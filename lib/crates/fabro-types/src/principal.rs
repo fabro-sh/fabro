@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use strum::{Display, IntoStaticStr};
 
 use crate::{IdpIdentity, RunId};
 
@@ -39,32 +40,21 @@ pub enum Principal {
     Anonymous,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, IntoStaticStr)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum AuthMethod {
     Github,
     DevToken,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum SystemActorKind {
     Engine,
     Watchdog,
     Timeout,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PrincipalLogFields {
-    pub principal_kind:   &'static str,
-    pub user_auth_method: Option<&'static str>,
-    pub idp_issuer:       Option<String>,
-    pub idp_subject:      Option<String>,
-    pub login:            Option<String>,
-    pub run_id:           Option<String>,
-    pub delivery_id:      Option<String>,
-    pub team_id:          Option<String>,
-    pub user_id:          Option<String>,
 }
 
 impl Principal {
@@ -78,52 +68,23 @@ impl Principal {
     }
 
     #[must_use]
-    pub fn worker(run_id: RunId) -> Self {
-        Self::Worker { run_id }
-    }
-
-    #[must_use]
-    pub fn webhook(delivery_id: String) -> Self {
-        Self::Webhook { delivery_id }
-    }
-
-    #[must_use]
-    pub fn slack(team_id: String, user_id: String, user_name: Option<String>) -> Self {
-        Self::Slack {
-            team_id,
-            user_id,
-            user_name,
-        }
-    }
-
-    #[must_use]
-    pub fn agent(
-        session_id: Option<String>,
-        parent_session_id: Option<String>,
-        model: Option<String>,
-    ) -> Self {
-        Self::Agent {
-            session_id,
-            parent_session_id,
-            model,
-        }
-    }
-
-    #[must_use]
-    pub fn system(system_kind: SystemActorKind) -> Self {
-        Self::System { system_kind }
-    }
-
-    #[must_use]
-    pub fn anonymous() -> Self {
-        Self::Anonymous
-    }
-
-    #[must_use]
     pub fn user_identity(&self) -> Option<&IdpIdentity> {
         match self {
             Self::User(user) => Some(&user.identity),
             _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::User(_) => "user",
+            Self::Worker { .. } => "worker",
+            Self::Webhook { .. } => "webhook",
+            Self::Slack { .. } => "slack",
+            Self::Agent { .. } => "agent",
+            Self::System { .. } => "system",
+            Self::Anonymous => "anonymous",
         }
     }
 
@@ -148,93 +109,8 @@ impl Principal {
                 ..
             } => session_id.clone(),
             Self::Agent { .. } => "agent".to_string(),
-            Self::System { system_kind } => format!("system:{system_kind:?}").to_lowercase(),
+            Self::System { system_kind } => format!("system:{system_kind}"),
             Self::Anonymous => "anonymous".to_string(),
-        }
-    }
-
-    #[must_use]
-    pub fn log_fields(&self) -> PrincipalLogFields {
-        match self {
-            Self::User(user) => PrincipalLogFields {
-                principal_kind:   "user",
-                user_auth_method: Some(user.auth_method.as_str()),
-                idp_issuer:       Some(user.identity.issuer().to_string()),
-                idp_subject:      Some(user.identity.subject().to_string()),
-                login:            Some(user.login.clone()),
-                run_id:           None,
-                delivery_id:      None,
-                team_id:          None,
-                user_id:          None,
-            },
-            Self::Worker { run_id } => PrincipalLogFields {
-                principal_kind:   "worker",
-                user_auth_method: None,
-                idp_issuer:       None,
-                idp_subject:      None,
-                login:            None,
-                run_id:           Some(run_id.to_string()),
-                delivery_id:      None,
-                team_id:          None,
-                user_id:          None,
-            },
-            Self::Webhook { delivery_id } => PrincipalLogFields {
-                principal_kind:   "webhook",
-                user_auth_method: None,
-                idp_issuer:       None,
-                idp_subject:      None,
-                login:            None,
-                run_id:           None,
-                delivery_id:      Some(delivery_id.clone()),
-                team_id:          None,
-                user_id:          None,
-            },
-            Self::Slack {
-                team_id, user_id, ..
-            } => PrincipalLogFields {
-                principal_kind:   "slack",
-                user_auth_method: None,
-                idp_issuer:       None,
-                idp_subject:      None,
-                login:            None,
-                run_id:           None,
-                delivery_id:      None,
-                team_id:          Some(team_id.clone()),
-                user_id:          Some(user_id.clone()),
-            },
-            Self::Agent { .. } => PrincipalLogFields {
-                principal_kind:   "agent",
-                user_auth_method: None,
-                idp_issuer:       None,
-                idp_subject:      None,
-                login:            None,
-                run_id:           None,
-                delivery_id:      None,
-                team_id:          None,
-                user_id:          None,
-            },
-            Self::System { .. } => PrincipalLogFields {
-                principal_kind:   "system",
-                user_auth_method: None,
-                idp_issuer:       None,
-                idp_subject:      None,
-                login:            None,
-                run_id:           None,
-                delivery_id:      None,
-                team_id:          None,
-                user_id:          None,
-            },
-            Self::Anonymous => PrincipalLogFields {
-                principal_kind:   "anonymous",
-                user_auth_method: None,
-                idp_issuer:       None,
-                idp_subject:      None,
-                login:            None,
-                run_id:           None,
-                delivery_id:      None,
-                team_id:          None,
-                user_id:          None,
-            },
         }
     }
 }
@@ -242,10 +118,7 @@ impl Principal {
 impl AuthMethod {
     #[must_use]
     pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Github => "github",
-            Self::DevToken => "dev_token",
-        }
+        self.into()
     }
 }
 
@@ -253,7 +126,7 @@ impl AuthMethod {
 mod tests {
     use serde_json::json;
 
-    use super::{AuthMethod, Principal, SystemActorKind};
+    use super::{AuthMethod, Principal, SystemActorKind, UserPrincipal};
     use crate::{IdpIdentity, fixtures};
 
     fn identity() -> IdpIdentity {
@@ -280,7 +153,9 @@ mod tests {
 
     #[test]
     fn system_principal_uses_system_kind_field() {
-        let principal = Principal::system(SystemActorKind::Watchdog);
+        let principal = Principal::System {
+            system_kind: SystemActorKind::Watchdog,
+        };
 
         assert_eq!(
             serde_json::to_value(&principal).unwrap(),
@@ -295,16 +170,26 @@ mod tests {
     fn round_trips_all_variants() {
         let variants = [
             Principal::user(identity(), "octocat".to_string(), AuthMethod::Github),
-            Principal::worker(fixtures::RUN_1),
-            Principal::webhook("delivery-1".to_string()),
-            Principal::slack("T1".to_string(), "U1".to_string(), Some("ada".to_string())),
-            Principal::agent(
-                Some("session".to_string()),
-                Some("parent".to_string()),
-                Some("gpt".to_string()),
-            ),
-            Principal::system(SystemActorKind::Engine),
-            Principal::anonymous(),
+            Principal::Worker {
+                run_id: fixtures::RUN_1,
+            },
+            Principal::Webhook {
+                delivery_id: "delivery-1".to_string(),
+            },
+            Principal::Slack {
+                team_id:   "T1".to_string(),
+                user_id:   "U1".to_string(),
+                user_name: Some("ada".to_string()),
+            },
+            Principal::Agent {
+                session_id:        Some("session".to_string()),
+                parent_session_id: Some("parent".to_string()),
+                model:             Some("gpt".to_string()),
+            },
+            Principal::System {
+                system_kind: SystemActorKind::Engine,
+            },
+            Principal::Anonymous,
         ];
 
         for principal in variants {
@@ -315,21 +200,25 @@ mod tests {
     }
 
     #[test]
-    fn projects_log_fields() {
-        let user = Principal::user(identity(), "octocat".to_string(), AuthMethod::DevToken);
-        let fields = user.log_fields();
+    fn auth_method_as_str_matches_serde() {
+        assert_eq!(AuthMethod::Github.as_str(), "github");
+        assert_eq!(AuthMethod::DevToken.as_str(), "dev_token");
+    }
 
-        assert_eq!(fields.principal_kind, "user");
-        assert_eq!(fields.user_auth_method, Some("dev_token"));
-        assert_eq!(fields.idp_issuer.as_deref(), Some("https://github.com"));
-        assert_eq!(fields.idp_subject.as_deref(), Some("12345"));
-        assert_eq!(fields.login.as_deref(), Some("octocat"));
+    #[test]
+    fn system_actor_kind_displays_snake_case() {
+        assert_eq!(SystemActorKind::Engine.to_string(), "engine");
+        assert_eq!(SystemActorKind::Watchdog.to_string(), "watchdog");
+        assert_eq!(SystemActorKind::Timeout.to_string(), "timeout");
+    }
 
-        let worker = Principal::worker(fixtures::RUN_1);
-        assert_eq!(worker.log_fields().principal_kind, "worker");
-        assert_eq!(
-            worker.log_fields().run_id,
-            Some(fixtures::RUN_1.to_string())
-        );
+    #[test]
+    fn user_principal_kind_is_user() {
+        let principal = Principal::User(UserPrincipal {
+            identity:    identity(),
+            login:       "octocat".to_string(),
+            auth_method: AuthMethod::Github,
+        });
+        assert_eq!(principal.kind(), "user");
     }
 }

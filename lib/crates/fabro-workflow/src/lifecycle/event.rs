@@ -10,7 +10,7 @@ use fabro_core::lifecycle::{
 };
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
-use fabro_types::RunId;
+use fabro_types::{Principal, RunId, SystemActorKind};
 
 use super::circuit_breaker::CircuitBreakerLifecycle;
 use super::git::GitCheckpointResult;
@@ -65,6 +65,18 @@ fn snapshot_failure_signatures(
             .collect::<BTreeMap<_, _>>()
     });
     (loop_sigs, restart_sigs)
+}
+
+fn actor_for_stage_failure(failure: &FailureDetail) -> Option<Principal> {
+    if failure.category == FailureCategory::TransientInfra
+        && failure.message.starts_with("handler timed out after ")
+    {
+        Some(Principal::System {
+            system_kind: SystemActorKind::Timeout,
+        })
+    } else {
+        None
+    }
 }
 
 fn response_from_outcome(node_id: &str, outcome: &Outcome) -> Option<String> {
@@ -206,16 +218,19 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             let scope = stage_scope_for(state, &gv.id);
 
             let duration_ms = crate::millis_u64(ctx.result.duration);
+            let failure = outcome.failure.clone().unwrap_or_else(|| {
+                FailureDetail::new("handler failed", FailureCategory::TransientInfra)
+            });
+            let actor = actor_for_stage_failure(&failure);
             self.emitter.emit_scoped(
                 &Event::StageFailed {
                     node_id: gv.id.clone(),
                     name: gv.label().to_string(),
                     index: stage_index,
-                    failure: outcome.failure.clone().unwrap_or_else(|| {
-                        FailureDetail::new("handler failed", FailureCategory::TransientInfra)
-                    }),
+                    failure,
                     will_retry: true,
                     duration_ms,
+                    actor,
                 },
                 &scope,
             );
@@ -254,16 +269,19 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             snapshot_failure_signatures(&self.circuit_breaker);
 
         if outcome.status.is_failure() {
+            let failure = outcome.failure.clone().unwrap_or_else(|| {
+                FailureDetail::new("handler failed", FailureCategory::Deterministic)
+            });
+            let actor = actor_for_stage_failure(&failure);
             self.emitter.emit_scoped(
                 &Event::StageFailed {
                     node_id: gv.id.clone(),
                     name: gv.label().to_string(),
                     index: stage_index,
-                    failure: outcome.failure.clone().unwrap_or_else(|| {
-                        FailureDetail::new("handler failed", FailureCategory::Deterministic)
-                    }),
+                    failure,
                     will_retry: false,
                     duration_ms,
+                    actor,
                 },
                 &scope,
             );

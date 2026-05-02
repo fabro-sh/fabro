@@ -11,6 +11,8 @@ use sha2::Sha256;
 #[cfg(test)]
 use tracing::info;
 
+#[cfg(test)]
+use crate::auth::REFRESH_TOKEN_PREFIX;
 use crate::auth::{self, JwtError, JwtSigningKey, KeyDeriveError};
 use crate::error::ApiError;
 
@@ -265,7 +267,7 @@ fn authenticate_bearer(
     token: &str,
     config: &ConfiguredAuth,
 ) -> Result<VerifiedAuth, ApiError> {
-    if token.starts_with("fabro_refresh_") {
+    if token.starts_with(REFRESH_TOKEN_PREFIX) {
         info!(
             path = %parts.uri.path(),
             "Refresh token presented at protected endpoint"

@@ -21,8 +21,7 @@ use tracing::{debug, error, info, warn};
 use crate::auth::{GithubEndpoints, browser_shell};
 use crate::jwt_auth::{AuthMode, auth_method_name, dev_token_matches};
 use crate::principal_middleware::{
-    AuthStatus, RequestAuth, RequestAuthContext, RequiredUser, UserProfile,
-    require_authenticated_user,
+    RequestAuth, RequestAuthContext, RequiredUser, UserProfile, require_authenticated_user,
 };
 use crate::server::AppState;
 
@@ -162,13 +161,13 @@ pub fn read_private_session(headers: &HeaderMap, key: &Key) -> Option<SessionCoo
     Some(session)
 }
 
-fn session_cookie_present(headers: &HeaderMap) -> bool {
+pub(crate) fn session_cookie_present(headers: &HeaderMap) -> bool {
     parse_cookie_header(headers)
         .get(SESSION_COOKIE_NAME)
         .is_some()
 }
 
-fn auth_context_from_session(session: &SessionCookie) -> Option<RequestAuthContext> {
+pub(crate) fn auth_context_from_session(session: &SessionCookie) -> Option<RequestAuthContext> {
     let identity = session.identity.clone()?;
     let principal = Principal::user(identity, session.login.clone(), session.auth_method);
     Some(RequestAuthContext::authenticated(
@@ -180,10 +179,6 @@ fn auth_context_from_session(session: &SessionCookie) -> Option<RequestAuthConte
             user_url:   session.user_url.clone(),
         }),
     ))
-}
-
-fn invalid_auth_context() -> RequestAuthContext {
-    RequestAuthContext::rejected(AuthStatus::Invalid, Some("unauthorized"))
 }
 
 fn read_private_oauth_state(headers: &HeaderMap, key: &Key) -> Option<OAuthStateCookie> {
@@ -337,17 +332,17 @@ async fn login_dev_token(
     payload: Result<Json<DevTokenLoginRequest>, JsonRejection>,
 ) -> Response {
     let Ok(Json(payload)) = payload else {
-        auth_slot.replace(invalid_auth_context());
+        auth_slot.replace(RequestAuthContext::invalid());
         return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
     };
     let expected = dev_token_from_mode(&auth_mode);
     let Some(expected) = expected else {
-        auth_slot.replace(invalid_auth_context());
+        auth_slot.replace(RequestAuthContext::invalid());
         return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
     };
 
     if !validate_dev_token_format(&payload.token) || !dev_token_matches(&payload.token, &expected) {
-        auth_slot.replace(invalid_auth_context());
+        auth_slot.replace(RequestAuthContext::invalid());
         return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
     }
 
@@ -492,7 +487,7 @@ async fn callback_github(
     Query(params): Query<OAuthCallbackParams>,
     headers: HeaderMap,
 ) -> Response {
-    auth_slot.replace(invalid_auth_context());
+    auth_slot.replace(RequestAuthContext::invalid());
 
     if !auth_method_enabled(&auth_mode, ServerAuthMethod::Github) {
         return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
@@ -819,7 +814,7 @@ async fn logout(
                 auth_slot.replace(context);
             }
         } else if session_cookie_present(&headers) {
-            auth_slot.replace(invalid_auth_context());
+            auth_slot.replace(RequestAuthContext::invalid());
         }
         jar.private_mut(&key).remove(
             Cookie::build((SESSION_COOKIE_NAME, ""))

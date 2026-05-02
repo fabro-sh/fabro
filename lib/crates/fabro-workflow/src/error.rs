@@ -1829,6 +1829,7 @@ mod tests {
             failure:     failure.clone(),
             will_retry:  false,
             duration_ms: 0,
+            actor:       None,
         };
 
         // 4. Verify classification survived all the way through

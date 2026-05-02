@@ -9,8 +9,9 @@ use axum::response::{IntoResponse, Response};
 use fabro_types::{CommandOutputStream, Principal, RunBlobId, RunId, StageId, UserPrincipal};
 use jsonwebtoken::dangerous::insecure_decode;
 use serde::Deserialize;
+use strum::IntoStaticStr;
 
-use crate::auth::JwtError;
+use crate::auth::{JwtError, REFRESH_TOKEN_PREFIX};
 use crate::error::ApiError;
 use crate::jwt_auth::{self, AuthMode, ConfiguredAuth};
 use crate::server::{AppState, parse_blob_id_path, parse_run_id_path, parse_stage_id_path};
@@ -32,7 +33,8 @@ pub(crate) struct UserProfile {
     pub user_url:   String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub(crate) enum AuthStatus {
     Missing,
     Invalid,
@@ -43,6 +45,9 @@ pub(crate) enum AuthStatus {
 #[derive(Clone)]
 pub(crate) struct AuthContextSlot(pub(crate) Arc<Mutex<RequestAuthContext>>);
 
+// Route handlers intentionally use either this slot handle or a guard extractor
+// such as RequiredUser/RequireRunScoped. A loose RequestPrincipal extractor
+// would make it easy to read a principal without enforcing the route's guard.
 pub(crate) struct RequestAuth(pub(crate) AuthContextSlot);
 
 pub(crate) struct RequiredUser(pub(crate) UserPrincipal);
@@ -70,7 +75,7 @@ impl RequestAuthContext {
     #[must_use]
     pub(crate) fn initial() -> Self {
         Self {
-            principal:       Principal::anonymous(),
+            principal:       Principal::Anonymous,
             auth_status:     AuthStatus::Missing,
             auth_error_code: None,
             user_profile:    None,
@@ -90,23 +95,23 @@ impl RequestAuthContext {
     #[must_use]
     pub(crate) fn rejected(status: AuthStatus, code: Option<&'static str>) -> Self {
         Self {
-            principal:       Principal::anonymous(),
+            principal:       Principal::Anonymous,
             auth_status:     status,
             auth_error_code: code,
             user_profile:    None,
         }
+    }
+
+    #[must_use]
+    pub(crate) fn invalid() -> Self {
+        Self::rejected(AuthStatus::Invalid, Some("unauthorized"))
     }
 }
 
 impl AuthStatus {
     #[must_use]
     pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Missing => "missing",
-            Self::Invalid => "invalid",
-            Self::Expired => "expired",
-            Self::Authenticated => "authenticated",
-        }
+        self.into()
     }
 }
 
@@ -163,7 +168,7 @@ impl FromRequestParts<Arc<AppState>> for RequireRunScoped {
             .await
             .map_err(IntoResponse::into_response)?;
         let run_id = parse_run_id_path(&id)?;
-        require_worker_or_user_for_run(&principal_from_parts(parts), &run_id)
+        require_worker_or_user_for_run(&auth_context_from_parts(parts), &run_id)
             .map_err(IntoResponse::into_response)?;
         Ok(Self(run_id))
     }
@@ -181,7 +186,7 @@ impl FromRequestParts<Arc<AppState>> for RequireRunBlob {
             .map_err(IntoResponse::into_response)?;
         let run_id = parse_run_id_path(&id)?;
         let blob_id = parse_blob_id_path(&blob_id)?;
-        require_worker_or_user_for_run(&principal_from_parts(parts), &run_id)
+        require_worker_or_user_for_run(&auth_context_from_parts(parts), &run_id)
             .map_err(IntoResponse::into_response)?;
         Ok(Self(run_id, blob_id))
     }
@@ -199,7 +204,7 @@ impl FromRequestParts<Arc<AppState>> for RequireStageArtifact {
             .map_err(IntoResponse::into_response)?;
         let run_id = parse_run_id_path(&id)?;
         let stage_id = parse_stage_id_path(&stage_id)?;
-        require_worker_or_user_for_run(&principal_from_parts(parts), &run_id)
+        require_worker_or_user_for_run(&auth_context_from_parts(parts), &run_id)
             .map_err(IntoResponse::into_response)?;
         Ok(Self(run_id, stage_id))
     }
@@ -221,7 +226,7 @@ impl FromRequestParts<Arc<AppState>> for RequireCommandLog {
         let stream = stream
             .parse::<CommandOutputStream>()
             .map_err(|_| ApiError::bad_request("Invalid command log stream.").into_response())?;
-        require_worker_or_user_for_run(&principal_from_parts(parts), &run_id)
+        require_worker_or_user_for_run(&auth_context_from_parts(parts), &run_id)
             .map_err(IntoResponse::into_response)?;
         Ok(Self(run_id, stage_id, stream))
     }
@@ -247,11 +252,11 @@ pub(crate) async fn principal_middleware(
     next.run(req).await
 }
 
-fn principal_from_parts(parts: &Parts) -> Principal {
+fn auth_context_from_parts(parts: &Parts) -> RequestAuthContext {
     parts
         .extensions
         .get::<AuthContextSlot>()
-        .map_or_else(Principal::anonymous, |slot| slot.snapshot().principal)
+        .map_or_else(RequestAuthContext::initial, AuthContextSlot::snapshot)
 }
 
 pub(crate) fn require_user(slot: &AuthContextSlot) -> Result<UserPrincipal, ApiError> {
@@ -280,45 +285,15 @@ pub(crate) fn require_authenticated_user(
     }
 }
 
-#[allow(
-    dead_code,
-    reason = "Worker-only route migration is staged behind the shared context."
-)]
-pub(crate) fn require_worker_for_run(
-    principal: &Principal,
+fn require_worker_or_user_for_run(
+    context: &RequestAuthContext,
     route_run_id: &RunId,
 ) -> Result<(), ApiError> {
-    match principal {
-        Principal::Worker { run_id } if run_id == route_run_id => Ok(()),
-        Principal::Worker { .. } => Err(ApiError::forbidden()),
-        _ => Err(ApiError::unauthorized()),
-    }
-}
-
-#[allow(
-    dead_code,
-    reason = "Run-scoped route migration is staged behind the shared context."
-)]
-pub(crate) fn require_worker_or_user_for_run(
-    principal: &Principal,
-    route_run_id: &RunId,
-) -> Result<(), ApiError> {
-    match principal {
+    match &context.principal {
         Principal::User(_) => Ok(()),
         Principal::Worker { run_id } if run_id == route_run_id => Ok(()),
         Principal::Worker { .. } => Err(ApiError::forbidden()),
-        _ => Err(ApiError::unauthorized()),
-    }
-}
-
-#[allow(
-    dead_code,
-    reason = "Webhook route stamps the slot inline; guard is for future webhook consumers."
-)]
-pub(crate) fn require_webhook(principal: &Principal) -> Result<String, ApiError> {
-    match principal {
-        Principal::Webhook { delivery_id } => Ok(delivery_id.clone()),
-        _ => Err(ApiError::unauthorized()),
+        _ => Err(auth_rejection(context.auth_status, context.auth_error_code)),
     }
 }
 
@@ -336,7 +311,7 @@ fn classify_request(req: &Request, state: &AppState) -> RequestAuthContext {
         Some(Ok(token)) => token,
     };
 
-    if token.starts_with("fabro_refresh_") {
+    if token.starts_with(REFRESH_TOKEN_PREFIX) {
         return rejected(AuthStatus::Invalid, Some("unauthorized"));
     }
     if !jwt_auth::looks_like_jwt(token) {
@@ -350,7 +325,7 @@ fn classify_request(req: &Request, state: &AppState) -> RequestAuthContext {
 
     if issuer == WORKER_TOKEN_ISSUER {
         return match worker_token::decode_worker_token(token, state.worker_token_keys()) {
-            Ok(run_id) => authenticated(Principal::worker(run_id), None),
+            Ok(run_id) => authenticated(Principal::Worker { run_id }, None),
             Err(JwtError::AccessTokenExpired) => {
                 rejected(AuthStatus::Expired, Some("access_token_expired"))
             }
@@ -552,7 +527,7 @@ mod tests {
         let context = classify_request(&request, state.as_ref());
 
         assert_eq!(context.auth_status, AuthStatus::Authenticated);
-        assert_eq!(context.principal, Principal::worker(run_id));
+        assert_eq!(context.principal, Principal::Worker { run_id });
     }
 
     #[test]
@@ -618,6 +593,28 @@ mod tests {
 
         assert_eq!(context.auth_status, AuthStatus::Missing);
         assert_eq!(context.auth_error_code, None);
-        assert_eq!(context.principal, Principal::anonymous());
+        assert_eq!(context.principal, Principal::Anonymous);
+    }
+
+    #[test]
+    fn run_scoped_guard_preserves_expired_auth_error_code() {
+        let context =
+            RequestAuthContext::rejected(AuthStatus::Expired, Some("access_token_expired"));
+
+        let err = require_worker_or_user_for_run(&context, &RunId::new()).unwrap_err();
+
+        assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(err.code(), Some("access_token_expired"));
+    }
+
+    #[test]
+    fn run_scoped_guard_preserves_invalid_auth_error_code() {
+        let context =
+            RequestAuthContext::rejected(AuthStatus::Invalid, Some("access_token_invalid"));
+
+        let err = require_worker_or_user_for_run(&context, &RunId::new()).unwrap_err();
+
+        assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(err.code(), Some("access_token_invalid"));
     }
 }

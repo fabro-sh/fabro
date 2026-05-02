@@ -169,7 +169,7 @@ impl AnswerSubmission {
     pub fn system(answer: Answer, system_kind: SystemActorKind) -> Self {
         Self {
             answer,
-            actor: Principal::system(system_kind),
+            actor: Principal::System { system_kind },
         }
     }
 }

@@ -1015,14 +1015,11 @@ mod tests {
         );
         assert_eq!(parsed.tool_call_id.as_deref(), Some("call_1"));
         let actor = parsed.actor.as_ref().expect("actor present");
-        assert_eq!(
-            actor,
-            &Principal::agent(
-                Some("ses_child".to_string()),
-                Some("ses_parent".to_string()),
-                Some("claude-sonnet".to_string()),
-            )
-        );
+        assert_eq!(actor, &Principal::Agent {
+            session_id:        Some("ses_child".to_string()),
+            parent_session_id: Some("ses_parent".to_string()),
+            model:             Some("claude-sonnet".to_string()),
+        });
 
         let serialized = parsed.to_value().unwrap();
         assert_eq!(serialized["stage_id"], value["stage_id"]);

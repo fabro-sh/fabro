@@ -5,6 +5,8 @@ mod jwt;
 mod keys;
 mod translate;
 
+pub(crate) const REFRESH_TOKEN_PREFIX: &str = "fabro_refresh_";
+
 pub(crate) use browser_shell::browser_shell;
 pub(crate) use cli_flow::web_routes;
 pub(crate) use fabro_store::{AuthCode, ConsumeOutcome, RefreshToken};

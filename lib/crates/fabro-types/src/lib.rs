@@ -53,7 +53,7 @@ pub use interview::{InterviewQuestionRecord, QuestionType};
 pub use outcome::{
     FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMeta, StageOutcome, StageState,
 };
-pub use principal::{AuthMethod, Principal, PrincipalLogFields, SystemActorKind, UserPrincipal};
+pub use principal::{AuthMethod, Principal, SystemActorKind, UserPrincipal};
 pub use pull_request::{
     PullRequestDetail, PullRequestGithubDetail, PullRequestRecord, PullRequestRef, PullRequestUser,
 };

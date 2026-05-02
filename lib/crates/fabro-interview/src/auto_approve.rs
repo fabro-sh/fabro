@@ -17,7 +17,9 @@ impl AutoApproveInterviewer {
 
     #[must_use]
     pub fn engine() -> Self {
-        Self::new(Principal::system(SystemActorKind::Engine))
+        Self::new(Principal::System {
+            system_kind: SystemActorKind::Engine,
+        })
     }
 }
 

@@ -27,17 +27,18 @@ use tracing::{info, warn};
 use url::{Host, Url};
 
 use crate::auth::browser_shell::browser_shell;
-use crate::auth::{self, AuthCode, ConsumeOutcome, JwtSubject, RefreshToken};
+use crate::auth::{self, AuthCode, ConsumeOutcome, JwtSubject, REFRESH_TOKEN_PREFIX, RefreshToken};
 use crate::jwt_auth::{AuthMode, ConfiguredAuth};
-use crate::principal_middleware::{AuthStatus, RequestAuth, RequestAuthContext};
+use crate::principal_middleware::{AuthContextSlot, AuthStatus, RequestAuth, RequestAuthContext};
 use crate::server::AppState;
-use crate::web_auth::{SessionCookie, read_private_session};
+use crate::web_auth::{
+    SessionCookie, auth_context_from_session, read_private_session, session_cookie_present,
+};
 
 const CLI_FLOW_COOKIE_NAME: &str = "fabro_cli_flow";
 const QUERY_VALUE_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'_').remove(b'-');
 const ACCESS_TOKEN_TTL_MINUTES: i64 = 10;
 const REFRESH_TOKEN_TTL_DAYS: i64 = 30;
-const REFRESH_TOKEN_PREFIX: &str = "fabro_refresh_";
 const GITHUB_NOT_CONFIGURED: &str = "GitHub login is not configured for this server.";
 const DEV_TOKEN_LOGIN_INSTRUCTIONS: &str = concat!(
     "This server uses dev-token auth.\n\n",
@@ -120,8 +121,14 @@ async fn start(
     State(state): State<Arc<AppState>>,
     Extension(auth_mode): Extension<AuthMode>,
     Query(params): Query<CliStartParams>,
+    RequestAuth(auth_slot): RequestAuth,
     headers: HeaderMap,
 ) -> Response {
+    let session_key = state.session_key();
+    let session = session_key
+        .as_ref()
+        .and_then(|session_key| stamp_cli_session_auth_context(&auth_slot, &headers, session_key));
+
     let Some(redirect_uri) = params
         .redirect_uri
         .as_deref()
@@ -146,7 +153,7 @@ async fn start(
         );
     }
 
-    let Some(session_key) = state.session_key() else {
+    let Some(session_key) = session_key else {
         return redirect_with_error(
             &redirect_uri,
             state_token,
@@ -171,8 +178,6 @@ async fn start(
             "Invalid PKCE parameters",
         );
     }
-    let session = read_private_session(&headers, &session_key);
-
     let secure = session_cookie_secure(state.as_ref());
     let mut jar = CookieJar::new();
     add_cli_flow_cookie(
@@ -199,13 +204,19 @@ async fn resume(
     State(state): State<Arc<AppState>>,
     Extension(auth_mode): Extension<AuthMode>,
     Query(params): Query<CliResumeParams>,
+    RequestAuth(auth_slot): RequestAuth,
     headers: HeaderMap,
 ) -> Response {
+    let session_key = state.session_key();
+    let session = session_key
+        .as_ref()
+        .and_then(|session_key| stamp_cli_session_auth_context(&auth_slot, &headers, session_key));
+
     if !github_enabled(&auth_mode) {
         return static_error_page(GITHUB_NOT_CONFIGURED);
     }
 
-    let Some(session_key) = state.session_key() else {
+    let Some(session_key) = session_key else {
         return static_error_page(GITHUB_NOT_CONFIGURED);
     };
     let Some(flow) = read_private_cli_flow(&headers, &session_key) else {
@@ -238,7 +249,6 @@ async fn resume(
         return response;
     }
 
-    let session = read_private_session(&headers, &session_key);
     let Some(session) = eligible_session(session.as_ref()) else {
         let mut jar = CookieJar::new();
         remove_cli_flow_cookie(&mut jar, &session_key, secure);
@@ -258,8 +268,14 @@ async fn resume(
 async fn confirm_resume(
     State(state): State<Arc<AppState>>,
     Extension(auth_mode): Extension<AuthMode>,
+    RequestAuth(auth_slot): RequestAuth,
     headers: HeaderMap,
 ) -> Response {
+    let session_key = state.session_key();
+    let session = session_key
+        .as_ref()
+        .and_then(|session_key| stamp_cli_session_auth_context(&auth_slot, &headers, session_key));
+
     if !github_enabled(&auth_mode) {
         return static_error_page(GITHUB_NOT_CONFIGURED);
     }
@@ -268,7 +284,7 @@ async fn confirm_resume(
         return static_error_page(INVALID_CONFIRMATION_REQUEST);
     }
 
-    let Some(session_key) = state.session_key() else {
+    let Some(session_key) = session_key else {
         return static_error_page(GITHUB_NOT_CONFIGURED);
     };
     let Some(flow) = read_private_cli_flow(&headers, &session_key) else {
@@ -287,7 +303,6 @@ async fn confirm_resume(
     };
     let secure = session_cookie_secure(state.as_ref());
 
-    let session = read_private_session(&headers, &session_key);
     let Some(session) = eligible_session(session.as_ref()) else {
         let mut jar = CookieJar::new();
         remove_cli_flow_cookie(&mut jar, &session_key, secure);
@@ -318,6 +333,7 @@ async fn confirm_resume(
 async fn token(
     State(state): State<Arc<AppState>>,
     Extension(auth_mode): Extension<AuthMode>,
+    RequestAuth(auth_slot): RequestAuth,
     headers: HeaderMap,
     body: Result<Json<CliTokenRequest>, JsonRejection>,
 ) -> Response {
@@ -325,21 +341,24 @@ async fn token(
         return github_auth_not_configured();
     };
     let Ok(Json(body)) = body else {
-        return oauth_error(
+        return oauth_invalid(
+            &auth_slot,
             StatusCode::BAD_REQUEST,
             "invalid_request",
             "Invalid request",
         );
     };
     let Some(code) = body.code.as_deref() else {
-        return oauth_error(
+        return oauth_invalid(
+            &auth_slot,
             StatusCode::BAD_REQUEST,
             "invalid_request",
             "Invalid request",
         );
     };
     let Some(code_verifier) = body.code_verifier.as_deref() else {
-        return oauth_error(
+        return oauth_invalid(
+            &auth_slot,
             StatusCode::BAD_REQUEST,
             "invalid_request",
             "Invalid request",
@@ -350,14 +369,16 @@ async fn token(
         .as_deref()
         .and_then(canonical_loopback_redirect_uri)
     else {
-        return oauth_error(
+        return oauth_invalid(
+            &auth_slot,
             StatusCode::BAD_REQUEST,
             "invalid_request",
             "Invalid request",
         );
     };
     if body.grant_type.as_deref() != Some("authorization_code") {
-        return oauth_error(
+        return oauth_invalid(
+            &auth_slot,
             StatusCode::BAD_REQUEST,
             "invalid_request",
             "Invalid request",
@@ -386,7 +407,8 @@ async fn token(
             );
         }
     }) else {
-        return oauth_error(
+        return oauth_invalid(
+            &auth_slot,
             StatusCode::BAD_REQUEST,
             "invalid_code",
             "Invalid authorization code",
@@ -394,7 +416,8 @@ async fn token(
     };
 
     if pkce_challenge(code_verifier) != entry.code_challenge {
-        return oauth_error(
+        return oauth_invalid(
+            &auth_slot,
             StatusCode::BAD_REQUEST,
             "pkce_verification_failed",
             "PKCE verification failed",
@@ -403,14 +426,20 @@ async fn token(
     if canonical_loopback_redirect_uri(&entry.redirect_uri).as_deref()
         != Some(redirect_uri.as_str())
     {
-        return oauth_error(
+        return oauth_invalid(
+            &auth_slot,
             StatusCode::BAD_REQUEST,
             "redirect_uri_mismatch",
             "Redirect URI mismatch",
         );
     }
     if !login_allowed(state.as_ref(), &entry.login) {
-        return oauth_error(StatusCode::FORBIDDEN, "unauthorized", "Login not permitted");
+        return oauth_invalid(
+            &auth_slot,
+            StatusCode::FORBIDDEN,
+            "unauthorized",
+            "Login not permitted",
+        );
     }
 
     let Some(jwt_key) = config.jwt_key.as_ref() else {
@@ -482,6 +511,7 @@ async fn token(
     );
 
     log_cli_auth_tokens_issued(&entry.login, &entry.email);
+    auth_slot.replace(refresh_user_context(&refresh_row));
 
     Json(CliTokenResponse {
         access_token,
@@ -513,7 +543,7 @@ async fn refresh(
             );
         }
         RefreshCredential::Invalid => {
-            auth_slot.replace(invalid_auth_context());
+            auth_slot.replace(RequestAuthContext::invalid());
             return oauth_error(StatusCode::UNAUTHORIZED, "unauthorized", "Unauthorized");
         }
         RefreshCredential::Present(secret) => secret,
@@ -583,7 +613,7 @@ async fn refresh(
 
     let (old, new_row) = match outcome {
         ConsumeOutcome::NotFound | ConsumeOutcome::Expired => {
-            auth_slot.replace(invalid_auth_context());
+            auth_slot.replace(RequestAuthContext::invalid());
             if auth_tokens.was_recently_replay_revoked(&secret_hash, now) {
                 return oauth_error(
                     StatusCode::UNAUTHORIZED,
@@ -598,7 +628,7 @@ async fn refresh(
             );
         }
         ConsumeOutcome::Reused(old) => {
-            auth_slot.replace(invalid_auth_context());
+            auth_slot.replace(RequestAuthContext::invalid());
             auth_tokens.mark_refresh_token_replay(secret_hash, now);
             if let Err(err) = auth_tokens.delete_chain(old.chain_id).await {
                 warn!(error = %err, chain_id = %old.chain_id, "Failed to revoke replayed refresh token chain");
@@ -614,7 +644,7 @@ async fn refresh(
     };
 
     if !login_allowed(state.as_ref(), &old.login) {
-        auth_slot.replace(invalid_auth_context());
+        auth_slot.replace(RequestAuthContext::invalid());
         if let Err(err) = auth_tokens.delete_chain(old.chain_id).await {
             warn!(error = %err, chain_id = %old.chain_id, "Failed to revoke deauthorized refresh token chain");
         }
@@ -661,7 +691,7 @@ async fn logout(
     let secret = match refresh_credential_from_headers(&headers) {
         RefreshCredential::Missing => return StatusCode::NO_CONTENT.into_response(),
         RefreshCredential::Invalid => {
-            auth_slot.replace(invalid_auth_context());
+            auth_slot.replace(RequestAuthContext::invalid());
             return StatusCode::NO_CONTENT.into_response();
         }
         RefreshCredential::Present(secret) => secret,
@@ -705,7 +735,7 @@ async fn logout(
         }
         log_cli_refresh_chain_logged_out(&refresh_token.login, &refresh_token.email);
     } else {
-        auth_slot.replace(invalid_auth_context());
+        auth_slot.replace(RequestAuthContext::invalid());
     }
 
     StatusCode::NO_CONTENT.into_response()
@@ -746,6 +776,22 @@ fn session_cookie_secure(state: &AppState) -> bool {
 fn eligible_session(session: Option<&SessionCookie>) -> Option<&SessionCookie> {
     session
         .filter(|session| session.identity.is_some() && session.auth_method == AuthMethod::Github)
+}
+
+fn stamp_cli_session_auth_context(
+    auth_slot: &AuthContextSlot,
+    headers: &HeaderMap,
+    session_key: &Key,
+) -> Option<SessionCookie> {
+    let session = read_private_session(headers, session_key);
+    if let Some(session) = eligible_session(session.as_ref()) {
+        if let Some(context) = auth_context_from_session(session) {
+            auth_slot.replace(context);
+        }
+    } else if session_cookie_present(headers) {
+        auth_slot.replace(RequestAuthContext::invalid());
+    }
+    session
 }
 
 fn valid_state_token(state: &str) -> bool {
@@ -926,10 +972,6 @@ fn refresh_user_context(refresh_token: &RefreshToken) -> RequestAuthContext {
     )
 }
 
-fn invalid_auth_context() -> RequestAuthContext {
-    RequestAuthContext::rejected(AuthStatus::Invalid, Some("unauthorized"))
-}
-
 fn hash_refresh_secret(secret: &str) -> [u8; 32] {
     Sha256::digest(secret.as_bytes()).into()
 }
@@ -993,6 +1035,19 @@ fn oauth_error(
         }),
     )
         .into_response()
+}
+
+fn oauth_invalid(
+    auth_slot: &AuthContextSlot,
+    status: StatusCode,
+    error: &'static str,
+    error_description: &'static str,
+) -> Response {
+    auth_slot.replace(RequestAuthContext::rejected(
+        AuthStatus::Invalid,
+        Some(error),
+    ));
+    oauth_error(status, error, error_description)
 }
 
 fn random_secret() -> String {
@@ -1336,6 +1391,25 @@ client_id = "github-client-id"
             .to_string()
     }
 
+    fn cli_flow_cookie(key: &Key) -> String {
+        let mut jar = cookie::CookieJar::new();
+        add_cli_flow_cookie(
+            &mut jar,
+            key,
+            &CliFlowCookie {
+                redirect_uri:   "http://127.0.0.1:4444/callback".to_string(),
+                state:          "abcdefghijklmnop".to_string(),
+                code_challenge: "challenge".to_string(),
+            },
+            true,
+        );
+        jar.delta()
+            .next()
+            .expect("flow cookie should exist")
+            .encoded()
+            .to_string()
+    }
+
     fn pkce_challenge(verifier: &str) -> String {
         URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
     }
@@ -1560,6 +1634,65 @@ client_id = "github-client-id"
             state:          "abcdefghijklmnop".to_string(),
             code_challenge: "challenge".to_string(),
         });
+    }
+
+    #[tokio::test]
+    async fn cli_session_routes_stamp_public_auth_context() {
+        let key = test_cookie_key();
+        let (app, _state, captured) = test_router_with_auth_capture(
+            github_settings("https://fabro.example"),
+            github_auth_mode(),
+        );
+        let session_cookie = github_session_cookie(&key);
+        let flow_cookie = cli_flow_cookie(&key);
+        let cookie_header = format!("{session_cookie}; {flow_cookie}");
+
+        let start = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/auth/cli/start?redirect_uri=http://127.0.0.1:4444/callback&state=abcdefghijklmnop&code_challenge=challenge&code_challenge_method=S256")
+                    .header(header::COOKIE, session_cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(start.status(), StatusCode::SEE_OTHER);
+
+        let resume = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/auth/cli/resume")
+                    .header(header::COOKIE, cookie_header.clone())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resume.status(), StatusCode::OK);
+
+        let confirm = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/cli/resume")
+                    .header(header::COOKIE, cookie_header)
+                    .header(header::ORIGIN, "https://fabro.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(confirm.status(), StatusCode::SEE_OTHER);
+
+        let contexts = captured.lock().expect("captured auth contexts").clone();
+        assert_eq!(contexts.len(), 3);
+        for context in contexts {
+            assert_eq!(context.auth_status, AuthStatus::Authenticated);
+            assert_eq!(context.principal.display(), "octocat");
+        }
     }
 
     #[tokio::test]
@@ -1901,6 +2034,64 @@ client_id = "github-client-id"
             .expect("refresh token should be stored");
         assert_eq!(refresh.login, "octocat");
         assert_eq!(refresh.user_agent, "fabro-cli/0.1");
+    }
+
+    #[tokio::test]
+    async fn token_stamps_public_auth_context() {
+        let (app, state, captured) = test_router_with_auth_capture(
+            github_settings("https://fabro.example"),
+            github_auth_mode(),
+        );
+        insert_auth_code(state.as_ref(), "auth-code-auth-context", "test-verifier").await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/cli/token")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({
+                            "grant_type": "authorization_code",
+                            "code": "auth-code-auth-context",
+                            "code_verifier": "test-verifier",
+                            "redirect_uri": "http://127.0.0.1:4444/callback"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/cli/token")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({
+                            "grant_type": "authorization_code",
+                            "code": "missing-code",
+                            "code_verifier": "test-verifier",
+                            "redirect_uri": "http://127.0.0.1:4444/callback"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let contexts = captured.lock().expect("captured auth contexts").clone();
+        assert_eq!(contexts[0].auth_status, AuthStatus::Authenticated);
+        assert_eq!(contexts[0].principal.display(), "octocat");
+        assert_eq!(contexts[1].auth_status, AuthStatus::Invalid);
+        assert_eq!(contexts[1].auth_error_code, Some("invalid_code"));
     }
 
     #[tokio::test]

@@ -62,7 +62,11 @@ fn interaction_actor(payload: &Value) -> Option<Principal> {
         .as_str()
         .or_else(|| user["username"].as_str())
         .map(str::to_string);
-    Some(Principal::slack(team_id, user_id, user_name))
+    Some(Principal::Slack {
+        team_id,
+        user_id,
+        user_name,
+    })
 }
 
 /// Extract selected checkbox values from `payload.state.values`.
@@ -105,14 +109,11 @@ mod tests {
         assert_eq!(result.run_id, "run-1");
         assert_eq!(result.qid, "q-1");
         assert_eq!(result.answer.value, AnswerValue::Yes);
-        assert_eq!(
-            result.actor,
-            fabro_types::Principal::slack(
-                "T123".to_string(),
-                "U123".to_string(),
-                Some("ada".to_string())
-            )
-        );
+        assert_eq!(result.actor, fabro_types::Principal::Slack {
+            team_id:   "T123".to_string(),
+            user_id:   "U123".to_string(),
+            user_name: Some("ada".to_string()),
+        });
     }
 
     #[test]

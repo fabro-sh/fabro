@@ -501,7 +501,9 @@ fn update_worker_title_from_event(event: &RunEvent) {
 
 fn stamp_system_worker(mut event: RunEvent) -> RunEvent {
     if event.actor.is_none() {
-        event.actor = Some(Principal::worker(event.run_id));
+        event.actor = Some(Principal::Worker {
+            run_id: event.run_id,
+        });
     }
     event
 }
@@ -758,7 +760,12 @@ mod tests {
     fn stamp_system_worker_fills_missing_actor_only() {
         let stamped = stamp_system_worker(running_event(None));
 
-        assert_eq!(stamped.actor, Some(Principal::worker(fixtures::RUN_1)));
+        assert_eq!(
+            stamped.actor,
+            Some(Principal::Worker {
+                run_id: fixtures::RUN_1,
+            })
+        );
 
         let existing_actor = test_user_principal("octocat");
         let stamped = stamp_system_worker(running_event(Some(existing_actor.clone())));
@@ -796,8 +803,18 @@ mod tests {
 
         let first = first.lock().await;
         let second = second.lock().await;
-        assert_eq!(first[0].actor, Some(Principal::worker(fixtures::RUN_1)));
-        assert_eq!(second[0].actor, Some(Principal::worker(fixtures::RUN_1)));
+        assert_eq!(
+            first[0].actor,
+            Some(Principal::Worker {
+                run_id: fixtures::RUN_1,
+            })
+        );
+        assert_eq!(
+            second[0].actor,
+            Some(Principal::Worker {
+                run_id: fixtures::RUN_1,
+            })
+        );
     }
 
     #[tokio::test]

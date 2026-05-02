@@ -31,10 +31,9 @@ impl Interviewer for ReplayInterviewer {
     async fn ask(&self, _question: Question) -> AnswerSubmission {
         let mut submissions = self.submissions.lock().expect("answers lock poisoned");
         if submissions.is_empty() {
-            AnswerSubmission::new(
-                Answer::interrupted(),
-                Principal::system(SystemActorKind::Engine),
-            )
+            AnswerSubmission::new(Answer::interrupted(), Principal::System {
+                system_kind: SystemActorKind::Engine,
+            })
         } else {
             submissions.remove(0)
         }

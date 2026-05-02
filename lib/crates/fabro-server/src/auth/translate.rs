@@ -9,7 +9,7 @@ use fabro_types::{AuthMethod, IdpIdentity};
 use fabro_util::dev_token::validate_dev_token_format;
 use tracing::trace;
 
-use crate::auth::{self, JwtSubject};
+use crate::auth::{self, JwtSubject, REFRESH_TOKEN_PREFIX};
 use crate::jwt_auth::{AuthMode, ConfiguredAuth, dev_token_matches};
 use crate::server::AppState;
 use crate::web_auth::{self, SessionCookie};
@@ -58,7 +58,7 @@ pub(crate) async fn auth_translation_middleware(
 }
 
 fn translate_bearer_token(token: &str, config: &ConfiguredAuth) -> Option<String> {
-    if token.starts_with("fabro_refresh_") || !token.starts_with("fabro_dev_") {
+    if token.starts_with(REFRESH_TOKEN_PREFIX) || !token.starts_with("fabro_dev_") {
         return None;
     }
 

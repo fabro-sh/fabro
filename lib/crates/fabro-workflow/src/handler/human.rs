@@ -293,7 +293,9 @@ impl Handler for HumanHandler {
             self.emit(
                 &services.run.emitter,
                 &Event::InterviewTimeout {
-                    actor:       Some(Principal::system(SystemActorKind::Timeout)),
+                    actor:       Some(Principal::System {
+                        system_kind: SystemActorKind::Timeout,
+                    }),
                     question_id: question_id.clone(),
                     question:    question_text,
                     stage:       node.id.clone(),
@@ -334,7 +336,9 @@ impl Handler for HumanHandler {
             self.emit(
                 &services.run.emitter,
                 &Event::InterviewInterrupted {
-                    actor:       Some(Principal::system(SystemActorKind::Engine)),
+                    actor:       Some(Principal::System {
+                        system_kind: SystemActorKind::Engine,
+                    }),
                     question_id: question_id.clone(),
                     question:    question_text,
                     stage:       node.id.clone(),

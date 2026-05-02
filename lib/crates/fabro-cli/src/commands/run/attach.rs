@@ -245,7 +245,7 @@ async fn handle_pending_server_interview(
     }
 
     hide_progress(progress_ui, json_output);
-    let interviewer = ConsoleInterviewer::new(styles, fabro_types::Principal::anonymous());
+    let interviewer = ConsoleInterviewer::new(styles, fabro_types::Principal::Anonymous);
     let submission =
         fabro_interview::Interviewer::ask(&interviewer, api_question_to_question(&question)).await;
     let answer = submission.answer;

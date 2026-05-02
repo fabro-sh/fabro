@@ -56,7 +56,11 @@ fn event_actor(payload: &serde_json::Value) -> Option<fabro_types::Principal> {
         .to_string();
     let user_id = event["user"].as_str()?.to_string();
     let user_name = event["user_name"].as_str().map(str::to_string);
-    Some(fabro_types::Principal::slack(team_id, user_id, user_name))
+    Some(fabro_types::Principal::Slack {
+        team_id,
+        user_id,
+        user_name,
+    })
 }
 
 #[cfg(test)]

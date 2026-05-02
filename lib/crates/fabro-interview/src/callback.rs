@@ -11,7 +11,12 @@ pub struct CallbackInterviewer {
 
 impl CallbackInterviewer {
     pub fn new(callback: impl Fn(Question) -> Answer + Send + Sync + 'static) -> Self {
-        Self::with_actor(Principal::system(SystemActorKind::Engine), callback)
+        Self::with_actor(
+            Principal::System {
+                system_kind: SystemActorKind::Engine,
+            },
+            callback,
+        )
     }
 
     pub fn with_actor(

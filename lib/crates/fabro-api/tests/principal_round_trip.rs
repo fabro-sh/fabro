@@ -43,7 +43,9 @@ fn principal_round_trips_representative_json() {
 
 #[test]
 fn principal_system_uses_system_kind_field() {
-    let principal = Principal::system(SystemActorKind::Watchdog);
+    let principal = Principal::System {
+        system_kind: SystemActorKind::Watchdog,
+    };
 
     assert_eq!(
         serde_json::to_value(principal).unwrap(),
@@ -62,16 +64,26 @@ fn principal_round_trips_every_variant_through_api_type() {
             "octocat".to_string(),
             AuthMethod::Github,
         ),
-        Principal::worker(fixtures::RUN_1),
-        Principal::webhook("delivery-1".to_string()),
-        Principal::slack("T1".to_string(), "U1".to_string(), Some("ada".to_string())),
-        Principal::agent(
-            Some("ses_agent".to_string()),
-            Some("ses_parent".to_string()),
-            Some("gpt-5.4".to_string()),
-        ),
-        Principal::system(SystemActorKind::Watchdog),
-        Principal::anonymous(),
+        Principal::Worker {
+            run_id: fixtures::RUN_1,
+        },
+        Principal::Webhook {
+            delivery_id: "delivery-1".to_string(),
+        },
+        Principal::Slack {
+            team_id:   "T1".to_string(),
+            user_id:   "U1".to_string(),
+            user_name: Some("ada".to_string()),
+        },
+        Principal::Agent {
+            session_id:        Some("ses_agent".to_string()),
+            parent_session_id: Some("ses_parent".to_string()),
+            model:             Some("gpt-5.4".to_string()),
+        },
+        Principal::System {
+            system_kind: SystemActorKind::Watchdog,
+        },
+        Principal::Anonymous,
     ];
 
     for principal in variants {
@@ -93,7 +105,9 @@ fn run_provenance_subject_round_trips_as_principal() {
             name:       Some("fabro-cli".to_string()),
             version:    Some("0.1.0".to_string()),
         }),
-        subject: Some(Principal::worker(fixtures::RUN_1)),
+        subject: Some(Principal::Worker {
+            run_id: fixtures::RUN_1,
+        }),
     };
     let json = serde_json::to_value(&provenance).unwrap();
 

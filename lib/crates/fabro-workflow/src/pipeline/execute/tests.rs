@@ -17,7 +17,7 @@ use fabro_hooks::HookSettings;
 use fabro_interview::AutoApproveInterviewer;
 use fabro_sandbox::SandboxSpec;
 use fabro_store::Database;
-use fabro_types::{RunId, WorkflowSettings, fixtures, format_blob_ref};
+use fabro_types::{Principal, RunId, SystemActorKind, WorkflowSettings, fixtures, format_blob_ref};
 use object_store::memory::InMemory;
 
 use super::*;
@@ -833,6 +833,21 @@ async fn timeout_causes_fail_status_record() {
     assert_eq!(status.outcome, StageOutcome::Failed {
         retry_requested: false,
     });
+
+    let events = executed.engine.run.run_store.list_events().await.unwrap();
+    let stage_failed = events
+        .iter()
+        .map(|envelope| &envelope.event)
+        .find(|event| {
+            event.event_name() == "stage.failed" && event.node_id.as_deref() == Some("work")
+        })
+        .expect("work stage failed event should be persisted");
+    assert_eq!(
+        stage_failed.actor,
+        Some(Principal::System {
+            system_kind: SystemActorKind::Timeout,
+        })
+    );
 }
 
 #[tokio::test]

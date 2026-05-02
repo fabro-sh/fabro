@@ -220,6 +220,8 @@ pub enum Event {
         failure:     FailureDetail,
         will_retry:  bool,
         duration_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor:       Option<Principal>,
     },
     StageRetrying {
         node_id:      String,
@@ -1507,7 +1509,7 @@ fn stored_event_fields(event: &Event, scope: Option<&StageScope>) -> StoredEvent
 fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
     match event {
         Event::RunCreated { provenance, .. } => StoredEventFields {
-            actor: provenance.as_ref().and_then(actor_from_provenance),
+            actor: provenance.as_ref().and_then(|p| p.subject.clone()),
             ..StoredEventFields::default()
         },
         Event::RunCancelRequested { actor }
@@ -1520,7 +1522,6 @@ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
             ..StoredEventFields::default()
         },
         Event::StageCompleted { node_id, name, .. }
-        | Event::StageFailed { node_id, name, .. }
         | Event::StageStarted { node_id, name, .. }
         | Event::StageRetrying { node_id, name, .. } => {
             let node_id_str = node_id.clone();
@@ -1528,6 +1529,21 @@ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
             StoredEventFields {
                 node_id: Some(node_id_str),
                 node_label,
+                ..StoredEventFields::default()
+            }
+        }
+        Event::StageFailed {
+            node_id,
+            name,
+            actor,
+            ..
+        } => {
+            let node_id_str = node_id.clone();
+            let node_label = default_node_label(Some(&node_id_str), Some(name.clone()));
+            StoredEventFields {
+                node_id: Some(node_id_str),
+                node_label,
+                actor: actor.clone(),
                 ..StoredEventFields::default()
             }
         }
@@ -1614,15 +1630,13 @@ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
         }
         Event::StallWatchdogTimeout { node, .. } => {
             let mut fields = node_stored_fields(Some(node.clone()));
-            fields.actor = Some(Principal::system(SystemActorKind::Watchdog));
+            fields.actor = Some(Principal::System {
+                system_kind: SystemActorKind::Watchdog,
+            });
             fields
         }
         _ => StoredEventFields::default(),
     }
-}
-
-fn actor_from_provenance(provenance: &RunProvenance) -> Option<Principal> {
-    provenance.subject.clone()
 }
 
 fn agent_tool_call_id(event: &AgentEvent) -> Option<&str> {
@@ -1639,18 +1653,18 @@ fn agent_actor_for_event(
     parent_session_id: Option<&str>,
 ) -> Option<Principal> {
     match event {
-        AgentEvent::AssistantMessage { model, .. } => Some(Principal::agent(
-            session_id.map(str::to_string),
-            parent_session_id.map(str::to_string),
-            Some(model.clone()),
-        )),
+        AgentEvent::AssistantMessage { model, .. } => Some(Principal::Agent {
+            session_id:        session_id.map(str::to_string),
+            parent_session_id: parent_session_id.map(str::to_string),
+            model:             Some(model.clone()),
+        }),
         AgentEvent::ToolCallStarted { .. }
         | AgentEvent::ToolCallOutputDelta { .. }
-        | AgentEvent::ToolCallCompleted { .. } => Some(Principal::agent(
-            session_id.map(str::to_string),
-            parent_session_id.map(str::to_string),
-            None,
-        )),
+        | AgentEvent::ToolCallCompleted { .. } => Some(Principal::Agent {
+            session_id:        session_id.map(str::to_string),
+            parent_session_id: parent_session_id.map(str::to_string),
+            model:             None,
+        }),
         _ => None,
     }
 }
@@ -3336,6 +3350,7 @@ mod tests {
             ),
             will_retry:  true,
             duration_ms: 5000,
+            actor:       None,
         });
 
         assert_eq!(stored.event_name(), "stage.failed");
@@ -3731,7 +3746,11 @@ mod tests {
         assert_eq!(stored.tool_call_id.as_deref(), Some("call_abc"));
         assert_eq!(
             stored.actor,
-            Some(Principal::agent(Some("ses_1".to_string()), None, None))
+            Some(Principal::Agent {
+                session_id:        Some("ses_1".to_string()),
+                parent_session_id: None,
+                model:             None,
+            })
         );
         assert_eq!(stored.parallel_group_id, Some(StageId::new("fanout", 2)));
         assert_eq!(
@@ -3981,14 +4000,11 @@ mod tests {
             parent_session_id: None,
         });
         let actor = stored.actor.as_ref().expect("actor set");
-        assert_eq!(
-            actor,
-            &Principal::agent(
-                Some("ses_agent".to_string()),
-                None,
-                Some("claude-sonnet".to_string()),
-            )
-        );
+        assert_eq!(actor, &Principal::Agent {
+            session_id:        Some("ses_agent".to_string()),
+            parent_session_id: None,
+            model:             Some("claude-sonnet".to_string()),
+        });
     }
 
     #[test]
@@ -4002,7 +4018,9 @@ mod tests {
         assert_eq!(stored.node_id.as_deref(), Some("code"));
         assert_eq!(
             stored.actor,
-            Some(Principal::system(SystemActorKind::Watchdog))
+            Some(Principal::System {
+                system_kind: SystemActorKind::Watchdog,
+            })
         );
     }
 

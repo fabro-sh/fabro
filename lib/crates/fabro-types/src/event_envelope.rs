@@ -72,11 +72,11 @@ mod tests {
             session_id:         Some("ses_42".to_string()),
             parent_session_id:  Some("ses_root".to_string()),
             tool_call_id:       Some("tool_call_xyz".to_string()),
-            actor:              Some(Principal::agent(
-                Some("ses_42".to_string()),
-                Some("ses_root".to_string()),
-                Some("claude-sonnet".to_string()),
-            )),
+            actor:              Some(Principal::Agent {
+                session_id:        Some("ses_42".to_string()),
+                parent_session_id: Some("ses_root".to_string()),
+                model:             Some("claude-sonnet".to_string()),
+            }),
             body:               EventBody::RunCompleted(RunCompletedProps {
                 duration_ms:          100,
                 artifact_count:       1,

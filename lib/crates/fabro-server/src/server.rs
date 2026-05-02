@@ -1098,7 +1098,7 @@ async fn http_log_middleware(mut req: axum_extract::Request, next: Next) -> Resp
     let status = response.status().as_u16();
     let latency_ms = start.elapsed().as_millis();
     let auth_context = auth_slot.snapshot();
-    let principal_fields = auth_context.principal.log_fields();
+    let principal_kind = auth_context.principal.kind();
     let auth_status = auth_context.auth_status.as_str();
 
     macro_rules! emit_http_log {
@@ -1110,7 +1110,7 @@ async fn http_log_middleware(mut req: axum_extract::Request, next: Next) -> Resp
                     status,
                     latency_ms,
                     request_id = %request_id,
-                    principal_kind = principal_fields.principal_kind,
+                    principal_kind,
                     auth_status,
                     auth_error_code,
                     $($field = $value,)*
@@ -1123,7 +1123,7 @@ async fn http_log_middleware(mut req: axum_extract::Request, next: Next) -> Resp
                     status,
                     latency_ms,
                     request_id = %request_id,
-                    principal_kind = principal_fields.principal_kind,
+                    principal_kind,
                     auth_status,
                     $($field = $value,)*
                     "HTTP response"
@@ -1135,45 +1135,25 @@ async fn http_log_middleware(mut req: axum_extract::Request, next: Next) -> Resp
     macro_rules! emit_principal_http_log {
         ($level:ident) => {{
             match &auth_context.principal {
-                Principal::User(_) => emit_http_log!(
+                Principal::User(user) => emit_http_log!(
                     $level,
-                    user_auth_method = principal_fields
-                        .user_auth_method
-                        .expect("user auth method field"),
-                    idp_issuer = principal_fields
-                        .idp_issuer
-                        .as_deref()
-                        .expect("user idp issuer field"),
-                    idp_subject = principal_fields
-                        .idp_subject
-                        .as_deref()
-                        .expect("user idp subject field"),
-                    login = principal_fields.login.as_deref().expect("user login field"),
+                    user_auth_method = user.auth_method.as_str(),
+                    idp_issuer = user.identity.issuer(),
+                    idp_subject = user.identity.subject(),
+                    login = user.login.as_str(),
                 ),
-                Principal::Worker { .. } => emit_http_log!(
+                Principal::Worker { run_id } => {
+                    emit_http_log!($level, run_id = run_id.to_string().as_str(),)
+                }
+                Principal::Webhook { delivery_id } => {
+                    emit_http_log!($level, delivery_id = delivery_id.as_str(),)
+                }
+                Principal::Slack {
+                    team_id, user_id, ..
+                } => emit_http_log!(
                     $level,
-                    run_id = principal_fields
-                        .run_id
-                        .as_deref()
-                        .expect("worker run id field"),
-                ),
-                Principal::Webhook { .. } => emit_http_log!(
-                    $level,
-                    delivery_id = principal_fields
-                        .delivery_id
-                        .as_deref()
-                        .expect("webhook delivery id field"),
-                ),
-                Principal::Slack { .. } => emit_http_log!(
-                    $level,
-                    team_id = principal_fields
-                        .team_id
-                        .as_deref()
-                        .expect("slack team id field"),
-                    user_id = principal_fields
-                        .user_id
-                        .as_deref()
-                        .expect("slack user id field"),
+                    team_id = team_id.as_str(),
+                    user_id = user_id.as_str(),
                 ),
                 Principal::Agent { .. } | Principal::System { .. } | Principal::Anonymous => {
                     emit_http_log!($level)
@@ -1415,7 +1395,7 @@ async fn github_webhook(
         .and_then(|value| value.to_str().ok())
     else {
         auth_slot.replace(RequestAuthContext {
-            principal:       Principal::anonymous(),
+            principal:       Principal::Anonymous,
             auth_status:     AuthStatus::Invalid,
             auth_error_code: Some("unauthorized"),
             user_profile:    None,
@@ -1426,7 +1406,7 @@ async fn github_webhook(
 
     if !verify_signature(&secret, &body, signature) {
         auth_slot.replace(RequestAuthContext {
-            principal:       Principal::anonymous(),
+            principal:       Principal::Anonymous,
             auth_status:     AuthStatus::Invalid,
             auth_error_code: Some("unauthorized"),
             user_profile:    None,
@@ -1436,7 +1416,9 @@ async fn github_webhook(
     }
 
     auth_slot.replace(RequestAuthContext {
-        principal:       Principal::webhook(delivery_id.to_string()),
+        principal:       Principal::Webhook {
+            delivery_id: delivery_id.to_string(),
+        },
         auth_status:     AuthStatus::Authenticated,
         auth_error_code: None,
         user_profile:    None,
@@ -8585,6 +8567,32 @@ methods = ["dev-token"]
         (guard, events)
     }
 
+    fn captured_field<'a>(event: &'a CapturedTracingEvent, name: &str) -> Option<&'a str> {
+        event
+            .fields
+            .iter()
+            .find_map(|(field_name, value)| (field_name == name).then_some(value.as_str()))
+    }
+
+    fn assert_log_field(event: &CapturedTracingEvent, name: &str, expected: &str) {
+        let actual = captured_field(event, name)
+            .unwrap_or_else(|| panic!("expected log field {name}; fields were {:?}", event.fields));
+        let debug_expected = format!("{expected:?}");
+        assert!(
+            actual == expected || actual == debug_expected,
+            "expected field {name} to be {expected:?}, got {actual:?}; fields were {:?}",
+            event.fields
+        );
+    }
+
+    fn assert_log_field_absent(event: &CapturedTracingEvent, name: &str) {
+        assert!(
+            captured_field(event, name).is_none(),
+            "expected log field {name} to be absent; fields were {:?}",
+            event.fields
+        );
+    }
+
     macro_rules! response_json {
         ($response:expr, $expected:expr) => {
             fabro_test::expect_axum_json($response, $expected, concat!(file!(), ":", line!()))
@@ -8633,6 +8641,80 @@ methods = ["dev-token"]
         assert!(!field_names.contains(&"run_id"));
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn http_log_records_user_principal_fields() {
+        let (_state, app) = jwt_auth_app();
+        let bearer = issue_test_user_jwt();
+        let (_guard, events) = capture_server_logs();
+
+        let response = app
+            .oneshot(bearer_request(Method::GET, "/runs", &bearer, Body::empty()))
+            .await
+            .unwrap();
+        assert_status!(response, StatusCode::OK).await;
+
+        let events = events.lock().expect("captured log events").clone();
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert_log_field(event, "principal_kind", "user");
+        assert_log_field(event, "auth_status", "authenticated");
+        assert_log_field(event, "user_auth_method", "github");
+        assert_log_field(event, "idp_issuer", "https://github.com");
+        assert_log_field(event, "idp_subject", "12345");
+        assert_log_field(event, "login", "octocat");
+        assert_log_field_absent(event, "auth_error_code");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn http_log_records_worker_principal_fields() {
+        let (_state, app) = jwt_auth_app();
+        let user_bearer = issue_test_user_jwt();
+        let run_id = create_run_with_bearer(&app, &user_bearer).await;
+        let worker_bearer = issue_test_worker_token(&run_id);
+        let (_guard, events) = capture_server_logs();
+
+        let response = app
+            .oneshot(bearer_request(
+                Method::GET,
+                &format!("/runs/{run_id}/state"),
+                &worker_bearer,
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_status!(response, StatusCode::OK).await;
+
+        let events = events.lock().expect("captured log events").clone();
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert_log_field(event, "principal_kind", "worker");
+        assert_log_field(event, "auth_status", "authenticated");
+        assert_log_field(event, "run_id", &run_id.to_string());
+        assert_log_field_absent(event, "auth_error_code");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn http_log_records_webhook_principal_fields() {
+        let body = br#"{"repository":{"full_name":"owner/repo"},"action":"opened"}"#;
+        let signature = compute_signature(TEST_WEBHOOK_SECRET.as_bytes(), body);
+        let app = webhook_test_app(dev_token_auth_mode());
+        let (_guard, events) = capture_server_logs();
+
+        let response = app
+            .oneshot(webhook_request(Some(&signature), None, body))
+            .await
+            .unwrap();
+        assert_status!(response, StatusCode::OK).await;
+
+        let events = events.lock().expect("captured log events").clone();
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert_log_field(event, "principal_kind", "webhook");
+        assert_log_field(event, "auth_status", "authenticated");
+        assert_log_field(event, "delivery_id", "delivery-1");
+        assert_log_field_absent(event, "auth_error_code");
+    }
+
     #[allow(
         clippy::needless_pass_by_value,
         reason = "Test helper mirrors the public build_router convenience API."
@@ -8665,6 +8747,7 @@ methods = ["dev-token"]
         let mut builder = Request::builder()
             .method("POST")
             .uri(api("/webhooks/github"))
+            .header("x-github-delivery", "delivery-1")
             .header("x-github-event", "pull_request");
         if let Some(sig) = signature {
             builder = builder.header("x-hub-signature-256", sig);
@@ -10119,6 +10202,7 @@ allowed_usernames = ["octocat"]
                 failure:     FailureDetail::new("try again", FailureCategory::TransientInfra),
                 will_retry:  true,
                 duration_ms: 10,
+                actor:       None,
             },
             workflow_event::Event::StageRetrying {
                 node_id:      "work".to_string(),

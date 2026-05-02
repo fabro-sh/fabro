@@ -15,7 +15,9 @@ pub struct QueueInterviewer {
 impl QueueInterviewer {
     #[must_use]
     pub fn new(answers: VecDeque<Answer>) -> Self {
-        Self::with_actor(answers, Principal::system(SystemActorKind::Engine))
+        Self::with_actor(answers, Principal::System {
+            system_kind: SystemActorKind::Engine,
+        })
     }
 
     #[must_use]
