@@ -31,11 +31,23 @@ export interface StageState {
     'prompt'?: string | null;
     'response'?: string | null;
     'status'?: NodeStatusRecord | null;
-    'provider_used'?: any;
+    /**
+     * Provider and model metadata recorded for the stage attempt.
+     */
+    'provider_used'?: object | null;
     'diff'?: string | null;
-    'script_invocation'?: any;
-    'script_timing'?: any;
-    'parallel_results'?: any;
+    /**
+     * Command and environment recorded when the stage script ran.
+     */
+    'script_invocation'?: object | null;
+    /**
+     * Wall-clock and step timing metadata for the stage script.
+     */
+    'script_timing'?: object | null;
+    /**
+     * Per-branch result objects produced by a parallel stage.
+     */
+    'parallel_results'?: Array<object> | null;
     'stdout'?: string | null;
     'stderr'?: string | null;
     'stdout_bytes'?: number | null;

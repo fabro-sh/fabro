@@ -5137,12 +5137,22 @@ components:
           oneOf:
             - $ref: "#/components/schemas/NodeStatusRecord"
             - type: "null"
-        provider_used: {}
+        provider_used:
+          type: ["object", "null"]
+          description: Provider and model metadata recorded for the stage attempt.
         diff:
           type: ["string", "null"]
-        script_invocation: {}
-        script_timing: {}
-        parallel_results: {}
+        script_invocation:
+          type: ["object", "null"]
+          description: Command and environment recorded when the stage script ran.
+        script_timing:
+          type: ["object", "null"]
+          description: Wall-clock and step timing metadata for the stage script.
+        parallel_results:
+          type: ["array", "null"]
+          items:
+            type: object
+          description: Per-branch result objects produced by a parallel stage.
         stdout:
           type: ["string", "null"]
         stderr:
