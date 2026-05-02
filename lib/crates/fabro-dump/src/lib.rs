@@ -23,8 +23,9 @@ pub type BlobReader = Box<dyn FnMut(RunBlobId) -> BoxFuture<'static, Result<Opti
 
 #[derive(Debug, Clone)]
 pub struct RunDump {
-    entries:     Vec<RunDumpEntry>,
-    stage_ranks: HashMap<StageId, u32>,
+    entries:        Vec<RunDumpEntry>,
+    stage_ranks:    HashMap<StageId, u32>,
+    dump_log_index: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -151,6 +152,7 @@ impl RunDump {
         Ok(Self {
             entries,
             stage_ranks,
+            dump_log_index: None,
         })
     }
 
@@ -252,16 +254,15 @@ impl RunDump {
 
     fn add_orphan_notice(&mut self, stage_id: &StageId) {
         let line = format!("notice: artifact stage {stage_id} was not present in run projection\n");
-        if let Some(entry) = self
-            .entries
-            .iter_mut()
-            .find(|entry| entry.path == "dump.log")
-        {
-            if let RunDumpContents::Text(text) = &mut entry.contents {
+        if let Some(index) = self.dump_log_index {
+            if let Some(RunDumpContents::Text(text)) =
+                self.entries.get_mut(index).map(|entry| &mut entry.contents)
+            {
                 text.push_str(&line);
                 return;
             }
         }
+        self.dump_log_index = Some(self.entries.len());
         self.entries.push(RunDumpEntry::text("dump.log", line));
     }
 
@@ -779,11 +780,12 @@ mod tests {
         let blob_id = fabro_types::RunBlobId::new(&blob);
         let legacy_ref = format!("file:///sandbox/.fabro/artifacts/{blob_id}.json");
         let mut dump = RunDump {
-            entries:     vec![RunDumpEntry::json(
+            entries:        vec![RunDumpEntry::json(
                 "run.json",
                 serde_json::json!({ "stdout": legacy_ref }),
             )],
-            stage_ranks: HashMap::new(),
+            stage_ranks:    HashMap::new(),
+            dump_log_index: None,
         };
 
         executor::block_on(async {

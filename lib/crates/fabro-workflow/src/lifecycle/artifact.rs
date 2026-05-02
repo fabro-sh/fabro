@@ -18,7 +18,7 @@ use crate::artifact_snapshot::collect_artifacts;
 use crate::artifact_upload::ArtifactSink;
 use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::graph::{WorkflowGraph, WorkflowNode};
-use crate::lifecycle::event::stage_scope_for;
+use crate::lifecycle::event::{stage_scope_for, stage_visit};
 use crate::outcome::BilledModelUsage;
 use crate::runtime_store::RunStoreHandle;
 
@@ -95,8 +95,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         }
         let epoch = self.attempt_start_epoch.lock().unwrap().unwrap_or(0.0);
         let node_id = ctx.node.id();
-        let visit_count = state.node_visits.get(node_id).copied().unwrap_or(1);
-        let visit = u32::try_from(visit_count.max(1)).unwrap_or(u32::MAX);
+        let visit = stage_visit(state, node_id);
         let node_slug = if visit <= 1 {
             node_id.to_string()
         } else {

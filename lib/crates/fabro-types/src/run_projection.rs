@@ -113,10 +113,6 @@ impl RunProjection {
         &self.pending_interviews
     }
 
-    pub fn stage_mut(&mut self, node_id: &str, visit: u32) -> &mut StageState {
-        self.stage_entry(node_id, visit, 0)
-    }
-
     pub fn stage_entry_id(&mut self, stage_id: &StageId, seq: u32) -> &mut StageState {
         self.stages
             .entry(stage_id.clone())

@@ -74,9 +74,9 @@ fn response_from_outcome(node_id: &str, outcome: &Outcome) -> Option<String> {
         .and_then(|value| value.as_str().map(ToOwned::to_owned))
 }
 
-fn stage_visit(state: &WfRunState, node_id: &str) -> u32 {
+pub(super) fn stage_visit(state: &WfRunState, node_id: &str) -> u32 {
     let visits = state.node_visits.get(node_id).copied().unwrap_or(1);
-    u32::try_from(visits.max(1)).unwrap_or(u32::MAX)
+    u32::try_from(visits).unwrap_or(u32::MAX)
 }
 
 pub(crate) fn stage_scope_for(state: &WfRunState, node_id: &str) -> StageScope {

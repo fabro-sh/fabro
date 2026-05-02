@@ -294,24 +294,11 @@ fn decode_artifact_location(
             "artifact location {location} has an invalid visit number: {err}"
         ))
     })?;
-    let retry_part = parts.next().ok_or_else(|| {
-        Error::Other(format!(
-            "artifact location {location} is missing a retry segment"
-        ))
-    })?;
-    let retry = decode_retry_segment(location, retry_part.as_ref())?;
-    let filename_segments = parts
-        .map(|part| decode_path_segment("artifact filename segment", part.as_ref()))
-        .collect::<Result<Vec<_>>>()?;
-    if filename_segments.is_empty() {
-        return Err(Error::Other(format!(
-            "artifact location {location} is missing a filename"
-        )));
-    }
+    let (retry, filename) = decode_retry_and_filename(location, &mut parts)?;
     Ok(NodeArtifact {
         node: StageId::new(node_id, visit),
         retry,
-        filename: filename_segments.join("/"),
+        filename,
         size,
     })
 }
@@ -326,6 +313,22 @@ fn decode_stage_artifact_entry(
             "artifact location {location} does not match expected prefix {prefix}"
         ))
     })?;
+    let (retry, filename) = decode_retry_and_filename(location, &mut parts)?;
+    Ok(StageArtifactEntry {
+        retry,
+        filename,
+        size,
+    })
+}
+
+fn decode_retry_and_filename<'a, I, P>(
+    location: &ObjectPath,
+    parts: &mut I,
+) -> Result<(u32, String)>
+where
+    I: Iterator<Item = P>,
+    P: AsRef<str> + 'a,
+{
     let retry_part = parts.next().ok_or_else(|| {
         Error::Other(format!(
             "artifact location {location} is missing a retry segment"
@@ -333,7 +336,6 @@ fn decode_stage_artifact_entry(
     })?;
     let retry = decode_retry_segment(location, retry_part.as_ref())?;
     let filename_segments = parts
-        .by_ref()
         .map(|part| decode_path_segment("artifact filename segment", part.as_ref()))
         .collect::<Result<Vec<_>>>()?;
     if filename_segments.is_empty() {
@@ -341,11 +343,7 @@ fn decode_stage_artifact_entry(
             "artifact location {location} is missing a filename"
         )));
     }
-    Ok(StageArtifactEntry {
-        retry,
-        filename: filename_segments.join("/"),
-        size,
-    })
+    Ok((retry, filename_segments.join("/")))
 }
 
 fn decode_retry_segment(location: &ObjectPath, segment: &str) -> Result<u32> {
