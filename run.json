@@ -199,14 +199,128 @@
     "in_place": false
   },
   "graph_source": "digraph Hello {\n    graph [goal=\"Say hello and demonstrate a basic Fabro workflow\"]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    greet [label=\"Greet\", prompt=\"Add a haiku to the README\"]\n\n    start -> greet -> exit\n}\n",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "run_id": "01KQQV6K849B64PN2ZRX3BQNZE",
+    "start_time": "2026-05-03T21:16:51.794674Z",
+    "run_branch": "fabro/run/01KQQV6K849B64PN2ZRX3BQNZE",
+    "base_sha": "2d7c79de1e45026b266d5aba6fad718c0ffcaa2f"
   },
-  "status_updated_at": "2026-05-03T21:16:38.560671Z",
+  "status": {
+    "kind": "running"
+  },
+  "status_updated_at": "2026-05-03T21:16:51.794720Z",
   "pending_control": null,
-  "checkpoint": null,
-  "checkpoints": [],
+  "checkpoint": {
+    "timestamp": "2026-05-03T21:17:05.174157Z",
+    "current_node": "greet",
+    "completed_nodes": [
+      "start",
+      "greet"
+    ],
+    "node_retries": {},
+    "context_values": {
+      "last_response": "Done! Here's what was added, just below the tagline:\n\n```\n*Agents run the graph —*\n*humans hold the approval gate —*\n*code ships without fear.*\n```\n\nThe haiku (5–7–5) captures Fabro's core ide",
+      "internal.run_id": "01KQQV6K849B64PN2ZRX3BQNZE",
+      "graph.rankdir": "LR",
+      "current_node": "greet",
+      "internal.work_dir": "/home/daytona/workspace",
+      "response.greet": "Done! Here's what was added, just below the tagline:\n\n```\n*Agents run the graph —*\n*humans hold the approval gate —*\n*code ships without fear.*\n```\n\nThe haiku (5–7–5) captures Fabro's core idea: deterministic workflow graphs driven by agents, gated by human approval, yielding confident, safe releases.",
+      "failure_signature": "",
+      "last_stage": "greet",
+      "internal.retry_count.greet": 0,
+      "internal.fidelity": "compact",
+      "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+      "internal.node_visit_count": 1,
+      "outcome": "succeeded",
+      "internal.thread_id": "start",
+      "internal.retry_count.start": 0,
+      "thread.start.current_node": "greet",
+      "failure_class": ""
+    },
+    "node_outcomes": {
+      "start": {
+        "status": "succeeded",
+        "usage": null
+      },
+      "greet": {
+        "status": "succeeded",
+        "context_updates": {
+          "last_response": "Done! Here's what was added, just below the tagline:\n\n```\n*Agents run the graph —*\n*humans hold the approval gate —*\n*code ships without fear.*\n```\n\nThe haiku (5–7–5) captures Fabro's core ide",
+          "response.greet": "Done! Here's what was added, just below the tagline:\n\n```\n*Agents run the graph —*\n*humans hold the approval gate —*\n*code ships without fear.*\n```\n\nThe haiku (5–7–5) captures Fabro's core idea: deterministic workflow graphs driven by agents, gated by human approval, yielding confident, safe releases.",
+          "last_stage": "greet"
+        },
+        "notes": "Stage completed: greet",
+        "usage": {
+          "input": {
+            "usage": {
+              "model": {
+                "provider": "anthropic",
+                "model_id": "claude-sonnet-4-6"
+              },
+              "tokens": {
+                "input_tokens": 4690,
+                "output_tokens": 439,
+                "reasoning_tokens": 0,
+                "cache_read_tokens": 25122,
+                "cache_write_tokens": 12457
+              }
+            },
+            "facts": {
+              "provider": "anthropic",
+              "cache_write_5m_tokens": 12457,
+              "cache_write_1h_tokens": 0
+            }
+          },
+          "total_usd_micros": 74904
+        },
+        "files_touched": [
+          "/home/daytona/workspace/README.md"
+        ]
+      }
+    },
+    "next_node_id": "exit",
+    "node_visits": {
+      "greet": 1,
+      "start": 1
+    }
+  },
+  "checkpoints": [
+    [
+      19,
+      {
+        "timestamp": "2026-05-03T21:16:53.836634Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "internal.run_id": "01KQQV6K849B64PN2ZRX3BQNZE",
+          "internal.thread_id": null,
+          "internal.retry_count.start": 0,
+          "internal.fidelity": "compact",
+          "internal.work_dir": "/home/daytona/workspace",
+          "outcome": "succeeded",
+          "internal.node_visit_count": 1,
+          "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+          "failure_class": "",
+          "failure_signature": "",
+          "current_node": "start",
+          "graph.rankdir": "LR"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "greet",
+        "node_visits": {
+          "start": 1
+        }
+      }
+    ]
+  ],
   "conclusion": null,
   "retro": null,
   "retro_prompt": null,
@@ -223,5 +337,41 @@
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
-  "stages": {}
+  "stages": {
+    "start@1": {
+      "first_event_seq": 16,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-03T21:16:53.836377Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null
+    },
+    "greet@1": {
+      "first_event_seq": 20,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": {
+        "mode": "agent",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6"
+      },
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null
+    }
+  }
 }
