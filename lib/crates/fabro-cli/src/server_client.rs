@@ -13,11 +13,14 @@ use fabro_config::bind::Bind;
 pub(crate) use fabro_types::RunProjection;
 use fabro_types::UserSettings;
 use fabro_util::dev_token;
-use tokio::time::sleep;
+use tokio::time::{self, sleep};
 
 use crate::args::ServerTargetArgs;
 use crate::commands::server::start;
 use crate::user_config::{self, cli_http_client_builder};
+
+const SERVER_HEALTH_PROBE_TIMEOUT: Duration = Duration::from_millis(250);
+const CLI_CONTROL_PLANE_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn refreshable_oauth(
     target: &ServerTarget,
@@ -129,7 +132,11 @@ async fn connect_local_api_client_bundle(
                 .dev_token_path();
             let token = wait_for_runtime_dev_token(&runtime_token_path).await?;
             let http_client = connect_unix_socket_http_client(&path, Some(&token)).await?;
-            Ok(Client::from_http_client("http://fabro", http_client))
+            Ok(Client::builder()
+                .transport("http://fabro", http_client)
+                .request_timeout(CLI_CONTROL_PLANE_REQUEST_TIMEOUT)
+                .connect()
+                .await?)
         }
         Bind::Tcp(addr) => {
             let target = ServerTarget::http_url(format!("http://{addr}"))?;
@@ -154,7 +161,8 @@ async fn build_client(
 ) -> Result<Client> {
     let mut builder = Client::builder()
         .target(target.clone())
-        .transport_connector(build_cli_transport_connector(target));
+        .transport_connector(build_cli_transport_connector(target))
+        .request_timeout(CLI_CONTROL_PLANE_REQUEST_TIMEOUT);
     if let Some((base_url, http_client)) = transport {
         builder = builder.transport(base_url, http_client);
     }
@@ -305,10 +313,20 @@ fn should_bypass_proxy_for_http_target(api_url: &str) -> bool {
 }
 
 async fn check_server_ready(http_client: &fabro_http::HttpClient) -> Result<()> {
-    match http_client.get("http://fabro/health").send().await {
-        Ok(response) if response.status().is_success() => Ok(()),
-        Ok(response) => bail!("server health check returned status {}", response.status()),
-        Err(err) => Err(anyhow!(err)),
+    let response = match time::timeout(
+        SERVER_HEALTH_PROBE_TIMEOUT,
+        http_client.get("http://fabro/health").send(),
+    )
+    .await
+    {
+        Ok(Ok(response)) => response,
+        Ok(Err(err)) => return Err(anyhow!(err)),
+        Err(_) => bail!("server health check timed out"),
+    };
+
+    match response {
+        response if response.status().is_success() => Ok(()),
+        response => bail!("server health check returned status {}", response.status()),
     }
 }
 
@@ -333,6 +351,9 @@ mod tests {
     use fabro_client::{AuthEntry, DevTokenEntry, OAuthEntry, StoredSubject};
     use httpmock::Method::{GET, POST};
     use serde_json::json;
+    use tokio::net::TcpListener;
+    #[cfg(unix)]
+    use tokio::net::UnixListener;
 
     use super::*;
 
@@ -355,6 +376,55 @@ mod tests {
         let credential = resolve_target_credential_with_store(&target, &store, Utc::now()).unwrap();
 
         assert!(matches!(credential, Some(Credential::DevToken(found)) if found == token));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unix_socket_probe_times_out_when_peer_accepts_without_http_response() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket_path = dir.path().join("hung.sock");
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let server = tokio::spawn(async move {
+            if let Ok((stream, _addr)) = listener.accept().await {
+                let _stream = stream;
+                sleep(Duration::from_secs(10)).await;
+            }
+        });
+
+        let result = time::timeout(
+            Duration::from_millis(500),
+            try_connect_unix_socket_http_client(&socket_path, None),
+        )
+        .await;
+
+        server.abort();
+        assert!(
+            result.is_ok(),
+            "Unix socket health probe should return its own timeout error instead of hanging"
+        );
+        assert!(result.unwrap().is_err());
+    }
+
+    #[tokio::test]
+    async fn http_target_transport_times_out_when_peer_accepts_without_http_response() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            if let Ok((_stream, _addr)) = listener.accept().await {
+                sleep(Duration::from_secs(10)).await;
+            }
+        });
+
+        let target = ServerTarget::http_url(format!("http://{addr}")).unwrap();
+        let client = connect_target_api_client_bundle(&target).await.unwrap();
+        let result = time::timeout(Duration::from_millis(750), client.get_health()).await;
+
+        server.abort();
+        assert!(
+            result.is_ok(),
+            "HTTP target health check should return its own timeout error instead of hanging"
+        );
+        assert!(result.unwrap().is_err());
     }
 
     #[test]

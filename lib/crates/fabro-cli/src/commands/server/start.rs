@@ -4,7 +4,7 @@
 )]
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use fabro_config::RuntimeDirectory;
@@ -18,12 +18,13 @@ use fabro_static::EnvVars;
 use fabro_types::settings::{LogDestination, ServerAuthMethod};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
-use tokio::net::{TcpStream, UnixStream};
 use tokio::process::Command as TokioCommand;
 use tokio::task::spawn_blocking;
 use tokio::time;
 
 use crate::local_server;
+
+const SERVER_START_HEALTH_PROBE_TIMEOUT: Duration = Duration::from_millis(250);
 
 pub(crate) struct ForegroundServerLogBootstrap {
     #[expect(dead_code, reason = "held for its Drop to release the server lock")]
@@ -349,9 +350,9 @@ async fn execute_daemon(
 
     let poll_interval = Duration::from_millis(50);
     let timeout = Duration::from_secs(5);
-    let mut elapsed = Duration::ZERO;
+    let deadline = Instant::now() + timeout;
 
-    while elapsed < timeout {
+    while Instant::now() < deadline {
         let daemon = match ServerDaemon::read(&runtime_directory) {
             Ok(daemon) => daemon,
             Err(err) => {
@@ -362,7 +363,7 @@ async fn execute_daemon(
             }
         };
         if let Some(daemon) = daemon {
-            if try_connect(&daemon.bind).await {
+            if try_health(&daemon.bind).await {
                 if announce {
                     let pid = child.id().unwrap_or_default();
                     maybe_warn_host_port_fallback(bind, &daemon.bind, printer);
@@ -394,8 +395,11 @@ async fn execute_daemon(
             bail!("Server exited during startup with status {status}");
         }
 
-        time::sleep(poll_interval).await;
-        elapsed += poll_interval;
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        time::sleep(poll_interval.min(remaining)).await;
     }
 
     ServerDaemon::remove(&runtime_directory);
@@ -456,15 +460,47 @@ async fn acquire_lock(runtime_directory: &RuntimeDirectory) -> Result<std::fs::F
     Ok(lock_file)
 }
 
-async fn try_connect(bind: &Bind) -> bool {
-    let connect_timeout = Duration::from_millis(100);
+async fn try_health(bind: &Bind) -> bool {
+    let Ok((base_url, client)) = build_health_client(bind) else {
+        return false;
+    };
+
+    let response = time::timeout(
+        SERVER_START_HEALTH_PROBE_TIMEOUT,
+        client.get(format!("{base_url}/health")).send(),
+    )
+    .await;
+
+    matches!(response, Ok(Ok(response)) if response.status().is_success())
+}
+
+fn build_health_client(bind: &Bind) -> Result<(String, fabro_http::HttpClient)> {
     match bind {
-        Bind::Tcp(addr) => time::timeout(connect_timeout, TcpStream::connect(addr))
-            .await
-            .is_ok_and(|r| r.is_ok()),
-        Bind::Unix(path) => time::timeout(connect_timeout, UnixStream::connect(path))
-            .await
-            .is_ok_and(|r| r.is_ok()),
+        Bind::Tcp(addr) => Ok((
+            format!("http://{addr}"),
+            fabro_http::HttpClientBuilder::new()
+                .no_proxy()
+                .timeout(SERVER_START_HEALTH_PROBE_TIMEOUT)
+                .build()?,
+        )),
+        Bind::Unix(path) => {
+            #[cfg(unix)]
+            {
+                Ok((
+                    "http://fabro".to_string(),
+                    fabro_http::HttpClientBuilder::new()
+                        .unix_socket(path)
+                        .no_proxy()
+                        .timeout(SERVER_START_HEALTH_PROBE_TIMEOUT)
+                        .build()?,
+                ))
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = path;
+                bail!("Unix-socket HTTP client is not supported on this platform")
+            }
+        }
     }
 }
 
@@ -495,17 +531,22 @@ fn read_log_tail(log_path: &Path, lines: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use fabro_config::bind::BindRequest;
+    use std::time::Duration;
+
+    use fabro_config::bind::{Bind, BindRequest};
     use fabro_server::serve::ServeArgs;
     use fabro_static::EnvVars;
     use fabro_types::settings::LogDestination;
     use fabro_util::Home;
     use fabro_util::printer::Printer;
     use temp_env::with_var;
+    use tokio::net::TcpListener;
     use tokio::runtime::Runtime;
+    use tokio::time;
 
     use super::{
         ensure_storage_server_autostart_allowed, execute_daemon, prepare_foreground_server_log,
+        try_health,
     };
 
     fn runtime() -> Runtime {
@@ -543,6 +584,22 @@ destination = "{destination}"
             #[cfg(debug_assertions)]
             watch_web: false,
         }
+    }
+
+    #[tokio::test]
+    async fn try_health_returns_false_for_tcp_peer_that_accepts_without_http_response() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            if let Ok((_stream, _addr)) = listener.accept().await {
+                time::sleep(Duration::from_secs(10)).await;
+            }
+        });
+
+        let ready = try_health(&Bind::Tcp(addr)).await;
+
+        server.abort();
+        assert!(!ready);
     }
 
     #[test]

@@ -20,6 +20,7 @@ use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use tokio::fs::File;
 use tokio::sync::Mutex;
+use tokio::time;
 use tokio_util::io::ReaderStream;
 
 use crate::credential::Credential;
@@ -30,6 +31,10 @@ use crate::error::{
 use crate::session::OAuthSession;
 use crate::target::ServerTarget;
 use crate::{AuthEntry, OAuthEntry, StoredSubject, sse};
+
+const DEFAULT_CONTROL_PLANE_REQUEST_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(30);
+const DEFAULT_HEALTH_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(250);
 
 type TransportFuture = BoxFuture<'static, Result<(fabro_http::HttpClient, String)>>;
 
@@ -58,6 +63,7 @@ pub struct Client {
     oauth_session:       Option<OAuthSession>,
     refresh_lock:        Arc<Mutex<()>>,
     transport_connector: Option<TransportConnector>,
+    request_timeout:     Option<std::time::Duration>,
 }
 
 #[derive(Clone)]
@@ -72,6 +78,7 @@ pub struct ClientBuilder {
     oauth_session:       Option<OAuthSession>,
     transport:           Option<(String, fabro_http::HttpClient)>,
     transport_connector: Option<TransportConnector>,
+    request_timeout:     Option<std::time::Duration>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -206,6 +213,12 @@ impl ClientBuilder {
         self
     }
 
+    #[must_use]
+    pub fn request_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.request_timeout = Some(timeout);
+        self
+    }
+
     pub async fn connect(self) -> Result<Client> {
         let bearer_token = self
             .credential
@@ -216,6 +229,11 @@ impl ClientBuilder {
             self.oauth_session
                 .as_ref()
                 .map(|session| session.target.clone())
+        });
+        let uses_default_target_transport =
+            self.transport.is_none() && self.transport_connector.is_none() && target.is_some();
+        let request_timeout = self.request_timeout.or_else(|| {
+            uses_default_target_transport.then_some(DEFAULT_CONTROL_PLANE_REQUEST_TIMEOUT)
         });
         let transport_connector = self
             .transport_connector
@@ -236,6 +254,7 @@ impl ClientBuilder {
             oauth_session: self.oauth_session,
             refresh_lock: Arc::new(Mutex::new(())),
             transport_connector,
+            request_timeout,
         })
     }
 }
@@ -260,6 +279,7 @@ impl Client {
             oauth_session:       None,
             refresh_lock:        Arc::new(Mutex::new(())),
             transport_connector: None,
+            request_timeout:     None,
         }
     }
 
@@ -302,6 +322,17 @@ impl Client {
             .expect("client state lock should not be poisoned") = state;
     }
 
+    async fn with_request_timeout<T>(&self, future: impl Future<Output = T>) -> Result<T> {
+        let Some(timeout) = self.request_timeout else {
+            return Ok(future.await);
+        };
+
+        match time::timeout(timeout, future).await {
+            Ok(value) => Ok(value),
+            Err(_) => bail!("server request timed out after {timeout:?}"),
+        }
+    }
+
     async fn send_api<T, E, F, Fut>(
         &self,
         request: F,
@@ -317,7 +348,10 @@ impl Client {
         E: serde::Serialize + std::fmt::Debug + Send + Sync + 'static,
     {
         let state = self.current_state();
-        match request.clone()(state.client.clone()).await {
+        match self
+            .with_request_timeout(Box::pin(request.clone()(state.client.clone())))
+            .await?
+        {
             Ok(response) => Ok(response),
             Err(err) => {
                 let mapped = classify_api_error(err).await;
@@ -325,7 +359,10 @@ impl Client {
                     if let Some(failed_token) = state.bearer_token.as_deref() {
                         self.refresh_access_token(failed_token).await?;
                         let state = self.current_state();
-                        return request(state.client.clone()).await.map_err(map_api_error);
+                        return self
+                            .with_request_timeout(Box::pin(request(state.client.clone())))
+                            .await?
+                            .map_err(map_api_error);
                     }
                 }
                 Err(mapped.error)
@@ -473,8 +510,9 @@ impl Client {
         T: Into<anyhow::Error>,
     {
         let state = self.current_state();
-        let response = request.clone()(state.http_client.clone())
-            .await
+        let response = self
+            .with_request_timeout(Box::pin(request.clone()(state.http_client.clone())))
+            .await?
             .map_err(Into::into)?;
         match classify_http_response(response).await? {
             Ok(response) => Ok(Ok(response)),
@@ -483,8 +521,9 @@ impl Client {
                     if let Some(failed_token) = state.bearer_token.as_deref() {
                         self.refresh_access_token(failed_token).await?;
                         let state = self.current_state();
-                        let response = request(state.http_client.clone())
-                            .await
+                        let response = self
+                            .with_request_timeout(Box::pin(request(state.http_client.clone())))
+                            .await?
                             .map_err(Into::into)?;
                         return classify_http_response(response).await;
                     }
@@ -658,8 +697,17 @@ impl Client {
     }
 
     pub async fn get_health(&self) -> Result<()> {
-        self.send_api(|client| async move { client.get_health().send().await })
-            .await?;
+        match time::timeout(
+            DEFAULT_HEALTH_REQUEST_TIMEOUT,
+            self.send_api(|client| async move { client.get_health().send().await }),
+        )
+        .await
+        {
+            Ok(result) => {
+                result?;
+            }
+            Err(_) => bail!("server health check timed out"),
+        }
         Ok(())
     }
 
@@ -1550,6 +1598,7 @@ fn add_pr_upgrade_hint(err: anyhow::Error) -> anyhow::Error {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::time::Duration;
 
     use chrono::Duration as ChronoDuration;
     use fabro_util::exit;
@@ -1641,6 +1690,49 @@ mod tests {
         assert_eq!(refreshed.access_token, "access-refreshed");
         assert_eq!(refreshed.refresh_token, "refresh-refreshed");
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn request_timeout_does_not_cap_stream_body_after_headers() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = vec![0_u8; 4096];
+            let read = stream.read(&mut request).await.unwrap();
+            let request = String::from_utf8_lossy(&request[..read]);
+            assert!(
+                request.starts_with("GET /api/v1/attach HTTP/1.1"),
+                "unexpected attach request: {request}"
+            );
+
+            let body = b"data: hello\n\n";
+            let headers = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(headers.as_bytes()).await.unwrap();
+            time::sleep(Duration::from_millis(100)).await;
+            stream.write_all(body).await.unwrap();
+        });
+
+        let target = ServerTarget::http_url(format!("http://{addr}")).unwrap();
+        let client = Client::builder()
+            .target(target)
+            .request_timeout(Duration::from_millis(50))
+            .connect()
+            .await
+            .unwrap();
+
+        let mut stream = client.attach_events(&[]).await.unwrap();
+        let chunk = time::timeout(Duration::from_millis(500), stream.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(chunk, Bytes::from_static(b"data: hello\n\n"));
+        server.await.unwrap();
     }
 
     async fn oauth_client(

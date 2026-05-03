@@ -4,6 +4,9 @@ use std::str::FromStr;
 
 use anyhow::{Result, bail};
 
+const DEFAULT_CONTROL_PLANE_REQUEST_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(30);
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ServerTarget {
     HttpUrl(CanonicalHttpUrl),
@@ -50,7 +53,9 @@ impl ServerTarget {
 
     pub fn build_public_http_client(&self) -> Result<(fabro_http::HttpClient, String)> {
         if let Some(api_url) = self.as_http_url() {
-            let http_client = fabro_http::HttpClientBuilder::new().build()?;
+            let http_client = fabro_http::HttpClientBuilder::new()
+                .timeout(DEFAULT_CONTROL_PLANE_REQUEST_TIMEOUT)
+                .build()?;
             return Ok((http_client, api_url.to_string()));
         }
 
@@ -63,6 +68,7 @@ impl ServerTarget {
             let http_client = fabro_http::HttpClientBuilder::new()
                 .unix_socket(path)
                 .no_proxy()
+                .timeout(DEFAULT_CONTROL_PLANE_REQUEST_TIMEOUT)
                 .build()?;
             Ok((http_client, "http://fabro".to_string()))
         }

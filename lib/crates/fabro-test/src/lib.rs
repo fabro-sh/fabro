@@ -2268,7 +2268,10 @@ pub async fn twin_openai() -> &'static TwinOpenAi {
             let client = test_http_client();
             let healthz_url = format!("http://127.0.0.1:{}/healthz", addr.port());
             for _ in 0..50 {
-                if let Ok(resp) = client.get(&healthz_url).send().await {
+                let response =
+                    time::timeout(Duration::from_millis(250), client.get(&healthz_url).send())
+                        .await;
+                if let Ok(Ok(resp)) = response {
                     let status = resp.status();
                     if status == fabro_http::StatusCode::OK {
                         return TwinOpenAi { base_url };
