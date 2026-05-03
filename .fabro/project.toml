@@ -11,7 +11,7 @@ auto_stop_interval = 30
 repo = "fabro-sh/fabro"
 
 [run.sandbox.daytona.snapshot]
-name = "fabro-v7"
+name = "fabro-v8"
 cpu = 8
 memory = "16GB"
 disk = "20GB"
@@ -33,6 +33,7 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 # Rust
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
+RUN rustup toolchain install nightly-2026-04-14 --profile minimal --component clippy,rustfmt
 RUN cargo install cargo-nextest --locked
 ENV CARGO_INCREMENTAL=0
 
