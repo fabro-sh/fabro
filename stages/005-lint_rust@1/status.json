@@ -1,0 +1,6 @@
+{
+  "outcome": "succeeded",
+  "notes": "Script completed: cargo +nightly-2026-04-14 fmt --check --all 2>&1 && cargo +nightly-2026-04-14 clippy -q --workspace -- -D warnings 2>&1",
+  "failure_reason": null,
+  "timestamp": "2026-05-03T23:52:31.225941Z"
+}

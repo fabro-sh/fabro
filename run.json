@@ -332,14 +332,15 @@
   "status_updated_at": "2026-05-03T23:47:59.287045Z",
   "pending_control": null,
   "checkpoint": {
-    "timestamp": "2026-05-03T23:52:31.227449Z",
-    "current_node": "lint_rust",
+    "timestamp": "2026-05-03T23:54:43.174947Z",
+    "current_node": "test_rust",
     "completed_nodes": [
       "start",
       "toolchain",
       "compile_rust",
       "compile_typescript",
-      "lint_rust"
+      "lint_rust",
+      "test_rust"
     ],
     "node_retries": {},
     "context_values": {
@@ -350,17 +351,19 @@
       "internal.retry_count.compile_rust": 0,
       "internal.fidelity": "compact",
       "outcome": "succeeded",
-      "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+      "command.output": "blob://sha256/d643b8786cd2a320fa7b2d7101e5c69e4358c65e1454ac2431debe0edf8e7041",
       "thread.compile_rust.current_node": "compile_typescript",
-      "internal.thread_id": "compile_typescript",
+      "internal.thread_id": "lint_rust",
       "internal.retry_count.compile_typescript": 0,
       "internal.retry_count.lint_rust": 0,
       "internal.retry_count.start": 0,
+      "thread.lint_rust.current_node": "test_rust",
+      "internal.retry_count.test_rust": 0,
       "thread.compile_typescript.current_node": "lint_rust",
       "internal.node_visit_count": 1,
       "command.stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
       "graph.retry_target": "exit",
-      "current_node": "lint_rust",
+      "current_node": "test_rust",
       "failure_signature": "",
       "internal.work_dir": "/home/daytona/workspace",
       "thread.start.current_node": "toolchain",
@@ -399,6 +402,15 @@
         "notes": "Script completed: cd apps/fabro-web && bun install && bun run typecheck 2>&1",
         "usage": null
       },
+      "test_rust": {
+        "status": "succeeded",
+        "context_updates": {
+          "command.stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "command.output": "blob://sha256/d643b8786cd2a320fa7b2d7101e5c69e4358c65e1454ac2431debe0edf8e7041"
+        },
+        "notes": "Script completed: ulimit -n 4096 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1",
+        "usage": null
+      },
       "lint_rust": {
         "status": "succeeded",
         "context_updates": {
@@ -409,13 +421,14 @@
         "usage": null
       }
     },
-    "next_node_id": "test_rust",
+    "next_node_id": "test_typescript",
     "node_visits": {
       "toolchain": 1,
       "start": 1,
       "lint_rust": 1,
       "compile_typescript": 1,
-      "compile_rust": 1
+      "compile_rust": 1,
+      "test_rust": 1
     }
   },
   "checkpoints": [
@@ -649,6 +662,97 @@
           "compile_rust": 1
         }
       }
+    ],
+    [
+      57,
+      {
+        "timestamp": "2026-05-03T23:52:34.626661Z",
+        "current_node": "lint_rust",
+        "completed_nodes": [
+          "start",
+          "toolchain",
+          "compile_rust",
+          "compile_typescript",
+          "lint_rust"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "thread.compile_typescript.current_node": "lint_rust",
+          "graph.rankdir": "LR",
+          "current_node": "lint_rust",
+          "outcome": "succeeded",
+          "thread.compile_rust.current_node": "compile_typescript",
+          "thread.start.current_node": "toolchain",
+          "thread.toolchain.current_node": "compile_rust",
+          "internal.fidelity": "compact",
+          "internal.retry_count.compile_rust": 0,
+          "internal.retry_count.start": 0,
+          "internal.retry_count.toolchain": 0,
+          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "failure_signature": "",
+          "internal.node_visit_count": 1,
+          "internal.retry_count.lint_rust": 0,
+          "graph.goal": "Verify the sandbox can lint and test the project",
+          "internal.work_dir": "/home/daytona/workspace",
+          "graph.retry_target": "exit",
+          "command.stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "failure_class": "",
+          "internal.retry_count.compile_typescript": 0,
+          "internal.thread_id": "compile_typescript",
+          "internal.run_id": "01KQR3V9D4VPFFWMNTVH09J48G"
+        },
+        "node_outcomes": {
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+              "command.output": "blob://sha256/0f445145c30db4edc762837f8ad7fdbcfcf07d57265b2bc38b6b276be718c75a"
+            },
+            "notes": "Script completed: rustc --version && cargo --version && bun --version 2>&1",
+            "usage": null
+          },
+          "compile_typescript": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/42306a483042091740e1a167efc535398afa53725063f7552ab75bbbd39929d0",
+              "command.stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cd apps/fabro-web && bun install && bun run typecheck 2>&1",
+            "usage": null
+          },
+          "lint_rust": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo +nightly-2026-04-14 fmt --check --all 2>&1 && cargo +nightly-2026-04-14 clippy -q --workspace -- -D warnings 2>&1",
+            "usage": null
+          },
+          "compile_rust": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo check -q --workspace 2>&1",
+            "usage": null
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "test_rust",
+        "git_commit_sha": "aa8cf777a9b6493c8afe0143704d22621349ece6",
+        "node_visits": {
+          "compile_rust": 1,
+          "lint_rust": 1,
+          "compile_typescript": 1,
+          "start": 1,
+          "toolchain": 1
+        }
+      }
     ]
   ],
   "conclusion": null,
@@ -709,7 +813,12 @@
       "first_event_seq": 50,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Script completed: cargo +nightly-2026-04-14 fmt --check --all 2>&1 && cargo +nightly-2026-04-14 clippy -q --workspace -- -D warnings 2>&1",
+        "failure_reason": null,
+        "timestamp": "2026-05-03T23:52:31.225941Z"
+      },
       "provider_used": null,
       "diff": null,
       "script_invocation": {
@@ -717,10 +826,25 @@
         "command": "cargo +nightly-2026-04-14 fmt --check --all 2>&1 && cargo +nightly-2026-04-14 clippy -q --workspace -- -D warnings 2>&1",
         "language": "shell"
       },
-      "script_timing": null,
+      "script_timing": {
+        "stdout": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+        "stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+        "exit_code": 0,
+        "duration_ms": 126020,
+        "termination": "exited",
+        "stdout_bytes": 0,
+        "stderr_bytes": 0,
+        "streams_separated": true,
+        "live_streaming": false
+      },
       "parallel_results": null,
       "stdout": null,
-      "stderr": null
+      "stderr": null,
+      "stdout_bytes": 0,
+      "stderr_bytes": 0,
+      "streams_separated": true,
+      "live_streaming": false,
+      "termination": "exited"
     },
     "compile_rust@1": {
       "first_event_seq": 30,
@@ -758,6 +882,23 @@
       "streams_separated": true,
       "live_streaming": false,
       "termination": "exited"
+    },
+    "test_rust@1": {
+      "first_event_seq": 60,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "ulimit -n 4096 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1",
+        "command": "ulimit -n 4096 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1",
+        "language": "shell"
+      },
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null
     },
     "toolchain@1": {
       "first_event_seq": 20,
