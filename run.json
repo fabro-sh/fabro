@@ -318,14 +318,103 @@
     "in_place": false
   },
   "graph_source": "digraph Smoke {\n    graph [goal=\"Verify the sandbox can lint and test the project\", retry_target=exit]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    toolchain          [label=\"Toolchain\", shape=parallelogram, script=\"rustc --version && cargo --version && bun --version 2>&1\", goal_gate=true]\n    compile_rust       [label=\"Compile Rust\", shape=parallelogram, script=\"cargo check -q --workspace 2>&1\", goal_gate=true]\n    compile_typescript [label=\"Compile TypeScript\", shape=parallelogram, script=\"cd apps/fabro-web && bun install && bun run typecheck 2>&1\", goal_gate=true]\n    lint_rust          [label=\"Lint Rust\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 fmt --check --all 2>&1 && cargo +nightly-2026-04-14 clippy -q --workspace -- -D warnings 2>&1\", goal_gate=true]\n    test_rust          [label=\"Test Rust\", shape=parallelogram, script=\"ulimit -n 4096 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1\", goal_gate=true]\n    test_typescript    [label=\"Test TypeScript\", shape=parallelogram, script=\"cd apps/fabro-web && bun test 2>&1\", goal_gate=true]\n\n    start -> toolchain\n    toolchain -> compile_rust\n    compile_rust -> compile_typescript\n    compile_typescript -> lint_rust\n    lint_rust -> test_rust\n    test_rust -> test_typescript\n    test_typescript -> exit\n}\n",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "run_id": "01KQQW4FK33SX1G5Y0WBMD3SMF",
+    "start_time": "2026-05-03T21:33:14.127839Z",
+    "run_branch": "fabro/run/01KQQW4FK33SX1G5Y0WBMD3SMF",
+    "base_sha": "e5c5feaa8dd7fdc7ecc007cc86ade57b7ab4f327"
   },
-  "status_updated_at": "2026-05-03T21:32:57.856385Z",
+  "status": {
+    "kind": "running"
+  },
+  "status_updated_at": "2026-05-03T21:33:14.127881Z",
   "pending_control": null,
-  "checkpoint": null,
-  "checkpoints": [],
+  "checkpoint": {
+    "timestamp": "2026-05-03T21:33:18.430812Z",
+    "current_node": "toolchain",
+    "completed_nodes": [
+      "start",
+      "toolchain"
+    ],
+    "node_retries": {},
+    "context_values": {
+      "graph.goal": "Verify the sandbox can lint and test the project",
+      "current_node": "toolchain",
+      "command.output": "blob://sha256/3f292362d10321292b5c54efcc2330ec2904987ded0a177918ca3b5ae03b59f4",
+      "failure_signature": "",
+      "thread.start.current_node": "toolchain",
+      "graph.rankdir": "LR",
+      "outcome": "succeeded",
+      "internal.run_id": "01KQQW4FK33SX1G5Y0WBMD3SMF",
+      "failure_class": "",
+      "internal.node_visit_count": 1,
+      "graph.retry_target": "exit",
+      "internal.fidelity": "compact",
+      "internal.work_dir": "/home/daytona/workspace",
+      "command.stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+      "internal.retry_count.toolchain": 0,
+      "internal.retry_count.start": 0,
+      "internal.thread_id": "start"
+    },
+    "node_outcomes": {
+      "start": {
+        "status": "succeeded",
+        "usage": null
+      },
+      "toolchain": {
+        "status": "succeeded",
+        "context_updates": {
+          "command.output": "blob://sha256/3f292362d10321292b5c54efcc2330ec2904987ded0a177918ca3b5ae03b59f4",
+          "command.stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+        },
+        "notes": "Script completed: rustc --version && cargo --version && bun --version 2>&1",
+        "usage": null
+      }
+    },
+    "next_node_id": "compile_rust",
+    "node_visits": {
+      "start": 1,
+      "toolchain": 1
+    }
+  },
+  "checkpoints": [
+    [
+      19,
+      {
+        "timestamp": "2026-05-03T21:33:16.024334Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "failure_signature": "",
+          "graph.retry_target": "exit",
+          "failure_class": "",
+          "graph.goal": "Verify the sandbox can lint and test the project",
+          "internal.fidelity": "compact",
+          "internal.node_visit_count": 1,
+          "internal.retry_count.start": 0,
+          "graph.rankdir": "LR",
+          "internal.thread_id": null,
+          "outcome": "succeeded",
+          "current_node": "start",
+          "internal.run_id": "01KQQW4FK33SX1G5Y0WBMD3SMF",
+          "internal.work_dir": "/home/daytona/workspace"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "toolchain",
+        "node_visits": {
+          "start": 1
+        }
+      }
+    ]
+  ],
   "conclusion": null,
   "retro": null,
   "retro_prompt": null,
@@ -342,5 +431,41 @@
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
-  "stages": {}
+  "stages": {
+    "toolchain@1": {
+      "first_event_seq": 20,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "rustc --version && cargo --version && bun --version 2>&1",
+        "command": "rustc --version && cargo --version && bun --version 2>&1",
+        "language": "shell"
+      },
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null
+    },
+    "start@1": {
+      "first_event_seq": 16,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-03T21:33:16.024121Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null
+    }
+  }
 }
