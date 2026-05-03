@@ -39,6 +39,7 @@ fn run_created_props_round_trip_templated_settings() {
             checkpoint_sha: "def456".to_string(),
         }),
         in_place:         true,
+        web_url:          Some("http://localhost:3000/runs/01JNQVR7M0EJ5GKAT2SC4ERS1Z".to_string()),
     };
 
     let json = serde_json::to_value(&props).expect("props should serialize");
@@ -53,6 +54,10 @@ fn run_created_props_round_trip_templated_settings() {
     assert_eq!(json["git"]["dirty"], "unknown");
     assert_eq!(json["git"]["push_outcome"]["type"], "skipped_no_remote");
     assert_eq!(json["in_place"], true);
+    assert_eq!(
+        json["web_url"],
+        "http://localhost:3000/runs/01JNQVR7M0EJ5GKAT2SC4ERS1Z"
+    );
 
     let round_trip: RunCreatedProps =
         serde_json::from_value(json.clone()).expect("props should deserialize");
@@ -65,4 +70,35 @@ fn run_created_props_round_trip_templated_settings() {
         round_trip.settings.run.goal,
         Some(RunGoal::Inline(InterpString::parse("Ship {{ env.TASK }}")))
     );
+}
+
+#[test]
+fn run_created_props_omits_web_url_when_absent() {
+    let props = RunCreatedProps {
+        settings:         WorkflowSettings::default(),
+        graph:            Graph::new("ship"),
+        workflow_source:  None,
+        workflow_config:  None,
+        labels:           BTreeMap::new(),
+        run_dir:          "/tmp/run".to_string(),
+        source_directory: None,
+        workflow_slug:    None,
+        db_prefix:        None,
+        provenance:       None,
+        manifest_blob:    None,
+        git:              None,
+        fork_source_ref:  None,
+        in_place:         false,
+        web_url:          None,
+    };
+
+    let json = serde_json::to_value(&props).expect("props should serialize");
+    assert!(
+        json.get("web_url").is_none(),
+        "web_url must be omitted when None, got {json}"
+    );
+
+    let round_trip: RunCreatedProps =
+        serde_json::from_value(json.clone()).expect("props should deserialize");
+    assert_eq!(round_trip.web_url, None);
 }

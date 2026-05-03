@@ -480,6 +480,7 @@ mod tests {
             git:              run_spec.git.clone(),
             fork_source_ref:  run_spec.fork_source_ref.clone(),
             in_place:         run_spec.in_place,
+            web_url:          None,
         })
         .await
         .unwrap();

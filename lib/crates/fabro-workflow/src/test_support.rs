@@ -128,6 +128,7 @@ async fn initialized(
         git:              run_options.pre_run_git.clone(),
         fork_source_ref:  run_options.fork_source_ref.clone(),
         in_place:         false,
+        web_url:          None,
     })
     .await
     .expect("failed to seed run.created event in run store");

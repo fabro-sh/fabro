@@ -42,6 +42,10 @@ export interface RunStatusResponse {
      * Timestamp when the run was created.
      */
     'created_at': string;
+    /**
+     * Public URL where the run can be viewed in the web UI. Present when the server has the web UI enabled (`server.web.enabled = true`) and `server.web.url` is non-empty; absent otherwise. 
+     */
+    'web_url'?: string;
 }
 
 

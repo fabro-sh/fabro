@@ -4584,6 +4584,14 @@ components:
           format: date-time
           description: Timestamp when the run was created.
           example: "2026-03-06T14:30:00Z"
+        web_url:
+          type: string
+          format: uri
+          description: |
+            Public URL where the run can be viewed in the web UI. Present when
+            the server has the web UI enabled (`server.web.enabled = true`) and
+            `server.web.url` is non-empty; absent otherwise.
+          example: "http://localhost:3000/runs/01JNQVR7M0EJ5GKAT2SC4ERS1Z"
 
     ApiQuestionOption:
       description: A selectable option for a multiple-choice or multi-select question.

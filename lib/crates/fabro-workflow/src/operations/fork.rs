@@ -187,6 +187,7 @@ async fn persist_forked_run(
         git:              spec.git.clone(),
         fork_source_ref:  spec.fork_source_ref.clone(),
         in_place:         spec.in_place,
+        web_url:          None,
     })
     .await
     .map_err(|err| Error::engine(err.to_string()))?;
@@ -341,6 +342,7 @@ mod tests {
             }),
             fork_source_ref:  None,
             in_place:         false,
+            web_url:          None,
         })
         .await
         .unwrap();

@@ -29,6 +29,26 @@ fn run_event_round_trips_run_created() {
 }
 
 #[test]
+fn run_event_round_trips_run_created_with_web_url() {
+    let value = json!({
+        "id": "evt_run_created_web",
+        "ts": "2026-04-29T12:00:00Z",
+        "run_id": fixtures::RUN_1,
+        "event": "run.created",
+        "properties": {
+            "settings": WorkflowSettings::default(),
+            "graph": Graph::new("test"),
+            "run_dir": "/tmp/fabro/run-1",
+            "source_directory": "/tmp/fabro/run-1",
+            "in_place": false,
+            "web_url": format!("http://localhost:3000/runs/{}", fixtures::RUN_1)
+        }
+    });
+
+    assert_run_event_round_trip(value);
+}
+
+#[test]
 fn run_event_round_trips_stage_started() {
     let value = json!({
         "id": "evt_stage_started",

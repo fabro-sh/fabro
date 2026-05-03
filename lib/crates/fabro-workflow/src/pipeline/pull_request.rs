@@ -1184,6 +1184,7 @@ mod tests {
             git:              run_spec.git.clone(),
             fork_source_ref:  None,
             in_place:         false,
+            web_url:          None,
         })
         .await
         .unwrap();
@@ -1253,6 +1254,7 @@ mod tests {
             git:              run_spec.git.clone(),
             fork_source_ref:  None,
             in_place:         false,
+            web_url:          None,
         })
         .await
         .unwrap();
@@ -1550,6 +1552,7 @@ mod tests {
             git:              None,
             fork_source_ref:  None,
             in_place:         false,
+            web_url:          None,
         })
         .await
         .unwrap();

@@ -1935,6 +1935,83 @@ async fn create_run(app: &Router, dot_source: &str) -> String {
 }
 
 #[tokio::test]
+async fn create_run_response_includes_web_url_when_web_enabled() {
+    let state = test_app_state_with_options(
+        server_settings_from_toml(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.web]
+enabled = true
+url = "http://127.0.0.1:32276"
+"#,
+        ),
+        RunLayer::default(),
+        5,
+    );
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api("/runs"))
+                .header("content-type", "application/json")
+                .body(manifest_body(MINIMAL_DOT))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::CREATED).await;
+    let id = body["id"].as_str().expect("id should be a string");
+    assert_eq!(
+        body["web_url"].as_str(),
+        Some(format!("http://127.0.0.1:32276/runs/{id}").as_str()),
+    );
+}
+
+#[tokio::test]
+async fn create_run_response_omits_web_url_when_web_disabled() {
+    let state = test_app_state_with_options(
+        server_settings_from_toml(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.web]
+enabled = false
+url = "http://127.0.0.1:32276"
+"#,
+        ),
+        RunLayer::default(),
+        5,
+    );
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api("/runs"))
+                .header("content-type", "application/json")
+                .body(manifest_body(MINIMAL_DOT))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::CREATED).await;
+    assert!(
+        body.get("web_url").is_none() || body["web_url"].is_null(),
+        "web_url should be absent or null when web is disabled, got {body}"
+    );
+}
+
+#[tokio::test]
 async fn validate_endpoint_returns_workflow_summary_without_preflight_checks() {
     let app = test_app_with();
     let response = app
@@ -2400,6 +2477,7 @@ async fn create_completed_run_ready_for_pull_request(
             git,
             fork_source_ref: None,
             in_place: false,
+            web_url: None,
         },
         workflow_event::Event::WorkflowRunStarted {
             name: "test".to_string(),

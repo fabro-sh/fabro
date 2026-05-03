@@ -28,6 +28,10 @@ impl InfoDisplay {
         Self::insert_info_line(renderer, &text);
     }
 
+    pub(super) fn show_web_url(renderer: &ProgressRenderer, url: &str) {
+        Self::insert_info_line(renderer, &format!("Web UI: {url}"));
+    }
+
     pub(super) fn on_run_notice(
         renderer: &ProgressRenderer,
         level: RunNoticeLevel,

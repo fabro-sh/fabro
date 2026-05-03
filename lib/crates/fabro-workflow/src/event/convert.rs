@@ -52,6 +52,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             git,
             fork_source_ref,
             in_place,
+            web_url,
             ..
         } => EventBody::RunCreated(fabro_types::RunCreatedProps {
             settings:         serde_json::from_value(settings.clone())
@@ -69,6 +70,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             git:              git.clone(),
             fork_source_ref:  fork_source_ref.clone(),
             in_place:         *in_place,
+            web_url:          web_url.clone(),
         }),
         Event::WorkflowRunStarted {
             name,
@@ -1764,6 +1766,7 @@ mod tests {
             git:              None,
             fork_source_ref:  None,
             in_place:         false,
+            web_url:          None,
         });
         let actor = stored.actor.as_ref().expect("actor set");
         assert_eq!(actor, &user_principal("alice"));

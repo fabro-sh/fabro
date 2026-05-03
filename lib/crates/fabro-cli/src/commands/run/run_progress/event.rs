@@ -33,6 +33,9 @@ impl ProgressUsage {
 
 #[derive(Debug, Clone)]
 pub(super) enum ProgressEvent {
+    RunCreated {
+        web_url: Option<String>,
+    },
     WorkflowStarted {
         worktree_dir: Option<String>,
         base_branch:  Option<String>,
@@ -227,6 +230,9 @@ pub(super) fn from_run_event(stored: &RunEvent) -> Option<ProgressEvent> {
     let node_label = stored.node_label.clone().unwrap_or_else(|| node_id.clone());
 
     match &stored.body {
+        EventBody::RunCreated(props) => Some(ProgressEvent::RunCreated {
+            web_url: props.web_url.clone(),
+        }),
         EventBody::RunStarted(props) => Some(ProgressEvent::WorkflowStarted {
             worktree_dir: props.worktree_dir.clone(),
             base_branch:  props.base_branch.clone(),

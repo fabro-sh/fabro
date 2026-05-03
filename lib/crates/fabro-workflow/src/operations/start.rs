@@ -1081,6 +1081,7 @@ mod tests {
                 in_place: false,
                 provenance: None,
                 configured_providers: Vec::new(),
+                web_url: None,
             },
             storage_root.to_path_buf(),
         )
@@ -1267,6 +1268,7 @@ mod tests {
                 in_place: false,
                 provenance: None,
                 configured_providers: Vec::new(),
+                web_url: None,
             },
             storage_root,
         )

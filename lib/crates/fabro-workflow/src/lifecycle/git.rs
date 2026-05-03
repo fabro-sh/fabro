@@ -621,6 +621,7 @@ mod tests {
             git: None,
             fork_source_ref: None,
             in_place: false,
+            web_url: None,
         })
         .await
         .unwrap();

@@ -683,6 +683,7 @@ fn dry_run_simple() {
     Goal: Run tests and report results
 
         Run: [ULID]
+        Web UI: http://localhost:3000/runs/[ULID]
         Sandbox: local (ready in [TIME])
         ✓ Start  [TIME]
         ✓ Run Tests  [TIME]

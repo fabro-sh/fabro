@@ -175,6 +175,7 @@ mod tests {
             git:              record.git.clone(),
             fork_source_ref:  record.fork_source_ref.clone(),
             in_place:         record.in_place,
+            web_url:          None,
         })
         .await
         .unwrap();

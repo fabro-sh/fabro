@@ -99,6 +99,11 @@ impl ProgressUI {
     fn dispatch(&mut self, event: ProgressEvent) {
         let renderer = &self.renderer;
         match event {
+            ProgressEvent::RunCreated { web_url } => {
+                if let Some(url) = web_url {
+                    InfoDisplay::show_web_url(renderer, &url);
+                }
+            }
             ProgressEvent::WorkflowStarted {
                 worktree_dir,
                 base_branch,

@@ -47,6 +47,10 @@ pub struct CreateRunInput {
     pub in_place: bool,
     pub provenance: Option<RunProvenance>,
     pub configured_providers: Vec<Provider>,
+    /// Public URL where this run can be viewed in the web UI, when the server
+    /// has the web UI enabled. Recorded on the `run.created` event so attach
+    /// replays can surface the link.
+    pub web_url: Option<String>,
 }
 
 #[derive(Debug)]
@@ -103,6 +107,7 @@ pub async fn create(
         in_place,
         provenance,
         configured_providers,
+        web_url,
     } = request;
 
     let run_id = run_id.unwrap_or_else(RunId::new);
@@ -159,6 +164,7 @@ pub async fn create(
         workflow_config,
         submitted_manifest_bytes.as_deref(),
         accepted_definition.as_ref(),
+        web_url,
     )
     .await?;
 
@@ -177,6 +183,7 @@ async fn persist_created_run(
     workflow_config: Option<String>,
     submitted_manifest_bytes: Option<&[u8]>,
     accepted_definition: Option<&RunDefinition>,
+    web_url: Option<String>,
 ) -> Result<(), Error> {
     let record = persisted.run_spec();
     let run_store = match store.create_run(&record.run_id).await {
@@ -228,6 +235,7 @@ async fn persist_created_run(
             git: record.git.clone(),
             fork_source_ref: record.fork_source_ref.clone(),
             in_place: record.in_place,
+            web_url,
         },
         record.run_id.created_at(),
         None,
@@ -715,6 +723,7 @@ mod tests {
                 in_place: false,
                 provenance: None,
                 configured_providers: Vec::new(),
+                web_url: None,
             },
             storage_root,
         )
@@ -758,6 +767,7 @@ mod tests {
                 in_place: false,
                 provenance: None,
                 configured_providers: Vec::new(),
+                web_url: None,
             },
             storage_root,
         )
@@ -823,6 +833,7 @@ mod tests {
                 in_place: false,
                 provenance: None,
                 configured_providers: Vec::new(),
+                web_url: None,
             },
             storage_root.clone(),
         )
@@ -931,6 +942,7 @@ mod tests {
                 in_place: false,
                 provenance: None,
                 configured_providers: Vec::new(),
+                web_url: None,
             },
             storage_root,
         )
@@ -973,6 +985,7 @@ mod tests {
                 in_place: false,
                 provenance: None,
                 configured_providers: Vec::new(),
+                web_url: None,
             },
             storage_root,
         )
@@ -1037,6 +1050,7 @@ mod tests {
                 in_place: false,
                 provenance: None,
                 configured_providers: Vec::new(),
+                web_url: None,
             },
             storage_dir.clone(),
         )
@@ -1094,6 +1108,7 @@ mod tests {
                     )),
                 }),
                 configured_providers: Vec::new(),
+                web_url: None,
             },
             storage_dir,
         )

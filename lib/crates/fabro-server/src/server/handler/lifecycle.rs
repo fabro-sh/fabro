@@ -130,16 +130,18 @@ async fn start_run(
         );
     }
 
+    let web_url = state.run_web_url(&id);
     state.scheduler_notify.notify_one();
     (
         StatusCode::OK,
         Json(RunStatusResponse {
-            id:              id.to_string(),
-            status:          RunStatus::Queued,
-            error:           None,
-            queue_position:  None,
+            id: id.to_string(),
+            status: RunStatus::Queued,
+            error: None,
+            queue_position: None,
             pending_control: None,
-            created_at:      id.created_at(),
+            created_at: id.created_at(),
+            web_url,
         }),
     )
         .into_response()
@@ -280,6 +282,7 @@ async fn cancel_run(
                 .into_response();
         }
     };
+    let web_url = state.run_web_url(&id);
 
     (
         StatusCode::OK,
@@ -290,6 +293,7 @@ async fn cancel_run(
             queue_position: None,
             pending_control,
             created_at,
+            web_url,
         }),
     )
         .into_response()
@@ -402,6 +406,7 @@ async fn pause_run(
                 .into_response();
         }
     };
+    let web_url = state.run_web_url(&id);
 
     (
         StatusCode::OK,
@@ -412,6 +417,7 @@ async fn pause_run(
             queue_position: None,
             pending_control,
             created_at,
+            web_url,
         }),
     )
         .into_response()
@@ -507,6 +513,7 @@ async fn unpause_run(
                 .into_response();
         }
     };
+    let web_url = state.run_web_url(&id);
 
     (
         StatusCode::OK,
@@ -517,6 +524,7 @@ async fn unpause_run(
             queue_position: None,
             pending_control,
             created_at,
+            web_url,
         }),
     )
         .into_response()
@@ -752,6 +760,7 @@ async fn archive_status_response(state: &AppState, id: RunId) -> Response {
         )
         .into_response();
     };
+    let web_url = state.run_web_url(&id);
     (
         StatusCode::OK,
         Json(RunStatusResponse {
@@ -761,6 +770,7 @@ async fn archive_status_response(state: &AppState, id: RunId) -> Response {
             queue_position: None,
             pending_control: None,
             created_at: id.created_at(),
+            web_url,
         }),
     )
         .into_response()
