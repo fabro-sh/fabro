@@ -211,7 +211,7 @@
   "status_updated_at": "2026-05-03T21:16:51.794720Z",
   "pending_control": null,
   "checkpoint": {
-    "timestamp": "2026-05-03T21:17:05.174157Z",
+    "timestamp": "2026-05-03T21:17:09.033563Z",
     "current_node": "greet",
     "completed_nodes": [
       "start",
@@ -219,23 +219,23 @@
     ],
     "node_retries": {},
     "context_values": {
-      "last_response": "Done! Here's what was added, just below the tagline:\n\n```\n*Agents run the graph —*\n*humans hold the approval gate —*\n*code ships without fear.*\n```\n\nThe haiku (5–7–5) captures Fabro's core ide",
-      "internal.run_id": "01KQQV6K849B64PN2ZRX3BQNZE",
       "graph.rankdir": "LR",
+      "last_response": "Done! Here's what was added, just below the tagline:\n\n```\n*Agents run the graph —*\n*humans hold the approval gate —*\n*code ships without fear.*\n```\n\nThe haiku (5–7–5) captures Fabro's core ide",
       "current_node": "greet",
-      "internal.work_dir": "/home/daytona/workspace",
-      "response.greet": "Done! Here's what was added, just below the tagline:\n\n```\n*Agents run the graph —*\n*humans hold the approval gate —*\n*code ships without fear.*\n```\n\nThe haiku (5–7–5) captures Fabro's core idea: deterministic workflow graphs driven by agents, gated by human approval, yielding confident, safe releases.",
       "failure_signature": "",
-      "last_stage": "greet",
-      "internal.retry_count.greet": 0,
-      "internal.fidelity": "compact",
-      "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
       "internal.node_visit_count": 1,
-      "outcome": "succeeded",
       "internal.thread_id": "start",
+      "failure_class": "",
       "internal.retry_count.start": 0,
+      "outcome": "succeeded",
+      "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+      "internal.fidelity": "compact",
+      "internal.work_dir": "/home/daytona/workspace",
+      "last_stage": "greet",
+      "response.greet": "Done! Here's what was added, just below the tagline:\n\n```\n*Agents run the graph —*\n*humans hold the approval gate —*\n*code ships without fear.*\n```\n\nThe haiku (5–7–5) captures Fabro's core idea: deterministic workflow graphs driven by agents, gated by human approval, yielding confident, safe releases.",
       "thread.start.current_node": "greet",
-      "failure_class": ""
+      "internal.run_id": "01KQQV6K849B64PN2ZRX3BQNZE",
+      "internal.retry_count.greet": 0
     },
     "node_outcomes": {
       "start": {
@@ -279,6 +279,7 @@
       }
     },
     "next_node_id": "exit",
+    "git_commit_sha": "119e306bf686b0bf404685b0f55427f2d82028d3",
     "node_visits": {
       "greet": 1,
       "start": 1
@@ -319,9 +320,117 @@
           "start": 1
         }
       }
+    ],
+    [
+      39,
+      {
+        "timestamp": "2026-05-03T21:17:09.033563Z",
+        "current_node": "greet",
+        "completed_nodes": [
+          "start",
+          "greet"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "graph.rankdir": "LR",
+          "last_response": "Done! Here's what was added, just below the tagline:\n\n```\n*Agents run the graph —*\n*humans hold the approval gate —*\n*code ships without fear.*\n```\n\nThe haiku (5–7–5) captures Fabro's core ide",
+          "current_node": "greet",
+          "failure_signature": "",
+          "internal.node_visit_count": 1,
+          "internal.thread_id": "start",
+          "failure_class": "",
+          "internal.retry_count.start": 0,
+          "outcome": "succeeded",
+          "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+          "internal.fidelity": "compact",
+          "internal.work_dir": "/home/daytona/workspace",
+          "last_stage": "greet",
+          "response.greet": "Done! Here's what was added, just below the tagline:\n\n```\n*Agents run the graph —*\n*humans hold the approval gate —*\n*code ships without fear.*\n```\n\nThe haiku (5–7–5) captures Fabro's core idea: deterministic workflow graphs driven by agents, gated by human approval, yielding confident, safe releases.",
+          "thread.start.current_node": "greet",
+          "internal.run_id": "01KQQV6K849B64PN2ZRX3BQNZE",
+          "internal.retry_count.greet": 0
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "greet": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_response": "Done! Here's what was added, just below the tagline:\n\n```\n*Agents run the graph —*\n*humans hold the approval gate —*\n*code ships without fear.*\n```\n\nThe haiku (5–7–5) captures Fabro's core ide",
+              "response.greet": "Done! Here's what was added, just below the tagline:\n\n```\n*Agents run the graph —*\n*humans hold the approval gate —*\n*code ships without fear.*\n```\n\nThe haiku (5–7–5) captures Fabro's core idea: deterministic workflow graphs driven by agents, gated by human approval, yielding confident, safe releases.",
+              "last_stage": "greet"
+            },
+            "notes": "Stage completed: greet",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-sonnet-4-6"
+                  },
+                  "tokens": {
+                    "input_tokens": 4690,
+                    "output_tokens": 439,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 25122,
+                    "cache_write_tokens": 12457
+                  }
+                },
+                "facts": {
+                  "provider": "anthropic",
+                  "cache_write_5m_tokens": 12457,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 74904
+            },
+            "files_touched": [
+              "/home/daytona/workspace/README.md"
+            ]
+          }
+        },
+        "next_node_id": "exit",
+        "git_commit_sha": "119e306bf686b0bf404685b0f55427f2d82028d3",
+        "node_visits": {
+          "greet": 1,
+          "start": 1
+        }
+      }
     ]
   ],
-  "conclusion": null,
+  "conclusion": {
+    "timestamp": "2026-05-03T21:17:09.052377Z",
+    "status": "succeeded",
+    "duration_ms": 17239,
+    "final_git_commit_sha": "119e306bf686b0bf404685b0f55427f2d82028d3",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "duration_ms": 0,
+        "retries": 0
+      },
+      {
+        "stage_id": "greet",
+        "stage_label": "greet",
+        "duration_ms": 11337,
+        "billing_usd_micros": 74904,
+        "retries": 0
+      }
+    ],
+    "billing": {
+      "input_tokens": 4690,
+      "output_tokens": 439,
+      "total_tokens": 42708,
+      "reasoning_tokens": 0,
+      "cache_read_tokens": 25122,
+      "cache_write_tokens": 12457,
+      "total_usd_micros": 74904
+    },
+    "total_retries": 0
+  },
   "retro": null,
   "retro_prompt": null,
   "retro_response": null,
@@ -338,6 +447,24 @@
   "superseded_by": null,
   "pending_interviews": {},
   "stages": {
+    "exit@1": {
+      "first_event_seq": 42,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-03T21:17:09.033714Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null
+    },
     "start@1": {
       "first_event_seq": 16,
       "prompt": null,
@@ -360,7 +487,12 @@
       "first_event_seq": 20,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Stage completed: greet",
+        "failure_reason": null,
+        "timestamp": "2026-05-03T21:17:05.174053Z"
+      },
       "provider_used": {
         "mode": "agent",
         "provider": "anthropic",
