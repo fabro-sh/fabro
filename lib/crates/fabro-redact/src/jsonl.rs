@@ -15,10 +15,10 @@ fn should_skip_field(key: &str) -> bool {
         return true;
     }
 
-    // Skip common path and directory fields
+    // Skip common path and directory fields, plus identifier-like names
     matches!(
         lower.as_str(),
-        "filepath" | "file_path" | "cwd" | "root" | "directory" | "dir" | "path"
+        "filepath" | "file_path" | "cwd" | "root" | "directory" | "dir" | "path" | "name"
     )
 }
 
@@ -183,16 +183,33 @@ mod tests {
     }
 
     #[test]
+    fn skip_field_name() {
+        assert!(should_skip_field("name"));
+    }
+
+    #[test]
     fn skip_field_false_positives() {
         assert!(!should_skip_field("content"));
         assert!(!should_skip_field("type"));
-        assert!(!should_skip_field("name"));
         assert!(!should_skip_field("text"));
         assert!(!should_skip_field("output"));
         assert!(!should_skip_field("video"));
         assert!(!should_skip_field("identify"));
         assert!(!should_skip_field("signatures"));
         assert!(!should_skip_field("consideration"));
+    }
+
+    #[test]
+    fn redact_json_value_preserves_name_field() {
+        let input = serde_json::json!({
+            "name": "fabro-01KQR3V9D4VPFFWMNTVH09J48G",
+            "content": format!("token={HIGH_ENTROPY_SECRET}"),
+        });
+
+        let redacted = redact_json_value(input);
+
+        assert_eq!(redacted["name"], "fabro-01KQR3V9D4VPFFWMNTVH09J48G");
+        assert_eq!(redacted["content"], "REDACTED");
     }
 
     #[test]
