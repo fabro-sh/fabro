@@ -1,0 +1,6 @@
+{
+  "outcome": "succeeded",
+  "notes": "Script completed: cd apps/fabro-web && bun install && bun run typecheck 2>&1",
+  "failure_reason": null,
+  "timestamp": "2026-05-03T21:20:53.763113Z"
+}
