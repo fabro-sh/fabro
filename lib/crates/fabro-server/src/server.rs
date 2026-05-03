@@ -590,20 +590,15 @@ impl AppState {
         )
     }
 
-    /// Public web UI URL for a run, when the web UI is enabled and configured.
-    /// Returns `None` when `server.web.enabled = false`, when the configured
-    /// URL is empty, or when InterpString resolution fails.
+    /// Snapshotted at create-time so attach replays surface the same link
+    /// even if `server.web.url` is later changed. `None` when the UI is
+    /// turned off or `server.web.url` is unset/invalid.
     pub(crate) fn run_web_url(&self, run_id: &fabro_types::RunId) -> Option<String> {
-        let web = &self.server_settings().server.web;
-        if !web.enabled {
+        if !self.server_settings().server.web.enabled {
             return None;
         }
-        let base = resolve_interp_string(&web.url).ok()?;
-        let trimmed = base.trim_end_matches('/');
-        if trimmed.is_empty() {
-            return None;
-        }
-        Some(format!("{trimmed}/runs/{run_id}"))
+        let base = self.canonical_origin().ok()?;
+        Some(format!("{}/runs/{run_id}", base.trim_end_matches('/')))
     }
 
     pub(crate) async fn resolve_llm_client(&self) -> anyhow::Result<LlmClientResult> {

@@ -161,6 +161,7 @@ pub(crate) fn validate_prepared_manifest(
 pub(crate) fn create_run_input(
     prepared: PreparedManifest,
     configured_providers: Vec<Provider>,
+    web_url: Option<String>,
 ) -> CreateRunInput {
     CreateRunInput {
         workflow: WorkflowInput::Bundled(prepared.workflow_input),
@@ -176,7 +177,7 @@ pub(crate) fn create_run_input(
         in_place: prepared.in_place,
         provenance: None,
         configured_providers,
-        web_url: None,
+        web_url,
     }
 }
 

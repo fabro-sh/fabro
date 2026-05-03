@@ -363,11 +363,11 @@ async fn create_run(
 
     let web_url = state.run_web_url(&run_id);
     let configured_providers = state.llm_source.configured_providers().await;
-    let mut create_input = run_manifest::create_run_input(prepared.clone(), configured_providers);
+    let mut create_input =
+        run_manifest::create_run_input(prepared.clone(), configured_providers, web_url.clone());
     create_input.run_id = Some(run_id);
     create_input.provenance = Some(run_provenance(&headers, &subject));
     create_input.submitted_manifest_bytes = Some(body.to_vec());
-    create_input.web_url = web_url.clone();
 
     let storage_root = match resolve_interp_string(&state.server_settings().server.storage.root) {
         Ok(path) => PathBuf::from(path),
