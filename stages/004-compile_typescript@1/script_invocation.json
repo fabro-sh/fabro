@@ -1,0 +1,5 @@
+{
+  "script": "cd apps/fabro-web && bun install && bun run typecheck 2>&1",
+  "command": "cd apps/fabro-web && bun install && bun run typecheck 2>&1",
+  "language": "shell"
+}
