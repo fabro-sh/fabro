@@ -43,7 +43,19 @@ const RUN_SUMMARY_EVENTS = new Set([
   "run.unarchived",
 ]);
 const STAGE_EVENTS = new Set(["stage.started", "stage.completed", "stage.failed"]);
-const COMMAND_EVENTS = new Set(["command.started", "command.completed"]);
+// Every event type the `eventsToActivity` reducer in `routes/run-stages.tsx`
+// consumes. When any of these arrive for a stage we currently view, the
+// stage-events SWR key for that stage must be invalidated so the panel
+// refetches. The lifecycle `STAGE_EVENTS` set is kept separate because it
+// also fans out to run-scoped invalidations (stages list, graph, detail).
+const STAGE_ACTIVITY_EVENTS = new Set([
+  "stage.prompt",
+  "agent.message",
+  "agent.tool.started",
+  "agent.tool.completed",
+  "command.started",
+  "command.completed",
+]);
 const INTERVIEW_EVENTS = new Set([
   "interview.started",
   "interview.completed",
@@ -91,20 +103,13 @@ export function queryKeysForRunEvent(
       queryKeys.runs.detail(runId),
     ];
     if (stageId) {
-      keys.push(queryKeys.runs.stageTurns(runId, stageId));
+      keys.push(queryKeys.runs.stageEvents(runId, stageId));
     }
     return keys;
   }
 
-  if (COMMAND_EVENTS.has(event)) {
-    const keys = [
-      queryKeys.runs.stages(runId),
-      queryKeys.runs.events(runId, 1000),
-    ];
-    if (stageId) {
-      keys.push(queryKeys.runs.stageTurns(runId, stageId));
-    }
-    return keys;
+  if (STAGE_ACTIVITY_EVENTS.has(event)) {
+    return stageId ? [queryKeys.runs.stageEvents(runId, stageId)] : [];
   }
 
   return [];

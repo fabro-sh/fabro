@@ -217,6 +217,61 @@ export async function apiPaginatedFetcher<TItem, TExtra extends object = {}>(
   }
 }
 
+function stageEventsPagePath(key: string, sinceSeq: number, limit: number): string {
+  const url = new URL(apiPath(key), "http://fabro.local");
+  url.searchParams.set("since_seq", String(sinceSeq));
+  url.searchParams.set("limit", String(limit));
+  return `${url.pathname}${url.search}`;
+}
+
+/**
+ * Cursor-paginated fetcher for `/runs/{id}/stages/{stageId}/events`.
+ *
+ * Loops from `since_seq=1` with a 1000-event page size, advancing the cursor
+ * to `highestSeq + 1` until the server reports `meta.has_more === false`.
+ * The empty-page guard mirrors `apiPaginatedFetcher`: if the server claims
+ * `has_more` but returns no rows we exit and `console.warn` to surface the
+ * server invariant violation without spinning the UI.
+ */
+export async function fetchAllStageEvents<TItem>(key: string): Promise<TItem[]> {
+  const PAGE_LIMIT = 1000;
+  const MAX_PAGES = 50;
+  const data: TItem[] = [];
+  let sinceSeq = 1;
+  let pagesLoaded = 0;
+
+  while (true) {
+    const response = await apiRequest(stageEventsPagePath(key, sinceSeq, PAGE_LIMIT));
+    if (!response.ok) {
+      throw await apiErrorFromResponse(response);
+    }
+    const page = (await response.json()) as PaginatedEnvelope<TItem & { seq: number }>;
+    pagesLoaded += 1;
+
+    if (page.data.length === 0) {
+      if (page.meta.has_more) {
+        console.warn(
+          `Stage events fetch for ${key} returned an empty page with has_more=true; stopping at ${data.length} items to avoid spinning.`,
+        );
+      }
+      return data;
+    }
+
+    data.push(...page.data);
+    if (!page.meta.has_more) return data;
+
+    if (pagesLoaded >= MAX_PAGES) {
+      console.warn(
+        `Stopped stage events fetch for ${key} after ${pagesLoaded} pages and ${data.length} items because the safety cap was reached.`,
+      );
+      return data;
+    }
+
+    const lastSeq = page.data[page.data.length - 1].seq;
+    sinceSeq = lastSeq + 1;
+  }
+}
+
 export async function apiJsonMutation<TResponse, TArg = unknown>(
   key: string,
   { arg }: { arg: TArg },

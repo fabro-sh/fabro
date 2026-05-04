@@ -3,9 +3,9 @@ use std::sync::Arc;
 use super::super::{
     ApiError, AppState, AppendEventResponse, BroadcastStream, Event, EventBody, EventEnvelope,
     EventPayload, HashSet, IntoResponse, Json, KeepAlive, PaginatedEventList, PaginationMeta, Path,
-    Query, RequireRunScoped, RequiredUser, Response, Router, RunEvent, RunId, RunStatus, Sse,
-    State, StatusCode, StreamExt, UnboundedReceiverStream, broadcast, get, mpsc, parse_run_id_path,
-    redact_jsonl_line, reject_if_archived, update_live_run_from_event,
+    Query, RequireRunScoped, RequireRunStageScoped, RequiredUser, Response, Router, RunEvent,
+    RunId, RunStatus, Sse, State, StatusCode, StreamExt, UnboundedReceiverStream, broadcast, get,
+    mpsc, parse_run_id_path, redact_jsonl_line, reject_if_archived, update_live_run_from_event,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -14,6 +14,10 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route(
             "/runs/{id}/events",
             get(list_run_events).post(append_run_event),
+        )
+        .route(
+            "/runs/{id}/stages/{stageId}/events",
+            get(list_run_stage_events),
         )
         .route("/runs/{id}/attach", get(attach_run_events))
 }
@@ -200,6 +204,35 @@ async fn list_run_events(
     }
 }
 
+async fn list_run_stage_events(
+    RequireRunStageScoped(id, stage_id): RequireRunStageScoped,
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<EventListParams>,
+) -> Response {
+    let since_seq = params.since_seq();
+    let limit = params.limit();
+    match state.store.open_run_reader(&id).await {
+        Ok(run_store) => match run_store
+            .list_events_for_node_from_with_limit(&stage_id, since_seq, limit)
+            .await
+        {
+            Ok(mut events) => {
+                let has_more = events.len() > limit;
+                events.truncate(limit);
+                Json(PaginatedEventList {
+                    data: events,
+                    meta: PaginationMeta { has_more },
+                })
+                .into_response()
+            }
+            Err(err) => {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            }
+        },
+        Err(_) => ApiError::not_found("Run not found.").into_response(),
+    }
+}
+
 async fn attach_run_events(
     _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
@@ -340,5 +373,204 @@ fn denied_lifecycle_event_name(body: &EventBody) -> Option<&'static str> {
         EventBody::RunPauseRequested(_) => Some("run.pause.requested"),
         EventBody::RunUnpauseRequested(_) => Some("run.unpause.requested"),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod stage_events_tests {
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Request, StatusCode, header};
+    use fabro_store::EventPayload;
+    use fabro_types::RunId;
+    use serde_json::json;
+    use tower::ServiceExt;
+
+    use crate::test_support::{build_test_router, test_app_state};
+
+    fn req_get(uri: &str) -> Request<Body> {
+        Request::builder()
+            .method("GET")
+            .uri(uri)
+            .body(Body::empty())
+            .expect("stage events GET request should build")
+    }
+
+    fn make_event(run_id: &RunId, idx: u32, node_id: Option<&str>) -> EventPayload {
+        let mut value = json!({
+            "id": format!("evt-{idx}"),
+            "ts": "2026-04-09T12:00:00Z",
+            "run_id": run_id.to_string(),
+            "event": "stage.prompt",
+            "properties": {
+                "visit": 1,
+                "text": format!("prompt {idx}"),
+            },
+        });
+        if let Some(node) = node_id {
+            value
+                .as_object_mut()
+                .unwrap()
+                .insert("node_id".into(), json!(node));
+        }
+        EventPayload::new(value, run_id).expect("event payload should validate")
+    }
+
+    async fn body_json(response: axum::response::Response) -> serde_json::Value {
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body should fit in memory");
+        serde_json::from_slice(&bytes).expect("response body should be valid JSON")
+    }
+
+    async fn seed_run_with_mixed_events() -> (RunId, axum::Router) {
+        let state = test_app_state();
+        let app = build_test_router(state.clone());
+        let run_id = RunId::new();
+        let run_store = state
+            .store_ref()
+            .create_run(&run_id)
+            .await
+            .expect("test run should be creatable");
+
+        // Seed 200 unrelated 'beta' events first so any node-blind
+        // truncation would lose the sparse 'alpha' tail. Then 3 'alpha'
+        // events past seq 100, plus a couple with no node_id at all.
+        for idx in 1..=200_u32 {
+            run_store
+                .append_event(&make_event(&run_id, idx, Some("beta")))
+                .await
+                .expect("append should succeed");
+        }
+        run_store
+            .append_event(&make_event(&run_id, 201, None))
+            .await
+            .expect("append should succeed");
+        for idx in 202..=204_u32 {
+            run_store
+                .append_event(&make_event(&run_id, idx, Some("alpha")))
+                .await
+                .expect("append should succeed");
+        }
+
+        (run_id, app)
+    }
+
+    #[tokio::test]
+    async fn returns_only_matching_node_events_in_seq_order() {
+        let (run_id, app) = seed_run_with_mixed_events().await;
+        let response = app
+            .oneshot(req_get(&format!(
+                "/api/v1/runs/{run_id}/stages/alpha/events"
+            )))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = body_json(response).await;
+        let data = body["data"].as_array().expect("data is array");
+        let seqs: Vec<u64> = data.iter().map(|e| e["seq"].as_u64().unwrap()).collect();
+        assert_eq!(seqs, vec![202, 203, 204]);
+        assert_eq!(body["meta"]["has_more"], false);
+    }
+
+    #[tokio::test]
+    async fn since_seq_filters_to_events_with_seq_at_least_k() {
+        let (run_id, app) = seed_run_with_mixed_events().await;
+        let response = app
+            .oneshot(req_get(&format!(
+                "/api/v1/runs/{run_id}/stages/alpha/events?since_seq=203"
+            )))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = body_json(response).await;
+        let seqs: Vec<u64> = body["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["seq"].as_u64().unwrap())
+            .collect();
+        assert_eq!(seqs, vec![203, 204]);
+    }
+
+    #[tokio::test]
+    async fn limit_one_returns_first_envelope_with_has_more_true() {
+        let (run_id, app) = seed_run_with_mixed_events().await;
+        let response = app
+            .oneshot(req_get(&format!(
+                "/api/v1/runs/{run_id}/stages/alpha/events?limit=1"
+            )))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = body_json(response).await;
+        let data = body["data"].as_array().unwrap();
+        assert_eq!(data.len(), 1);
+        assert_eq!(data[0]["seq"].as_u64().unwrap(), 202);
+        assert_eq!(body["meta"]["has_more"], true);
+    }
+
+    #[tokio::test]
+    async fn unknown_stage_in_existing_run_returns_empty_list_with_no_more() {
+        let (run_id, app) = seed_run_with_mixed_events().await;
+        let response = app
+            .oneshot(req_get(&format!(
+                "/api/v1/runs/{run_id}/stages/unknown-stage/events"
+            )))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = body_json(response).await;
+        assert_eq!(body["data"].as_array().unwrap().len(), 0);
+        assert_eq!(body["meta"]["has_more"], false);
+    }
+
+    #[tokio::test]
+    async fn missing_run_returns_404_with_run_not_found() {
+        let app = build_test_router(test_app_state());
+        // A syntactically valid RunId that the store has never seen, so
+        // `parse_run_id_path` succeeds but `open_run_reader` fails — that
+        // exercises the handler's not-found branch rather than the path
+        // parser's 400 branch.
+        let absent = RunId::new();
+        let response = app
+            .oneshot(req_get(&format!(
+                "/api/v1/runs/{absent}/stages/alpha/events"
+            )))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let body = body_json(response).await;
+        let detail = body["errors"][0]["detail"]
+            .as_str()
+            .expect("error detail string");
+        assert!(
+            detail.contains("Run not found."),
+            "unexpected error body: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_request_is_rejected() {
+        let state = test_app_state();
+        // Bypass `build_test_router`'s auto-injected bearer token by
+        // building the raw router directly. The principal middleware sees
+        // a missing Authorization header and the extractor enforces auth.
+        let app = crate::server::build_router(state, crate::test_support::test_auth_mode());
+        let run_id = RunId::new();
+
+        let request = Request::builder()
+            .method("GET")
+            .uri(format!("/api/v1/runs/{run_id}/stages/alpha/events"))
+            .header(header::ACCEPT, "application/json")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 }

@@ -23,7 +23,26 @@ describe("queryKeys", () => {
       queryKeys.runs.graph("run-1", "LR"),
       queryKeys.runs.graph("run-1", "TB"),
       queryKeys.runs.detail("run-1"),
-      queryKeys.runs.stageTurns("run-1", "stage-1"),
+      queryKeys.runs.stageEvents("run-1", "stage-1"),
     ]);
+  });
+
+  test("agent activity events invalidate the per-stage events key", () => {
+    for (const event of [
+      "stage.prompt",
+      "agent.message",
+      "agent.tool.started",
+      "agent.tool.completed",
+      "command.started",
+      "command.completed",
+    ]) {
+      expect(queryKeysForRunEvent("run-1", event, "stage-1")).toEqual([
+        queryKeys.runs.stageEvents("run-1", "stage-1"),
+      ]);
+    }
+  });
+
+  test("agent activity events without a node_id invalidate nothing", () => {
+    expect(queryKeysForRunEvent("run-1", "agent.message")).toEqual([]);
   });
 });

@@ -40,16 +40,13 @@ import type { Stage } from "../components/stage-sidebar";
 import { EmptyState } from "../components/state";
 import { CopyButton } from "../components/ui";
 import { formatDurationSecs } from "../lib/format";
-import { fetchRunCommandLog, useRunEventsList, useRunStageTurns, useRunStages } from "../lib/queries";
+import { fetchRunCommandLog, useRunStageEvents, useRunStages } from "../lib/queries";
 import { mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
 import { getNumber, getString, type UnknownRecord } from "../lib/unknown";
 import {
   CommandOutputStream,
   CommandTermination,
   type EventEnvelope,
-  type StageTurn as ApiStageTurn,
-  type PaginatedStageTurnList,
-  type PaginatedEventList,
 } from "@qltysh/fabro-api-client";
 
 export const handle = { wide: true };
@@ -68,7 +65,7 @@ function readTermination(props: UnknownRecord): CommandTermination {
   return CommandTermination.EXITED;
 }
 
-function turnsFromEvents(events: EventEnvelope[], stageId: string): TurnType[] {
+export function eventsToActivity(events: EventEnvelope[], stageId: string): TurnType[] {
   const stageEvents = events.filter((e) => e.node_id === stageId);
   const turns: TurnType[] = [];
   // Collect tool pairs: started → completed
@@ -151,41 +148,6 @@ function turnsFromEvents(events: EventEnvelope[], stageId: string): TurnType[] {
   }
 
   return turns;
-}
-
-function mapApiStageTurn(t: ApiStageTurn): TurnType {
-  switch (t.kind) {
-    case "tool":
-      return {
-        kind: "tool",
-        tools: (t.tools ?? []).map((tu) => ({
-          id: tu.id,
-          toolName: tu.tool_name,
-          input: tu.input,
-          result: tu.result,
-          isError: tu.is_error,
-          durationMs: tu.duration_ms,
-        })),
-      };
-    case "system":
-    case "assistant":
-      return { kind: t.kind, content: t.content ?? "" };
-  }
-}
-
-function mapTurns(
-  turnsResult: PaginatedStageTurnList | null | undefined,
-  eventsResult: PaginatedEventList | null | undefined,
-  selectedStageId: string | undefined,
-): TurnType[] {
-  if (!selectedStageId) return [];
-  if (turnsResult?.data?.length) {
-    return turnsResult.data.map(mapApiStageTurn);
-  }
-  if (eventsResult?.data) {
-    return turnsFromEvents(eventsResult.data, selectedStageId);
-  }
-  return [];
 }
 
 function Markdown({ content }: { content: string }) {
@@ -605,14 +567,13 @@ export default function RunStages() {
   );
 
   const selectedStage = stages.find((s: Stage) => s.id === stageId) ?? stages[0];
-  const turnsQuery = useRunStageTurns(id, selectedStage?.id);
-  const hasStageTurns = (turnsQuery.data?.data.length ?? 0) > 0;
-  const shouldLoadEventFallback =
-    !!selectedStage?.id && !turnsQuery.isLoading && !turnsQuery.error && !hasStageTurns;
-  const eventsQuery = useRunEventsList(id, shouldLoadEventFallback);
+  const stageEventsQuery = useRunStageEvents(id, selectedStage?.id);
   const turns = useMemo(
-    () => mapTurns(turnsQuery.data, eventsQuery.data, selectedStage?.id),
-    [eventsQuery.data, selectedStage?.id, turnsQuery.data],
+    () =>
+      selectedStage
+        ? eventsToActivity(stageEventsQuery.data ?? [], selectedStage.id)
+        : [],
+    [stageEventsQuery.data, selectedStage],
   );
   const isRunning = selectedStage?.status === "running";
 

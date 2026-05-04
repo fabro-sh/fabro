@@ -30,7 +30,6 @@ models/artifact-batch-upload-manifest.ts
 models/artifact-entry.ts
 models/artifact-list-response.ts
 models/artifacts-settings.ts
-models/assistant-stage-turn.ts
 models/auth-method.ts
 models/billed-token-counts.ts
 models/billing-by-model.ts
@@ -168,7 +167,6 @@ models/paginated-run-file-list.ts
 models/paginated-run-list.ts
 models/paginated-run-stage-list.ts
 models/paginated-saved-query-list.ts
-models/paginated-stage-turn-list.ts
 models/pagination-meta.ts
 models/pending-interview-record.ts
 models/pre-run-push-outcome-failed.ts
@@ -300,7 +298,6 @@ models/stage-completion.ts
 models/stage-outcome.ts
 models/stage-projection.ts
 models/stage-state.ts
-models/stage-turn.ts
 models/start-run-request.ts
 models/submit-answer-request.ts
 models/success-reason.ts
@@ -308,13 +305,10 @@ models/system-actor-kind.ts
 models/system-features.ts
 models/system-info-response.ts
 models/system-run-counts.ts
-models/system-stage-turn.ts
 models/teams-integration-settings.ts
 models/terminal-status.ts
 models/timeline-entry-response.ts
 models/tls-mode.ts
-models/tool-stage-turn.ts
-models/tool-use.ts
 models/user-response.ts
 models/validate-response.ts
 models/webhook-strategy.ts
