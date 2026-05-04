@@ -1,0 +1,521 @@
+{
+  "spec": {
+    "run_id": "01KQT1TNZ0QXK0QHP10G0V5X84",
+    "settings": {
+      "project": {
+        "name": null,
+        "description": null,
+        "directory": ".",
+        "metadata": {}
+      },
+      "workflow": {
+        "name": null,
+        "description": null,
+        "graph": "workflow.fabro",
+        "metadata": {}
+      },
+      "run": {
+        "goal": {
+          "type": "inline",
+          "value": "# Settings-Driven LLM Providers And Models Implementation Plan\n\n> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.\n\n**Goal:** Implement a settings-driven LLM provider/model catalog so new providers and models can be configured through TOML when they use an existing adapter.\n\n**Architecture:** Treat provider and model identity as layered settings data. Keep adapters, agent profiles, auth schemes, billing policy shapes, and request control kinds as explicit Rust behavior. Build a resolved `Arc<Catalog>` from settings and pass that catalog through server, workflow, CLI, auth, and LLM client seams.\n\n**Tech Stack:** Rust, serde/TOML settings layers, chrono `NaiveDate`, strum enums for code-owned control values, OpenAPI/progenitor, TypeScript API client generation, cargo nextest.\n\n---\n\n## Summary\n\nThis is a breaking cross-crate refactor. `fabro_model::Provider` stops being the product identity type; provider identity becomes a string-backed `ProviderId`. OpenAPI provider fields become strings, and the resolved settings catalog becomes the source of truth for model lookup, provider lookup, default selection, credential resolution, adapter registration, and `/models`.\n\nAll settings layers are trusted execution configuration, including project TOML and workflow/run TOML. That trust model allows repository-provided settings to define or override provider routing. It does not make every credential interchangeable: Codex OAuth remains locked to the fixed ChatGPT Codex backend because it is a long-lived account-scoped credential, not a normal API key for arbitrary `base_url` routing.\n\nBuilt-in providers and models ship as default settings data. User, server, project, and workflow/run settings merge on top of those defaults using the existing settings-layer model.\n\n## Key Interface Decisions\n\n- Add trusted, mergeable `[llm]` settings. Provider `adapter` is a registry key implemented in Rust; new providers can use existing adapter keys without code changes, while new adapters still require Rust.\n\n```toml\n[llm.providers.kimi]\ndisplay_name = \"Kimi\"\nadapter = \"openai_compatible\"\nbase_url = \"https://api.moonshot.ai/v1\"\ncredentials = [\"credential:kimi\", \"env:KIMI_API_KEY\"]\npriority = 60\nenabled = true\naliases = [\"moonshot\"]\n\n[llm.models.\"kimi-k2.5\"]\nprovider = \"kimi\"\napi_id = \"kimi-k2.5\"\ndisplay_name = \"Kimi K2.5\"\nfamily = \"kimi\"\nknowledge_cutoff = 2025-01-01\ndefault = true\nenabled = true\naliases = [\"kimi\"]\nestimated_output_tps = 50\n\n[llm.models.\"kimi-k2.5\".limits]\ncontext_window = 262144\nmax_output = 32768\n\n[llm.models.\"kimi-k2.5\".features]\ntools = true\nvision = false\nreasoning = true\neffort = false\n\n[llm.models.\"kimi-k2.5\".costs]\ninput_cost_per_mtok = 0.60\noutput_cost_per_mtok = 2.50\ncache_input_cost_per_mtok = 0.15\n```\n\n- `api_id` is the model identifier sent to the provider API; when omitted, it defaults to the catalog model ID.\n- `features.reasoning`, `features.effort`, and `controls.reasoning_effort` are separate. `features.reasoning` records whether the model has reasoning behavior at all and is used for catalog capability display plus fallback/model matching. `features.effort` records whether the model supports the provider's native effort parameter. `controls.reasoning_effort` is the user-facing allow-list for native effort values Fabro may accept for that model.\n- Do not add a provider-level `profile` field in v1. The agent profile is inferred from the adapter registry entry, for example `anthropic -> anthropic`, `openai -> openai`, `gemini -> gemini`, and `openai_compatible -> openai`. New profile behavior is a Rust change.\n- Do not add provider-level `cli_backend` in v1. Existing graph/workflow `cli_backend` behavior remains separate from provider catalog data. `codex_mode` remains credential-derived and is not configurable through provider settings.\n- Add fixed, typed model controls. Supported control kinds and enum values are Rust-owned. Current v1 controls are `reasoning_effort = [\"low\", \"medium\", \"high\", \"xhigh\", \"max\"]` and non-default `speed = [\"fast\"]`. A model only declares values allowed by its adapter metadata; v1 does not expose non-native reasoning-effort fallback strategies as catalog data.\n\n```toml\n[llm.models.\"claude-opus-4-6\".controls]\nreasoning_effort = [\"low\", \"medium\", \"high\"]\nspeed = [\"fast\"]\n\n[llm.models.\"claude-opus-4-6\".costs.speed.fast]\ninput_cost_per_mtok = 90.0\noutput_cost_per_mtok = 450.0\ncache_input_cost_per_mtok = 9.0\n```\n\n- `Speed::Standard` is always available and is not listed in `controls.speed`. `controls.speed` enumerates additional speeds only, so `costs.speed.standard` is not a valid override.\n- `controls.speed` and `costs.speed` have one invariant: every `costs.speed.<speed>` key must be declared in `controls.speed`. A declared non-standard speed without a price override is allowed and uses base costs. An override whose speed is not declared is a catalog build error. Built-in Anthropic fast-mode models must declare both `controls.speed = [\"fast\"]` and explicit `costs.speed.fast` rows so the current fast multiplier becomes data.\n- Omitted control lists are not wildcards. If `controls.reasoning_effort` is omitted and `features.effort = true`, it resolves to the adapter's native reasoning-effort defaults. If `features.effort = false`, it resolves to an empty list. If `controls.speed` is omitted, it resolves to an empty list of additional speeds.\n- Add `[run.model.controls]` for run defaults. Node and style values still win over run defaults.\n\n```toml\n[run.model.controls]\nreasoning_effort = \"high\"\nspeed = \"fast\"\n```\n\n- Credential entries are a typed `CredentialRef` enum. Accepted forms are only `credential:<id>` and `env:<NAME>`; literal secret strings fail deserialization or validation and are never represented as a successful settings value.\n- `credential:<id>` reads structured credentials from the existing `fabro-vault` crate. API-key credentials must match the provider ID they are attached to. `env:<NAME>` reads the process environment first, then falls back to an existing raw `fabro-vault` secret with the same name.\n- `credential:openai_codex` is special. It is only valid for canonical provider ID `openai`, maps to vault ID `openai_codex`, sets `codex_mode = true`, and always uses `https://chatgpt.com/backend-api/codex`. It ignores `[llm.providers.openai].base_url` and cannot be used by aliases or custom providers.\n- OpenAPI changes are breaking: provider schemas become `type: string`, `Model.provider` becomes a provider ID string, `Model.controls` is added, and `knowledge_cutoff` becomes `format: date`.\n\n## Implementation Plan\n\n- [ ] **Settings schema and merge behavior**\n  - Add `LlmSettings`, `ProviderSettings`, `ModelSettings`, `ModelControls`, `ModelCostTable`, `CostRates`, and `CredentialRef` to `fabro-config`.\n  - Store built-in providers and models in defaults settings data so production catalog construction starts from the same layered settings path as user/project/workflow overrides.\n  - Preserve sparse field-merge semantics for `[llm.providers.<id>]` and `[llm.models.<id>]`. Arrays such as `credentials`, `aliases`, `controls.reasoning_effort`, and `controls.speed` replace as whole arrays. To add one credential to a built-in provider, redeclare the full `credentials` list in the higher layer.\n  - Keep the targeted legacy `[llm]` migration error for old keys such as `provider` or `model`; accept only the new `[llm.providers]` and `[llm.models]` subtrees. Do not regress to a generic serde unknown-field error.\n  - Parse adapter keys as strings in `fabro-config`. Do not make `fabro-config` depend on `fabro-llm`; adapter-key validation happens when building the resolved catalog.\n\n- [ ] **Catalog model**\n  - Add `ProviderId` and `ModelId` string newtypes where they improve type clarity across crates.\n  - Replace product identity uses of `fabro_model::Provider` with `ProviderId`. Keep Rust enums for behavior that is still code-owned, including `ReasoningEffort` and `Speed`.\n  - Move `ReasoningEffort` from `fabro-llm` to `fabro-model` or another shared vocabulary crate so catalog data, request validation, OpenAPI replacement types, and LLM requests use one enum.\n  - Add code-owned adapter metadata beside the catalog, not in `fabro-config`. This metadata is still Rust code; only provider/model rows are data.\n  - Add concrete metadata vocabulary types in the shared model/catalog layer so model validation and LLM factory registration share one contract:\n\n    ```rust\n    #[derive(Debug, Clone, Copy, PartialEq, Eq)]\n    pub enum AgentProfileKind {\n        Anthropic,\n        OpenAi,\n        Gemini,\n    }\n\n    #[derive(Debug, Clone, Copy, PartialEq, Eq)]\n    pub enum ApiKeyHeaderPolicy {\n        Bearer,\n        Custom { name: &'static str },\n    }\n\n    pub struct AdapterMetadata {\n        pub key: &'static str,\n        pub default_profile: AgentProfileKind,\n        pub api_key_header: ApiKeyHeaderPolicy,\n        pub controls: AdapterControlCapabilities,\n    }\n\n    pub struct AdapterControlCapabilities {\n        pub native_reasoning_effort: &'static [ReasoningEffort],\n        pub additional_speeds: &'static [Speed],\n    }\n\n    // Implemented in fabro-auth, not fabro-model, to avoid a dependency cycle.\n    pub fn build_api_key_header(policy: ApiKeyHeaderPolicy, key: String) -> ApiKeyHeader {\n        match policy {\n            ApiKeyHeaderPolicy::Bearer => ApiKeyHeader::Bearer(key),\n            ApiKeyHeaderPolicy::Custom { name } => ApiKeyHeader::Custom {\n                name: name.to_string(),\n                value: key,\n            },\n        }\n    }\n    ```\n\n  - `AgentProfileKind` is an internal dispatch key that `fabro-agent` maps to concrete `AgentProfile` implementations; it is not a settings field. `ApiKeyHeaderPolicy` describes how an API key becomes an `ApiKeyHeader` without carrying secret values.\n  - `native_reasoning_effort` is every reasoning-effort value that can be sent through the provider's native effort field. After omitted controls are filled from adapter defaults, resolved model `controls.reasoning_effort` must be a non-empty subset of `native_reasoning_effort` when `features.effort = true`; it must be omitted or empty when `features.effort = false`. V1 does not expose generic non-native effort fallback in catalog data.\n  - Model `controls.speed` must be a subset of adapter `additional_speeds`. `Speed::Standard` is implicit and must not appear in either list.\n  - Build `Catalog` from resolved settings and return catalog-build errors for malformed provider/model data.\n  - Validate provider `adapter` strings against the adapter metadata while building the catalog. `fabro-llm` has the matching factory registry and tests must prove every metadata key has a factory.\n  - Build provider and model alias indexes after all layers merge and after disabled entries are filtered out of runtime lookup. Canonical IDs and aliases for enabled entries share one namespace within their kind. Any enabled-entry collision is fatal, including canonical ID versus another enabled entity's alias. Disabled entries do not reserve aliases; re-enabling a disabled entry can fail if its aliases collide with currently enabled entries.\n  - Surface alias/catalog failures at catalog construction: server startup fails, CLI run/validate fails, and workflow materialization fails before requests are issued.\n  - Replace hardcoded provider precedence with provider `priority`. Higher priority wins; missing priority is `0`; ties sort by canonical provider ID. `enabled = false` removes the provider/model from runtime selection but does not delete vault entries.\n  - Retire `Catalog::builtin()` from production lookup paths. Gate the old singleton behind `#[cfg(any(test, feature = \"test-support\"))]` for tests. Add a narrowly named bootstrap/defaults constructor for install and API-key validation flows that need built-in provider definitions before project settings are loaded.\n  - Put the bootstrap/defaults constructor behind an explicit module such as `fabro_model::bootstrap_catalog` and document it as install-only.\n  - Add a CI-enforced workspace test that scans for `bootstrap_catalog` references and allows only bootstrap/install/test-support paths. Request-serving crates and handlers must fail that test if they call the bootstrap constructor.\n\n- [ ] **OpenAPI and generated clients**\n  - Change provider fields in `docs/public/api-reference/fabro-api.yaml` from the closed `Provider` schema to strings or a shared `ProviderId` newtype.\n  - Remove `with_replacement(\"Provider\", \"fabro_model::Provider\", &[])` from `lib/crates/fabro-api/build.rs`.\n  - Delete or replace `lib/crates/fabro-api/tests/provider_round_trip.rs`; add JSON parity coverage for `ProviderId` if that type is reused by `fabro-api`.\n  - Regenerate Rust API types with `cargo build -p fabro-api`.\n  - Regenerate the TypeScript API client after the OpenAPI change.\n\n- [ ] **Credentials and auth**\n  - Change `AuthCredential`, `ApiCredential`, resolver errors, and credential lookup helpers from closed `Provider` to `ProviderId`.\n  - Preserve existing vault JSON by deserializing old provider strings as provider IDs.\n  - Keep `credential_id_for` compatibility: API-key credentials use their canonical provider ID; Codex OAuth still maps only to `openai_codex`.\n  - Resolve provider `credentials` in list order. For `env:` refs, build an API credential for the current provider using the adapter registry's auth-header policy. For `credential:` refs, require structured credential/provider compatibility before attaching it. The first successfully resolved credential wins, so built-in ordering should put the preferred credential type first; for OpenAI, place `credential:openai_codex` before API-key refs only when Codex OAuth should be preferred over API-key traffic.\n  - Keep Codex OAuth outside configurable provider routing: the resolver produces the fixed ChatGPT Codex base URL and `codex_mode = true` only for canonical `openai` plus `openai_codex`.\n  - Define `fabro auth list` behavior for absent or disabled providers: list vault entries regardless, annotate catalog status as enabled, disabled, or unknown, and do not treat unknown entries as runtime-configured providers.\n  - Ensure new credential-ref Display/Debug/error paths redact secret values and never log resolved env values. Env names and credential IDs may appear only in non-secret diagnostic text.\n\n- [ ] **LLM client and adapter registry**\n  - Introduce an adapter factory registry in `fabro-llm` keyed by the same strings as catalog adapter metadata: `anthropic`, `openai`, `gemini`, and `openai_compatible`.\n  - Keep factory behavior in `fabro-llm`; keep static metadata needed by `fabro-model` and `fabro-auth` in the shared catalog/model layer to avoid dependency cycles.\n  - Change `Client::from_source` and `Client::from_credentials` call paths so provider settings and the resolved catalog are available before adapter registration.\n  - Register adapters by provider ID from the resolved catalog. `Client::resolve_provider` must use the injected catalog to map model IDs and aliases to provider IDs; it must not call `Catalog::builtin()`.\n  - Keep install/API-key validation working by using the bootstrap/defaults catalog for the provider currently being configured.\n  - Leave custom auth schemes and data-driven adapter implementations out of scope.\n\n- [ ] **Validation**\n  - Do not change the public `LintRule` trait signature.\n  - Remove catalog-dependent model/provider-known checks from `rules::built_in_rules()`.\n  - Reintroduce those checks as catalog-bound rule instances, for example `model_support::rules_for_catalog(Arc<Catalog>)`, passed through the existing `extra_rules` argument after settings resolution.\n  - Thread the resolved catalog to CLI, server, workflow, and parser validation call sites that should report unknown models/providers.\n  - Keep pure graph-shape validation available without runtime settings.\n\n- [ ] **Workflow, server, agent, and hooks plumbing**\n  - Store `Arc<Catalog>` in server app state and workflow service state.\n  - Replace production `Catalog::builtin()` call sites in server handlers, workflow operations, workflow transforms, hooks, diagnostics, completions, pull-request creation, and agent profile/session code.\n  - Ensure project and workflow/run TOML settings are merged before model resolution, validation, fallback-chain construction, and LLM client construction.\n  - Infer agent profile from the provider adapter registry entry. Do not make profiles data-driven in v1.\n  - Continue to expose existing node/workflow `cli_backend` behavior independently of provider settings.\n\n- [ ] **Controls and request validation**\n  - Add model control allow-lists to catalog data. Validate control values against existing Rust enums: `ReasoningEffort::{Low, Medium, High, XHigh, Max}` and `Speed::{Standard, Fast}`.\n  - Change `fabro_llm::types::Request.speed`, `fabro_llm::generate::GenerateParams.speed`, and agent/workflow speed config plumbing from `Option<String>` to `Option<Speed>`. Keep serde wire compatibility through the existing snake_case `Speed` representation and parse strings only at API/settings/graph boundaries.\n  - Validate model-declared controls against adapter capabilities at catalog build time.\n  - Define \"explicit control\" narrowly: a value from `[run.model.controls]`, a node attribute after stylesheet/import transforms, or a style-applied attribute. Define \"legacy default\" as the current hardcoded fallback returned only when no explicit value exists.\n  - Avoid a broad provenance refactor. Add helper methods that can distinguish \"attribute present\" from \"fallback returned\" at the control resolution sites.\n  - Explicit unsupported controls fail before building provider requests. Legacy defaults are omitted for models that do not declare the control.\n\n- [ ] **Billing**\n  - Do not collapse `ModelPricingPolicy` variants in this change.\n  - Change model costs to a base `CostRates` plus optional `speed: BTreeMap<Speed, CostRates>` overrides.\n  - Update `pricing_for(speed)` so selected rates are `costs.speed[speed]` when present, otherwise base rates.\n  - Preserve provider-shaped pricing policies. Anthropic cache-write 5m/1h rates continue to derive from the selected input rate, so Anthropic fast-mode cost rows produce the same cache-write rates as today's multiplier path.\n  - Remove the hardcoded `(Provider::Anthropic, Speed::Fast, claude-opus-4-7/4-6)` branch after the equivalent rows exist in defaults data.\n\n## Test Plan\n\n- `fabro-config`: parse and merge `[llm]`; reject literal credential refs; preserve the legacy `[llm] provider/model` migration hint; cover field-merge and whole-array replacement behavior.\n- `fabro-model`: dynamic catalog lookup, adapter key validation, enabled-only alias collision behavior, duplicate-alias failure surfaces, defaults, provider `priority`, disabled entries, `NaiveDate` knowledge cutoff, model controls, adapter capability validation, absent-control defaults, non-empty `features.effort` controls, speed subset validation, and per-speed pricing.\n- `fabro-auth`: existing vault credential JSON still parses; `credential:` and `env:` resolution order works; structured credential/provider mismatches fail; Codex OAuth remains restricted to canonical `openai` and fixed ChatGPT Codex base URL even when `[llm.providers.openai].base_url` is overridden.\n- `fabro-llm`: built-in Kimi/Zai/Minimax/Inception register through `openai_compatible` settings without provider-specific branches; every catalog adapter metadata key has a production factory and every production factory is reachable from a metadata key; `Request.speed` is typed as `Option<Speed>` internally; request validation rejects explicit unsupported controls and omits legacy defaults for unsupported models.\n- `fabro-validate`: built-in rules no longer call `Catalog::builtin()`; catalog-bound model/provider-known rules work through `extra_rules`.\n- `fabro-api`: OpenAPI provider schema no longer replaces with `fabro_model::Provider`; provider string/`ProviderId` JSON parity is covered; TypeScript client generation reflects string providers.\n- `fabro-server`/`fabro-workflow`/`fabro-cli`: `/models?provider=<id>` works with string IDs; project/workflow TOML can add a custom provider/model for a run; install/API-key validation uses bootstrap defaults; CLI model commands and server-returned models use the resolved catalog.\n- Workspace policy test: CI enforces the `bootstrap_catalog` reference allowlist across the workspace so request-serving modules cannot call bootstrap/default constructors.\n- Verification commands:\n  - `cargo build -p fabro-api`\n  - `cargo nextest run -p fabro-config -p fabro-model -p fabro-auth -p fabro-llm -p fabro-validate -p fabro-workflow -p fabro-server -p fabro-api`\n  - `cargo +nightly-2026-04-14 fmt --check --all`\n  - `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`\n\n## Assumptions And Deferred Work\n\n- All settings layers are trusted execution configuration. Provider routing may attach server credentials to outbound HTTP, so credential-specific invariants still matter even though project/workflow TOML is trusted.\n- Field-merge for provider/model tables is intentional. Whole-array replacement for controls can mask future built-in values; more granular array merge operations are deferred.\n- V1 does not support custom auth schemes, data-driven profile templates, provider-level CLI backend routing, data-driven adapter implementations, or new request control kinds.\n- Adding a new value to an existing Rust-owned control enum, such as a new speed value beyond `standard` and `fast`, remains a Rust change.\n- Existing imprecise knowledge cutoff labels migrate to exact normalized dates, e.g. `May 2025` becomes `2025-05-01`; presentation can render lower precision.\n"
+        },
+        "working_dir": null,
+        "metadata": {},
+        "inputs": {},
+        "model": {
+          "provider": "anthropic",
+          "name": "claude-sonnet-4-6",
+          "fallbacks": []
+        },
+        "git": {
+          "author": null
+        },
+        "prepare": {
+          "commands": [],
+          "timeout_ms": 300000
+        },
+        "execution": {
+          "mode": "normal",
+          "approval": "prompt",
+          "retros": true
+        },
+        "checkpoint": {
+          "exclude_globs": []
+        },
+        "sandbox": {
+          "provider": "daytona",
+          "preserve": false,
+          "devcontainer": false,
+          "env": {},
+          "local": {
+            "worktree_mode": "always"
+          },
+          "docker": {
+            "image": "buildpack-deps:noble",
+            "network_mode": null,
+            "memory_limit": 4000000000,
+            "cpu_quota": 200000,
+            "env_vars": {},
+            "skip_clone": false
+          },
+          "daytona": {
+            "auto_stop_interval": 30,
+            "labels": {
+              "repo": "fabro-sh/fabro"
+            },
+            "snapshot": {
+              "name": "fabro-v8",
+              "cpu": 8,
+              "memory_gb": 16,
+              "disk_gb": 20,
+              "dockerfile": {
+                "type": "inline",
+                "value": "FROM ubuntu:24.04\n\nRUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 && rm -rf /var/lib/apt/lists/*\n\n# GitHub CLI\nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*\n\n# Rust\nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\nENV PATH=\"/root/.cargo/bin:${PATH}\"\nRUN rustup toolchain install nightly-2026-04-14 --profile minimal --component clippy,rustfmt\nRUN cargo install cargo-nextest --locked\nENV CARGO_INCREMENTAL=0\n\n# Bun\nRUN curl -fsSL https://bun.sh/install | bash\nENV PATH=\"/root/.bun/bin:${PATH}\"\n\nWORKDIR /root\n"
+              }
+            },
+            "network": null,
+            "skip_clone": false
+          }
+        },
+        "notifications": {},
+        "interviews": {
+          "provider": null,
+          "slack": null,
+          "discord": null,
+          "teams": null
+        },
+        "agent": {
+          "permissions": null,
+          "mcps": {}
+        },
+        "hooks": [],
+        "scm": {
+          "provider": null,
+          "owner": null,
+          "repository": null,
+          "github": null
+        },
+        "pull_request": {
+          "enabled": true,
+          "draft": false,
+          "auto_merge": false,
+          "merge_strategy": "squash"
+        },
+        "artifacts": {
+          "include": []
+        }
+      }
+    },
+    "graph": {
+      "name": "ImplementPlan",
+      "nodes": {
+        "implement": {
+          "id": "implement",
+          "attrs": {
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Implement"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "prompt": {
+              "String": "Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD."
+            }
+          }
+        },
+        "verify": {
+          "id": "verify",
+          "attrs": {
+            "label": {
+              "String": "Verify"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "retry_target": {
+              "String": "fixup"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1 && cargo dev docs refresh 2>&1 && cargo dev docs check 2>&1"
+            },
+            "goal_gate": {
+              "Boolean": true
+            }
+          }
+        },
+        "preflight_lint": {
+          "id": "preflight_lint",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "label": {
+              "String": "Preflight Lint"
+            }
+          }
+        },
+        "fix_lints": {
+          "id": "fix_lints",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Fix Lints"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "max_visits": {
+              "Integer": 3
+            },
+            "prompt": {
+              "String": "The preflight lint step failed. Read the build output from context and fix all clippy lint warnings."
+            }
+          }
+        },
+        "toolchain": {
+          "id": "toolchain",
+          "attrs": {
+            "script": {
+              "String": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "label": {
+              "String": "Toolchain"
+            }
+          }
+        },
+        "preflight_compile": {
+          "id": "preflight_compile",
+          "attrs": {
+            "max_retries": {
+              "Integer": 0
+            },
+            "label": {
+              "String": "Preflight Compile"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "script": {
+              "String": "cargo check -q --workspace 2>&1"
+            },
+            "shape": {
+              "String": "parallelogram"
+            }
+          }
+        },
+        "start": {
+          "id": "start",
+          "attrs": {
+            "shape": {
+              "String": "Mdiamond"
+            },
+            "label": {
+              "String": "Start"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "fixup": {
+          "id": "fixup",
+          "attrs": {
+            "label": {
+              "String": "Fixup"
+            },
+            "max_visits": {
+              "Integer": 3
+            },
+            "prompt": {
+              "String": "The verify step failed. Read the build output from context and fix all clippy lint warnings, test failures, and generated docs errors."
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "exit": {
+          "id": "exit",
+          "attrs": {
+            "shape": {
+              "String": "Msquare"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Exit"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "simplify_opus": {
+          "id": "simplify_opus",
+          "attrs": {
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "label": {
+              "String": "Simplify (Opus)"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "simplify_gpt": {
+          "id": "simplify_gpt",
+          "attrs": {
+            "label": {
+              "String": "Simplify (GPT-55)"
+            },
+            "model": {
+              "String": "gpt-5.5"
+            },
+            "provider": {
+              "String": "openai"
+            },
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            }
+          }
+        },
+        "fmt": {
+          "id": "fmt",
+          "attrs": {
+            "label": {
+              "String": "Format"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 fmt --all 2>&1"
+            }
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "start",
+          "to": "toolchain",
+          "attrs": {}
+        },
+        {
+          "from": "toolchain",
+          "to": "preflight_compile",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "toolchain",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_compile",
+          "to": "preflight_lint",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_compile",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_lint",
+          "to": "implement",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_lint",
+          "to": "fix_lints",
+          "attrs": {}
+        },
+        {
+          "from": "fix_lints",
+          "to": "preflight_lint",
+          "attrs": {}
+        },
+        {
+          "from": "implement",
+          "to": "simplify_opus",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_opus",
+          "to": "simplify_gpt",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_gpt",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "verify",
+          "to": "fmt",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "verify",
+          "to": "fixup",
+          "attrs": {}
+        },
+        {
+          "from": "fixup",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "fmt",
+          "to": "exit",
+          "attrs": {}
+        }
+      ],
+      "attrs": {
+        "rankdir": {
+          "String": "LR"
+        },
+        "goal": {
+          "String": "# Settings-Driven LLM Providers And Models Implementation Plan\n\n> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.\n\n**Goal:** Implement a settings-driven LLM provider/model catalog so new providers and models can be configured through TOML when they use an existing adapter.\n\n**Architecture:** Treat provider and model identity as layered settings data. Keep adapters, agent profiles, auth schemes, billing policy shapes, and request control kinds as explicit Rust behavior. Build a resolved `Arc<Catalog>` from settings and pass that catalog through server, workflow, CLI, auth, and LLM client seams.\n\n**Tech Stack:** Rust, serde/TOML settings layers, chrono `NaiveDate`, strum enums for code-owned control values, OpenAPI/progenitor, TypeScript API client generation, cargo nextest.\n\n---\n\n## Summary\n\nThis is a breaking cross-crate refactor. `fabro_model::Provider` stops being the product identity type; provider identity becomes a string-backed `ProviderId`. OpenAPI provider fields become strings, and the resolved settings catalog becomes the source of truth for model lookup, provider lookup, default selection, credential resolution, adapter registration, and `/models`.\n\nAll settings layers are trusted execution configuration, including project TOML and workflow/run TOML. That trust model allows repository-provided settings to define or override provider routing. It does not make every credential interchangeable: Codex OAuth remains locked to the fixed ChatGPT Codex backend because it is a long-lived account-scoped credential, not a normal API key for arbitrary `base_url` routing.\n\nBuilt-in providers and models ship as default settings data. User, server, project, and workflow/run settings merge on top of those defaults using the existing settings-layer model.\n\n## Key Interface Decisions\n\n- Add trusted, mergeable `[llm]` settings. Provider `adapter` is a registry key implemented in Rust; new providers can use existing adapter keys without code changes, while new adapters still require Rust.\n\n```toml\n[llm.providers.kimi]\ndisplay_name = \"Kimi\"\nadapter = \"openai_compatible\"\nbase_url = \"https://api.moonshot.ai/v1\"\ncredentials = [\"credential:kimi\", \"env:KIMI_API_KEY\"]\npriority = 60\nenabled = true\naliases = [\"moonshot\"]\n\n[llm.models.\"kimi-k2.5\"]\nprovider = \"kimi\"\napi_id = \"kimi-k2.5\"\ndisplay_name = \"Kimi K2.5\"\nfamily = \"kimi\"\nknowledge_cutoff = 2025-01-01\ndefault = true\nenabled = true\naliases = [\"kimi\"]\nestimated_output_tps = 50\n\n[llm.models.\"kimi-k2.5\".limits]\ncontext_window = 262144\nmax_output = 32768\n\n[llm.models.\"kimi-k2.5\".features]\ntools = true\nvision = false\nreasoning = true\neffort = false\n\n[llm.models.\"kimi-k2.5\".costs]\ninput_cost_per_mtok = 0.60\noutput_cost_per_mtok = 2.50\ncache_input_cost_per_mtok = 0.15\n```\n\n- `api_id` is the model identifier sent to the provider API; when omitted, it defaults to the catalog model ID.\n- `features.reasoning`, `features.effort`, and `controls.reasoning_effort` are separate. `features.reasoning` records whether the model has reasoning behavior at all and is used for catalog capability display plus fallback/model matching. `features.effort` records whether the model supports the provider's native effort parameter. `controls.reasoning_effort` is the user-facing allow-list for native effort values Fabro may accept for that model.\n- Do not add a provider-level `profile` field in v1. The agent profile is inferred from the adapter registry entry, for example `anthropic -> anthropic`, `openai -> openai`, `gemini -> gemini`, and `openai_compatible -> openai`. New profile behavior is a Rust change.\n- Do not add provider-level `cli_backend` in v1. Existing graph/workflow `cli_backend` behavior remains separate from provider catalog data. `codex_mode` remains credential-derived and is not configurable through provider settings.\n- Add fixed, typed model controls. Supported control kinds and enum values are Rust-owned. Current v1 controls are `reasoning_effort = [\"low\", \"medium\", \"high\", \"xhigh\", \"max\"]` and non-default `speed = [\"fast\"]`. A model only declares values allowed by its adapter metadata; v1 does not expose non-native reasoning-effort fallback strategies as catalog data.\n\n```toml\n[llm.models.\"claude-opus-4-6\".controls]\nreasoning_effort = [\"low\", \"medium\", \"high\"]\nspeed = [\"fast\"]\n\n[llm.models.\"claude-opus-4-6\".costs.speed.fast]\ninput_cost_per_mtok = 90.0\noutput_cost_per_mtok = 450.0\ncache_input_cost_per_mtok = 9.0\n```\n\n- `Speed::Standard` is always available and is not listed in `controls.speed`. `controls.speed` enumerates additional speeds only, so `costs.speed.standard` is not a valid override.\n- `controls.speed` and `costs.speed` have one invariant: every `costs.speed.<speed>` key must be declared in `controls.speed`. A declared non-standard speed without a price override is allowed and uses base costs. An override whose speed is not declared is a catalog build error. Built-in Anthropic fast-mode models must declare both `controls.speed = [\"fast\"]` and explicit `costs.speed.fast` rows so the current fast multiplier becomes data.\n- Omitted control lists are not wildcards. If `controls.reasoning_effort` is omitted and `features.effort = true`, it resolves to the adapter's native reasoning-effort defaults. If `features.effort = false`, it resolves to an empty list. If `controls.speed` is omitted, it resolves to an empty list of additional speeds.\n- Add `[run.model.controls]` for run defaults. Node and style values still win over run defaults.\n\n```toml\n[run.model.controls]\nreasoning_effort = \"high\"\nspeed = \"fast\"\n```\n\n- Credential entries are a typed `CredentialRef` enum. Accepted forms are only `credential:<id>` and `env:<NAME>`; literal secret strings fail deserialization or validation and are never represented as a successful settings value.\n- `credential:<id>` reads structured credentials from the existing `fabro-vault` crate. API-key credentials must match the provider ID they are attached to. `env:<NAME>` reads the process environment first, then falls back to an existing raw `fabro-vault` secret with the same name.\n- `credential:openai_codex` is special. It is only valid for canonical provider ID `openai`, maps to vault ID `openai_codex`, sets `codex_mode = true`, and always uses `https://chatgpt.com/backend-api/codex`. It ignores `[llm.providers.openai].base_url` and cannot be used by aliases or custom providers.\n- OpenAPI changes are breaking: provider schemas become `type: string`, `Model.provider` becomes a provider ID string, `Model.controls` is added, and `knowledge_cutoff` becomes `format: date`.\n\n## Implementation Plan\n\n- [ ] **Settings schema and merge behavior**\n  - Add `LlmSettings`, `ProviderSettings`, `ModelSettings`, `ModelControls`, `ModelCostTable`, `CostRates`, and `CredentialRef` to `fabro-config`.\n  - Store built-in providers and models in defaults settings data so production catalog construction starts from the same layered settings path as user/project/workflow overrides.\n  - Preserve sparse field-merge semantics for `[llm.providers.<id>]` and `[llm.models.<id>]`. Arrays such as `credentials`, `aliases`, `controls.reasoning_effort`, and `controls.speed` replace as whole arrays. To add one credential to a built-in provider, redeclare the full `credentials` list in the higher layer.\n  - Keep the targeted legacy `[llm]` migration error for old keys such as `provider` or `model`; accept only the new `[llm.providers]` and `[llm.models]` subtrees. Do not regress to a generic serde unknown-field error.\n  - Parse adapter keys as strings in `fabro-config`. Do not make `fabro-config` depend on `fabro-llm`; adapter-key validation happens when building the resolved catalog.\n\n- [ ] **Catalog model**\n  - Add `ProviderId` and `ModelId` string newtypes where they improve type clarity across crates.\n  - Replace product identity uses of `fabro_model::Provider` with `ProviderId`. Keep Rust enums for behavior that is still code-owned, including `ReasoningEffort` and `Speed`.\n  - Move `ReasoningEffort` from `fabro-llm` to `fabro-model` or another shared vocabulary crate so catalog data, request validation, OpenAPI replacement types, and LLM requests use one enum.\n  - Add code-owned adapter metadata beside the catalog, not in `fabro-config`. This metadata is still Rust code; only provider/model rows are data.\n  - Add concrete metadata vocabulary types in the shared model/catalog layer so model validation and LLM factory registration share one contract:\n\n    ```rust\n    #[derive(Debug, Clone, Copy, PartialEq, Eq)]\n    pub enum AgentProfileKind {\n        Anthropic,\n        OpenAi,\n        Gemini,\n    }\n\n    #[derive(Debug, Clone, Copy, PartialEq, Eq)]\n    pub enum ApiKeyHeaderPolicy {\n        Bearer,\n        Custom { name: &'static str },\n    }\n\n    pub struct AdapterMetadata {\n        pub key: &'static str,\n        pub default_profile: AgentProfileKind,\n        pub api_key_header: ApiKeyHeaderPolicy,\n        pub controls: AdapterControlCapabilities,\n    }\n\n    pub struct AdapterControlCapabilities {\n        pub native_reasoning_effort: &'static [ReasoningEffort],\n        pub additional_speeds: &'static [Speed],\n    }\n\n    // Implemented in fabro-auth, not fabro-model, to avoid a dependency cycle.\n    pub fn build_api_key_header(policy: ApiKeyHeaderPolicy, key: String) -> ApiKeyHeader {\n        match policy {\n            ApiKeyHeaderPolicy::Bearer => ApiKeyHeader::Bearer(key),\n            ApiKeyHeaderPolicy::Custom { name } => ApiKeyHeader::Custom {\n                name: name.to_string(),\n                value: key,\n            },\n        }\n    }\n    ```\n\n  - `AgentProfileKind` is an internal dispatch key that `fabro-agent` maps to concrete `AgentProfile` implementations; it is not a settings field. `ApiKeyHeaderPolicy` describes how an API key becomes an `ApiKeyHeader` without carrying secret values.\n  - `native_reasoning_effort` is every reasoning-effort value that can be sent through the provider's native effort field. After omitted controls are filled from adapter defaults, resolved model `controls.reasoning_effort` must be a non-empty subset of `native_reasoning_effort` when `features.effort = true`; it must be omitted or empty when `features.effort = false`. V1 does not expose generic non-native effort fallback in catalog data.\n  - Model `controls.speed` must be a subset of adapter `additional_speeds`. `Speed::Standard` is implicit and must not appear in either list.\n  - Build `Catalog` from resolved settings and return catalog-build errors for malformed provider/model data.\n  - Validate provider `adapter` strings against the adapter metadata while building the catalog. `fabro-llm` has the matching factory registry and tests must prove every metadata key has a factory.\n  - Build provider and model alias indexes after all layers merge and after disabled entries are filtered out of runtime lookup. Canonical IDs and aliases for enabled entries share one namespace within their kind. Any enabled-entry collision is fatal, including canonical ID versus another enabled entity's alias. Disabled entries do not reserve aliases; re-enabling a disabled entry can fail if its aliases collide with currently enabled entries.\n  - Surface alias/catalog failures at catalog construction: server startup fails, CLI run/validate fails, and workflow materialization fails before requests are issued.\n  - Replace hardcoded provider precedence with provider `priority`. Higher priority wins; missing priority is `0`; ties sort by canonical provider ID. `enabled = false` removes the provider/model from runtime selection but does not delete vault entries.\n  - Retire `Catalog::builtin()` from production lookup paths. Gate the old singleton behind `#[cfg(any(test, feature = \"test-support\"))]` for tests. Add a narrowly named bootstrap/defaults constructor for install and API-key validation flows that need built-in provider definitions before project settings are loaded.\n  - Put the bootstrap/defaults constructor behind an explicit module such as `fabro_model::bootstrap_catalog` and document it as install-only.\n  - Add a CI-enforced workspace test that scans for `bootstrap_catalog` references and allows only bootstrap/install/test-support paths. Request-serving crates and handlers must fail that test if they call the bootstrap constructor.\n\n- [ ] **OpenAPI and generated clients**\n  - Change provider fields in `docs/public/api-reference/fabro-api.yaml` from the closed `Provider` schema to strings or a shared `ProviderId` newtype.\n  - Remove `with_replacement(\"Provider\", \"fabro_model::Provider\", &[])` from `lib/crates/fabro-api/build.rs`.\n  - Delete or replace `lib/crates/fabro-api/tests/provider_round_trip.rs`; add JSON parity coverage for `ProviderId` if that type is reused by `fabro-api`.\n  - Regenerate Rust API types with `cargo build -p fabro-api`.\n  - Regenerate the TypeScript API client after the OpenAPI change.\n\n- [ ] **Credentials and auth**\n  - Change `AuthCredential`, `ApiCredential`, resolver errors, and credential lookup helpers from closed `Provider` to `ProviderId`.\n  - Preserve existing vault JSON by deserializing old provider strings as provider IDs.\n  - Keep `credential_id_for` compatibility: API-key credentials use their canonical provider ID; Codex OAuth still maps only to `openai_codex`.\n  - Resolve provider `credentials` in list order. For `env:` refs, build an API credential for the current provider using the adapter registry's auth-header policy. For `credential:` refs, require structured credential/provider compatibility before attaching it. The first successfully resolved credential wins, so built-in ordering should put the preferred credential type first; for OpenAI, place `credential:openai_codex` before API-key refs only when Codex OAuth should be preferred over API-key traffic.\n  - Keep Codex OAuth outside configurable provider routing: the resolver produces the fixed ChatGPT Codex base URL and `codex_mode = true` only for canonical `openai` plus `openai_codex`.\n  - Define `fabro auth list` behavior for absent or disabled providers: list vault entries regardless, annotate catalog status as enabled, disabled, or unknown, and do not treat unknown entries as runtime-configured providers.\n  - Ensure new credential-ref Display/Debug/error paths redact secret values and never log resolved env values. Env names and credential IDs may appear only in non-secret diagnostic text.\n\n- [ ] **LLM client and adapter registry**\n  - Introduce an adapter factory registry in `fabro-llm` keyed by the same strings as catalog adapter metadata: `anthropic`, `openai`, `gemini`, and `openai_compatible`.\n  - Keep factory behavior in `fabro-llm`; keep static metadata needed by `fabro-model` and `fabro-auth` in the shared catalog/model layer to avoid dependency cycles.\n  - Change `Client::from_source` and `Client::from_credentials` call paths so provider settings and the resolved catalog are available before adapter registration.\n  - Register adapters by provider ID from the resolved catalog. `Client::resolve_provider` must use the injected catalog to map model IDs and aliases to provider IDs; it must not call `Catalog::builtin()`.\n  - Keep install/API-key validation working by using the bootstrap/defaults catalog for the provider currently being configured.\n  - Leave custom auth schemes and data-driven adapter implementations out of scope.\n\n- [ ] **Validation**\n  - Do not change the public `LintRule` trait signature.\n  - Remove catalog-dependent model/provider-known checks from `rules::built_in_rules()`.\n  - Reintroduce those checks as catalog-bound rule instances, for example `model_support::rules_for_catalog(Arc<Catalog>)`, passed through the existing `extra_rules` argument after settings resolution.\n  - Thread the resolved catalog to CLI, server, workflow, and parser validation call sites that should report unknown models/providers.\n  - Keep pure graph-shape validation available without runtime settings.\n\n- [ ] **Workflow, server, agent, and hooks plumbing**\n  - Store `Arc<Catalog>` in server app state and workflow service state.\n  - Replace production `Catalog::builtin()` call sites in server handlers, workflow operations, workflow transforms, hooks, diagnostics, completions, pull-request creation, and agent profile/session code.\n  - Ensure project and workflow/run TOML settings are merged before model resolution, validation, fallback-chain construction, and LLM client construction.\n  - Infer agent profile from the provider adapter registry entry. Do not make profiles data-driven in v1.\n  - Continue to expose existing node/workflow `cli_backend` behavior independently of provider settings.\n\n- [ ] **Controls and request validation**\n  - Add model control allow-lists to catalog data. Validate control values against existing Rust enums: `ReasoningEffort::{Low, Medium, High, XHigh, Max}` and `Speed::{Standard, Fast}`.\n  - Change `fabro_llm::types::Request.speed`, `fabro_llm::generate::GenerateParams.speed`, and agent/workflow speed config plumbing from `Option<String>` to `Option<Speed>`. Keep serde wire compatibility through the existing snake_case `Speed` representation and parse strings only at API/settings/graph boundaries.\n  - Validate model-declared controls against adapter capabilities at catalog build time.\n  - Define \"explicit control\" narrowly: a value from `[run.model.controls]`, a node attribute after stylesheet/import transforms, or a style-applied attribute. Define \"legacy default\" as the current hardcoded fallback returned only when no explicit value exists.\n  - Avoid a broad provenance refactor. Add helper methods that can distinguish \"attribute present\" from \"fallback returned\" at the control resolution sites.\n  - Explicit unsupported controls fail before building provider requests. Legacy defaults are omitted for models that do not declare the control.\n\n- [ ] **Billing**\n  - Do not collapse `ModelPricingPolicy` variants in this change.\n  - Change model costs to a base `CostRates` plus optional `speed: BTreeMap<Speed, CostRates>` overrides.\n  - Update `pricing_for(speed)` so selected rates are `costs.speed[speed]` when present, otherwise base rates.\n  - Preserve provider-shaped pricing policies. Anthropic cache-write 5m/1h rates continue to derive from the selected input rate, so Anthropic fast-mode cost rows produce the same cache-write rates as today's multiplier path.\n  - Remove the hardcoded `(Provider::Anthropic, Speed::Fast, claude-opus-4-7/4-6)` branch after the equivalent rows exist in defaults data.\n\n## Test Plan\n\n- `fabro-config`: parse and merge `[llm]`; reject literal credential refs; preserve the legacy `[llm] provider/model` migration hint; cover field-merge and whole-array replacement behavior.\n- `fabro-model`: dynamic catalog lookup, adapter key validation, enabled-only alias collision behavior, duplicate-alias failure surfaces, defaults, provider `priority`, disabled entries, `NaiveDate` knowledge cutoff, model controls, adapter capability validation, absent-control defaults, non-empty `features.effort` controls, speed subset validation, and per-speed pricing.\n- `fabro-auth`: existing vault credential JSON still parses; `credential:` and `env:` resolution order works; structured credential/provider mismatches fail; Codex OAuth remains restricted to canonical `openai` and fixed ChatGPT Codex base URL even when `[llm.providers.openai].base_url` is overridden.\n- `fabro-llm`: built-in Kimi/Zai/Minimax/Inception register through `openai_compatible` settings without provider-specific branches; every catalog adapter metadata key has a production factory and every production factory is reachable from a metadata key; `Request.speed` is typed as `Option<Speed>` internally; request validation rejects explicit unsupported controls and omits legacy defaults for unsupported models.\n- `fabro-validate`: built-in rules no longer call `Catalog::builtin()`; catalog-bound model/provider-known rules work through `extra_rules`.\n- `fabro-api`: OpenAPI provider schema no longer replaces with `fabro_model::Provider`; provider string/`ProviderId` JSON parity is covered; TypeScript client generation reflects string providers.\n- `fabro-server`/`fabro-workflow`/`fabro-cli`: `/models?provider=<id>` works with string IDs; project/workflow TOML can add a custom provider/model for a run; install/API-key validation uses bootstrap defaults; CLI model commands and server-returned models use the resolved catalog.\n- Workspace policy test: CI enforces the `bootstrap_catalog` reference allowlist across the workspace so request-serving modules cannot call bootstrap/default constructors.\n- Verification commands:\n  - `cargo build -p fabro-api`\n  - `cargo nextest run -p fabro-config -p fabro-model -p fabro-auth -p fabro-llm -p fabro-validate -p fabro-workflow -p fabro-server -p fabro-api`\n  - `cargo +nightly-2026-04-14 fmt --check --all`\n  - `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`\n\n## Assumptions And Deferred Work\n\n- All settings layers are trusted execution configuration. Provider routing may attach server credentials to outbound HTTP, so credential-specific invariants still matter even though project/workflow TOML is trusted.\n- Field-merge for provider/model tables is intentional. Whole-array replacement for controls can mask future built-in values; more granular array merge operations are deferred.\n- V1 does not support custom auth schemes, data-driven profile templates, provider-level CLI backend routing, data-driven adapter implementations, or new request control kinds.\n- Adding a new value to an existing Rust-owned control enum, such as a new speed value beyond `standard` and `fast`, remains a Rust change.\n- Existing imprecise knowledge cutoff labels migrate to exact normalized dates, e.g. `May 2025` becomes `2025-05-01`; presentation can render lower precision.\n"
+        },
+        "model_stylesheet": {
+          "String": "\n            * { model: claude-opus-4-7; }\n        "
+        }
+      }
+    },
+    "workflow_slug": "implement-plan",
+    "source_directory": "/Users/bhelmkamp/p/fabro-sh/fabro",
+    "provenance": {
+      "server": {
+        "version": "0.223.0-nightly.0"
+      },
+      "client": {
+        "user_agent": "fabro-cli/0.223.0-nightly.0",
+        "name": "fabro-cli",
+        "version": "0.223.0-nightly.0"
+      },
+      "subject": {
+        "kind": "user",
+        "identity": {
+          "issuer": "https://github.com",
+          "subject": "19"
+        },
+        "login": "brynary",
+        "auth_method": "github"
+      }
+    },
+    "manifest_blob": "23002f9e5dbb4ed840b7c0d8dc0f3461ed28371e60401ea63051ec9e8ee6abd4",
+    "definition_blob": "791b2ce7454b6fff8fa26bea4af48533a25d0e56c4cecc44be1ea071680b4f9d",
+    "git": {
+      "origin_url": "https://github.com/fabro-sh/fabro",
+      "branch": "main",
+      "sha": "8064aa269eb893efca2a1654d9ece4acf8129307",
+      "dirty": "clean",
+      "push_outcome": {
+        "type": "not_attempted"
+      }
+    },
+    "in_place": false
+  },
+  "graph_source": "digraph ImplementPlan {\n    graph [\n        goal=\"Implement and simplify\",\n        model_stylesheet=\"\n            * { model: claude-opus-4-7; }\n        \"\n    ]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    toolchain         [label=\"Toolchain\", shape=parallelogram, script=\"command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1\", max_retries=0]\n    preflight_compile [label=\"Preflight Compile\", shape=parallelogram, script=\"cargo check -q --workspace 2>&1\", max_retries=0]\n    preflight_lint    [label=\"Preflight Lint\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1\", max_retries=0]\n    fix_lints         [label=\"Fix Lints\", prompt=\"The preflight lint step failed. Read the build output from context and fix all clippy lint warnings.\", max_visits=3]\n    implement         [label=\"Implement\", prompt=\"Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD.\"]\n    simplify_opus     [label=\"Simplify (Opus)\", prompt=\"@prompts/simplify.md\"]\n    simplify_gpt      [label=\"Simplify (GPT-55)\", prompt=\"@prompts/simplify.md\", model=\"gpt-55\"]\n    verify            [label=\"Verify\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1 && cargo dev docs refresh 2>&1 && cargo dev docs check 2>&1\", goal_gate=true, retry_target=\"fixup\"]\n    fixup             [label=\"Fixup\", prompt=\"The verify step failed. Read the build output from context and fix all clippy lint warnings, test failures, and generated docs errors.\", max_visits=3]\n    fmt               [label=\"Format\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 fmt --all 2>&1\", max_retries=0]\n\n    start -> toolchain\n    toolchain -> preflight_compile [condition=\"outcome=succeeded\"]\n    toolchain -> exit\n    preflight_compile -> preflight_lint [condition=\"outcome=succeeded\"]\n    preflight_compile -> exit\n    preflight_lint -> implement [condition=\"outcome=succeeded\"]\n    preflight_lint -> fix_lints\n    fix_lints -> preflight_lint\n    implement -> simplify_opus -> simplify_gpt -> verify\n    verify -> fmt   [condition=\"outcome=succeeded\"]\n    verify -> fixup\n    fixup -> verify\n    fmt -> exit\n}\n",
+  "start": null,
+  "status": {
+    "kind": "starting"
+  },
+  "status_updated_at": "2026-05-04T17:50:57.030975Z",
+  "pending_control": null,
+  "checkpoint": null,
+  "checkpoints": [],
+  "conclusion": null,
+  "retro": null,
+  "retro_prompt": null,
+  "retro_response": null,
+  "sandbox": {
+    "provider": "daytona",
+    "working_directory": "/home/daytona/workspace",
+    "identifier": "fabro-01KQT1TNZ0QXK0QHP10G0V5X84",
+    "repo_cloned": true,
+    "clone_origin_url": "https://github.com/fabro-sh/fabro",
+    "clone_branch": "main"
+  },
+  "final_patch": null,
+  "pull_request": null,
+  "superseded_by": null,
+  "pending_interviews": {},
+  "stages": {}
+}
