@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use fabro_retro::retro::CompletedStage;
 use fabro_store::EventEnvelope;
-use fabro_types::EventBody;
+use fabro_types::{EventBody, StageId};
 
 /// Callback invoked when a workflow node starts executing.
 pub type OnNodeCallback = Option<Arc<dyn Fn(&str) + Send + Sync>>;
@@ -114,11 +114,9 @@ pub fn extract_stage_durations_from_events(events: &[EventEnvelope]) -> HashMap<
 /// Extract per-stage (node_id, visit) durations from `stage.completed` /
 /// `stage.failed` events. Differs from
 /// [`extract_stage_durations_from_events`] by keying on the full
-/// [`fabro_types::StageId`] instead of just `node_id`, so multi-visit
+/// [`StageId`] instead of just `node_id`, so multi-visit
 /// stages (e.g. a looped `verify` node) keep distinct durations.
-pub fn extract_stage_durations_by_stage_id(
-    events: &[EventEnvelope],
-) -> HashMap<fabro_types::StageId, u64> {
+pub fn extract_stage_durations_by_stage_id(events: &[EventEnvelope]) -> HashMap<StageId, u64> {
     let mut durations = HashMap::new();
     for envelope in events {
         let Some(duration_ms) = stage_completion_duration_ms(&envelope.event.body) else {

@@ -123,6 +123,27 @@ describe("subscribeToRunEvents", () => {
     cleanup();
   });
 
+  test("falls back to node_id when an event has no stage_id", () => {
+    const source = new FakeEventSource();
+    const keys: string[] = [];
+    const cleanup = subscribeToRunEvents(
+      "run-stage-node",
+      (key) => {
+        keys.push(key);
+        return Promise.resolve();
+      },
+      () => source,
+      { debounceMs: 0 },
+    );
+
+    source.emit({ event: "stage.started", node_id: "verify" });
+
+    expect(keys).toContain(queryKeys.runs.stageTurns("run-stage-node", "verify"));
+    expect(keys).toContain(queryKeys.runs.stages("run-stage-node"));
+
+    cleanup();
+  });
+
   test("malformed events are ignored and StrictMode-style cleanup does not underflow", () => {
     const firstSource = new FakeEventSource();
     const secondSource = new FakeEventSource();

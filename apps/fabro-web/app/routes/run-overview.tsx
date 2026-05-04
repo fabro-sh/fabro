@@ -54,9 +54,6 @@ export default function RunOverview() {
     const inner = innerRef.current;
     if (!inner || !graphSvg) return;
 
-    let cancelled = false;
-    (async () => {
-    if (cancelled) return;
     inner.innerHTML = graphSvg;
     const svg = inner.querySelector("svg");
     if (!svg) return;
@@ -151,8 +148,6 @@ export default function RunOverview() {
         }
       }
     }
-    })();
-    return () => { cancelled = true; };
   }, [stages, graphSvg, id, navigate, terminalOutcome]);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {

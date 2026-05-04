@@ -2,7 +2,7 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use fabro_store::RunProjectionReducer;
-use fabro_types::{EventBody, RunProjection, StageId};
+use fabro_types::{EventBody, RunProjection, StageId, StageProjection};
 
 use super::super::{
     ApiError, AppState, BilledTokenCounts, BillingByModel, BillingStageRef, EventEnvelope, HashMap,
@@ -72,8 +72,7 @@ async fn list_run_stages(
     let stage_durations = fabro_workflow::extract_stage_durations_by_stage_id(&events);
     let lifecycle_states = latest_stage_states(&events);
 
-    let mut entries: Vec<(&StageId, &fabro_types::StageProjection)> =
-        projection.iter_stages().collect();
+    let mut entries: Vec<(&StageId, &StageProjection)> = projection.iter_stages().collect();
     entries.sort_by_key(|(_, stage)| stage.first_event_seq);
 
     let mut stages = Vec::with_capacity(entries.len());

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { PaginatedRunStageList, StageState } from "@qltysh/fabro-api-client";
 
 import type { Stage } from "../components/stage-sidebar";
-import { aggregateGraphNodeStatus, mapRunStagesToSidebarStages } from "./stage-sidebar";
+import { aggregateGraphNodeStatus, formatStageLabel, mapRunStagesToSidebarStages } from "./stage-sidebar";
 
 function makeStage(nodeId: string, visit: number, status: StageState): Stage {
   return {
@@ -44,10 +44,12 @@ describe("mapRunStagesToSidebarStages", () => {
     expect(result[0].id).toBe("apply-changes@1");
     expect(result[0].nodeId).toBe("apply");
     expect(result[0].visit).toBe(1);
+    expect(formatStageLabel(result[0])).toBe("Apply Changes");
 
     expect(result[1].id).toBe("apply-changes@2");
     expect(result[1].nodeId).toBe("apply");
     expect(result[1].visit).toBe(2);
+    expect(formatStageLabel(result[1])).toBe("Apply Changes (2)");
   });
 
   test("filters by node_id (suffixed start@1 / exit@1 are still hidden)", () => {
