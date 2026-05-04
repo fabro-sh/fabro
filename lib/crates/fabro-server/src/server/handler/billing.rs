@@ -68,7 +68,17 @@ async fn list_run_stages(
         Err(_) => return ApiError::not_found("Run not found.").into_response(),
     };
 
-    let projection = RunProjection::apply_events(&events).unwrap_or_default();
+    let projection = match RunProjection::apply_events(&events) {
+        Ok(projection) => projection,
+        Err(err) => {
+            tracing::warn!(
+                run_id = %id,
+                error = %err,
+                "Failed to build run projection; returning empty stages list",
+            );
+            RunProjection::default()
+        }
+    };
     let stage_durations = fabro_workflow::extract_stage_durations_by_stage_id(&events);
     let lifecycle_states = latest_stage_states(&events);
 
@@ -78,7 +88,14 @@ async fn list_run_stages(
     let mut stages = Vec::with_capacity(entries.len());
     for (stage_id, stage_projection) in entries {
         let node_id = stage_id.node_id().to_string();
-        let visit = NonZeroU32::new(stage_id.visit()).expect("StageId.visit is 1-based");
+        let Some(visit) = NonZeroU32::new(stage_id.visit()) else {
+            tracing::warn!(
+                run_id = %id,
+                stage_id = %stage_id,
+                "Skipping stage with non-positive visit",
+            );
+            continue;
+        };
         // Prefer the latest lifecycle event; fall back to the projection's
         // stored completion (e.g. for runs recovered from snapshot only).
         let status = lifecycle_states.get(stage_id).copied().unwrap_or_else(|| {
