@@ -605,9 +605,11 @@ async fn scenario_steering_mid_task(session: &mut Session, dir: &Path) {
                 steering_queue
                     .lock()
                     .expect("steering queue lock")
-                    .push_back(
+                    .push_back((
                         "Stop what you are doing. Create a file called steered.txt containing 'steered' and do nothing else.".to_string(),
-                    );
+                        fabro_types::SteerKind::Append,
+                        None,
+                    ));
                 break;
             }
         }

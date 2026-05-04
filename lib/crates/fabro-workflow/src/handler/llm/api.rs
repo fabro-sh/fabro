@@ -4,9 +4,10 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use fabro_agent::subagent::{SessionFactory, SubAgentManager};
 use fabro_agent::{
-    AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, OpenAiProfile, Sandbox, Session,
-    SessionOptions, Turn,
+    AgentEvent, AgentProfile, AnthropicProfile, CompletionCoordinator, GeminiProfile,
+    OpenAiProfile, Sandbox, Session, SessionControlHandle, SessionOptions, Turn,
 };
+use fabro_types::StageId;
 use fabro_auth::{CredentialSource, EnvCredentialSource};
 use fabro_graphviz::graph::Node;
 use fabro_llm::client::Client;
@@ -21,6 +22,7 @@ use crate::context::{Context, WorkflowContext};
 use crate::error::Error;
 use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::billed_model_usage_from_llm;
+use crate::steering_hub::SteeringHub;
 
 fn build_profile(model: &str, provider: Provider) -> Box<dyn AgentProfile> {
     match provider {
@@ -122,6 +124,7 @@ pub struct AgentApiBackend {
     env:            HashMap<String, String>,
     mcp_servers:    Vec<McpServerSettings>,
     source:         Arc<dyn CredentialSource>,
+    steering_hub:   Option<Arc<SteeringHub>>,
 }
 
 impl AgentApiBackend {
@@ -140,6 +143,7 @@ impl AgentApiBackend {
             env: HashMap::new(),
             mcp_servers: Vec::new(),
             source,
+            steering_hub: None,
         }
     }
 
@@ -166,6 +170,12 @@ impl AgentApiBackend {
     #[must_use]
     pub fn with_mcp_servers(mut self, servers: Vec<McpServerSettings>) -> Self {
         self.mcp_servers = servers;
+        self
+    }
+
+    #[must_use]
+    pub fn with_steering_hub(mut self, hub: Arc<SteeringHub>) -> Self {
+        self.steering_hub = Some(hub);
         self
     }
 
@@ -491,6 +501,25 @@ impl CodergenBackend for AgentApiBackend {
             session.initialize().await;
         }
 
+        // Register with steering hub for steer delivery
+        let stage_id = stage_scope.stage_id();
+        let _steering_guard = if let Some(ref hub) = self.steering_hub {
+            let control_handle = session.control_handle();
+            hub.register(&stage_id, &control_handle);
+            let coordinator = SteeringCompletionCoordinator {
+                hub:      Arc::clone(hub),
+                stage_id: stage_id.clone(),
+                handle:   control_handle,
+            };
+            session.set_completion_coordinator(Arc::new(coordinator));
+            Some(SteeringGuard {
+                hub:      Arc::clone(hub),
+                stage_id: stage_id.clone(),
+            })
+        } else {
+            None
+        };
+
         let result = session.process_input(prompt).await;
 
         // On failover-eligible error, try fallback providers.
@@ -543,6 +572,18 @@ impl CodergenBackend for AgentApiBackend {
                         }
                     };
                     session = new_session;
+
+                    // Re-register with steering hub for the new session
+                    if let Some(ref hub) = self.steering_hub {
+                        let control_handle = session.control_handle();
+                        hub.register(&stage_id, &control_handle);
+                        let coordinator = SteeringCompletionCoordinator {
+                            hub:      Arc::clone(hub),
+                            stage_id: stage_id.clone(),
+                            handle:   control_handle,
+                        };
+                        session.set_completion_coordinator(Arc::new(coordinator));
+                    }
 
                     // Re-subscribe to forward events + track files from the new session
                     spawn_event_forwarder(
@@ -633,6 +674,37 @@ impl CodergenBackend for AgentApiBackend {
             files_touched,
             last_file_touched,
         })
+    }
+}
+
+/// RAII guard that unregisters a session from the steering hub on drop.
+struct SteeringGuard {
+    hub:      Arc<SteeringHub>,
+    stage_id: StageId,
+}
+
+impl Drop for SteeringGuard {
+    fn drop(&mut self) {
+        self.hub.unregister(&self.stage_id);
+    }
+}
+
+/// Completion coordinator that atomically checks whether new steers arrived
+/// during a final (tool_calls-empty) response.
+struct SteeringCompletionCoordinator {
+    hub:      Arc<SteeringHub>,
+    stage_id: StageId,
+    handle:   SessionControlHandle,
+}
+
+impl CompletionCoordinator for SteeringCompletionCoordinator {
+    fn on_natural_completion(&self) -> bool {
+        self.hub.unregister(&self.stage_id);
+        if self.handle.queue_is_empty() {
+            return false;
+        }
+        self.hub.register(&self.stage_id, &self.handle);
+        true
     }
 }
 

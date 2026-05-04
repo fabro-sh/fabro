@@ -31,6 +31,7 @@ pub mod stage_completion;
 pub mod stage_id;
 pub mod start;
 pub mod status;
+pub mod steering;
 
 pub use artifact::ArtifactUpload;
 pub use auth::{IdpIdentity, IdpIdentityError};
@@ -82,6 +83,7 @@ pub use secret::{SecretMetadata, SecretType};
 pub use stage_completion::StageCompletion;
 pub use stage_id::{ParallelBranchId, StageId};
 pub use start::StartRecord;
+pub use self::steering::SteerKind;
 pub use status::{
     BlockedReason, FailureReason, InvalidTransition, ParseFailureReasonError,
     ParseSuccessReasonError, RunControlAction, RunStatus, SuccessReason, TerminalStatus,

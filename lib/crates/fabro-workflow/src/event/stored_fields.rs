@@ -176,6 +176,15 @@ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
             fields.actor.clone_from(actor);
             fields
         }
+        Event::SteeringAttached { stage } | Event::SteeringDetached { stage } => {
+            node_stored_fields(Some(stage.clone()))
+        }
+        Event::SteerBuffered { actor, .. } | Event::SteerDropped { actor, .. } => {
+            StoredEventFields {
+                actor: actor.clone(),
+                ..StoredEventFields::default()
+            }
+        }
         Event::StallWatchdogTimeout { node, .. } => {
             let mut fields = node_stored_fields(Some(node.clone()));
             fields.actor = Some(Principal::System {
@@ -213,6 +222,7 @@ fn agent_actor_for_event(
             parent_session_id: parent_session_id.map(str::to_string),
             model:             None,
         }),
+        AgentEvent::SteeringInjected { actor, .. } => actor.clone(),
         _ => None,
     }
 }

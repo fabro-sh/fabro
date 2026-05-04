@@ -13,6 +13,7 @@ use fabro_llm::types::{
 use fabro_llm::{Error as LlmError, retry};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_mcp::connection_manager::McpConnectionManager;
+use fabro_types::{Principal, SteerKind};
 use futures::StreamExt;
 use tokio::sync::{Mutex as AsyncMutex, broadcast};
 use tokio::time;
@@ -36,28 +37,33 @@ use crate::skills::{
 };
 use crate::subagent::{SubAgentCallbackEvent, SubAgentEventCallback, SubAgentManager};
 use crate::tool_execution::execute_tool_calls;
-use crate::types::{AgentEvent, SessionEvent, SessionState, Turn};
+use crate::types::{AgentEvent, CompletionCoordinator, SessionEvent, SessionState, Turn};
+
+/// A single queued steering entry: (text, kind, actor).
+type SteeringEntry = (String, SteerKind, Option<Principal>);
 
 pub struct Session {
-    id:               String,
-    config:           SessionOptions,
-    history:          History,
-    event_emitter:    Emitter,
-    state:            SessionState,
-    llm_client:       Client,
-    provider_profile: Arc<dyn AgentProfile>,
-    sandbox:          Arc<dyn Sandbox>,
-    steering_queue:   Arc<Mutex<VecDeque<String>>>,
-    followup_queue:   Arc<Mutex<VecDeque<String>>>,
-    cancel_token:     CancellationToken,
-    interrupt_reason: Arc<Mutex<Option<InterruptReason>>>,
-    memory:           Vec<String>,
-    env_context:      EnvContext,
-    skills:           Vec<Skill>,
-    system_prompt:    String,
-    file_tracker:     FileTracker,
-    tool_env:         Option<HashMap<String, String>>,
-    subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
+    id:                       String,
+    config:                   SessionOptions,
+    history:                  History,
+    event_emitter:            Emitter,
+    state:                    SessionState,
+    llm_client:               Client,
+    provider_profile:         Arc<dyn AgentProfile>,
+    sandbox:                  Arc<dyn Sandbox>,
+    steering_queue:           Arc<Mutex<VecDeque<SteeringEntry>>>,
+    followup_queue:           Arc<Mutex<VecDeque<String>>>,
+    cancel_token:             CancellationToken,
+    interrupt_reason:         Arc<Mutex<Option<InterruptReason>>>,
+    round_token:              Arc<std::sync::RwLock<CancellationToken>>,
+    completion_coordinator:   Option<Arc<dyn CompletionCoordinator>>,
+    memory:                   Vec<String>,
+    env_context:              EnvContext,
+    skills:                   Vec<Skill>,
+    system_prompt:            String,
+    file_tracker:             FileTracker,
+    tool_env:                 Option<HashMap<String, String>>,
+    subagent_manager:         Option<Arc<AsyncMutex<SubAgentManager>>>,
 }
 
 impl Session {
@@ -82,6 +88,8 @@ impl Session {
             followup_queue: Arc::new(Mutex::new(VecDeque::new())),
             cancel_token: CancellationToken::new(),
             interrupt_reason: Arc::new(Mutex::new(None)),
+            round_token: Arc::new(std::sync::RwLock::new(CancellationToken::new())),
+            completion_coordinator: None,
             memory: Vec::new(),
             env_context: EnvContext::default(),
             skills: Vec::new(),
@@ -417,7 +425,32 @@ impl Session {
         self.steering_queue
             .lock()
             .expect("steering queue lock poisoned")
-            .push_back(message);
+            .push_back((message, SteerKind::Append, None));
+    }
+
+    /// Push an interrupt steer and cancel the current round token.
+    pub fn interrupt_with(&self, text: String, actor: Option<Principal>) {
+        self.steering_queue
+            .lock()
+            .expect("steering queue lock poisoned")
+            .push_back((text, SteerKind::Interrupt, actor));
+        self.round_token
+            .read()
+            .expect("round token lock poisoned")
+            .cancel();
+    }
+
+    /// Returns a lightweight handle for external steering control.
+    #[must_use]
+    pub fn control_handle(&self) -> SessionControlHandle {
+        SessionControlHandle {
+            steering_queue: self.steering_queue.clone(),
+            round_token:    self.round_token.clone(),
+        }
+    }
+
+    pub fn set_completion_coordinator(&mut self, coord: Arc<dyn CompletionCoordinator>) {
+        self.completion_coordinator = Some(coord);
     }
 
     pub fn follow_up(&self, message: String) {
@@ -493,7 +526,9 @@ impl Session {
     }
 
     #[must_use]
-    pub fn steering_queue_handle(&self) -> Arc<Mutex<VecDeque<String>>> {
+    pub fn steering_queue_handle(
+        &self,
+    ) -> Arc<Mutex<VecDeque<SteeringEntry>>> {
         self.steering_queue.clone()
     }
 
@@ -690,12 +725,29 @@ impl Session {
                 text: expanded_input.clone(),
             });
 
-        // Drain steering queue before first LLM call
-        self.drain_steering();
-
         let mut round_count: usize = 0;
 
         loop {
+            // Drain steering at top of every iteration (covers pre-loop,
+            // post-tool, and post-interrupt paths uniformly).
+            self.drain_steering();
+
+            // Reset round token if it was cancelled (steer interrupt)
+            {
+                let needs_reset = self
+                    .round_token
+                    .read()
+                    .expect("round token lock poisoned")
+                    .is_cancelled();
+                if needs_reset {
+                    let mut guard = self
+                        .round_token
+                        .write()
+                        .expect("round token lock poisoned");
+                    *guard = CancellationToken::new();
+                }
+            }
+
             // Check max_tool_rounds_per_input
             if self.config.max_tool_rounds_per_input > 0
                 && round_count >= self.config.max_tool_rounds_per_input
@@ -721,6 +773,26 @@ impl Session {
                 self.close();
                 return Err(self.interrupted_error());
             }
+
+            // Build per-round composite token from cancel_token (terminal)
+            // and round_token (per-round steer interrupt).
+            let round_ct = self
+                .round_token
+                .read()
+                .expect("round token lock poisoned")
+                .clone();
+            let composite = CancellationToken::new();
+            let _composite_driver = {
+                let composite = composite.clone();
+                let cancel = self.cancel_token.clone();
+                let round = round_ct.clone();
+                tokio::spawn(async move {
+                    tokio::select! {
+                        () = cancel.cancelled() => composite.cancel(),
+                        () = round.cancelled() => composite.cancel(),
+                    }
+                })
+            };
 
             // Pre-turn compaction: trim context before building the request
             self.compact_if_needed().await;
@@ -765,7 +837,12 @@ impl Session {
                 let mut emitted_text = String::new();
                 let mut emitted_reasoning = String::new();
 
-                while let Some(event_result) = event_stream.next().await {
+                loop {
+                    let next = tokio::select! {
+                        next = event_stream.next() => next,
+                        () = composite.cancelled() => None,
+                    };
+                    let Some(event_result) = next else { break };
                     match event_result {
                         Ok(event) => {
                             match &event {
@@ -795,19 +872,30 @@ impl Session {
                             return Err(self.emit_llm_error(err));
                         }
                     }
-
-                    // Check cancellation between chunks
-                    if self.cancel_token.is_cancelled() {
-                        break;
-                    }
                 }
 
-                // If interrupted during streaming, drop the stream to cancel the HTTP
-                // connection, then close the session before returning.
+                // If terminal cancel during streaming, close and return error.
                 if self.cancel_token.is_cancelled() {
                     drop(event_stream);
                     self.close();
                     return Err(self.interrupted_error());
+                }
+
+                // Round-token steer interrupt during LLM streaming:
+                // drop the unrecorded turn and clear any partial UI output.
+                if round_ct.is_cancelled() {
+                    if !emitted_text.is_empty() || !emitted_reasoning.is_empty() {
+                        self.event_emitter.emit(
+                            self.id.clone(),
+                            AgentEvent::AssistantOutputReplace {
+                                text:      String::new(),
+                                reasoning: None,
+                            },
+                        );
+                    }
+                    drop(event_stream);
+                    response = None;
+                    break;
                 }
 
                 if let Some(resp) = accumulator.response().cloned() {
@@ -835,6 +923,12 @@ impl Session {
                         .open_stream_with_retry(&client, &request, &retry_policy)
                         .await?;
                 }
+            }
+
+            // If round was interrupted during LLM streaming, continue to
+            // next iteration (drain_steering at top will pick up the steer).
+            if response.is_none() && round_ct.is_cancelled() && !self.cancel_token.is_cancelled() {
+                continue;
             }
 
             let Some(response) = response else {
@@ -879,6 +973,13 @@ impl Session {
 
             // If no tool calls, natural completion
             if tool_calls.is_empty() {
+                let should_continue = self
+                    .completion_coordinator
+                    .as_ref()
+                    .is_some_and(|c| c.on_natural_completion());
+                if should_continue {
+                    continue;
+                }
                 break;
             }
 
@@ -904,24 +1005,26 @@ impl Session {
             self.file_tracker
                 .record_from_tool_calls(&tool_calls, &results);
 
-            // Check cancellation after tool execution
-            if self.cancel_token.is_cancelled() {
-                self.history.push(Turn::ToolResults {
-                    results,
-                    timestamp: SystemTime::now(),
-                });
-                self.close();
-                return Err(self.interrupted_error());
-            }
-
-            // Record tool results turn
+            // Always push tool results (maintains tool_use ↔ tool_result invariant)
             self.history.push(Turn::ToolResults {
                 results,
                 timestamp: SystemTime::now(),
             });
 
-            // Drain steering after tool execution
-            self.drain_steering();
+            // Check terminal cancellation
+            if self.cancel_token.is_cancelled() {
+                self.close();
+                return Err(self.interrupted_error());
+            }
+
+            // Check round-token interrupt (steer during tool execution).
+            // Continue to next iteration — drain_steering at top will pick up
+            // the message.
+            if round_ct.is_cancelled() {
+                self.transition(SessionState::Thinking);
+                continue;
+            }
+
             self.transition(SessionState::Thinking);
 
             // Loop detection
@@ -970,20 +1073,24 @@ impl Session {
     }
 
     fn drain_steering(&mut self) {
-        let messages: Vec<String> = self
+        let messages: Vec<(String, SteerKind, Option<Principal>)> = self
             .steering_queue
             .lock()
             .expect("steering queue lock poisoned")
             .drain(..)
             .collect();
-        for msg in messages {
+        for (msg, kind, actor) in messages {
             let text = msg.clone();
             self.history.push(Turn::Steering {
                 content:   msg,
                 timestamp: SystemTime::now(),
             });
             self.event_emitter
-                .emit(self.id.clone(), AgentEvent::SteeringInjected { text });
+                .emit(self.id.clone(), AgentEvent::SteeringInjected {
+                    text,
+                    kind,
+                    actor,
+                });
         }
     }
 
@@ -1029,6 +1136,55 @@ const fn is_auth_error(err: &LlmError) -> bool {
         err.provider_kind(),
         Some(ProviderErrorKind::Authentication | ProviderErrorKind::AccessDenied)
     )
+}
+
+/// Lightweight, clonable handle for external steering into a `Session`.
+/// The `SteeringHub` stores this — not the `Session` itself.
+#[derive(Clone)]
+pub struct SessionControlHandle {
+    steering_queue: Arc<Mutex<VecDeque<SteeringEntry>>>,
+    round_token:    Arc<std::sync::RwLock<CancellationToken>>,
+}
+
+impl SessionControlHandle {
+    /// Create a new control handle from shared queue and round token.
+    pub fn new(
+        steering_queue: Arc<Mutex<VecDeque<SteeringEntry>>>,
+        round_token: Arc<std::sync::RwLock<CancellationToken>>,
+    ) -> Self {
+        Self {
+            steering_queue,
+            round_token,
+        }
+    }
+
+    /// Push an append steer.
+    pub fn steer(&self, text: String, actor: Option<Principal>) {
+        self.steering_queue
+            .lock()
+            .expect("steering queue lock poisoned")
+            .push_back((text, SteerKind::Append, actor));
+    }
+
+    /// Push an interrupt steer and cancel the round token.
+    pub fn interrupt_with(&self, text: String, actor: Option<Principal>) {
+        self.steering_queue
+            .lock()
+            .expect("steering queue lock poisoned")
+            .push_back((text, SteerKind::Interrupt, actor));
+        self.round_token
+            .read()
+            .expect("round token lock poisoned")
+            .cancel();
+    }
+
+    /// Check if the steering queue is empty.
+    pub fn queue_is_empty(&self) -> bool {
+        self.steering_queue
+            .lock()
+            .expect("steering queue lock poisoned")
+            .is_empty()
+    }
 }
 
 #[cfg(test)]

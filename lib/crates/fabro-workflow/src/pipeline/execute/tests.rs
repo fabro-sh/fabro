@@ -237,6 +237,7 @@ async fn execute_test_run_with_options(
             artifact_sink: None,
             checkpoint: None,
             seed_context: None,
+            steering_hub: None,
         },
     )
     .await
@@ -295,6 +296,7 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
             artifact_sink:     None,
             checkpoint:        None,
             seed_context:      None,
+            steering_hub:      None,
         },
     )
     .await
@@ -363,6 +365,7 @@ async fn run_with_lifecycle(
             artifact_sink: None,
             checkpoint: None,
             seed_context: None,
+            steering_hub: None,
         },
     )
     .await?;

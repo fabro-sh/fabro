@@ -822,6 +822,7 @@ mod tests {
             Arc::new(SandboxGitRuntime::new()),
             metadata_runtime,
             metadata_writer,
+            None,
         )
     }
 
@@ -847,6 +848,7 @@ mod tests {
             Arc::new(fabro_auth::EnvCredentialSource::new()),
             Arc::new(SandboxGitRuntime::new()),
             Arc::new(RunMetadataRuntime::new()),
+            None,
             None,
         );
         let retroed = Retroed {

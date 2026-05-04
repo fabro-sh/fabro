@@ -805,6 +805,31 @@ impl Client {
         Ok(())
     }
 
+    pub async fn steer_run(&self, run_id: &str, text: &str, interrupt: bool) -> Result<()> {
+        let run_id = run_id.to_string();
+        let text: types::SteerRunRequestText = text
+            .to_string()
+            .try_into()
+            .map_err(|e| anyhow!("invalid steer text: {e}"))?;
+        self.send_api(|client| {
+            let run_id = run_id.clone();
+            let text = text.clone();
+            async move {
+                client
+                    .steer_run()
+                    .id(run_id)
+                    .body(types::SteerRunRequest {
+                        interrupt,
+                        text,
+                    })
+                    .send()
+                    .await
+            }
+        })
+        .await?;
+        Ok(())
+    }
+
     pub async fn archive_run(&self, run_id: &RunId) -> Result<()> {
         self.send_api(
             |client| async move { client.archive_run().id(run_id.to_string()).send().await },

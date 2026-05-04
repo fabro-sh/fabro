@@ -605,9 +605,13 @@ fn event_body_from_event(event: &Event) -> EventBody {
                     visit:     *visit,
                 })
             }
-            AgentEvent::SteeringInjected { text } => {
+            AgentEvent::SteeringInjected { text, kind, .. } => {
                 EventBody::AgentSteeringInjected(fabro_types::AgentSteeringInjectedProps {
-                    text:  text.clone(),
+                    text: text.clone(),
+                    kind: match kind {
+                        ::fabro_types::SteerKind::Append => "append".to_string(),
+                        ::fabro_types::SteerKind::Interrupt => "interrupt".to_string(),
+                    },
                     visit: *visit,
                 })
             }
@@ -708,6 +712,26 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 panic!("streaming-noise agent event should not be converted to RunEvent")
             }
         },
+        Event::SteeringAttached { .. } => {
+            EventBody::AgentSteeringAttached(fabro_types::AgentSteeringAttachedProps)
+        }
+        Event::SteeringDetached { .. } => {
+            EventBody::AgentSteeringDetached(fabro_types::AgentSteeringDetachedProps)
+        }
+        Event::SteerBuffered { kind, .. } => {
+            EventBody::AgentSteerBuffered(fabro_types::AgentSteerBufferedProps {
+                kind: match kind {
+                    ::fabro_types::SteerKind::Append => "append".to_string(),
+                    ::fabro_types::SteerKind::Interrupt => "interrupt".to_string(),
+                },
+            })
+        }
+        Event::SteerDropped { count, reason, .. } => {
+            EventBody::AgentSteerDropped(fabro_types::AgentSteerDroppedProps {
+                count:  *count,
+                reason: reason.clone(),
+            })
+        }
         Event::SubgraphStarted { start_node, .. } => {
             EventBody::SubgraphStarted(fabro_types::SubgraphStartedProps {
                 start_node: start_node.clone(),

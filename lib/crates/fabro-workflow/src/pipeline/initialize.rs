@@ -27,6 +27,7 @@ use tokio::time::timeout as tokio_timeout;
 use super::types::{InitOptions, Initialized, LlmSpec, Persisted, SandboxEnvSpec};
 use crate::devcontainer_bridge::{devcontainer_to_snapshot_config, run_devcontainer_lifecycle};
 use crate::error::Error;
+use crate::steering_hub::SteeringHub;
 use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::git::RUN_BRANCH_PREFIX;
 use crate::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
@@ -259,6 +260,7 @@ async fn build_registry(
     graph: &graph::Graph,
     llm_source: Arc<dyn CredentialSource>,
     cli_resolver: Option<CredentialResolver>,
+    steering_hub: Option<Arc<SteeringHub>>,
 ) -> Result<(Arc<HandlerRegistry>, bool), Error> {
     let build_no_backend = || Arc::new(default_registry(Arc::clone(&interviewer), || None));
 
@@ -299,8 +301,9 @@ async fn build_registry(
             let fallback_chain = spec.fallback_chain.clone();
             let mcp_servers = spec.mcp_servers.clone();
             let llm_source_for_api = Arc::clone(&llm_source);
+            let steering_hub_for_api = steering_hub.clone();
             let registry = Arc::new(default_registry(interviewer, move || {
-                let api = AgentApiBackend::new(
+                let mut api = AgentApiBackend::new(
                     model.clone(),
                     provider,
                     fallback_chain.clone(),
@@ -308,6 +311,9 @@ async fn build_registry(
                 )
                 .with_env(env.clone())
                 .with_mcp_servers(mcp_servers.clone());
+                if let Some(ref hub) = steering_hub_for_api {
+                    api = api.with_steering_hub(Arc::clone(hub));
+                }
                 let cli = cli_resolver
                     .clone()
                     .map_or_else(
@@ -575,6 +581,7 @@ pub async fn initialize(
             &graph,
             Arc::clone(&llm_source),
             cli_resolver,
+            options.steering_hub.clone(),
         )
         .await?
     };
@@ -721,6 +728,7 @@ pub async fn initialize(
         sandbox_git,
         metadata_runtime,
         metadata_writer,
+        options.steering_hub.clone(),
     );
     let engine = Arc::new(EngineServices {
         run: Arc::clone(&run_services),
@@ -947,6 +955,7 @@ mod tests {
             artifact_sink: None,
             checkpoint: None,
             seed_context: None,
+            steering_hub: None,
         })
         .await;
         let events = seen.lock().unwrap().clone();
@@ -1002,6 +1011,7 @@ mod tests {
             artifact_sink:     None,
             checkpoint:        None,
             seed_context:      None,
+            steering_hub:      None,
         };
 
         let plan = resolve_worktree_plan(&mut options);
@@ -1064,6 +1074,7 @@ mod tests {
             artifact_sink: None,
             checkpoint: None,
             seed_context: None,
+            steering_hub: None,
         })
         .await
         .unwrap();
@@ -1128,6 +1139,7 @@ mod tests {
             &graph,
             Arc::new(VaultCredentialSource::new(Arc::clone(&vault))),
             Some(CredentialResolver::new(vault)),
+            None,
         )
         .await
         .unwrap();
@@ -1193,6 +1205,7 @@ mod tests {
             artifact_sink: None,
             checkpoint: None,
             seed_context: None,
+            steering_hub: None,
         })
         .await
         .unwrap();
@@ -1305,6 +1318,7 @@ mod tests {
             artifact_sink: None,
             checkpoint: None,
             seed_context: None,
+            steering_hub: None,
         })
         .await;
 
@@ -1368,6 +1382,7 @@ mod tests {
             artifact_sink: None,
             checkpoint: None,
             seed_context: None,
+            steering_hub: None,
         })
         .await;
 

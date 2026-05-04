@@ -18,6 +18,7 @@ pub(crate) mod runs;
 pub(crate) mod sandbox;
 pub(crate) mod secret;
 pub(crate) mod server;
+pub(crate) mod steer;
 pub(crate) mod system;
 pub(crate) mod uninstall;
 pub(crate) mod upgrade;

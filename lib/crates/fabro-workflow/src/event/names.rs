@@ -82,6 +82,10 @@ pub fn event_name(event: &Event) -> &'static str {
             AgentEvent::McpServerReady { .. } => "agent.mcp.ready",
             AgentEvent::McpServerFailed { .. } => "agent.mcp.failed",
         },
+        Event::SteeringAttached { .. } => "agent.steering.attached",
+        Event::SteeringDetached { .. } => "agent.steering.detached",
+        Event::SteerBuffered { .. } => "agent.steer.buffered",
+        Event::SteerDropped { .. } => "agent.steer.dropped",
         Event::SubgraphStarted { .. } => "subgraph.started",
         Event::SubgraphCompleted { .. } => "subgraph.completed",
         Event::Sandbox { event } => match event {

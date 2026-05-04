@@ -1879,6 +1879,60 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/runs/{id}/steer:
+    post:
+      operationId: steerRun
+      tags: [Human-in-the-Loop]
+      summary: Steer Run
+      description: Sends a steering message to the agent running in the specified run.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SteerRunRequest"
+      responses:
+        "202":
+          description: Steer accepted and forwarded to the agent.
+        "400":
+          description: Invalid request body
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Run is not in a steerable state.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Worker process is unavailable.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/runs/{id}/stages:
     get:
       operationId: listRunStages
@@ -4683,6 +4737,25 @@ components:
             type: string
           description: Keys of selected options (for multi-select questions).
           example: ["option_a", "option_b"]
+
+    SteerRunRequest:
+      description: Request body for steering a running agent.
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 8192
+          description: Steering message to send to the agent.
+          example: "Try a different approach using the existing test helpers."
+        interrupt:
+          type: boolean
+          default: false
+          description: >
+            If true, cancel the in-flight LLM stream and tool calls in the
+            current round, delivering the message as the next user turn.
 
     ErrorResponseEntry:
       description: A single error entry in an error response.

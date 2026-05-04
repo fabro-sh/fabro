@@ -18,6 +18,7 @@ use tokio::sync::RwLock as AsyncRwLock;
 
 use crate::ManifestPath;
 use crate::artifact_upload::ArtifactSink;
+use crate::steering_hub::SteeringHub;
 use crate::context::Context;
 use crate::error::Error;
 use crate::event::Emitter;
@@ -255,6 +256,7 @@ pub struct InitOptions {
     pub run_control:       Option<Arc<RunControlState>>,
     pub checkpoint:        Option<Checkpoint>,
     pub seed_context:      Option<Context>,
+    pub steering_hub:      Option<Arc<SteeringHub>>,
 }
 
 /// Output of the INITIALIZE phase.

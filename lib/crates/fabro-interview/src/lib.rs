@@ -225,6 +225,7 @@ pub use control_protocol::{
     WORKER_CONTROL_PROTOCOL_VERSION, WorkerControlAnswer, WorkerControlEnvelope,
     WorkerControlMessage,
 };
+pub use fabro_types::SteerKind;
 pub use queue::QueueInterviewer;
 pub use recording::RecordingInterviewer;
 pub use replay::ReplayInterviewer;

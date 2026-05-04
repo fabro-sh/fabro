@@ -1004,6 +1004,7 @@ mod tests {
             Arc::new(SandboxGitRuntime::new()),
             Arc::clone(&lifecycle.metadata_runtime),
             lifecycle.metadata_writer.clone(),
+            None,
         );
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),

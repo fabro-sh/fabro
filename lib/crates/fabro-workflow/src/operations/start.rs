@@ -33,6 +33,7 @@ use tokio::sync::RwLock as AsyncRwLock;
 
 use crate::ManifestPath;
 use crate::artifact_upload::ArtifactSink;
+use crate::steering_hub::SteeringHub;
 use crate::context::Context;
 use crate::error::Error;
 use crate::event::{
@@ -82,6 +83,7 @@ struct RunSession {
     workflow_bundle:   Option<Arc<WorkflowBundle>>,
     run_control:       Option<Arc<RunControlState>>,
     vault:             Option<Arc<AsyncRwLock<Vault>>>,
+    steering_hub:      Option<Arc<SteeringHub>>,
 }
 
 pub struct StartServices {
@@ -100,6 +102,7 @@ pub struct StartServices {
     pub vault:              Option<Arc<AsyncRwLock<Vault>>>,
     pub on_node:            crate::OnNodeCallback,
     pub registry_override:  Option<Arc<HandlerRegistry>>,
+    pub steering_hub:       Option<Arc<SteeringHub>>,
 }
 
 pub struct Started {
@@ -453,6 +456,7 @@ impl RunSession {
             workflow_path,
             workflow_bundle,
             vault: services.vault,
+            steering_hub: services.steering_hub,
         })
     }
 }
@@ -759,6 +763,7 @@ impl RunSession {
             run_control: self.run_control,
             checkpoint,
             seed_context: self.seed_context,
+            steering_hub: self.steering_hub,
         };
         let mut initialized = Box::pin(pipeline::initialize(persisted, init_options)).await?;
         initialized.on_node = on_node;
@@ -1120,6 +1125,7 @@ mod tests {
             vault: None,
             on_node: None,
             registry_override: Some(registry),
+            steering_hub: None,
         }
     }
 

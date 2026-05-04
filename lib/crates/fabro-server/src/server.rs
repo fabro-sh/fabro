@@ -2751,6 +2751,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         vault: Some(Arc::clone(&state.vault)),
         on_node: None,
         registry_override,
+        steering_hub: None,
     };
 
     let execution = async {

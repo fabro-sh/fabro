@@ -37,6 +37,7 @@ fn help() {
       install     Set up the Fabro environment (LLMs, certs, GitHub)
       uninstall   Uninstall Fabro from this machine
       auth        Manage CLI authentication state
+      steer       Steer a running agent
       pr          Pull request operations
       secret      Manage server-owned secrets
       settings    Inspect effective settings

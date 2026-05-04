@@ -116,6 +116,31 @@ export function useSubmitInterviewAnswer(runId: string | undefined) {
   );
 }
 
+export interface SteerRunArg {
+  text: string;
+  interrupt: boolean;
+}
+
+export function useSteerRun(runId: string | undefined) {
+  const { mutate } = useSWRConfig();
+  return useSWRMutation(
+    runId ? `steer:${runId}` : null,
+    async (_key: string, { arg }: { arg: SteerRunArg }) => {
+      if (!runId) throw new Error("runId is required");
+      await apiJsonMutation<void, SteerRunArg>(
+        queryKeys.runs.steer(runId),
+        { arg },
+      );
+    },
+    {
+      onSuccess: () => {
+        if (!runId) return;
+        void mutate(queryKeys.runs.detail(runId));
+      },
+    },
+  );
+}
+
 export function useToggleDemoMode() {
   const { mutate } = useSWRConfig();
   return useSWRMutation(

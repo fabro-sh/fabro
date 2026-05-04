@@ -166,6 +166,7 @@ async fn initialized(
                     Arc::new(SandboxGitRuntime::new()),
                     Arc::new(RunMetadataRuntime::new()),
                     None,
+                    None,
                 ),
                 registry:        Arc::new(registry),
                 git_state:       std::sync::RwLock::new(None),

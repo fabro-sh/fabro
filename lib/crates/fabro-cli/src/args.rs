@@ -576,6 +576,26 @@ pub(crate) struct DumpArgs {
 }
 
 #[derive(Args)]
+pub(crate) struct SteerArgs {
+    #[command(flatten)]
+    pub(crate) server: ServerTargetArgs,
+
+    /// Run ID to steer
+    pub(crate) run_id: String,
+
+    /// Steering message text (omit if using --text-stdin)
+    pub(crate) text: Option<String>,
+
+    /// Read steering text from stdin
+    #[arg(long)]
+    pub(crate) text_stdin: bool,
+
+    /// Interrupt the current round before delivering the message
+    #[arg(long)]
+    pub(crate) interrupt: bool,
+}
+
+#[derive(Args)]
 pub(crate) struct SecretListArgs;
 
 #[derive(Args)]
@@ -1056,6 +1076,8 @@ pub(crate) enum Commands {
     Uninstall(UninstallArgs),
     /// Manage CLI authentication state
     Auth(AuthNamespace),
+    /// Steer a running agent
+    Steer(SteerArgs),
     /// Pull request operations
     Pr(PrNamespace),
     /// Manage server-owned secrets
@@ -1180,6 +1202,7 @@ impl Commands {
                 SystemCommand::Df(_) => "system df",
                 SystemCommand::Events(_) => "system events",
             },
+            Self::Steer(_) => "steer",
             Self::SendAnalytics { .. } => "__send_analytics",
             Self::SendPanic { .. } => "__send_panic",
             Self::RenderGraph => "__render-graph",

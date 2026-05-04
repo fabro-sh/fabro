@@ -16,6 +16,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::ManifestPath;
 use crate::event::Emitter;
+use crate::steering_hub::SteeringHub;
 use crate::handler::HandlerRegistry;
 use crate::run_metadata::{RunMetadataRuntime, RunMetadataWriterHandle};
 use crate::runtime_store::RunStoreHandle;
@@ -36,6 +37,7 @@ pub struct RunServices {
     pub(crate) sandbox_git:      Arc<SandboxGitRuntime>,
     pub(crate) metadata_runtime: Arc<RunMetadataRuntime>,
     pub(crate) metadata_writer:  Option<RunMetadataWriterHandle>,
+    pub steering_hub:            Option<Arc<SteeringHub>>,
 }
 
 impl RunServices {
@@ -51,6 +53,7 @@ impl RunServices {
         sandbox_git: Arc<SandboxGitRuntime>,
         metadata_runtime: Arc<RunMetadataRuntime>,
         metadata_writer: Option<RunMetadataWriterHandle>,
+        steering_hub: Option<Arc<SteeringHub>>,
     ) -> Arc<Self> {
         Arc::new(Self {
             run_store,
@@ -63,6 +66,7 @@ impl RunServices {
             sandbox_git,
             metadata_runtime,
             metadata_writer,
+            steering_hub,
         })
     }
 
@@ -214,6 +218,7 @@ impl EngineServices {
                 Arc::new(StubCredentialSource),
                 Arc::new(SandboxGitRuntime::new()),
                 Arc::new(RunMetadataRuntime::new()),
+                None,
                 None,
             ),
             registry:        Arc::new(HandlerRegistry::new(Box::new(start::StartHandler))),

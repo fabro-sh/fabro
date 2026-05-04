@@ -82,6 +82,7 @@ pub struct AgentTurnLimitReachedProps {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentSteeringInjectedProps {
     pub text:  String,
+    pub kind:  String,
     pub visit: u32,
 }
 
@@ -155,4 +156,25 @@ pub struct AgentMcpFailedProps {
     pub server_name: String,
     pub error:       String,
     pub visit:       u32,
+}
+
+/// Emitted when the `SteeringHub` attaches a session handle for a stage.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentSteeringAttachedProps;
+
+/// Emitted when the `SteeringHub` detaches a session handle for a stage.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentSteeringDetachedProps;
+
+/// Emitted when a steer arrives with no active session and is buffered.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentSteerBufferedProps {
+    pub kind: String,
+}
+
+/// Emitted when buffered or queued steers are dropped.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentSteerDroppedProps {
+    pub count:  usize,
+    pub reason: String,
 }

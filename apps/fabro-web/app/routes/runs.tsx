@@ -20,9 +20,9 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { ciConfig, columnStatusDisplay, deriveCiStatus, mapRunListItem } from "../data/runs";
 import type { CiStatus, CheckRun, CheckStatus, RunItem, RunWithStatus, ColumnStatus } from "../data/runs";
+import { SteerComposer } from "../components/steer-composer";
 import { EmptyState } from "../components/state";
 import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
-import { useDemoMode } from "../lib/demo-mode";
 import { useAuthConfig, useBoardsRuns, useSystemInfo } from "../lib/queries";
 import type { PaginatedBoardRunList } from "@qltysh/fabro-api-client";
 
@@ -276,11 +276,13 @@ function PrCard({
   icon: Icon,
   iconColor,
   actions,
+  onSteer,
 }: {
   pr: RunItem;
   icon: React.ComponentType<{ className?: string }>;
   iconColor: string;
   actions?: string[];
+  onSteer?: (runId: string) => void;
 }) {
   const lifecycleLabel = boardLifecycleStatusLabel(pr);
 
@@ -347,6 +349,7 @@ function PrCard({
               key={label}
               type="button"
               disabled={pr.actionDisabled}
+              onClick={label === "Steer" ? (e) => { e.preventDefault(); e.stopPropagation(); onSteer?.(pr.id); } : undefined}
               className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:text-fg-muted disabled:border-line ${
                 label === "Merge"
                   ? "border-mint/20 text-mint hover:border-mint/50 hover:text-fg"
@@ -396,11 +399,13 @@ function SortablePrCard({
   icon,
   iconColor,
   actions,
+  onSteer,
 }: {
   pr: RunItem;
   icon: React.ComponentType<{ className?: string }>;
   iconColor: string;
   actions?: string[];
+  onSteer?: (runId: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: pr.id });
   const wasDragging = useRef(false);
@@ -426,17 +431,13 @@ function SortablePrCard({
         }
       }}
     >
-      <PrCard pr={pr} icon={icon} iconColor={iconColor} actions={actions} />
+      <PrCard pr={pr} icon={icon} iconColor={iconColor} actions={actions} onSteer={onSteer} />
     </div>
   );
 }
 
-function BoardColumn({ column }: { column: Column }) {
+function BoardColumn({ column, onSteer }: { column: Column; onSteer: (runId: string) => void }) {
   const Icon = iconMap[column.iconType];
-  const demoMode = useDemoMode();
-  const actions = demoMode
-    ? column.actions
-    : column.actions.filter((label) => label !== "Steer");
   return (
     <div className="flex min-w-0 flex-col">
       <div className="mb-3 flex items-center gap-3">
@@ -457,7 +458,8 @@ function BoardColumn({ column }: { column: Column }) {
               pr={pr}
               icon={Icon}
               iconColor={column.text}
-              actions={actions}
+              actions={column.actions}
+              onSteer={onSteer}
             />
           ))}
         </div>
@@ -684,6 +686,7 @@ export default function Runs() {
   const [view, setView] = useState<ViewMode>("columns");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [columns, setColumns] = useState(initialColumns);
+  const [steerRunId, setSteerRunId] = useState<string | null>(null);
   const lowerQuery = query.toLowerCase();
   useBoardEvents();
 

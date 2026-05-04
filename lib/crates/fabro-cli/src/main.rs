@@ -287,6 +287,9 @@ async fn main_inner(worker_token: Option<String>) -> (String, Result<()>) {
                 ))
                 .await?;
             }
+            Commands::Steer(args) => {
+                commands::steer::execute(args).await?;
+            }
             Commands::Doctor(args) => {
                 let exit_code = Box::pin(commands::doctor::run_doctor(&args, &base_ctx)).await?;
                 std::process::exit(exit_code);

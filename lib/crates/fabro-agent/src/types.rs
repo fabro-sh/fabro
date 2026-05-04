@@ -2,6 +2,7 @@ use std::time::SystemTime;
 
 use fabro_llm::Error as LlmError;
 use fabro_llm::types::{ContentPart, ThinkingData, TokenCounts, ToolCall, ToolResult};
+use fabro_types::{Principal, SteerKind};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
@@ -157,7 +158,9 @@ pub enum AgentEvent {
         skill_name: String,
     },
     SteeringInjected {
-        text: String,
+        text:  String,
+        kind:  SteerKind,
+        actor: Option<Principal>,
     },
     CompactionStarted {
         estimated_tokens:    usize,
@@ -309,8 +312,8 @@ impl AgentEvent {
             Self::SkillExpanded { skill_name } => {
                 debug!(session_id, skill = skill_name.as_str(), "Skill expanded");
             }
-            Self::SteeringInjected { text } => {
-                debug!(session_id, text_len = text.len(), "Steering injected");
+            Self::SteeringInjected { text, kind, .. } => {
+                debug!(session_id, text_len = text.len(), ?kind, "Steering injected");
             }
             Self::CompactionStarted {
                 estimated_tokens,
@@ -418,6 +421,15 @@ pub struct SessionEvent {
     pub session_id:        String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<String>,
+}
+
+/// Called at natural completion (tool_calls empty) to coordinate with
+/// the steering source. Implementors can atomically check whether new
+/// steers arrived during the final response.
+pub trait CompletionCoordinator: Send + Sync {
+    /// Return `true` to continue the loop (queue is non-empty),
+    /// `false` to break.
+    fn on_natural_completion(&self) -> bool;
 }
 
 #[cfg(test)]

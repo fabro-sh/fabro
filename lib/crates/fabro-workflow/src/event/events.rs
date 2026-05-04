@@ -399,6 +399,27 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_session_id: Option<String>,
     },
+    /// Emitted when the SteeringHub registers a session handle for a stage.
+    SteeringAttached {
+        stage: String,
+    },
+    /// Emitted when the SteeringHub unregisters a session handle for a stage.
+    SteeringDetached {
+        stage: String,
+    },
+    /// Emitted when a steer arrives with no active session and is buffered.
+    SteerBuffered {
+        kind:  ::fabro_types::SteerKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<Principal>,
+    },
+    /// Emitted when buffered or queued steers are dropped.
+    SteerDropped {
+        count:  usize,
+        reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor:  Option<Principal>,
+    },
     SubgraphStarted {
         node_id:    String,
         start_node: String,
@@ -1053,6 +1074,18 @@ impl Event {
                 ..
             } => {
                 debug!(node_id, model, provider, "Prompt completed");
+            }
+            Self::SteeringAttached { stage } => {
+                debug!(stage, "Steering attached");
+            }
+            Self::SteeringDetached { stage } => {
+                debug!(stage, "Steering detached");
+            }
+            Self::SteerBuffered { kind, .. } => {
+                info!(?kind, "Steer buffered");
+            }
+            Self::SteerDropped { count, reason, .. } => {
+                warn!(count, reason, "Steer dropped");
             }
             Self::Agent { .. } | Self::Sandbox { .. } => {}
             Self::SandboxInitialized {

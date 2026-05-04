@@ -346,6 +346,7 @@ mod tests {
             Arc::new(crate::sandbox_git_runtime::SandboxGitRuntime::new()),
             Arc::new(crate::run_metadata::RunMetadataRuntime::new()),
             None,
+            None,
         );
         let mut engine = EngineServices::test_default();
         engine.run = Arc::clone(&services);
@@ -400,6 +401,7 @@ mod tests {
             test_llm_source(),
             Arc::new(crate::sandbox_git_runtime::SandboxGitRuntime::new()),
             Arc::new(crate::run_metadata::RunMetadataRuntime::new()),
+            None,
             None,
         );
 

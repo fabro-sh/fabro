@@ -61,6 +61,7 @@ export const queryKeys = {
     cancel: (id: string) => `/api/v1/runs/${pathSegment(id)}/cancel`,
     archive: (id: string) => `/api/v1/runs/${pathSegment(id)}/archive`,
     unarchive: (id: string) => `/api/v1/runs/${pathSegment(id)}/unarchive`,
+    steer: (id: string) => `/api/v1/runs/${pathSegment(id)}/steer`,
     attach: (id: string) => `/api/v1/runs/${pathSegment(id)}/attach`,
   },
   workflows: {
