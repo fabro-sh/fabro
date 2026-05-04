@@ -594,7 +594,7 @@ export class CrossTabSseCoordinator {
 
     this.ownCandidate = candidate;
     this.candidates.set(candidateKey(candidate), candidate);
-    this.post(candidate);
+    if (!this.post(candidate)) return;
     this.candidateTimer = setTimeout(() => {
       this.completeCandidacy(candidate);
     }, this.timing.electionJitterMs);
@@ -651,7 +651,7 @@ export class CrossTabSseCoordinator {
       this.handleLeaderEventSourceMessage(message.data);
     };
 
-    this.post({
+    const announced = this.post({
       type: "leader-changed",
       version: MESSAGE_VERSION,
       tabId: this.tabId,
@@ -660,6 +660,7 @@ export class CrossTabSseCoordinator {
       generation,
       visibility: this.currentVisibility(),
     });
+    if (!announced) return;
     this.startHeartbeat();
     this.resyncAll();
   }
@@ -761,14 +762,14 @@ export class CrossTabSseCoordinator {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
     }
-    this.sendHeartbeat();
+    if (!this.sendHeartbeat()) return;
     this.heartbeatTimer = setInterval(() => {
       this.sendHeartbeat();
     }, this.timing.heartbeatMs);
   }
 
-  private sendHeartbeat() {
-    if (!this.isLeader) return;
+  private sendHeartbeat(): boolean {
+    if (!this.isLeader) return false;
     const visibility = this.currentVisibility();
     this.leader = {
       leaderId: this.tabId,
@@ -776,7 +777,7 @@ export class CrossTabSseCoordinator {
       visibility,
       lastSeen: this.now(),
     };
-    this.post({
+    return this.post({
       type: "heartbeat",
       version: MESSAGE_VERSION,
       tabId: this.tabId,
@@ -806,7 +807,7 @@ export class CrossTabSseCoordinator {
     this.leader = null;
 
     if (broadcast) {
-      this.post({
+      const released = this.post({
         type: "release",
         version: MESSAGE_VERSION,
         tabId: this.tabId,
@@ -814,6 +815,7 @@ export class CrossTabSseCoordinator {
         leaderId: this.tabId,
         generation,
       });
+      if (!released) return;
       this.post({
         type: "resync",
         version: MESSAGE_VERSION,
@@ -888,7 +890,10 @@ export class CrossTabSseCoordinator {
   }
 
   private post(message: CrossTabSseMessage): boolean {
-    if (!this.channel) return false;
+    if (!this.channel) {
+      this.degradeToFallback();
+      return false;
+    }
     try {
       this.channel.postMessage(message);
       return true;
