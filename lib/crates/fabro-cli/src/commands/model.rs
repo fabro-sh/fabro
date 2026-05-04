@@ -4,6 +4,7 @@ use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_api::types as api_types;
 use fabro_model::{Catalog, Model, ModelTestMode, Provider};
 use fabro_util::terminal::Styles;
+use futures::{StreamExt, stream};
 use serde::Serialize;
 
 use crate::args::{ModelListArgs, ModelTestArgs, ModelsCommand};
@@ -35,6 +36,13 @@ struct ModelTestOutput {
     total:    usize,
     failures: u32,
     skipped:  u32,
+}
+
+struct CompletedModelTest {
+    index:        usize,
+    model:        Model,
+    result_color: Color,
+    status:       String,
 }
 
 pub(crate) async fn execute(
@@ -155,6 +163,28 @@ fn print_models_table(models: &[Model], styles: &Styles) {
     );
 }
 
+fn configured_model_test_status(
+    result: Result<api_types::ModelTestResult>,
+) -> (Color, String, bool) {
+    match result {
+        Ok(resp) if resp.status == api_types::ModelTestResultStatus::Ok => {
+            (Color::Green, "ok".to_string(), false)
+        }
+        Ok(resp) if resp.status == api_types::ModelTestResultStatus::Skip => (
+            Color::Red,
+            "error: provider became unconfigured after listing".to_string(),
+            true,
+        ),
+        Ok(resp) => {
+            let message = resp
+                .error_message
+                .unwrap_or_else(|| "unknown error".to_string());
+            (Color::Red, format!("error: {message}"), true)
+        }
+        Err(err) => (Color::Red, format!("error: {err}"), true),
+    }
+}
+
 fn model_test_row_from_status(model: &Model, status: &str, result_color: Color) -> ModelTestRow {
     let trimmed = status.trim();
     match result_color {
@@ -197,6 +227,7 @@ async fn test_models_via_server(
     provider: Option<&str>,
     model: Option<&str>,
     deep: bool,
+    jobs: usize,
     styles: &Styles,
     json_output: bool,
 ) -> Result<()> {
@@ -289,48 +320,51 @@ async fn test_models_via_server(
             }
         }
 
-        for info in &configured {
-            if !json_output {
-                eprint!("Testing {}...", info.id);
-            }
-            let result = client.test_model(&info.id, request_mode).await;
-            if !json_output {
-                eprintln!(" done");
-            }
-
-            let (result_color, status) = match result {
-                Ok(resp) if resp.status == api_types::ModelTestResultStatus::Ok => {
-                    (Color::Green, "ok".to_string())
-                }
-                Ok(resp) if resp.status == api_types::ModelTestResultStatus::Skip => {
-                    failures += 1;
+        let mut completed = stream::iter(configured.into_iter().enumerate())
+            .map(|(index, info)| {
+                let client = client.clone();
+                async move {
+                    let result = client.test_model(&info.id, request_mode).await;
+                    if !json_output {
+                        eprintln!("Testing {}... done", info.id);
+                    }
+                    let (result_color, status, failed) = configured_model_test_status(result);
                     (
-                        Color::Red,
-                        "error: provider became unconfigured after listing".to_string(),
+                        CompletedModelTest {
+                            index,
+                            model: info,
+                            result_color,
+                            status,
+                        },
+                        failed,
                     )
                 }
-                Ok(resp) => {
-                    failures += 1;
-                    let message = resp
-                        .error_message
-                        .unwrap_or_else(|| "unknown error".to_string());
-                    (Color::Red, format!("error: {message}"))
-                }
-                Err(err) => {
-                    failures += 1;
-                    (Color::Red, format!("error: {err}"))
-                }
-            };
+            })
+            .buffer_unordered(jobs)
+            .collect::<Vec<_>>()
+            .await;
 
-            let mut row = model_row(info, use_color);
+        completed.sort_by_key(|(completed, _)| completed.index);
+
+        for (completed, failed) in completed {
+            if failed {
+                failures += 1;
+            }
+
+            let mut row = model_row(&completed.model, use_color);
             row.push(
-                status
+                completed
+                    .status
                     .clone()
                     .cell()
-                    .foreground_color(color_if(use_color, result_color)),
+                    .foreground_color(color_if(use_color, completed.result_color)),
             );
             rows.push(row);
-            json_rows.push(model_test_row_from_status(info, &status, result_color));
+            json_rows.push(model_test_row_from_status(
+                &completed.model,
+                &completed.status,
+                completed.result_color,
+            ));
         }
     }
 
@@ -404,6 +438,7 @@ async fn run_models(
             provider,
             model,
             deep,
+            jobs,
             ..
         }) => {
             test_models_via_server(
@@ -411,6 +446,7 @@ async fn run_models(
                 provider.as_deref(),
                 model.as_deref(),
                 deep,
+                jobs,
                 &styles,
                 json_output,
             )

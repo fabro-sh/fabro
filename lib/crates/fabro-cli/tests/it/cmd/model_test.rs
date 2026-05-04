@@ -1,6 +1,17 @@
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::Duration;
+
 use assert_cmd::Command;
+use axum::extract::{Path, State};
+use axum::routing::{get, post};
+use axum::{Json, Router};
 use fabro_test::{fabro_snapshot, test_context};
 use httpmock::MockServer;
+use tokio::net::TcpListener;
+use tokio::sync::{Semaphore, oneshot};
 
 fn remove_provider_env(cmd: &mut Command) -> &mut Command {
     cmd.env_remove("ANTHROPIC_API_KEY")
@@ -78,8 +89,9 @@ fn help() {
       -p, --provider <PROVIDER>  Filter by provider
       -m, --model <MODEL>        Test a specific model
           --no-upgrade-check     Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --deep                 Run a multi-turn tool-use test (catches reasoning round-trip bugs)
+      -j, --jobs <JOBS>          Number of model tests to run concurrently in bulk mode [default: 4]
           --quiet                Suppress non-essential output [env: FABRO_QUIET=]
+          --deep                 Run a multi-turn tool-use test (catches reasoning round-trip bugs)
           --verbose              Enable verbose output [env: FABRO_VERBOSE=]
       -h, --help                 Print help
     ----- stderr -----
@@ -336,4 +348,306 @@ fn model_test_json_partitions_skip_and_fail() {
         json["results"][1]["error"],
         "provider became unconfigured after listing"
     );
+}
+
+#[derive(Clone)]
+struct ConcurrentModelServerState {
+    models:          Vec<serde_json::Value>,
+    gate:            Arc<ConcurrencyGate>,
+    response_delays: Arc<HashMap<String, Duration>>,
+}
+
+struct ConcurrentModelServer {
+    base_url:    String,
+    gate:        Arc<ConcurrencyGate>,
+    shutdown_tx: Option<oneshot::Sender<()>>,
+    join_handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for ConcurrentModelServer {
+    fn drop(&mut self) {
+        if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            let _ = shutdown_tx.send(());
+        }
+        if let Some(join_handle) = self.join_handle.take() {
+            join_handle
+                .join()
+                .expect("concurrent model test server thread should not panic");
+        }
+    }
+}
+
+struct ConcurrencyGate {
+    expected:      usize,
+    arrived:       AtomicUsize,
+    in_flight:     AtomicUsize,
+    max_in_flight: AtomicUsize,
+    released:      AtomicBool,
+    timed_out:     AtomicBool,
+    release:       Semaphore,
+}
+
+impl ConcurrencyGate {
+    fn new(expected: usize) -> Self {
+        Self {
+            expected,
+            arrived: AtomicUsize::new(0),
+            in_flight: AtomicUsize::new(0),
+            max_in_flight: AtomicUsize::new(0),
+            released: AtomicBool::new(expected == 0),
+            timed_out: AtomicBool::new(false),
+            release: Semaphore::new(0),
+        }
+    }
+
+    async fn enter(&self) {
+        let in_flight = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+        self.max_in_flight.fetch_max(in_flight, Ordering::SeqCst);
+
+        if self.released.load(Ordering::SeqCst) {
+            return;
+        }
+
+        let arrived = self.arrived.fetch_add(1, Ordering::SeqCst) + 1;
+        if arrived >= self.expected {
+            if !self.released.swap(true, Ordering::SeqCst) {
+                self.release.add_permits(self.expected);
+            }
+            return;
+        }
+
+        let permit = self.release.acquire();
+        if self.released.load(Ordering::SeqCst) {
+            return;
+        }
+
+        if tokio::time::timeout(Duration::from_secs(15), permit)
+            .await
+            .is_err()
+        {
+            self.timed_out.store(true, Ordering::SeqCst);
+            if !self.released.swap(true, Ordering::SeqCst) {
+                self.release.add_permits(self.expected);
+            }
+        }
+    }
+
+    fn exit(&self) {
+        self.in_flight.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    fn max_in_flight(&self) -> usize {
+        self.max_in_flight.load(Ordering::SeqCst)
+    }
+
+    fn timed_out(&self) -> bool {
+        self.timed_out.load(Ordering::SeqCst)
+    }
+}
+
+fn start_concurrent_model_server(
+    models: Vec<serde_json::Value>,
+    gate_expected: usize,
+    response_delays: HashMap<String, Duration>,
+) -> ConcurrentModelServer {
+    #[expect(
+        clippy::disallowed_types,
+        reason = "Bind synchronously so we can read the listening port before spawning the \
+                  runtime thread; converted to tokio::net::TcpListener inside the runtime."
+    )]
+    let std_listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test server should bind");
+    std_listener
+        .set_nonblocking(true)
+        .expect("test server listener should be nonblocking");
+    let addr: SocketAddr = std_listener
+        .local_addr()
+        .expect("test server should have addr");
+    let gate = Arc::new(ConcurrencyGate::new(gate_expected));
+    let state = ConcurrentModelServerState {
+        models,
+        gate: Arc::clone(&gate),
+        response_delays: Arc::new(response_delays),
+    };
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Owns a dedicated OS thread that hosts a fresh Tokio runtime so the test server \
+                  is independent of any caller runtime and joinable via Drop."
+    )]
+    let join_handle = std::thread::spawn(move || {
+        let runtime = tokio::runtime::Runtime::new().expect("test runtime should start");
+        runtime.block_on(async move {
+            let listener =
+                TcpListener::from_std(std_listener).expect("test listener should convert");
+            let app = Router::new()
+                .route("/api/v1/models", get(concurrent_list_models))
+                .route("/api/v1/models/{id}/test", post(concurrent_test_model))
+                .with_state(state);
+            let _ = axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await;
+        });
+    });
+
+    ConcurrentModelServer {
+        base_url: format!("http://{addr}"),
+        gate,
+        shutdown_tx: Some(shutdown_tx),
+        join_handle: Some(join_handle),
+    }
+}
+
+async fn concurrent_list_models(
+    State(state): State<ConcurrentModelServerState>,
+) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "data": state.models,
+        "meta": { "has_more": false }
+    }))
+}
+
+async fn concurrent_test_model(
+    State(state): State<ConcurrentModelServerState>,
+    Path(id): Path<String>,
+) -> Json<serde_json::Value> {
+    state.gate.enter().await;
+    if let Some(delay) = state.response_delays.get(&id) {
+        tokio::time::sleep(*delay).await;
+    }
+    state.gate.exit();
+
+    Json(serde_json::json!({
+        "model_id": id,
+        "status": "ok"
+    }))
+}
+
+#[test]
+fn model_test_default_jobs_runs_four_concurrently() {
+    let context = test_context!();
+    let models = vec![
+        model_json("claude-opus-4-7", "anthropic", true),
+        model_json("claude-opus-4-6", "anthropic", true),
+        model_json("claude-sonnet-4-5", "anthropic", true),
+        model_json("claude-sonnet-4-6", "anthropic", true),
+        model_json("claude-haiku-4-5", "anthropic", true),
+    ];
+    let server = start_concurrent_model_server(models, 4, HashMap::new());
+    context.set_http_target(&server.base_url);
+
+    let mut cmd = context.command();
+    remove_provider_env(&mut cmd);
+    cmd.args(["model", "test"]);
+    let output = cmd.output().expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "model test should succeed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !server.gate.timed_out(),
+        "concurrency gate timed out before four requests arrived"
+    );
+    assert_eq!(
+        server.gate.max_in_flight(),
+        4,
+        "default jobs should run four model tests concurrently before the gate releases"
+    );
+}
+
+#[test]
+fn model_test_explicit_jobs_two_runs_two_concurrently() {
+    let context = test_context!();
+    let models = vec![
+        model_json("claude-opus-4-7", "anthropic", true),
+        model_json("claude-opus-4-6", "anthropic", true),
+        model_json("claude-sonnet-4-5", "anthropic", true),
+        model_json("claude-sonnet-4-6", "anthropic", true),
+        model_json("claude-haiku-4-5", "anthropic", true),
+    ];
+    let server = start_concurrent_model_server(models, 2, HashMap::new());
+    context.set_http_target(&server.base_url);
+
+    let mut cmd = context.command();
+    remove_provider_env(&mut cmd);
+    cmd.args(["model", "test", "--jobs", "2"]);
+    let output = cmd.output().expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "model test should succeed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !server.gate.timed_out(),
+        "concurrency gate timed out before two requests arrived"
+    );
+    assert_eq!(
+        server.gate.max_in_flight(),
+        2,
+        "--jobs 2 should run two model tests concurrently before the gate releases"
+    );
+}
+
+#[test]
+fn model_test_json_preserves_listing_order_under_concurrency() {
+    let context = test_context!();
+    let models = vec![
+        model_json("claude-opus-4-7", "anthropic", true),
+        model_json("claude-opus-4-6", "anthropic", true),
+        model_json("claude-sonnet-4-5", "anthropic", true),
+        model_json("claude-sonnet-4-6", "anthropic", true),
+        model_json("claude-haiku-4-5", "anthropic", true),
+    ];
+    let response_delays = HashMap::from([
+        ("claude-opus-4-7".to_string(), Duration::from_millis(250)),
+        ("claude-opus-4-6".to_string(), Duration::from_millis(200)),
+        ("claude-sonnet-4-5".to_string(), Duration::from_millis(150)),
+        ("claude-sonnet-4-6".to_string(), Duration::from_millis(100)),
+        ("claude-haiku-4-5".to_string(), Duration::from_millis(50)),
+    ]);
+    let server = start_concurrent_model_server(models, 5, response_delays);
+    context.set_http_target(&server.base_url);
+
+    let mut cmd = context.command();
+    remove_provider_env(&mut cmd);
+    cmd.args(["model", "test", "--jobs", "5", "--json"]);
+    let output = cmd.output().expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "model test should succeed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !server.gate.timed_out(),
+        "concurrency gate timed out before five requests arrived"
+    );
+    assert_eq!(
+        server.gate.max_in_flight(),
+        5,
+        "ordering test should have all five model requests in flight"
+    );
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+    let models = json["results"]
+        .as_array()
+        .expect("results should be an array")
+        .iter()
+        .map(|row| row["model"].as_str().expect("model should be a string"))
+        .collect::<Vec<_>>();
+    assert_eq!(models, vec![
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-sonnet-4-5",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5",
+    ]);
 }

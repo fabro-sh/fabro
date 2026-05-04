@@ -876,6 +876,15 @@ pub(crate) struct ModelTestArgs {
     #[arg(short, long)]
     pub(crate) model: Option<String>,
 
+    /// Number of model tests to run concurrently in bulk mode
+    #[arg(
+        short = 'j',
+        long,
+        default_value_t = 4,
+        value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..)
+    )]
+    pub(crate) jobs: usize,
+
     /// Run a multi-turn tool-use test (catches reasoning round-trip bugs)
     #[arg(long)]
     pub(crate) deep: bool,
