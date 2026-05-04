@@ -217,7 +217,7 @@ where
 /// A typed credential reference. Literal secret strings are rejected at
 /// deserialization so settings never carry a successful "secret string"
 /// representation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
 pub enum CredentialRef {
     /// Structured credential stored in `fabro-vault` keyed by `<id>`.
@@ -227,30 +227,21 @@ pub enum CredentialRef {
     Env(String),
 }
 
-impl CredentialRef {
-    /// The string form, e.g. `"credential:openai_codex"` or
-    /// `"env:KIMI_API_KEY"`. Stable for serialization round-trips.
-    #[must_use]
-    pub fn as_serialized(&self) -> String {
-        match self {
-            Self::Credential(id) => format!("credential:{id}"),
-            Self::Env(name) => format!("env:{name}"),
-        }
-    }
-}
-
 impl std::fmt::Display for CredentialRef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Display deliberately writes only the typed reference form, never
         // any resolved secret value. Env names and credential IDs are not
         // themselves secret.
-        f.write_str(&self.as_serialized())
+        match self {
+            Self::Credential(id) => write!(f, "credential:{id}"),
+            Self::Env(name) => write!(f, "env:{name}"),
+        }
     }
 }
 
 impl From<CredentialRef> for String {
     fn from(value: CredentialRef) -> Self {
-        value.as_serialized()
+        value.to_string()
     }
 }
 
@@ -306,14 +297,6 @@ impl TryFrom<String> for CredentialRef {
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         value.parse()
-    }
-}
-
-impl<'de> Deserialize<'de> for CredentialRef {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        use serde::de::Error;
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(D::Error::custom)
     }
 }
 

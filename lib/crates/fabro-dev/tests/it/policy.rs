@@ -4,7 +4,7 @@
 //! product-level invariants. They run as part of `cargo nextest` and are
 //! cheap (text scans only).
 
-use std::path::{Path, PathBuf};
+use walkdir::WalkDir;
 
 use crate::workspace_root;
 
@@ -16,6 +16,9 @@ use crate::workspace_root;
 ///
 /// The allowed-callers list below is the policy boundary. Adding a new
 /// caller is intentional and requires updating this list.
+///
+/// The walker only descends into `lib/`, so non-`lib/` paths (docs, top-level
+/// markdown) are not part of the allowlist.
 const BOOTSTRAP_CATALOG_ALLOWED_PATH_FRAGMENTS: &[&str] = &[
     // The bootstrap module itself.
     "lib/crates/fabro-model/src/bootstrap_catalog",
@@ -30,17 +33,48 @@ const BOOTSTRAP_CATALOG_ALLOWED_PATH_FRAGMENTS: &[&str] = &[
     "test_support",
     "/tests/it/",
     "/tests/policy.rs",
-    // Documentation files referencing the policy.
-    "docs/",
-    "CLAUDE.md",
-    "AGENTS.md",
 ];
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "policy test reads source files synchronously with std::fs"
+)]
 fn bootstrap_catalog_references_stay_in_allowlist() {
     let root = workspace_root();
-    let mut violations: Vec<(PathBuf, usize, String)> = Vec::new();
-    walk_rust_sources(&root, &mut |path, contents| {
+    let lib_root = root.join("lib");
+    let mut violations: Vec<(String, usize, String)> = Vec::new();
+
+    let walker = WalkDir::new(&lib_root).into_iter().filter_entry(|entry| {
+        // Skip generated/output directories at any depth.
+        let name = entry.file_name().to_string_lossy();
+        !matches!(
+            name.as_ref(),
+            "target" | ".git" | "node_modules" | "dist" | "build"
+        )
+    });
+
+    for entry in walker.flatten() {
+        let path = entry.path();
+        if !path.is_file() || path.extension().is_none_or(|ext| ext != "rs") {
+            continue;
+        }
+        let Ok(contents) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        // Cheap early-out: avoids per-line work for the ~99% of files with no
+        // reference to the symbol.
+        if !contents.contains("bootstrap_catalog") {
+            continue;
+        }
+        let rel = path.strip_prefix(&root).unwrap_or(path);
+        let rel_str = rel.to_string_lossy().replace('\\', "/");
+        let path_allowed = BOOTSTRAP_CATALOG_ALLOWED_PATH_FRAGMENTS
+            .iter()
+            .any(|frag| rel_str.contains(frag));
+        if path_allowed {
+            continue;
+        }
         for (idx, line) in contents.lines().enumerate() {
             if !line.contains("bootstrap_catalog") {
                 continue;
@@ -50,57 +84,17 @@ fn bootstrap_catalog_references_stay_in_allowlist() {
             if trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with('*') {
                 continue;
             }
-            let rel = path.strip_prefix(&root).unwrap_or(path);
-            let rel_str = rel.to_string_lossy().replace('\\', "/");
-            if BOOTSTRAP_CATALOG_ALLOWED_PATH_FRAGMENTS
-                .iter()
-                .any(|frag| rel_str.contains(frag))
-            {
-                continue;
-            }
-            violations.push((rel.to_path_buf(), idx + 1, line.to_string()));
+            violations.push((rel_str.clone(), idx + 1, line.to_string()));
         }
-    });
+    }
 
     assert!(
         violations.is_empty(),
         "bootstrap_catalog (install-only) referenced from non-allowlisted source files:\n{}\n\nIf this is intentional, add the path fragment to BOOTSTRAP_CATALOG_ALLOWED_PATH_FRAGMENTS in lib/crates/fabro-dev/tests/it/policy.rs.",
         violations
             .into_iter()
-            .map(|(p, l, s)| format!("  {}:{}: {}", p.display(), l, s.trim()))
+            .map(|(p, l, s)| format!("  {p}:{l}: {}", s.trim()))
             .collect::<Vec<_>>()
             .join("\n"),
     );
-}
-
-#[expect(
-    clippy::disallowed_methods,
-    reason = "policy test reads source files synchronously with std::fs"
-)]
-fn walk_rust_sources(root: &Path, on_file: &mut dyn FnMut(&Path, &str)) {
-    let mut stack: Vec<PathBuf> = vec![root.join("lib")];
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            // Skip generated/output directories.
-            if matches!(
-                name_str.as_ref(),
-                "target" | ".git" | "node_modules" | "dist" | "build"
-            ) {
-                continue;
-            }
-            if path.is_dir() {
-                stack.push(path);
-            } else if path.extension().is_some_and(|ext| ext == "rs") {
-                if let Ok(contents) = std::fs::read_to_string(&path) {
-                    on_file(&path, &contents);
-                }
-            }
-        }
-    }
 }

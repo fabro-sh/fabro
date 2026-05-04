@@ -8,6 +8,8 @@
 //! (in `fabro-model`) and the LLM factory registry (in `fabro-llm`) must agree
 //! on the same set of adapter keys; the parity is enforced by tests.
 
+use strum::VariantArray;
+
 use crate::Speed;
 use crate::reasoning::ReasoningEffort;
 
@@ -64,13 +66,9 @@ pub struct AdapterMetadata {
     pub controls:        AdapterControlCapabilities,
 }
 
-const FULL_REASONING_EFFORTS: &[ReasoningEffort] = &[
-    ReasoningEffort::Low,
-    ReasoningEffort::Medium,
-    ReasoningEffort::High,
-    ReasoningEffort::XHigh,
-    ReasoningEffort::Max,
-];
+/// Every reasoning-effort variant. Re-exposed as a const slice so static
+/// adapter metadata can reference it without re-listing variants.
+const FULL_REASONING_EFFORTS: &[ReasoningEffort] = ReasoningEffort::VARIANTS;
 
 const FAST_SPEEDS: &[Speed] = &[Speed::Fast];
 

@@ -410,29 +410,10 @@ pub struct RateLimitInfo {
 }
 
 // --- 3.8 ReasoningEffort ---
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    strum::Display,
-    strum::EnumString,
-    strum::IntoStaticStr,
-)]
-#[serde(rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
-pub enum ReasoningEffort {
-    Low,
-    Medium,
-    High,
-    XHigh,
-    Max,
-}
+//
+// Re-exported from `fabro-model` so catalog data, request validation, OpenAPI
+// replacement types, and the LLM client share one enum.
+pub use fabro_model::ReasoningEffort;
 
 // --- 3.6 Request ---
 
@@ -1276,31 +1257,5 @@ mod tests {
     #[test]
     fn tool_choice_mode_str_named() {
         assert_eq!(ToolChoice::named("get_weather").mode_str(), "named");
-    }
-
-    #[test]
-    fn reasoning_effort_from_str_round_trip() {
-        use std::str::FromStr;
-        assert_eq!(ReasoningEffort::from_str("low"), Ok(ReasoningEffort::Low));
-        assert_eq!(
-            ReasoningEffort::from_str("medium"),
-            Ok(ReasoningEffort::Medium)
-        );
-        assert_eq!(ReasoningEffort::from_str("high"), Ok(ReasoningEffort::High));
-        assert_eq!(
-            ReasoningEffort::from_str("xhigh"),
-            Ok(ReasoningEffort::XHigh)
-        );
-        assert_eq!(ReasoningEffort::from_str("max"), Ok(ReasoningEffort::Max));
-        assert_eq!(ReasoningEffort::XHigh.to_string(), "xhigh");
-        assert_eq!(<&'static str>::from(ReasoningEffort::XHigh), "xhigh");
-        assert_eq!(ReasoningEffort::Max.to_string(), "max");
-        assert_eq!(<&'static str>::from(ReasoningEffort::Max), "max");
-    }
-
-    #[test]
-    fn reasoning_effort_from_str_rejects_unknown() {
-        use std::str::FromStr;
-        assert!(ReasoningEffort::from_str("bogus").is_err());
     }
 }

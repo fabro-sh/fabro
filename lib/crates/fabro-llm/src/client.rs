@@ -321,7 +321,7 @@ impl Client {
     }
 }
 
-fn auth_value(auth_header: &ApiKeyHeader) -> String {
+pub(crate) fn auth_value(auth_header: &ApiKeyHeader) -> String {
     match auth_header {
         ApiKeyHeader::Bearer(value) | ApiKeyHeader::Custom { value, .. } => value.clone(),
     }
