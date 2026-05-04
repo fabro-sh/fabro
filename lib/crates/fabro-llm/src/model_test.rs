@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use fabro_model::Model;
 pub use fabro_model::ModelTestMode;
+use fabro_model::{Model, Provider};
 use strum::IntoStaticStr;
 use tokio::time;
 
@@ -54,8 +54,18 @@ pub async fn run_model_test(
 }
 
 async fn run_basic_test(info: &Model, client: Arc<Client>) -> ModelTestOutcome {
-    let params = GenerateParams::new(&info.id, client)
-        .provider(<&'static str>::from(info.provider))
+    run_basic_model_probe(&info.id, info.provider, client).await
+}
+
+/// Run the cheap single-prompt model availability probe without requiring a
+/// catalog-backed [`Model`].
+pub async fn run_basic_model_probe(
+    model_id: &str,
+    provider: Provider,
+    client: Arc<Client>,
+) -> ModelTestOutcome {
+    let params = GenerateParams::new(model_id, client)
+        .provider(<&'static str>::from(provider))
         .prompt("Say OK")
         .max_tokens(16);
 

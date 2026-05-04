@@ -97,9 +97,10 @@ async fn openai_gpt_5_5_complete() {
     assert_eq!(response.provider, "openai");
 }
 
-#[fabro_macros::e2e_test(live("OPENAI_API_KEY"))]
+#[fabro_macros::e2e_test(live("OPENAI_GPT_5_5_PRO_API_KEY"))]
 async fn openai_gpt_5_5_pro_complete() {
-    let api_key = std::env::var(EnvVars::OPENAI_API_KEY).expect("OPENAI_API_KEY must be set");
+    let api_key = std::env::var("OPENAI_GPT_5_5_PRO_API_KEY")
+        .expect("OPENAI_GPT_5_5_PRO_API_KEY must be set");
     let adapter = OpenAiAdapter::new(api_key);
     let request = Request {
         temperature: None,

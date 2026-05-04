@@ -99,6 +99,7 @@ impl Catalog {
     #[must_use]
     pub fn probe_for_provider(&self, p: Provider) -> Option<&Model> {
         let override_id: Option<&str> = match p {
+            Provider::Anthropic => Some("claude-haiku-4-5"),
             Provider::OpenAi => Some("gpt-5.4-mini"),
             _ => None,
         };
@@ -226,13 +227,13 @@ mod tests {
         let m = Catalog::builtin()
             .default_for_provider(Provider::Anthropic)
             .unwrap();
-        assert_eq!(m.id, "claude-opus-4-7");
+        assert_eq!(m.id, "claude-sonnet-4-6");
         assert!(m.default);
 
         let m = Catalog::builtin()
             .default_for_provider(Provider::OpenAi)
             .unwrap();
-        assert_eq!(m.id, "gpt-5.5");
+        assert_eq!(m.id, "gpt-5.4");
 
         let m = Catalog::builtin()
             .default_for_provider(Provider::Gemini)
@@ -249,11 +250,11 @@ mod tests {
     }
 
     #[test]
-    fn builtin_probe_anthropic_returns_default() {
+    fn builtin_probe_anthropic_returns_override() {
         let m = Catalog::builtin()
             .probe_for_provider(Provider::Anthropic)
             .unwrap();
-        assert_eq!(m.id, "claude-opus-4-7");
+        assert_eq!(m.id, "claude-haiku-4-5");
     }
 
     #[test]
@@ -730,7 +731,7 @@ mod tests {
                 "gpt54",
                 "gpt-54",
             ],
-            default: false,
+            default: true,
             configured: false,
         }
         "#);

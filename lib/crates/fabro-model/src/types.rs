@@ -152,7 +152,7 @@ mod tests {
         assert_eq!(info.cache_input_cost_per_mtok(), Some(0.5));
         assert_eq!(info.estimated_output_tps(), Some(25.0));
         assert!(!info.aliases().is_empty());
-        assert!(info.is_default());
+        assert!(!info.is_default());
     }
 
     #[test]

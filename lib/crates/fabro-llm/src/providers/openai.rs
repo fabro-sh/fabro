@@ -210,10 +210,18 @@ fn provider_error_from_openai_error_json(error: &serde_json::Value) -> Error {
         .map_or_else(|| "OpenAI stream error".to_string(), str::to_string);
 
     let kind = match classifier {
-        Some("insufficient_quota") => ProviderErrorKind::QuotaExceeded,
-        Some("rate_limit_exceeded") => ProviderErrorKind::RateLimit,
-        Some("invalid_api_key" | "invalid_authentication") => ProviderErrorKind::Authentication,
-        Some("account_deactivated" | "permission_denied") => ProviderErrorKind::AccessDenied,
+        Some("insufficient_quota" | "billing_hard_limit_reached") => {
+            ProviderErrorKind::QuotaExceeded
+        }
+        Some("rate_limit_error" | "rate_limit_exceeded" | "too_many_requests") => {
+            ProviderErrorKind::RateLimit
+        }
+        Some("authentication_error" | "invalid_api_key" | "invalid_authentication") => {
+            ProviderErrorKind::Authentication
+        }
+        Some(
+            "access_denied" | "account_deactivated" | "permission_denied" | "permission_error",
+        ) => ProviderErrorKind::AccessDenied,
         Some("content_filter" | "content_policy_violation") => ProviderErrorKind::ContentFilter,
         Some("context_length_exceeded") => ProviderErrorKind::ContextLength,
         Some("server_error" | "internal_error" | "service_unavailable" | "engine_overloaded") => {
@@ -1845,6 +1853,29 @@ mod tests {
             Error::Provider { kind, detail } => {
                 assert_eq!(kind, ProviderErrorKind::Authentication);
                 assert_eq!(detail.error_code.as_deref(), Some("invalid_api_key"));
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn error_event_with_rate_limit_error_returns_rate_limit() {
+        let mut state = empty_sse_state();
+        let data = r#"{
+            "type": "error",
+            "error": {
+                "type": "rate_limit_error",
+                "message": "Too many requests."
+            }
+        }"#;
+
+        let err = process_sse_event(&mut state, Some("error"), data)
+            .expect_err("error event should fail the stream");
+
+        match err {
+            Error::Provider { kind, detail } => {
+                assert_eq!(kind, ProviderErrorKind::RateLimit);
+                assert_eq!(detail.error_code.as_deref(), Some("rate_limit_error"));
             }
             other => panic!("expected provider error, got {other:?}"),
         }

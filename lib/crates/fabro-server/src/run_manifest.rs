@@ -15,8 +15,8 @@ use fabro_config::{
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_graphviz::render::apply_direction;
 use fabro_llm::Provider;
-use fabro_llm::model_test::{ModelTestMode, ModelTestStatus, run_model_test};
-use fabro_model::{Catalog, Model, ModelCosts, ModelFeatures, ModelLimits};
+use fabro_llm::model_test::{ModelTestStatus, run_basic_model_probe};
+use fabro_model::Catalog;
 use fabro_sandbox::config::{
     DaytonaNetwork, DaytonaSnapshotSettings, DockerfileSource as SandboxDockerfileSource,
 };
@@ -39,6 +39,7 @@ use fabro_workflow::pipeline::Validated;
 use fabro_workflow::run_materialization::materialize_run;
 use fabro_workflow::workflow_bundle::{BundledWorkflow, ParsedWorkflowConfig, WorkflowBundle};
 use fabro_workflow::{Error as WorkflowError, ManifestPath};
+use futures_util::stream::{self, StreamExt};
 use tokio::process::Command;
 use tokio::time;
 
@@ -912,6 +913,15 @@ async fn run_sandbox_check(
     }
 }
 
+const MODEL_PREFLIGHT_PROBE_CONCURRENCY: usize = 4;
+
+struct PendingModelProbe {
+    index:         usize,
+    model_id:      String,
+    provider_name: String,
+    provider:      Provider,
+}
+
 async fn run_llm_check(
     state: &AppState,
     checks: &mut Vec<CheckResult>,
@@ -971,55 +981,50 @@ async fn run_llm_check(
             }
 
             let mut all_ok = true;
-            for (model_id, provider_name) in &model_providers {
+            let mut completed_checks: Vec<(usize, CheckResult)> = Vec::new();
+            let mut pending_probes = Vec::new();
+            for (index, (model_id, provider_name)) in model_providers.iter().enumerate() {
                 match provider_name.parse::<Provider>() {
                     Ok(provider) => {
-                        let mut status = CheckStatus::Pass;
-                        let remediation = if let Some((_, issue)) = auth_issues
+                        if let Some((_, issue)) = auth_issues
                             .iter()
                             .find(|(candidate, _)| *candidate == provider)
                         {
-                            status = CheckStatus::Warning;
                             all_ok = false;
-                            Some(auth_issue_message(provider, issue))
+                            completed_checks.push((index, CheckResult {
+                                name:        "LLM".into(),
+                                status:      CheckStatus::Warning,
+                                summary:     model_id.clone(),
+                                details:     vec![CheckDetail::new(format!(
+                                    "Provider: {provider_name}"
+                                ))],
+                                remediation: Some(auth_issue_message(provider, issue)),
+                            }));
                         } else if !configured.iter().any(|name| name == provider_name) {
-                            status = CheckStatus::Warning;
                             all_ok = false;
-                            Some(format!("Provider \"{provider_name}\" is not configured"))
+                            completed_checks.push((index, CheckResult {
+                                name:        "LLM".into(),
+                                status:      CheckStatus::Warning,
+                                summary:     model_id.clone(),
+                                details:     vec![CheckDetail::new(format!(
+                                    "Provider: {provider_name}"
+                                ))],
+                                remediation: Some(format!(
+                                    "Provider \"{provider_name}\" is not configured"
+                                )),
+                            }));
                         } else {
-                            let probe_model = preflight_probe_model(model_id, provider);
-                            let outcome = run_model_test(
-                                &probe_model,
-                                ModelTestMode::Basic,
-                                Arc::clone(&client),
-                            )
-                            .await;
-                            if outcome.status == ModelTestStatus::Ok {
-                                None
-                            } else {
-                                status = CheckStatus::Error;
-                                all_ok = false;
-                                Some(format!(
-                                    "Model availability probe failed: {}",
-                                    outcome
-                                        .error_message
-                                        .unwrap_or_else(|| "unknown error".to_string())
-                                ))
-                            }
-                        };
-                        checks.push(CheckResult {
-                            name: "LLM".into(),
-                            status,
-                            summary: model_id.clone(),
-                            details: vec![
-                                CheckDetail::new(format!("Provider: {provider_name}")),
-                                CheckDetail::new("Probe: basic generation".to_string()),
-                            ],
-                            remediation,
-                        });
+                            pending_probes.push(PendingModelProbe {
+                                index,
+                                model_id: model_id.clone(),
+                                provider_name: provider_name.clone(),
+                                provider,
+                            });
+                        }
                     }
                     Err(err) => {
-                        checks.push(CheckResult {
+                        all_ok = false;
+                        completed_checks.push((index, CheckResult {
                             name:        "LLM".into(),
                             status:      CheckStatus::Error,
                             summary:     model_id.clone(),
@@ -1029,11 +1034,55 @@ async fn run_llm_check(
                             remediation: Some(format!(
                                 "Invalid provider \"{provider_name}\": {err}"
                             )),
-                        });
-                        all_ok = false;
+                        }));
                     }
                 }
             }
+
+            let mut probe_checks = stream::iter(pending_probes)
+                .map(|probe| {
+                    let client = Arc::clone(&client);
+                    async move {
+                        let outcome =
+                            run_basic_model_probe(&probe.model_id, probe.provider, client).await;
+                        let (status, remediation) = if outcome.status == ModelTestStatus::Ok {
+                            (CheckStatus::Pass, None)
+                        } else {
+                            (
+                                CheckStatus::Error,
+                                Some(format!(
+                                    "Model availability probe failed: {}",
+                                    outcome
+                                        .error_message
+                                        .unwrap_or_else(|| "unknown error".to_string())
+                                )),
+                            )
+                        };
+                        (probe.index, CheckResult {
+                            name: "LLM".into(),
+                            status,
+                            summary: probe.model_id,
+                            details: vec![
+                                CheckDetail::new(format!("Provider: {}", probe.provider_name)),
+                                CheckDetail::new("Probe: basic generation".to_string()),
+                            ],
+                            remediation,
+                        })
+                    }
+                })
+                .buffer_unordered(MODEL_PREFLIGHT_PROBE_CONCURRENCY)
+                .collect::<Vec<_>>()
+                .await;
+
+            if probe_checks
+                .iter()
+                .any(|(_, check)| check.status != CheckStatus::Pass)
+            {
+                all_ok = false;
+            }
+            completed_checks.append(&mut probe_checks);
+            completed_checks.sort_by_key(|(index, _)| *index);
+            checks.extend(completed_checks.into_iter().map(|(_, check)| check));
             all_ok
         }
         Err(err) => {
@@ -1046,42 +1095,6 @@ async fn run_llm_check(
             });
             false
         }
-    }
-}
-
-fn preflight_probe_model(model_id: &str, provider: Provider) -> Model {
-    if let Some(info) = Catalog::builtin().get(model_id) {
-        let mut model = info.clone();
-        model.provider = provider;
-        return model;
-    }
-
-    Model {
-        id: model_id.to_string(),
-        provider,
-        family: "custom".to_string(),
-        display_name: model_id.to_string(),
-        limits: ModelLimits {
-            context_window: 0,
-            max_output:     None,
-        },
-        training: None,
-        knowledge_cutoff: None,
-        features: ModelFeatures {
-            tools:     false,
-            vision:    false,
-            reasoning: false,
-            effort:    false,
-        },
-        costs: ModelCosts {
-            input_cost_per_mtok:       None,
-            output_cost_per_mtok:      None,
-            cache_input_cost_per_mtok: None,
-        },
-        estimated_output_tps: None,
-        aliases: Vec::new(),
-        default: false,
-        configured: true,
     }
 }
 

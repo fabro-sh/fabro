@@ -106,8 +106,8 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
     for (provider, issue) in &result.auth_issues {
         let message = auth_issue_message(*provider, issue);
         failures.push(ProviderFailure {
-            provider: *provider,
-            short:    short_error_line(&message),
+            provider:     *provider,
+            summary_line: short_error_line(&message),
         });
         details.push(CheckDetail::new(message));
     }
@@ -135,14 +135,14 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
                 let rendered = collect_chain(&err).join(": ");
                 failures.push(ProviderFailure {
                     provider,
-                    short: short_error_line(&rendered),
+                    summary_line: short_error_line(&rendered),
                 });
                 details.push(CheckDetail::new(format!("{provider}: {rendered}")));
             }
             Err(_) => {
                 failures.push(ProviderFailure {
                     provider,
-                    short: "timeout (30s)".to_string(),
+                    summary_line: "timeout (30s)".to_string(),
                 });
                 details.push(CheckDetail::new(format!("{provider}: timeout (30s)")));
             }
@@ -166,7 +166,7 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
     };
     let remediation = failures
         .iter()
-        .map(|f| format!("{}: {}", f.provider, f.short))
+        .map(|f| format!("{}: {}", f.provider, f.summary_line))
         .collect::<Vec<_>>()
         .join("; ");
 
@@ -180,8 +180,8 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
 }
 
 struct ProviderFailure {
-    provider: Provider,
-    short:    String,
+    provider:     Provider,
+    summary_line: String,
 }
 
 const MAX_SHORT_LEN: usize = 120;
@@ -194,7 +194,7 @@ fn short_error_line(rendered: &str) -> String {
         .unwrap_or("error");
     if first.chars().count() > MAX_SHORT_LEN {
         let cutoff: String = first.chars().take(MAX_SHORT_LEN).collect();
-        format!("{cutoff}…")
+        format!("{cutoff}...")
     } else {
         first.to_string()
     }
@@ -667,10 +667,10 @@ mod tests {
     }
 
     #[test]
-    fn short_error_line_truncates_long_input_with_ellipsis() {
+    fn short_error_line_truncates_long_input_with_ascii_ellipsis() {
         let input = "a".repeat(MAX_SHORT_LEN + 50);
         let result = short_error_line(&input);
-        let expected = format!("{}…", "a".repeat(MAX_SHORT_LEN));
+        let expected = format!("{}...", "a".repeat(MAX_SHORT_LEN));
         assert_eq!(result, expected);
     }
 
