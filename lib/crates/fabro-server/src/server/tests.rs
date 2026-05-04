@@ -6125,7 +6125,7 @@ async fn pause_run_sets_pending_control_on_board_response() {
     assert_eq!(body["pending_control"].as_str(), Some("pause"));
 
     // Verify the run appears on the board (store has Submitted status →
-    // "initializing" column)
+    // "queued" column)
     let req = Request::builder()
         .method("GET")
         .uri(api("/boards/runs"))
@@ -6140,7 +6140,7 @@ async fn pause_run_sets_pending_control_on_board_response() {
         .find(|item| item["run_id"].as_str() == Some(run_id_str.as_str()))
         .expect("board item should exist");
     assert!(item["status"].is_object());
-    assert_eq!(item["column"].as_str(), Some("initializing"));
+    assert_eq!(item["column"].as_str(), Some("queued"));
     assert_eq!(item["pending_control"].as_str(), Some("pause"));
 }
 

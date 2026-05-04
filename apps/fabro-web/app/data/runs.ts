@@ -37,9 +37,10 @@ export interface RunItem {
   sourceDirectory?: string;
 }
 
-export type ColumnStatus = "initializing" | "running" | "blocked" | "succeeded" | "failed";
+export type ColumnStatus = "queued" | "initializing" | "running" | "blocked" | "succeeded" | "failed";
 
 export const columnStatusDisplay: Record<ColumnStatus, { label: string; dot: string; text: string }> = {
+  queued:       { label: "Queued",       dot: "bg-fg-muted",  text: "text-fg-muted" },
   initializing: { label: "Initializing", dot: "bg-amber",     text: "text-amber" },
   running:      { label: "Running",      dot: "bg-teal-500",  text: "text-teal-500" },
   blocked:      { label: "Blocked",      dot: "bg-amber",     text: "text-amber" },
@@ -113,6 +114,7 @@ export function columnForStatus(status: ApiRunStatus | null | undefined): Column
   switch (status?.kind) {
     case "submitted":
     case "queued":
+      return "queued";
     case "starting":
       return "initializing";
     case "running":

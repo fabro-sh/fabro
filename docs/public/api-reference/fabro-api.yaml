@@ -5656,6 +5656,7 @@ components:
       description: Board column status for a run in the list view.
       type: string
       enum:
+        - queued
         - initializing
         - running
         - blocked

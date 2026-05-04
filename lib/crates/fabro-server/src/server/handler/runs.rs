@@ -84,7 +84,8 @@ impl ListRunsParams {
 
 fn board_column(status: RunStatus) -> Option<&'static str> {
     match status {
-        RunStatus::Submitted | RunStatus::Queued | RunStatus::Starting => Some("initializing"),
+        RunStatus::Submitted | RunStatus::Queued => Some("queued"),
+        RunStatus::Starting => Some("initializing"),
         RunStatus::Running | RunStatus::Paused { .. } => Some("running"),
         RunStatus::Blocked { .. } => Some("blocked"),
         RunStatus::Succeeded { .. } => Some("succeeded"),
@@ -95,6 +96,7 @@ fn board_column(status: RunStatus) -> Option<&'static str> {
 
 pub(crate) fn board_columns() -> serde_json::Value {
     serde_json::json!([
+        {"id": "queued", "name": "Queued"},
         {"id": "initializing", "name": "Initializing"},
         {"id": "running", "name": "Running"},
         {"id": "blocked", "name": "Blocked"},

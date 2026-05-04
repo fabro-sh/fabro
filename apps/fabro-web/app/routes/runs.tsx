@@ -38,6 +38,7 @@ interface ColumnStyle {
 }
 
 const columnStyles: Record<ColumnStatus, ColumnStyle> = {
+  queued:       { iconType: "branch", actions: [] },
   initializing: { iconType: "branch", actions: [] },
   running:      { iconType: "branch", actions: ["Watch", "Steer"] },
   blocked:      { iconType: "branch", actions: ["Answer Question"] },
@@ -65,6 +66,7 @@ type Column = {
 };
 
 const SKELETON_STATUSES: ColumnStatus[] = [
+  "queued",
   "initializing",
   "running",
   "blocked",
@@ -754,6 +756,9 @@ export default function Runs() {
     (sum, col) => sum + col.items.length,
     0,
   );
+  const visibleColumns = filteredColumns.filter(
+    (col) => col.id !== "queued" || col.items.length > 0,
+  );
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -815,7 +820,7 @@ export default function Runs() {
         {view === "columns" ? (
           <>
             <div className="flex gap-5 overflow-x-auto pb-4">
-              {filteredColumns.map((col) => (
+              {visibleColumns.map((col) => (
                 <div key={col.id} className="w-72 shrink-0">
                   <BoardColumn column={col} />
                 </div>
@@ -838,7 +843,7 @@ export default function Runs() {
         ) : (
           <>
             <div className="space-y-4">
-              {filteredColumns.map((col) => {
+              {visibleColumns.map((col) => {
                 const isCollapsed = collapsed.has(col.id);
                 return (
                   <div key={col.id}>
