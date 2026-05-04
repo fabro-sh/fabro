@@ -13,9 +13,11 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { BoardColumn } from './board-column';
 
 export interface BoardColumnDefinition {
-    'id': string;
+    'id': BoardColumn;
     'name': string;
 }
-

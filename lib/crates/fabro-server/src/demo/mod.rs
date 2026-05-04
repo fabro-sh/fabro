@@ -975,27 +975,27 @@ mod runs {
     pub(super) fn columns() -> Vec<BoardColumnDefinition> {
         vec![
             BoardColumnDefinition {
-                id:   "queued".into(),
+                id:   BoardColumn::Queued,
                 name: "Queued".into(),
             },
             BoardColumnDefinition {
-                id:   "initializing".into(),
+                id:   BoardColumn::Initializing,
                 name: "Initializing".into(),
             },
             BoardColumnDefinition {
-                id:   "running".into(),
+                id:   BoardColumn::Running,
                 name: "Running".into(),
             },
             BoardColumnDefinition {
-                id:   "blocked".into(),
+                id:   BoardColumn::Blocked,
                 name: "Blocked".into(),
             },
             BoardColumnDefinition {
-                id:   "succeeded".into(),
+                id:   BoardColumn::Succeeded,
                 name: "Succeeded".into(),
             },
             BoardColumnDefinition {
-                id:   "failed".into(),
+                id:   BoardColumn::Failed,
                 name: "Failed".into(),
             },
         ]

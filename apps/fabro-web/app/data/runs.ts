@@ -1,8 +1,10 @@
 import { formatElapsedSecs, formatDurationSecs } from "../lib/format";
-import type {
-  RunListItem,
-  RunStatus as ApiRunStatus,
-  RunSummary,
+import {
+  BoardColumn,
+  type BoardColumn as ApiBoardColumn,
+  type RunListItem,
+  type RunStatus as ApiRunStatus,
+  type RunSummary,
 } from "@qltysh/fabro-api-client";
 
 export type CiStatus = "passing" | "failing" | "pending";
@@ -37,7 +39,16 @@ export interface RunItem {
   sourceDirectory?: string;
 }
 
-export type ColumnStatus = "queued" | "initializing" | "running" | "blocked" | "succeeded" | "failed";
+export type ColumnStatus = ApiBoardColumn;
+
+export const columnStatuses = [
+  BoardColumn.QUEUED,
+  BoardColumn.INITIALIZING,
+  BoardColumn.RUNNING,
+  BoardColumn.BLOCKED,
+  BoardColumn.SUCCEEDED,
+  BoardColumn.FAILED,
+] as const satisfies readonly ColumnStatus[];
 
 export const columnStatusDisplay: Record<ColumnStatus, { label: string; dot: string; text: string }> = {
   queued:       { label: "Queued",       dot: "bg-fg-muted",  text: "text-fg-muted" },

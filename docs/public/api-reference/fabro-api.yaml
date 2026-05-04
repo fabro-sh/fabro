@@ -5670,7 +5670,7 @@ components:
         - name
       properties:
         id:
-          type: string
+          $ref: "#/components/schemas/BoardColumn"
         name:
           type: string
 

@@ -18,7 +18,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ciConfig, columnStatusDisplay, deriveCiStatus, mapRunListItem } from "../data/runs";
+import { ciConfig, columnStatusDisplay, columnStatuses, deriveCiStatus, mapRunListItem } from "../data/runs";
 import type { CiStatus, CheckRun, CheckStatus, RunItem, RunWithStatus, ColumnStatus } from "../data/runs";
 import { EmptyState } from "../components/state";
 import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
@@ -50,7 +50,7 @@ const defaultColumnStyle: ColumnStyle = { iconType: "branch", actions: [] };
 const defaultColumnColors = { dot: "bg-fg-muted", text: "text-fg-muted" };
 
 interface BoardRunsResponse {
-  columns: { id: string; name: string }[];
+  columns: PaginatedBoardRunList["columns"];
   data: PaginatedBoardRunList["data"];
   meta: PaginatedBoardRunList["meta"];
 }
@@ -65,17 +65,8 @@ type Column = {
   items: RunItem[];
 };
 
-const SKELETON_STATUSES: ColumnStatus[] = [
-  "queued",
-  "initializing",
-  "running",
-  "blocked",
-  "succeeded",
-  "failed",
-];
-
 function buildSkeletonColumns(): Column[] {
-  return SKELETON_STATUSES.map((id) => {
+  return columnStatuses.map((id) => {
     const colors = columnStatusDisplay[id];
     return {
       id,
@@ -100,7 +91,7 @@ export function buildBoardColumns(response: BoardRunsResponse): Column[] {
   }
 
   return response.columns.map((col) => {
-    const id = col.id as ColumnStatus;
+    const id = col.id;
     const colors = columnStatusDisplay[id] ?? defaultColumnColors;
     return {
       id,
