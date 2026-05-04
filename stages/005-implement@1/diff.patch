@@ -1,0 +1,340 @@
+diff --git a/lib/crates/fabro-sandbox/src/local.rs b/lib/crates/fabro-sandbox/src/local.rs
+index 8b69b737..27c89da0 100644
+--- a/lib/crates/fabro-sandbox/src/local.rs
++++ b/lib/crates/fabro-sandbox/src/local.rs
+@@ -282,14 +282,18 @@ impl Sandbox for LocalSandbox {
+         let stdout_task = tokio::spawn(async move {
+             let mut buf = String::new();
+             if let Some(ref mut r) = stdout_pipe {
+-                let _ = r.read_to_string(&mut buf).await;
++                if let Err(err) = r.read_to_string(&mut buf).await {
++                    tracing::warn!(error = %err, stream = "stdout", "Failed to drain child stdout");
++                }
+             }
+             buf
+         });
+         let stderr_task = tokio::spawn(async move {
+             let mut buf = String::new();
+             if let Some(ref mut r) = stderr_pipe {
+-                let _ = r.read_to_string(&mut buf).await;
++                if let Err(err) = r.read_to_string(&mut buf).await {
++                    tracing::warn!(error = %err, stream = "stderr", "Failed to drain child stderr");
++                }
+             }
+             buf
+         });
+diff --git a/lib/crates/fabro-workflow/src/handler/agent.rs b/lib/crates/fabro-workflow/src/handler/agent.rs
+index 676e2f14..7e3a4be0 100644
+--- a/lib/crates/fabro-workflow/src/handler/agent.rs
++++ b/lib/crates/fabro-workflow/src/handler/agent.rs
+@@ -52,6 +52,8 @@ pub trait CodergenBackend: Send + Sync {
+         _node: &Node,
+         _prompt: &str,
+         _system_prompt: Option<&str>,
++        _emitter: &Arc<Emitter>,
++        _stage_scope: &StageScope,
+     ) -> Result<CodergenResult, Error> {
+         Err(Error::Validation(
+             "one_shot mode not supported by this backend".into(),
+diff --git a/lib/crates/fabro-workflow/src/handler/llm/api.rs b/lib/crates/fabro-workflow/src/handler/llm/api.rs
+index 5d21c7d3..9247c19e 100644
+--- a/lib/crates/fabro-workflow/src/handler/llm/api.rs
++++ b/lib/crates/fabro-workflow/src/handler/llm/api.rs
+@@ -285,6 +285,8 @@ impl CodergenBackend for AgentApiBackend {
+         node: &Node,
+         prompt: &str,
+         system_prompt: Option<&str>,
++        emitter: &Arc<Emitter>,
++        stage_scope: &StageScope,
+     ) -> Result<CodergenResult, Error> {
+         let client = Client::from_source(self.source.as_ref())
+             .await
+@@ -358,14 +360,16 @@ impl CodergenBackend for AgentApiBackend {
+                 let mut found = None;
+ 
+                 for target in fallback_chain {
+-                    tracing::warn!(
+-                        stage = node.id.as_str(),
+-                        from_provider = from_provider.as_str(),
+-                        from_model = from_model.as_str(),
+-                        to_provider = target.provider.as_str(),
+-                        to_model = target.model.as_str(),
+-                        error = error_msg.as_str(),
+-                        "LLM provider failover (prompt)"
++                    emitter.emit_scoped(
++                        &Event::Failover {
++                            stage:         node.id.clone(),
++                            from_provider: from_provider.clone(),
++                            from_model:    from_model.clone(),
++                            to_provider:   target.provider.clone(),
++                            to_model:      target.model.clone(),
++                            error:         error_msg.clone(),
++                        },
++                        stage_scope,
+                     );
+ 
+                     let max_tokens = node.max_tokens().or_else(|| {
+diff --git a/lib/crates/fabro-workflow/src/handler/llm/cli.rs b/lib/crates/fabro-workflow/src/handler/llm/cli.rs
+index 5036eec9..7fcf60ed 100644
+--- a/lib/crates/fabro-workflow/src/handler/llm/cli.rs
++++ b/lib/crates/fabro-workflow/src/handler/llm/cli.rs
+@@ -810,9 +810,13 @@ impl CodergenBackend for BackendRouter {
+         node: &Node,
+         prompt: &str,
+         system_prompt: Option<&str>,
++        emitter: &Arc<Emitter>,
++        stage_scope: &StageScope,
+     ) -> Result<CodergenResult, Error> {
+         // CLI backend doesn't support one_shot, always route to API
+-        self.api_backend.one_shot(node, prompt, system_prompt).await
++        self.api_backend
++            .one_shot(node, prompt, system_prompt, emitter, stage_scope)
++            .await
+     }
+ }
+ 
+diff --git a/lib/crates/fabro-workflow/src/handler/parallel.rs b/lib/crates/fabro-workflow/src/handler/parallel.rs
+index 39862586..2b0aa184 100644
+--- a/lib/crates/fabro-workflow/src/handler/parallel.rs
++++ b/lib/crates/fabro-workflow/src/handler/parallel.rs
+@@ -12,7 +12,7 @@ use tokio::sync::Semaphore;
+ use super::{EngineServices, Handler};
+ use crate::context::{Context, WorkflowContext, keys};
+ use crate::error::Error;
+-use crate::event::{Event, StageScope};
++use crate::event::{Event, RunNoticeLevel, StageScope};
+ use crate::git::sanitize_ref_component;
+ use crate::hook_context::set_hook_node;
+ use crate::millis_u64;
+@@ -207,6 +207,11 @@ impl Handler for ParallelHandler {
+                         error = %fabro_sandbox::display_for_log(&e),
+                         "parallel base checkpoint failed"
+                     );
++                    services.run.emitter.notice(
++                        RunNoticeLevel::Warn,
++                        "parallel_base_checkpoint_failed",
++                        format!("Could not checkpoint base state before parallel branches: {e}"),
++                    );
+                     None
+                 }
+             }
+diff --git a/lib/crates/fabro-workflow/src/handler/prompt.rs b/lib/crates/fabro-workflow/src/handler/prompt.rs
+index a76099b8..502b9666 100644
+--- a/lib/crates/fabro-workflow/src/handler/prompt.rs
++++ b/lib/crates/fabro-workflow/src/handler/prompt.rs
+@@ -105,7 +105,13 @@ impl Handler for PromptHandler {
+         let (response_text, stage_usage, backend_files_touched) =
+             if let Some(backend) = &self.backend {
+                 let result = backend
+-                    .one_shot(node, &prompt, system_prompt.as_deref())
++                    .one_shot(
++                        node,
++                        &prompt,
++                        system_prompt.as_deref(),
++                        &services.run.emitter,
++                        &stage_scope,
++                    )
+                     .await;
+                 match result {
+                     Ok(CodergenResult::Full(outcome)) => return Ok(outcome),
+@@ -279,6 +285,8 @@ mod tests {
+                 _node: &Node,
+                 _prompt: &str,
+                 _system_prompt: Option<&str>,
++                _emitter: &Arc<crate::event::Emitter>,
++                _stage_scope: &StageScope,
+             ) -> Result<CodergenResult, Error> {
+                 Ok(CodergenResult::Text {
+                     text:              "one-shot response".to_string(),
+@@ -339,6 +347,8 @@ mod tests {
+                 _node: &Node,
+                 _prompt: &str,
+                 _system_prompt: Option<&str>,
++                _emitter: &Arc<crate::event::Emitter>,
++                _stage_scope: &StageScope,
+             ) -> Result<CodergenResult, Error> {
+                 Ok(CodergenResult::Text {
+                     text:              "one-shot response".to_string(),
+@@ -396,6 +406,8 @@ mod tests {
+             _node: &Node,
+             prompt: &str,
+             system_prompt: Option<&str>,
++            _emitter: &Arc<crate::event::Emitter>,
++            _stage_scope: &StageScope,
+         ) -> Result<CodergenResult, Error> {
+             *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
+             *self.captured_system_prompt.lock().unwrap() = Some(system_prompt.map(String::from));
+diff --git a/lib/crates/fabro-workflow/src/lifecycle/git.rs b/lib/crates/fabro-workflow/src/lifecycle/git.rs
+index 0e0e9f19..99454cf6 100644
+--- a/lib/crates/fabro-workflow/src/lifecycle/git.rs
++++ b/lib/crates/fabro-workflow/src/lifecycle/git.rs
+@@ -292,6 +292,12 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
+                                         error = %fabro_sandbox::display_for_log(&err),
+                                         "git push from run lifecycle failed"
+                                     );
++                                    self.emitter.notice_with_tail(
++                                        RunNoticeLevel::Warn,
++                                        "git_push_failed",
++                                        format!("Failed to push run branch {branch}: {err}"),
++                                        exec_output_tail.clone(),
++                                    );
+                                     (false, exec_output_tail)
+                                 }
+                             };
+diff --git a/lib/crates/fabro-workflow/src/pipeline/initialize.rs b/lib/crates/fabro-workflow/src/pipeline/initialize.rs
+index ce125827..0b998814 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/initialize.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/initialize.rs
+@@ -239,11 +239,14 @@ async fn build_sandbox_env(
+                     Ok(token) => {
+                         env.insert("GITHUB_TOKEN".to_string(), token);
+                     }
+-                    Err(e) => emitter.notice(
+-                        RunNoticeLevel::Warn,
+-                        "github_token_failed",
+-                        format!("Failed to mint GitHub token: {e}"),
+-                    ),
++                    Err(e) => {
++                        tracing::warn!(error = %e, "Failed to mint GitHub token");
++                        emitter.notice(
++                            RunNoticeLevel::Warn,
++                            "github_token_failed",
++                            format!("Failed to mint GitHub token: {e}"),
++                        );
++                    }
+                 }
+             }
+         }
+@@ -516,6 +519,16 @@ pub async fn initialize(
+         ))
+     };
+     if worktree_plan.is_some() && !worktree_created {
++        tracing::warn!(
++            worktree_mode = ?options.worktree_mode,
++            "worktree requested but cwd is not a git repository; running without a worktree"
++        );
++        options.emitter.notice(
++            RunNoticeLevel::Warn,
++            "worktree_skipped_no_git",
++            "Worktree mode requested but no Git repository was found; running without a \
++             worktree.",
++        );
+         options.run_options.git = None;
+     }
+     let cleanup_guard = scopeguard::guard(Arc::clone(&sandbox), |sandbox| {
+@@ -619,7 +632,16 @@ pub async fn initialize(
+                     options.run_options.base_branch = info.base_branch;
+                 }
+             }
+-            Ok(None) => {}
++            Ok(None) => {
++                if sandbox.origin_url().is_some() {
++                    options.emitter.notice(
++                        RunNoticeLevel::Warn,
++                        "sandbox_git_unavailable",
++                        "Sandbox could not set up Git despite a configured origin; running \
++                         without checkpointing or PR support.",
++                    );
++                }
++            }
+             Err(e) => {
+                 return Err(Error::engine_with_source("Sandbox git setup failed", &e));
+             }
+@@ -1011,6 +1033,84 @@ mod tests {
+         assert!(options.run_options.git.is_none());
+     }
+ 
++    #[tokio::test]
++    async fn initialize_emits_worktree_skipped_no_git_in_non_git_cwd() {
++        let temp = tempfile::tempdir().unwrap();
++        let run_dir = temp.path().join("run");
++        std::fs::create_dir_all(&run_dir).unwrap();
++        // Non-git working directory: a tmpdir without a `.git` parent.
++        let cwd = temp.path().join("cwd");
++        std::fs::create_dir_all(&cwd).unwrap();
++
++        let (graph, source) = simple_graph();
++        let persisted = test_persisted(graph, source, &run_dir);
++        let emitter = Arc::new(crate::event::Emitter::new(test_run_id()));
++        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
++        emitter.on_event({
++            let seen = Arc::clone(&seen);
++            move |event| seen.lock().unwrap().push(event.clone())
++        });
++
++        let _ = initialize(persisted, InitOptions {
++            run_id: test_run_id(),
++            run_store: {
++                let store = memory_store();
++                let inner = store.create_run(&test_run_id()).await.unwrap();
++                inner.into()
++            },
++            dry_run: false,
++            emitter,
++            sandbox: SandboxSpec::Local {
++                working_directory: cwd,
++            },
++            llm: LlmSpec {
++                model:          "test-model".to_string(),
++                provider:       fabro_llm::Provider::Anthropic,
++                fallback_chain: Vec::new(),
++                mcp_servers:    Vec::new(),
++                dry_run:        true,
++            },
++            interviewer: Arc::new(AutoApproveInterviewer::engine()),
++            lifecycle: crate::run_options::LifecycleOptions {
++                setup_commands:           vec![],
++                setup_command_timeout_ms: 1_000,
++                devcontainer_phases:      vec![],
++            },
++            run_options: test_settings(&run_dir),
++            workflow_path: None,
++            workflow_bundle: None,
++            hooks: fabro_hooks::HookSettings { hooks: vec![] },
++            sandbox_env: SandboxEnvSpec {
++                devcontainer_env:   HashMap::new(),
++                toml_env:           HashMap::new(),
++                github_permissions: None,
++                origin_url:         None,
++            },
++            vault: None,
++            devcontainer: None,
++            git: None,
++            worktree_mode: Some(WorktreeMode::Always),
++            run_control: None,
++            registry_override: None,
++            artifact_sink: None,
++            checkpoint: None,
++            seed_context: None,
++        })
++        .await;
++
++        let events = seen.lock().unwrap().clone();
++        let notice = events
++            .iter()
++            .find_map(|event| match &event.body {
++                EventBody::RunNotice(props) if props.code == "worktree_skipped_no_git" => {
++                    Some(props.clone())
++                }
++                _ => None,
++            })
++            .expect("worktree_skipped_no_git notice");
++        assert!(matches!(notice.level, fabro_types::RunNoticeLevel::Warn));
++    }
++
+     #[tokio::test]
+     async fn initialize_prepares_sandbox_and_uses_persisted_run_dir() {
+         let temp = tempfile::tempdir().unwrap();
+diff --git a/lib/crates/fabro-workflow/tests/it/integration.rs b/lib/crates/fabro-workflow/tests/it/integration.rs
+index 002d473d..15bdbce7 100644
+--- a/lib/crates/fabro-workflow/tests/it/integration.rs
++++ b/lib/crates/fabro-workflow/tests/it/integration.rs
+@@ -6221,6 +6221,8 @@ mod real_llm {
+             _node: &Node,
+             prompt: &str,
+             _system_prompt: Option<&str>,
++            _emitter: &Arc<Emitter>,
++            _stage_scope: &fabro_workflow::event::StageScope,
+         ) -> Result<CodergenResult, Error> {
+             self.complete(prompt).await
+         }
