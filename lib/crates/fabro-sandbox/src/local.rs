@@ -282,14 +282,18 @@ impl Sandbox for LocalSandbox {
         let stdout_task = tokio::spawn(async move {
             let mut buf = String::new();
             if let Some(ref mut r) = stdout_pipe {
-                let _ = r.read_to_string(&mut buf).await;
+                if let Err(err) = r.read_to_string(&mut buf).await {
+                    tracing::warn!(error = %err, stream = "stdout", "Failed to drain child stdout");
+                }
             }
             buf
         });
         let stderr_task = tokio::spawn(async move {
             let mut buf = String::new();
             if let Some(ref mut r) = stderr_pipe {
-                let _ = r.read_to_string(&mut buf).await;
+                if let Err(err) = r.read_to_string(&mut buf).await {
+                    tracing::warn!(error = %err, stream = "stderr", "Failed to drain child stderr");
+                }
             }
             buf
         });

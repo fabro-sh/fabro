@@ -239,11 +239,14 @@ async fn build_sandbox_env(
                     Ok(token) => {
                         env.insert("GITHUB_TOKEN".to_string(), token);
                     }
-                    Err(e) => emitter.notice(
-                        RunNoticeLevel::Warn,
-                        "github_token_failed",
-                        format!("Failed to mint GitHub token: {e}"),
-                    ),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to mint GitHub token");
+                        emitter.notice(
+                            RunNoticeLevel::Warn,
+                            "github_token_failed",
+                            format!("Failed to mint GitHub token: {e}"),
+                        );
+                    }
                 }
             }
         }
@@ -504,6 +507,15 @@ pub async fn initialize(
                 }
             }
         } else {
+            tracing::warn!(
+                worktree_mode = ?options.worktree_mode,
+                "worktree requested but cwd is not a git repository; running without a worktree"
+            );
+            options.emitter.notice(
+                RunNoticeLevel::Warn,
+                "worktree_skipped_no_git",
+                "Worktree mode requested but no Git repository was found; running without a worktree.",
+            );
             Arc::new(ReadBeforeWriteSandbox::new(inner))
         }
     } else {
@@ -619,7 +631,15 @@ pub async fn initialize(
                     options.run_options.base_branch = info.base_branch;
                 }
             }
-            Ok(None) => {}
+            Ok(None) => {
+                if sandbox.origin_url().is_some() {
+                    options.emitter.notice(
+                        RunNoticeLevel::Warn,
+                        "sandbox_git_unavailable",
+                        "Sandbox could not set up Git despite a configured origin; running without checkpointing or PR support.",
+                    );
+                }
+            }
             Err(e) => {
                 return Err(Error::engine_with_source("Sandbox git setup failed", &e));
             }
@@ -1372,5 +1392,83 @@ mod tests {
         .await;
 
         assert!(matches!(result, Err(Error::Cancelled)));
+    }
+
+    #[tokio::test]
+    async fn initialize_worktree_skipped_no_git_emits_notice() {
+        // Use a non-git temp dir so resolve_worktree_base_sha returns Ok(None)
+        let temp = tempfile::tempdir().unwrap();
+        let non_git_dir = temp.path().to_path_buf();
+        let run_dir = temp.path().join("run");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        let (graph, source) = simple_graph();
+        let persisted = test_persisted(graph, source, &run_dir);
+        let emitter = Arc::new(crate::event::Emitter::new(test_run_id()));
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        emitter.on_event({
+            let seen = Arc::clone(&seen);
+            move |event| seen.lock().unwrap().push(event.clone())
+        });
+
+        let _initialized = initialize(persisted, InitOptions {
+            run_id: test_run_id(),
+            run_store: {
+                let store = memory_store();
+                let inner = store.create_run(&test_run_id()).await.unwrap();
+                inner.into()
+            },
+            dry_run: false,
+            emitter,
+            sandbox: SandboxSpec::Local {
+                working_directory: non_git_dir,
+            },
+            llm: LlmSpec {
+                model:          "test-model".to_string(),
+                provider:       fabro_llm::Provider::Anthropic,
+                fallback_chain: Vec::new(),
+                mcp_servers:    Vec::new(),
+                dry_run:        true,
+            },
+            interviewer: Arc::new(AutoApproveInterviewer::engine()),
+            lifecycle: crate::run_options::LifecycleOptions {
+                setup_commands:           vec![],
+                setup_command_timeout_ms: 1_000,
+                devcontainer_phases:      vec![],
+            },
+            run_options: test_settings(&run_dir),
+            workflow_path: None,
+            workflow_bundle: None,
+            hooks: fabro_hooks::HookSettings { hooks: vec![] },
+            sandbox_env: SandboxEnvSpec {
+                devcontainer_env:   HashMap::new(),
+                toml_env:           HashMap::new(),
+                github_permissions: None,
+                origin_url:         None,
+            },
+            vault: None,
+            devcontainer: None,
+            git: None,
+            worktree_mode: Some(WorktreeMode::Always),
+            run_control: None,
+            registry_override: None,
+            artifact_sink: None,
+            checkpoint: None,
+            seed_context: None,
+        })
+        .await
+        .unwrap();
+
+        let events = seen.lock().unwrap();
+        let notice = events.iter().find(|e| {
+            matches!(
+                &e.body,
+                EventBody::RunNotice(props) if props.code == "worktree_skipped_no_git"
+            )
+        });
+        assert!(
+            notice.is_some(),
+            "expected worktree_skipped_no_git notice, got events: {:?}",
+            events.iter().map(RunEvent::event_name).collect::<Vec<_>>()
+        );
     }
 }

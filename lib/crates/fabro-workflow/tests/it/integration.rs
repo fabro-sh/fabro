@@ -6193,6 +6193,7 @@ mod real_llm {
     use fabro_types::WorkflowSettings;
     use fabro_workflow::context::Context;
     use fabro_workflow::error::Error;
+    use fabro_workflow::event::StageScope;
     use fabro_workflow::handler::agent::{AgentHandler, CodergenBackend, CodergenResult};
 
     struct LlmCodergenBackend {
@@ -6221,6 +6222,8 @@ mod real_llm {
             _node: &Node,
             prompt: &str,
             _system_prompt: Option<&str>,
+            _emitter: &Arc<Emitter>,
+            _stage_scope: &StageScope,
         ) -> Result<CodergenResult, Error> {
             self.complete(prompt).await
         }

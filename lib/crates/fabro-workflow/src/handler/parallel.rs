@@ -12,7 +12,7 @@ use tokio::sync::Semaphore;
 use super::{EngineServices, Handler};
 use crate::context::{Context, WorkflowContext, keys};
 use crate::error::Error;
-use crate::event::{Event, StageScope};
+use crate::event::{Event, RunNoticeLevel, StageScope};
 use crate::git::sanitize_ref_component;
 use crate::hook_context::set_hook_node;
 use crate::millis_u64;
@@ -206,6 +206,11 @@ impl Handler for ParallelHandler {
                     tracing::warn!(
                         error = %fabro_sandbox::display_for_log(&e),
                         "parallel base checkpoint failed"
+                    );
+                    services.run.emitter.notice(
+                        RunNoticeLevel::Warn,
+                        "parallel_base_checkpoint_failed",
+                        format!("Could not checkpoint base state before parallel branches: {e}"),
                     );
                     None
                 }
@@ -874,5 +879,108 @@ mod tests {
 
         let branch_count = context.get(keys::PARALLEL_BRANCH_COUNT);
         assert_eq!(branch_count, Some(serde_json::json!(2)));
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Test sets up a temporary git repo to exercise the parallel checkpoint failure path."
+    )]
+    #[tokio::test]
+    async fn parallel_base_checkpoint_failure_emits_notice() {
+        // Set up a git repo then lock the index to make `git add` fail.
+        let repo_dir = tempfile::tempdir().unwrap();
+        let init = std::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(repo_dir.path())
+            .output()
+            .unwrap();
+        assert!(init.status.success());
+        for (key, value) in [("user.name", "Test"), ("user.email", "test@test.com")] {
+            let config = std::process::Command::new("git")
+                .args(["config", key, value])
+                .current_dir(repo_dir.path())
+                .output()
+                .unwrap();
+            assert!(config.status.success());
+        }
+        let commit = std::process::Command::new("git")
+            .args(["commit", "--allow-empty", "-m", "initial"])
+            .current_dir(repo_dir.path())
+            .output()
+            .unwrap();
+        assert!(commit.status.success());
+        // Lock the index to make `git add` fail
+        let lock_path = repo_dir.path().join(".git/index.lock");
+        std::fs::write(&lock_path, b"locked").unwrap();
+
+        let store = test_store();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+        let mut services = EngineServices::test_default();
+        let emitter = Arc::new(crate::event::Emitter::new(fixtures::RUN_1));
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        emitter.on_event({
+            let seen = Arc::clone(&seen);
+            move |event| seen.lock().unwrap().push(event.clone())
+        });
+        services.run = services
+            .run
+            .with_emitter(emitter)
+            .with_run_store(run_store.clone().into())
+            .with_sandbox(Arc::new(fabro_agent::LocalSandbox::new(
+                repo_dir.path().to_path_buf(),
+            )));
+        // Supply git_state so the parallel handler enters the git path
+        services.set_git_state(Some(Arc::new(crate::sandbox_git::GitState {
+            run_id:                   fixtures::RUN_1,
+            base_sha:                 "abc123".to_string(),
+            run_branch:               Some("fabro/run/test".to_string()),
+            meta_branch:              None,
+            checkpoint_exclude_globs: Vec::new(),
+            git_author:               crate::git::GitAuthor::default(),
+        })));
+        let logger = crate::event::StoreProgressLogger::new(run_store.clone());
+        logger.register(services.run.emitter.as_ref());
+
+        let mut node = Node::new("par");
+        node.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("component".to_string()),
+        );
+        let context = test_context();
+        let mut graph = Graph::new("test");
+        graph.nodes.insert("par".to_string(), node.clone());
+        graph
+            .nodes
+            .insert("branch_a".to_string(), Node::new("branch_a"));
+        graph.edges.push(Edge::new("par", "branch_a"));
+
+        let outcome = ParallelHandler
+            .execute(&node, &context, &graph, repo_dir.path(), &services)
+            .await
+            .unwrap();
+        logger.flush().await;
+
+        // Clean up the lock so tempdir cleanup doesn't leave artifacts
+        let _ = std::fs::remove_file(&lock_path);
+
+        // Should still succeed (the checkpoint failure is non-fatal)
+        assert_eq!(outcome.status, StageOutcome::Succeeded);
+
+        let events = seen.lock().unwrap();
+        let notice = events.iter().find(|e| {
+            matches!(
+                &e.body,
+                fabro_types::EventBody::RunNotice(props)
+                    if props.code == "parallel_base_checkpoint_failed"
+            )
+        });
+        assert!(
+            notice.is_some(),
+            "expected parallel_base_checkpoint_failed notice, got events: {:?}",
+            events
+                .iter()
+                .map(fabro_types::RunEvent::event_name)
+                .collect::<Vec<_>>()
+        );
     }
 }

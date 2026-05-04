@@ -292,6 +292,14 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                                         error = %fabro_sandbox::display_for_log(&err),
                                         "git push from run lifecycle failed"
                                     );
+                                    self.emitter.emit(&Event::RunNotice {
+                                        level:            RunNoticeLevel::Warn,
+                                        code:             "git_push_failed".to_string(),
+                                        message:          format!(
+                                            "Failed to push run branch {branch}: {err}"
+                                        ),
+                                        exec_output_tail: exec_output_tail.clone(),
+                                    });
                                     (false, exec_output_tail)
                                 }
                             };
@@ -1061,5 +1069,77 @@ mod tests {
         async fn read_run_log(&self) -> Result<Option<Vec<u8>>> {
             Ok(None)
         }
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Test sets up a temporary git repo with a bogus remote to verify push-failure notice."
+    )]
+    #[tokio::test]
+    async fn checkpoint_push_failure_emits_git_push_failed_notice() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        init_git_repo(repo_dir.path());
+        // Add a bogus remote so git_push_ref actually attempts the push.
+        let add_remote = std::process::Command::new("git")
+            .args(["remote", "add", "origin", "https://127.0.0.1:1/nope.git"])
+            .current_dir(repo_dir.path())
+            .output()
+            .unwrap();
+        assert!(add_remote.status.success());
+        let branch = "fabro/metadata/run";
+        let run_branch = "fabro/run/test";
+        let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
+        let events = record_events(&emitter);
+        let run_store = run_store(fixtures::RUN_1).await;
+        let handle = RunStoreHandle::local(run_store.clone());
+        // run_options with a run_branch so the push path is entered
+        let options = Arc::new(RunOptions {
+            settings:         WorkflowSettings::default(),
+            run_dir:          repo_dir.path().to_path_buf(),
+            cancel_token:     None,
+            run_id:           fixtures::RUN_1,
+            labels:           HashMap::new(),
+            workflow_slug:    Some("metadata".to_string()),
+            github_app:       None,
+            pre_run_git:      None,
+            fork_source_ref:  None,
+            base_branch:      None,
+            display_base_sha: None,
+            git:              Some(GitCheckpointOptions {
+                base_sha:    None,
+                run_branch:  Some(run_branch.to_string()),
+                meta_branch: Some(branch.to_string()),
+            }),
+        });
+        let lifecycle = git_lifecycle(
+            repo_dir.path(),
+            emitter,
+            handle,
+            options,
+            Arc::new(RunMetadataRuntime::new()),
+        );
+        let graph = workflow_graph();
+        let node = graph.get_node("build").unwrap();
+        let mut state = ExecutionState::new(&graph).unwrap();
+        state.increment_visits("build");
+        let result = WfNodeResult::new(Outcome::success(), Duration::from_millis(10), 1, 1);
+
+        lifecycle
+            .on_checkpoint(&node, &result, Some("exit"), &state)
+            .await
+            .unwrap();
+
+        let events = events.lock().unwrap();
+        let notice = events.iter().find(|e| {
+            matches!(
+                &e.body,
+                EventBody::RunNotice(props) if props.code == "git_push_failed"
+            )
+        });
+        assert!(
+            notice.is_some(),
+            "expected git_push_failed notice, got events: {:?}",
+            events.iter().map(RunEvent::event_name).collect::<Vec<_>>()
+        );
     }
 }

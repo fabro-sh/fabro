@@ -285,6 +285,8 @@ impl CodergenBackend for AgentApiBackend {
         node: &Node,
         prompt: &str,
         system_prompt: Option<&str>,
+        emitter: &Arc<Emitter>,
+        stage_scope: &StageScope,
     ) -> Result<CodergenResult, Error> {
         let client = Client::from_source(self.source.as_ref())
             .await
@@ -358,14 +360,16 @@ impl CodergenBackend for AgentApiBackend {
                 let mut found = None;
 
                 for target in fallback_chain {
-                    tracing::warn!(
-                        stage = node.id.as_str(),
-                        from_provider = from_provider.as_str(),
-                        from_model = from_model.as_str(),
-                        to_provider = target.provider.as_str(),
-                        to_model = target.model.as_str(),
-                        error = error_msg.as_str(),
-                        "LLM provider failover (prompt)"
+                    emitter.emit_scoped(
+                        &Event::Failover {
+                            stage:         node.id.clone(),
+                            from_provider: from_provider.clone(),
+                            from_model:    from_model.clone(),
+                            to_provider:   target.provider.clone(),
+                            to_model:      target.model.clone(),
+                            error:         error_msg.clone(),
+                        },
+                        stage_scope,
                     );
 
                     let max_tokens = node.max_tokens().or_else(|| {
