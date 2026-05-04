@@ -1,0 +1,422 @@
+diff --git a/lib/crates/fabro-workflow/src/pipeline/pull_request.rs b/lib/crates/fabro-workflow/src/pipeline/pull_request.rs
+index 1fb784a4..cd84af8b 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/pull_request.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/pull_request.rs
+@@ -13,6 +13,17 @@ use fabro_types::settings::run::MergeStrategy;
+ use fabro_util::text::strip_goal_decoration;
+ use tracing::{debug, info};
+ 
++use super::types::{Concluded, Finalized, PullRequestOptions};
++use crate::event::{Event, RunNoticeLevel};
++use crate::outcome::{StageOutcome, format_cost as outcome_format_cost};
++use crate::records::{Conclusion, RunSpec};
++use crate::runtime_store::RunStoreHandle;
++
++/// Maximum length of a PR title (Unicode scalar values). Single source of
++/// truth — referenced by the structured-output schema, the system prompt,
++/// and [`enforce_title_cap`].
++const PR_TITLE_MAX_CHARS: usize = 72;
++
+ /// Structured output schema for the LLM-generated PR title and body.
+ ///
+ /// `title` is required but allows empty strings (the only signal that
+@@ -23,7 +34,7 @@ static PR_CONTENT_SCHEMA: LazyLock<serde_json::Value> = LazyLock::new(|| {
+     serde_json::json!({
+         "type": "object",
+         "properties": {
+-            "title": { "type": "string", "maxLength": 72 },
++            "title": { "type": "string", "maxLength": PR_TITLE_MAX_CHARS },
+             "body":  { "type": "string", "minLength": 1 }
+         },
+         "required": ["title", "body"],
+@@ -37,10 +48,26 @@ struct GeneratedPrContent {
+     body:  String,
+ }
+ 
++/// LLM-derived PR title and the fully assembled body (LLM narrative plus
++/// programmatic Plan / Retro / Fabro Details / footer sections).
++///
++/// `title` may be the empty string when the LLM returned a usable body but
++/// no usable title — callers fall back to [`pr_title_from_goal`] in that
++/// case. Every other generation failure is surfaced as `Err`.
++#[derive(Debug, Clone)]
++pub struct PrContent {
++    pub title: String,
++    pub body:  String,
++}
++
+ /// System prompt that instructs the LLM how to write a Fabro PR title and
+ /// body. The trailing programmatic sections (Plan `<details>`, Retro,
+ /// Fabro Details, footer) are appended after the LLM body — the prompt
+ /// explicitly forbids the LLM from duplicating them.
++//
++// The "max 72 characters" instruction must stay in sync with
++// `PR_TITLE_MAX_CHARS` and the schema above; the prompt is advisory and
++// `enforce_title_cap` is the actual enforcement.
+ const PR_BODY_SYSTEM_PROMPT: &str = "You are writing a pull request title and description for a code change produced by an AI workflow.
+ 
+ OUTPUT FORMAT
+@@ -96,38 +123,45 @@ Include a visual aid only when a reviewer would struggle to reconstruct the ment
+ 
+ Mermaid: prefer `TB` direction, ≤10 nodes typical. Place inline at the point of relevance, not in a separate \"Diagrams\" section.";
+ 
+-// Generous tier (>=200k context window).
+-const MAX_GOAL_CHARS_LARGE: usize = 75_000;
+-const MAX_PLAN_CHARS_LARGE: usize = 75_000;
+-const MAX_DIFF_CHARS_LARGE: usize = 250_000;
+-
+-// Conservative tier (matches the previous values).
+-const MAX_GOAL_CHARS_SMALL: usize = 20_000;
+-const MAX_PLAN_CHARS_SMALL: usize = 20_000;
+-const MAX_DIFF_CHARS_SMALL: usize = 50_000;
++/// Truncation budget for the LLM prompt's goal / plan / diff sections.
++struct TruncationCaps {
++    goal: usize,
++    plan: usize,
++    diff: usize,
++}
+ 
+-/// Resolve truncation caps for `(goal, plan, diff)` based on the model's
+-/// context window. Unknown models fall through to the conservative tier.
+-fn truncation_caps(model: &str) -> (usize, usize, usize) {
++/// Generous tier for models with ≥200k context windows.
++const TRUNCATION_LARGE: TruncationCaps = TruncationCaps {
++    goal: 75_000,
++    plan: 75_000,
++    diff: 250_000,
++};
++
++/// Conservative tier (matches the pre-refactor values). Used for smaller
++/// or unknown models.
++const TRUNCATION_SMALL: TruncationCaps = TruncationCaps {
++    goal: 20_000,
++    plan: 20_000,
++    diff: 50_000,
++};
++
++/// Resolve truncation caps based on the model's context window. Unknown
++/// models fall through to the conservative tier.
++fn truncation_caps(model: &str) -> &'static TruncationCaps {
+     let large_enough = Catalog::builtin()
+         .get(model)
+-        .is_some_and(|m| m.limits.context_window >= 200_000);
++        .is_some_and(|m| m.context_window() >= 200_000);
+     if large_enough {
+-        (
+-            MAX_GOAL_CHARS_LARGE,
+-            MAX_PLAN_CHARS_LARGE,
+-            MAX_DIFF_CHARS_LARGE,
+-        )
++        &TRUNCATION_LARGE
+     } else {
+-        (
+-            MAX_GOAL_CHARS_SMALL,
+-            MAX_PLAN_CHARS_SMALL,
+-            MAX_DIFF_CHARS_SMALL,
+-        )
++        &TRUNCATION_SMALL
+     }
+ }
+ 
+-/// Truncate `s` to at most `max` chars on a UTF-8 char boundary.
++/// Truncate `s` to at most `max` bytes, aligned to a UTF-8 char boundary
++/// (so the returned slice never splits a multibyte sequence). The cap is
++/// in bytes for cheap context-window safety; for ASCII-heavy diffs and
++/// goals this matches a char count.
+ fn truncate_chars(s: &str, max: usize) -> &str {
+     if s.len() > max {
+         &s[..s.floor_char_boundary(max)]
+@@ -136,35 +170,30 @@ fn truncate_chars(s: &str, max: usize) -> &str {
+     }
+ }
+ 
+-/// Cap a title at 72 chars, replacing the trailing char with `…` when
+-/// truncation occurs. Counts Unicode scalar values, not bytes.
+-fn enforce_title_cap(title: &str) -> String {
+-    const MAX: usize = 72;
+-    if title.chars().count() > MAX {
+-        let truncated: String = title.chars().take(MAX - 1).collect();
++/// Truncate `s` to at most `max` Unicode scalar values, replacing the
++/// trailing char with `…` when truncation occurs.
++fn truncate_with_ellipsis(s: &str, max: usize) -> String {
++    if s.chars().count() > max {
++        let truncated: String = s.chars().take(max - 1).collect();
+         format!("{truncated}\u{2026}")
+     } else {
+-        title.to_string()
++        s.to_string()
+     }
+ }
+ 
+-use super::types::{Concluded, Finalized, PullRequestOptions};
+-use crate::event::{Event, RunNoticeLevel};
+-use crate::outcome::{StageOutcome, format_cost as outcome_format_cost};
+-use crate::records::{Conclusion, RunSpec};
+-use crate::runtime_store::RunStoreHandle;
++/// Cap a PR title at [`PR_TITLE_MAX_CHARS`].
++fn enforce_title_cap(title: &str) -> String {
++    truncate_with_ellipsis(title, PR_TITLE_MAX_CHARS)
++}
+ 
+ /// Derive a PR title from the workflow goal.
+ ///
+-/// Uses the first line, truncated to 120 characters for readability.
++/// Uses the first line, truncated to 120 characters for readability. The
++/// caller is expected to apply [`enforce_title_cap`] afterwards if a
++/// stricter cap is required (the wider cap here is the legacy behaviour
++/// for the deterministic fallback path).
+ fn pr_title_from_goal(goal: &str) -> String {
+-    let stripped = strip_goal_decoration(goal);
+-    if stripped.chars().count() > 120 {
+-        let truncated: String = stripped.chars().take(119).collect();
+-        format!("{truncated}…")
+-    } else {
+-        stripped.to_string()
+-    }
++    truncate_with_ellipsis(strip_goal_decoration(goal), 120)
+ }
+ 
+ /// Truncate a PR body to fit GitHub's 65,536 character limit.
+@@ -425,10 +454,7 @@ async fn load_pull_request_diff(run_store: &RunStoreHandle) -> String {
+ /// Build a complete PR title and body by combining LLM-generated narrative
+ /// with programmatic sections (plan, retro, fabro details).
+ ///
+-/// Returns `(title, body)`. The title may be the empty string when the LLM
+-/// returns a usable body but no usable title — callers are responsible for
+-/// the deterministic title fallback in that case. Every other generation
+-/// failure is surfaced as `Err`.
++/// See [`PrContent`] for the empty-title-as-fallback-signal contract.
+ pub async fn build_pr_body(
+     diff: &str,
+     goal: &str,
+@@ -436,7 +462,7 @@ pub async fn build_pr_body(
+     run_store: &RunStoreHandle,
+     llm_source: &dyn CredentialSource,
+     conclusion: Option<&Conclusion>,
+-) -> Result<(String, String), String> {
++) -> Result<PrContent, String> {
+     let client = Client::from_source(llm_source)
+         .await
+         .map_err(|e| format!("Failed to create LLM client: {e}"))?;
+@@ -451,7 +477,7 @@ async fn build_pr_body_with_client(
+     run_store: &RunStoreHandle,
+     conclusion: Option<&Conclusion>,
+     client: Arc<Client>,
+-) -> Result<(String, String), String> {
++) -> Result<PrContent, String> {
+     build_pr_body_with_client_and_state(diff, goal, model, run_store, conclusion, client, None)
+         .await
+ }
+@@ -464,7 +490,7 @@ async fn build_pr_body_with_source_and_state(
+     llm_source: &dyn CredentialSource,
+     conclusion: Option<&Conclusion>,
+     run_state: Option<&fabro_store::RunProjection>,
+-) -> Result<(String, String), String> {
++) -> Result<PrContent, String> {
+     let client = Client::from_source(llm_source)
+         .await
+         .map_err(|e| format!("Failed to create LLM client: {e}"))?;
+@@ -489,7 +515,7 @@ async fn build_pr_body_with_client_and_state(
+     conclusion: Option<&Conclusion>,
+     client: Arc<Client>,
+     run_state: Option<&fabro_store::RunProjection>,
+-) -> Result<(String, String), String> {
++) -> Result<PrContent, String> {
+     info!("Building PR body");
+ 
+     let loaded_run_state = if run_state.is_none() {
+@@ -510,12 +536,12 @@ async fn build_pr_body_with_client_and_state(
+     let run_spec = run_state.and_then(|state| state.spec.clone());
+     let dot_source = run_state.and_then(|state| state.graph_source.clone());
+ 
+-    let (max_goal, max_plan, max_diff) = truncation_caps(model);
+-    let truncated_goal = truncate_chars(goal, max_goal);
+-    let truncated_diff = truncate_chars(diff, max_diff);
++    let caps = truncation_caps(model);
++    let truncated_goal = truncate_chars(goal, caps.goal);
++    let truncated_diff = truncate_chars(diff, caps.diff);
+ 
+     let prompt = if let Some(ref plan) = plan_text {
+-        let truncated_plan = truncate_chars(plan, max_plan);
++        let truncated_plan = truncate_chars(plan, caps.plan);
+         format!(
+             "Goal: {truncated_goal}\n\nPlan:\n```\n{truncated_plan}\n```\n\nDiff:\n```\n{truncated_diff}\n```"
+         )
+@@ -559,7 +585,7 @@ async fn build_pr_body_with_client_and_state(
+ 
+     info!("PR body generated");
+ 
+-    Ok((title, body))
++    Ok(PrContent { title, body })
+ }
+ 
+ /// Auto-merge configuration for a pull request.
+@@ -600,7 +626,10 @@ pub async fn maybe_open_pull_request(
+     let (owner, repo) =
+         github_app::parse_github_owner_repo(&https_url).map_err(|err| format!("{err:#}"))?;
+ 
+-    let (llm_title, body) = build_pr_body_with_source_and_state(
++    let PrContent {
++        title: llm_title,
++        body,
++    } = build_pr_body_with_source_and_state(
+         req.diff,
+         req.goal,
+         req.model,
+@@ -613,12 +642,14 @@ pub async fn maybe_open_pull_request(
+     .map_err(|err| format!("{err:#}"))?;
+     let body = truncate_pr_body(&body);
+ 
+-    let title = if llm_title.trim().is_empty() {
+-        pr_title_from_goal(req.goal)
++    // The LLM-title path is already capped inside the builder via
++    // `enforce_title_cap`; the fallback path uses `pr_title_from_goal`,
++    // which has a wider 120-char cap and so needs re-capping here.
++    let title = if llm_title.is_empty() {
++        enforce_title_cap(&pr_title_from_goal(req.goal))
+     } else {
+         llm_title
+     };
+-    let title = enforce_title_cap(&title);
+ 
+     let created = github_app::create_pull_request(
+         &req.github,
+@@ -1276,7 +1307,7 @@ mod tests {
+     async fn build_pr_body_uses_in_memory_conclusion() {
+         let store = test_store();
+         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+-        let (title, body) = build_pr_body_with_client(
++        let pr = build_pr_body_with_client(
+             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
+             "Implement feature",
+             "mock-model",
+@@ -1290,7 +1321,8 @@ mod tests {
+         .await
+         .unwrap();
+ 
+-        assert_eq!(title, "Mock title");
++        assert_eq!(pr.title, "Mock title");
++        let body = pr.body;
+         assert!(body.contains("Narrative from mock."));
+         assert!(body.contains("### Fabro Details"));
+         assert!(body.contains("Ran 3 stages in 2m 30s for $0.42"));
+@@ -1350,7 +1382,7 @@ mod tests {
+         .await
+         .unwrap();
+ 
+-        let (_title, body) = build_pr_body_with_client(
++        let body = build_pr_body_with_client(
+             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
+             "Implement feature",
+             "mock-model",
+@@ -1362,7 +1394,8 @@ mod tests {
+             ),
+         )
+         .await
+-        .unwrap();
++        .unwrap()
++        .body;
+ 
+         assert!(body.contains("Narrative from mock."));
+         assert!(body.contains("### Retro"));
+@@ -1440,7 +1473,7 @@ mod tests {
+         .await
+         .unwrap();
+ 
+-        let (_title, body) = build_pr_body_with_client(
++        let body = build_pr_body_with_client(
+             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
+             "Implement feature",
+             "mock-model",
+@@ -1452,7 +1485,8 @@ mod tests {
+             ),
+         )
+         .await
+-        .unwrap();
++        .unwrap()
++        .body;
+ 
+         assert!(body.contains("<summary>Full plan</summary>"));
+         assert!(body.contains("Plan from store"));
+@@ -1462,7 +1496,7 @@ mod tests {
+     async fn build_pr_body_uses_explicit_llm_client() {
+         let store = test_store();
+         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+-        let (_title, body) = build_pr_body_with_client(
++        let body = build_pr_body_with_client(
+             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
+             "Implement feature",
+             "gpt-5.4",
+@@ -1474,7 +1508,8 @@ mod tests {
+             ),
+         )
+         .await
+-        .unwrap();
++        .unwrap()
++        .body;
+ 
+         assert!(body.contains("Narrative from explicit client."));
+         assert!(!body.contains("Narrative from mock."));
+@@ -1521,7 +1556,7 @@ mod tests {
+         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+         let run_store_handle: RunStoreHandle = run_store.into();
+ 
+-        let (title, body) = build_pr_body(
++        let pr = build_pr_body(
+             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
+             "Implement feature",
+             "gpt-5.4",
+@@ -1532,8 +1567,8 @@ mod tests {
+         .await
+         .unwrap();
+ 
+-        assert_eq!(title, "Vault title");
+-        assert!(body.contains("Narrative from vault source."));
++        assert_eq!(pr.title, "Vault title");
++        assert!(pr.body.contains("Narrative from vault source."));
+         response_mock.assert_async().await;
+     }
+ 
+@@ -1754,7 +1789,7 @@ mod tests {
+         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+         let long_title = "x".repeat(200);
+         let payload = pr_content_json(&long_title, "Body content.");
+-        let (title, _body) = build_pr_body_with_client(
++        let title = build_pr_body_with_client(
+             "diff --git a/src/lib.rs b/src/lib.rs\n+fn x() {}\n",
+             "Implement feature",
+             "mock-model",
+@@ -1763,7 +1798,8 @@ mod tests {
+             explicit_client("mock", &payload),
+         )
+         .await
+-        .unwrap();
++        .unwrap()
++        .title;
+ 
+         assert_eq!(title.chars().count(), 72);
+         assert!(title.ends_with('\u{2026}'));
+diff --git a/lib/crates/fabro-workflow/tests/it/integration.rs b/lib/crates/fabro-workflow/tests/it/integration.rs
+index 742218c1..2574ee17 100644
+--- a/lib/crates/fabro-workflow/tests/it/integration.rs
++++ b/lib/crates/fabro-workflow/tests/it/integration.rs
+@@ -6896,7 +6896,7 @@ async fn workflow_run_with_vault_only_openai_codex_builds_pr_body() {
+     let run_store = store.open_run_reader(&run_options.run_id).await.unwrap();
+     let run_store_handle: fabro_workflow::runtime_store::RunStoreHandle = run_store.into();
+ 
+-    let (title, body) = fabro_workflow::pull_request::build_pr_body(
++    let pr = fabro_workflow::pull_request::build_pr_body(
+         "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
+         "Implement feature",
+         "gpt-5.4",
+@@ -6916,8 +6916,8 @@ async fn workflow_run_with_vault_only_openai_codex_builds_pr_body() {
+     .await
+     .expect("PR body should build from vault-only credentials");
+ 
+-    assert_eq!(title, "Vault title");
+-    assert!(body.contains("Narrative from vault source."));
++    assert_eq!(pr.title, "Vault title");
++    assert!(pr.body.contains("Narrative from vault source."));
+     response_mock.assert_async().await;
+ }
+ 
