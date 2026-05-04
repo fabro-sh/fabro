@@ -497,6 +497,7 @@ command = ["demo-mcp"]
                     provider:  Some(InterpString::parse("openai")),
                     name:      Some(InterpString::parse("gpt-5")),
                     fallbacks: Vec::new(),
+                    controls:  None,
                 }),
                 execution: Some(RunExecutionLayer {
                     mode:     Some(RunMode::DryRun),

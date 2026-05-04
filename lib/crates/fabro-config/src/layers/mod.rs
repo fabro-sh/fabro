@@ -30,8 +30,9 @@ pub use run::{
     GitAuthorLayer, HookAgentMarker, HookEntry, HookTlsMode, InterviewProviderLayer,
     InterviewsLayer, LocalSandboxLayer, McpEntryLayer, ModelRefOrSplice, NotificationProviderLayer,
     NotificationRouteLayer, PrepareStep, RunAgentLayer, RunArtifactsLayer, RunCheckpointLayer,
-    RunExecutionLayer, RunGitLayer, RunGoalLayer, RunLayer, RunModelLayer, RunPrepareLayer,
-    RunPullRequestLayer, RunSandboxLayer, RunScmLayer, ScmGitHubLayer, StringOrSplice,
+    RunExecutionLayer, RunGitLayer, RunGoalLayer, RunLayer, RunModelControlsLayer, RunModelLayer,
+    RunPrepareLayer, RunPullRequestLayer, RunSandboxLayer, RunScmLayer, ScmGitHubLayer,
+    StringOrSplice,
 };
 pub use server::{
     DiscordIntegrationLayer, GithubIntegrationLayer, IntegrationWebhooksLayer,

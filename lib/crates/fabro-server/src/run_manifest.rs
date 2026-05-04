@@ -315,6 +315,7 @@ fn manifest_args_overrides(args: Option<&types::ManifestArgs>) -> ManifestSettin
         provider:  args.provider.as_deref().map(InterpString::parse),
         name:      args.model.as_deref().map(InterpString::parse),
         fallbacks: Vec::new(),
+        controls:  None,
     });
     let local_worktree = args
         .worktree_mode

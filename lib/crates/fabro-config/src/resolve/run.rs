@@ -72,6 +72,14 @@ fn resolve_model(model: Option<&RunModelLayer>) -> RunModelSettings {
                 ModelRefOrSplice::Splice => None,
             })
             .collect(),
+        controls:  model
+            .controls
+            .as_ref()
+            .map(|c| fabro_types::settings::RunModelControls {
+                reasoning_effort: c.reasoning_effort.clone(),
+                speed:            c.speed.clone(),
+            })
+            .unwrap_or_default(),
     }
 }
 

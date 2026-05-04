@@ -39,6 +39,7 @@ fn model_from_args(model: Option<&str>, provider: Option<&str>) -> Option<RunMod
         provider:  provider.map(InterpString::parse),
         name:      model.map(InterpString::parse),
         fallbacks: Vec::new(),
+        controls:  None,
     })
 }
 
