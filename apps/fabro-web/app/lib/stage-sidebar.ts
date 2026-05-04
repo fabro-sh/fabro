@@ -10,6 +10,15 @@ export const SUCCEEDED_STAGE_STATES: ReadonlySet<StageState> = new Set([
   "partially_succeeded",
 ]);
 
+/**
+ * Display label for a stage. Suffixes `(N)` for visits > 1 so a looped node
+ * (e.g. `verify`) renders as `verify`, `verify (2)`, `verify (3)` in the
+ * sidebar and stage header.
+ */
+export function formatStageLabel(stage: { name: string; visit: number }): string {
+  return stage.visit > 1 ? `${stage.name} (${stage.visit})` : stage.name;
+}
+
 export function mapRunStagesToSidebarStages(
   stagesResult: PaginatedRunStageList | null | undefined,
 ): Stage[] {
@@ -39,21 +48,27 @@ export function aggregateGraphNodeStatus(stages: readonly Stage[]): Map<
   string,
   { displayStatus: StageState; latestStageId: string }
 > {
-  const grouped = new Map<string, Stage[]>();
+  // Single pass per nodeId: track the visit with the highest `visit` overall
+  // (drives click target + terminal status) and the highest-visit *active*
+  // stage (drives display when any visit is in flight).
+  const latest = new Map<string, Stage>();
+  const latestActive = new Map<string, Stage>();
   for (const stage of stages) {
-    const list = grouped.get(stage.nodeId) ?? [];
-    list.push(stage);
-    grouped.set(stage.nodeId, list);
+    const prevLatest = latest.get(stage.nodeId);
+    if (!prevLatest || stage.visit > prevLatest.visit) {
+      latest.set(stage.nodeId, stage);
+    }
+    if (ACTIVE_STAGE_STATES.has(stage.status)) {
+      const prevActive = latestActive.get(stage.nodeId);
+      if (!prevActive || stage.visit > prevActive.visit) {
+        latestActive.set(stage.nodeId, stage);
+      }
+    }
   }
   const result = new Map<string, { displayStatus: StageState; latestStageId: string }>();
-  for (const [nodeId, list] of grouped) {
-    list.sort((a, b) => a.visit - b.visit);
-    const latest = list[list.length - 1];
-    const activeVisit = [...list]
-      .reverse()
-      .find((s) => ACTIVE_STAGE_STATES.has(s.status));
-    const display = activeVisit ?? latest;
-    result.set(nodeId, { displayStatus: display.status, latestStageId: latest.id });
+  for (const [nodeId, latestStage] of latest) {
+    const display = latestActive.get(nodeId) ?? latestStage;
+    result.set(nodeId, { displayStatus: display.status, latestStageId: latestStage.id });
   }
   return result;
 }

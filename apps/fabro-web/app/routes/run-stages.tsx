@@ -41,7 +41,7 @@ import { EmptyState } from "../components/state";
 import { CopyButton } from "../components/ui";
 import { formatDurationSecs } from "../lib/format";
 import { fetchRunCommandLog, useRunEventsList, useRunStageTurns, useRunStages } from "../lib/queries";
-import { mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
+import { formatStageLabel, mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
 import { getNumber, getString, type UnknownRecord } from "../lib/unknown";
 import {
   CommandOutputStream,
@@ -638,7 +638,7 @@ export default function RunStages() {
         <div className="sticky top-0 z-10 -mx-2 flex items-center gap-2 bg-page/85 px-2 py-2 backdrop-blur">
           <SelectedIcon className={`size-5 ${selectedConfig.color} ${isRunning ? "animate-spin" : ""}`} />
           <h3 className="text-base font-semibold text-fg">
-            {selectedStage.visit > 1 ? `${selectedStage.name} (${selectedStage.visit})` : selectedStage.name}
+            {formatStageLabel(selectedStage)}
           </h3>
           <span className="font-mono text-xs tabular-nums text-fg-muted">
             <RunningStageDuration

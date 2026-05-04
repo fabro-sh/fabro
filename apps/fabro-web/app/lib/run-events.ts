@@ -136,10 +136,10 @@ export function subscribeToRunEvents(
 }
 
 function stageIdFromPayload(payload: RunEventPayload): string | undefined {
-  if (typeof payload.stage_id === "string") return payload.stage_id;
-  if (typeof payload.node_id === "string") return payload.node_id;
-  const nodeId = payload.properties?.node_id;
-  return typeof nodeId === "string" ? nodeId : undefined;
+  // Only return a true `node_id@visit` StageId. A bare `node_id` would not
+  // match the suffixed `stageTurns(runId, "verify@1")` cache key, so falling
+  // back to it would silently no-op the invalidation.
+  return typeof payload.stage_id === "string" ? payload.stage_id : undefined;
 }
 
 export function useRunEvents(runId: string | undefined) {

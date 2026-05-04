@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use fabro_retro::retro::CompletedStage;
 use fabro_store::EventEnvelope;
+use fabro_types::EventBody;
 
 /// Callback invoked when a workflow node starts executing.
 pub type OnNodeCallback = Option<Arc<dyn Fn(&str) + Send + Sync>>;
@@ -86,23 +87,23 @@ pub fn build_completed_stages(cp: &records::Checkpoint, run_failed: bool) -> Vec
     stages
 }
 
+/// Extract the `duration_ms` from a `stage.completed` / `stage.failed`
+/// event body, or `None` for any other variant.
+fn stage_completion_duration_ms(body: &EventBody) -> Option<u64> {
+    match body {
+        EventBody::StageCompleted(props) => Some(props.duration_ms),
+        EventBody::StageFailed(props) => Some(props.duration_ms),
+        _ => None,
+    }
+}
+
 pub fn extract_stage_durations_from_events(events: &[EventEnvelope]) -> HashMap<String, u64> {
     let mut durations = HashMap::new();
     for envelope in events {
-        let event = &envelope.event;
-        let event_name = event.event_name();
-        if event_name != "stage.completed" && event_name != "stage.failed" {
-            continue;
-        }
-        let Some(node_id) = event.node_id.as_deref() else {
+        let Some(duration_ms) = stage_completion_duration_ms(&envelope.event.body) else {
             continue;
         };
-        let Some(duration_ms) = event
-            .properties()
-            .ok()
-            .and_then(|properties| properties.get("duration_ms").cloned())
-            .and_then(|duration| duration.as_u64())
-        else {
+        let Some(node_id) = envelope.event.node_id.as_deref() else {
             continue;
         };
         durations.insert(node_id.to_string(), duration_ms);
@@ -120,20 +121,10 @@ pub fn extract_stage_durations_by_stage_id(
 ) -> HashMap<fabro_types::StageId, u64> {
     let mut durations = HashMap::new();
     for envelope in events {
-        let event = &envelope.event;
-        let event_name = event.event_name();
-        if event_name != "stage.completed" && event_name != "stage.failed" {
-            continue;
-        }
-        let Some(stage_id) = event.stage_id.as_ref() else {
+        let Some(duration_ms) = stage_completion_duration_ms(&envelope.event.body) else {
             continue;
         };
-        let Some(duration_ms) = event
-            .properties()
-            .ok()
-            .and_then(|properties| properties.get("duration_ms").cloned())
-            .and_then(|duration| duration.as_u64())
-        else {
+        let Some(stage_id) = envelope.event.stage_id.as_ref() else {
             continue;
         };
         durations.insert(stage_id.clone(), duration_ms);

@@ -17,46 +17,39 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/billing", get(get_run_billing))
 }
 
-/// Pick the stage state from the latest lifecycle event for `stage_id`,
-/// falling back to the projection's stored completion when no lifecycle
-/// events have landed yet (e.g. an empty event log for a completed run
-/// recovered from snapshot only).
-fn stage_status_from_events(
-    events: &[EventEnvelope],
-    stage_id: &StageId,
-    projection: &RunProjection,
-) -> StageState {
-    let latest = events.iter().rev().find(|envelope| {
-        envelope.event.stage_id.as_ref() == Some(stage_id)
-            && matches!(
-                &envelope.event.body,
-                EventBody::StageStarted(_)
-                    | EventBody::StageRetrying(_)
-                    | EventBody::StageCompleted(_)
-                    | EventBody::StageFailed(_)
-            )
-    });
-
-    if let Some(envelope) = latest {
-        return match &envelope.event.body {
-            EventBody::StageStarted(_) => StageState::Running,
-            EventBody::StageRetrying(_) => StageState::Retrying,
-            EventBody::StageFailed(props) => {
-                if props.will_retry {
-                    StageState::Retrying
-                } else {
-                    StageState::Failed
-                }
-            }
-            EventBody::StageCompleted(props) => StageState::from(props.status),
-            _ => StageState::Pending,
-        };
+/// Map a `stage.*` lifecycle event body to the [`StageState`] it implies.
+/// Returns `None` for any other variant.
+fn stage_state_from_lifecycle(body: &EventBody) -> Option<StageState> {
+    match body {
+        EventBody::StageStarted(_) => Some(StageState::Running),
+        EventBody::StageRetrying(_) => Some(StageState::Retrying),
+        EventBody::StageFailed(props) => Some(if props.will_retry {
+            StageState::Retrying
+        } else {
+            StageState::Failed
+        }),
+        EventBody::StageCompleted(props) => Some(StageState::from(props.status)),
+        _ => None,
     }
+}
 
-    projection
-        .stage(stage_id)
-        .and_then(|stage| stage.completion.as_ref())
-        .map_or(StageState::Pending, |c| StageState::from(c.outcome))
+/// Single-pass scan over `events` building the latest [`StageState`] for each
+/// [`StageId`] from lifecycle events (started/retrying/completed/failed). Each
+/// later lifecycle event overwrites earlier ones, leaving the latest as the
+/// stored value — equivalent to "scan in reverse, take first match" but in O(E)
+/// for the whole list rather than O(stages × events).
+fn latest_stage_states(events: &[EventEnvelope]) -> HashMap<StageId, StageState> {
+    let mut states = HashMap::new();
+    for envelope in events {
+        let Some(stage_id) = envelope.event.stage_id.as_ref() else {
+            continue;
+        };
+        let Some(state) = stage_state_from_lifecycle(&envelope.event.body) else {
+            continue;
+        };
+        states.insert(stage_id.clone(), state);
+    }
+    states
 }
 
 async fn list_run_stages(
@@ -77,21 +70,30 @@ async fn list_run_stages(
 
     let projection = RunProjection::apply_events(&events).unwrap_or_default();
     let stage_durations = fabro_workflow::extract_stage_durations_by_stage_id(&events);
+    let lifecycle_states = latest_stage_states(&events);
 
     let mut entries: Vec<(&StageId, &fabro_types::StageProjection)> =
         projection.iter_stages().collect();
-    entries.sort_by_key(|(_, projection)| projection.first_event_seq);
+    entries.sort_by_key(|(_, stage)| stage.first_event_seq);
 
     let mut stages = Vec::with_capacity(entries.len());
-    for (stage_id, _projection_stage) in entries {
-        let duration_ms = stage_durations.get(stage_id).copied();
+    for (stage_id, stage_projection) in entries {
+        let node_id = stage_id.node_id().to_string();
         let visit = NonZeroU32::new(stage_id.visit()).expect("StageId.visit is 1-based");
+        // Prefer the latest lifecycle event; fall back to the projection's
+        // stored completion (e.g. for runs recovered from snapshot only).
+        let status = lifecycle_states.get(stage_id).copied().unwrap_or_else(|| {
+            stage_projection
+                .completion
+                .as_ref()
+                .map_or(StageState::Pending, |c| StageState::from(c.outcome))
+        });
         stages.push(RunStage {
             id: stage_id.to_string(),
-            name: stage_id.node_id().to_string(),
-            status: stage_status_from_events(&events, stage_id, &projection),
-            duration_secs: duration_ms.map(|ms| ms as f64 / 1000.0),
-            node_id: stage_id.node_id().to_string(),
+            name: node_id.clone(),
+            status,
+            duration_secs: stage_durations.get(stage_id).map(|ms| *ms as f64 / 1000.0),
+            node_id,
             visit,
         });
     }

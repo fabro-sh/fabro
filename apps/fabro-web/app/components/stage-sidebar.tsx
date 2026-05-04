@@ -11,7 +11,7 @@ import {
 } from "@heroicons/react/24/solid";
 import { Bars3BottomLeftIcon, DocumentTextIcon, MapIcon } from "@heroicons/react/24/outline";
 import { formatDurationSecs } from "../lib/format";
-import { ACTIVE_STAGE_STATES } from "../lib/stage-sidebar";
+import { ACTIVE_STAGE_STATES, formatStageLabel } from "../lib/stage-sidebar";
 
 export interface Stage {
   id: string;
@@ -101,7 +101,7 @@ export function StageSidebar({ stages, runId, selectedStageId, activeLink }: Sta
                     }`}
                   >
                     <Icon className={`size-4 shrink-0 ${config.color} ${ACTIVE_STAGE_STATES.has(stage.status) ? "animate-spin" : ""}`} />
-                    <span className="flex-1 truncate">{stage.visit > 1 ? `${stage.name} (${stage.visit})` : stage.name}</span>
+                    <span className="flex-1 truncate">{formatStageLabel(stage)}</span>
                     <span className="font-mono text-xs tabular-nums text-fg-muted">{stageDuration(stage)}</span>
                   </Link>
                 </li>
