@@ -1,0 +1,320 @@
+diff --git a/lib/crates/fabro-agent/src/session.rs b/lib/crates/fabro-agent/src/session.rs
+index 40c59d39..3af7981d 100644
+--- a/lib/crates/fabro-agent/src/session.rs
++++ b/lib/crates/fabro-agent/src/session.rs
+@@ -43,27 +43,27 @@ use crate::types::{AgentEvent, CompletionCoordinator, SessionEvent, SessionState
+ type SteeringEntry = (String, SteerKind, Option<Principal>);
+ 
+ pub struct Session {
+-    id:                       String,
+-    config:                   SessionOptions,
+-    history:                  History,
+-    event_emitter:            Emitter,
+-    state:                    SessionState,
+-    llm_client:               Client,
+-    provider_profile:         Arc<dyn AgentProfile>,
+-    sandbox:                  Arc<dyn Sandbox>,
+-    steering_queue:           Arc<Mutex<VecDeque<SteeringEntry>>>,
+-    followup_queue:           Arc<Mutex<VecDeque<String>>>,
+-    cancel_token:             CancellationToken,
+-    interrupt_reason:         Arc<Mutex<Option<InterruptReason>>>,
+-    round_token:              Arc<std::sync::RwLock<CancellationToken>>,
+-    completion_coordinator:   Option<Arc<dyn CompletionCoordinator>>,
+-    memory:                   Vec<String>,
+-    env_context:              EnvContext,
+-    skills:                   Vec<Skill>,
+-    system_prompt:            String,
+-    file_tracker:             FileTracker,
+-    tool_env:                 Option<HashMap<String, String>>,
+-    subagent_manager:         Option<Arc<AsyncMutex<SubAgentManager>>>,
++    id:                     String,
++    config:                 SessionOptions,
++    history:                History,
++    event_emitter:          Emitter,
++    state:                  SessionState,
++    llm_client:             Client,
++    provider_profile:       Arc<dyn AgentProfile>,
++    sandbox:                Arc<dyn Sandbox>,
++    steering_queue:         Arc<Mutex<VecDeque<SteeringEntry>>>,
++    followup_queue:         Arc<Mutex<VecDeque<String>>>,
++    cancel_token:           CancellationToken,
++    interrupt_reason:       Arc<Mutex<Option<InterruptReason>>>,
++    round_token:            Arc<std::sync::RwLock<CancellationToken>>,
++    completion_coordinator: Option<Arc<dyn CompletionCoordinator>>,
++    memory:                 Vec<String>,
++    env_context:            EnvContext,
++    skills:                 Vec<Skill>,
++    system_prompt:          String,
++    file_tracker:           FileTracker,
++    tool_env:               Option<HashMap<String, String>>,
++    subagent_manager:       Option<Arc<AsyncMutex<SubAgentManager>>>,
+ }
+ 
+ impl Session {
+@@ -516,9 +516,7 @@ impl Session {
+     }
+ 
+     #[must_use]
+-    pub fn steering_queue_handle(
+-        &self,
+-    ) -> Arc<Mutex<VecDeque<SteeringEntry>>> {
++    pub fn steering_queue_handle(&self) -> Arc<Mutex<VecDeque<SteeringEntry>>> {
+         self.steering_queue.clone()
+     }
+ 
+@@ -724,10 +722,7 @@ impl Session {
+ 
+             // Reset round token if it was cancelled (steer interrupt)
+             {
+-                let mut guard = self
+-                    .round_token
+-                    .write()
+-                    .expect("round token lock poisoned");
++                let mut guard = self.round_token.write().expect("round token lock poisoned");
+                 if guard.is_cancelled() {
+                     *guard = CancellationToken::new();
+                 }
+@@ -2971,4 +2966,4 @@ mod tests {
+             "ProcessingEnd event should be emitted when returning to Idle"
+         );
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-agent/src/types.rs b/lib/crates/fabro-agent/src/types.rs
+index 67187784..bc44da09 100644
+--- a/lib/crates/fabro-agent/src/types.rs
++++ b/lib/crates/fabro-agent/src/types.rs
+@@ -313,7 +313,12 @@ impl AgentEvent {
+                 debug!(session_id, skill = skill_name.as_str(), "Skill expanded");
+             }
+             Self::SteeringInjected { text, kind, .. } => {
+-                debug!(session_id, text_len = text.len(), ?kind, "Steering injected");
++                debug!(
++                    session_id,
++                    text_len = text.len(),
++                    ?kind,
++                    "Steering injected"
++                );
+             }
+             Self::CompactionStarted {
+                 estimated_tokens,
+diff --git a/lib/crates/fabro-cli/src/commands/run/runner.rs b/lib/crates/fabro-cli/src/commands/run/runner.rs
+index a82afbca..a60f0fb7 100644
+--- a/lib/crates/fabro-cli/src/commands/run/runner.rs
++++ b/lib/crates/fabro-cli/src/commands/run/runner.rs
+@@ -638,6 +638,7 @@ mod tests {
+     };
+     use fabro_vault::{SecretType, Vault};
+     use fabro_workflow::event::RunEventSink;
++    use fabro_workflow::steering_hub::SteeringHub;
+ 
+     use super::{
+         WorkerControlStreamEvent, WorkerTitlePhase, apply_worker_control_line,
+@@ -645,7 +646,6 @@ mod tests {
+         read_worker_control_stream_blocking, stamp_system_worker, worker_title,
+         worker_title_phase_for_event,
+     };
+-    use fabro_workflow::steering_hub::SteeringHub;
+     use crate::args::RunWorkerMode;
+ 
+     #[test]
+diff --git a/lib/crates/fabro-client/src/client.rs b/lib/crates/fabro-client/src/client.rs
+index db8a3042..20148211 100644
+--- a/lib/crates/fabro-client/src/client.rs
++++ b/lib/crates/fabro-client/src/client.rs
+@@ -818,10 +818,7 @@ impl Client {
+                 client
+                     .steer_run()
+                     .id(run_id)
+-                    .body(types::SteerRunRequest {
+-                        interrupt,
+-                        text,
+-                    })
++                    .body(types::SteerRunRequest { interrupt, text })
+                     .send()
+                     .await
+             }
+diff --git a/lib/crates/fabro-types/src/lib.rs b/lib/crates/fabro-types/src/lib.rs
+index 2b02ab8f..b47a49c7 100644
+--- a/lib/crates/fabro-types/src/lib.rs
++++ b/lib/crates/fabro-types/src/lib.rs
+@@ -83,8 +83,9 @@ pub use secret::{SecretMetadata, SecretType};
+ pub use stage_completion::StageCompletion;
+ pub use stage_id::{ParallelBranchId, StageId};
+ pub use start::StartRecord;
+-pub use self::steering::SteerKind;
+ pub use status::{
+     BlockedReason, FailureReason, InvalidTransition, ParseFailureReasonError,
+     ParseSuccessReasonError, RunControlAction, RunStatus, SuccessReason, TerminalStatus,
+ };
++
++pub use self::steering::SteerKind;
+diff --git a/lib/crates/fabro-workflow/src/event/convert.rs b/lib/crates/fabro-workflow/src/event/convert.rs
+index cf5cf8e0..efadb9e9 100644
+--- a/lib/crates/fabro-workflow/src/event/convert.rs
++++ b/lib/crates/fabro-workflow/src/event/convert.rs
+@@ -607,8 +607,8 @@ fn event_body_from_event(event: &Event) -> EventBody {
+             }
+             AgentEvent::SteeringInjected { text, kind, .. } => {
+                 EventBody::AgentSteeringInjected(fabro_types::AgentSteeringInjectedProps {
+-                    text: text.clone(),
+-                    kind: kind.to_string(),
++                    text:  text.clone(),
++                    kind:  kind.to_string(),
+                     visit: *visit,
+                 })
+             }
+diff --git a/lib/crates/fabro-workflow/src/handler/llm/api.rs b/lib/crates/fabro-workflow/src/handler/llm/api.rs
+index 09ed4970..6753ea26 100644
+--- a/lib/crates/fabro-workflow/src/handler/llm/api.rs
++++ b/lib/crates/fabro-workflow/src/handler/llm/api.rs
+@@ -7,13 +7,13 @@ use fabro_agent::{
+     AgentEvent, AgentProfile, AnthropicProfile, CompletionCoordinator, GeminiProfile,
+     OpenAiProfile, Sandbox, Session, SessionControlHandle, SessionOptions, Turn,
+ };
+-use fabro_types::StageId;
+ use fabro_auth::{CredentialSource, EnvCredentialSource};
+ use fabro_graphviz::graph::Node;
+ use fabro_llm::client::Client;
+ use fabro_llm::types::{Message, Request, TokenCounts};
+ use fabro_mcp::config::McpServerSettings;
+ use fabro_model::{FallbackTarget, Provider};
++use fabro_types::StageId;
+ use tokio::sync::Mutex as TokioMutex;
+ 
+ use super::super::agent::{CodergenBackend, CodergenResult};
+@@ -665,11 +665,7 @@ impl CodergenBackend for AgentApiBackend {
+ 
+ /// Register a session with the steering hub, setting up the completion
+ /// coordinator so the close-the-door protocol works.
+-fn register_session_steering(
+-    hub: &Arc<SteeringHub>,
+-    stage_id: &StageId,
+-    session: &mut Session,
+-) {
++fn register_session_steering(hub: &Arc<SteeringHub>, stage_id: &StageId, session: &mut Session) {
+     let control_handle = session.control_handle();
+     hub.register(stage_id, &control_handle);
+     let coordinator = SteeringCompletionCoordinator {
+@@ -895,4 +891,4 @@ mod tests {
+ 
+         assert_eq!(client.provider_names(), vec!["anthropic"]);
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-workflow/src/operations/start.rs b/lib/crates/fabro-workflow/src/operations/start.rs
+index 0e062d17..1bf4c2bd 100644
+--- a/lib/crates/fabro-workflow/src/operations/start.rs
++++ b/lib/crates/fabro-workflow/src/operations/start.rs
+@@ -33,7 +33,6 @@ use tokio::sync::RwLock as AsyncRwLock;
+ 
+ use crate::ManifestPath;
+ use crate::artifact_upload::ArtifactSink;
+-use crate::steering_hub::SteeringHub;
+ use crate::context::Context;
+ use crate::error::Error;
+ use crate::event::{
+@@ -52,6 +51,7 @@ use crate::run_metadata::metadata_branch_name;
+ use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
+ use crate::run_status::{FailureReason, RunStatus};
+ use crate::runtime_store::RunStoreHandle;
++use crate::steering_hub::SteeringHub;
+ use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
+ 
+ struct RunSession {
+diff --git a/lib/crates/fabro-workflow/src/pipeline/initialize.rs b/lib/crates/fabro-workflow/src/pipeline/initialize.rs
+index 10fc0752..887bb220 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/initialize.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/initialize.rs
+@@ -27,7 +27,6 @@ use tokio::time::timeout as tokio_timeout;
+ use super::types::{InitOptions, Initialized, LlmSpec, Persisted, SandboxEnvSpec};
+ use crate::devcontainer_bridge::{devcontainer_to_snapshot_config, run_devcontainer_lifecycle};
+ use crate::error::Error;
+-use crate::steering_hub::SteeringHub;
+ use crate::event::{Emitter, Event, RunNoticeLevel};
+ use crate::git::RUN_BRANCH_PREFIX;
+ use crate::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
+@@ -39,6 +38,7 @@ use crate::run_options::{GitCheckpointOptions, RunOptions};
+ use crate::sandbox_git::GIT_REMOTE;
+ use crate::sandbox_git_runtime::SandboxGitRuntime;
+ use crate::services::{EngineServices, RunServices};
++use crate::steering_hub::SteeringHub;
+ 
+ struct WorktreePlan {
+     branch_name:          String,
+diff --git a/lib/crates/fabro-workflow/src/pipeline/types.rs b/lib/crates/fabro-workflow/src/pipeline/types.rs
+index b4baa16e..51dfcb86 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/types.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/types.rs
+@@ -18,7 +18,6 @@ use tokio::sync::RwLock as AsyncRwLock;
+ 
+ use crate::ManifestPath;
+ use crate::artifact_upload::ArtifactSink;
+-use crate::steering_hub::SteeringHub;
+ use crate::context::Context;
+ use crate::error::Error;
+ use crate::event::Emitter;
+@@ -30,6 +29,7 @@ use crate::run_control::RunControlState;
+ use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
+ use crate::runtime_store::RunStoreHandle;
+ use crate::services::{EngineServices, RunServices};
++use crate::steering_hub::SteeringHub;
+ use crate::transforms::Transform;
+ use crate::workflow_bundle::WorkflowBundle;
+ 
+diff --git a/lib/crates/fabro-workflow/src/services.rs b/lib/crates/fabro-workflow/src/services.rs
+index f3e640c9..afdb424b 100644
+--- a/lib/crates/fabro-workflow/src/services.rs
++++ b/lib/crates/fabro-workflow/src/services.rs
+@@ -16,12 +16,12 @@ use tokio_util::sync::CancellationToken;
+ 
+ use crate::ManifestPath;
+ use crate::event::Emitter;
+-use crate::steering_hub::SteeringHub;
+ use crate::handler::HandlerRegistry;
+ use crate::run_metadata::{RunMetadataRuntime, RunMetadataWriterHandle};
+ use crate::runtime_store::RunStoreHandle;
+ use crate::sandbox_git::GitState;
+ use crate::sandbox_git_runtime::SandboxGitRuntime;
++use crate::steering_hub::SteeringHub;
+ use crate::workflow_bundle::WorkflowBundle;
+ 
+ /// Services shared across workflow phases.
+diff --git a/lib/crates/fabro-workflow/src/steering_hub.rs b/lib/crates/fabro-workflow/src/steering_hub.rs
+index 6dc91e26..70ad3754 100644
+--- a/lib/crates/fabro-workflow/src/steering_hub.rs
++++ b/lib/crates/fabro-workflow/src/steering_hub.rs
+@@ -29,7 +29,7 @@ pub struct SteeringHub {
+ impl SteeringHub {
+     pub fn new(emitter: Arc<Emitter>) -> Self {
+         Self {
+-            active:  RwLock::new(HashMap::new()),
++            active: RwLock::new(HashMap::new()),
+             pending: Mutex::new(VecDeque::new()),
+             emitter,
+         }
+@@ -76,7 +76,12 @@ impl SteeringHub {
+             let mut pending = self.pending.lock().expect("steering pending lock poisoned");
+             for steer in pending.drain(..) {
+                 // Buffered steers always delivered as append
+-                Self::enqueue_into_session(handle, &steer.text, SteerKind::Append, steer.actor.as_ref());
++                Self::enqueue_into_session(
++                    handle,
++                    &steer.text,
++                    SteerKind::Append,
++                    steer.actor.as_ref(),
++                );
+             }
+             drop(pending);
+ 
+@@ -106,7 +111,7 @@ impl SteeringHub {
+             self.emitter.emit(&Event::SteerDropped {
+                 count,
+                 reason: "run_ended".to_string(),
+-                actor:  None,
++                actor: None,
+             });
+         }
+     }
