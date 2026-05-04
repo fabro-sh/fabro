@@ -1,0 +1,521 @@
+{
+  "spec": {
+    "run_id": "01KQSYTW106NPPHT7ESWTMW5MR",
+    "settings": {
+      "project": {
+        "name": null,
+        "description": null,
+        "directory": ".",
+        "metadata": {}
+      },
+      "workflow": {
+        "name": null,
+        "description": null,
+        "graph": "workflow.fabro",
+        "metadata": {}
+      },
+      "run": {
+        "goal": {
+          "type": "inline",
+          "value": "# Model Test Bounded Concurrency Implementation Plan\n\n> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.\n\n**Goal:** Make bulk `fabro model test` run configured model checks concurrently with a bounded default of 4 requests.\n\n**Architecture:** Keep the existing single-model path serial. In the bulk path, list models once, partition configured and unconfigured models as today, then run configured model POSTs through a `futures` stream with `buffer_unordered(jobs)`. Store each completed configured result with its original configured-list index and sort before rendering so final stdout and JSON remain deterministic within the existing configured/unconfigured grouping.\n\n**Tech Stack:** Rust, Clap, `futures::stream`, existing `fabro_client::Client`, existing `httpmock` integration tests, an inline Axum concurrency harness for deterministic in-flight assertions, `cargo nextest`.\n\n---\n\n## File Structure\n\n- Modify `lib/crates/fabro-cli/src/args.rs`: add the user-facing `--jobs/-j` option to `ModelTestArgs`.\n- Modify `lib/crates/fabro-cli/src/commands/model.rs`: add bounded concurrent execution for configured bulk tests and keep output/result semantics unchanged.\n- Modify `lib/crates/fabro-cli/tests/it/cmd/model_test.rs`: update help output and add integration coverage for default concurrency and stable final ordering.\n\n## Behavior Contract\n\n- `fabro model test` defaults to `--jobs 4`.\n- `--jobs 1` is allowed and behaves like the current serial bulk behavior.\n- `--jobs 0` is rejected by Clap.\n- `fabro model test --model <MODEL>` ignores the concurrency setting and remains a single POST.\n- Bulk mode never POSTs unconfigured models.\n- Bulk mode completion progress prints one stderr line per completed configured model, `Testing <model>... done`, in completion order. Tests may assert presence of these lines but must not assert their relative ordering.\n- The model listing order means the order returned by `GET /api/v1/models`.\n- Final stdout table rows include only configured models, in listing order.\n- Final JSON preserves the current grouping: unconfigured rows first in listing order, then configured rows in listing order.\n- Existing failure semantics stay the same: configured model test failures increment `failures`; unconfigured listed models increment `skipped` but do not make bulk mode fail; a configured model returning `skip` after listing is a failure.\n- `--deep` uses the same `--jobs` value as basic mode. Users who want serial deep tests can pass `--jobs 1`.\n- The default can send four simultaneous requests to the same provider. Provider-specific throttling and retry budgets are out of scope for this change; `--jobs 1` is the manual mitigation for low rate limits.\n- Do not wrap per-model futures in `catch_unwind`. Panics are programming bugs and should unwind the command as they would in the current serial path; request failures remain normal per-row errors.\n\n### Task 1: Add the CLI Option\n\n**Files:**\n- Modify: `lib/crates/fabro-cli/src/args.rs`\n- Test: `lib/crates/fabro-cli/tests/it/cmd/model_test.rs`\n\n- [ ] **Step 1: Add `jobs` to `ModelTestArgs`**\n\nAdd this field after `model` and before `deep`:\n\n```rust\n    /// Number of model tests to run concurrently in bulk mode\n    #[arg(short = 'j', long, default_value_t = 4, value_parser = clap::value_parser!(usize).range(1..))]\n    pub(crate) jobs: usize,\n```\n\n- [ ] **Step 2: Update the help snapshot**\n\nUpdate the `help` snapshot in `lib/crates/fabro-cli/tests/it/cmd/model_test.rs` so the options include:\n\n```text\n      -j, --jobs <JOBS>          Number of model tests to run concurrently in bulk mode [default: 4]\n```\n\n- [ ] **Step 3: Run the help test and confirm the snapshot is the only expected change**\n\nRun:\n\n```bash\ncargo nextest run -p fabro-cli --test it cmd::model_test::help\n```\n\nExpected: the test passes after the snapshot text is updated.\n\n### Task 2: Thread `jobs` Through the Command\n\n**Files:**\n- Modify: `lib/crates/fabro-cli/src/commands/model.rs`\n\n- [ ] **Step 1: Update `test_models_via_server` signature**\n\nChange the function signature to accept `jobs` and keep the existing `request_mode` derivation as the first line of the body:\n\n```rust\nasync fn test_models_via_server(\n    client: &server_client::Client,\n    provider: Option<&str>,\n    model: Option<&str>,\n    deep: bool,\n    jobs: usize,\n    styles: &Styles,\n    json_output: bool,\n) -> Result<()> {\n    let request_mode = deep.then_some(ModelTestMode::Deep);\n```\n\n- [ ] **Step 2: Pass `jobs` from `run_models`**\n\nChange the `ModelsCommand::Test` match arm to destructure and forward `jobs`:\n\n```rust\n        ModelsCommand::Test(ModelTestArgs {\n            provider,\n            model,\n            deep,\n            jobs,\n            ..\n        }) => {\n            test_models_via_server(\n                client,\n                provider.as_deref(),\n                model.as_deref(),\n                deep,\n                jobs,\n                &styles,\n                json_output,\n            )\n            .await?;\n        }\n```\n\n- [ ] **Step 3: Verify compile catches no missed call sites**\n\nRun:\n\n```bash\ncargo check -p fabro-cli\n```\n\nExpected: no errors related to `test_models_via_server` arguments.\n\n### Task 3: Add Bounded Concurrent Bulk Execution\n\n**Files:**\n- Modify: `lib/crates/fabro-cli/src/commands/model.rs`\n\n- [ ] **Step 1: Add futures imports**\n\nAdd this import near the existing imports:\n\n```rust\nuse futures::{StreamExt, stream};\n```\n\n- [ ] **Step 2: Add a completed result record**\n\nAdd this private struct near `ModelTestOutput`:\n\n```rust\nstruct CompletedModelTest {\n    index:        usize,\n    model:        Model,\n    result_color: Color,\n    status:       String,\n}\n```\n\n- [ ] **Step 3: Extract configured response handling**\n\nAdd this helper near `model_test_row_from_status`:\n\n```rust\nfn configured_model_test_status(\n    result: Result<api_types::ModelTestResult>,\n) -> (Color, String, bool) {\n    match result {\n        Ok(resp) if resp.status == api_types::ModelTestResultStatus::Ok => {\n            (Color::Green, \"ok\".to_string(), false)\n        }\n        Ok(resp) if resp.status == api_types::ModelTestResultStatus::Skip => (\n            Color::Red,\n            \"error: provider became unconfigured after listing\".to_string(),\n            true,\n        ),\n        Ok(resp) => {\n            let message = resp\n                .error_message\n                .unwrap_or_else(|| \"unknown error\".to_string());\n            (Color::Red, format!(\"error: {message}\"), true)\n        }\n        Err(err) => (Color::Red, format!(\"error: {err}\"), true),\n    }\n}\n```\n\n- [ ] **Step 4: Replace only the serial configured loop**\n\nKeep the existing `models_to_test` list, `partition(...)`, and unconfigured loop unchanged. Replace only the existing `for info in &configured { ... }` loop in bulk mode with the following code. The new code consumes `configured` with `into_iter()` because the vector is not used after this point.\n\n```rust\n        let mut completed = stream::iter(configured.into_iter().enumerate())\n            .map(|(index, info)| {\n                let client = client.clone();\n                async move {\n                    let result = client.test_model(&info.id, request_mode).await;\n                    if !json_output {\n                        eprintln!(\"Testing {}... done\", info.id);\n                    }\n                    let (result_color, status, failed) = configured_model_test_status(result);\n                    (\n                        CompletedModelTest {\n                            index,\n                            model: info,\n                            result_color,\n                            status,\n                        },\n                        failed,\n                    )\n                }\n            })\n            .buffer_unordered(jobs)\n            .collect::<Vec<_>>()\n            .await;\n\n        completed.sort_by_key(|(completed, _)| completed.index);\n\n        for (completed, failed) in completed {\n            if failed {\n                failures += 1;\n            }\n\n            let mut row = model_row(&completed.model, use_color);\n            row.push(\n                completed\n                    .status\n                    .clone()\n                    .cell()\n                    .foreground_color(color_if(use_color, completed.result_color)),\n            );\n            rows.push(row);\n            json_rows.push(model_test_row_from_status(\n                &completed.model,\n                &completed.status,\n                completed.result_color,\n            ));\n        }\n```\n\n- [ ] **Step 5: Confirm clone and panic semantics**\n\nDo not add `catch_unwind` around the mapped future. `client.clone()` is intentional: `fabro_client::Client` derives `Clone` and shares its underlying state through `Arc` fields, so normal requests can run concurrently. In production, OAuth-authenticated clients serialize refresh work through the existing refresh lock; this does not affect normal request concurrency and is irrelevant to the harness tests below, which use a credential-less HTTP target.\n\n- [ ] **Step 6: Keep single-model progress unchanged**\n\nDo not change the existing single-model block:\n\n```rust\n        if !json_output {\n            eprint!(\"Testing {model_id}...\");\n        }\n        let result = client.test_model(model_id, request_mode).await;\n        if !json_output {\n            eprintln!(\" done\");\n        }\n```\n\n- [ ] **Step 7: Run focused compile check**\n\nRun:\n\n```bash\ncargo check -p fabro-cli\n```\n\nExpected: command succeeds.\n\n### Task 4: Test Bounded Concurrency and Stable Output\n\n**Files:**\n- Modify: `lib/crates/fabro-cli/tests/it/cmd/model_test.rs`\n\n- [ ] **Step 1: Add an inline deterministic concurrency harness**\n\nKeep this helper inline in `model_test.rs`; do not move it to shared support unless another test file needs it. The helper uses Axum because `httpmock` is not a good fit for deterministic barrier-style in-flight assertions.\n\nAdd imports for the helper:\n\n```rust\nuse std::collections::HashMap;\nuse std::net::SocketAddr;\nuse std::sync::Arc;\nuse std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};\nuse std::time::Duration;\n\nuse axum::extract::{Path, State};\nuse axum::routing::{get, post};\nuse axum::{Json, Router};\nuse tokio::net::TcpListener;\nuse tokio::sync::{Semaphore, oneshot};\n```\n\nAdd these helper types and functions near the existing mock helpers:\n\n```rust\n#[derive(Clone)]\nstruct ConcurrentModelServerState {\n    models: Vec<serde_json::Value>,\n    gate: Arc<ConcurrencyGate>,\n    response_delays: Arc<HashMap<String, Duration>>,\n}\n\nstruct ConcurrentModelServer {\n    base_url: String,\n    gate: Arc<ConcurrencyGate>,\n    shutdown_tx: Option<oneshot::Sender<()>>,\n    join_handle: Option<std::thread::JoinHandle<()>>,\n}\n\nimpl Drop for ConcurrentModelServer {\n    fn drop(&mut self) {\n        if let Some(shutdown_tx) = self.shutdown_tx.take() {\n            let _ = shutdown_tx.send(());\n        }\n        if let Some(join_handle) = self.join_handle.take() {\n            join_handle\n                .join()\n                .expect(\"concurrent model test server thread should not panic\");\n        }\n    }\n}\n\nstruct ConcurrencyGate {\n    expected: usize,\n    arrived: AtomicUsize,\n    in_flight: AtomicUsize,\n    max_in_flight: AtomicUsize,\n    released: AtomicBool,\n    timed_out: AtomicBool,\n    release: Semaphore,\n}\n\nimpl ConcurrencyGate {\n    fn new(expected: usize) -> Self {\n        Self {\n            expected,\n            arrived: AtomicUsize::new(0),\n            in_flight: AtomicUsize::new(0),\n            max_in_flight: AtomicUsize::new(0),\n            released: AtomicBool::new(expected == 0),\n            timed_out: AtomicBool::new(false),\n            release: Semaphore::new(0),\n        }\n    }\n\n    async fn enter(&self) {\n        let in_flight = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;\n        self.max_in_flight.fetch_max(in_flight, Ordering::SeqCst);\n\n        if self.released.load(Ordering::SeqCst) {\n            return;\n        }\n\n        let arrived = self.arrived.fetch_add(1, Ordering::SeqCst) + 1;\n        if arrived >= self.expected {\n            if !self.released.swap(true, Ordering::SeqCst) {\n                self.release.add_permits(self.expected);\n            }\n            return;\n        }\n\n        let permit = self.release.acquire();\n        if self.released.load(Ordering::SeqCst) {\n            return;\n        }\n\n        if tokio::time::timeout(Duration::from_secs(15), permit)\n            .await\n            .is_err()\n        {\n            self.timed_out.store(true, Ordering::SeqCst);\n            if !self.released.swap(true, Ordering::SeqCst) {\n                self.release.add_permits(self.expected);\n            }\n        }\n    }\n\n    fn exit(&self) {\n        self.in_flight.fetch_sub(1, Ordering::SeqCst);\n    }\n\n    fn max_in_flight(&self) -> usize {\n        self.max_in_flight.load(Ordering::SeqCst)\n    }\n\n    fn timed_out(&self) -> bool {\n        self.timed_out.load(Ordering::SeqCst)\n    }\n}\n\nfn start_concurrent_model_server(\n    models: Vec<serde_json::Value>,\n    gate_expected: usize,\n    response_delays: HashMap<String, Duration>,\n) -> ConcurrentModelServer {\n    let std_listener =\n        std::net::TcpListener::bind(\"127.0.0.1:0\").expect(\"test server should bind\");\n    std_listener\n        .set_nonblocking(true)\n        .expect(\"test server listener should be nonblocking\");\n    let addr: SocketAddr = std_listener.local_addr().expect(\"test server should have addr\");\n    let gate = Arc::new(ConcurrencyGate::new(gate_expected));\n    let state = ConcurrentModelServerState {\n        models,\n        gate: Arc::clone(&gate),\n        response_delays: Arc::new(response_delays),\n    };\n    let (shutdown_tx, shutdown_rx) = oneshot::channel();\n\n    let join_handle = std::thread::spawn(move || {\n        let runtime = tokio::runtime::Runtime::new().expect(\"test runtime should start\");\n        runtime.block_on(async move {\n            let listener =\n                TcpListener::from_std(std_listener).expect(\"test listener should convert\");\n            let app = Router::new()\n                .route(\"/api/v1/models\", get(concurrent_list_models))\n                .route(\"/api/v1/models/{id}/test\", post(concurrent_test_model))\n                .with_state(state);\n            let _ = axum::serve(listener, app)\n                .with_graceful_shutdown(async {\n                    let _ = shutdown_rx.await;\n                })\n                .await;\n        });\n    });\n\n    ConcurrentModelServer {\n        base_url: format!(\"http://{addr}\"),\n        gate,\n        shutdown_tx: Some(shutdown_tx),\n        join_handle: Some(join_handle),\n    }\n}\n\nasync fn concurrent_list_models(\n    State(state): State<ConcurrentModelServerState>,\n) -> Json<serde_json::Value> {\n    Json(serde_json::json!({\n        \"data\": state.models,\n        \"meta\": { \"has_more\": false }\n    }))\n}\n\nasync fn concurrent_test_model(\n    State(state): State<ConcurrentModelServerState>,\n    Path(id): Path<String>,\n) -> Json<serde_json::Value> {\n    state.gate.enter().await;\n    if let Some(delay) = state.response_delays.get(&id) {\n        tokio::time::sleep(*delay).await;\n    }\n    state.gate.exit();\n\n    Json(serde_json::json!({\n        \"model_id\": id,\n        \"status\": \"ok\"\n    }))\n}\n```\n\nThe gate intentionally uses a `Semaphore` plus a `released` re-check instead of `Notify`, so late arrivals cannot miss a wake after the trigger request releases the gate. The 15-second timeout has no happy-path cost; when it fires, tests must fail explicitly through `gate.timed_out()` before checking `max_in_flight`. The Tokio runtime is constructed inside the spawned server thread, and `Drop` joins that thread after sending shutdown so helper failures surface in the owning test.\n\n- [ ] **Step 2: Add a default concurrency test**\n\nBuild the configured model JSON list with the existing `model_json` helper near the top of `model_test.rs`. Use IDs that exist in `Catalog::builtin()` so table rendering can look them up:\n\n```rust\nlet models = vec![\n    model_json(\"claude-opus-4-7\", \"anthropic\", true),\n    model_json(\"claude-opus-4-6\", \"anthropic\", true),\n    model_json(\"claude-sonnet-4-5\", \"anthropic\", true),\n    model_json(\"claude-sonnet-4-6\", \"anthropic\", true),\n    model_json(\"claude-haiku-4-5\", \"anthropic\", true),\n];\n```\n\nStart the helper with those five configured models, `gate_expected = 4`, and no response delays. Wire the spawned CLI to the harness: each test in Steps 2-4 must call `context.set_http_target(&server.base_url)` (and `remove_provider_env(&mut cmd)`) before invoking the command, mirroring the existing tests in this file. Without this the CLI hits the default target and the harness receives zero requests.\n\nRun `fabro model test` without `--jobs`, then assert:\n\n```rust\nassert!(\n    output.status.success(),\n    \"model test should succeed:\\nstdout:\\n{}\\nstderr:\\n{}\",\n    String::from_utf8_lossy(&output.stdout),\n    String::from_utf8_lossy(&output.stderr)\n);\nassert!(\n    !server.gate.timed_out(),\n    \"concurrency gate timed out before four requests arrived\"\n);\nassert_eq!(\n    server.gate.max_in_flight(),\n    4,\n    \"default jobs should run four model tests concurrently before the gate releases\"\n);\n```\n\nThe gate timeout makes a serial fallback fail with `max_in_flight() == 1` instead of hanging the test.\n\n- [ ] **Step 3: Add an explicit `--jobs 2` concurrency test**\n\nReuse the same local-server helper and run:\n\n```rust\ncmd.args([\"model\", \"test\", \"--jobs\", \"2\"]);\n```\n\nAssert:\n\n```rust\nassert!(\n    !server.gate.timed_out(),\n    \"concurrency gate timed out before two requests arrived\"\n);\nassert_eq!(\n    server.gate.max_in_flight(),\n    2,\n    \"--jobs 2 should run two model tests concurrently before the gate releases\"\n);\n```\n\n- [ ] **Step 4: Add a stable JSON ordering test**\n\nThe existing `model_test_json_partitions_skip_and_fail` test pins the bulk JSON shape as `results[].model`; keep this ordering test on that same shape. Use the same five configured models, start the helper with `gate_expected = 5`, and run with `--jobs 5 --json` so all five requests are in flight before any response is allowed to complete. Set response delays so completion order is the reverse of listing order:\n\n```rust\nlet response_delays = HashMap::from([\n    (\"claude-opus-4-7\".to_string(), Duration::from_millis(250)),\n    (\"claude-opus-4-6\".to_string(), Duration::from_millis(200)),\n    (\"claude-sonnet-4-5\".to_string(), Duration::from_millis(150)),\n    (\"claude-sonnet-4-6\".to_string(), Duration::from_millis(100)),\n    (\"claude-haiku-4-5\".to_string(), Duration::from_millis(50)),\n]);\n```\n\nRun:\n\n```rust\ncmd.args([\"model\", \"test\", \"--jobs\", \"5\", \"--json\"]);\n```\n\nParse stdout and assert the JSON result order still matches listing order:\n\n```rust\nassert!(\n    !server.gate.timed_out(),\n    \"concurrency gate timed out before five requests arrived\"\n);\nassert_eq!(\n    server.gate.max_in_flight(),\n    5,\n    \"ordering test should have all five model requests in flight\"\n);\nlet json: serde_json::Value =\n    serde_json::from_slice(&output.stdout).expect(\"invalid JSON output\");\nlet models = json[\"results\"]\n    .as_array()\n    .expect(\"results should be an array\")\n    .iter()\n    .map(|row| row[\"model\"].as_str().expect(\"model should be a string\"))\n    .collect::<Vec<_>>();\nassert_eq!(\n    models,\n    vec![\n        \"claude-opus-4-7\",\n        \"claude-opus-4-6\",\n        \"claude-sonnet-4-5\",\n        \"claude-sonnet-4-6\",\n        \"claude-haiku-4-5\",\n    ]\n);\n```\n\n- [ ] **Step 5: Keep the existing unconfigured-model regression test**\n\nDo not remove or weaken `model_test_does_not_announce_unconfigured`; it already verifies that bulk mode does not POST unconfigured models. If the new Axum helper makes this easier to express later, keep the same assertion that the unconfigured test route receives zero calls.\n\n- [ ] **Step 6: Run the model test integration suite**\n\nRun:\n\n```bash\ncargo nextest run -p fabro-cli --test it cmd::model_test\n```\n\nExpected: all `cmd::model_test` tests pass.\n\n### Task 5: Final Verification\n\n**Files:**\n- Verify: `lib/crates/fabro-cli/src/args.rs`\n- Verify: `lib/crates/fabro-cli/src/commands/model.rs`\n- Verify: `lib/crates/fabro-cli/tests/it/cmd/model_test.rs`\n\n- [ ] **Step 1: Format check**\n\nRun:\n\n```bash\ncargo +nightly-2026-04-14 fmt --check --all\n```\n\nExpected: formatting check passes.\n\n- [ ] **Step 2: Clippy**\n\nRun:\n\n```bash\ncargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings\n```\n\nExpected: clippy passes without warnings.\n\n- [ ] **Step 3: Full CLI tests if time allows**\n\nRun:\n\n```bash\ncargo nextest run -p fabro-cli\n```\n\nExpected: `fabro-cli` tests pass. If this is too slow, record that focused integration coverage and clippy passed.\n\n## Assumptions\n\n- The public option name is `--jobs` with short flag `-j`.\n- The default concurrency is exactly 4.\n- A global concurrency limit is sufficient for this change; provider-specific throttling is out of scope and low-rate-limit users can pass `--jobs 1`.\n- `--deep` does not force serial execution; users can combine `--deep --jobs 1` when they want that behavior.\n- Progress lines in bulk mode may complete out of order; final table and JSON order must stay stable within the configured/unconfigured grouping described above.\n- The new Axum concurrency harness remains inline in `model_test.rs` because it is specific to this command's concurrency behavior.\n- `client.clone()` is expected to share client state through the existing `Arc` fields; auth refresh serialization is acceptable and does not invalidate request concurrency.\n- Panics inside per-model futures are not caught; this matches the current command's treatment of programmer bugs.\n- No server-side bulk endpoint is added.\n"
+        },
+        "working_dir": null,
+        "metadata": {},
+        "inputs": {},
+        "model": {
+          "provider": "anthropic",
+          "name": "claude-sonnet-4-6",
+          "fallbacks": []
+        },
+        "git": {
+          "author": null
+        },
+        "prepare": {
+          "commands": [],
+          "timeout_ms": 300000
+        },
+        "execution": {
+          "mode": "normal",
+          "approval": "prompt",
+          "retros": true
+        },
+        "checkpoint": {
+          "exclude_globs": []
+        },
+        "sandbox": {
+          "provider": "daytona",
+          "preserve": false,
+          "devcontainer": false,
+          "env": {},
+          "local": {
+            "worktree_mode": "always"
+          },
+          "docker": {
+            "image": "buildpack-deps:noble",
+            "network_mode": null,
+            "memory_limit": 4000000000,
+            "cpu_quota": 200000,
+            "env_vars": {},
+            "skip_clone": false
+          },
+          "daytona": {
+            "auto_stop_interval": 30,
+            "labels": {
+              "repo": "fabro-sh/fabro"
+            },
+            "snapshot": {
+              "name": "fabro-v8",
+              "cpu": 8,
+              "memory_gb": 16,
+              "disk_gb": 20,
+              "dockerfile": {
+                "type": "inline",
+                "value": "FROM ubuntu:24.04\n\nRUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 && rm -rf /var/lib/apt/lists/*\n\n# GitHub CLI\nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*\n\n# Rust\nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\nENV PATH=\"/root/.cargo/bin:${PATH}\"\nRUN rustup toolchain install nightly-2026-04-14 --profile minimal --component clippy,rustfmt\nRUN cargo install cargo-nextest --locked\nENV CARGO_INCREMENTAL=0\n\n# Bun\nRUN curl -fsSL https://bun.sh/install | bash\nENV PATH=\"/root/.bun/bin:${PATH}\"\n\nWORKDIR /root\n"
+              }
+            },
+            "network": null,
+            "skip_clone": false
+          }
+        },
+        "notifications": {},
+        "interviews": {
+          "provider": null,
+          "slack": null,
+          "discord": null,
+          "teams": null
+        },
+        "agent": {
+          "permissions": null,
+          "mcps": {}
+        },
+        "hooks": [],
+        "scm": {
+          "provider": null,
+          "owner": null,
+          "repository": null,
+          "github": null
+        },
+        "pull_request": {
+          "enabled": true,
+          "draft": false,
+          "auto_merge": false,
+          "merge_strategy": "squash"
+        },
+        "artifacts": {
+          "include": []
+        }
+      }
+    },
+    "graph": {
+      "name": "ImplementPlan",
+      "nodes": {
+        "fix_lints": {
+          "id": "fix_lints",
+          "attrs": {
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Fix Lints"
+            },
+            "max_visits": {
+              "Integer": 3
+            },
+            "prompt": {
+              "String": "The preflight lint step failed. Read the build output from context and fix all clippy lint warnings."
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "simplify_gpt": {
+          "id": "simplify_gpt",
+          "attrs": {
+            "label": {
+              "String": "Simplify (GPT-55)"
+            },
+            "model": {
+              "String": "gpt-5.5"
+            },
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "provider": {
+              "String": "openai"
+            }
+          }
+        },
+        "toolchain": {
+          "id": "toolchain",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "script": {
+              "String": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "label": {
+              "String": "Toolchain"
+            }
+          }
+        },
+        "fixup": {
+          "id": "fixup",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "prompt": {
+              "String": "The verify step failed. Read the build output from context and fix all clippy lint warnings, test failures, and generated docs errors."
+            },
+            "max_visits": {
+              "Integer": 3
+            },
+            "label": {
+              "String": "Fixup"
+            }
+          }
+        },
+        "simplify_opus": {
+          "id": "simplify_opus",
+          "attrs": {
+            "label": {
+              "String": "Simplify (Opus)"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "exit": {
+          "id": "exit",
+          "attrs": {
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Exit"
+            },
+            "shape": {
+              "String": "Msquare"
+            }
+          }
+        },
+        "preflight_compile": {
+          "id": "preflight_compile",
+          "attrs": {
+            "shape": {
+              "String": "parallelogram"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Preflight Compile"
+            },
+            "script": {
+              "String": "cargo check -q --workspace 2>&1"
+            },
+            "max_retries": {
+              "Integer": 0
+            }
+          }
+        },
+        "implement": {
+          "id": "implement",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Implement"
+            },
+            "prompt": {
+              "String": "Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD."
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "verify": {
+          "id": "verify",
+          "attrs": {
+            "label": {
+              "String": "Verify"
+            },
+            "retry_target": {
+              "String": "fixup"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1 && cargo dev docs refresh 2>&1 && cargo dev docs check 2>&1"
+            },
+            "goal_gate": {
+              "Boolean": true
+            }
+          }
+        },
+        "fmt": {
+          "id": "fmt",
+          "attrs": {
+            "shape": {
+              "String": "parallelogram"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 fmt --all 2>&1"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Format"
+            }
+          }
+        },
+        "start": {
+          "id": "start",
+          "attrs": {
+            "shape": {
+              "String": "Mdiamond"
+            },
+            "label": {
+              "String": "Start"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "preflight_lint": {
+          "id": "preflight_lint",
+          "attrs": {
+            "shape": {
+              "String": "parallelogram"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1"
+            },
+            "label": {
+              "String": "Preflight Lint"
+            }
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "start",
+          "to": "toolchain",
+          "attrs": {}
+        },
+        {
+          "from": "toolchain",
+          "to": "preflight_compile",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "toolchain",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_compile",
+          "to": "preflight_lint",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_compile",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_lint",
+          "to": "implement",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_lint",
+          "to": "fix_lints",
+          "attrs": {}
+        },
+        {
+          "from": "fix_lints",
+          "to": "preflight_lint",
+          "attrs": {}
+        },
+        {
+          "from": "implement",
+          "to": "simplify_opus",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_opus",
+          "to": "simplify_gpt",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_gpt",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "verify",
+          "to": "fmt",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "verify",
+          "to": "fixup",
+          "attrs": {}
+        },
+        {
+          "from": "fixup",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "fmt",
+          "to": "exit",
+          "attrs": {}
+        }
+      ],
+      "attrs": {
+        "model_stylesheet": {
+          "String": "\n            * { model: claude-opus-4-7; }\n        "
+        },
+        "goal": {
+          "String": "# Model Test Bounded Concurrency Implementation Plan\n\n> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.\n\n**Goal:** Make bulk `fabro model test` run configured model checks concurrently with a bounded default of 4 requests.\n\n**Architecture:** Keep the existing single-model path serial. In the bulk path, list models once, partition configured and unconfigured models as today, then run configured model POSTs through a `futures` stream with `buffer_unordered(jobs)`. Store each completed configured result with its original configured-list index and sort before rendering so final stdout and JSON remain deterministic within the existing configured/unconfigured grouping.\n\n**Tech Stack:** Rust, Clap, `futures::stream`, existing `fabro_client::Client`, existing `httpmock` integration tests, an inline Axum concurrency harness for deterministic in-flight assertions, `cargo nextest`.\n\n---\n\n## File Structure\n\n- Modify `lib/crates/fabro-cli/src/args.rs`: add the user-facing `--jobs/-j` option to `ModelTestArgs`.\n- Modify `lib/crates/fabro-cli/src/commands/model.rs`: add bounded concurrent execution for configured bulk tests and keep output/result semantics unchanged.\n- Modify `lib/crates/fabro-cli/tests/it/cmd/model_test.rs`: update help output and add integration coverage for default concurrency and stable final ordering.\n\n## Behavior Contract\n\n- `fabro model test` defaults to `--jobs 4`.\n- `--jobs 1` is allowed and behaves like the current serial bulk behavior.\n- `--jobs 0` is rejected by Clap.\n- `fabro model test --model <MODEL>` ignores the concurrency setting and remains a single POST.\n- Bulk mode never POSTs unconfigured models.\n- Bulk mode completion progress prints one stderr line per completed configured model, `Testing <model>... done`, in completion order. Tests may assert presence of these lines but must not assert their relative ordering.\n- The model listing order means the order returned by `GET /api/v1/models`.\n- Final stdout table rows include only configured models, in listing order.\n- Final JSON preserves the current grouping: unconfigured rows first in listing order, then configured rows in listing order.\n- Existing failure semantics stay the same: configured model test failures increment `failures`; unconfigured listed models increment `skipped` but do not make bulk mode fail; a configured model returning `skip` after listing is a failure.\n- `--deep` uses the same `--jobs` value as basic mode. Users who want serial deep tests can pass `--jobs 1`.\n- The default can send four simultaneous requests to the same provider. Provider-specific throttling and retry budgets are out of scope for this change; `--jobs 1` is the manual mitigation for low rate limits.\n- Do not wrap per-model futures in `catch_unwind`. Panics are programming bugs and should unwind the command as they would in the current serial path; request failures remain normal per-row errors.\n\n### Task 1: Add the CLI Option\n\n**Files:**\n- Modify: `lib/crates/fabro-cli/src/args.rs`\n- Test: `lib/crates/fabro-cli/tests/it/cmd/model_test.rs`\n\n- [ ] **Step 1: Add `jobs` to `ModelTestArgs`**\n\nAdd this field after `model` and before `deep`:\n\n```rust\n    /// Number of model tests to run concurrently in bulk mode\n    #[arg(short = 'j', long, default_value_t = 4, value_parser = clap::value_parser!(usize).range(1..))]\n    pub(crate) jobs: usize,\n```\n\n- [ ] **Step 2: Update the help snapshot**\n\nUpdate the `help` snapshot in `lib/crates/fabro-cli/tests/it/cmd/model_test.rs` so the options include:\n\n```text\n      -j, --jobs <JOBS>          Number of model tests to run concurrently in bulk mode [default: 4]\n```\n\n- [ ] **Step 3: Run the help test and confirm the snapshot is the only expected change**\n\nRun:\n\n```bash\ncargo nextest run -p fabro-cli --test it cmd::model_test::help\n```\n\nExpected: the test passes after the snapshot text is updated.\n\n### Task 2: Thread `jobs` Through the Command\n\n**Files:**\n- Modify: `lib/crates/fabro-cli/src/commands/model.rs`\n\n- [ ] **Step 1: Update `test_models_via_server` signature**\n\nChange the function signature to accept `jobs` and keep the existing `request_mode` derivation as the first line of the body:\n\n```rust\nasync fn test_models_via_server(\n    client: &server_client::Client,\n    provider: Option<&str>,\n    model: Option<&str>,\n    deep: bool,\n    jobs: usize,\n    styles: &Styles,\n    json_output: bool,\n) -> Result<()> {\n    let request_mode = deep.then_some(ModelTestMode::Deep);\n```\n\n- [ ] **Step 2: Pass `jobs` from `run_models`**\n\nChange the `ModelsCommand::Test` match arm to destructure and forward `jobs`:\n\n```rust\n        ModelsCommand::Test(ModelTestArgs {\n            provider,\n            model,\n            deep,\n            jobs,\n            ..\n        }) => {\n            test_models_via_server(\n                client,\n                provider.as_deref(),\n                model.as_deref(),\n                deep,\n                jobs,\n                &styles,\n                json_output,\n            )\n            .await?;\n        }\n```\n\n- [ ] **Step 3: Verify compile catches no missed call sites**\n\nRun:\n\n```bash\ncargo check -p fabro-cli\n```\n\nExpected: no errors related to `test_models_via_server` arguments.\n\n### Task 3: Add Bounded Concurrent Bulk Execution\n\n**Files:**\n- Modify: `lib/crates/fabro-cli/src/commands/model.rs`\n\n- [ ] **Step 1: Add futures imports**\n\nAdd this import near the existing imports:\n\n```rust\nuse futures::{StreamExt, stream};\n```\n\n- [ ] **Step 2: Add a completed result record**\n\nAdd this private struct near `ModelTestOutput`:\n\n```rust\nstruct CompletedModelTest {\n    index:        usize,\n    model:        Model,\n    result_color: Color,\n    status:       String,\n}\n```\n\n- [ ] **Step 3: Extract configured response handling**\n\nAdd this helper near `model_test_row_from_status`:\n\n```rust\nfn configured_model_test_status(\n    result: Result<api_types::ModelTestResult>,\n) -> (Color, String, bool) {\n    match result {\n        Ok(resp) if resp.status == api_types::ModelTestResultStatus::Ok => {\n            (Color::Green, \"ok\".to_string(), false)\n        }\n        Ok(resp) if resp.status == api_types::ModelTestResultStatus::Skip => (\n            Color::Red,\n            \"error: provider became unconfigured after listing\".to_string(),\n            true,\n        ),\n        Ok(resp) => {\n            let message = resp\n                .error_message\n                .unwrap_or_else(|| \"unknown error\".to_string());\n            (Color::Red, format!(\"error: {message}\"), true)\n        }\n        Err(err) => (Color::Red, format!(\"error: {err}\"), true),\n    }\n}\n```\n\n- [ ] **Step 4: Replace only the serial configured loop**\n\nKeep the existing `models_to_test` list, `partition(...)`, and unconfigured loop unchanged. Replace only the existing `for info in &configured { ... }` loop in bulk mode with the following code. The new code consumes `configured` with `into_iter()` because the vector is not used after this point.\n\n```rust\n        let mut completed = stream::iter(configured.into_iter().enumerate())\n            .map(|(index, info)| {\n                let client = client.clone();\n                async move {\n                    let result = client.test_model(&info.id, request_mode).await;\n                    if !json_output {\n                        eprintln!(\"Testing {}... done\", info.id);\n                    }\n                    let (result_color, status, failed) = configured_model_test_status(result);\n                    (\n                        CompletedModelTest {\n                            index,\n                            model: info,\n                            result_color,\n                            status,\n                        },\n                        failed,\n                    )\n                }\n            })\n            .buffer_unordered(jobs)\n            .collect::<Vec<_>>()\n            .await;\n\n        completed.sort_by_key(|(completed, _)| completed.index);\n\n        for (completed, failed) in completed {\n            if failed {\n                failures += 1;\n            }\n\n            let mut row = model_row(&completed.model, use_color);\n            row.push(\n                completed\n                    .status\n                    .clone()\n                    .cell()\n                    .foreground_color(color_if(use_color, completed.result_color)),\n            );\n            rows.push(row);\n            json_rows.push(model_test_row_from_status(\n                &completed.model,\n                &completed.status,\n                completed.result_color,\n            ));\n        }\n```\n\n- [ ] **Step 5: Confirm clone and panic semantics**\n\nDo not add `catch_unwind` around the mapped future. `client.clone()` is intentional: `fabro_client::Client` derives `Clone` and shares its underlying state through `Arc` fields, so normal requests can run concurrently. In production, OAuth-authenticated clients serialize refresh work through the existing refresh lock; this does not affect normal request concurrency and is irrelevant to the harness tests below, which use a credential-less HTTP target.\n\n- [ ] **Step 6: Keep single-model progress unchanged**\n\nDo not change the existing single-model block:\n\n```rust\n        if !json_output {\n            eprint!(\"Testing {model_id}...\");\n        }\n        let result = client.test_model(model_id, request_mode).await;\n        if !json_output {\n            eprintln!(\" done\");\n        }\n```\n\n- [ ] **Step 7: Run focused compile check**\n\nRun:\n\n```bash\ncargo check -p fabro-cli\n```\n\nExpected: command succeeds.\n\n### Task 4: Test Bounded Concurrency and Stable Output\n\n**Files:**\n- Modify: `lib/crates/fabro-cli/tests/it/cmd/model_test.rs`\n\n- [ ] **Step 1: Add an inline deterministic concurrency harness**\n\nKeep this helper inline in `model_test.rs`; do not move it to shared support unless another test file needs it. The helper uses Axum because `httpmock` is not a good fit for deterministic barrier-style in-flight assertions.\n\nAdd imports for the helper:\n\n```rust\nuse std::collections::HashMap;\nuse std::net::SocketAddr;\nuse std::sync::Arc;\nuse std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};\nuse std::time::Duration;\n\nuse axum::extract::{Path, State};\nuse axum::routing::{get, post};\nuse axum::{Json, Router};\nuse tokio::net::TcpListener;\nuse tokio::sync::{Semaphore, oneshot};\n```\n\nAdd these helper types and functions near the existing mock helpers:\n\n```rust\n#[derive(Clone)]\nstruct ConcurrentModelServerState {\n    models: Vec<serde_json::Value>,\n    gate: Arc<ConcurrencyGate>,\n    response_delays: Arc<HashMap<String, Duration>>,\n}\n\nstruct ConcurrentModelServer {\n    base_url: String,\n    gate: Arc<ConcurrencyGate>,\n    shutdown_tx: Option<oneshot::Sender<()>>,\n    join_handle: Option<std::thread::JoinHandle<()>>,\n}\n\nimpl Drop for ConcurrentModelServer {\n    fn drop(&mut self) {\n        if let Some(shutdown_tx) = self.shutdown_tx.take() {\n            let _ = shutdown_tx.send(());\n        }\n        if let Some(join_handle) = self.join_handle.take() {\n            join_handle\n                .join()\n                .expect(\"concurrent model test server thread should not panic\");\n        }\n    }\n}\n\nstruct ConcurrencyGate {\n    expected: usize,\n    arrived: AtomicUsize,\n    in_flight: AtomicUsize,\n    max_in_flight: AtomicUsize,\n    released: AtomicBool,\n    timed_out: AtomicBool,\n    release: Semaphore,\n}\n\nimpl ConcurrencyGate {\n    fn new(expected: usize) -> Self {\n        Self {\n            expected,\n            arrived: AtomicUsize::new(0),\n            in_flight: AtomicUsize::new(0),\n            max_in_flight: AtomicUsize::new(0),\n            released: AtomicBool::new(expected == 0),\n            timed_out: AtomicBool::new(false),\n            release: Semaphore::new(0),\n        }\n    }\n\n    async fn enter(&self) {\n        let in_flight = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;\n        self.max_in_flight.fetch_max(in_flight, Ordering::SeqCst);\n\n        if self.released.load(Ordering::SeqCst) {\n            return;\n        }\n\n        let arrived = self.arrived.fetch_add(1, Ordering::SeqCst) + 1;\n        if arrived >= self.expected {\n            if !self.released.swap(true, Ordering::SeqCst) {\n                self.release.add_permits(self.expected);\n            }\n            return;\n        }\n\n        let permit = self.release.acquire();\n        if self.released.load(Ordering::SeqCst) {\n            return;\n        }\n\n        if tokio::time::timeout(Duration::from_secs(15), permit)\n            .await\n            .is_err()\n        {\n            self.timed_out.store(true, Ordering::SeqCst);\n            if !self.released.swap(true, Ordering::SeqCst) {\n                self.release.add_permits(self.expected);\n            }\n        }\n    }\n\n    fn exit(&self) {\n        self.in_flight.fetch_sub(1, Ordering::SeqCst);\n    }\n\n    fn max_in_flight(&self) -> usize {\n        self.max_in_flight.load(Ordering::SeqCst)\n    }\n\n    fn timed_out(&self) -> bool {\n        self.timed_out.load(Ordering::SeqCst)\n    }\n}\n\nfn start_concurrent_model_server(\n    models: Vec<serde_json::Value>,\n    gate_expected: usize,\n    response_delays: HashMap<String, Duration>,\n) -> ConcurrentModelServer {\n    let std_listener =\n        std::net::TcpListener::bind(\"127.0.0.1:0\").expect(\"test server should bind\");\n    std_listener\n        .set_nonblocking(true)\n        .expect(\"test server listener should be nonblocking\");\n    let addr: SocketAddr = std_listener.local_addr().expect(\"test server should have addr\");\n    let gate = Arc::new(ConcurrencyGate::new(gate_expected));\n    let state = ConcurrentModelServerState {\n        models,\n        gate: Arc::clone(&gate),\n        response_delays: Arc::new(response_delays),\n    };\n    let (shutdown_tx, shutdown_rx) = oneshot::channel();\n\n    let join_handle = std::thread::spawn(move || {\n        let runtime = tokio::runtime::Runtime::new().expect(\"test runtime should start\");\n        runtime.block_on(async move {\n            let listener =\n                TcpListener::from_std(std_listener).expect(\"test listener should convert\");\n            let app = Router::new()\n                .route(\"/api/v1/models\", get(concurrent_list_models))\n                .route(\"/api/v1/models/{id}/test\", post(concurrent_test_model))\n                .with_state(state);\n            let _ = axum::serve(listener, app)\n                .with_graceful_shutdown(async {\n                    let _ = shutdown_rx.await;\n                })\n                .await;\n        });\n    });\n\n    ConcurrentModelServer {\n        base_url: format!(\"http://{addr}\"),\n        gate,\n        shutdown_tx: Some(shutdown_tx),\n        join_handle: Some(join_handle),\n    }\n}\n\nasync fn concurrent_list_models(\n    State(state): State<ConcurrentModelServerState>,\n) -> Json<serde_json::Value> {\n    Json(serde_json::json!({\n        \"data\": state.models,\n        \"meta\": { \"has_more\": false }\n    }))\n}\n\nasync fn concurrent_test_model(\n    State(state): State<ConcurrentModelServerState>,\n    Path(id): Path<String>,\n) -> Json<serde_json::Value> {\n    state.gate.enter().await;\n    if let Some(delay) = state.response_delays.get(&id) {\n        tokio::time::sleep(*delay).await;\n    }\n    state.gate.exit();\n\n    Json(serde_json::json!({\n        \"model_id\": id,\n        \"status\": \"ok\"\n    }))\n}\n```\n\nThe gate intentionally uses a `Semaphore` plus a `released` re-check instead of `Notify`, so late arrivals cannot miss a wake after the trigger request releases the gate. The 15-second timeout has no happy-path cost; when it fires, tests must fail explicitly through `gate.timed_out()` before checking `max_in_flight`. The Tokio runtime is constructed inside the spawned server thread, and `Drop` joins that thread after sending shutdown so helper failures surface in the owning test.\n\n- [ ] **Step 2: Add a default concurrency test**\n\nBuild the configured model JSON list with the existing `model_json` helper near the top of `model_test.rs`. Use IDs that exist in `Catalog::builtin()` so table rendering can look them up:\n\n```rust\nlet models = vec![\n    model_json(\"claude-opus-4-7\", \"anthropic\", true),\n    model_json(\"claude-opus-4-6\", \"anthropic\", true),\n    model_json(\"claude-sonnet-4-5\", \"anthropic\", true),\n    model_json(\"claude-sonnet-4-6\", \"anthropic\", true),\n    model_json(\"claude-haiku-4-5\", \"anthropic\", true),\n];\n```\n\nStart the helper with those five configured models, `gate_expected = 4`, and no response delays. Wire the spawned CLI to the harness: each test in Steps 2-4 must call `context.set_http_target(&server.base_url)` (and `remove_provider_env(&mut cmd)`) before invoking the command, mirroring the existing tests in this file. Without this the CLI hits the default target and the harness receives zero requests.\n\nRun `fabro model test` without `--jobs`, then assert:\n\n```rust\nassert!(\n    output.status.success(),\n    \"model test should succeed:\\nstdout:\\n{}\\nstderr:\\n{}\",\n    String::from_utf8_lossy(&output.stdout),\n    String::from_utf8_lossy(&output.stderr)\n);\nassert!(\n    !server.gate.timed_out(),\n    \"concurrency gate timed out before four requests arrived\"\n);\nassert_eq!(\n    server.gate.max_in_flight(),\n    4,\n    \"default jobs should run four model tests concurrently before the gate releases\"\n);\n```\n\nThe gate timeout makes a serial fallback fail with `max_in_flight() == 1` instead of hanging the test.\n\n- [ ] **Step 3: Add an explicit `--jobs 2` concurrency test**\n\nReuse the same local-server helper and run:\n\n```rust\ncmd.args([\"model\", \"test\", \"--jobs\", \"2\"]);\n```\n\nAssert:\n\n```rust\nassert!(\n    !server.gate.timed_out(),\n    \"concurrency gate timed out before two requests arrived\"\n);\nassert_eq!(\n    server.gate.max_in_flight(),\n    2,\n    \"--jobs 2 should run two model tests concurrently before the gate releases\"\n);\n```\n\n- [ ] **Step 4: Add a stable JSON ordering test**\n\nThe existing `model_test_json_partitions_skip_and_fail` test pins the bulk JSON shape as `results[].model`; keep this ordering test on that same shape. Use the same five configured models, start the helper with `gate_expected = 5`, and run with `--jobs 5 --json` so all five requests are in flight before any response is allowed to complete. Set response delays so completion order is the reverse of listing order:\n\n```rust\nlet response_delays = HashMap::from([\n    (\"claude-opus-4-7\".to_string(), Duration::from_millis(250)),\n    (\"claude-opus-4-6\".to_string(), Duration::from_millis(200)),\n    (\"claude-sonnet-4-5\".to_string(), Duration::from_millis(150)),\n    (\"claude-sonnet-4-6\".to_string(), Duration::from_millis(100)),\n    (\"claude-haiku-4-5\".to_string(), Duration::from_millis(50)),\n]);\n```\n\nRun:\n\n```rust\ncmd.args([\"model\", \"test\", \"--jobs\", \"5\", \"--json\"]);\n```\n\nParse stdout and assert the JSON result order still matches listing order:\n\n```rust\nassert!(\n    !server.gate.timed_out(),\n    \"concurrency gate timed out before five requests arrived\"\n);\nassert_eq!(\n    server.gate.max_in_flight(),\n    5,\n    \"ordering test should have all five model requests in flight\"\n);\nlet json: serde_json::Value =\n    serde_json::from_slice(&output.stdout).expect(\"invalid JSON output\");\nlet models = json[\"results\"]\n    .as_array()\n    .expect(\"results should be an array\")\n    .iter()\n    .map(|row| row[\"model\"].as_str().expect(\"model should be a string\"))\n    .collect::<Vec<_>>();\nassert_eq!(\n    models,\n    vec![\n        \"claude-opus-4-7\",\n        \"claude-opus-4-6\",\n        \"claude-sonnet-4-5\",\n        \"claude-sonnet-4-6\",\n        \"claude-haiku-4-5\",\n    ]\n);\n```\n\n- [ ] **Step 5: Keep the existing unconfigured-model regression test**\n\nDo not remove or weaken `model_test_does_not_announce_unconfigured`; it already verifies that bulk mode does not POST unconfigured models. If the new Axum helper makes this easier to express later, keep the same assertion that the unconfigured test route receives zero calls.\n\n- [ ] **Step 6: Run the model test integration suite**\n\nRun:\n\n```bash\ncargo nextest run -p fabro-cli --test it cmd::model_test\n```\n\nExpected: all `cmd::model_test` tests pass.\n\n### Task 5: Final Verification\n\n**Files:**\n- Verify: `lib/crates/fabro-cli/src/args.rs`\n- Verify: `lib/crates/fabro-cli/src/commands/model.rs`\n- Verify: `lib/crates/fabro-cli/tests/it/cmd/model_test.rs`\n\n- [ ] **Step 1: Format check**\n\nRun:\n\n```bash\ncargo +nightly-2026-04-14 fmt --check --all\n```\n\nExpected: formatting check passes.\n\n- [ ] **Step 2: Clippy**\n\nRun:\n\n```bash\ncargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings\n```\n\nExpected: clippy passes without warnings.\n\n- [ ] **Step 3: Full CLI tests if time allows**\n\nRun:\n\n```bash\ncargo nextest run -p fabro-cli\n```\n\nExpected: `fabro-cli` tests pass. If this is too slow, record that focused integration coverage and clippy passed.\n\n## Assumptions\n\n- The public option name is `--jobs` with short flag `-j`.\n- The default concurrency is exactly 4.\n- A global concurrency limit is sufficient for this change; provider-specific throttling is out of scope and low-rate-limit users can pass `--jobs 1`.\n- `--deep` does not force serial execution; users can combine `--deep --jobs 1` when they want that behavior.\n- Progress lines in bulk mode may complete out of order; final table and JSON order must stay stable within the configured/unconfigured grouping described above.\n- The new Axum concurrency harness remains inline in `model_test.rs` because it is specific to this command's concurrency behavior.\n- `client.clone()` is expected to share client state through the existing `Arc` fields; auth refresh serialization is acceptable and does not invalidate request concurrency.\n- Panics inside per-model futures are not caught; this matches the current command's treatment of programmer bugs.\n- No server-side bulk endpoint is added.\n"
+        },
+        "rankdir": {
+          "String": "LR"
+        }
+      }
+    },
+    "workflow_slug": "implement-plan",
+    "source_directory": "/Users/bhelmkamp/p/fabro-sh/fabro",
+    "provenance": {
+      "server": {
+        "version": "0.223.0-nightly.0"
+      },
+      "client": {
+        "user_agent": "fabro-cli/0.223.0-nightly.0",
+        "name": "fabro-cli",
+        "version": "0.223.0-nightly.0"
+      },
+      "subject": {
+        "kind": "user",
+        "identity": {
+          "issuer": "https://github.com",
+          "subject": "19"
+        },
+        "login": "brynary",
+        "auth_method": "github"
+      }
+    },
+    "manifest_blob": "f2b176890a1dda9bb32eee017a5c7290af67437c8247aa6641ff4b882dc3aaa1",
+    "definition_blob": "791b2ce7454b6fff8fa26bea4af48533a25d0e56c4cecc44be1ea071680b4f9d",
+    "git": {
+      "origin_url": "https://github.com/fabro-sh/fabro",
+      "branch": "main",
+      "sha": "92cfcbde71735fc36387191fc882d824651ce8b4",
+      "dirty": "clean",
+      "push_outcome": {
+        "type": "not_attempted"
+      }
+    },
+    "in_place": false
+  },
+  "graph_source": "digraph ImplementPlan {\n    graph [\n        goal=\"Implement and simplify\",\n        model_stylesheet=\"\n            * { model: claude-opus-4-7; }\n        \"\n    ]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    toolchain         [label=\"Toolchain\", shape=parallelogram, script=\"command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1\", max_retries=0]\n    preflight_compile [label=\"Preflight Compile\", shape=parallelogram, script=\"cargo check -q --workspace 2>&1\", max_retries=0]\n    preflight_lint    [label=\"Preflight Lint\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1\", max_retries=0]\n    fix_lints         [label=\"Fix Lints\", prompt=\"The preflight lint step failed. Read the build output from context and fix all clippy lint warnings.\", max_visits=3]\n    implement         [label=\"Implement\", prompt=\"Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD.\"]\n    simplify_opus     [label=\"Simplify (Opus)\", prompt=\"@prompts/simplify.md\"]\n    simplify_gpt      [label=\"Simplify (GPT-55)\", prompt=\"@prompts/simplify.md\", model=\"gpt-55\"]\n    verify            [label=\"Verify\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1 && cargo dev docs refresh 2>&1 && cargo dev docs check 2>&1\", goal_gate=true, retry_target=\"fixup\"]\n    fixup             [label=\"Fixup\", prompt=\"The verify step failed. Read the build output from context and fix all clippy lint warnings, test failures, and generated docs errors.\", max_visits=3]\n    fmt               [label=\"Format\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 fmt --all 2>&1\", max_retries=0]\n\n    start -> toolchain\n    toolchain -> preflight_compile [condition=\"outcome=succeeded\"]\n    toolchain -> exit\n    preflight_compile -> preflight_lint [condition=\"outcome=succeeded\"]\n    preflight_compile -> exit\n    preflight_lint -> implement [condition=\"outcome=succeeded\"]\n    preflight_lint -> fix_lints\n    fix_lints -> preflight_lint\n    implement -> simplify_opus -> simplify_gpt -> verify\n    verify -> fmt   [condition=\"outcome=succeeded\"]\n    verify -> fixup\n    fixup -> verify\n    fmt -> exit\n}\n",
+  "start": null,
+  "status": {
+    "kind": "starting"
+  },
+  "status_updated_at": "2026-05-04T16:58:37.507179Z",
+  "pending_control": null,
+  "checkpoint": null,
+  "checkpoints": [],
+  "conclusion": null,
+  "retro": null,
+  "retro_prompt": null,
+  "retro_response": null,
+  "sandbox": {
+    "provider": "daytona",
+    "working_directory": "/home/daytona/workspace",
+    "identifier": "fabro-01KQSYTW106NPPHT7ESWTMW5MR",
+    "repo_cloned": true,
+    "clone_origin_url": "https://github.com/fabro-sh/fabro",
+    "clone_branch": "main"
+  },
+  "final_patch": null,
+  "pull_request": null,
+  "superseded_by": null,
+  "pending_interviews": {},
+  "stages": {}
+}
