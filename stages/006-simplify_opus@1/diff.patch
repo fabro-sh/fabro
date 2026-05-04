@@ -1,0 +1,575 @@
+diff --git a/apps/fabro-web/app/lib/mutations.ts b/apps/fabro-web/app/lib/mutations.ts
+index bb6f706c..b85ecfac 100644
+--- a/apps/fabro-web/app/lib/mutations.ts
++++ b/apps/fabro-web/app/lib/mutations.ts
+@@ -172,4 +172,4 @@ export function useLoginDevToken() {
+       return response.json() as Promise<{ ok: boolean }>;
+     },
+   );
+-}
+\ No newline at end of file
++}
+diff --git a/apps/fabro-web/app/lib/query-keys.ts b/apps/fabro-web/app/lib/query-keys.ts
+index 47c3c676..439e297f 100644
+--- a/apps/fabro-web/app/lib/query-keys.ts
++++ b/apps/fabro-web/app/lib/query-keys.ts
+@@ -76,4 +76,4 @@ export const queryKeys = {
+   settings: {
+     server: () => "/api/v1/settings",
+   },
+-};
+\ No newline at end of file
++};
+diff --git a/apps/fabro-web/app/lib/run-events.ts b/apps/fabro-web/app/lib/run-events.ts
+index 2884f1ee..981d1cc0 100644
+--- a/apps/fabro-web/app/lib/run-events.ts
++++ b/apps/fabro-web/app/lib/run-events.ts
+@@ -41,8 +41,11 @@ const INTERVIEW_EVENTS = new Set([
+   "interview.interrupted",
+ ]);
+ const STEERING_EVENTS = new Set([
+-  "steering.received",
+-  "steering.applied",
++  "agent.steering.injected",
++  "agent.steering.attached",
++  "agent.steering.detached",
++  "agent.steer.buffered",
++  "agent.steer.dropped",
+ ]);
+ 
+ export function queryKeysForRunEvent(
+@@ -153,4 +156,4 @@ export function useRunEvents(runId: string | undefined) {
+     if (!runId) return;
+     return subscribeToRunEvents(runId, mutate as MutateFn);
+   }, [mutate, runId]);
+-}
+\ No newline at end of file
++}
+diff --git a/apps/fabro-web/app/routes/runs.tsx b/apps/fabro-web/app/routes/runs.tsx
+index b83b7e1c..0d0aa572 100644
+--- a/apps/fabro-web/app/routes/runs.tsx
++++ b/apps/fabro-web/app/routes/runs.tsx
+@@ -794,7 +794,7 @@ export default function Runs() {
+             <div className="flex gap-5 overflow-x-auto pb-4">
+               {filteredColumns.map((col) => (
+                 <div key={col.id} className="w-72 shrink-0">
+-                  <BoardColumn column={col} />
++                  <BoardColumn column={col} onSteer={setSteerRunId} />
+                 </div>
+               ))}
+             </div>
+@@ -869,6 +869,9 @@ export default function Runs() {
+           </>
+         )}
+       </div>
++      {steerRunId && (
++        <SteerComposer runId={steerRunId} onClose={() => setSteerRunId(null)} />
++      )}
+     </DndContext>
+   );
+-}
+\ No newline at end of file
++}
+diff --git a/docs/public/api-reference/fabro-api.yaml b/docs/public/api-reference/fabro-api.yaml
+index 22ad033a..c5e8908c 100644
+--- a/docs/public/api-reference/fabro-api.yaml
++++ b/docs/public/api-reference/fabro-api.yaml
+@@ -8395,4 +8395,4 @@ components:
+         login:
+           type: string
+           description: User's login identifier (e.g. GitHub username).
+-          example: octocat
+\ No newline at end of file
++          example: octocat
+diff --git a/lib/crates/fabro-agent/src/lib.rs b/lib/crates/fabro-agent/src/lib.rs
+index b5d60da2..d3a71e35 100644
+--- a/lib/crates/fabro-agent/src/lib.rs
++++ b/lib/crates/fabro-agent/src/lib.rs
+@@ -62,4 +62,4 @@ pub use types::{AgentEvent, CompletionCoordinator, SessionEvent, SessionState, T
+     unreachable_pub,
+     reason = "Test support stays crate-visible for cross-module unit tests."
+ )]
+-pub(crate) mod test_support;
+\ No newline at end of file
++pub(crate) mod test_support;
+diff --git a/lib/crates/fabro-agent/src/session.rs b/lib/crates/fabro-agent/src/session.rs
+index c99e6520..40c59d39 100644
+--- a/lib/crates/fabro-agent/src/session.rs
++++ b/lib/crates/fabro-agent/src/session.rs
+@@ -422,22 +422,12 @@ impl Session {
+     }
+ 
+     pub fn steer(&self, message: String) {
+-        self.steering_queue
+-            .lock()
+-            .expect("steering queue lock poisoned")
+-            .push_back((message, SteerKind::Append, None));
++        self.control_handle().steer(message, None);
+     }
+ 
+     /// Push an interrupt steer and cancel the current round token.
+     pub fn interrupt_with(&self, text: String, actor: Option<Principal>) {
+-        self.steering_queue
+-            .lock()
+-            .expect("steering queue lock poisoned")
+-            .push_back((text, SteerKind::Interrupt, actor));
+-        self.round_token
+-            .read()
+-            .expect("round token lock poisoned")
+-            .cancel();
++        self.control_handle().interrupt_with(text, actor);
+     }
+ 
+     /// Returns a lightweight handle for external steering control.
+@@ -734,16 +724,11 @@ impl Session {
+ 
+             // Reset round token if it was cancelled (steer interrupt)
+             {
+-                let needs_reset = self
++                let mut guard = self
+                     .round_token
+-                    .read()
+-                    .expect("round token lock poisoned")
+-                    .is_cancelled();
+-                if needs_reset {
+-                    let mut guard = self
+-                        .round_token
+-                        .write()
+-                        .expect("round token lock poisoned");
++                    .write()
++                    .expect("round token lock poisoned");
++                if guard.is_cancelled() {
+                     *guard = CancellationToken::new();
+                 }
+             }
+@@ -1079,10 +1064,9 @@ impl Session {
+             .expect("steering queue lock poisoned")
+             .drain(..)
+             .collect();
+-        for (msg, kind, actor) in messages {
+-            let text = msg.clone();
++        for (text, kind, actor) in messages {
+             self.history.push(Turn::Steering {
+-                content:   msg,
++                content:   text.clone(),
+                 timestamp: SystemTime::now(),
+             });
+             self.event_emitter
+diff --git a/lib/crates/fabro-agent/src/types.rs b/lib/crates/fabro-agent/src/types.rs
+index 7c7562a0..67187784 100644
+--- a/lib/crates/fabro-agent/src/types.rs
++++ b/lib/crates/fabro-agent/src/types.rs
+@@ -803,4 +803,4 @@ mod tests {
+             _ => panic!("expected McpServerFailed variant"),
+         }
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-agent/tests/it/parity_matrix.rs b/lib/crates/fabro-agent/tests/it/parity_matrix.rs
+index 4c5792de..3c9aa043 100644
+--- a/lib/crates/fabro-agent/tests/it/parity_matrix.rs
++++ b/lib/crates/fabro-agent/tests/it/parity_matrix.rs
+@@ -1024,4 +1024,4 @@ async fn scenario_provider_specific_editing(session: &mut Session, dir: &Path) {
+         content.contains("goodbye"),
+         "Expected 'goodbye' in target.rs, got: {content}"
+     );
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-cli/src/args.rs b/lib/crates/fabro-cli/src/args.rs
+index 2aefb65b..e9e7bc66 100644
+--- a/lib/crates/fabro-cli/src/args.rs
++++ b/lib/crates/fabro-cli/src/args.rs
+@@ -1556,4 +1556,4 @@ pub(crate) enum ProviderCommand {
+ pub(crate) struct CompletionArgs {
+     /// Shell to generate completions for
+     pub shell: clap_complete::Shell,
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-cli/src/commands/mod.rs b/lib/crates/fabro-cli/src/commands/mod.rs
+index 513eee73..323e10d8 100644
+--- a/lib/crates/fabro-cli/src/commands/mod.rs
++++ b/lib/crates/fabro-cli/src/commands/mod.rs
+@@ -24,4 +24,4 @@ pub(crate) mod uninstall;
+ pub(crate) mod upgrade;
+ pub(crate) mod validate;
+ pub(crate) mod version;
+-pub(crate) mod workflow;
+\ No newline at end of file
++pub(crate) mod workflow;
+diff --git a/lib/crates/fabro-cli/src/commands/run/runner.rs b/lib/crates/fabro-cli/src/commands/run/runner.rs
+index 1f200b18..a82afbca 100644
+--- a/lib/crates/fabro-cli/src/commands/run/runner.rs
++++ b/lib/crates/fabro-cli/src/commands/run/runner.rs
+@@ -975,4 +975,4 @@ mod tests {
+ 
+         assert!(credential.contains("vault-key"));
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-cli/src/commands/steer.rs b/lib/crates/fabro-cli/src/commands/steer.rs
+index 5ed0a49e..c378c9d1 100644
+--- a/lib/crates/fabro-cli/src/commands/steer.rs
++++ b/lib/crates/fabro-cli/src/commands/steer.rs
+@@ -34,4 +34,4 @@ pub(crate) async fn execute(args: SteerArgs) -> Result<()> {
+ 
+     println!("Steer delivered.");
+     Ok(())
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-cli/src/main.rs b/lib/crates/fabro-cli/src/main.rs
+index b2ca2913..012cb0e2 100644
+--- a/lib/crates/fabro-cli/src/main.rs
++++ b/lib/crates/fabro-cli/src/main.rs
+@@ -1324,4 +1324,4 @@ destination = "{destination}"
+             "should fail when both --quiet and --verbose"
+         );
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-client/src/client.rs b/lib/crates/fabro-client/src/client.rs
+index 648cd53e..db8a3042 100644
+--- a/lib/crates/fabro-client/src/client.rs
++++ b/lib/crates/fabro-client/src/client.rs
+@@ -1950,4 +1950,4 @@ mod tests {
+             "hint should only fire on unstructured 404s, got: {message}"
+         );
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-interview/src/control_protocol.rs b/lib/crates/fabro-interview/src/control_protocol.rs
+index 03ff72d9..d1062475 100644
+--- a/lib/crates/fabro-interview/src/control_protocol.rs
++++ b/lib/crates/fabro-interview/src/control_protocol.rs
+@@ -175,4 +175,4 @@ mod tests {
+         assert!(json.contains(r#""type":"run.steer""#));
+         assert!(json.contains(r#""kind":"interrupt""#));
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-interview/src/lib.rs b/lib/crates/fabro-interview/src/lib.rs
+index 21443237..8c1eded8 100644
+--- a/lib/crates/fabro-interview/src/lib.rs
++++ b/lib/crates/fabro-interview/src/lib.rs
+@@ -415,4 +415,4 @@ mod tests {
+         let answer = ask.await.unwrap().answer;
+         assert_eq!(answer.value, AnswerValue::Yes);
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-server/src/server.rs b/lib/crates/fabro-server/src/server.rs
+index 43b9a142..b3732d82 100644
+--- a/lib/crates/fabro-server/src/server.rs
++++ b/lib/crates/fabro-server/src/server.rs
+@@ -3241,4 +3241,4 @@ async fn reject_if_archived(state: &AppState, run_id: &RunId) -> Option<Response
+     clippy::disallowed_methods,
+     reason = "server unit tests stage fixtures with sync std::fs writes"
+ )]
+-mod tests;
+\ No newline at end of file
++mod tests;
+diff --git a/lib/crates/fabro-types/src/lib.rs b/lib/crates/fabro-types/src/lib.rs
+index b98891ad..2b02ab8f 100644
+--- a/lib/crates/fabro-types/src/lib.rs
++++ b/lib/crates/fabro-types/src/lib.rs
+@@ -87,4 +87,4 @@ pub use self::steering::SteerKind;
+ pub use status::{
+     BlockedReason, FailureReason, InvalidTransition, ParseFailureReasonError,
+     ParseSuccessReasonError, RunControlAction, RunStatus, SuccessReason, TerminalStatus,
+-};
+\ No newline at end of file
++};
+diff --git a/lib/crates/fabro-types/src/run_event/agent.rs b/lib/crates/fabro-types/src/run_event/agent.rs
+index 8a51fb14..e7f81ab1 100644
+--- a/lib/crates/fabro-types/src/run_event/agent.rs
++++ b/lib/crates/fabro-types/src/run_event/agent.rs
+@@ -177,4 +177,4 @@ pub struct AgentSteerBufferedProps {
+ pub struct AgentSteerDroppedProps {
+     pub count:  usize,
+     pub reason: String,
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-types/src/run_event/mod.rs b/lib/crates/fabro-types/src/run_event/mod.rs
+index d0e69c93..89bddd3f 100644
+--- a/lib/crates/fabro-types/src/run_event/mod.rs
++++ b/lib/crates/fabro-types/src/run_event/mod.rs
+@@ -1447,4 +1447,4 @@ mod tests {
+             );
+         }
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-types/src/steering.rs b/lib/crates/fabro-types/src/steering.rs
+index 4a652d9c..67007520 100644
+--- a/lib/crates/fabro-types/src/steering.rs
++++ b/lib/crates/fabro-types/src/steering.rs
+@@ -1,8 +1,9 @@
+ use serde::{Deserialize, Serialize};
+ 
+ /// Whether a steer appends to the queue or interrupts the current round.
+-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, strum::Display)]
+ #[serde(rename_all = "lowercase")]
++#[strum(serialize_all = "lowercase")]
+ pub enum SteerKind {
+     Append,
+     Interrupt,
+diff --git a/lib/crates/fabro-workflow/src/event/convert.rs b/lib/crates/fabro-workflow/src/event/convert.rs
+index 8d73ba9a..cf5cf8e0 100644
+--- a/lib/crates/fabro-workflow/src/event/convert.rs
++++ b/lib/crates/fabro-workflow/src/event/convert.rs
+@@ -608,10 +608,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
+             AgentEvent::SteeringInjected { text, kind, .. } => {
+                 EventBody::AgentSteeringInjected(fabro_types::AgentSteeringInjectedProps {
+                     text: text.clone(),
+-                    kind: match kind {
+-                        ::fabro_types::SteerKind::Append => "append".to_string(),
+-                        ::fabro_types::SteerKind::Interrupt => "interrupt".to_string(),
+-                    },
++                    kind: kind.to_string(),
+                     visit: *visit,
+                 })
+             }
+@@ -720,10 +717,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
+         }
+         Event::SteerBuffered { kind, .. } => {
+             EventBody::AgentSteerBuffered(fabro_types::AgentSteerBufferedProps {
+-                kind: match kind {
+-                    ::fabro_types::SteerKind::Append => "append".to_string(),
+-                    ::fabro_types::SteerKind::Interrupt => "interrupt".to_string(),
+-                },
++                kind: kind.to_string(),
+             })
+         }
+         Event::SteerDropped { count, reason, .. } => {
+@@ -1881,4 +1875,4 @@ mod tests {
+         let actor = stored.actor.as_ref().expect("actor set");
+         assert_eq!(actor, &user_principal("alice"));
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-workflow/src/event/events.rs b/lib/crates/fabro-workflow/src/event/events.rs
+index e888f56a..ba8b16e8 100644
+--- a/lib/crates/fabro-workflow/src/event/events.rs
++++ b/lib/crates/fabro-workflow/src/event/events.rs
+@@ -1397,4 +1397,4 @@ impl Event {
+             }
+         }
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-workflow/src/event/names.rs b/lib/crates/fabro-workflow/src/event/names.rs
+index 28658c86..62160586 100644
+--- a/lib/crates/fabro-workflow/src/event/names.rs
++++ b/lib/crates/fabro-workflow/src/event/names.rs
+@@ -192,4 +192,4 @@ mod tests {
+             "run.unarchived"
+         );
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-workflow/src/event/stored_fields.rs b/lib/crates/fabro-workflow/src/event/stored_fields.rs
+index ad75501c..fe581db0 100644
+--- a/lib/crates/fabro-workflow/src/event/stored_fields.rs
++++ b/lib/crates/fabro-workflow/src/event/stored_fields.rs
+@@ -225,4 +225,4 @@ fn agent_actor_for_event(
+         AgentEvent::SteeringInjected { actor, .. } => actor.clone(),
+         _ => None,
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-workflow/src/handler/llm/api.rs b/lib/crates/fabro-workflow/src/handler/llm/api.rs
+index 0348a15a..09ed4970 100644
+--- a/lib/crates/fabro-workflow/src/handler/llm/api.rs
++++ b/lib/crates/fabro-workflow/src/handler/llm/api.rs
+@@ -504,14 +504,7 @@ impl CodergenBackend for AgentApiBackend {
+         // Register with steering hub for steer delivery
+         let stage_id = stage_scope.stage_id();
+         let _steering_guard = if let Some(ref hub) = self.steering_hub {
+-            let control_handle = session.control_handle();
+-            hub.register(&stage_id, &control_handle);
+-            let coordinator = SteeringCompletionCoordinator {
+-                hub:      Arc::clone(hub),
+-                stage_id: stage_id.clone(),
+-                handle:   control_handle,
+-            };
+-            session.set_completion_coordinator(Arc::new(coordinator));
++            register_session_steering(hub, &stage_id, &mut session);
+             Some(SteeringGuard {
+                 hub:      Arc::clone(hub),
+                 stage_id: stage_id.clone(),
+@@ -575,14 +568,7 @@ impl CodergenBackend for AgentApiBackend {
+ 
+                     // Re-register with steering hub for the new session
+                     if let Some(ref hub) = self.steering_hub {
+-                        let control_handle = session.control_handle();
+-                        hub.register(&stage_id, &control_handle);
+-                        let coordinator = SteeringCompletionCoordinator {
+-                            hub:      Arc::clone(hub),
+-                            stage_id: stage_id.clone(),
+-                            handle:   control_handle,
+-                        };
+-                        session.set_completion_coordinator(Arc::new(coordinator));
++                        register_session_steering(hub, &stage_id, &mut session);
+                     }
+ 
+                     // Re-subscribe to forward events + track files from the new session
+@@ -677,6 +663,23 @@ impl CodergenBackend for AgentApiBackend {
+     }
+ }
+ 
++/// Register a session with the steering hub, setting up the completion
++/// coordinator so the close-the-door protocol works.
++fn register_session_steering(
++    hub: &Arc<SteeringHub>,
++    stage_id: &StageId,
++    session: &mut Session,
++) {
++    let control_handle = session.control_handle();
++    hub.register(stage_id, &control_handle);
++    let coordinator = SteeringCompletionCoordinator {
++        hub:      Arc::clone(hub),
++        stage_id: stage_id.clone(),
++        handle:   control_handle,
++    };
++    session.set_completion_coordinator(Arc::new(coordinator));
++}
++
+ /// RAII guard that unregisters a session from the steering hub on drop.
+ struct SteeringGuard {
+     hub:      Arc<SteeringHub>,
+diff --git a/lib/crates/fabro-workflow/src/lib.rs b/lib/crates/fabro-workflow/src/lib.rs
+index 57148940..4e84d35c 100644
+--- a/lib/crates/fabro-workflow/src/lib.rs
++++ b/lib/crates/fabro-workflow/src/lib.rs
+@@ -158,4 +158,4 @@ pub mod steering_hub;
+ pub mod test_support;
+ #[doc(hidden)]
+ pub mod transforms;
+-pub mod workflow_bundle;
+\ No newline at end of file
++pub mod workflow_bundle;
+diff --git a/lib/crates/fabro-workflow/src/lifecycle/git.rs b/lib/crates/fabro-workflow/src/lifecycle/git.rs
+index 23b2e8d9..e8f3e2ef 100644
+--- a/lib/crates/fabro-workflow/src/lifecycle/git.rs
++++ b/lib/crates/fabro-workflow/src/lifecycle/git.rs
+@@ -1063,4 +1063,4 @@ mod tests {
+             Ok(None)
+         }
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-workflow/src/operations/start.rs b/lib/crates/fabro-workflow/src/operations/start.rs
+index a9da2a9f..0e062d17 100644
+--- a/lib/crates/fabro-workflow/src/operations/start.rs
++++ b/lib/crates/fabro-workflow/src/operations/start.rs
+@@ -1498,4 +1498,4 @@ mod tests {
+             result = result.as_ref().map(|_| "Ok"),
+         );
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-workflow/src/pipeline/execute/tests.rs b/lib/crates/fabro-workflow/src/pipeline/execute/tests.rs
+index 9bb7bb34..d8a04e65 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/execute/tests.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/execute/tests.rs
+@@ -1163,4 +1163,4 @@ async fn run_with_lifecycle_emits_initialize_and_setup_events() {
+     assert!(sandbox_idx < setup_idx);
+     assert!(setup_idx < run_started_idx);
+     assert!(run_started_idx < run_running_idx);
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-workflow/src/pipeline/finalize.rs b/lib/crates/fabro-workflow/src/pipeline/finalize.rs
+index 8ff17937..9e04846c 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/finalize.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/finalize.rs
+@@ -1089,4 +1089,4 @@ mod tests {
+             Ok(None)
+         }
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-workflow/src/pipeline/initialize.rs b/lib/crates/fabro-workflow/src/pipeline/initialize.rs
+index 73db715a..10fc0752 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/initialize.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/initialize.rs
+@@ -1388,4 +1388,4 @@ mod tests {
+ 
+         assert!(matches!(result, Err(Error::Cancelled)));
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-workflow/src/pipeline/retro.rs b/lib/crates/fabro-workflow/src/pipeline/retro.rs
+index e9d94a98..f2646a95 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/retro.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/retro.rs
+@@ -444,4 +444,4 @@ mod tests {
+         assert!(retro_completed_properties.get("retro").is_some());
+         assert_eq!(retro_completed_properties["retro"]["smoothness"], "smooth");
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-workflow/src/pipeline/types.rs b/lib/crates/fabro-workflow/src/pipeline/types.rs
+index def89daf..b4baa16e 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/types.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/types.rs
+@@ -352,4 +352,4 @@ pub struct PullRequestOptions {
+     pub github_app: Option<fabro_github::GitHubCredentials>,
+     pub origin_url: Option<String>,
+     pub model:      String,
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-workflow/src/services.rs b/lib/crates/fabro-workflow/src/services.rs
+index dcbe5713..f3e640c9 100644
+--- a/lib/crates/fabro-workflow/src/services.rs
++++ b/lib/crates/fabro-workflow/src/services.rs
+@@ -277,4 +277,4 @@ mod tests {
+                 .is_empty()
+         );
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-workflow/src/steering_hub.rs b/lib/crates/fabro-workflow/src/steering_hub.rs
+index 5c9e77ef..6dc91e26 100644
+--- a/lib/crates/fabro-workflow/src/steering_hub.rs
++++ b/lib/crates/fabro-workflow/src/steering_hub.rs
+@@ -259,4 +259,4 @@ mod tests {
+         assert_eq!(q.len(), 1);
+         assert_eq!(q[0].1, SteerKind::Interrupt);
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-workflow/src/test_support.rs b/lib/crates/fabro-workflow/src/test_support.rs
+index 3148600b..1d44945a 100644
+--- a/lib/crates/fabro-workflow/src/test_support.rs
++++ b/lib/crates/fabro-workflow/src/test_support.rs
+@@ -523,4 +523,4 @@ impl WorkflowRunner {
+         ))
+         .await
+     }
+-}
+\ No newline at end of file
++}
