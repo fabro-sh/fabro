@@ -1,0 +1,1628 @@
+diff --git a/apps/fabro-web/app/lib/query-keys.test.ts b/apps/fabro-web/app/lib/query-keys.test.ts
+index 8f036ac3..4840c03f 100644
+--- a/apps/fabro-web/app/lib/query-keys.test.ts
++++ b/apps/fabro-web/app/lib/query-keys.test.ts
+@@ -19,6 +19,7 @@ describe("queryKeys", () => {
+     ]);
+     expect(queryKeysForRunEvent("run-1", "stage.completed", "stage-1")).toEqual([
+       queryKeys.runs.stages("run-1"),
++      queryKeys.runs.billing("run-1"),
+       queryKeys.runs.events("run-1", 1000),
+       queryKeys.runs.graph("run-1", "LR"),
+       queryKeys.runs.graph("run-1", "TB"),
+@@ -26,4 +27,4 @@ describe("queryKeys", () => {
+       queryKeys.runs.stageTurns("run-1", "stage-1"),
+     ]);
+   });
+-});
++});
+\ No newline at end of file
+diff --git a/apps/fabro-web/app/lib/run-events.test.tsx b/apps/fabro-web/app/lib/run-events.test.tsx
+index e9faa93f..c16eb20f 100644
+--- a/apps/fabro-web/app/lib/run-events.test.tsx
++++ b/apps/fabro-web/app/lib/run-events.test.tsx
+@@ -49,6 +49,18 @@ describe("queryKeysForRunEvent", () => {
+       queryKeys.runs.graph("run-1", "TB"),
+     ]);
+   });
++
++  test("stage.retrying invalidates stages, billing, events, and stage turns", () => {
++    expect(queryKeysForRunEvent("run-1", "stage.retrying", "stage-7")).toEqual([
++      queryKeys.runs.stages("run-1"),
++      queryKeys.runs.billing("run-1"),
++      queryKeys.runs.events("run-1", 1000),
++      queryKeys.runs.graph("run-1", "LR"),
++      queryKeys.runs.graph("run-1", "TB"),
++      queryKeys.runs.detail("run-1"),
++      queryKeys.runs.stageTurns("run-1", "stage-7"),
++    ]);
++  });
+ });
+ 
+ describe("subscribeToRunEvents", () => {
+@@ -239,4 +251,4 @@ async function waitFor(condition: () => boolean, timeoutMs = 200) {
+     await new Promise((resolve) => setTimeout(resolve, 2));
+   }
+   throw new Error("condition did not become true before timeout");
+-}
++}
+\ No newline at end of file
+diff --git a/apps/fabro-web/app/lib/run-events.ts b/apps/fabro-web/app/lib/run-events.ts
+index 1413d38d..caea8122 100644
+--- a/apps/fabro-web/app/lib/run-events.ts
++++ b/apps/fabro-web/app/lib/run-events.ts
+@@ -42,7 +42,12 @@ const RUN_SUMMARY_EVENTS = new Set([
+   "run.archived",
+   "run.unarchived",
+ ]);
+-const STAGE_EVENTS = new Set(["stage.started", "stage.completed", "stage.failed"]);
++const STAGE_EVENTS = new Set([
++  "stage.started",
++  "stage.completed",
++  "stage.failed",
++  "stage.retrying",
++]);
+ const COMMAND_EVENTS = new Set(["command.started", "command.completed"]);
+ const INTERVIEW_EVENTS = new Set([
+   "interview.started",
+@@ -85,6 +90,7 @@ export function queryKeysForRunEvent(
+   if (STAGE_EVENTS.has(event)) {
+     const keys = [
+       queryKeys.runs.stages(runId),
++      queryKeys.runs.billing(runId),
+       queryKeys.runs.events(runId, 1000),
+       queryKeys.runs.graph(runId, "LR"),
+       queryKeys.runs.graph(runId, "TB"),
+@@ -178,4 +184,4 @@ export function useRunEvents(runId: string | undefined) {
+     if (!runId) return;
+     return subscribeToRunEvents(runId, mutate as MutateFn);
+   }, [mutate, runId]);
+-}
++}
+\ No newline at end of file
+diff --git a/apps/fabro-web/app/routes/run-billing.test.tsx b/apps/fabro-web/app/routes/run-billing.test.tsx
+index ed9e3040..4953b749 100644
+--- a/apps/fabro-web/app/routes/run-billing.test.tsx
++++ b/apps/fabro-web/app/routes/run-billing.test.tsx
+@@ -75,12 +75,14 @@ describe("RunBilling", () => {
+             model: null,
+             billing: zeroBilling(),
+             runtime_secs: 0,
++            state: "succeeded",
+           },
+           {
+             stage: { id: "command", name: "command" },
+             model: null,
+             billing: zeroBilling(),
+             runtime_secs: 61,
++            state: "succeeded",
+           },
+         ],
+         totals: {
+@@ -108,6 +110,7 @@ describe("RunBilling", () => {
+             model: null,
+             billing: zeroBilling(),
+             runtime_secs: 0,
++            state: "succeeded",
+           },
+           {
+             stage: { id: "agent", name: "agent" },
+@@ -119,6 +122,7 @@ describe("RunBilling", () => {
+               total_usd_micros: 240000,
+             }),
+             runtime_secs: 42,
++            state: "succeeded",
+           },
+         ],
+         totals: {
+@@ -162,4 +166,54 @@ describe("RunBilling", () => {
+     expect(text).toContain("No completed stages yet");
+     expect(text).toContain("Stages will appear once the run produces completed nodes.");
+   });
+-});
++
++  test("renders an in-flight row with live runtime and includes its elapsed time in the footer", () => {
++    const originalNow = Date.now;
++    // Pin "now" to 30s after the in-flight row started.
++    const startedAt = "2026-04-29T12:00:00.000Z";
++    const fakeNow = new Date("2026-04-29T12:00:30.000Z").getTime();
++    Date.now = () => fakeNow;
++
++    try {
++      const renderer = renderBilling(
++        billing({
++          stages: [
++            {
++              stage: { id: "in-flight", name: "in-flight" },
++              model: null,
++              // Server reports 0 runtime / no billing; the row is still being executed.
++              billing: zeroBilling(),
++              runtime_secs: 0,
++              started_at: startedAt,
++              state: "running",
++            },
++          ],
++          // Server total is 0 because the in-flight row hasn't been finalized.
++          totals: {
++            runtime_secs: 0,
++            ...zeroBilling(),
++          },
++        }),
++      );
++
++      const text = textFromNode(renderer.toJSON());
++      // Empty-state must NOT show — the table should appear as soon as the
++      // first stage starts.
++      expect(text).not.toContain("No completed stages yet");
++      expect(text).toContain("in-flight");
++
++      // Both the row's runtime cell and the footer total should reflect
++      // ~30s elapsed since started_at.
++      expect(text).toContain("30s");
++
++      const footers = renderer.root.findAll((node) => node.type === "tfoot");
++      const footerCells = footers[0].findAll((node) => node.type === "td");
++      // The Run time column in the footer is index 3 (Total / [empty Model] /
++      // Tokens / Run time / Billing).
++      const footerRuntime = textFromInstance(footerCells[3]);
++      expect(footerRuntime).toContain("30s");
++    } finally {
++      Date.now = originalNow;
++    }
++  });
++});
+\ No newline at end of file
+diff --git a/apps/fabro-web/app/routes/run-billing.tsx b/apps/fabro-web/app/routes/run-billing.tsx
+index 6bb6ab76..74c712fd 100644
+--- a/apps/fabro-web/app/routes/run-billing.tsx
++++ b/apps/fabro-web/app/routes/run-billing.tsx
+@@ -1,3 +1,5 @@
++import { useEffect, useState } from "react";
++
+ import { EmptyState } from "../components/state";
+ import { formatDurationSecs } from "../lib/format";
+ import { useRunBilling } from "../lib/queries";
+@@ -14,33 +16,87 @@ function formatUsdMicros(usdMicros?: number | null) {
+   return usdMicros == null ? EMPTY_VALUE : `$${(usdMicros / 1_000_000).toFixed(2)}`;
+ }
+ 
+-function mapBilling(billing: RunBilling | undefined) {
++function isInFlightState(state: string | null | undefined): boolean {
++  return state === "running" || state === "retrying" || state === "pending";
++}
++
++interface MappedStageRow {
++  stage:          string;
++  model:          string | null;
++  inputTokens:    number | null;
++  outputTokens:   number | null;
++  runtimeSecs:    number;
++  totalUsdMicros: number | null | undefined;
++  inFlight:       boolean;
++  startedAt:      string | null | undefined;
++}
++
++interface MappedBilling {
++  rows:            MappedStageRow[];
++  totalRuntimeSecs: number;
++  totalUsdMicros:  number | null | undefined;
++  totalInput:      number | null;
++  totalOutput:     number | null;
++  modelBreakdown:  {
++    model:          string;
++    stages:         number;
++    inputTokens:    number;
++    outputTokens:   number;
++    totalUsdMicros: number | null | undefined;
++  }[];
++  modelStageCount: number;
++  hasInFlight:     boolean;
++}
++
++function mapBilling(billing: RunBilling | undefined, now: number): MappedBilling {
+   if (!billing) {
+     return {
+-      stages: [],
+-      totalRuntime: formatDurationSecs(0),
+-      totalUsdMicros: undefined,
+-      totalInput: null,
+-      totalOutput: null,
+-      modelBreakdown: [],
+-      modelStageCount: 0,
++      rows:             [],
++      totalRuntimeSecs: 0,
++      totalUsdMicros:   undefined,
++      totalInput:       null,
++      totalOutput:      null,
++      modelBreakdown:   [],
++      modelStageCount:  0,
++      hasInFlight:      false,
+     };
+   }
+ 
+-  const stages = billing.stages.map((stage) => {
++  let hasInFlight = false;
++  const rows: MappedStageRow[] = billing.stages.map((stage) => {
+     const hasModel = stage.model != null;
++    const inFlight = isInFlightState(stage.state);
++    if (inFlight) hasInFlight = true;
++
++    let runtimeSecs = stage.runtime_secs;
++    if (inFlight && stage.started_at) {
++      const startedMs = new Date(stage.started_at).getTime();
++      if (Number.isFinite(startedMs)) {
++        runtimeSecs = Math.max(0, (now - startedMs) / 1000);
++      }
++    }
++
+     return {
+-      stage: stage.stage.name,
+-      model: stage.model?.id ?? null,
+-      inputTokens: hasModel ? stage.billing.input_tokens : null,
+-      outputTokens: hasModel
++      stage:          stage.stage.name,
++      model:          stage.model?.id ?? null,
++      inputTokens:    hasModel ? stage.billing.input_tokens : null,
++      outputTokens:   hasModel
+         ? stage.billing.output_tokens + stage.billing.reasoning_tokens
+         : null,
+-      runtime: formatDurationSecs(stage.runtime_secs),
++      runtimeSecs,
+       totalUsdMicros: stage.billing.total_usd_micros,
++      inFlight,
++      startedAt:      stage.started_at,
+     };
+   });
+-  const totalRuntime = formatDurationSecs(billing.totals.runtime_secs);
++
++  // While ticking, derive total runtime from the displayed row runtimes so the
++  // footer updates in lock-step with the in-flight row(s). Otherwise trust the
++  // server's authoritative total.
++  const totalRuntimeSecs = hasInFlight
++    ? rows.reduce((sum, row) => sum + row.runtimeSecs, 0)
++    : billing.totals.runtime_secs;
++
+   const hasLlmStages = billing.by_model.length > 0;
+   const totalInput = hasLlmStages ? billing.totals.input_tokens : null;
+   const totalOutput = hasLlmStages
+@@ -49,38 +105,53 @@ function mapBilling(billing: RunBilling | undefined) {
+   const totalUsdMicros = billing.totals.total_usd_micros;
+   const modelBreakdown = billing.by_model
+     .map((entry) => ({
+-      model: entry.model.id,
+-      stages: entry.stages,
+-      inputTokens: entry.billing.input_tokens,
+-      outputTokens: entry.billing.output_tokens + entry.billing.reasoning_tokens,
++      model:          entry.model.id,
++      stages:         entry.stages,
++      inputTokens:    entry.billing.input_tokens,
++      outputTokens:   entry.billing.output_tokens + entry.billing.reasoning_tokens,
+       totalUsdMicros: entry.billing.total_usd_micros,
+     }))
+     .sort((a, b) => (b.totalUsdMicros ?? -1) - (a.totalUsdMicros ?? -1));
+   const modelStageCount = modelBreakdown.reduce((sum, row) => sum + row.stages, 0);
++
+   return {
+-    stages,
+-    totalRuntime,
++    rows,
++    totalRuntimeSecs,
+     totalUsdMicros,
+     totalInput,
+     totalOutput,
+     modelBreakdown,
+     modelStageCount,
++    hasInFlight,
+   };
+ }
+ 
+ export default function RunBilling({ params }: { params: { id: string } }) {
+   const billingQuery = useRunBilling(params.id);
++
++  // Tick state for live runtime computation. Re-rendered every second only
++  // while at least one stage is in-flight.
++  const [now, setNow] = useState(() => Date.now());
++  const billing = billingQuery.data;
++  const hasInFlight = billing?.stages.some((stage) => isInFlightState(stage.state)) ?? false;
++
++  useEffect(() => {
++    if (!hasInFlight) return;
++    const interval = setInterval(() => setNow(Date.now()), 1000);
++    return () => clearInterval(interval);
++  }, [hasInFlight]);
++
+   const {
+-    stages,
+-    totalRuntime,
++    rows,
++    totalRuntimeSecs,
+     totalUsdMicros,
+     totalInput,
+     totalOutput,
+     modelBreakdown,
+     modelStageCount,
+-  } = mapBilling(billingQuery.data);
++  } = mapBilling(billing, now);
+ 
+-  if (!stages.length) {
++  if (!rows.length) {
+     return (
+       <div className="py-12">
+         <EmptyState
+@@ -105,7 +176,7 @@ export default function RunBilling({ params }: { params: { id: string } }) {
+             </tr>
+           </thead>
+           <tbody>
+-            {stages.map((row) => (
++            {rows.map((row) => (
+               <tr key={row.stage} className="border-b border-line last:border-b-0">
+                 <td className="px-4 py-3 text-fg-2">{row.stage}</td>
+                 <td className="px-4 py-3 font-mono text-xs text-fg-3">
+@@ -115,7 +186,9 @@ export default function RunBilling({ params }: { params: { id: string } }) {
+                   {formatTokens(row.inputTokens)} <span className="text-fg-muted">/</span>{" "}
+                   {formatTokens(row.outputTokens)}
+                 </td>
+-                <td className="px-4 py-3 text-right font-mono text-xs text-fg-3">{row.runtime}</td>
++                <td className="px-4 py-3 text-right font-mono text-xs text-fg-3">
++                  {formatDurationSecs(row.runtimeSecs)}
++                </td>
+                 <td className="px-4 py-3 text-right font-mono text-xs text-fg-3">
+                   {formatUsdMicros(row.totalUsdMicros)}
+                 </td>
+@@ -131,7 +204,7 @@ export default function RunBilling({ params }: { params: { id: string } }) {
+                 {formatTokens(totalOutput)}
+               </td>
+               <td className="px-4 py-3 text-right font-mono text-xs font-medium text-fg">
+-                {totalRuntime}
++                {formatDurationSecs(totalRuntimeSecs)}
+               </td>
+               <td className="px-4 py-3 text-right font-mono text-xs font-medium text-fg">
+                 {formatUsdMicros(totalUsdMicros)}
+diff --git a/docs/public/api-reference/fabro-api.yaml b/docs/public/api-reference/fabro-api.yaml
+index 4137dfaa..18ccca73 100644
+--- a/docs/public/api-reference/fabro-api.yaml
++++ b/docs/public/api-reference/fabro-api.yaml
+@@ -5328,6 +5328,20 @@ components:
+           oneOf:
+             - $ref: "#/components/schemas/CommandTermination"
+             - type: "null"
++        started_at:
++          type: ["string", "null"]
++          format: date-time
++          description: Wall-clock time the latest attempt of this stage started, if known.
++        duration_ms:
++          type: ["integer", "null"]
++          format: uint64
++          minimum: 0
++          description: Wall-clock duration of the stage's latest terminal attempt, if known.
++        state:
++          oneOf:
++            - $ref: "#/components/schemas/StageState"
++            - type: "null"
++          description: Lifecycle state of the stage projection.
+ 
+     InterviewOption:
+       description: Option stored with an interview question in the event log.
+@@ -6339,6 +6353,11 @@ components:
+           type: string
+           description: Node identifier in the Graphviz graph source.
+           example: propose
++        started_at:
++          type: ["string", "null"]
++          format: date-time
++          description: Wall-clock time the latest attempt of this stage started, if known.
++          example: "2026-04-29T12:34:56Z"
+ 
+     ToolUse:
+       description: A single tool invocation with its input, result, and execution metadata.
+@@ -6629,6 +6648,16 @@ components:
+           type: number
+           description: Wall-clock runtime in seconds.
+           example: 154.0
++        started_at:
++          type: ["string", "null"]
++          format: date-time
++          description: Wall-clock time the latest attempt of this stage started, if known.
++          example: "2026-04-29T12:34:56Z"
++        state:
++          oneOf:
++            - $ref: "#/components/schemas/StageState"
++            - type: "null"
++          description: Lifecycle state of the stage. Use to detect in-flight rows for client-side runtime ticking.
+ 
+     RunBillingTotals:
+       description: Aggregate billing totals across all stages of a run.
+@@ -8323,4 +8352,4 @@ components:
+         login:
+           type: string
+           description: User's login identifier (e.g. GitHub username).
+-          example: octocat
++          example: octocat
+\ No newline at end of file
+diff --git a/lib/crates/fabro-api/tests/run_billing_stage_round_trip.rs b/lib/crates/fabro-api/tests/run_billing_stage_round_trip.rs
+index c160a840..5323e3dd 100644
+--- a/lib/crates/fabro-api/tests/run_billing_stage_round_trip.rs
++++ b/lib/crates/fabro-api/tests/run_billing_stage_round_trip.rs
+@@ -1,4 +1,5 @@
+ use fabro_api::types::RunBillingStage;
++use fabro_types::StageState;
+ use serde_json::json;
+ 
+ #[test]
+@@ -28,3 +29,59 @@ fn run_billing_stage_model_accepts_required_null() {
+     assert!(encoded.get("model").is_some());
+     assert!(encoded["model"].is_null());
+ }
++
++#[test]
++fn run_billing_stage_round_trips_terminal_row_with_started_at_and_state() {
++    let value = json!({
++        "stage": {
++            "id": "build",
++            "name": "build"
++        },
++        "model": { "id": "claude-sonnet-4-5" },
++        "billing": {
++            "input_tokens": 12,
++            "output_tokens": 34,
++            "total_tokens": 46,
++            "reasoning_tokens": 0,
++            "cache_read_tokens": 0,
++            "cache_write_tokens": 0
++        },
++        "runtime_secs": 5.5,
++        "started_at": "2026-04-29T12:34:56Z",
++        "state": "succeeded"
++    });
++
++    let stage: RunBillingStage = serde_json::from_value(value.clone())
++        .expect("terminal stage row should deserialize");
++    assert!(stage.started_at.is_some());
++    assert_eq!(stage.state, Some(StageState::Succeeded));
++    assert_eq!(serde_json::to_value(stage).unwrap(), value);
++}
++
++#[test]
++fn run_billing_stage_round_trips_in_flight_row() {
++    let value = json!({
++        "stage": {
++            "id": "build",
++            "name": "build"
++        },
++        "model": null,
++        "billing": {
++            "input_tokens": 0,
++            "output_tokens": 0,
++            "total_tokens": 0,
++            "reasoning_tokens": 0,
++            "cache_read_tokens": 0,
++            "cache_write_tokens": 0
++        },
++        "runtime_secs": 1.25,
++        "started_at": "2026-04-29T12:34:56Z",
++        "state": "running"
++    });
++
++    let stage: RunBillingStage = serde_json::from_value(value.clone())
++        .expect("in-flight stage row should deserialize");
++    assert!(stage.model.is_none());
++    assert_eq!(stage.state, Some(StageState::Running));
++    assert_eq!(serde_json::to_value(stage).unwrap(), value);
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-api/tests/stage_projection_round_trip.rs b/lib/crates/fabro-api/tests/stage_projection_round_trip.rs
+index 0523197c..5ec8ab69 100644
+--- a/lib/crates/fabro-api/tests/stage_projection_round_trip.rs
++++ b/lib/crates/fabro-api/tests/stage_projection_round_trip.rs
+@@ -28,7 +28,10 @@ fn stage_projection_round_trips_representative_json() {
+         "parallel_results": [{ "branch": 0, "status": "succeeded" }],
+         "stdout": "ok",
+         "stderr": "",
+-        "termination": "exited"
++        "termination": "exited",
++        "started_at": "2026-04-29T12:34:00Z",
++        "duration_ms": 56000,
++        "state": "succeeded"
+     });
+ 
+     let state: StageProjection = serde_json::from_value(value.clone()).unwrap();
+@@ -43,4 +46,4 @@ fn assert_same_type<T: 'static, U: 'static>() {
+         type_name::<T>(),
+         type_name::<U>()
+     );
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-server/src/demo/mod.rs b/lib/crates/fabro-server/src/demo/mod.rs
+index 08423cd5..c0c9858b 100644
+--- a/lib/crates/fabro-server/src/demo/mod.rs
++++ b/lib/crates/fabro-server/src/demo/mod.rs
+@@ -1187,6 +1187,7 @@ mod runs {
+                 status:        StageState::Succeeded,
+                 duration_secs: Some(72.0),
+                 dot_id:        Some("detect".into()),
++                started_at:    None,
+             },
+             RunStage {
+                 id:            "propose-changes".into(),
+@@ -1194,6 +1195,7 @@ mod runs {
+                 status:        StageState::Succeeded,
+                 duration_secs: Some(154.0),
+                 dot_id:        Some("propose".into()),
++                started_at:    None,
+             },
+             RunStage {
+                 id:            "review-changes".into(),
+@@ -1201,6 +1203,7 @@ mod runs {
+                 status:        StageState::Succeeded,
+                 duration_secs: Some(45.0),
+                 dot_id:        Some("review".into()),
++                started_at:    None,
+             },
+             RunStage {
+                 id:            "apply-changes".into(),
+@@ -1208,6 +1211,7 @@ mod runs {
+                 status:        StageState::Running,
+                 duration_secs: Some(118.0),
+                 dot_id:        Some("apply".into()),
++                started_at:    None,
+             },
+         ]
+     }
+@@ -1248,6 +1252,8 @@ mod runs {
+                         total_usd_micros:   Some(480_000),
+                     },
+                     runtime_secs: 72.0,
++                    started_at:   None,
++                    state:        Some(StageState::Succeeded),
+                 },
+                 RunBillingStage {
+                     stage:        BillingStageRef {
+@@ -1267,6 +1273,8 @@ mod runs {
+                         total_usd_micros:   Some(720_000),
+                     },
+                     runtime_secs: 154.0,
++                    started_at:   None,
++                    state:        Some(StageState::Succeeded),
+                 },
+                 RunBillingStage {
+                     stage:        BillingStageRef {
+@@ -1286,6 +1294,8 @@ mod runs {
+                         total_usd_micros:   Some(190_000),
+                     },
+                     runtime_secs: 45.0,
++                    started_at:   None,
++                    state:        Some(StageState::Succeeded),
+                 },
+                 RunBillingStage {
+                     stage:        BillingStageRef {
+@@ -1305,6 +1315,8 @@ mod runs {
+                         total_usd_micros:   Some(870_000),
+                     },
+                     runtime_secs: 118.0,
++                    started_at:   None,
++                    state:        Some(StageState::Running),
+                 },
+             ],
+             totals:   RunBillingTotals {
+@@ -1697,4 +1709,4 @@ session_sandboxes = false
+             })
+             .clone()
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-server/src/server/handler/billing.rs b/lib/crates/fabro-server/src/server/handler/billing.rs
+index dfe7d517..cb50b27d 100644
+--- a/lib/crates/fabro-server/src/server/handler/billing.rs
++++ b/lib/crates/fabro-server/src/server/handler/billing.rs
+@@ -1,13 +1,13 @@
+ use std::sync::Arc;
+ 
+-use fabro_types::EventBody;
++use chrono::Utc;
++use fabro_types::{StageId, StageProjection};
+ 
+ use super::super::{
+-    ApiError, AppState, BilledTokenCounts, BillingByModel, BillingStageRef, EventEnvelope, HashMap,
+-    IntoResponse, Json, ListResponse, ModelBillingTotals, ModelReference, PaginationParams, Path,
+-    Query, RequiredUser, Response, Router, RunBilling, RunBillingStage, RunBillingTotals, RunId,
+-    RunStage, RunStatus, StageState, State, StatusCode, accumulate_model_billing, get,
+-    parse_run_id_path,
++    ApiError, AppState, BilledTokenCounts, BillingByModel, BillingStageRef, HashMap, IntoResponse,
++    Json, ListResponse, ModelBillingTotals, ModelReference, PaginationParams, Path, Query,
++    RequiredUser, Response, Router, RunBilling, RunBillingStage, RunBillingTotals, RunId, RunStage,
++    State, StatusCode, accumulate_model_billing, get, parse_run_id_path,
+ };
+ 
+ pub(super) fn routes() -> Router<Arc<AppState>> {
+@@ -16,23 +16,55 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
+         .route("/runs/{id}/billing", get(get_run_billing))
+ }
+ 
+-fn active_stage_state_from_events(events: &[EventEnvelope], node_id: &str) -> StageState {
+-    let latest = events.iter().rev().find(|envelope| {
+-        envelope.event.node_id.as_deref() == Some(node_id)
+-            && matches!(
+-                &envelope.event.body,
+-                EventBody::StageRetrying(_)
+-                    | EventBody::StageStarted(_)
+-                    | EventBody::StageCompleted(_)
+-                    | EventBody::StageFailed(_)
+-            )
+-    });
++/// One row per `node_id`, latest visit wins.
++///
++/// Mirrors the aggregation rule used in `fabro_workflow::pipeline::finalize`:
++/// the displayed row uses the latest visit's data, but the row's sort key is
++/// the minimum `first_event_seq` across all visits of that node — i.e. the
++/// node's first appearance in the event log. This produces the same A, B
++/// order for an A → B → A loop that finalize produces.
++struct DedupedStage<'a> {
++    node_id:               String,
++    stage:                 &'a StageProjection,
++    sort_key_first_event:  u32,
++}
+ 
+-    if latest.is_some_and(|e| matches!(&e.event.body, EventBody::StageRetrying(_))) {
+-        StageState::Retrying
+-    } else {
+-        StageState::Running
++fn dedupe_by_node_id<'a>(
++    stages: impl IntoIterator<Item = (&'a StageId, &'a StageProjection)>,
++) -> Vec<DedupedStage<'a>> {
++    let mut by_node: HashMap<String, (u32, u32, &'a StageProjection)> = HashMap::new();
++    for (stage_id, stage) in stages {
++        let node_id = stage_id.node_id().to_string();
++        let visit = stage_id.visit();
++        let first_event = stage.first_event_seq.get();
++        by_node
++            .entry(node_id)
++            .and_modify(|entry| {
++                if first_event < entry.0 {
++                    entry.0 = first_event;
++                }
++                if visit >= entry.1 {
++                    entry.1 = visit;
++                    entry.2 = stage;
++                }
++            })
++            .or_insert((first_event, visit, stage));
+     }
++
++    let mut deduped: Vec<DedupedStage<'a>> = by_node
++        .into_iter()
++        .map(|(node_id, (first_event, _visit, stage))| DedupedStage {
++            node_id,
++            stage,
++            sort_key_first_event: first_event,
++        })
++        .collect();
++    deduped.sort_by(|a, b| {
++        a.sort_key_first_event
++            .cmp(&b.sort_key_first_event)
++            .then_with(|| a.node_id.cmp(&b.node_id))
++    });
++    deduped
+ }
+ 
+ async fn list_run_stages(
+@@ -46,81 +78,29 @@ async fn list_run_stages(
+         Err(response) => return response,
+     };
+ 
+-    // Try live run first.
+-    let (checkpoint, run_is_active) = {
+-        let runs = state.runs.lock().expect("runs lock poisoned");
+-        match runs.get(&id) {
+-            Some(managed_run) => {
+-                let active = !matches!(
+-                    managed_run.status,
+-                    RunStatus::Succeeded { .. } | RunStatus::Failed { .. } | RunStatus::Dead
+-                );
+-                (managed_run.checkpoint.clone(), active)
+-            }
+-            None => (None, false),
+-        }
++    let Ok(run_store) = state.store.open_run_reader(&id).await else {
++        return ApiError::not_found("Run not found.").into_response();
+     };
+-
+-    // Fall back to stored run.
+-    let (checkpoint, run_is_active) = if checkpoint.is_some() {
+-        (checkpoint, run_is_active)
+-    } else {
+-        match state.store.open_run_reader(&id).await {
+-            Ok(run_store) => match run_store.state().await {
+-                Ok(run_state) => {
+-                    let active = run_state.status.is_some_and(|status| !status.is_terminal());
+-                    (run_state.checkpoint, active)
+-                }
+-                Err(_) => (None, false),
+-            },
+-            Err(_) => return ApiError::not_found("Run not found.").into_response(),
++    let projection = match run_store.state().await {
++        Ok(state) => state,
++        Err(err) => {
++            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
++                .into_response();
+         }
+     };
+ 
+-    let Some(checkpoint) = checkpoint else {
+-        return (
+-            StatusCode::OK,
+-            Json(ListResponse::new(Vec::<RunStage>::new())),
+-        )
+-            .into_response();
+-    };
+-
+-    let events = match state.store.open_run_reader(&id).await {
+-        Ok(run_store) => run_store.list_events().await.unwrap_or_default(),
+-        Err(_) => Vec::new(),
+-    };
+-    let stage_durations = fabro_workflow::extract_stage_durations_from_events(&events);
+-
+-    let mut stages = Vec::new();
+-    for node_id in &checkpoint.completed_nodes {
+-        let duration_ms = stage_durations.get(node_id).copied().unwrap_or(0);
+-        let status = match checkpoint.node_outcomes.get(node_id) {
+-            Some(outcome) => StageState::from(outcome.status),
+-            None => StageState::Succeeded,
+-        };
+-        stages.push(RunStage {
+-            id: node_id.clone(),
+-            name: node_id.clone(),
+-            status,
+-            duration_secs: Some(duration_ms as f64 / 1000.0),
+-            dot_id: Some(node_id.clone()),
+-        });
+-    }
+-
+-    // Add next node as running if the run is still active.
+-    // The checkpoint's current_node is the last *completed* stage; next_node_id
+-    // is the stage that is currently executing.
+-    if let Some(next_id) = &checkpoint.next_node_id {
+-        if run_is_active && next_id != "exit" && !checkpoint.completed_nodes.contains(next_id) {
+-            stages.push(RunStage {
+-                id:            next_id.clone(),
+-                name:          next_id.clone(),
+-                status:        active_stage_state_from_events(&events, next_id),
+-                duration_secs: None,
+-                dot_id:        Some(next_id.clone()),
+-            });
+-        }
+-    }
++    let now = Utc::now();
++    let stages: Vec<RunStage> = dedupe_by_node_id(projection.iter_stages())
++        .into_iter()
++        .map(|entry| RunStage {
++            id:            entry.node_id.clone(),
++            name:          entry.node_id.clone(),
++            status:        entry.stage.effective_state(),
++            duration_secs: entry.stage.runtime_secs(now),
++            dot_id:        Some(entry.node_id.clone()),
++            started_at:    entry.stage.started_at,
++        })
++        .collect();
+ 
+     (StatusCode::OK, Json(ListResponse::new(stages))).into_response()
+ }
+@@ -137,55 +117,29 @@ async fn get_run_billing(
+         }
+     };
+ 
+-    let checkpoint = match run_store.state().await {
+-        Ok(state) => state.checkpoint,
++    let projection = match run_store.state().await {
++        Ok(state) => state,
+         Err(err) => {
+             return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                 .into_response();
+         }
+     };
+ 
+-    let Some(checkpoint) = checkpoint else {
+-        let empty = RunBilling {
+-            by_model: Vec::new(),
+-            stages:   Vec::new(),
+-            totals:   RunBillingTotals {
+-                cache_read_tokens:  0,
+-                cache_write_tokens: 0,
+-                input_tokens:       0,
+-                output_tokens:      0,
+-                reasoning_tokens:   0,
+-                runtime_secs:       0.0,
+-                total_tokens:       0,
+-                total_usd_micros:   None,
+-            },
+-        };
+-        return (StatusCode::OK, Json(empty)).into_response();
+-    };
+-
+-    let stage_durations = match run_store.list_events().await {
+-        Ok(events) => fabro_workflow::extract_stage_durations_from_events(&events),
+-        Err(err) => {
+-            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+-                .into_response();
+-        }
+-    };
++    let now = Utc::now();
+ 
+     let mut by_model_totals = HashMap::<String, ModelBillingTotals>::new();
+     let mut billed_usages = Vec::new();
+     let mut runtime_secs = 0.0_f64;
+     let mut stages = Vec::new();
+ 
+-    for node_id in &checkpoint.completed_nodes {
+-        let duration_ms = stage_durations.get(node_id).copied().unwrap_or(0);
+-        runtime_secs += duration_ms as f64 / 1000.0;
++    for entry in dedupe_by_node_id(projection.iter_stages()) {
++        let stage = entry.stage;
++        let node_id = entry.node_id;
+ 
+-        let usage = checkpoint
+-            .node_outcomes
+-            .get(node_id)
+-            .and_then(|outcome| outcome.usage.as_ref());
++        let row_runtime = stage.runtime_secs(now).unwrap_or(0.0);
++        runtime_secs += row_runtime;
+ 
+-        let (billing, model) = if let Some(usage) = usage {
++        let (billing, model) = if let Some(usage) = stage.usage.as_ref() {
+             billed_usages.push(usage.clone());
+             let tokens = usage.tokens();
+             let billing = BilledTokenCounts {
+@@ -207,11 +161,13 @@ async fn get_run_billing(
+         stages.push(RunBillingStage {
+             billing,
+             model,
+-            runtime_secs: duration_ms as f64 / 1000.0,
++            runtime_secs: row_runtime,
+             stage: BillingStageRef {
+                 id:   node_id.clone(),
+-                name: node_id.clone(),
++                name: node_id,
+             },
++            started_at: stage.started_at,
++            state: Some(stage.effective_state()),
+         });
+     }
+ 
+@@ -241,4 +197,4 @@ async fn get_run_billing(
+     };
+ 
+     (StatusCode::OK, Json(response)).into_response()
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-server/src/server/tests.rs b/lib/crates/fabro-server/src/server/tests.rs
+index 74a18fc1..6de28d70 100644
+--- a/lib/crates/fabro-server/src/server/tests.rs
++++ b/lib/crates/fabro-server/src/server/tests.rs
+@@ -2134,6 +2134,36 @@ async fn list_run_stages_projects_retrying_until_completion() {
+         },
+         workflow_event::Event::RunStarting,
+         workflow_event::Event::RunRunning,
++        workflow_event::Event::StageStarted {
++            node_id:      "setup".to_string(),
++            name:         "Setup".to_string(),
++            index:        0,
++            handler_type: "command".to_string(),
++            attempt:      1,
++            max_attempts: 1,
++        },
++        workflow_event::Event::StageCompleted {
++            node_id: "setup".to_string(),
++            name: "Setup".to_string(),
++            index: 0,
++            duration_ms: 5,
++            status: "succeeded".to_string(),
++            preferred_label: None,
++            suggested_next_ids: Vec::new(),
++            billing: None,
++            failure: None,
++            notes: None,
++            files_touched: Vec::new(),
++            context_updates: None,
++            jump_to_node: None,
++            context_values: None,
++            node_visits: None,
++            loop_failure_signatures: None,
++            restart_failure_signatures: None,
++            response: None,
++            attempt: 1,
++            max_attempts: 1,
++        },
+         workflow_event::Event::StageStarted {
+             node_id:      "work".to_string(),
+             name:         "Work".to_string(),
+@@ -2269,6 +2299,197 @@ async fn list_run_stages_projects_retrying_until_completion() {
+     assert_eq!(stage_status(&body, "work"), "partially_succeeded");
+ }
+ 
++#[tokio::test]
++async fn run_billing_retried_node_then_succeeded_emits_one_row_with_final_attempt_duration() {
++    let state = test_app_state_with_isolated_storage();
++    let app = crate::test_support::build_test_router(Arc::clone(&state));
++    let run_id = RunId::new();
++
++    create_durable_run_with_events(&state, run_id, &[
++        workflow_event::Event::RunSubmitted {
++            definition_blob: None,
++        },
++        workflow_event::Event::RunStarting,
++        workflow_event::Event::RunRunning,
++        workflow_event::Event::StageStarted {
++            node_id:      "work".to_string(),
++            name:         "Work".to_string(),
++            index:        0,
++            handler_type: "command".to_string(),
++            attempt:      1,
++            max_attempts: 3,
++        },
++        workflow_event::Event::StageFailed {
++            node_id:     "work".to_string(),
++            name:        "Work".to_string(),
++            index:       0,
++            failure:     FailureDetail::new("transient", FailureCategory::TransientInfra),
++            will_retry:  true,
++            duration_ms: 10,
++            actor:       None,
++        },
++        workflow_event::Event::StageRetrying {
++            node_id:      "work".to_string(),
++            name:         "Work".to_string(),
++            index:        0,
++            attempt:      2,
++            max_attempts: 3,
++            delay_ms:     0,
++        },
++        workflow_event::Event::StageStarted {
++            node_id:      "work".to_string(),
++            name:         "Work".to_string(),
++            index:        0,
++            handler_type: "command".to_string(),
++            attempt:      2,
++            max_attempts: 3,
++        },
++        workflow_event::Event::StageCompleted {
++            node_id: "work".to_string(),
++            name: "Work".to_string(),
++            index: 0,
++            duration_ms: 25,
++            status: "succeeded".to_string(),
++            preferred_label: None,
++            suggested_next_ids: Vec::new(),
++            billing: None,
++            failure: None,
++            notes: None,
++            files_touched: Vec::new(),
++            context_updates: None,
++            jump_to_node: None,
++            context_values: None,
++            node_visits: None,
++            loop_failure_signatures: None,
++            restart_failure_signatures: None,
++            response: None,
++            attempt: 2,
++            max_attempts: 3,
++        },
++    ])
++    .await;
++
++    let response = app
++        .oneshot(
++            Request::builder()
++                .method("GET")
++                .uri(api(&format!("/runs/{run_id}/billing")))
++                .body(Body::empty())
++                .unwrap(),
++        )
++        .await
++        .unwrap();
++    let body = response_json!(response, StatusCode::OK).await;
++    let stages = body["stages"].as_array().unwrap();
++    assert_eq!(stages.len(), 1, "retry collapses to one row per node_id");
++    let row = &stages[0];
++    assert_eq!(row["stage"]["id"], "work");
++    assert_eq!(
++        row["state"], "succeeded",
++        "final state mirrors the latest StageCompleted"
++    );
++    let runtime = row["runtime_secs"].as_f64().unwrap();
++    assert!(
++        (runtime - 0.025).abs() < f64::EPSILON,
++        "runtime should equal final attempt's 25ms, got {runtime}"
++    );
++}
++
++fn revisit_test_started(node_id: &str) -> workflow_event::Event {
++    workflow_event::Event::StageStarted {
++        node_id:      node_id.to_string(),
++        name:         node_id.to_string(),
++        index:        0,
++        handler_type: "command".to_string(),
++        attempt:      1,
++        max_attempts: 1,
++    }
++}
++
++fn revisit_test_completed_with_visit(
++    node_id: &str,
++    duration_ms: u64,
++    visit: usize,
++) -> workflow_event::Event {
++    let mut node_visits = std::collections::BTreeMap::new();
++    node_visits.insert(node_id.to_string(), visit);
++    workflow_event::Event::StageCompleted {
++        node_id: node_id.to_string(),
++        name: node_id.to_string(),
++        index: 0,
++        duration_ms,
++        status: "succeeded".to_string(),
++        preferred_label: None,
++        suggested_next_ids: Vec::new(),
++        billing: None,
++        failure: None,
++        notes: None,
++        files_touched: Vec::new(),
++        context_updates: None,
++        jump_to_node: None,
++        context_values: None,
++        node_visits: Some(node_visits),
++        loop_failure_signatures: None,
++        restart_failure_signatures: None,
++        response: None,
++        attempt: 1,
++        max_attempts: 1,
++    }
++}
++
++#[tokio::test]
++async fn run_billing_revisited_node_collapses_to_two_rows_with_latest_visit_data() {
++    let state = test_app_state_with_isolated_storage();
++    let app = crate::test_support::build_test_router(Arc::clone(&state));
++    let run_id = RunId::new();
++
++    create_durable_run_with_events(&state, run_id, &[
++        workflow_event::Event::RunSubmitted {
++            definition_blob: None,
++        },
++        workflow_event::Event::RunStarting,
++        workflow_event::Event::RunRunning,
++        // A → B → A loop. Per-visit `node_visits` payload steers the reducer
++        // to attribute each StageCompleted to the right visit.
++        revisit_test_started("a"),
++        revisit_test_completed_with_visit("a", 1, 1),
++        revisit_test_started("b"),
++        revisit_test_completed_with_visit("b", 2, 1),
++        revisit_test_started("a"),
++        revisit_test_completed_with_visit("a", 99, 2),
++    ])
++    .await;
++
++    let response = app
++        .oneshot(
++            Request::builder()
++                .method("GET")
++                .uri(api(&format!("/runs/{run_id}/billing")))
++                .body(Body::empty())
++                .unwrap(),
++        )
++        .await
++        .unwrap();
++    let body = response_json!(response, StatusCode::OK).await;
++    let stages = body["stages"].as_array().unwrap();
++    assert_eq!(stages.len(), 2, "two distinct node_ids → two rows");
++    assert_eq!(
++        stages[0]["stage"]["id"], "a",
++        "A appeared first → A's row first"
++    );
++    assert_eq!(stages[1]["stage"]["id"], "b");
++    let a_runtime = stages[0]["runtime_secs"].as_f64().unwrap();
++    assert!(
++        (a_runtime - 0.099).abs() < f64::EPSILON,
++        "A should carry latest visit's duration (99ms), got {a_runtime}"
++    );
++    let b_runtime = stages[1]["runtime_secs"].as_f64().unwrap();
++    assert!(
++        (b_runtime - 0.002).abs() < f64::EPSILON,
++        "B should carry its single visit's duration (2ms), got {b_runtime}"
++    );
++}
++
+ async fn append_raw_run_event(
+     state: &Arc<AppState>,
+     run_id: RunId,
+@@ -7241,4 +7462,4 @@ fn validate_github_slug_rejects_path_traversal_and_separators() {
+ fn validate_github_slug_rejects_overlong() {
+     let long = "a".repeat(40);
+     assert!(super::validate_github_slug("owner", &long, 39).is_err());
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-store/src/run_state.rs b/lib/crates/fabro-store/src/run_state.rs
+index 77b36796..c9209859 100644
+--- a/lib/crates/fabro-store/src/run_state.rs
++++ b/lib/crates/fabro-store/src/run_state.rs
+@@ -10,7 +10,7 @@ use fabro_types::{
+     BilledModelUsage, Checkpoint, Conclusion, EventBody, FailureSignature, InterviewQuestionRecord,
+     Outcome, PendingInterviewRecord, PullRequestRecord, RunControlAction, RunEvent, RunId,
+     RunProjection, RunSpec, RunStatus, RunSummary, SandboxRecord, StageCompletion, StageOutcome,
+-    StageProjection, StartRecord, TerminalStatus, first_event_seq,
++    StageProjection, StageState, StartRecord, TerminalStatus, first_event_seq,
+ };
+ use fabro_util::error::render_with_causes;
+ use serde_json::Value;
+@@ -290,11 +290,20 @@ impl RunProjectionReducer for RunProjection {
+                 let Some(stage_id) = stored.stage_id.as_ref() else {
+                     return Ok(());
+                 };
+-                self.stage_entry(
++                let stage = self.stage_entry(
+                     stage_id.node_id(),
+                     stage_id.visit(),
+                     first_event_seq(event.seq),
+                 );
++                stage.reset_for_new_attempt();
++                stage.started_at = Some(ts);
++                stage.state = Some(StageState::Running);
++            }
++            EventBody::StageRetrying(_) => {
++                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
++                    return Ok(());
++                };
++                stage.state = Some(StageState::Retrying);
+             }
+             EventBody::StagePrompt(props) => {
+                 let Some(stage) = stage_at_visit(self, stored, props.visit, event.seq) else {
+@@ -317,12 +326,19 @@ impl RunProjectionReducer for RunProjection {
+                 let response = props.response.clone();
+                 let outcome = stage_outcome_from_props(props);
+                 let completion = stage_completion_from_outcome(&outcome, ts);
++                let usage = props.billing.clone();
++                let duration_ms = props.duration_ms;
++                let terminal_state = StageState::from(outcome.status);
+                 let stage = self.stage_entry(node_id, visit, first_event_seq(event.seq));
+                 stage.response = response;
+                 stage.completion = Some(completion);
++                stage.duration_ms = Some(duration_ms);
++                stage.usage = usage;
++                stage.state = Some(terminal_state);
+             }
+             EventBody::StageFailed(props) => {
+                 let failure_reason = props.failure.as_ref().map(|detail| detail.message.clone());
++                let duration_ms = props.duration_ms;
+                 let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
+                     return Ok(());
+                 };
+@@ -334,6 +350,8 @@ impl RunProjectionReducer for RunProjection {
+                     failure_reason,
+                     timestamp: ts,
+                 });
++                stage.duration_ms = Some(duration_ms);
++                stage.state = Some(StageState::Failed);
+             }
+             EventBody::AgentSessionStarted(props) => {
+                 let Some(stage) = stage_at_visit(self, stored, props.visit, event.seq) else {
+@@ -613,12 +631,13 @@ mod tests {
+     use fabro_types::run_event::run::RunFailedProps;
+     use fabro_types::run_event::{
+         CheckpointCompletedProps, InterviewCompletedProps, InterviewOption, InterviewStartedProps,
+-        RunControlEffectProps, StagePromptProps, StageStartedProps,
++        RunControlEffectProps, StageCompletedProps, StageFailedProps, StagePromptProps,
++        StageRetryingProps, StageStartedProps,
+     };
+     use fabro_types::{
+-        BlockedReason, Checkpoint, EventBody, FailureReason, Outcome, QuestionType, RunBlobId,
+-        RunControlAction, RunEvent, RunStatus, StageOutcome, SuccessReason, TerminalStatus,
+-        WorkflowSettings, first_event_seq, fixtures,
++        BlockedReason, Checkpoint, EventBody, FailureCategory, FailureDetail, FailureReason,
++        Outcome, QuestionType, RunBlobId, RunControlAction, RunEvent, RunStatus, StageOutcome,
++        StageState, SuccessReason, TerminalStatus, WorkflowSettings, first_event_seq, fixtures,
+     };
+     use serde_json::json;
+ 
+@@ -1488,4 +1507,199 @@ mod tests {
+         );
+         assert_eq!(state.status_updated_at, updated_at);
+     }
+-}
++
++    fn started_props() -> StageStartedProps {
++        StageStartedProps {
++            index:        0,
++            handler_type: "agent".to_string(),
++            attempt:      1,
++            max_attempts: 3,
++        }
++    }
++
++    fn failed_props(duration_ms: u64) -> StageFailedProps {
++        StageFailedProps {
++            index: 0,
++            failure: Some(FailureDetail::new(
++                "boom",
++                FailureCategory::TransientInfra,
++            )),
++            will_retry: true,
++            duration_ms,
++        }
++    }
++
++    fn retrying_props() -> StageRetryingProps {
++        StageRetryingProps {
++            index:        0,
++            attempt:      2,
++            max_attempts: 3,
++            delay_ms:     0,
++        }
++    }
++
++    fn completed_props(duration_ms: u64, status: StageOutcome) -> StageCompletedProps {
++        StageCompletedProps {
++            index: 0,
++            duration_ms,
++            status,
++            preferred_label: None,
++            suggested_next_ids: Vec::new(),
++            billing: None,
++            failure: None,
++            notes: None,
++            files_touched: Vec::new(),
++            context_updates: None,
++            jump_to_node: None,
++            context_values: None,
++            node_visits: None,
++            loop_failure_signatures: None,
++            restart_failure_signatures: None,
++            response: None,
++            attempt: 1,
++            max_attempts: 3,
++        }
++    }
++
++    #[test]
++    fn stage_started_records_started_at_and_running_state() {
++        let mut state = RunProjection::default();
++        let stage_id = StageId::new("build", 1);
++
++        state
++            .apply_event(&test_stage_event(
++                3,
++                EventBody::StageStarted(started_props()),
++                stage_id.clone(),
++            ))
++            .unwrap();
++
++        let stage = state.stage(&stage_id).unwrap();
++        assert_eq!(stage.state, Some(StageState::Running));
++        assert!(stage.started_at.is_some());
++        assert_eq!(stage.effective_state(), StageState::Running);
++    }
++
++    #[test]
++    fn stage_completed_records_duration_and_terminal_state() {
++        let mut state = RunProjection::default();
++        let stage_id = StageId::new("build", 1);
++
++        state
++            .apply_event(&test_stage_event(
++                1,
++                EventBody::StageStarted(started_props()),
++                stage_id.clone(),
++            ))
++            .unwrap();
++        state
++            .apply_event(&test_event(
++                2,
++                EventBody::StageCompleted(completed_props(42, StageOutcome::Succeeded)),
++                Some("build"),
++            ))
++            .unwrap();
++
++        let stage = state.stage(&stage_id).unwrap();
++        assert_eq!(stage.duration_ms, Some(42));
++        assert_eq!(stage.state, Some(StageState::Succeeded));
++        assert_eq!(stage.effective_state(), StageState::Succeeded);
++    }
++
++    #[test]
++    fn stage_failed_records_duration_and_failed_state() {
++        let mut state = RunProjection::default();
++        let stage_id = StageId::new("build", 1);
++
++        state
++            .apply_event(&test_stage_event(
++                1,
++                EventBody::StageStarted(started_props()),
++                stage_id.clone(),
++            ))
++            .unwrap();
++        state
++            .apply_event(&test_event(
++                2,
++                EventBody::StageFailed(failed_props(10)),
++                Some("build"),
++            ))
++            .unwrap();
++
++        let stage = state.stage(&stage_id).unwrap();
++        assert_eq!(stage.duration_ms, Some(10));
++        assert_eq!(stage.state, Some(StageState::Failed));
++    }
++
++    #[test]
++    fn stage_retrying_sets_retrying_state() {
++        let mut state = RunProjection::default();
++        let stage_id = StageId::new("build", 1);
++
++        state
++            .apply_event(&test_stage_event(
++                1,
++                EventBody::StageStarted(started_props()),
++                stage_id.clone(),
++            ))
++            .unwrap();
++        state
++            .apply_event(&test_event(
++                2,
++                EventBody::StageFailed(failed_props(10)),
++                Some("build"),
++            ))
++            .unwrap();
++        state
++            .apply_event(&test_event(
++                3,
++                EventBody::StageRetrying(retrying_props()),
++                Some("build"),
++            ))
++            .unwrap();
++
++        let stage = state.stage(&stage_id).unwrap();
++        assert_eq!(stage.state, Some(StageState::Retrying));
++    }
++
++    #[test]
++    fn stage_started_after_retrying_returns_to_running_and_resets_attempt_data() {
++        let mut state = RunProjection::default();
++        let stage_id = StageId::new("build", 1);
++
++        state
++            .apply_event(&test_stage_event(
++                1,
++                EventBody::StageStarted(started_props()),
++                stage_id.clone(),
++            ))
++            .unwrap();
++        state
++            .apply_event(&test_event(
++                2,
++                EventBody::StageFailed(failed_props(10)),
++                Some("build"),
++            ))
++            .unwrap();
++        state
++            .apply_event(&test_event(
++                3,
++                EventBody::StageRetrying(retrying_props()),
++                Some("build"),
++            ))
++            .unwrap();
++        state
++            .apply_event(&test_stage_event(
++                4,
++                EventBody::StageStarted(started_props()),
++                stage_id.clone(),
++            ))
++            .unwrap();
++
++        let stage = state.stage(&stage_id).unwrap();
++        assert_eq!(stage.state, Some(StageState::Running));
++        // Prior attempt's terminal data must not leak into the new attempt.
++        assert!(stage.completion.is_none());
++        assert_eq!(stage.duration_ms, None);
++    }
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-types/src/run_projection.rs b/lib/crates/fabro-types/src/run_projection.rs
+index de2e4a1a..32cdbabc 100644
+--- a/lib/crates/fabro-types/src/run_projection.rs
++++ b/lib/crates/fabro-types/src/run_projection.rs
+@@ -4,9 +4,9 @@ use std::num::NonZeroU32;
+ use chrono::{DateTime, Utc};
+ 
+ use crate::{
+-    Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition, PullRequestRecord, Retro,
+-    RunControlAction, RunId, RunSpec, RunStatus, SandboxRecord, StageCompletion, StageId,
+-    StartRecord,
++    BilledModelUsage, Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition,
++    PullRequestRecord, Retro, RunControlAction, RunId, RunSpec, RunStatus, SandboxRecord,
++    StageCompletion, StageId, StageState, StartRecord,
+ };
+ 
+ #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+@@ -61,6 +61,17 @@ pub struct StageProjection {
+     pub live_streaming:    Option<bool>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub termination:       Option<crate::CommandTermination>,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub started_at:        Option<DateTime<Utc>>,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub duration_ms:       Option<u64>,
++    /// Server-internal billing usage for the latest attempt; not part of the
++    /// wire contract because `BilledModelUsage` is not modeled in OpenAPI.
++    /// Read only in-process by the billing handler.
++    #[serde(skip)]
++    pub usage:             Option<BilledModelUsage>,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub state:             Option<StageState>,
+ }
+ 
+ /// Convert a 1-based event sequence number into the `NonZeroU32` form used for
+@@ -90,7 +101,79 @@ impl StageProjection {
+             streams_separated: None,
+             live_streaming: None,
+             termination: None,
++            started_at: None,
++            duration_ms: None,
++            usage: None,
++            state: None,
++        }
++    }
++
++    /// Effective lifecycle state derived from stored event data.
++    ///
++    /// Falls back to deriving from `completion` for projections that predate
++    /// the stored `state` field, so old serialized projections still work
++    /// without a backfill.
++    #[must_use]
++    pub fn effective_state(&self) -> StageState {
++        self.state.unwrap_or_else(|| match &self.completion {
++            Some(completion) => StageState::from(completion.outcome),
++            None => StageState::Running,
++        })
++    }
++
++    /// Live wall-clock runtime in seconds.
++    ///
++    /// While the stage is non-terminal (`Pending`, `Running`, or `Retrying`),
++    /// this returns the elapsed time since `started_at` so the UI can tick
++    /// client-side. Once terminal, the stored `duration_ms` is returned. This
++    /// also handles retries safely: a new `StageStarted` resets the state
++    /// back to `Running` and keeps the live computation correct even if a
++    /// previous attempt left a stale `duration_ms`.
++    #[must_use]
++    pub fn runtime_secs(&self, now: DateTime<Utc>) -> Option<f64> {
++        let state = self.effective_state();
++        if matches!(
++            state,
++            StageState::Running | StageState::Retrying | StageState::Pending
++        ) {
++            return self.started_at.map(|started| {
++                now.signed_duration_since(started)
++                    .num_milliseconds()
++                    .max(0) as f64
++                    / 1000.0
++            });
+         }
++        self.duration_ms.map(|ms| ms as f64 / 1000.0)
++    }
++
++    /// Reset every per-attempt result field. Called when a stage starts a
++    /// new attempt (or visit) so prior-attempt data does not leak into the
++    /// new attempt's projection.
++    ///
++    /// Preserves `first_event_seq` (identity / sort key) and leaves
++    /// `started_at` / `state` to be set by the caller immediately after.
++    pub fn reset_for_new_attempt(&mut self) {
++        self.completion = None;
++        self.duration_ms = None;
++        self.usage = None;
++        self.state = None;
++
++        self.response = None;
++        self.prompt = None;
++        self.provider_used = None;
++        self.diff = None;
++
++        self.script_invocation = None;
++        self.script_timing = None;
++        self.parallel_results = None;
++
++        self.stdout = None;
++        self.stderr = None;
++        self.stdout_bytes = None;
++        self.stderr_bytes = None;
++        self.streams_separated = None;
++        self.live_streaming = None;
++        self.termination = None;
+     }
+ }
+ 
+@@ -185,4 +268,4 @@ impl RunProjection {
+             }
+         }
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/packages/fabro-api-client/src/models/run-billing-stage.ts b/lib/packages/fabro-api-client/src/models/run-billing-stage.ts
+index b6d807d8..aad11d6e 100644
+--- a/lib/packages/fabro-api-client/src/models/run-billing-stage.ts
++++ b/lib/packages/fabro-api-client/src/models/run-billing-stage.ts
+@@ -22,6 +22,9 @@ import type { BillingStageRef } from './billing-stage-ref';
+ // May contain unused imports in some cases
+ // @ts-ignore
+ import type { ModelReference } from './model-reference';
++// May contain unused imports in some cases
++// @ts-ignore
++import type { StageState } from './stage-state';
+ 
+ /**
+  * Token counts and billed totals for a single stage within a run.
+@@ -34,5 +37,12 @@ export interface RunBillingStage {
+      * Wall-clock runtime in seconds.
+      */
+     'runtime_secs': number;
++    /**
++     * Wall-clock time the latest attempt of this stage started, if known.
++     */
++    'started_at'?: string | null;
++    /**
++     * Lifecycle state of the stage. Use to detect in-flight rows for client-side runtime ticking.
++     */
++    'state'?: StageState | null;
+ }
+-
+diff --git a/lib/packages/fabro-api-client/src/models/run-stage.ts b/lib/packages/fabro-api-client/src/models/run-stage.ts
+index c98ec9be..2e5e82f0 100644
+--- a/lib/packages/fabro-api-client/src/models/run-stage.ts
++++ b/lib/packages/fabro-api-client/src/models/run-stage.ts
+@@ -38,7 +38,10 @@ export interface RunStage {
+      * Node identifier in the Graphviz graph source.
+      */
+     'dot_id'?: string;
++    /**
++     * Wall-clock time the latest attempt of this stage started, if known.
++     */
++    'started_at'?: string | null;
+ }
+ 
+ 
+-
+diff --git a/lib/packages/fabro-api-client/src/models/stage-projection.ts b/lib/packages/fabro-api-client/src/models/stage-projection.ts
+index 41321ec7..7f18d6bc 100644
+--- a/lib/packages/fabro-api-client/src/models/stage-projection.ts
++++ b/lib/packages/fabro-api-client/src/models/stage-projection.ts
+@@ -19,6 +19,9 @@ import type { CommandTermination } from './command-termination';
+ // May contain unused imports in some cases
+ // @ts-ignore
+ import type { StageCompletion } from './stage-completion';
++// May contain unused imports in some cases
++// @ts-ignore
++import type { StageState } from './stage-state';
+ 
+ /**
+  * Observable projection data for one workflow stage execution.
+@@ -52,7 +55,17 @@ export interface StageProjection {
+     'streams_separated'?: boolean | null;
+     'live_streaming'?: boolean | null;
+     'termination'?: CommandTermination | null;
++    /**
++     * Wall-clock time the latest attempt of this stage started, if known.
++     */
++    'started_at'?: string | null;
++    /**
++     * Wall-clock duration of the stage\'s latest terminal attempt, if known.
++     */
++    'duration_ms'?: number | null;
++    /**
++     * Lifecycle state of the stage projection.
++     */
++    'state'?: StageState | null;
+ }
+ 
+-
+-
