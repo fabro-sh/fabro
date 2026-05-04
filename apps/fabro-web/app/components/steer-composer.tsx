@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { ApiError } from "../lib/api-client";
 import { useSteerRun } from "../lib/mutations";
+import { ErrorMessage } from "./ui";
 
 interface SteerComposerProps {
   runId: string;
@@ -113,13 +114,9 @@ export function SteerComposer({ runId, open, onClose }: SteerComposerProps) {
           maxLength={8192}
         />
         {errorMessage && (
-          <p
-            role="alert"
-            className="mt-2 text-xs text-amber"
-            data-testid="steer-error"
-          >
-            {errorMessage}
-          </p>
+          <div className="mt-2">
+            <ErrorMessage message={errorMessage} />
+          </div>
         )}
         <div className="mt-3 flex items-center justify-between gap-2">
           <span className="text-[11px] text-fg-muted">

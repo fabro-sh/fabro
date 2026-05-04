@@ -780,6 +780,14 @@ impl RunSession {
             }
         });
 
+        // Drain any unconsumed pending steers on every exit path
+        // (success, error, panic). The emit lands in the progress log via
+        // the explicit flush below; the scopeguard is a panic-only fallback.
+        let steering_hub_for_drain = Arc::clone(&self.steering_hub);
+        let _drain_guard = scopeguard::guard((), move |()| {
+            steering_hub_for_drain.drain_pending_at_run_end();
+        });
+
         let executed = pipeline::execute(initialized).await;
         store_progress_logger.flush().await;
         let final_context = Some(executed.final_context.clone());
@@ -821,7 +829,9 @@ impl RunSession {
         let concluded = Box::pin(pipeline::finalize(retroed, &finalize_opts)).await?;
         let finalized = Box::pin(pipeline::pull_request(concluded, &pr_opts)).await;
         // Emit `agent.steer.dropped { reason: run_ended }` for any
-        // unconsumed pending steers, then flush so it lands in the store.
+        // unconsumed pending steers on the success path, then flush. The
+        // scopeguard above re-runs as a no-op (drain is idempotent on an
+        // already-empty buffer) on the way out of scope.
         self.steering_hub.drain_pending_at_run_end();
         store_progress_logger.flush().await;
 

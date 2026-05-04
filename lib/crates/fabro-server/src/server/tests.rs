@@ -5303,9 +5303,14 @@ async fn steer_empty_text_returns_bad_request() {
         .unwrap();
 
     let response = app.oneshot(req).await.unwrap();
-    // Could be 400 (empty text) or 409 (run not running yet) depending on
-    // timing — either way it must NOT be 202.
-    assert_ne!(response.status(), StatusCode::ACCEPTED);
+    // 400 (whitespace-only text) or 409 (run not yet `running` when the
+    // handler checks status) are both acceptable; the only outcome we
+    // want to rule out is a successful enqueue.
+    let status = response.status();
+    assert!(
+        matches!(status, StatusCode::BAD_REQUEST | StatusCode::CONFLICT),
+        "expected 400 or 409, got {status}"
+    );
 }
 
 #[tokio::test]

@@ -86,27 +86,18 @@ impl SessionControlHandle {
 
     /// Push an `Append`-kind steering message onto the queue.
     pub fn steer(&self, text: String, actor: Option<Principal>) {
-        self.queue
-            .lock()
-            .expect("steering queue lock poisoned")
-            .push_back((text, SteerKind::Append, actor));
+        self.enqueue((text, SteerKind::Append, actor));
     }
 
     /// Push an `Interrupt`-kind steering message onto the queue *and* cancel
     /// the current round so the agent loop reacts immediately.
     pub fn interrupt_with(&self, text: String, actor: Option<Principal>) {
-        self.queue
-            .lock()
-            .expect("steering queue lock poisoned")
-            .push_back((text, SteerKind::Interrupt, actor));
-        self.round_token
-            .read()
-            .expect("round token lock poisoned")
-            .cancel();
+        self.enqueue((text, SteerKind::Interrupt, actor));
     }
 
     /// Direct enqueue used by callers that already encoded a kind/actor
-    /// (e.g. the hub flushing buffered steers as Appends).
+    /// (e.g. the hub flushing buffered steers as Appends). For
+    /// `Interrupt`-kind items, also cancels the current round token.
     pub fn enqueue(&self, item: SteeringItem) {
         let cancel_after = matches!(item.1, SteerKind::Interrupt);
         self.queue
@@ -121,6 +112,27 @@ impl SessionControlHandle {
         }
     }
 
+    /// Push `item` while enforcing a FIFO cap: if the queue is at or above
+    /// `cap`, the oldest entry is evicted and returned. Atomic under a
+    /// single lock acquisition.
+    #[must_use]
+    pub fn enqueue_bounded(&self, item: SteeringItem, cap: usize) -> Option<SteeringItem> {
+        let cancel_after = matches!(item.1, SteerKind::Interrupt);
+        let evicted = {
+            let mut q = self.queue.lock().expect("steering queue lock poisoned");
+            let evicted = if q.len() >= cap { q.pop_front() } else { None };
+            q.push_back(item);
+            evicted
+        };
+        if cancel_after {
+            self.round_token
+                .read()
+                .expect("round token lock poisoned")
+                .cancel();
+        }
+        evicted
+    }
+
     /// Whether the steering queue currently has no unconsumed messages.
     #[must_use]
     pub fn queue_is_empty(&self) -> bool {
@@ -130,23 +142,15 @@ impl SessionControlHandle {
             .is_empty()
     }
 
-    /// Current length of the steering queue.
+    /// Current queue length. Production callers should generally prefer
+    /// `queue_is_empty` or `enqueue_bounded`'s atomic eviction; this is
+    /// kept for tests and diagnostics.
     #[must_use]
     pub fn queue_len(&self) -> usize {
         self.queue
             .lock()
             .expect("steering queue lock poisoned")
             .len()
-    }
-
-    /// Pop the oldest queued steer (used by the hub to enforce its per-session
-    /// cap with FIFO eviction).
-    #[must_use]
-    pub fn pop_oldest(&self) -> Option<SteeringItem> {
-        self.queue
-            .lock()
-            .expect("steering queue lock poisoned")
-            .pop_front()
     }
 }
 
@@ -532,23 +536,13 @@ impl Session {
     /// Push an `Append`-kind steer onto the queue (no actor — internal
     /// callers like loop-detection use this).
     pub fn steer(&self, message: String) {
-        self.steering_queue
-            .lock()
-            .expect("steering queue lock poisoned")
-            .push_back((message, SteerKind::Append, None));
+        self.control_handle().steer(message, None);
     }
 
     /// Push an `Interrupt`-kind steer onto the queue and cancel the current
     /// round token so the agent loop reacts mid-round.
     pub fn interrupt_with(&self, message: String, actor: Option<Principal>) {
-        self.steering_queue
-            .lock()
-            .expect("steering queue lock poisoned")
-            .push_back((message, SteerKind::Interrupt, actor));
-        self.round_token
-            .read()
-            .expect("round token lock poisoned")
-            .cancel();
+        self.control_handle().interrupt_with(message, actor);
     }
 
     /// Cheap, cloneable handle that lets external coordinators deliver
@@ -567,11 +561,6 @@ impl Session {
     /// response.
     pub fn set_completion_coordinator(&mut self, coordinator: Arc<dyn CompletionCoordinator>) {
         self.completion_coordinator = Some(coordinator);
-    }
-
-    /// Remove any installed completion coordinator.
-    pub fn clear_completion_coordinator(&mut self) {
-        self.completion_coordinator = None;
     }
 
     pub fn follow_up(&self, message: String) {
@@ -644,11 +633,6 @@ impl Session {
     #[must_use]
     pub fn followup_queue_handle(&self) -> Arc<Mutex<VecDeque<String>>> {
         self.followup_queue.clone()
-    }
-
-    #[must_use]
-    pub fn steering_queue_handle(&self) -> Arc<Mutex<VecDeque<SteeringItem>>> {
-        self.steering_queue.clone()
     }
 
     #[must_use]

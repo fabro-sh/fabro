@@ -17,8 +17,6 @@ pub(super) fn routes() -> axum::Router<Arc<AppState>> {
     axum::Router::new().route("/runs/{id}/steer", post(steer_run))
 }
 
-const MAX_STEER_TEXT_LEN: usize = 8192;
-
 async fn steer_run(
     auth: RequiredUser,
     State(state): State<Arc<AppState>>,
@@ -33,20 +31,15 @@ async fn steer_run(
         return response;
     }
 
-    // Body validation. (OpenAPI enforces minLength=1/maxLength=8192 at the
-    // type boundary already; we re-check defensively for trims/whitespace.)
-    let text = req.text.to_string();
-    let trimmed_len = text.trim().len();
-    if trimmed_len == 0 {
+    // Body validation. OpenAPI enforces minLength=1/maxLength=8192 at the
+    // type boundary already, so the only thing left to guard against is a
+    // payload that's whitespace-only.
+    let SteerRunRequest { text, interrupt } = req;
+    let text: String = text.into();
+    if text.trim().is_empty() {
         return ApiError::bad_request("Steer text must not be empty.").into_response();
     }
-    if text.len() > MAX_STEER_TEXT_LEN {
-        return ApiError::bad_request(format!(
-            "Steer text must be ≤ {MAX_STEER_TEXT_LEN} characters."
-        ))
-        .into_response();
-    }
-    let kind = if req.interrupt {
+    let kind = if interrupt {
         SteerKind::Interrupt
     } else {
         SteerKind::Append

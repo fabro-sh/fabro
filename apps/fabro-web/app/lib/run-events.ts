@@ -105,10 +105,7 @@ export function queryKeysForRunEvent(
   }
 
   if (STEERING_EVENTS.has(event)) {
-    const keys = [
-      queryKeys.runs.events(runId, 1000),
-      queryKeys.runs.detail(runId),
-    ];
+    const keys = [queryKeys.runs.events(runId, 1000)];
     if (stageId) {
       keys.push(queryKeys.runs.stageTurns(runId, stageId));
     }

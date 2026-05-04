@@ -308,10 +308,10 @@ async fn build_registry(
                     provider,
                     fallback_chain.clone(),
                     Arc::clone(&llm_source_for_api),
+                    Arc::clone(&steering_hub_for_api),
                 )
                 .with_env(env.clone())
-                .with_mcp_servers(mcp_servers.clone())
-                .with_steering_hub(Arc::clone(&steering_hub_for_api));
+                .with_mcp_servers(mcp_servers.clone());
                 let cli = cli_resolver
                     .clone()
                     .map_or_else(

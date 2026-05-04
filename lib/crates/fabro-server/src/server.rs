@@ -2236,8 +2236,8 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
         // unregister), so they're the authoritative window in which a
         // steer can be delivered to a live session.
         EventBody::AgentSteeringAttached(_) => {
-            if let Some(stage_id) = event.stage_id.clone() {
-                managed_run.active_api_stages.insert(stage_id);
+            if let Some(stage_id) = event.stage_id.as_ref() {
+                managed_run.active_api_stages.insert(stage_id.clone());
             }
         }
         EventBody::AgentSteeringDetached(_) => {
@@ -2249,8 +2249,8 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
         // and sometimes fail to emit `completed` on error paths — the
         // stage.completed/stage.failed handler below is the backstop.
         EventBody::AgentCliStarted(_) => {
-            if let Some(stage_id) = event.stage_id.clone() {
-                managed_run.active_cli_stages.insert(stage_id);
+            if let Some(stage_id) = event.stage_id.as_ref() {
+                managed_run.active_cli_stages.insert(stage_id.clone());
             }
         }
         EventBody::AgentCliCompleted(_) => {

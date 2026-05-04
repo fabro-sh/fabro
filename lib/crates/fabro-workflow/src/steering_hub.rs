@@ -18,7 +18,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
 
-use fabro_agent::SessionControlHandle;
+use fabro_agent::{SessionControlHandle, SteeringItem};
 use fabro_types::run_event::AgentSteerDroppedReason;
 use fabro_types::{Principal, StageId, SteerKind};
 
@@ -35,14 +35,6 @@ pub const PER_RUN_PENDING_CAP: usize = 32;
 #[derive(Debug, Clone)]
 struct PendingSteer {
     text:  String,
-    /// Original kind. Buffered steers always flush as `Append` when a
-    /// session registers (see `register`), but we keep the original so a
-    /// future per-stage targeting feature can preserve it.
-    #[allow(
-        dead_code,
-        reason = "captured for future per-stage targeting; see TODO"
-    )]
-    kind:  SteerKind,
     actor: Option<Principal>,
 }
 
@@ -89,9 +81,9 @@ impl SteeringHub {
     }
 
     /// Register an API-mode session as steerable for this stage. If no
-    /// entry existed for `stage_id`, drains pending into the new handle as
-    /// `Append`-kind messages and emits `agent.steering.attached`. If an
-    /// entry already existed (e.g. failover replaced the underlying
+    /// entry existed for `stage_id`, emits `agent.steering.attached` and
+    /// drains pending into the new handle as `Append`-kind messages. If
+    /// an entry already existed (e.g. failover replaced the underlying
     /// session), the handle is overwritten silently — no drain, no event.
     pub fn register(&self, stage_id: &StageId, handle: &SessionControlHandle) {
         let was_new = {
@@ -101,6 +93,14 @@ impl SteeringHub {
             was_new
         };
         if was_new {
+            // Emit attached *before* draining so any `agent.steer.dropped`
+            // events from cap-evictions during the drain follow the
+            // attached event in the stream (UI consumers can attribute
+            // drops to a known session).
+            self.emitter.emit(&Event::AgentSteeringAttached {
+                node_id: stage_id.node_id().to_string(),
+                visit:   stage_id.visit(),
+            });
             let pending: Vec<PendingSteer> = {
                 let mut pending = self.pending.lock().expect("pending lock poisoned");
                 pending.drain(..).collect()
@@ -116,10 +116,6 @@ impl SteeringHub {
                     Some(stage_id),
                 );
             }
-            self.emitter.emit(&Event::AgentSteeringAttached {
-                node_id: stage_id.node_id().to_string(),
-                visit:   stage_id.visit(),
-            });
         }
     }
 
@@ -137,6 +133,34 @@ impl SteeringHub {
                 visit:   stage_id.visit(),
             });
         }
+    }
+
+    /// Atomic close-the-door check used by the agent loop's natural-
+    /// completion path. Under the `active` write lock: if `handle`'s
+    /// queue is empty, remove the stage and return `true` (loop should
+    /// break — emits `detached`). If the queue is non-empty, leave the
+    /// registration intact and return `false` (loop should iterate once
+    /// more — no event emitted, so no detach/attach flap).
+    pub fn unregister_if_queue_empty(
+        &self,
+        stage_id: &StageId,
+        handle: &SessionControlHandle,
+    ) -> bool {
+        let removed = {
+            let mut active = self.active.write().expect("active lock poisoned");
+            if handle.queue_is_empty() {
+                active.remove(stage_id).is_some()
+            } else {
+                false
+            }
+        };
+        if removed {
+            self.emitter.emit(&Event::AgentSteeringDetached {
+                node_id: stage_id.node_id().to_string(),
+                visit:   stage_id.visit(),
+            });
+        }
+        removed
     }
 
     /// Deliver a steer from the HTTP control plane. Broadcasts to every
@@ -162,7 +186,6 @@ impl SteeringHub {
             }
             pending.push_back(PendingSteer {
                 text,
-                kind,
                 actor: actor.clone(),
             });
             self.emitter
@@ -205,15 +228,14 @@ impl SteeringHub {
 
     /// Push an item into a session's queue, evicting the oldest entry and
     /// emitting `agent.steer.dropped { queue_full }` if the cap is hit.
+    /// The push + eviction are atomic under the per-session queue lock.
     fn enqueue_into_session_queue(
         handle: &SessionControlHandle,
-        item: (String, SteerKind, Option<Principal>),
+        item: SteeringItem,
         emitter: &Emitter,
         stage_id: Option<&StageId>,
     ) {
-        if handle.queue_len() >= PER_SESSION_QUEUE_CAP {
-            let evicted = handle.pop_oldest();
-            let evicted_actor = evicted.and_then(|(.., a)| a);
+        if let Some((.., evicted_actor)) = handle.enqueue_bounded(item, PER_SESSION_QUEUE_CAP) {
             emitter.emit(&Event::AgentSteerDropped {
                 reason:  AgentSteerDroppedReason::QueueFull,
                 count:   1,
@@ -222,7 +244,6 @@ impl SteeringHub {
                 visit:   stage_id.map(StageId::visit),
             });
         }
-        handle.enqueue(item);
     }
 }
 
