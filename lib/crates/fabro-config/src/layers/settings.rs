@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use super::cli::CliLayer;
 use super::features::FeaturesLayer;
+use super::llm::LlmLayer;
 use super::project::ProjectLayer;
 use super::run::RunLayer;
 use super::server::ServerLayer;
@@ -34,6 +35,8 @@ pub(crate) struct SettingsLayer {
     pub server:   Option<ServerLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub features: Option<FeaturesLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm:      Option<LlmLayer>,
 }
 
 impl FromStr for SettingsLayer {

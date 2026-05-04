@@ -5,7 +5,19 @@ use crate::SettingsLayer;
 const CURRENT_VERSION: u32 = 1;
 
 const ALLOWED_TOP_LEVEL_KEYS: &[&str] = &[
-    "_version", "project", "workflow", "run", "cli", "server", "features",
+    "_version", "project", "workflow", "run", "cli", "server", "features", "llm",
+];
+
+/// Legacy `[llm]` keys that pre-date the settings-driven catalog plan and
+/// should still produce the migration hint for `[run.model]` rather than be
+/// silently accepted by the new `[llm]` schema.
+const LEGACY_LLM_KEYS: &[&str] = &[
+    "provider",
+    "model",
+    "temperature",
+    "max_tokens",
+    "fallbacks",
+    "fallback",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,7 +38,7 @@ impl fmt::Display for ParseError {
                 } else {
                     write!(
                         f,
-                        "unknown top-level settings key `{key}`: expected one of `_version`, `project`, `workflow`, `run`, `cli`, `server`, `features`"
+                        "unknown top-level settings key `{key}`: expected one of `_version`, `project`, `workflow`, `run`, `cli`, `server`, `features`, `llm`"
                     )
                 }
             }
@@ -69,6 +81,21 @@ pub(crate) fn parse_settings(input: &str) -> Result<SettingsLayer, ParseError> {
                     key:  key.clone(),
                     hint: rename_hint(key),
                 });
+            }
+        }
+
+        // The settings-driven catalog plan re-introduced `[llm]` for provider
+        // and model rows. Old top-level `[llm]` keys (`provider`, `model`,
+        // ...) are forbidden and must continue to surface the migration hint
+        // for `[run.model]` rather than be silently dropped or generic-error.
+        if let Some(llm_table) = table.get("llm").and_then(toml::Value::as_table) {
+            for legacy_key in LEGACY_LLM_KEYS {
+                if llm_table.contains_key(*legacy_key) {
+                    return Err(ParseError::UnknownTopLevelKey {
+                        key:  format!("llm.{legacy_key}"),
+                        hint: rename_hint("llm"),
+                    });
+                }
             }
         }
     }
@@ -165,5 +192,39 @@ mod tests {
     fn higher_version_rejected_with_upgrade_hint() {
         let err = "_version = 99".parse::<SettingsLayer>().unwrap_err();
         assert!(err.to_string().contains("Upgrade"));
+    }
+
+    #[test]
+    fn accepts_new_llm_providers_subtree() {
+        let parsed = "[llm.providers.kimi]\nadapter = \"openai_compatible\"\n"
+            .parse::<SettingsLayer>()
+            .unwrap();
+        assert!(parsed.llm.unwrap().providers.contains_key("kimi"));
+    }
+
+    #[test]
+    fn accepts_new_llm_models_subtree() {
+        let parsed = "[llm.models.\"foo\"]\nprovider = \"kimi\"\n"
+            .parse::<SettingsLayer>()
+            .unwrap();
+        assert!(parsed.llm.unwrap().models.contains_key("foo"));
+    }
+
+    #[test]
+    fn rejects_legacy_llm_provider_key_with_run_model_hint() {
+        let err = "[llm]\nprovider = \"openai\"\n"
+            .parse::<SettingsLayer>()
+            .unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("run.model") || text.contains("llm"), "got: {text}");
+    }
+
+    #[test]
+    fn rejects_legacy_llm_model_key_with_run_model_hint() {
+        let err = "[llm]\nmodel = \"opus\"\n"
+            .parse::<SettingsLayer>()
+            .unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("run.model") || text.contains("llm"), "got: {text}");
     }
 }
