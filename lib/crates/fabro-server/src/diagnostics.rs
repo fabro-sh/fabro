@@ -148,7 +148,7 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
 
 fn probe_model(provider: Provider) -> String {
     Catalog::builtin()
-        .probe_for_provider(provider)
+        .probe_for_provider(&provider.to_string())
         .map_or_else(|| format!("unknown-{provider}"), |m| m.id.clone())
 }
 

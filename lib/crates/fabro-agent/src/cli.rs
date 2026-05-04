@@ -205,18 +205,18 @@ fn build_tool_approval(
 }
 
 fn summarizer_model_id(provider: Provider) -> ModelHandle {
+    let model = match provider {
+        Provider::OpenAi | Provider::OpenAiCompatible => "gpt-4o-mini",
+        Provider::Gemini => "gemini-2.0-flash",
+        Provider::Anthropic => "claude-haiku-4-5",
+        Provider::Kimi => "kimi-k2.5",
+        Provider::Zai => "glm-4.7",
+        Provider::Minimax => "minimax-m2.5",
+        Provider::Inception => "mercury",
+    };
     ModelHandle::ByName {
-        provider,
-        model: match provider {
-            Provider::OpenAi | Provider::OpenAiCompatible => "gpt-4o-mini",
-            Provider::Gemini => "gemini-2.0-flash",
-            Provider::Anthropic => "claude-haiku-4-5",
-            Provider::Kimi => "kimi-k2.5",
-            Provider::Zai => "glm-4.7",
-            Provider::Minimax => "minimax-m2.5",
-            Provider::Inception => "mercury",
-        }
-        .to_string(),
+        provider: provider.into(),
+        model:    model.to_string(),
     }
 }
 
@@ -484,7 +484,7 @@ pub async fn run_with_args_and_client(
         model
     } else {
         Catalog::builtin()
-            .default_for_provider(provider)
+            .default_for_provider(&provider.to_string())
             .map(|model| model.id.clone())
             .ok_or_else(|| {
                 anyhow::anyhow!(

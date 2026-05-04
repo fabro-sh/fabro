@@ -35,32 +35,21 @@ async fn list_models(
     State(state): State<Arc<AppState>>,
     Query(params): Query<ModelListParams>,
 ) -> Response {
-    let provider = match params.provider.as_deref() {
-        Some(value) => match Provider::from_str(value) {
-            Ok(provider) => Some(provider),
-            Err(_) => {
-                return ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    format!("unknown provider: {value}"),
-                )
-                .into_response();
-            }
-        },
-        None => None,
-    };
+    let provider_filter = params.provider.as_deref();
 
     let query = params.query.as_ref().map(|value| value.to_lowercase());
     let limit = params.limit.clamp(1, 100) as usize;
     let offset = params.offset.min(MAX_PAGE_OFFSET) as usize;
-    let configured: HashSet<Provider> = state
+    let configured: HashSet<String> = state
         .llm_source
         .configured_providers()
         .await
         .into_iter()
+        .map(|p| p.to_string())
         .collect();
 
     let mut models = fabro_model::Catalog::builtin()
-        .list(provider)
+        .list(provider_filter)
         .into_iter()
         .filter(|model| match &query {
             Some(query) => {
@@ -75,7 +64,7 @@ async fn list_models(
         })
         .cloned()
         .map(|mut model| {
-            model.configured = configured.contains(&model.provider);
+            model.configured = configured.contains(model.provider.as_str());
             model
         })
         .collect::<Vec<_>>();
@@ -130,11 +119,13 @@ async fn test_model(
     if let Some((_, issue)) = llm_result
         .auth_issues
         .iter()
-        .find(|(provider, _)| *provider == info.provider)
+        .find(|(provider, _)| provider.to_string() == info.provider.as_str())
     {
-        return ApiError::bad_request(auth_issue_message(info.provider, issue)).into_response();
+        let provider_enum =
+            Provider::from_str(info.provider.as_str()).unwrap_or(Provider::Anthropic);
+        return ApiError::bad_request(auth_issue_message(provider_enum, issue)).into_response();
     }
-    let provider_name = <&'static str>::from(info.provider);
+    let provider_name = info.provider.as_str();
     if !llm_result.client.provider_names().contains(&provider_name) {
         return Json(serde_json::json!({
             "model_id": info.id,

@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_api::types as api_types;
-use fabro_model::{Catalog, Model, ModelTestMode, Provider};
+use fabro_model::{Catalog, Model, ModelTestMode};
 use fabro_util::terminal::Styles;
 use serde::Serialize;
 
@@ -21,7 +21,7 @@ enum ModelTestResultKind {
 #[derive(Serialize)]
 struct ModelTestRow {
     model:    String,
-    provider: Provider,
+    provider: String,
     result:   ModelTestResultKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail:   Option<String>,
@@ -104,6 +104,7 @@ fn model_row(model: &Model, use_color: bool) -> Vec<CellStruct> {
         model.id.clone().cell().bold(use_color),
         model
             .provider
+            .to_string()
             .cell()
             .foreground_color(color_if(use_color, Color::Ansi256(8))),
         aliases
@@ -160,21 +161,21 @@ fn model_test_row_from_status(model: &Model, status: &str, result_color: Color) 
     match result_color {
         Color::Green => ModelTestRow {
             model:    model.id.clone(),
-            provider: model.provider,
+            provider: model.provider.to_string(),
             result:   ModelTestResultKind::Pass,
             detail:   None,
             error:    None,
         },
         Color::Yellow => ModelTestRow {
             model:    model.id.clone(),
-            provider: model.provider,
+            provider: model.provider.to_string(),
             result:   ModelTestResultKind::Skip,
             detail:   Some(trimmed.to_string()),
             error:    None,
         },
         _ => ModelTestRow {
             model:    model.id.clone(),
-            provider: model.provider,
+            provider: model.provider.to_string(),
             result:   ModelTestResultKind::Fail,
             detail:   None,
             error:    Some(
@@ -276,7 +277,7 @@ async fn test_models_via_server(
 
         for info in &unconfigured {
             skipped += 1;
-            let provider_name = info.provider.display_name().to_string();
+            let provider_name = info.provider.to_string();
             if !skipped_providers.contains(&provider_name) {
                 skipped_providers.push(provider_name);
             }
@@ -437,33 +438,33 @@ mod tests {
         server_client::Client::new_no_proxy(api_url).unwrap()
     }
 
-    fn test_model_json(id: &str, provider: Provider) -> serde_json::Value {
+    fn test_model_json(id: &str, provider: &str) -> serde_json::Value {
         serde_json::to_value(Model {
-            id: id.to_string(),
-            provider,
-            family: "test".to_string(),
-            display_name: format!("{id} display"),
-            limits: ModelLimits {
+            id:                   id.to_string(),
+            provider:             fabro_model::ProviderId::from(provider),
+            family:               "test".to_string(),
+            display_name:         format!("{id} display"),
+            limits:               ModelLimits {
                 context_window: 128_000,
                 max_output:     Some(4096),
             },
-            training: None,
-            knowledge_cutoff: None,
-            features: ModelFeatures {
+            training:             None,
+            knowledge_cutoff:     None,
+            features:             ModelFeatures {
                 tools:     true,
                 vision:    false,
                 reasoning: false,
                 effort:    false,
             },
-            costs: ModelCosts {
+            costs:                ModelCosts {
                 input_cost_per_mtok:       Some(1.0),
                 output_cost_per_mtok:      Some(2.0),
                 cache_input_cost_per_mtok: None,
             },
             estimated_output_tps: Some(100.0),
-            aliases: vec!["tm".to_string()],
-            default: false,
-            configured: false,
+            aliases:              vec!["tm".to_string()],
+            default:              false,
+            configured:           false,
         })
         .unwrap()
     }
@@ -640,7 +641,7 @@ mod tests {
                     .header("Content-Type", "application/json")
                     .body(
                         serde_json::json!({
-                            "data": [test_model_json("test-model", Provider::Anthropic)],
+                            "data": [test_model_json("test-model", "anthropic")],
                             "meta": { "has_more": false }
                         })
                         .to_string(),
@@ -654,7 +655,7 @@ mod tests {
         mock.assert_async().await;
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "test-model");
-        assert_eq!(models[0].provider, Provider::Anthropic);
+        assert_eq!(models[0].provider, "anthropic");
     }
 
     #[tokio::test]
@@ -671,7 +672,7 @@ mod tests {
                     .header("Content-Type", "application/json")
                     .body(
                         serde_json::json!({
-                            "data": [test_model_json("model-a", Provider::Anthropic)],
+                            "data": [test_model_json("model-a", "anthropic")],
                             "meta": { "has_more": false }
                         })
                         .to_string(),
@@ -700,7 +701,7 @@ mod tests {
                     .header("Content-Type", "application/json")
                     .body(
                         serde_json::json!({
-                            "data": [test_model_json("claude-sonnet-4-5", Provider::Anthropic)],
+                            "data": [test_model_json("claude-sonnet-4-5", "anthropic")],
                             "meta": { "has_more": false }
                         })
                         .to_string(),
@@ -729,7 +730,7 @@ mod tests {
                     .header("Content-Type", "application/json")
                     .body(
                         serde_json::json!({
-                            "data": [test_model_json("model-a", Provider::Anthropic)],
+                            "data": [test_model_json("model-a", "anthropic")],
                             "meta": { "has_more": true }
                         })
                         .to_string(),
@@ -746,7 +747,7 @@ mod tests {
                     .header("Content-Type", "application/json")
                     .body(
                         serde_json::json!({
-                            "data": [test_model_json("model-b", Provider::OpenAi)],
+                            "data": [test_model_json("model-b", "openai")],
                             "meta": { "has_more": false }
                         })
                         .to_string(),

@@ -250,7 +250,7 @@ fn model_test_skipped_footer_sources_from_listing() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Skipped 1 model(s) (no credentials: OpenAI)"));
+    assert!(stderr.contains("Skipped 1 model(s) (no credentials: openai)"));
 }
 
 #[test]

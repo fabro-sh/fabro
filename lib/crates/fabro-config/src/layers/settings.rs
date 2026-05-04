@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use super::cli::CliLayer;
 use super::features::FeaturesLayer;
+use super::llm::LlmLayer;
 use super::project::ProjectLayer;
 use super::run::RunLayer;
 use super::server::ServerLayer;
@@ -28,6 +29,8 @@ pub(crate) struct SettingsLayer {
     pub workflow: Option<WorkflowLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run:      Option<RunLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm:      Option<LlmLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cli:      Option<CliLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

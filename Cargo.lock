@@ -2015,6 +2015,7 @@ dependencies = [
 name = "fabro-model"
 version = "0.221.0-nightly.1"
 dependencies = [
+ "chrono",
  "fabro-static",
  "insta",
  "serde",

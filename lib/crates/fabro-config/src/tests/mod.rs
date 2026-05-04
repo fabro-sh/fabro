@@ -1,5 +1,6 @@
 mod combine;
 mod defaults;
+mod llm_settings;
 mod log_filter;
 mod resolve_cli;
 mod resolve_features;

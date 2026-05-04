@@ -150,5 +150,5 @@ fn assert_non_llm_billing(billing: &serde_json::Value, expected_stage_ids: &[&st
     let total_runtime_secs = billing["totals"]["runtime_secs"]
         .as_f64()
         .expect("totals should include runtime_secs");
-    assert_eq!(total_runtime_secs, runtime_secs);
+    assert!((total_runtime_secs - runtime_secs).abs() < f64::EPSILON);
 }

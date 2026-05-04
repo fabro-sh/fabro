@@ -85,12 +85,13 @@ pub(crate) async fn validate_api_key(provider: Provider, api_key: &str) -> Resul
     .await
     .context("failed to create LLM client")?;
 
+    let provider_str = provider.to_string();
     let probe_model = Catalog::builtin()
-        .probe_for_provider(provider)
+        .probe_for_provider(&provider_str)
         .map_or_else(|| format!("unknown-{provider}"), |model| model.id.clone());
 
     let params = GenerateParams::new(probe_model, Arc::new(client))
-        .provider(<&'static str>::from(provider))
+        .provider(&provider_str)
         .prompt("Say OK")
         .max_tokens(16);
 

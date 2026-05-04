@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString, IntoStaticStr};
 
-use crate::{Model, Provider};
+use crate::{Model, ProviderId};
 
 const TOKENS_PER_MTOK: i128 = 1_000_000;
 const ANTHROPIC_FAST_MODE_MULTIPLIER_NUMERATOR: i64 = 6;
@@ -117,7 +117,7 @@ pub enum Speed {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ModelRef {
-    pub provider: Provider,
+    pub provider: ProviderId,
     pub model_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed:    Option<Speed>,
@@ -271,16 +271,17 @@ pub enum ModelBillingFacts {
 
 impl ModelBillingFacts {
     #[must_use]
-    pub fn for_provider(provider: Provider) -> Self {
+    pub fn for_provider(provider: &str) -> Self {
         match provider {
-            Provider::OpenAi => Self::OpenAi(OpenAiBillingFacts::default()),
-            Provider::OpenAiCompatible => Self::OpenAiCompatible(OpenAiBillingFacts::default()),
-            Provider::Anthropic => Self::Anthropic(AnthropicBillingFacts::default()),
-            Provider::Gemini => Self::Gemini(GeminiBillingFacts::default()),
-            Provider::Kimi => Self::Kimi(OpenAiBillingFacts::default()),
-            Provider::Zai => Self::Zai(OpenAiBillingFacts::default()),
-            Provider::Minimax => Self::Minimax(OpenAiBillingFacts::default()),
-            Provider::Inception => Self::Inception(OpenAiBillingFacts::default()),
+            "openai" => Self::OpenAi(OpenAiBillingFacts::default()),
+            "anthropic" => Self::Anthropic(AnthropicBillingFacts::default()),
+            "gemini" => Self::Gemini(GeminiBillingFacts::default()),
+            "kimi" => Self::Kimi(OpenAiBillingFacts::default()),
+            "zai" => Self::Zai(OpenAiBillingFacts::default()),
+            "minimax" => Self::Minimax(OpenAiBillingFacts::default()),
+            "inception" => Self::Inception(OpenAiBillingFacts::default()),
+            // Unknown providers and openai_compatible get OpenAI-compatible billing facts
+            _ => Self::OpenAiCompatible(OpenAiBillingFacts::default()),
         }
     }
 }
@@ -361,7 +362,7 @@ impl Model {
     #[must_use]
     pub fn billing_model_ref(&self, speed: Option<Speed>) -> ModelRef {
         ModelRef {
-            provider: self.provider,
+            provider: self.provider.clone(),
             model_id: self.id.clone(),
             speed,
         }
@@ -379,8 +380,10 @@ impl Model {
             .cache_input_cost_per_mtok
             .map(PricePerMTok::from_usd);
 
-        let (input, output, cached_input) = match (self.provider, speed) {
-            (Provider::Anthropic, Some(Speed::Fast))
+        let provider_str = self.provider.as_str();
+
+        let (input, output, cached_input) = match (provider_str, speed) {
+            ("anthropic", Some(Speed::Fast))
                 if self.id == "claude-opus-4-7" || self.id == "claude-opus-4-6" =>
             {
                 (
@@ -404,20 +407,13 @@ impl Model {
             _ => return None,
         };
 
-        let policy = match self.provider {
-            Provider::OpenAi => ModelPricingPolicy::OpenAi(OpenAiModelPricing {
+        let policy = match provider_str {
+            "openai" => ModelPricingPolicy::OpenAi(OpenAiModelPricing {
                 input,
                 cached_input,
                 output,
             }),
-            Provider::OpenAiCompatible => {
-                ModelPricingPolicy::OpenAiCompatible(OpenAiModelPricing {
-                    input,
-                    cached_input,
-                    output,
-                })
-            }
-            Provider::Anthropic => ModelPricingPolicy::Anthropic(AnthropicModelPricing {
+            "anthropic" => ModelPricingPolicy::Anthropic(AnthropicModelPricing {
                 input,
                 cache_read: cached_input,
                 cache_write_5m: Some(input.multiply_ratio(
@@ -430,28 +426,34 @@ impl Model {
                 )),
                 output,
             }),
-            Provider::Gemini => ModelPricingPolicy::Gemini(GeminiModelPricing {
+            "gemini" => ModelPricingPolicy::Gemini(GeminiModelPricing {
                 input,
                 output,
                 cached_input,
                 storage: None,
             }),
-            Provider::Kimi => ModelPricingPolicy::Kimi(OpenAiModelPricing {
+            "kimi" => ModelPricingPolicy::Kimi(OpenAiModelPricing {
                 input,
                 cached_input,
                 output,
             }),
-            Provider::Zai => ModelPricingPolicy::Zai(OpenAiModelPricing {
+            "zai" => ModelPricingPolicy::Zai(OpenAiModelPricing {
                 input,
                 cached_input,
                 output,
             }),
-            Provider::Minimax => ModelPricingPolicy::Minimax(OpenAiModelPricing {
+            "minimax" => ModelPricingPolicy::Minimax(OpenAiModelPricing {
                 input,
                 cached_input,
                 output,
             }),
-            Provider::Inception => ModelPricingPolicy::Inception(OpenAiModelPricing {
+            "inception" => ModelPricingPolicy::Inception(OpenAiModelPricing {
+                input,
+                cached_input,
+                output,
+            }),
+            // Unknown providers get OpenAI-compatible pricing
+            _ => ModelPricingPolicy::OpenAiCompatible(OpenAiModelPricing {
                 input,
                 cached_input,
                 output,
@@ -573,13 +575,13 @@ fn bill_gemini(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Catalog;
+    use crate::{Catalog, ProviderId};
 
     #[test]
     fn openai_pricing_bills_cached_input_and_reasoning_output() {
         let pricing = ModelPricing {
             model:  ModelRef {
-                provider: Provider::OpenAi,
+                provider: ProviderId::from("openai"),
                 model_id: "gpt-5.4".to_string(),
                 speed:    None,
             },
@@ -632,7 +634,7 @@ mod tests {
     fn anthropic_billing_supports_distinct_cache_write_buckets() {
         let pricing = ModelPricing {
             model:  ModelRef {
-                provider: Provider::Anthropic,
+                provider: ProviderId::from("anthropic"),
                 model_id: "claude-opus-4-6".to_string(),
                 speed:    Some(Speed::Fast),
             },
@@ -678,7 +680,7 @@ mod tests {
     fn gemini_billing_requires_storage_pricing_when_storage_facts_exist() {
         let pricing = ModelPricing {
             model:  ModelRef {
-                provider: Provider::Gemini,
+                provider: ProviderId::from("gemini"),
                 model_id: "gemini-3.1-pro-preview".to_string(),
                 speed:    None,
             },

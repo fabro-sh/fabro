@@ -38,7 +38,7 @@ pub fn materialize_run(
         provider
             .as_deref()
             .and_then(|value| value.parse::<Provider>().ok())
-            .and_then(|provider| catalog.default_for_provider(provider))
+            .and_then(|provider| catalog.default_for_provider(&provider.to_string()))
             .unwrap_or_else(|| catalog.default_for_configured(configured_providers))
             .id
             .clone()

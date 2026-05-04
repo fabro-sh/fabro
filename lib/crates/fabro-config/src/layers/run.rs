@@ -107,6 +107,21 @@ pub struct RunModelLayer {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[option(default = "[]", value_type = "array<string>")]
     pub fallbacks: Vec<ModelRefOrSplice>,
+    /// Default model controls for runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub controls:  Option<RunModelControlsLayer>,
+}
+
+/// `[run.model.controls]` — run-level default model controls.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunModelControlsLayer {
+    /// Default reasoning effort for runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+    /// Default speed for runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed:            Option<String>,
 }
 
 /// A single `fallbacks` entry: either a parsed `ModelRef` or the splice marker.

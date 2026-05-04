@@ -411,28 +411,7 @@ pub struct RateLimitInfo {
 
 // --- 3.8 ReasoningEffort ---
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    strum::Display,
-    strum::EnumString,
-    strum::IntoStaticStr,
-)]
-#[serde(rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
-pub enum ReasoningEffort {
-    Low,
-    Medium,
-    High,
-    XHigh,
-    Max,
-}
+pub use fabro_model::ReasoningEffort;
 
 // --- 3.6 Request ---
 

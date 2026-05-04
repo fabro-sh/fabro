@@ -13,10 +13,14 @@ use fabro_types::settings::{Duration, InterpString, Size};
 use super::LogFilter;
 use super::cli::{CliAuthLayer, CliLoggingLayer, CliTargetLayer};
 use super::features::FeaturesLayer;
+use super::llm::{
+    CredentialRef, ModelControlsLayer, ModelCostTableLayer, ModelFeaturesLayer, ModelLimitsLayer,
+};
 use super::run::{
     DaytonaSnapshotLayer, HookAgentMarker, HookEntry, HookTlsMode, InterviewProviderLayer,
     LocalSandboxLayer, ModelRefOrSplice, NotificationProviderLayer, RunArtifactsLayer,
-    RunCheckpointLayer, RunGoalLayer, RunPrepareLayer, ScmGitHubLayer, StringOrSplice,
+    RunCheckpointLayer, RunGoalLayer, RunModelControlsLayer, RunPrepareLayer, ScmGitHubLayer,
+    StringOrSplice,
 };
 use super::server::{
     ObjectStoreLocalLayer, ObjectStoreS3Layer, ServerApiLayer, ServerAuthGithubLayer,
@@ -57,6 +61,7 @@ macro_rules! impl_combine_or_option {
 impl_combine_or_option!(
     String,
     bool,
+    f64,
     u16,
     u32,
     u64,
@@ -84,9 +89,15 @@ impl_combine_or_option!(
     LogFilter,
 );
 
-impl Combine for Option<Vec<String>> {
-    fn combine(self, other: Self) -> Self {
-        self.or(other)
+impl Combine for Vec<String> {
+    fn combine(self, _other: Self) -> Self {
+        self
+    }
+}
+
+impl Combine for Vec<CredentialRef> {
+    fn combine(self, _other: Self) -> Self {
+        self
     }
 }
 
@@ -123,9 +134,14 @@ impl_combine_self!(
     DaytonaSnapshotLayer,
     InterviewProviderLayer,
     LocalSandboxLayer,
+    ModelControlsLayer,
+    ModelCostTableLayer,
+    ModelFeaturesLayer,
+    ModelLimitsLayer,
     NotificationProviderLayer,
     RunArtifactsLayer,
     RunGoalLayer,
+    RunModelControlsLayer,
     RunPrepareLayer,
     ScmGitHubLayer,
     ObjectStoreLocalLayer,

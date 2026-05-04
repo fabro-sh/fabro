@@ -20,13 +20,15 @@ pub fn billed_model_usage_from_llm(
     usage: &LlmTokenCounts,
 ) -> BilledModelUsage {
     let speed = parse_speed(requested_speed);
+    let provider_id = fabro_model::ProviderId::from(provider);
     let model = ModelRef {
-        provider,
+        provider: provider_id,
         model_id: model_id.to_string(),
         speed,
     };
     let tokens = token_counts_from_llm_usage(usage);
-    let facts = billing_facts_for_stage_usage(provider, &tokens);
+    let provider_str = provider.to_string();
+    let facts = billing_facts_for_stage_usage(&provider_str, &tokens);
     let input = ModelBillingInput {
         usage: ModelUsage {
             model: model.clone(),
@@ -37,7 +39,7 @@ pub fn billed_model_usage_from_llm(
 
     let total_usd_micros = Catalog::builtin()
         .get(model_id)
-        .filter(|candidate| candidate.provider == provider)
+        .filter(|candidate| candidate.provider == provider_str.as_str())
         .and_then(|candidate| candidate.pricing_for(speed))
         .and_then(|pricing| pricing.bill(&input))
         .map(|amount| amount.0);
@@ -144,9 +146,9 @@ fn token_counts_from_llm_usage(usage: &LlmTokenCounts) -> TokenCounts {
     usage.clone()
 }
 
-fn billing_facts_for_stage_usage(provider: Provider, tokens: &TokenCounts) -> ModelBillingFacts {
+fn billing_facts_for_stage_usage(provider: &str, tokens: &TokenCounts) -> ModelBillingFacts {
     match provider {
-        Provider::Anthropic => ModelBillingFacts::Anthropic(AnthropicBillingFacts {
+        "anthropic" => ModelBillingFacts::Anthropic(AnthropicBillingFacts {
             cache_write_5m_tokens: tokens.cache_write_tokens,
             cache_write_1h_tokens: 0,
         }),

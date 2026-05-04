@@ -17,7 +17,7 @@ use fabro_auth::EnvCredentialSource;
 use fabro_llm::client::Client;
 use fabro_llm::provider::{Provider, ProviderAdapter};
 use fabro_llm::providers::OpenAiAdapter;
-use fabro_model::ModelHandle;
+use fabro_model::{ModelHandle, ProviderId};
 use fabro_test::{TwinScenario, TwinScenarios, TwinToolCall, twin_openai};
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -35,15 +35,15 @@ fn summarizer_model_id(provider: Provider) -> ModelHandle {
         | Provider::Minimax
         | Provider::Inception
         | Provider::OpenAiCompatible => ModelHandle::ByName {
-            provider: Provider::OpenAi,
+            provider: ProviderId::from("openai"),
             model:    "gpt-5.4-mini".to_string(),
         },
         Provider::Gemini => ModelHandle::ByName {
-            provider: Provider::Gemini,
+            provider: ProviderId::from("gemini"),
             model:    "gemini-3-flash-preview".to_string(),
         },
         Provider::Anthropic => ModelHandle::ByName {
-            provider: Provider::Anthropic,
+            provider: ProviderId::from("anthropic"),
             model:    "claude-haiku-4-5".to_string(),
         },
     }

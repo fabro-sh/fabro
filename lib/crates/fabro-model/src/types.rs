@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::provider::Provider;
+use crate::provider_id::ProviderId;
 
 // --- 2.9 Model ---
 
@@ -34,7 +34,7 @@ pub struct ModelCosts {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Model {
     pub id:                   String,
-    pub provider:             Provider,
+    pub provider:             ProviderId,
     pub family:               String,
     pub display_name:         String,
     pub limits:               ModelLimits,
@@ -58,8 +58,8 @@ impl Model {
         &self.id
     }
 
-    pub fn provider(&self) -> Provider {
-        self.provider
+    pub fn provider(&self) -> &ProviderId {
+        &self.provider
     }
 
     pub fn family(&self) -> &str {
@@ -130,13 +130,12 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use crate::catalog::Catalog;
-    use crate::provider::Provider;
 
     #[test]
     fn inherent_methods_return_correct_values() {
         let info = Catalog::builtin().get("claude-opus-4-7").unwrap();
         assert_eq!(info.id(), "claude-opus-4-7");
-        assert_eq!(info.provider(), Provider::Anthropic);
+        assert_eq!(info.provider(), "anthropic");
         assert_eq!(info.family(), "claude-4");
         assert_eq!(info.display_name(), "Claude Opus 4.7");
         assert_eq!(info.context_window(), 1_000_000);

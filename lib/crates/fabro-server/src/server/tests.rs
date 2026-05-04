@@ -2693,7 +2693,7 @@ async fn list_models_marks_configured_false_when_no_credential_material() {
 }
 
 #[tokio::test]
-async fn list_models_invalid_provider_returns_400() {
+async fn list_models_unknown_provider_returns_empty_list() {
     let app = test_app_with();
 
     let req = Request::builder()
@@ -2703,7 +2703,13 @@ async fn list_models_invalid_provider_returns_400() {
         .unwrap();
 
     let response = app.oneshot(req).await.unwrap();
-    assert_status!(response, StatusCode::BAD_REQUEST).await;
+    let body = checked_response!(response, StatusCode::OK).await;
+    let bytes = axum::body::to_bytes(body.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let data = json["data"].as_array().expect("data should be an array");
+    assert!(data.is_empty(), "unknown provider should return empty list");
 }
 
 #[tokio::test]

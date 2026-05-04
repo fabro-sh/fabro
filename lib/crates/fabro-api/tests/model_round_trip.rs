@@ -1,7 +1,7 @@
 use std::any::{TypeId, type_name};
 
 use fabro_api::types::Model as ApiModel;
-use fabro_model::{Model, ModelCosts, ModelFeatures, ModelLimits, Provider};
+use fabro_model::{Model, ModelCosts, ModelFeatures, ModelLimits, ProviderId};
 
 #[test]
 fn model_reuses_canonical_type() {
@@ -12,7 +12,7 @@ fn model_reuses_canonical_type() {
 fn model_json_matches_openapi_shape() {
     let model = Model {
         id:                   "claude-opus-4-7".to_string(),
-        provider:             Provider::Anthropic,
+        provider:             ProviderId::from("anthropic"),
         family:               "claude-4".to_string(),
         display_name:         "Claude Opus 4.7".to_string(),
         limits:               ModelLimits {

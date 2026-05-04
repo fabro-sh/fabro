@@ -55,7 +55,7 @@ pub async fn run_model_test(
 
 async fn run_basic_test(info: &Model, client: Arc<Client>) -> ModelTestOutcome {
     let params = GenerateParams::new(&info.id, client)
-        .provider(<&'static str>::from(info.provider))
+        .provider(info.provider.as_str())
         .prompt("Say OK")
         .max_tokens(16);
 
@@ -123,7 +123,7 @@ fn build_deep_test_params(info: &Model, client: Arc<Client>) -> Option<GenerateP
     );
 
     let mut params = GenerateParams::new(&info.id, client)
-        .provider(<&'static str>::from(info.provider))
+        .provider(info.provider.as_str())
         .prompt(
             "Use the add tool twice: first add 15 and 27, then add that result to 42. \
              Finally, tell me whether the grand total is even or odd and why.",
@@ -159,7 +159,7 @@ fn validate_deep_result(result: &GenerateResult) -> Result<(), String> {
 mod tests {
     use std::collections::HashMap;
 
-    use fabro_model::{ModelCosts, ModelFeatures, ModelLimits, Provider};
+    use fabro_model::{ModelCosts, ModelFeatures, ModelLimits};
 
     use super::*;
     use crate::types::{FinishReason, Message, Response, StepResult, TokenCounts, ToolResult};
@@ -167,7 +167,7 @@ mod tests {
     fn test_model_with(features: ModelFeatures) -> Model {
         Model {
             id: "test-model".to_string(),
-            provider: Provider::Anthropic,
+            provider: fabro_model::ProviderId::from("anthropic"),
             family: "test".to_string(),
             display_name: "Test Model".to_string(),
             limits: ModelLimits {

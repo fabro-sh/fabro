@@ -1292,7 +1292,7 @@ mod tests {
         let summarizer = WebFetchSummarizer {
             client,
             model_id: ModelHandle::ByName {
-                provider: fabro_model::Provider::Anthropic,
+                provider: fabro_model::ProviderId::from("anthropic"),
                 model:    "mock-model".to_string(),
             },
         };
@@ -1393,7 +1393,7 @@ mod tests {
         let summarizer = WebFetchSummarizer {
             client,
             model_id: ModelHandle::ByName {
-                provider: fabro_model::Provider::Anthropic,
+                provider: fabro_model::ProviderId::from("anthropic"),
                 model:    "target-model".to_string(),
             },
         };
