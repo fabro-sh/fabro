@@ -11,7 +11,9 @@ import {
   type SharedEventSubscription,
 } from "./sse";
 
-interface RunEventPayload extends EventPayload {
+export interface RunEventPayload extends EventPayload {
+  id?: string;
+  seq?: number;
   event?: string;
   node_id?: string;
   properties?: Record<string, unknown>;
@@ -119,7 +121,13 @@ export function subscribeToRunEvents(
   runId: string,
   mutate: MutateFn,
   eventSourceFactory: (url: string) => EventSourceLike = createBrowserEventSource,
-  { debounceMs = 300 }: { debounceMs?: number } = {},
+  {
+    debounceMs = 300,
+    onEvent,
+  }: {
+    debounceMs?: number;
+    onEvent?: (payload: RunEventPayload) => void;
+  } = {},
 ): () => void {
   return subscribeToSharedEventSource<RunEventPayload>({
     subscriptions,
@@ -129,6 +137,8 @@ export function subscribeToRunEvents(
     eventSourceFactory,
     debounceMs,
     resolveInvalidation: (payload) => {
+      onEvent?.(payload);
+
       const event = payload.event;
       if (!event) return { keys: [] };
 

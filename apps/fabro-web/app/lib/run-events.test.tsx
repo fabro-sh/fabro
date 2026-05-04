@@ -68,6 +68,34 @@ describe("subscribeToRunEvents", () => {
     expect(source.closed).toBe(true);
   });
 
+  test("runs payload callbacks for later subscribers on a shared source", () => {
+    const source = new FakeEventSource();
+    const seen: string[] = [];
+    const keys: string[] = [];
+    const mutate = (key: string) => {
+      keys.push(key);
+      return Promise.resolve();
+    };
+
+    const firstCleanup = subscribeToRunEvents("run-shared-payload", mutate, () => source, { debounceMs: 0 });
+    const secondCleanup = subscribeToRunEvents("run-shared-payload", mutate, () => {
+      throw new Error("source should be reused");
+    }, {
+      debounceMs: 0,
+      onEvent: (payload) => {
+        if (payload.event) seen.push(payload.event);
+      },
+    });
+
+    source.emit({ id: "evt-1", event: "agent.steer.buffered", properties: { kind: "append" } });
+
+    expect(seen).toEqual(["agent.steer.buffered"]);
+    expect(keys).toEqual([queryKeys.runs.events("run-shared-payload", 1000)]);
+
+    firstCleanup();
+    secondCleanup();
+  });
+
   test("terminal events close the source after invalidating keys", () => {
     const source = new FakeEventSource();
     const keys: string[] = [];

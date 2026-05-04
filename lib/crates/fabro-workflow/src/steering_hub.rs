@@ -171,11 +171,21 @@ impl SteeringHub {
         // step so register/unregister cannot race with this push.
         let active = self.active.read().expect("active lock poisoned");
         if active.is_empty() {
-            drop(active);
-            let mut pending = self.pending.lock().expect("pending lock poisoned");
-            if pending.len() >= PER_RUN_PENDING_CAP {
-                let dropped = pending.pop_front();
-                let dropped_actor = dropped.and_then(|d| d.actor);
+            let dropped_actor = {
+                let mut pending = self.pending.lock().expect("pending lock poisoned");
+                let dropped_actor = if pending.len() >= PER_RUN_PENDING_CAP {
+                    Some(pending.pop_front().and_then(|d| d.actor))
+                } else {
+                    None
+                };
+                pending.push_back(PendingSteer {
+                    text,
+                    actor: actor.clone(),
+                });
+                dropped_actor
+            };
+
+            if let Some(dropped_actor) = dropped_actor {
                 self.emitter.emit(&Event::AgentSteerDropped {
                     reason:  AgentSteerDroppedReason::QueueFull,
                     count:   1,
@@ -184,12 +194,9 @@ impl SteeringHub {
                     visit:   None,
                 });
             }
-            pending.push_back(PendingSteer {
-                text,
-                actor: actor.clone(),
-            });
             self.emitter
                 .emit(&Event::AgentSteerBuffered { kind, actor });
+            drop(active);
             return;
         }
 

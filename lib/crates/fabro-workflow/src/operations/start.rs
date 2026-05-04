@@ -826,7 +826,14 @@ impl RunSession {
         };
 
         let retro = retroed.retro.clone();
-        let concluded = Box::pin(pipeline::finalize(retroed, &finalize_opts)).await?;
+        let concluded = match Box::pin(pipeline::finalize(retroed, &finalize_opts)).await {
+            Ok(concluded) => concluded,
+            Err(err) => {
+                self.steering_hub.drain_pending_at_run_end();
+                store_progress_logger.flush().await;
+                return Err(err);
+            }
+        };
         let finalized = Box::pin(pipeline::pull_request(concluded, &pr_opts)).await;
         // Emit `agent.steer.dropped { reason: run_ended }` for any
         // unconsumed pending steers on the success path, then flush. The
