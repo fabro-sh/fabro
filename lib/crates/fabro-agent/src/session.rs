@@ -2120,6 +2120,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stream_quota_error_does_not_replay() {
+        let quota_error = LlmError::Provider {
+            kind:   ProviderErrorKind::QuotaExceeded,
+            detail: Box::new(ProviderErrorDetail {
+                error_code: Some("insufficient_quota".into()),
+                ..ProviderErrorDetail::new("You exceeded your current quota", "mock")
+            }),
+        };
+        let provider = Arc::new(ScriptedStreamProvider::new(vec![
+            ScriptedStreamCall::Events(vec![
+                Ok(StreamEvent::text_delta("partial", None)),
+                Err(quota_error.clone()),
+            ]),
+        ]));
+        let mut session = make_session_with_provider(provider.clone()).await;
+
+        let result = session.process_input("Hello").await;
+
+        assert!(matches!(
+            result,
+            Err(Error::Llm(LlmError::Provider {
+                kind: ProviderErrorKind::QuotaExceeded,
+                ..
+            }))
+        ));
+        assert_eq!(provider.call_index.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
     async fn stream_retries_when_stream_ends_without_finish_before_any_deltas() {
         let provider = Arc::new(ScriptedStreamProvider::new(vec![
             ScriptedStreamCall::Events(vec![]),

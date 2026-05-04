@@ -2,7 +2,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use futures::{StreamExt, stream};
 
-use crate::error::{Error, error_from_status_code};
+use crate::error::{Error, ProviderErrorDetail, ProviderErrorKind, error_from_status_code};
 use crate::provider::{ProviderAdapter, StreamEventStream, validate_tool_choice};
 use crate::providers::common::{
     self as common, parse_error_body, parse_rate_limit_headers, parse_retry_after,
@@ -105,7 +105,7 @@ impl Adapter {
         let mut event_stream = self.stream(request).await?;
         let mut last_response: Option<Response> = None;
         while let Some(event) = event_stream.next().await {
-            if let Ok(StreamEvent::Finish { response, .. }) = event {
+            if let StreamEvent::Finish { response, .. } = event? {
                 last_response = Some(*response);
                 break;
             }
@@ -189,6 +189,58 @@ fn map_finish_reason(status: Option<&str>, has_tool_calls: bool) -> FinishReason
         Some("incomplete") => FinishReason::Length,
         Some("failed") => FinishReason::Error,
         Some(other) => FinishReason::Other(other.to_string()),
+    }
+}
+
+fn provider_error_from_openai_error_json(error: &serde_json::Value) -> Error {
+    let classifier = error
+        .get("code")
+        .and_then(serde_json::Value::as_str)
+        .filter(|code| !code.is_empty())
+        .or_else(|| {
+            error
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .filter(|error_type| !error_type.is_empty())
+        });
+    let message = error
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .filter(|message| !message.is_empty())
+        .map_or_else(|| "OpenAI stream error".to_string(), str::to_string);
+
+    let kind = match classifier {
+        Some("insufficient_quota") => ProviderErrorKind::QuotaExceeded,
+        Some("rate_limit_exceeded") => ProviderErrorKind::RateLimit,
+        Some("invalid_api_key" | "invalid_authentication") => ProviderErrorKind::Authentication,
+        Some("account_deactivated" | "permission_denied") => ProviderErrorKind::AccessDenied,
+        Some("content_filter" | "content_policy_violation") => ProviderErrorKind::ContentFilter,
+        Some("context_length_exceeded") => ProviderErrorKind::ContextLength,
+        Some("server_error" | "internal_error" | "service_unavailable" | "engine_overloaded") => {
+            ProviderErrorKind::Server
+        }
+        Some(code) if code.ends_with("_not_found") => ProviderErrorKind::NotFound,
+        Some(code)
+            if code.starts_with("invalid_")
+                || code.starts_with("unsupported_")
+                || code.ends_with("_too_large")
+                || code.ends_with("_too_long") =>
+        {
+            ProviderErrorKind::InvalidRequest
+        }
+        Some(_) | None => ProviderErrorKind::Server,
+    };
+
+    Error::Provider {
+        kind,
+        detail: Box::new(ProviderErrorDetail {
+            message,
+            provider: "openai".to_string(),
+            status_code: None,
+            error_code: classifier.map(str::to_string),
+            retry_after: None,
+            raw: Some(error.clone()),
+        }),
     }
 }
 
@@ -605,7 +657,7 @@ async fn process_next_sse_events(state: &mut SseStreamState) -> Result<Vec<Strea
         match state.line_reader.read_next_chunk("\n\n").await? {
             Some(message_block) => {
                 if let Some((event_type, data)) = parse_sse_message(&message_block) {
-                    let events = process_sse_event(state, event_type.as_deref(), &data);
+                    let events = process_sse_event(state, event_type.as_deref(), &data)?;
                     if !events.is_empty() {
                         return Ok(events);
                     }
@@ -622,7 +674,7 @@ fn process_sse_event(
     state: &mut SseStreamState,
     event_type: Option<&str>,
     data: &str,
-) -> Vec<StreamEvent> {
+) -> Result<Vec<StreamEvent>, Error> {
     let mut events = Vec::new();
 
     if !state.emitted_start {
@@ -632,7 +684,7 @@ fn process_sse_event(
 
     let json: serde_json::Value = match serde_json::from_str(data) {
         Ok(v) => v,
-        Err(_) => return events,
+        Err(_) => return Ok(events),
     };
 
     // Resolve event type from the `event:` SSE line or from the JSON `type` field.
@@ -646,13 +698,26 @@ fn process_sse_event(
         .unwrap_or_default();
 
     match resolved_type.as_str() {
+        "error" => {
+            let error = json.get("error").unwrap_or(&json);
+            return Err(provider_error_from_openai_error_json(error));
+        }
         "response.created" => handle_response_created(state, &json),
         "response.output_text.delta" => handle_text_delta(state, &json, &mut events),
         "response.function_call_arguments.delta" => {
             handle_tool_call_delta(state, &json, &mut events);
         }
         "response.output_item.done" => handle_output_item_done(state, &json, &mut events),
-        "response.completed" => handle_response_completed(state, &json, &mut events),
+        "response.completed" | "response.incomplete" => {
+            handle_response_completed(state, &json, &mut events);
+        }
+        "response.failed" => {
+            let error = json
+                .get("response")
+                .and_then(|response| response.get("error"))
+                .unwrap_or(&json);
+            return Err(provider_error_from_openai_error_json(error));
+        }
         "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
             if let Some(delta) = json.get("delta").and_then(serde_json::Value::as_str) {
                 if !state.emitted_reasoning_start {
@@ -668,7 +733,7 @@ fn process_sse_event(
         _ => {}
     }
 
-    events
+    Ok(events)
 }
 
 /// Handle `response.created` by extracting the response ID and model.
@@ -1090,7 +1155,10 @@ impl ProviderAdapter for Adapter {
 mod tests {
     use std::collections::HashMap;
 
+    use httpmock::prelude::*;
+
     use super::*;
+    use crate::error::ProviderErrorKind;
     use crate::providers::common::LineReader;
     use crate::types::{AudioData, DocumentData};
 
@@ -1628,6 +1696,247 @@ mod tests {
     }
 
     #[test]
+    fn error_event_with_insufficient_quota_returns_provider_error() {
+        let mut state = empty_sse_state();
+        let data = r#"{
+            "type": "error",
+            "error": {
+                "type": "insufficient_quota",
+                "code": "insufficient_quota",
+                "message": "You exceeded your current quota.",
+                "param": null
+            }
+        }"#;
+
+        let err = process_sse_event(&mut state, Some("error"), data)
+            .expect_err("error event should fail the stream");
+
+        match err {
+            Error::Provider { kind, detail } => {
+                assert_eq!(kind, ProviderErrorKind::QuotaExceeded);
+                assert!(detail.message.contains("exceeded your current quota"));
+                assert_eq!(detail.error_code.as_deref(), Some("insufficient_quota"));
+                assert!(detail.raw.is_some());
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn error_event_classifies_on_type_when_code_absent() {
+        let mut state = empty_sse_state();
+        let data = r#"{
+            "type": "error",
+            "error": {
+                "type": "insufficient_quota",
+                "message": "You exceeded your current quota."
+            }
+        }"#;
+
+        let err = process_sse_event(&mut state, Some("error"), data)
+            .expect_err("error event should fail the stream");
+
+        match err {
+            Error::Provider { kind, detail } => {
+                assert_eq!(kind, ProviderErrorKind::QuotaExceeded);
+                assert_eq!(detail.error_code.as_deref(), Some("insufficient_quota"));
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn response_failed_event_with_server_error_returns_provider_error() {
+        let mut state = empty_sse_state();
+        let data = r#"{
+            "type": "response.failed",
+            "response": {
+                "status": "failed",
+                "error": {
+                    "type": "server_error",
+                    "code": "server_error",
+                    "message": "The server had an error while processing your request."
+                }
+            }
+        }"#;
+
+        let err = process_sse_event(&mut state, Some("response.failed"), data)
+            .expect_err("response.failed should fail the stream");
+
+        match err {
+            Error::Provider { kind, detail } => {
+                assert_eq!(kind, ProviderErrorKind::Server);
+                assert!(detail.message.contains("server had an error"));
+                assert_eq!(detail.error_code.as_deref(), Some("server_error"));
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn response_incomplete_preserves_partial_text() {
+        let mut state = empty_sse_state();
+
+        process_sse_event(
+            &mut state,
+            Some("response.created"),
+            r#"{"type":"response.created","response":{"id":"resp_123","model":"gpt-5.4"}}"#,
+        )
+        .expect("created event should parse");
+        process_sse_event(
+            &mut state,
+            Some("response.output_text.delta"),
+            r#"{"type":"response.output_text.delta","delta":"Hel"}"#,
+        )
+        .expect("first delta should parse");
+        process_sse_event(
+            &mut state,
+            Some("response.output_text.delta"),
+            r#"{"type":"response.output_text.delta","delta":"lo"}"#,
+        )
+        .expect("second delta should parse");
+
+        let events = process_sse_event(
+            &mut state,
+            Some("response.incomplete"),
+            r#"{
+                "type": "response.incomplete",
+                "response": {
+                    "id": "resp_123",
+                    "model": "gpt-5.4",
+                    "status": "incomplete"
+                }
+            }"#,
+        )
+        .expect("incomplete response should finish normally");
+
+        let finish = events
+            .last()
+            .expect("incomplete response should emit finish");
+        match finish {
+            StreamEvent::Finish {
+                finish_reason,
+                response,
+                ..
+            } => {
+                assert_eq!(finish_reason.clone(), FinishReason::Length);
+                assert_eq!(response.text(), "Hello");
+            }
+            other => panic!("expected finish event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn error_event_with_invalid_api_key_returns_authentication_error() {
+        let mut state = empty_sse_state();
+        let data = r#"{
+            "type": "error",
+            "error": {
+                "type": "invalid_api_key",
+                "code": "invalid_api_key",
+                "message": "Incorrect API key provided."
+            }
+        }"#;
+
+        let err = process_sse_event(&mut state, Some("error"), data)
+            .expect_err("error event should fail the stream");
+
+        match err {
+            Error::Provider { kind, detail } => {
+                assert_eq!(kind, ProviderErrorKind::Authentication);
+                assert_eq!(detail.error_code.as_deref(), Some("invalid_api_key"));
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn error_event_with_unknown_invalid_prefix_returns_invalid_request() {
+        let mut state = empty_sse_state();
+        let data = r#"{
+            "type": "error",
+            "error": {
+                "type": "invalid_prompt",
+                "code": "invalid_prompt",
+                "message": "Prompt is invalid."
+            }
+        }"#;
+
+        let err = process_sse_event(&mut state, Some("error"), data)
+            .expect_err("error event should fail the stream");
+
+        match err {
+            Error::Provider { kind, detail } => {
+                assert_eq!(kind, ProviderErrorKind::InvalidRequest);
+                assert_eq!(detail.error_code.as_deref(), Some("invalid_prompt"));
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn error_event_with_unknown_code_falls_back_to_server_with_message() {
+        let mut state = empty_sse_state();
+        let data = r#"{
+            "type": "error",
+            "error": {
+                "type": "unexpected_stream_failure",
+                "code": "unexpected_stream_failure",
+                "message": "Unexpected stream failure."
+            }
+        }"#;
+
+        let err = process_sse_event(&mut state, Some("error"), data)
+            .expect_err("error event should fail the stream");
+
+        match err {
+            Error::Provider { kind, detail } => {
+                assert_eq!(kind, ProviderErrorKind::Server);
+                assert_eq!(detail.message, "Unexpected stream failure.");
+                assert_eq!(
+                    detail.error_code.as_deref(),
+                    Some("unexpected_stream_failure")
+                );
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn codex_complete_via_stream_propagates_stream_errors() {
+        let server = MockServer::start();
+        let sse_body = r#"event: error
+data: {"type":"error","error":{"type":"insufficient_quota","code":"insufficient_quota","message":"You exceeded your current quota."}}
+
+"#;
+
+        server.mock(|when, then| {
+            when.method(POST).path("/responses");
+            then.status(200)
+                .header("content-type", "text/event-stream")
+                .body(sse_body);
+        });
+
+        let adapter = Adapter::new("sk-test")
+            .with_base_url(server.base_url())
+            .with_codex_mode();
+
+        let err = adapter
+            .complete(&minimal_request())
+            .await
+            .expect_err("codex streaming completion should propagate stream errors");
+
+        match err {
+            Error::Provider { kind, detail } => {
+                assert_eq!(kind, ProviderErrorKind::QuotaExceeded);
+                assert_eq!(detail.error_code.as_deref(), Some("insufficient_quota"));
+                assert!(detail.message.contains("exceeded your current quota"));
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn reasoning_summary_delta_emits_reasoning_events() {
         let mut state = empty_sse_state();
         let data = r#"{"type":"response.reasoning_summary_text.delta","delta":"Let me think"}"#;
@@ -1635,7 +1944,8 @@ mod tests {
             &mut state,
             Some("response.reasoning_summary_text.delta"),
             data,
-        );
+        )
+        .expect("reasoning summary delta should parse");
         assert_eq!(events.len(), 2);
         assert!(matches!(events[0], StreamEvent::ReasoningStart));
         assert!(
@@ -1649,7 +1959,8 @@ mod tests {
 
         // First delta: should emit ReasoningStart + ReasoningDelta
         let data1 = r#"{"type":"response.reasoning_text.delta","delta":"Step 1"}"#;
-        let events1 = process_sse_event(&mut state, Some("response.reasoning_text.delta"), data1);
+        let events1 = process_sse_event(&mut state, Some("response.reasoning_text.delta"), data1)
+            .expect("first reasoning delta should parse");
         assert_eq!(events1.len(), 2);
         assert!(matches!(events1[0], StreamEvent::ReasoningStart));
         assert!(
@@ -1658,7 +1969,8 @@ mod tests {
 
         // Second delta: should NOT emit duplicate ReasoningStart
         let data2 = r#"{"type":"response.reasoning_text.delta","delta":"Step 2"}"#;
-        let events2 = process_sse_event(&mut state, Some("response.reasoning_text.delta"), data2);
+        let events2 = process_sse_event(&mut state, Some("response.reasoning_text.delta"), data2)
+            .expect("second reasoning delta should parse");
         assert_eq!(events2.len(), 1);
         assert!(
             matches!(events2[0], StreamEvent::ReasoningDelta { ref delta } if delta == "Step 2")
@@ -1671,7 +1983,8 @@ mod tests {
         state.emitted_reasoning_start = true;
 
         let data = r#"{"item":{"type":"reasoning","id":"rs_abc","summary":[]}}"#;
-        let events = process_sse_event(&mut state, Some("response.output_item.done"), data);
+        let events = process_sse_event(&mut state, Some("response.output_item.done"), data)
+            .expect("output item done should parse");
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], StreamEvent::ReasoningEnd));
         assert!(!state.emitted_reasoning_start);
