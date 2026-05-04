@@ -1,0 +1,521 @@
+{
+  "spec": {
+    "run_id": "01KQT1VDVXGWN9P6MFK4R5E44D",
+    "settings": {
+      "project": {
+        "name": null,
+        "description": null,
+        "directory": ".",
+        "metadata": {}
+      },
+      "workflow": {
+        "name": null,
+        "description": null,
+        "graph": "workflow.fabro",
+        "metadata": {}
+      },
+      "run": {
+        "goal": {
+          "type": "inline",
+          "value": "# Stage URLs encode visit (`node@visit`)\n\n## Context\n\nToday, in the Fabro web UI, stages that re-run (e.g. `verify` in a loop) all\ncollapse to the same URL: `/runs/{id}/stages/verify`. The sidebar lists them\nmultiple times but every link/selection points at the first visit.\n\nA **Stage** is a Node + a Visit (1-indexed; bumped each time the workflow\nre-enters that node). The data model already knows this:\n`StageId(node_id, visit)` exists in `lib/crates/fabro-types/src/stage_id.rs`,\nand the OpenAPI `StageId` path parameter\n(`docs/public/api-reference/fabro-api.yaml:2925`) already documents the\n`node_id@visit` form. The bug is that `GET /api/v1/runs/{id}/stages` returns\n`RunStage.id = node_id` (no visit suffix), and the events fallback in the UI\nfilters by `node_id` instead of the full `stage_id`.\n\nNote: \"visit\" is deliberate. There is a separate retry-attempt counter\ninside a single visit (`StageStartedProps.attempt` in\n`lib/crates/fabro-types/src/run_event/stage.rs:13`) — that's not what we're\nmodeling here. URLs and the new field both refer to **visits**.\n\nOutcome: each stage gets a distinct URL (e.g. `verify@1`, `verify@2`) that\nloads only that visit's turns/logs, with a `(N)` indicator in the sidebar\nwhen `N > 1`.\n\n## Approach\n\n**Server**: rebuild the stage list from `RunProjection::iter_stages()`, which\nis already keyed by full `StageId` (`HashMap<StageId, StageProjection>` in\n`lib/crates/fabro-types/src/run_projection.rs:32`). This deletes the\n`checkpoint.completed_nodes` walk (which loses visit info — it's a\n`Vec<String>` of node_ids only) and the `next_node_id` branch entirely.\n\n**Status derivation is event-driven, not completion-driven.**\n`StageProjection.completion` is set by `StageFailed` *even when* the workflow\nis about to retry (`run_state.rs:329` — `StageRetrying` does not clear it),\nso reading completion alone would show `failed` for a stage that's\nretrying. For each stage, scan its events (filtered by exact `stage_id`)\nand take the **latest** lifecycle event:\n- `stage.retrying` → `StageState::Retrying`\n- `stage.failed(props)` with `props.will_retry == true` → `StageState::Retrying`\n- `stage.failed(props)` with `props.will_retry == false` → `StageState::Failed`\n- `stage.completed` → `StageState::from(StageCompletedProps.status)`\n- `stage.started` (no later completed/failed/retrying) → `StageState::Running`\n\nUse the projection's `completion` only as a tiebreaker when no lifecycle\nevents for that stage_id exist (defensive case). The\n`StageState::from(StageOutcome)` impl is at\n`lib/crates/fabro-types/src/outcome.rs:136`.\n\n**API contract**: on `RunStage`, add a required `visit: integer` field, and\n**rename `dot_id` → `node_id`** (required) for consistency with\n`StageId::node_id()`, `EventEnvelope.node_id`, and the rest of the type\nvocabulary. Tighten the `id` description to call out the `node_id@visit`\nform. This is a breaking field rename; per project policy\n(\"simplest change possible, we don't care about migration\"), we do it now\nrather than carrying both names.\n\n**Frontend**: links and selection already use `stage.id`, so they propagate\nnaturally once the API returns `verify@1`/`verify@2`. The events-fallback\nfilter switches from `e.node_id === stageId` to `e.stage_id === stageId`.\nSidebar/header append `(N)` only when `visit > 1`. The\n`isVisibleStage(stage.id)` filter switches to `isVisibleStage(stage.node_id)`\nso that `start@1`/`exit@1` are still hidden.\n\nOne fixture run with two visits of the same node is added to demo data so\nthis code path stays under test.\n\n## Files to change (in order)\n\n### 1. OpenAPI — `docs/public/api-reference/fabro-api.yaml`\n\n`RunStage` schema (line 6315):\n- `id`: clarify description: `StageId in \"node_id@visit\" form, e.g. verify@2`. Update example to `verify@2`.\n- Add `visit: { type: integer, format: uint32, minimum: 1, description: \"1-based visit count; bumped each time the workflow re-enters this node\" }`. Mark required. (`format: uint32` + `minimum: 1` codegens to `NonZeroU32`, matching `StageProjection.first_event_seq` at line 5286–5288 of the spec.)\n- **Rename `dot_id` → `node_id`** and mark required. Description: \"Node id in the workflow graph; multiple stages with different visits share the same node_id.\" Example: `verify`.\n\n### 2. Generated code\n\n- `cargo build -p fabro-api` — regenerates Rust types via `progenitor`.\n- `cd lib/packages/fabro-api-client && bun run generate` — regenerates TS client.\n\n### 3. Workflow lib — `lib/crates/fabro-workflow/src/lib.rs`\n\nAdd a sibling to `extract_stage_durations_from_events` (line 89). Leave the\nexisting function alone — `finalize.rs:81,506` and `retro.rs:56` operate on a\nsingle visit per node and shouldn't change. New function:\n\n```rust\npub fn extract_stage_durations_by_stage_id(\n    events: &[EventEnvelope],\n) -> HashMap<StageId, u64>\n```\n\nFilters `stage.completed`/`stage.failed`, keys by `envelope.stage_id`.\n\n### 4. Server handler — `lib/crates/fabro-server/src/server/handler/billing.rs`\n\nRewrite `list_run_stages` (lines 38–126):\n\n- Replace `checkpoint.completed_nodes` iteration with\n  `projection.iter_stages()`, collected and sorted by `first_event_seq`.\n- Per stage, build `RunStage`:\n  - `id = stage_id.to_string()`\n  - `node_id = stage_id.node_id().to_string()`\n  - `name = stage_id.node_id().to_string()` (UI adds the suffix)\n  - `visit = NonZeroU32::new(stage_id.visit()).expect(\"StageId.visit is 1-based\")`\n    (generated type is `NonZeroU32` because of `format: uint32` + `minimum: 1`)\n  - `status = stage_status_from_events(events, &stage_id, &projection)`\n    (see Status derivation below)\n  - `duration_secs`: from the new `extract_stage_durations_by_stage_id`.\n- **Status derivation** — replace `active_stage_state_from_events` (line 19)\n  with `stage_status_from_events(events: &[EventEnvelope], stage_id: &StageId,\n  projection: &RunProjection) -> StageState`. Implementation:\n  1. Filter events to those with `envelope.event.stage_id == Some(stage_id)`.\n  2. Find the **latest** lifecycle event among `stage.started`,\n     `stage.retrying`, `stage.completed`, `stage.failed` for that stage_id.\n  3. Map:\n     - `stage.started` → `Running`\n     - `stage.retrying` → `Retrying`\n     - `stage.failed(props)` with `props.will_retry == true` → `Retrying`\n       (a will-retry failure is conceptually mid-retry, even before the\n       `stage.retrying` envelope lands; field defined at\n       `lib/crates/fabro-types/src/run_event/stage.rs:57`)\n     - `stage.failed(props)` with `props.will_retry == false` → `Failed`\n     - `stage.completed` → `StageState::from(StageCompletedProps.status)`\n       (using the existing `From<StageOutcome> for StageState` impl)\n  4. Fallback: if no lifecycle events, use\n     `StageState::from(completion.outcome)` from the projection if present,\n     else `Pending`.\n- Drop the `next_node_id` branch (lines 113–123) entirely — the projection\n  now carries the in-flight stage.\n\n### 5. Demo fixtures — `lib/crates/fabro-server/src/demo/mod.rs:1156`\n\nSuffix existing four IDs with `@1` and set `visit: 1`. Add a 5th entry to\nmodel a re-run:\n\n```rust\nfn visit(n: u32) -> NonZeroU32 { NonZeroU32::new(n).expect(\"visit is 1-based\") }\n\nRunStage { id: \"apply-changes@1\".into(), name: \"apply-changes\".into(),\n           status: Succeeded, duration_secs: Some(118.0),\n           node_id: \"apply\".into(), visit: visit(1) },\nRunStage { id: \"apply-changes@2\".into(), name: \"apply-changes\".into(),\n           status: Running, duration_secs: None,\n           node_id: \"apply\".into(), visit: visit(2) },\n```\n\n`visit` codegens to `NonZeroU32` (see Section 1) — direct `1`/`2` literals\nwon't compile. Use the helper above (or inline\n`NonZeroU32::new(n).unwrap()`).\n\nBoth share `node_id: \"apply\"` so the graph node lights up regardless of\nselection.\n\n### 6. Frontend mapping — `apps/fabro-web/app/lib/stage-sidebar.ts:13`\n\n- Pass through `visit` and `node_id` (renamed from `dot_id`) to the sidebar\n  `Stage` shape.\n- Change filter to `isVisibleStage(stage.node_id)` (line 17) so suffixed IDs\n  still hide `start`/`exit`.\n- Drop the `?? stage.id` fallback (line 21) — `node_id` is now required.\n\n### 7. Sidebar component — `apps/fabro-web/app/components/stage-sidebar.tsx`\n\n- Rename the `dotId` field on `Stage` to `nodeId` (line 21).\n- Add `visit: number` to the `Stage` interface (line 16).\n- Render display label as `${stage.name}` when `visit <= 1`, otherwise\n  `${stage.name} (${visit})` in the `<span>` at line 103.\n- Update any callers reading `stage.dotId` (graph highlighting) to\n  `stage.nodeId`.\n\n### 8. SSE cache invalidation — `apps/fabro-web/app/lib/run-events.ts`\n\nTwo fixes here:\n\n1. **Suffixed StageId routing** (`:132`): `stageIdFromPayload` currently\n   returns `payload.node_id`. Once\n   `queryKeys.runs.stageTurns(runId, stageId)` is keyed by `verify@1` (lines\n   84, 95 of the same file), invalidations passing `verify` won't match.\n   - Add `stage_id?: string` to `RunEventPayload` (line 14).\n   - In `stageIdFromPayload`: prefer `payload.stage_id`; fall back to\n     `payload.node_id` for events that don't carry the full StageId (e.g.\n     pre-stage envelopes).\n2. **Add `stage.retrying` to `STAGE_EVENTS`** (line 35). Today the set is\n   `[\"stage.started\", \"stage.completed\", \"stage.failed\"]`. The new\n   server-side status logic relies on `stage.retrying`, and the workflow\n   already emits it (`lib/crates/fabro-workflow/src/lifecycle/event.rs:232`).\n   Without this, a selected stage stays visually `failed` until another\n   invalidating event arrives — defeats the P1 fix above.\n\nTests:\n- An envelope with `stage_id: \"verify@2\"` and `event: \"stage.retrying\"`\n  invalidates `stages`, `events`, `graph`, run `detail`, and\n  `stageTurns(runId, \"verify@2\")`.\n\n### 9. Run-stages route — `apps/fabro-web/app/routes/run-stages.tsx`\n\n- Line 72: change `events.filter((e) => e.node_id === stageId)` to\n  `events.filter((e) => e.stage_id === stageId)`. The filter narrows the\n  scope so `stageId` (the function parameter) is the authoritative StageId\n  inside the loop.\n- Lines 117 and 126: drop the `` ?? `${stageId}@1` `` fallback. Note:\n  `EventEnvelope.stage_id` is generated as `string | null | undefined`\n  (see `lib/packages/fabro-api-client/src/models/run-event.ts:34`), so\n  assigning `stageId: e.stage_id` directly fails typecheck. Use the\n  function parameter instead — after the filter, all surviving events have\n  `stage_id === stageId` by construction:\n  ```ts\n  pendingCommand = { stageId, script, language };\n  ...\n  turns.push({ kind: \"command\", stageId, ... });\n  ```\n- Header (line ~640): when `selectedStage.visit > 1`, render\n  `${selectedStage.name} (${selectedStage.visit})`.\n\n### 10. Graph aggregation policy — `apps/fabro-web/app/routes/run-overview.tsx:66-77`\n\nToday the graph code maps `Map<dotId, stageId>`; with two visits sharing a\nnode_id, the second entry silently overwrites the first, and the status\nsets union all visits. Make the policy explicit:\n\n- **Click target**: open the **latest** visit for that node_id (highest\n  `visit`). Build the map deterministically — `Map.set(nodeId, latestStage.id)`\n  after sorting visits ascending.\n- **Status policy**: *latest visit wins for terminal states; active states\n  win globally.* That is — for a given node, if any visit is `running` or\n  `retrying`, the node renders that active state. Otherwise the node renders\n  the **latest visit's** terminal state. So:\n  - `(failed, running)` → `running` (active wins)\n  - `(failed, succeeded)` → `succeeded` (latest visit wins; failure-then-fix\n    should look healed, not failed)\n  - `(succeeded, failed)` → `failed` (latest visit wins)\n  - `(running, retrying)` → `retrying` (active; pick the latest)\n- The current if/else cascade in run-overview.tsx orders running before\n  failed unconditionally — switch it to a two-step compute: pick the\n  display status per node by the rule above, *then* render once.\n- **Frontend tests**: `(failed, running)` → running color, click → `verify@2`.\n  `(failed, succeeded)` → succeeded color, click → `verify@2`.\n  `(succeeded, failed)` → failed color, click → `verify@2`.\n\n### 11. Tests\n\n- **`lib/crates/fabro-server/src/server/tests.rs`** (alongside existing\n  `list_run_stages_projects_retrying_until_completion` at line 2126): add\n  `list_run_stages_distinguishes_visits` — build a run with two visits of\n  the same node, hit `GET /runs/{id}/stages`, assert two `RunStage`\n  entries with distinct `id`/`visit` and the same `node_id`.\n- **`lib/crates/fabro-server/src/server/tests.rs`**:\n  `list_run_stages_shows_retrying_after_failed_event` — a stage where the\n  latest event is `stage.failed` followed by `stage.retrying` renders as\n  `Retrying`, not `Failed`.\n- **`lib/crates/fabro-server/src/server/tests.rs`**:\n  `list_run_stages_shows_retrying_when_failed_will_retry` — a stage whose\n  *only* lifecycle event so far is `stage.failed { will_retry: true }`\n  (no `stage.retrying` envelope yet) still renders as `Retrying`. Narrower\n  guard for the will_retry branch.\n- **`apps/fabro-web/app/routes/run-stages.test.ts`**: `turnsFromEvents`\n  filters correctly on `stage_id` (verify@1 events vs verify@2 events do\n  not cross-contaminate).\n- **`apps/fabro-web/app/lib/stage-sidebar.test.ts`** (new or existing): map\n  fixture with two `apply-changes` visits → two distinct sidebar entries,\n  display labels `apply-changes` and `apply-changes (2)`.\n- **`apps/fabro-web/app/lib/run-events.test.tsx`**: SSE envelope with\n  `stage_id: \"verify@2\"` triggers invalidation of\n  `stageTurns(runId, \"verify@2\")`.\n- **Graph test** (`apps/fabro-web/app/routes/run-overview.test.tsx` or\n  similar): two visits of the same node — graph status follows the\n  cascade, click target is the latest visit.\n\n## Out of scope\n\n- Wiring up the production `/runs/{id}/stages/{stageId}/turns` handler\n  (`lib/crates/fabro-server/src/server/handler/mod.rs:116` is\n  `not_implemented`). The events fallback is doing the work today and will\n  keep doing it; the per-stage filter fix is what unblocks multi-visit\n  display.\n- Per-visit billing breakdown in `get_run_billing` — that path still uses\n  the existing per-node duration map.\n\n## Critical files\n\n- `docs/public/api-reference/fabro-api.yaml` — schema source of truth\n- `lib/crates/fabro-server/src/server/handler/billing.rs` — `list_run_stages`\n- `lib/crates/fabro-types/src/run_projection.rs` — `iter_stages` data source\n- `lib/crates/fabro-workflow/src/lib.rs` — new duration extractor\n- `lib/crates/fabro-server/src/demo/mod.rs` — fixture\n- `apps/fabro-web/app/routes/run-stages.tsx` — events filter + header\n- `apps/fabro-web/app/components/stage-sidebar.tsx` — display label\n- `apps/fabro-web/app/lib/stage-sidebar.ts` — visibility filter + mapping\n- `apps/fabro-web/app/lib/run-events.ts` — SSE cache invalidation\n- `apps/fabro-web/app/routes/run-overview.tsx` — graph aggregation policy\n- `lib/crates/fabro-types/src/outcome.rs` — `From<StageOutcome> for StageState` (already exists; reuse)\n\n## Verification\n\nBuild:\n- `cargo build -p fabro-api` — regenerates types from updated YAML\n- `cd lib/packages/fabro-api-client && bun run generate`\n- `cargo build --workspace`\n\nTests:\n- `cargo nextest run -p fabro-server` — conformance + new tests in\n  `lib/crates/fabro-server/src/server/tests.rs` (distinguish_visits,\n  shows_retrying_after_failed_event, shows_retrying_when_failed_will_retry)\n- `cd apps/fabro-web && bun test && bun run typecheck`\n\nEnd-to-end (single-visit regression):\n- `fabro server start` → open the demo URL → confirm\n  `detect-drift`/`propose-changes`/`review-changes` show no `(N)` suffix.\n  URLs are `.../stages/detect-drift@1` etc. Graph still highlights correctly.\n\nEnd-to-end (the fix):\n- Demo: two `apply-changes` rows. Sidebar shows `apply-changes` and\n  `apply-changes (2)`. URLs `.../stages/apply-changes@1` vs\n  `.../stages/apply-changes@2` are distinct and load distinct content. Graph\n  lights up the same `apply` node either way.\n- Real loop run: trigger a workflow that loops `verify` (fail → fix → pass).\n  Confirm two distinct entries with distinct statuses, durations, turns, and\n  command logs (`/stages/verify@1/logs/stdout` vs\n  `/stages/verify@2/logs/stdout`).\n\nAPI contract:\n- `curl /api/v1/runs/{id}/stages | jq` — `id` contains `@`; `visit` is\n  present and ≥ 1; `node_id` is the bare node id with no `@`. The old\n  `dot_id` field is gone.\n\nNegative checks:\n- Terminal run: no trailing in-flight row.\n- Parallel fanout: still one row per group (parallel branches don't promote\n  to separate `RunStage` entries).\n- Empty checkpoint: empty list, no panic.\n- **Retry mid-flight**: trigger a stage that fails and then retries; sidebar\n  shows `Retrying`, not `Failed`. Confirms P1 regression guard.\n- **SSE liveness**: while a run is active and a stage emits events, the\n  selected stage's turn list updates without a manual refresh — confirms\n  cache invalidation works against suffixed keys.\n"
+        },
+        "working_dir": null,
+        "metadata": {},
+        "inputs": {},
+        "model": {
+          "provider": "anthropic",
+          "name": "claude-sonnet-4-6",
+          "fallbacks": []
+        },
+        "git": {
+          "author": null
+        },
+        "prepare": {
+          "commands": [],
+          "timeout_ms": 300000
+        },
+        "execution": {
+          "mode": "normal",
+          "approval": "prompt",
+          "retros": true
+        },
+        "checkpoint": {
+          "exclude_globs": []
+        },
+        "sandbox": {
+          "provider": "daytona",
+          "preserve": false,
+          "devcontainer": false,
+          "env": {},
+          "local": {
+            "worktree_mode": "always"
+          },
+          "docker": {
+            "image": "buildpack-deps:noble",
+            "network_mode": null,
+            "memory_limit": 4000000000,
+            "cpu_quota": 200000,
+            "env_vars": {},
+            "skip_clone": false
+          },
+          "daytona": {
+            "auto_stop_interval": 30,
+            "labels": {
+              "repo": "fabro-sh/fabro"
+            },
+            "snapshot": {
+              "name": "fabro-v8",
+              "cpu": 8,
+              "memory_gb": 16,
+              "disk_gb": 20,
+              "dockerfile": {
+                "type": "inline",
+                "value": "FROM ubuntu:24.04\n\nRUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 && rm -rf /var/lib/apt/lists/*\n\n# GitHub CLI\nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*\n\n# Rust\nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\nENV PATH=\"/root/.cargo/bin:${PATH}\"\nRUN rustup toolchain install nightly-2026-04-14 --profile minimal --component clippy,rustfmt\nRUN cargo install cargo-nextest --locked\nENV CARGO_INCREMENTAL=0\n\n# Bun\nRUN curl -fsSL https://bun.sh/install | bash\nENV PATH=\"/root/.bun/bin:${PATH}\"\n\nWORKDIR /root\n"
+              }
+            },
+            "network": null,
+            "skip_clone": false
+          }
+        },
+        "notifications": {},
+        "interviews": {
+          "provider": null,
+          "slack": null,
+          "discord": null,
+          "teams": null
+        },
+        "agent": {
+          "permissions": null,
+          "mcps": {}
+        },
+        "hooks": [],
+        "scm": {
+          "provider": null,
+          "owner": null,
+          "repository": null,
+          "github": null
+        },
+        "pull_request": {
+          "enabled": true,
+          "draft": false,
+          "auto_merge": false,
+          "merge_strategy": "squash"
+        },
+        "artifacts": {
+          "include": []
+        }
+      }
+    },
+    "graph": {
+      "name": "ImplementPlan",
+      "nodes": {
+        "simplify_opus": {
+          "id": "simplify_opus",
+          "attrs": {
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Simplify (Opus)"
+            }
+          }
+        },
+        "implement": {
+          "id": "implement",
+          "attrs": {
+            "prompt": {
+              "String": "Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD."
+            },
+            "label": {
+              "String": "Implement"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "verify": {
+          "id": "verify",
+          "attrs": {
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1 && cargo dev docs refresh 2>&1 && cargo dev docs check 2>&1"
+            },
+            "retry_target": {
+              "String": "fixup"
+            },
+            "goal_gate": {
+              "Boolean": true
+            },
+            "label": {
+              "String": "Verify"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "preflight_compile": {
+          "id": "preflight_compile",
+          "attrs": {
+            "shape": {
+              "String": "parallelogram"
+            },
+            "label": {
+              "String": "Preflight Compile"
+            },
+            "script": {
+              "String": "cargo check -q --workspace 2>&1"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "fixup": {
+          "id": "fixup",
+          "attrs": {
+            "prompt": {
+              "String": "The verify step failed. Read the build output from context and fix all clippy lint warnings, test failures, and generated docs errors."
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "max_visits": {
+              "Integer": 3
+            },
+            "label": {
+              "String": "Fixup"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "exit": {
+          "id": "exit",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "shape": {
+              "String": "Msquare"
+            },
+            "label": {
+              "String": "Exit"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "simplify_gpt": {
+          "id": "simplify_gpt",
+          "attrs": {
+            "label": {
+              "String": "Simplify (GPT-55)"
+            },
+            "model": {
+              "String": "gpt-5.5"
+            },
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "provider": {
+              "String": "openai"
+            }
+          }
+        },
+        "fix_lints": {
+          "id": "fix_lints",
+          "attrs": {
+            "prompt": {
+              "String": "The preflight lint step failed. Read the build output from context and fix all clippy lint warnings."
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "max_visits": {
+              "Integer": 3
+            },
+            "label": {
+              "String": "Fix Lints"
+            }
+          }
+        },
+        "toolchain": {
+          "id": "toolchain",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "script": {
+              "String": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Toolchain"
+            },
+            "max_retries": {
+              "Integer": 0
+            }
+          }
+        },
+        "preflight_lint": {
+          "id": "preflight_lint",
+          "attrs": {
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Preflight Lint"
+            },
+            "shape": {
+              "String": "parallelogram"
+            }
+          }
+        },
+        "start": {
+          "id": "start",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "shape": {
+              "String": "Mdiamond"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Start"
+            }
+          }
+        },
+        "fmt": {
+          "id": "fmt",
+          "attrs": {
+            "script": {
+              "String": "cargo +nightly-2026-04-14 fmt --all 2>&1"
+            },
+            "label": {
+              "String": "Format"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "start",
+          "to": "toolchain",
+          "attrs": {}
+        },
+        {
+          "from": "toolchain",
+          "to": "preflight_compile",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "toolchain",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_compile",
+          "to": "preflight_lint",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_compile",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_lint",
+          "to": "implement",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_lint",
+          "to": "fix_lints",
+          "attrs": {}
+        },
+        {
+          "from": "fix_lints",
+          "to": "preflight_lint",
+          "attrs": {}
+        },
+        {
+          "from": "implement",
+          "to": "simplify_opus",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_opus",
+          "to": "simplify_gpt",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_gpt",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "verify",
+          "to": "fmt",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "verify",
+          "to": "fixup",
+          "attrs": {}
+        },
+        {
+          "from": "fixup",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "fmt",
+          "to": "exit",
+          "attrs": {}
+        }
+      ],
+      "attrs": {
+        "rankdir": {
+          "String": "LR"
+        },
+        "goal": {
+          "String": "# Stage URLs encode visit (`node@visit`)\n\n## Context\n\nToday, in the Fabro web UI, stages that re-run (e.g. `verify` in a loop) all\ncollapse to the same URL: `/runs/{id}/stages/verify`. The sidebar lists them\nmultiple times but every link/selection points at the first visit.\n\nA **Stage** is a Node + a Visit (1-indexed; bumped each time the workflow\nre-enters that node). The data model already knows this:\n`StageId(node_id, visit)` exists in `lib/crates/fabro-types/src/stage_id.rs`,\nand the OpenAPI `StageId` path parameter\n(`docs/public/api-reference/fabro-api.yaml:2925`) already documents the\n`node_id@visit` form. The bug is that `GET /api/v1/runs/{id}/stages` returns\n`RunStage.id = node_id` (no visit suffix), and the events fallback in the UI\nfilters by `node_id` instead of the full `stage_id`.\n\nNote: \"visit\" is deliberate. There is a separate retry-attempt counter\ninside a single visit (`StageStartedProps.attempt` in\n`lib/crates/fabro-types/src/run_event/stage.rs:13`) — that's not what we're\nmodeling here. URLs and the new field both refer to **visits**.\n\nOutcome: each stage gets a distinct URL (e.g. `verify@1`, `verify@2`) that\nloads only that visit's turns/logs, with a `(N)` indicator in the sidebar\nwhen `N > 1`.\n\n## Approach\n\n**Server**: rebuild the stage list from `RunProjection::iter_stages()`, which\nis already keyed by full `StageId` (`HashMap<StageId, StageProjection>` in\n`lib/crates/fabro-types/src/run_projection.rs:32`). This deletes the\n`checkpoint.completed_nodes` walk (which loses visit info — it's a\n`Vec<String>` of node_ids only) and the `next_node_id` branch entirely.\n\n**Status derivation is event-driven, not completion-driven.**\n`StageProjection.completion` is set by `StageFailed` *even when* the workflow\nis about to retry (`run_state.rs:329` — `StageRetrying` does not clear it),\nso reading completion alone would show `failed` for a stage that's\nretrying. For each stage, scan its events (filtered by exact `stage_id`)\nand take the **latest** lifecycle event:\n- `stage.retrying` → `StageState::Retrying`\n- `stage.failed(props)` with `props.will_retry == true` → `StageState::Retrying`\n- `stage.failed(props)` with `props.will_retry == false` → `StageState::Failed`\n- `stage.completed` → `StageState::from(StageCompletedProps.status)`\n- `stage.started` (no later completed/failed/retrying) → `StageState::Running`\n\nUse the projection's `completion` only as a tiebreaker when no lifecycle\nevents for that stage_id exist (defensive case). The\n`StageState::from(StageOutcome)` impl is at\n`lib/crates/fabro-types/src/outcome.rs:136`.\n\n**API contract**: on `RunStage`, add a required `visit: integer` field, and\n**rename `dot_id` → `node_id`** (required) for consistency with\n`StageId::node_id()`, `EventEnvelope.node_id`, and the rest of the type\nvocabulary. Tighten the `id` description to call out the `node_id@visit`\nform. This is a breaking field rename; per project policy\n(\"simplest change possible, we don't care about migration\"), we do it now\nrather than carrying both names.\n\n**Frontend**: links and selection already use `stage.id`, so they propagate\nnaturally once the API returns `verify@1`/`verify@2`. The events-fallback\nfilter switches from `e.node_id === stageId` to `e.stage_id === stageId`.\nSidebar/header append `(N)` only when `visit > 1`. The\n`isVisibleStage(stage.id)` filter switches to `isVisibleStage(stage.node_id)`\nso that `start@1`/`exit@1` are still hidden.\n\nOne fixture run with two visits of the same node is added to demo data so\nthis code path stays under test.\n\n## Files to change (in order)\n\n### 1. OpenAPI — `docs/public/api-reference/fabro-api.yaml`\n\n`RunStage` schema (line 6315):\n- `id`: clarify description: `StageId in \"node_id@visit\" form, e.g. verify@2`. Update example to `verify@2`.\n- Add `visit: { type: integer, format: uint32, minimum: 1, description: \"1-based visit count; bumped each time the workflow re-enters this node\" }`. Mark required. (`format: uint32` + `minimum: 1` codegens to `NonZeroU32`, matching `StageProjection.first_event_seq` at line 5286–5288 of the spec.)\n- **Rename `dot_id` → `node_id`** and mark required. Description: \"Node id in the workflow graph; multiple stages with different visits share the same node_id.\" Example: `verify`.\n\n### 2. Generated code\n\n- `cargo build -p fabro-api` — regenerates Rust types via `progenitor`.\n- `cd lib/packages/fabro-api-client && bun run generate` — regenerates TS client.\n\n### 3. Workflow lib — `lib/crates/fabro-workflow/src/lib.rs`\n\nAdd a sibling to `extract_stage_durations_from_events` (line 89). Leave the\nexisting function alone — `finalize.rs:81,506` and `retro.rs:56` operate on a\nsingle visit per node and shouldn't change. New function:\n\n```rust\npub fn extract_stage_durations_by_stage_id(\n    events: &[EventEnvelope],\n) -> HashMap<StageId, u64>\n```\n\nFilters `stage.completed`/`stage.failed`, keys by `envelope.stage_id`.\n\n### 4. Server handler — `lib/crates/fabro-server/src/server/handler/billing.rs`\n\nRewrite `list_run_stages` (lines 38–126):\n\n- Replace `checkpoint.completed_nodes` iteration with\n  `projection.iter_stages()`, collected and sorted by `first_event_seq`.\n- Per stage, build `RunStage`:\n  - `id = stage_id.to_string()`\n  - `node_id = stage_id.node_id().to_string()`\n  - `name = stage_id.node_id().to_string()` (UI adds the suffix)\n  - `visit = NonZeroU32::new(stage_id.visit()).expect(\"StageId.visit is 1-based\")`\n    (generated type is `NonZeroU32` because of `format: uint32` + `minimum: 1`)\n  - `status = stage_status_from_events(events, &stage_id, &projection)`\n    (see Status derivation below)\n  - `duration_secs`: from the new `extract_stage_durations_by_stage_id`.\n- **Status derivation** — replace `active_stage_state_from_events` (line 19)\n  with `stage_status_from_events(events: &[EventEnvelope], stage_id: &StageId,\n  projection: &RunProjection) -> StageState`. Implementation:\n  1. Filter events to those with `envelope.event.stage_id == Some(stage_id)`.\n  2. Find the **latest** lifecycle event among `stage.started`,\n     `stage.retrying`, `stage.completed`, `stage.failed` for that stage_id.\n  3. Map:\n     - `stage.started` → `Running`\n     - `stage.retrying` → `Retrying`\n     - `stage.failed(props)` with `props.will_retry == true` → `Retrying`\n       (a will-retry failure is conceptually mid-retry, even before the\n       `stage.retrying` envelope lands; field defined at\n       `lib/crates/fabro-types/src/run_event/stage.rs:57`)\n     - `stage.failed(props)` with `props.will_retry == false` → `Failed`\n     - `stage.completed` → `StageState::from(StageCompletedProps.status)`\n       (using the existing `From<StageOutcome> for StageState` impl)\n  4. Fallback: if no lifecycle events, use\n     `StageState::from(completion.outcome)` from the projection if present,\n     else `Pending`.\n- Drop the `next_node_id` branch (lines 113–123) entirely — the projection\n  now carries the in-flight stage.\n\n### 5. Demo fixtures — `lib/crates/fabro-server/src/demo/mod.rs:1156`\n\nSuffix existing four IDs with `@1` and set `visit: 1`. Add a 5th entry to\nmodel a re-run:\n\n```rust\nfn visit(n: u32) -> NonZeroU32 { NonZeroU32::new(n).expect(\"visit is 1-based\") }\n\nRunStage { id: \"apply-changes@1\".into(), name: \"apply-changes\".into(),\n           status: Succeeded, duration_secs: Some(118.0),\n           node_id: \"apply\".into(), visit: visit(1) },\nRunStage { id: \"apply-changes@2\".into(), name: \"apply-changes\".into(),\n           status: Running, duration_secs: None,\n           node_id: \"apply\".into(), visit: visit(2) },\n```\n\n`visit` codegens to `NonZeroU32` (see Section 1) — direct `1`/`2` literals\nwon't compile. Use the helper above (or inline\n`NonZeroU32::new(n).unwrap()`).\n\nBoth share `node_id: \"apply\"` so the graph node lights up regardless of\nselection.\n\n### 6. Frontend mapping — `apps/fabro-web/app/lib/stage-sidebar.ts:13`\n\n- Pass through `visit` and `node_id` (renamed from `dot_id`) to the sidebar\n  `Stage` shape.\n- Change filter to `isVisibleStage(stage.node_id)` (line 17) so suffixed IDs\n  still hide `start`/`exit`.\n- Drop the `?? stage.id` fallback (line 21) — `node_id` is now required.\n\n### 7. Sidebar component — `apps/fabro-web/app/components/stage-sidebar.tsx`\n\n- Rename the `dotId` field on `Stage` to `nodeId` (line 21).\n- Add `visit: number` to the `Stage` interface (line 16).\n- Render display label as `${stage.name}` when `visit <= 1`, otherwise\n  `${stage.name} (${visit})` in the `<span>` at line 103.\n- Update any callers reading `stage.dotId` (graph highlighting) to\n  `stage.nodeId`.\n\n### 8. SSE cache invalidation — `apps/fabro-web/app/lib/run-events.ts`\n\nTwo fixes here:\n\n1. **Suffixed StageId routing** (`:132`): `stageIdFromPayload` currently\n   returns `payload.node_id`. Once\n   `queryKeys.runs.stageTurns(runId, stageId)` is keyed by `verify@1` (lines\n   84, 95 of the same file), invalidations passing `verify` won't match.\n   - Add `stage_id?: string` to `RunEventPayload` (line 14).\n   - In `stageIdFromPayload`: prefer `payload.stage_id`; fall back to\n     `payload.node_id` for events that don't carry the full StageId (e.g.\n     pre-stage envelopes).\n2. **Add `stage.retrying` to `STAGE_EVENTS`** (line 35). Today the set is\n   `[\"stage.started\", \"stage.completed\", \"stage.failed\"]`. The new\n   server-side status logic relies on `stage.retrying`, and the workflow\n   already emits it (`lib/crates/fabro-workflow/src/lifecycle/event.rs:232`).\n   Without this, a selected stage stays visually `failed` until another\n   invalidating event arrives — defeats the P1 fix above.\n\nTests:\n- An envelope with `stage_id: \"verify@2\"` and `event: \"stage.retrying\"`\n  invalidates `stages`, `events`, `graph`, run `detail`, and\n  `stageTurns(runId, \"verify@2\")`.\n\n### 9. Run-stages route — `apps/fabro-web/app/routes/run-stages.tsx`\n\n- Line 72: change `events.filter((e) => e.node_id === stageId)` to\n  `events.filter((e) => e.stage_id === stageId)`. The filter narrows the\n  scope so `stageId` (the function parameter) is the authoritative StageId\n  inside the loop.\n- Lines 117 and 126: drop the `` ?? `${stageId}@1` `` fallback. Note:\n  `EventEnvelope.stage_id` is generated as `string | null | undefined`\n  (see `lib/packages/fabro-api-client/src/models/run-event.ts:34`), so\n  assigning `stageId: e.stage_id` directly fails typecheck. Use the\n  function parameter instead — after the filter, all surviving events have\n  `stage_id === stageId` by construction:\n  ```ts\n  pendingCommand = { stageId, script, language };\n  ...\n  turns.push({ kind: \"command\", stageId, ... });\n  ```\n- Header (line ~640): when `selectedStage.visit > 1`, render\n  `${selectedStage.name} (${selectedStage.visit})`.\n\n### 10. Graph aggregation policy — `apps/fabro-web/app/routes/run-overview.tsx:66-77`\n\nToday the graph code maps `Map<dotId, stageId>`; with two visits sharing a\nnode_id, the second entry silently overwrites the first, and the status\nsets union all visits. Make the policy explicit:\n\n- **Click target**: open the **latest** visit for that node_id (highest\n  `visit`). Build the map deterministically — `Map.set(nodeId, latestStage.id)`\n  after sorting visits ascending.\n- **Status policy**: *latest visit wins for terminal states; active states\n  win globally.* That is — for a given node, if any visit is `running` or\n  `retrying`, the node renders that active state. Otherwise the node renders\n  the **latest visit's** terminal state. So:\n  - `(failed, running)` → `running` (active wins)\n  - `(failed, succeeded)` → `succeeded` (latest visit wins; failure-then-fix\n    should look healed, not failed)\n  - `(succeeded, failed)` → `failed` (latest visit wins)\n  - `(running, retrying)` → `retrying` (active; pick the latest)\n- The current if/else cascade in run-overview.tsx orders running before\n  failed unconditionally — switch it to a two-step compute: pick the\n  display status per node by the rule above, *then* render once.\n- **Frontend tests**: `(failed, running)` → running color, click → `verify@2`.\n  `(failed, succeeded)` → succeeded color, click → `verify@2`.\n  `(succeeded, failed)` → failed color, click → `verify@2`.\n\n### 11. Tests\n\n- **`lib/crates/fabro-server/src/server/tests.rs`** (alongside existing\n  `list_run_stages_projects_retrying_until_completion` at line 2126): add\n  `list_run_stages_distinguishes_visits` — build a run with two visits of\n  the same node, hit `GET /runs/{id}/stages`, assert two `RunStage`\n  entries with distinct `id`/`visit` and the same `node_id`.\n- **`lib/crates/fabro-server/src/server/tests.rs`**:\n  `list_run_stages_shows_retrying_after_failed_event` — a stage where the\n  latest event is `stage.failed` followed by `stage.retrying` renders as\n  `Retrying`, not `Failed`.\n- **`lib/crates/fabro-server/src/server/tests.rs`**:\n  `list_run_stages_shows_retrying_when_failed_will_retry` — a stage whose\n  *only* lifecycle event so far is `stage.failed { will_retry: true }`\n  (no `stage.retrying` envelope yet) still renders as `Retrying`. Narrower\n  guard for the will_retry branch.\n- **`apps/fabro-web/app/routes/run-stages.test.ts`**: `turnsFromEvents`\n  filters correctly on `stage_id` (verify@1 events vs verify@2 events do\n  not cross-contaminate).\n- **`apps/fabro-web/app/lib/stage-sidebar.test.ts`** (new or existing): map\n  fixture with two `apply-changes` visits → two distinct sidebar entries,\n  display labels `apply-changes` and `apply-changes (2)`.\n- **`apps/fabro-web/app/lib/run-events.test.tsx`**: SSE envelope with\n  `stage_id: \"verify@2\"` triggers invalidation of\n  `stageTurns(runId, \"verify@2\")`.\n- **Graph test** (`apps/fabro-web/app/routes/run-overview.test.tsx` or\n  similar): two visits of the same node — graph status follows the\n  cascade, click target is the latest visit.\n\n## Out of scope\n\n- Wiring up the production `/runs/{id}/stages/{stageId}/turns` handler\n  (`lib/crates/fabro-server/src/server/handler/mod.rs:116` is\n  `not_implemented`). The events fallback is doing the work today and will\n  keep doing it; the per-stage filter fix is what unblocks multi-visit\n  display.\n- Per-visit billing breakdown in `get_run_billing` — that path still uses\n  the existing per-node duration map.\n\n## Critical files\n\n- `docs/public/api-reference/fabro-api.yaml` — schema source of truth\n- `lib/crates/fabro-server/src/server/handler/billing.rs` — `list_run_stages`\n- `lib/crates/fabro-types/src/run_projection.rs` — `iter_stages` data source\n- `lib/crates/fabro-workflow/src/lib.rs` — new duration extractor\n- `lib/crates/fabro-server/src/demo/mod.rs` — fixture\n- `apps/fabro-web/app/routes/run-stages.tsx` — events filter + header\n- `apps/fabro-web/app/components/stage-sidebar.tsx` — display label\n- `apps/fabro-web/app/lib/stage-sidebar.ts` — visibility filter + mapping\n- `apps/fabro-web/app/lib/run-events.ts` — SSE cache invalidation\n- `apps/fabro-web/app/routes/run-overview.tsx` — graph aggregation policy\n- `lib/crates/fabro-types/src/outcome.rs` — `From<StageOutcome> for StageState` (already exists; reuse)\n\n## Verification\n\nBuild:\n- `cargo build -p fabro-api` — regenerates types from updated YAML\n- `cd lib/packages/fabro-api-client && bun run generate`\n- `cargo build --workspace`\n\nTests:\n- `cargo nextest run -p fabro-server` — conformance + new tests in\n  `lib/crates/fabro-server/src/server/tests.rs` (distinguish_visits,\n  shows_retrying_after_failed_event, shows_retrying_when_failed_will_retry)\n- `cd apps/fabro-web && bun test && bun run typecheck`\n\nEnd-to-end (single-visit regression):\n- `fabro server start` → open the demo URL → confirm\n  `detect-drift`/`propose-changes`/`review-changes` show no `(N)` suffix.\n  URLs are `.../stages/detect-drift@1` etc. Graph still highlights correctly.\n\nEnd-to-end (the fix):\n- Demo: two `apply-changes` rows. Sidebar shows `apply-changes` and\n  `apply-changes (2)`. URLs `.../stages/apply-changes@1` vs\n  `.../stages/apply-changes@2` are distinct and load distinct content. Graph\n  lights up the same `apply` node either way.\n- Real loop run: trigger a workflow that loops `verify` (fail → fix → pass).\n  Confirm two distinct entries with distinct statuses, durations, turns, and\n  command logs (`/stages/verify@1/logs/stdout` vs\n  `/stages/verify@2/logs/stdout`).\n\nAPI contract:\n- `curl /api/v1/runs/{id}/stages | jq` — `id` contains `@`; `visit` is\n  present and ≥ 1; `node_id` is the bare node id with no `@`. The old\n  `dot_id` field is gone.\n\nNegative checks:\n- Terminal run: no trailing in-flight row.\n- Parallel fanout: still one row per group (parallel branches don't promote\n  to separate `RunStage` entries).\n- Empty checkpoint: empty list, no panic.\n- **Retry mid-flight**: trigger a stage that fails and then retries; sidebar\n  shows `Retrying`, not `Failed`. Confirms P1 regression guard.\n- **SSE liveness**: while a run is active and a stage emits events, the\n  selected stage's turn list updates without a manual refresh — confirms\n  cache invalidation works against suffixed keys.\n"
+        },
+        "model_stylesheet": {
+          "String": "\n            * { model: claude-opus-4-7; }\n        "
+        }
+      }
+    },
+    "workflow_slug": "implement-plan",
+    "source_directory": "/Users/bhelmkamp/p/fabro-sh/fabro",
+    "provenance": {
+      "server": {
+        "version": "0.223.0-nightly.0"
+      },
+      "client": {
+        "user_agent": "fabro-cli/0.223.0-nightly.0",
+        "name": "fabro-cli",
+        "version": "0.223.0-nightly.0"
+      },
+      "subject": {
+        "kind": "user",
+        "identity": {
+          "issuer": "https://github.com",
+          "subject": "19"
+        },
+        "login": "brynary",
+        "auth_method": "github"
+      }
+    },
+    "manifest_blob": "29debc55b3002cbb567a28c00fb26b37173812d2121d714ebdfd8a4f3d90fd46",
+    "definition_blob": "791b2ce7454b6fff8fa26bea4af48533a25d0e56c4cecc44be1ea071680b4f9d",
+    "git": {
+      "origin_url": "https://github.com/fabro-sh/fabro",
+      "branch": "main",
+      "sha": "8064aa269eb893efca2a1654d9ece4acf8129307",
+      "dirty": "clean",
+      "push_outcome": {
+        "type": "not_attempted"
+      }
+    },
+    "in_place": false
+  },
+  "graph_source": "digraph ImplementPlan {\n    graph [\n        goal=\"Implement and simplify\",\n        model_stylesheet=\"\n            * { model: claude-opus-4-7; }\n        \"\n    ]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    toolchain         [label=\"Toolchain\", shape=parallelogram, script=\"command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1\", max_retries=0]\n    preflight_compile [label=\"Preflight Compile\", shape=parallelogram, script=\"cargo check -q --workspace 2>&1\", max_retries=0]\n    preflight_lint    [label=\"Preflight Lint\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1\", max_retries=0]\n    fix_lints         [label=\"Fix Lints\", prompt=\"The preflight lint step failed. Read the build output from context and fix all clippy lint warnings.\", max_visits=3]\n    implement         [label=\"Implement\", prompt=\"Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD.\"]\n    simplify_opus     [label=\"Simplify (Opus)\", prompt=\"@prompts/simplify.md\"]\n    simplify_gpt      [label=\"Simplify (GPT-55)\", prompt=\"@prompts/simplify.md\", model=\"gpt-55\"]\n    verify            [label=\"Verify\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1 && cargo dev docs refresh 2>&1 && cargo dev docs check 2>&1\", goal_gate=true, retry_target=\"fixup\"]\n    fixup             [label=\"Fixup\", prompt=\"The verify step failed. Read the build output from context and fix all clippy lint warnings, test failures, and generated docs errors.\", max_visits=3]\n    fmt               [label=\"Format\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 fmt --all 2>&1\", max_retries=0]\n\n    start -> toolchain\n    toolchain -> preflight_compile [condition=\"outcome=succeeded\"]\n    toolchain -> exit\n    preflight_compile -> preflight_lint [condition=\"outcome=succeeded\"]\n    preflight_compile -> exit\n    preflight_lint -> implement [condition=\"outcome=succeeded\"]\n    preflight_lint -> fix_lints\n    fix_lints -> preflight_lint\n    implement -> simplify_opus -> simplify_gpt -> verify\n    verify -> fmt   [condition=\"outcome=succeeded\"]\n    verify -> fixup\n    fixup -> verify\n    fmt -> exit\n}\n",
+  "start": null,
+  "status": {
+    "kind": "starting"
+  },
+  "status_updated_at": "2026-05-04T17:51:21.497717Z",
+  "pending_control": null,
+  "checkpoint": null,
+  "checkpoints": [],
+  "conclusion": null,
+  "retro": null,
+  "retro_prompt": null,
+  "retro_response": null,
+  "sandbox": {
+    "provider": "daytona",
+    "working_directory": "/home/daytona/workspace",
+    "identifier": "fabro-01KQT1VDVXGWN9P6MFK4R5E44D",
+    "repo_cloned": true,
+    "clone_origin_url": "https://github.com/fabro-sh/fabro",
+    "clone_branch": "main"
+  },
+  "final_patch": null,
+  "pull_request": null,
+  "superseded_by": null,
+  "pending_interviews": {},
+  "stages": {}
+}
