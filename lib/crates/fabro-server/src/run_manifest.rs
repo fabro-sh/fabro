@@ -1013,7 +1013,7 @@ async fn run_llm_check(
                             summary: model_id.clone(),
                             details: vec![
                                 CheckDetail::new(format!("Provider: {provider_name}")),
-                                CheckDetail::new("Probe: basic generation"),
+                                CheckDetail::new("Probe: basic generation".to_string()),
                             ],
                             remediation,
                         });
@@ -1057,31 +1057,31 @@ fn preflight_probe_model(model_id: &str, provider: Provider) -> Model {
     }
 
     Model {
-        id:                   model_id.to_string(),
+        id: model_id.to_string(),
         provider,
-        family:               "custom".to_string(),
-        display_name:         model_id.to_string(),
-        limits:               ModelLimits {
+        family: "custom".to_string(),
+        display_name: model_id.to_string(),
+        limits: ModelLimits {
             context_window: 0,
             max_output:     None,
         },
-        training:             None,
-        knowledge_cutoff:     None,
-        features:             ModelFeatures {
+        training: None,
+        knowledge_cutoff: None,
+        features: ModelFeatures {
             tools:     false,
             vision:    false,
             reasoning: false,
             effort:    false,
         },
-        costs:                ModelCosts {
+        costs: ModelCosts {
             input_cost_per_mtok:       None,
             output_cost_per_mtok:      None,
             cache_input_cost_per_mtok: None,
         },
         estimated_output_tps: None,
-        aliases:              Vec::new(),
-        default:              false,
-        configured:           true,
+        aliases: Vec::new(),
+        default: false,
+        configured: true,
     }
 }
 
@@ -1965,6 +1965,6 @@ digraph Demo {
                 .unwrap_or_default()
                 .contains("Rate limited by openai: quota limited")
         );
-        response_mock.assert_async().await;
+        assert!(response_mock.calls_async().await >= 1);
     }
 }
