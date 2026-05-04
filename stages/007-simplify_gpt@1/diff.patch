@@ -1,0 +1,360 @@
+diff --git a/apps/fabro-web/app/hooks/use-run-toasts.ts b/apps/fabro-web/app/hooks/use-run-toasts.ts
+new file mode 100644
+index 00000000..087b1fb6
+--- /dev/null
++++ b/apps/fabro-web/app/hooks/use-run-toasts.ts
+@@ -0,0 +1,67 @@
++import { useEffect, useRef } from "react";
++
++import { useToast } from "../components/toast";
++import { subscribeToRunEvents, type RunEventPayload } from "../lib/run-events";
++import type { MutateFn } from "../lib/sse";
++
++const NOOP_MUTATE = (() => undefined) as MutateFn;
++
++export function useRunToasts(runId: string | undefined) {
++  const { push } = useToast();
++  const seenEventIdsRef = useRef(new Set<string>());
++
++  useEffect(() => {
++    if (!runId) return;
++
++    seenEventIdsRef.current.clear();
++    return subscribeToRunEvents(runId, NOOP_MUTATE, undefined, {
++      onEvent: (payload) => {
++        const dedupeId = eventDedupeId(payload);
++        if (dedupeId) {
++          if (seenEventIdsRef.current.has(dedupeId)) return;
++          seenEventIdsRef.current.add(dedupeId);
++        }
++
++        const message = steeringToastMessage(payload);
++        if (message) {
++          push({ message });
++        }
++      },
++    });
++  }, [push, runId]);
++}
++
++function eventDedupeId(payload: RunEventPayload): string | null {
++  if (typeof payload.id === "string") return payload.id;
++  if (typeof payload.seq === "number") return `seq:${payload.seq}`;
++  return null;
++}
++
++function steeringToastMessage(payload: RunEventPayload): string | null {
++  const props = payload.properties ?? {};
++
++  switch (payload.event) {
++    case "agent.steering.injected": {
++      const kind = props.kind;
++      if (kind === "append") return "Steer delivered.";
++      if (kind === "interrupt") {
++        return "Agent interrupted — your message is the next turn.";
++      }
++      return null;
++    }
++    case "agent.steer.buffered":
++      return "Steer queued — will apply when an agent stage runs.";
++    case "agent.steer.dropped": {
++      const reason = props.reason;
++      if (reason === "queue_full") {
++        return "Steer rate limit reached; oldest queued steer dropped.";
++      }
++      if (reason === "run_ended") {
++        return "Run ended before queued steer(s) could apply.";
++      }
++      return null;
++    }
++    default:
++      return null;
++  }
++}
+diff --git a/apps/fabro-web/app/lib/run-events.test.tsx b/apps/fabro-web/app/lib/run-events.test.tsx
+index 14acf4f2..19b0675b 100644
+--- a/apps/fabro-web/app/lib/run-events.test.tsx
++++ b/apps/fabro-web/app/lib/run-events.test.tsx
+@@ -68,6 +68,34 @@ describe("subscribeToRunEvents", () => {
+     expect(source.closed).toBe(true);
+   });
+ 
++  test("runs payload callbacks for later subscribers on a shared source", () => {
++    const source = new FakeEventSource();
++    const seen: string[] = [];
++    const keys: string[] = [];
++    const mutate = (key: string) => {
++      keys.push(key);
++      return Promise.resolve();
++    };
++
++    const firstCleanup = subscribeToRunEvents("run-shared-payload", mutate, () => source, { debounceMs: 0 });
++    const secondCleanup = subscribeToRunEvents("run-shared-payload", mutate, () => {
++      throw new Error("source should be reused");
++    }, {
++      debounceMs: 0,
++      onEvent: (payload) => {
++        if (payload.event) seen.push(payload.event);
++      },
++    });
++
++    source.emit({ id: "evt-1", event: "agent.steer.buffered", properties: { kind: "append" } });
++
++    expect(seen).toEqual(["agent.steer.buffered"]);
++    expect(keys).toEqual([queryKeys.runs.events("run-shared-payload", 1000)]);
++
++    firstCleanup();
++    secondCleanup();
++  });
++
+   test("terminal events close the source after invalidating keys", () => {
+     const source = new FakeEventSource();
+     const keys: string[] = [];
+diff --git a/apps/fabro-web/app/lib/run-events.ts b/apps/fabro-web/app/lib/run-events.ts
+index bcae6c8d..948b31ac 100644
+--- a/apps/fabro-web/app/lib/run-events.ts
++++ b/apps/fabro-web/app/lib/run-events.ts
+@@ -11,7 +11,9 @@ import {
+   type SharedEventSubscription,
+ } from "./sse";
+ 
+-interface RunEventPayload extends EventPayload {
++export interface RunEventPayload extends EventPayload {
++  id?: string;
++  seq?: number;
+   event?: string;
+   node_id?: string;
+   properties?: Record<string, unknown>;
+@@ -119,7 +121,13 @@ export function subscribeToRunEvents(
+   runId: string,
+   mutate: MutateFn,
+   eventSourceFactory: (url: string) => EventSourceLike = createBrowserEventSource,
+-  { debounceMs = 300 }: { debounceMs?: number } = {},
++  {
++    debounceMs = 300,
++    onEvent,
++  }: {
++    debounceMs?: number;
++    onEvent?: (payload: RunEventPayload) => void;
++  } = {},
+ ): () => void {
+   return subscribeToSharedEventSource<RunEventPayload>({
+     subscriptions,
+@@ -129,6 +137,8 @@ export function subscribeToRunEvents(
+     eventSourceFactory,
+     debounceMs,
+     resolveInvalidation: (payload) => {
++      onEvent?.(payload);
++
+       const event = payload.event;
+       if (!event) return { keys: [] };
+ 
+@@ -157,4 +167,4 @@ export function useRunEvents(runId: string | undefined) {
+     if (!runId) return;
+     return subscribeToRunEvents(runId, mutate as MutateFn);
+   }, [mutate, runId]);
+-}
+\ No newline at end of file
++}
+diff --git a/apps/fabro-web/app/lib/sse.ts b/apps/fabro-web/app/lib/sse.ts
+index 408ff3c9..29597f87 100644
+--- a/apps/fabro-web/app/lib/sse.ts
++++ b/apps/fabro-web/app/lib/sse.ts
+@@ -18,10 +18,13 @@ export interface EventInvalidation {
+   immediate?: boolean;
+ }
+ 
++type EventResolver = (payload: EventPayload) => EventInvalidation;
++
+ export interface SharedEventSubscription {
+   source: EventSourceLike;
+   refcount: number;
+   mutators: Map<MutateFn, number>;
++  resolvers: Map<symbol, EventResolver>;
+   pendingKeys: Set<string>;
+   debounceTimer: ReturnType<typeof setTimeout> | null;
+ }
+@@ -54,6 +57,7 @@ export function subscribeToSharedEventSource<TPayload extends EventPayload>({
+       source,
+       refcount: 0,
+       mutators: new Map(),
++      resolvers: new Map(),
+       pendingKeys: new Set(),
+       debounceTimer: null,
+     };
+@@ -70,18 +74,29 @@ export function subscribeToSharedEventSource<TPayload extends EventPayload>({
+         return;
+       }
+ 
+-      const invalidation = resolveInvalidation(payload);
+-      queueInvalidations(current, invalidation.keys, {
+-        debounceMs,
+-        immediate: invalidation.immediate,
+-      });
++      const keys = new Set<string>();
++      let close = false;
++      let immediate = false;
++      for (const resolver of current.resolvers.values()) {
++        const invalidation = resolver(payload);
++        for (const key of invalidation.keys) keys.add(key);
++        close ||= Boolean(invalidation.close);
++        immediate ||= Boolean(invalidation.immediate);
++      }
++
++      queueInvalidations(current, [...keys], { debounceMs, immediate });
+ 
+-      if (invalidation.close) {
++      if (close) {
+         closeSharedEventSource(subscriptions, subscriptionKey, { flushPending: true });
+       }
+     };
+   }
+ 
++  const resolverId = Symbol(subscriptionKey);
++  subscription.resolvers.set(
++    resolverId,
++    resolveInvalidation as EventResolver,
++  );
+   subscription.refcount += 1;
+   subscription.mutators.set(mutate, (subscription.mutators.get(mutate) ?? 0) + 1);
+ 
+@@ -89,6 +104,8 @@ export function subscribeToSharedEventSource<TPayload extends EventPayload>({
+     const current = subscriptions.get(subscriptionKey);
+     if (!current) return;
+ 
++    current.resolvers.delete(resolverId);
++
+     const mutateCount = current.mutators.get(mutate) ?? 0;
+     if (mutateCount <= 1) {
+       current.mutators.delete(mutate);
+diff --git a/apps/fabro-web/app/routes/run-detail.tsx b/apps/fabro-web/app/routes/run-detail.tsx
+index 2732fdf0..0b9493da 100644
+--- a/apps/fabro-web/app/routes/run-detail.tsx
++++ b/apps/fabro-web/app/routes/run-detail.tsx
+@@ -1,8 +1,9 @@
+-import { useEffect, useRef } from "react";
++import { useEffect, useRef, useState } from "react";
+ import { ArrowPathIcon, ChevronRightIcon } from "@heroicons/react/20/solid";
+ import { Link, Outlet, useLocation } from "react-router";
+ 
+ import { InterviewDock } from "../components/interview-dock";
++import { SteerComposer } from "../components/steer-composer";
+ import { ErrorState } from "../components/state";
+ import { useToast } from "../components/toast";
+ import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from "../components/ui";
+@@ -22,6 +23,7 @@ import {
+   type PreviewMutationResult,
+ } from "../lib/mutations";
+ import { useRunEvents } from "../lib/run-events";
++import { useRunToasts } from "../hooks/use-run-toasts";
+ import { useRun, useRunQuestions } from "../lib/queries";
+ import {
+   canArchive,
+@@ -115,8 +117,10 @@ export default function RunDetail({ params }: { params: { id: string } }) {
+   const { push, dismiss } = useToast();
+   const tabs = allTabs.filter((t) => !t.demoOnly || demoMode);
+   const lifecycleToastStateRef = useRef<LifecycleToastState>(INITIAL_LIFECYCLE_TOAST_STATE);
++  const [steerOpen, setSteerOpen] = useState(false);
+ 
+   useRunEvents(params.id);
++  useRunToasts(params.id);
+ 
+   useEffect(() => {
+     if (previewMutation.data?.intent === "preview") {
+@@ -204,6 +208,18 @@ export default function RunDetail({ params }: { params: { id: string } }) {
+         </div>
+ 
+         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
++          {statusKind === "running" && (
++            <div>
++              <button
++                type="button"
++                onClick={() => setSteerOpen(true)}
++                className={MUTATION_BUTTON_CLASS}
++              >
++                Steer
++              </button>
++            </div>
++          )}
++
+           {visibility.showPrimaryCancel && (
+             <div>
+               <button
+@@ -300,6 +316,12 @@ export default function RunDetail({ params }: { params: { id: string } }) {
+         <Outlet />
+       </div>
+ 
++      <SteerComposer
++        runId={params.id}
++        open={steerOpen}
++        onClose={() => setSteerOpen(false)}
++      />
++
+       {isBlocked && pendingQuestions.length > 0 && (
+         <>
+           <div aria-hidden="true" className="h-72" />
+diff --git a/lib/crates/fabro-workflow/src/operations/start.rs b/lib/crates/fabro-workflow/src/operations/start.rs
+index 9ec984b2..a605d689 100644
+--- a/lib/crates/fabro-workflow/src/operations/start.rs
++++ b/lib/crates/fabro-workflow/src/operations/start.rs
+@@ -826,7 +826,14 @@ impl RunSession {
+         };
+ 
+         let retro = retroed.retro.clone();
+-        let concluded = Box::pin(pipeline::finalize(retroed, &finalize_opts)).await?;
++        let concluded = match Box::pin(pipeline::finalize(retroed, &finalize_opts)).await {
++            Ok(concluded) => concluded,
++            Err(err) => {
++                self.steering_hub.drain_pending_at_run_end();
++                store_progress_logger.flush().await;
++                return Err(err);
++            }
++        };
+         let finalized = Box::pin(pipeline::pull_request(concluded, &pr_opts)).await;
+         // Emit `agent.steer.dropped { reason: run_ended }` for any
+         // unconsumed pending steers on the success path, then flush. The
+diff --git a/lib/crates/fabro-workflow/src/steering_hub.rs b/lib/crates/fabro-workflow/src/steering_hub.rs
+index a96da11f..cb3764f2 100644
+--- a/lib/crates/fabro-workflow/src/steering_hub.rs
++++ b/lib/crates/fabro-workflow/src/steering_hub.rs
+@@ -171,11 +171,21 @@ impl SteeringHub {
+         // step so register/unregister cannot race with this push.
+         let active = self.active.read().expect("active lock poisoned");
+         if active.is_empty() {
+-            drop(active);
+-            let mut pending = self.pending.lock().expect("pending lock poisoned");
+-            if pending.len() >= PER_RUN_PENDING_CAP {
+-                let dropped = pending.pop_front();
+-                let dropped_actor = dropped.and_then(|d| d.actor);
++            let dropped_actor = {
++                let mut pending = self.pending.lock().expect("pending lock poisoned");
++                let dropped_actor = if pending.len() >= PER_RUN_PENDING_CAP {
++                    Some(pending.pop_front().and_then(|d| d.actor))
++                } else {
++                    None
++                };
++                pending.push_back(PendingSteer {
++                    text,
++                    actor: actor.clone(),
++                });
++                dropped_actor
++            };
++
++            if let Some(dropped_actor) = dropped_actor {
+                 self.emitter.emit(&Event::AgentSteerDropped {
+                     reason:  AgentSteerDroppedReason::QueueFull,
+                     count:   1,
+@@ -184,12 +194,9 @@ impl SteeringHub {
+                     visit:   None,
+                 });
+             }
+-            pending.push_back(PendingSteer {
+-                text,
+-                actor: actor.clone(),
+-            });
+             self.emitter
+                 .emit(&Event::AgentSteerBuffered { kind, actor });
++            drop(active);
+             return;
+         }
+ 
