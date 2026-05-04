@@ -330,35 +330,47 @@
   "status_updated_at": "2026-05-04T01:34:22.790624Z",
   "pending_control": null,
   "checkpoint": {
-    "timestamp": "2026-05-04T01:34:26.257096Z",
-    "current_node": "toolchain",
+    "timestamp": "2026-05-04T01:36:27.141398Z",
+    "current_node": "compile_rust",
     "completed_nodes": [
       "start",
-      "toolchain"
+      "toolchain",
+      "compile_rust"
     ],
     "node_retries": {},
     "context_values": {
       "outcome": "succeeded",
+      "thread.toolchain.current_node": "compile_rust",
       "internal.fidelity": "compact",
       "graph.retry_target": "exit",
       "internal.work_dir": "/home/daytona/workspace",
       "internal.retry_count.toolchain": 0,
       "internal.run_id": "01KQR9Y301PN1BJ0R3JC4FY6GX",
+      "internal.retry_count.compile_rust": 0,
       "failure_signature": "",
-      "internal.thread_id": "start",
+      "internal.thread_id": "toolchain",
       "graph.goal": "Verify the sandbox can lint and test the project",
       "graph.rankdir": "LR",
-      "command.output": "blob://sha256/0f445145c30db4edc762837f8ad7fdbcfcf07d57265b2bc38b6b276be718c75a",
+      "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
       "internal.node_visit_count": 1,
       "thread.start.current_node": "toolchain",
       "internal.retry_count.start": 0,
       "failure_class": "",
-      "current_node": "toolchain",
+      "current_node": "compile_rust",
       "command.stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
     },
     "node_outcomes": {
       "start": {
         "status": "succeeded",
+        "usage": null
+      },
+      "compile_rust": {
+        "status": "succeeded",
+        "context_updates": {
+          "command.stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+        },
+        "notes": "Script completed: cargo check -q --workspace 2>&1",
         "usage": null
       },
       "toolchain": {
@@ -371,9 +383,10 @@
         "usage": null
       }
     },
-    "next_node_id": "compile_rust",
+    "next_node_id": "compile_typescript",
     "node_visits": {
       "toolchain": 1,
+      "compile_rust": 1,
       "start": 1
     }
   },
@@ -410,6 +423,58 @@
         },
         "next_node_id": "toolchain",
         "node_visits": {
+          "start": 1
+        }
+      }
+    ],
+    [
+      26,
+      {
+        "timestamp": "2026-05-04T01:34:29.953166Z",
+        "current_node": "toolchain",
+        "completed_nodes": [
+          "start",
+          "toolchain"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "failure_signature": "",
+          "graph.goal": "Verify the sandbox can lint and test the project",
+          "command.output": "blob://sha256/0f445145c30db4edc762837f8ad7fdbcfcf07d57265b2bc38b6b276be718c75a",
+          "thread.start.current_node": "toolchain",
+          "graph.retry_target": "exit",
+          "graph.rankdir": "LR",
+          "internal.retry_count.start": 0,
+          "outcome": "succeeded",
+          "internal.thread_id": "start",
+          "failure_class": "",
+          "current_node": "toolchain",
+          "internal.fidelity": "compact",
+          "internal.node_visit_count": 1,
+          "command.stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "internal.retry_count.toolchain": 0,
+          "internal.run_id": "01KQR9Y301PN1BJ0R3JC4FY6GX",
+          "internal.work_dir": "/home/daytona/workspace"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+              "command.output": "blob://sha256/0f445145c30db4edc762837f8ad7fdbcfcf07d57265b2bc38b6b276be718c75a"
+            },
+            "notes": "Script completed: rustc --version && cargo --version && bun --version 2>&1",
+            "usage": null
+          }
+        },
+        "next_node_id": "compile_rust",
+        "git_commit_sha": "59b19e6418d10a1181f4a283a60db1ca2663e595",
+        "node_visits": {
+          "toolchain": 1,
           "start": 1
         }
       }
@@ -450,11 +515,33 @@
       "stdout": null,
       "stderr": null
     },
+    "compile_rust@1": {
+      "first_event_seq": 29,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "cargo check -q --workspace 2>&1",
+        "command": "cargo check -q --workspace 2>&1",
+        "language": "shell"
+      },
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null
+    },
     "toolchain@1": {
       "first_event_seq": 19,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Script completed: rustc --version && cargo --version && bun --version 2>&1",
+        "failure_reason": null,
+        "timestamp": "2026-05-04T01:34:26.256096Z"
+      },
       "provider_used": null,
       "diff": null,
       "script_invocation": {
@@ -462,10 +549,25 @@
         "command": "rustc --version && cargo --version && bun --version 2>&1",
         "language": "shell"
       },
-      "script_timing": null,
+      "script_timing": {
+        "stdout": "blob://sha256/0f445145c30db4edc762837f8ad7fdbcfcf07d57265b2bc38b6b276be718c75a",
+        "stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+        "exit_code": 0,
+        "duration_ms": 1584,
+        "termination": "exited",
+        "stdout_bytes": 79,
+        "stderr_bytes": 0,
+        "streams_separated": true,
+        "live_streaming": true
+      },
       "parallel_results": null,
       "stdout": null,
-      "stderr": null
+      "stderr": null,
+      "stdout_bytes": 79,
+      "stderr_bytes": 0,
+      "streams_separated": true,
+      "live_streaming": true,
+      "termination": "exited"
     }
   }
 }
