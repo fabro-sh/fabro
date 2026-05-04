@@ -184,11 +184,12 @@ where
     D: Deserializer<'de>,
 {
     use serde::de::Error;
+    use toml::value::Datetime;
 
     #[derive(Deserialize)]
     #[serde(untagged)]
     enum Either {
-        Toml(toml::value::Datetime),
+        Toml(Datetime),
         Str(String),
     }
 
@@ -310,8 +311,9 @@ impl TryFrom<String> for CredentialRef {
 
 impl<'de> Deserialize<'de> for CredentialRef {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
         let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
+        s.parse().map_err(D::Error::custom)
     }
 }
 
@@ -428,6 +430,10 @@ mod tests {
         // CredentialRef. The error bubbles up as a TOML deserialization
         // failure.
         #[derive(Deserialize)]
+        #[expect(
+            dead_code,
+            reason = "field exists only to drive the deserializer; we assert on the parse error"
+        )]
         struct Wrap {
             v: Vec<CredentialRef>,
         }
@@ -453,20 +459,14 @@ aliases = ["moonshot"]
         let kimi = layer.providers.get("kimi").unwrap();
         assert_eq!(kimi.display_name.as_deref(), Some("Kimi"));
         assert_eq!(kimi.adapter.as_deref(), Some("openai_compatible"));
-        assert_eq!(
-            kimi.base_url.as_deref(),
-            Some("https://api.moonshot.ai/v1")
-        );
+        assert_eq!(kimi.base_url.as_deref(), Some("https://api.moonshot.ai/v1"));
         assert_eq!(kimi.priority, Some(60));
         assert_eq!(kimi.enabled, Some(true));
         assert_eq!(kimi.aliases.as_deref(), Some(&["moonshot".to_string()][..]));
-        assert_eq!(
-            kimi.credentials.as_ref().unwrap(),
-            &vec![
-                CredentialRef::Credential("kimi".to_string()),
-                CredentialRef::Env("KIMI_API_KEY".to_string()),
-            ]
-        );
+        assert_eq!(kimi.credentials.as_ref().unwrap(), &vec![
+            CredentialRef::Credential("kimi".to_string()),
+            CredentialRef::Env("KIMI_API_KEY".to_string()),
+        ]);
     }
 
     #[test]
@@ -548,18 +548,9 @@ cache_input_cost_per_mtok = 9.0
         let controls = m.controls.as_ref().unwrap();
         assert_eq!(
             controls.reasoning_effort.as_deref(),
-            Some(
-                &[
-                    "low".to_string(),
-                    "medium".to_string(),
-                    "high".to_string()
-                ][..]
-            )
+            Some(&["low".to_string(), "medium".to_string(), "high".to_string()][..])
         );
-        assert_eq!(
-            controls.speed.as_deref(),
-            Some(&["fast".to_string()][..])
-        );
+        assert_eq!(controls.speed.as_deref(), Some(&["fast".to_string()][..]));
 
         let costs = m.costs.as_ref().unwrap();
         let fast = costs.speed.as_ref().unwrap().get("fast").unwrap();
@@ -629,10 +620,9 @@ mystery = 1
             ..ProviderSettings::default()
         };
         let merged = high.combine(low);
-        assert_eq!(
-            merged.credentials.unwrap(),
-            vec![CredentialRef::Env("FOO".to_string())]
-        );
+        assert_eq!(merged.credentials.unwrap(), vec![CredentialRef::Env(
+            "FOO".to_string()
+        )]);
     }
 
     #[test]
@@ -643,35 +633,28 @@ mystery = 1
             ..ProviderSettings::default()
         };
         let merged = high.combine(low);
-        assert_eq!(
-            merged.credentials.unwrap(),
-            vec![CredentialRef::Env("FOO".to_string())]
-        );
+        assert_eq!(merged.credentials.unwrap(), vec![CredentialRef::Env(
+            "FOO".to_string()
+        )]);
     }
 
     #[test]
     fn merge_map_field_merges_per_provider_id() {
         let mut high_map: std::collections::HashMap<String, ProviderSettings> =
             std::collections::HashMap::new();
-        high_map.insert(
-            "kimi".to_string(),
-            ProviderSettings {
-                base_url: Some("https://override".to_string()),
-                ..ProviderSettings::default()
-            },
-        );
+        high_map.insert("kimi".to_string(), ProviderSettings {
+            base_url: Some("https://override".to_string()),
+            ..ProviderSettings::default()
+        });
         let high: MergeMap<ProviderSettings> = MergeMap::from(high_map);
 
         let mut low_map: std::collections::HashMap<String, ProviderSettings> =
             std::collections::HashMap::new();
-        low_map.insert(
-            "kimi".to_string(),
-            ProviderSettings {
-                adapter: Some("openai_compatible".to_string()),
-                base_url: Some("https://defaults".to_string()),
-                ..ProviderSettings::default()
-            },
-        );
+        low_map.insert("kimi".to_string(), ProviderSettings {
+            adapter: Some("openai_compatible".to_string()),
+            base_url: Some("https://defaults".to_string()),
+            ..ProviderSettings::default()
+        });
         let low: MergeMap<ProviderSettings> = MergeMap::from(low_map);
 
         let merged = high.combine(low);
@@ -693,7 +676,10 @@ mystery = 1
             speed:            Some(vec!["fast".to_string()]),
         };
         let merged = high.combine(low);
-        assert_eq!(merged.reasoning_effort.as_deref(), Some(&["high".to_string()][..]));
+        assert_eq!(
+            merged.reasoning_effort.as_deref(),
+            Some(&["high".to_string()][..])
+        );
         assert_eq!(merged.speed.as_deref(), Some(&["fast".to_string()][..]));
     }
 }

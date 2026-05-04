@@ -18,7 +18,6 @@ use std::sync::Arc;
 use fabro_auth::ApiKeyHeader;
 use fabro_model::adapter::{self as model_adapter, AdapterMetadata};
 
-use crate::error::Error;
 use crate::provider::ProviderAdapter;
 use crate::providers;
 
@@ -50,13 +49,13 @@ impl AdapterConfig {
     /// Construct a minimal config with just provider ID and auth header.
     pub fn new(provider_id: impl Into<String>, auth_header: ApiKeyHeader) -> Self {
         Self {
-            provider_id:   provider_id.into(),
+            provider_id: provider_id.into(),
             auth_header,
-            base_url:      None,
+            base_url: None,
             extra_headers: HashMap::new(),
-            codex_mode:    false,
-            org_id:        None,
-            project_id:    None,
+            codex_mode: false,
+            org_id: None,
+            project_id: None,
         }
     }
 }
@@ -69,11 +68,15 @@ fn auth_value(header: &ApiKeyHeader) -> String {
 
 /// Factory function signature. Takes a fully-resolved [`AdapterConfig`] and
 /// returns a registered-ready [`ProviderAdapter`].
-pub type AdapterFactory = fn(&AdapterConfig) -> Result<Arc<dyn ProviderAdapter>, Error>;
+///
+/// Adapter constructors are infallible today; if a future adapter needs to
+/// fail at construction time, add a separate fallible factory variant
+/// rather than re-shaping every existing factory.
+pub type AdapterFactory = fn(&AdapterConfig) -> Arc<dyn ProviderAdapter>;
 
 const KIMI_BASE_URL: &str = "https://api.moonshot.ai/v1";
 
-fn build_anthropic(config: &AdapterConfig) -> Result<Arc<dyn ProviderAdapter>, Error> {
+fn build_anthropic(config: &AdapterConfig) -> Arc<dyn ProviderAdapter> {
     let mut adapter = providers::AnthropicAdapter::new(auth_value(&config.auth_header));
     if let Some(base_url) = config.base_url.clone() {
         adapter = adapter.with_base_url(base_url);
@@ -81,10 +84,10 @@ fn build_anthropic(config: &AdapterConfig) -> Result<Arc<dyn ProviderAdapter>, E
     if !config.extra_headers.is_empty() {
         adapter = adapter.with_default_headers(config.extra_headers.clone());
     }
-    Ok(Arc::new(adapter))
+    Arc::new(adapter)
 }
 
-fn build_openai(config: &AdapterConfig) -> Result<Arc<dyn ProviderAdapter>, Error> {
+fn build_openai(config: &AdapterConfig) -> Arc<dyn ProviderAdapter> {
     let mut adapter = providers::OpenAiAdapter::new(auth_value(&config.auth_header));
     if let Some(base_url) = config.base_url.clone() {
         adapter = adapter.with_base_url(base_url);
@@ -101,10 +104,10 @@ fn build_openai(config: &AdapterConfig) -> Result<Arc<dyn ProviderAdapter>, Erro
     if let Some(project_id) = config.project_id.clone() {
         adapter = adapter.with_project_id(project_id);
     }
-    Ok(Arc::new(adapter))
+    Arc::new(adapter)
 }
 
-fn build_gemini(config: &AdapterConfig) -> Result<Arc<dyn ProviderAdapter>, Error> {
+fn build_gemini(config: &AdapterConfig) -> Arc<dyn ProviderAdapter> {
     let mut adapter = providers::GeminiAdapter::new(auth_value(&config.auth_header));
     if let Some(base_url) = config.base_url.clone() {
         adapter = adapter.with_base_url(base_url);
@@ -112,10 +115,10 @@ fn build_gemini(config: &AdapterConfig) -> Result<Arc<dyn ProviderAdapter>, Erro
     if !config.extra_headers.is_empty() {
         adapter = adapter.with_default_headers(config.extra_headers.clone());
     }
-    Ok(Arc::new(adapter))
+    Arc::new(adapter)
 }
 
-fn build_openai_compatible(config: &AdapterConfig) -> Result<Arc<dyn ProviderAdapter>, Error> {
+fn build_openai_compatible(config: &AdapterConfig) -> Arc<dyn ProviderAdapter> {
     let base_url = config
         .base_url
         .clone()
@@ -126,7 +129,7 @@ fn build_openai_compatible(config: &AdapterConfig) -> Result<Arc<dyn ProviderAda
     if !config.extra_headers.is_empty() {
         adapter = adapter.with_default_headers(config.extra_headers.clone());
     }
-    Ok(Arc::new(adapter))
+    Arc::new(adapter)
 }
 
 /// Look up a factory by adapter key. Returns `None` if the key has no factory
@@ -182,8 +185,7 @@ mod tests {
 
     #[test]
     fn registered_factory_set_matches_metadata_set() {
-        let metadata: std::collections::BTreeSet<&str> =
-            model_adapter::keys().collect();
+        let metadata: std::collections::BTreeSet<&str> = model_adapter::keys().collect();
         let factories: std::collections::BTreeSet<&str> = registered_keys().collect();
         assert_eq!(metadata, factories);
     }
@@ -195,14 +197,11 @@ mod tests {
 
     #[test]
     fn anthropic_factory_builds_anthropic_adapter() {
-        let config = AdapterConfig::new(
-            "anthropic",
-            ApiKeyHeader::Custom {
-                name:  "x-api-key".to_string(),
-                value: "test-key".to_string(),
-            },
-        );
-        let adapter = factory_for("anthropic").unwrap()(&config).unwrap();
+        let config = AdapterConfig::new("anthropic", ApiKeyHeader::Custom {
+            name:  "x-api-key".to_string(),
+            value: "test-key".to_string(),
+        });
+        let adapter = factory_for("anthropic").unwrap()(&config);
         assert_eq!(adapter.name(), "anthropic");
     }
 
@@ -217,7 +216,7 @@ mod tests {
             org_id:        None,
             project_id:    None,
         };
-        let adapter = factory_for("openai_compatible").unwrap()(&config).unwrap();
+        let adapter = factory_for("openai_compatible").unwrap()(&config);
         assert_eq!(adapter.name(), "kimi");
     }
 }

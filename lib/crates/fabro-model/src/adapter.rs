@@ -8,8 +8,8 @@
 //! (in `fabro-model`) and the LLM factory registry (in `fabro-llm`) must agree
 //! on the same set of adapter keys; the parity is enforced by tests.
 
-use crate::reasoning::ReasoningEffort;
 use crate::Speed;
+use crate::reasoning::ReasoningEffort;
 
 /// Internal dispatch key that `fabro-agent` maps to a concrete agent profile.
 ///
@@ -100,7 +100,9 @@ pub const OPENAI: AdapterMetadata = AdapterMetadata {
 pub const GEMINI: AdapterMetadata = AdapterMetadata {
     key:             "gemini",
     default_profile: AgentProfileKind::Gemini,
-    api_key_header:  ApiKeyHeaderPolicy::Custom { name: "x-goog-api-key" },
+    api_key_header:  ApiKeyHeaderPolicy::Custom {
+        name: "x-goog-api-key",
+    },
     controls:        AdapterControlCapabilities {
         native_reasoning_effort: FULL_REASONING_EFFORTS,
         additional_speeds:       &[],
@@ -184,10 +186,7 @@ mod tests {
 
     #[test]
     fn openai_compatible_uses_openai_profile() {
-        assert_eq!(
-            OPENAI_COMPATIBLE.default_profile,
-            AgentProfileKind::OpenAi
-        );
+        assert_eq!(OPENAI_COMPATIBLE.default_profile, AgentProfileKind::OpenAi);
     }
 
     #[test]

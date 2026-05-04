@@ -42,17 +42,26 @@ mod tests {
 
     #[test]
     fn parses_canonical_lowercase_strings() {
-        assert_eq!(ReasoningEffort::from_str("low").unwrap(), ReasoningEffort::Low);
+        assert_eq!(
+            ReasoningEffort::from_str("low").unwrap(),
+            ReasoningEffort::Low
+        );
         assert_eq!(
             ReasoningEffort::from_str("medium").unwrap(),
             ReasoningEffort::Medium
         );
-        assert_eq!(ReasoningEffort::from_str("high").unwrap(), ReasoningEffort::High);
+        assert_eq!(
+            ReasoningEffort::from_str("high").unwrap(),
+            ReasoningEffort::High
+        );
         assert_eq!(
             ReasoningEffort::from_str("xhigh").unwrap(),
             ReasoningEffort::XHigh
         );
-        assert_eq!(ReasoningEffort::from_str("max").unwrap(), ReasoningEffort::Max);
+        assert_eq!(
+            ReasoningEffort::from_str("max").unwrap(),
+            ReasoningEffort::Max
+        );
     }
 
     #[test]

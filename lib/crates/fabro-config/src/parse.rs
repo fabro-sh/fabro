@@ -216,7 +216,10 @@ mod tests {
             .parse::<SettingsLayer>()
             .unwrap_err();
         let text = err.to_string();
-        assert!(text.contains("run.model") || text.contains("llm"), "got: {text}");
+        assert!(
+            text.contains("run.model") || text.contains("llm"),
+            "got: {text}"
+        );
     }
 
     #[test]
@@ -225,6 +228,9 @@ mod tests {
             .parse::<SettingsLayer>()
             .unwrap_err();
         let text = err.to_string();
-        assert!(text.contains("run.model") || text.contains("llm"), "got: {text}");
+        assert!(
+            text.contains("run.model") || text.contains("llm"),
+            "got: {text}"
+        );
     }
 }

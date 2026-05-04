@@ -4,6 +4,7 @@ mod docker_build;
 #[cfg(unix)]
 mod docker_entrypoint;
 mod docs;
+mod policy;
 mod release;
 mod spa;
 
@@ -11,7 +12,7 @@ fn fabro_dev() -> assert_cmd::Command {
     assert_cmd::cargo::cargo_bin_cmd!("fabro-dev")
 }
 
-fn workspace_root() -> PathBuf {
+pub(crate) fn workspace_root() -> PathBuf {
     let mut root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     root.pop();
     root.pop();

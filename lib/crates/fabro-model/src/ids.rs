@@ -133,12 +133,15 @@ mod tests {
     #[test]
     fn display_writes_inner_string() {
         assert_eq!(ProviderId::new("anthropic").to_string(), "anthropic");
-        assert_eq!(ModelId::new("claude-opus-4-7").to_string(), "claude-opus-4-7");
+        assert_eq!(
+            ModelId::new("claude-opus-4-7").to_string(),
+            "claude-opus-4-7"
+        );
     }
 
     #[test]
     fn ord_is_lexicographic() {
-        let mut v = vec![ProviderId::new("zai"), ProviderId::new("anthropic")];
+        let mut v = [ProviderId::new("zai"), ProviderId::new("anthropic")];
         v.sort();
         assert_eq!(v[0].as_str(), "anthropic");
         assert_eq!(v[1].as_str(), "zai");
