@@ -41,8 +41,11 @@ const INTERVIEW_EVENTS = new Set([
   "interview.interrupted",
 ]);
 const STEERING_EVENTS = new Set([
-  "steering.received",
-  "steering.applied",
+  "agent.steering.injected",
+  "agent.steering.attached",
+  "agent.steering.detached",
+  "agent.steer.buffered",
+  "agent.steer.dropped",
 ]);
 
 export function queryKeysForRunEvent(

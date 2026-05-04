@@ -794,7 +794,7 @@ export default function Runs() {
             <div className="flex gap-5 overflow-x-auto pb-4">
               {filteredColumns.map((col) => (
                 <div key={col.id} className="w-72 shrink-0">
-                  <BoardColumn column={col} />
+                  <BoardColumn column={col} onSteer={setSteerRunId} />
                 </div>
               ))}
             </div>
@@ -869,6 +869,9 @@ export default function Runs() {
           </>
         )}
       </div>
+      {steerRunId && (
+        <SteerComposer runId={steerRunId} onClose={() => setSteerRunId(null)} />
+      )}
     </DndContext>
   );
 }

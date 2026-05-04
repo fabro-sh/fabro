@@ -608,10 +608,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             AgentEvent::SteeringInjected { text, kind, .. } => {
                 EventBody::AgentSteeringInjected(fabro_types::AgentSteeringInjectedProps {
                     text: text.clone(),
-                    kind: match kind {
-                        ::fabro_types::SteerKind::Append => "append".to_string(),
-                        ::fabro_types::SteerKind::Interrupt => "interrupt".to_string(),
-                    },
+                    kind: kind.to_string(),
                     visit: *visit,
                 })
             }
@@ -720,10 +717,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
         }
         Event::SteerBuffered { kind, .. } => {
             EventBody::AgentSteerBuffered(fabro_types::AgentSteerBufferedProps {
-                kind: match kind {
-                    ::fabro_types::SteerKind::Append => "append".to_string(),
-                    ::fabro_types::SteerKind::Interrupt => "interrupt".to_string(),
-                },
+                kind: kind.to_string(),
             })
         }
         Event::SteerDropped { count, reason, .. } => {

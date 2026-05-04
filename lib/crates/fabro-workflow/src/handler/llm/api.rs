@@ -504,14 +504,7 @@ impl CodergenBackend for AgentApiBackend {
         // Register with steering hub for steer delivery
         let stage_id = stage_scope.stage_id();
         let _steering_guard = if let Some(ref hub) = self.steering_hub {
-            let control_handle = session.control_handle();
-            hub.register(&stage_id, &control_handle);
-            let coordinator = SteeringCompletionCoordinator {
-                hub:      Arc::clone(hub),
-                stage_id: stage_id.clone(),
-                handle:   control_handle,
-            };
-            session.set_completion_coordinator(Arc::new(coordinator));
+            register_session_steering(hub, &stage_id, &mut session);
             Some(SteeringGuard {
                 hub:      Arc::clone(hub),
                 stage_id: stage_id.clone(),
@@ -575,14 +568,7 @@ impl CodergenBackend for AgentApiBackend {
 
                     // Re-register with steering hub for the new session
                     if let Some(ref hub) = self.steering_hub {
-                        let control_handle = session.control_handle();
-                        hub.register(&stage_id, &control_handle);
-                        let coordinator = SteeringCompletionCoordinator {
-                            hub:      Arc::clone(hub),
-                            stage_id: stage_id.clone(),
-                            handle:   control_handle,
-                        };
-                        session.set_completion_coordinator(Arc::new(coordinator));
+                        register_session_steering(hub, &stage_id, &mut session);
                     }
 
                     // Re-subscribe to forward events + track files from the new session
@@ -675,6 +661,23 @@ impl CodergenBackend for AgentApiBackend {
             last_file_touched,
         })
     }
+}
+
+/// Register a session with the steering hub, setting up the completion
+/// coordinator so the close-the-door protocol works.
+fn register_session_steering(
+    hub: &Arc<SteeringHub>,
+    stage_id: &StageId,
+    session: &mut Session,
+) {
+    let control_handle = session.control_handle();
+    hub.register(stage_id, &control_handle);
+    let coordinator = SteeringCompletionCoordinator {
+        hub:      Arc::clone(hub),
+        stage_id: stage_id.clone(),
+        handle:   control_handle,
+    };
+    session.set_completion_coordinator(Arc::new(coordinator));
 }
 
 /// RAII guard that unregisters a session from the steering hub on drop.

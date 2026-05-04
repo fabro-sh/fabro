@@ -422,22 +422,12 @@ impl Session {
     }
 
     pub fn steer(&self, message: String) {
-        self.steering_queue
-            .lock()
-            .expect("steering queue lock poisoned")
-            .push_back((message, SteerKind::Append, None));
+        self.control_handle().steer(message, None);
     }
 
     /// Push an interrupt steer and cancel the current round token.
     pub fn interrupt_with(&self, text: String, actor: Option<Principal>) {
-        self.steering_queue
-            .lock()
-            .expect("steering queue lock poisoned")
-            .push_back((text, SteerKind::Interrupt, actor));
-        self.round_token
-            .read()
-            .expect("round token lock poisoned")
-            .cancel();
+        self.control_handle().interrupt_with(text, actor);
     }
 
     /// Returns a lightweight handle for external steering control.
@@ -734,16 +724,11 @@ impl Session {
 
             // Reset round token if it was cancelled (steer interrupt)
             {
-                let needs_reset = self
+                let mut guard = self
                     .round_token
-                    .read()
-                    .expect("round token lock poisoned")
-                    .is_cancelled();
-                if needs_reset {
-                    let mut guard = self
-                        .round_token
-                        .write()
-                        .expect("round token lock poisoned");
+                    .write()
+                    .expect("round token lock poisoned");
+                if guard.is_cancelled() {
                     *guard = CancellationToken::new();
                 }
             }
@@ -1079,10 +1064,9 @@ impl Session {
             .expect("steering queue lock poisoned")
             .drain(..)
             .collect();
-        for (msg, kind, actor) in messages {
-            let text = msg.clone();
+        for (text, kind, actor) in messages {
             self.history.push(Turn::Steering {
-                content:   msg,
+                content:   text.clone(),
                 timestamp: SystemTime::now(),
             });
             self.event_emitter
