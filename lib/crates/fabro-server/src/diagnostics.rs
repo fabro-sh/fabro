@@ -121,11 +121,12 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
         match probe_result {
             Ok(Ok(())) => details.push(CheckDetail::new(format!("{provider}: OK"))),
             Ok(Err(err)) => {
+                let rendered = render_error_chain(&err);
                 failures.push(ProviderFailure {
                     name:  provider.to_string(),
-                    short: short_error_line(&err.to_string()),
+                    short: short_error_line(&rendered),
                 });
-                details.push(CheckDetail::new(format!("{provider}: {err}")));
+                details.push(CheckDetail::new(format!("{provider}: {rendered}")));
             }
             Err(_) => {
                 failures.push(ProviderFailure {
@@ -186,6 +187,17 @@ fn short_error_line(rendered: &str) -> String {
     } else {
         first.to_string()
     }
+}
+
+fn render_error_chain(err: &dyn std::error::Error) -> String {
+    let mut out = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        out.push_str(": ");
+        out.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    out
 }
 
 fn probe_model(provider: Provider) -> String {
@@ -673,6 +685,23 @@ mod tests {
         let input = "a".repeat(MAX_SHORT_LEN + 1);
         let expected = format!("{}…", "a".repeat(MAX_SHORT_LEN));
         assert_eq!(short_error_line(&input), expected);
+    }
+
+    #[test]
+    fn render_error_chain_includes_underlying_cause_for_typed_llm_error() {
+        let inner = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "tcp connect");
+        let err = fabro_llm::Error::network("openai request failed", inner);
+
+        let rendered = render_error_chain(&err);
+
+        assert!(
+            rendered.contains("openai request failed"),
+            "top-level message missing: {rendered}"
+        );
+        assert!(
+            rendered.contains("tcp connect"),
+            "underlying cause missing — chain not walked: {rendered}"
+        );
     }
 
     #[test]
