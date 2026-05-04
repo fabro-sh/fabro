@@ -292,6 +292,12 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                                         error = %fabro_sandbox::display_for_log(&err),
                                         "git push from run lifecycle failed"
                                     );
+                                    self.emitter.notice_with_tail(
+                                        RunNoticeLevel::Warn,
+                                        "git_push_failed",
+                                        format!("Failed to push run branch {branch}: {err}"),
+                                        exec_output_tail.clone(),
+                                    );
                                     (false, exec_output_tail)
                                 }
                             };

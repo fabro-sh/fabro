@@ -105,7 +105,13 @@ impl Handler for PromptHandler {
         let (response_text, stage_usage, backend_files_touched) =
             if let Some(backend) = &self.backend {
                 let result = backend
-                    .one_shot(node, &prompt, system_prompt.as_deref())
+                    .one_shot(
+                        node,
+                        &prompt,
+                        system_prompt.as_deref(),
+                        &services.run.emitter,
+                        &stage_scope,
+                    )
                     .await;
                 match result {
                     Ok(CodergenResult::Full(outcome)) => return Ok(outcome),
@@ -279,6 +285,8 @@ mod tests {
                 _node: &Node,
                 _prompt: &str,
                 _system_prompt: Option<&str>,
+                _emitter: &Arc<crate::event::Emitter>,
+                _stage_scope: &StageScope,
             ) -> Result<CodergenResult, Error> {
                 Ok(CodergenResult::Text {
                     text:              "one-shot response".to_string(),
@@ -339,6 +347,8 @@ mod tests {
                 _node: &Node,
                 _prompt: &str,
                 _system_prompt: Option<&str>,
+                _emitter: &Arc<crate::event::Emitter>,
+                _stage_scope: &StageScope,
             ) -> Result<CodergenResult, Error> {
                 Ok(CodergenResult::Text {
                     text:              "one-shot response".to_string(),
@@ -396,6 +406,8 @@ mod tests {
             _node: &Node,
             prompt: &str,
             system_prompt: Option<&str>,
+            _emitter: &Arc<crate::event::Emitter>,
+            _stage_scope: &StageScope,
         ) -> Result<CodergenResult, Error> {
             *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
             *self.captured_system_prompt.lock().unwrap() = Some(system_prompt.map(String::from));
