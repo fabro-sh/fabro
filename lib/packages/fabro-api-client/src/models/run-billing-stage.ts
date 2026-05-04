@@ -22,6 +22,9 @@ import type { BillingStageRef } from './billing-stage-ref';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { ModelReference } from './model-reference';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { StageState } from './stage-state';
 
 /**
  * Token counts and billed totals for a single stage within a run.
@@ -34,5 +37,12 @@ export interface RunBillingStage {
      * Wall-clock runtime in seconds.
      */
     'runtime_secs': number;
+    /**
+     * Wall-clock time the latest attempt of this stage started, if known.
+     */
+    'started_at'?: string | null;
+    /**
+     * Lifecycle state of the stage. Use to detect in-flight rows for client-side runtime ticking.
+     */
+    'state'?: StageState | null;
 }
-

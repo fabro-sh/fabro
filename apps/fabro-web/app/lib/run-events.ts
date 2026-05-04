@@ -42,7 +42,12 @@ const RUN_SUMMARY_EVENTS = new Set([
   "run.archived",
   "run.unarchived",
 ]);
-const STAGE_EVENTS = new Set(["stage.started", "stage.completed", "stage.failed"]);
+const STAGE_EVENTS = new Set([
+  "stage.started",
+  "stage.completed",
+  "stage.failed",
+  "stage.retrying",
+]);
 const COMMAND_EVENTS = new Set(["command.started", "command.completed"]);
 const INTERVIEW_EVENTS = new Set([
   "interview.started",
@@ -85,6 +90,7 @@ export function queryKeysForRunEvent(
   if (STAGE_EVENTS.has(event)) {
     const keys = [
       queryKeys.runs.stages(runId),
+      queryKeys.runs.billing(runId),
       queryKeys.runs.events(runId, 1000),
       queryKeys.runs.graph(runId, "LR"),
       queryKeys.runs.graph(runId, "TB"),

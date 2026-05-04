@@ -38,7 +38,10 @@ export interface RunStage {
      * Node identifier in the Graphviz graph source.
      */
     'dot_id'?: string;
+    /**
+     * Wall-clock time the latest attempt of this stage started, if known.
+     */
+    'started_at'?: string | null;
 }
-
 
 

@@ -75,12 +75,14 @@ describe("RunBilling", () => {
             model: null,
             billing: zeroBilling(),
             runtime_secs: 0,
+            state: "succeeded",
           },
           {
             stage: { id: "command", name: "command" },
             model: null,
             billing: zeroBilling(),
             runtime_secs: 61,
+            state: "succeeded",
           },
         ],
         totals: {
@@ -108,6 +110,7 @@ describe("RunBilling", () => {
             model: null,
             billing: zeroBilling(),
             runtime_secs: 0,
+            state: "succeeded",
           },
           {
             stage: { id: "agent", name: "agent" },
@@ -119,6 +122,7 @@ describe("RunBilling", () => {
               total_usd_micros: 240000,
             }),
             runtime_secs: 42,
+            state: "succeeded",
           },
         ],
         totals: {
@@ -161,5 +165,55 @@ describe("RunBilling", () => {
     const text = textFromNode(renderer.toJSON());
     expect(text).toContain("No completed stages yet");
     expect(text).toContain("Stages will appear once the run produces completed nodes.");
+  });
+
+  test("renders an in-flight row with live runtime and includes its elapsed time in the footer", () => {
+    const originalNow = Date.now;
+    // Pin "now" to 30s after the in-flight row started.
+    const startedAt = "2026-04-29T12:00:00.000Z";
+    const fakeNow = new Date("2026-04-29T12:00:30.000Z").getTime();
+    Date.now = () => fakeNow;
+
+    try {
+      const renderer = renderBilling(
+        billing({
+          stages: [
+            {
+              stage: { id: "in-flight", name: "in-flight" },
+              model: null,
+              // Server reports 0 runtime / no billing; the row is still being executed.
+              billing: zeroBilling(),
+              runtime_secs: 0,
+              started_at: startedAt,
+              state: "running",
+            },
+          ],
+          // Server total is 0 because the in-flight row hasn't been finalized.
+          totals: {
+            runtime_secs: 0,
+            ...zeroBilling(),
+          },
+        }),
+      );
+
+      const text = textFromNode(renderer.toJSON());
+      // Empty-state must NOT show — the table should appear as soon as the
+      // first stage starts.
+      expect(text).not.toContain("No completed stages yet");
+      expect(text).toContain("in-flight");
+
+      // Both the row's runtime cell and the footer total should reflect
+      // ~30s elapsed since started_at.
+      expect(text).toContain("30s");
+
+      const footers = renderer.root.findAll((node) => node.type === "tfoot");
+      const footerCells = footers[0].findAll((node) => node.type === "td");
+      // The Run time column in the footer is index 3 (Total / [empty Model] /
+      // Tokens / Run time / Billing).
+      const footerRuntime = textFromInstance(footerCells[3]);
+      expect(footerRuntime).toContain("30s");
+    } finally {
+      Date.now = originalNow;
+    }
   });
 });

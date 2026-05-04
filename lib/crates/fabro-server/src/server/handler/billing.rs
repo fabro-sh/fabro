@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
-use fabro_types::EventBody;
+use chrono::Utc;
+use fabro_types::{StageId, StageProjection};
 
 use super::super::{
-    ApiError, AppState, BilledTokenCounts, BillingByModel, BillingStageRef, EventEnvelope, HashMap,
-    IntoResponse, Json, ListResponse, ModelBillingTotals, ModelReference, PaginationParams, Path,
-    Query, RequiredUser, Response, Router, RunBilling, RunBillingStage, RunBillingTotals, RunId,
-    RunStage, RunStatus, StageState, State, StatusCode, accumulate_model_billing, get,
-    parse_run_id_path,
+    ApiError, AppState, BilledTokenCounts, BillingByModel, BillingStageRef, HashMap, IntoResponse,
+    Json, ListResponse, ModelBillingTotals, ModelReference, PaginationParams, Path, Query,
+    RequiredUser, Response, Router, RunBilling, RunBillingStage, RunBillingTotals, RunId, RunStage,
+    State, StatusCode, accumulate_model_billing, get, parse_run_id_path,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -16,23 +16,55 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/billing", get(get_run_billing))
 }
 
-fn active_stage_state_from_events(events: &[EventEnvelope], node_id: &str) -> StageState {
-    let latest = events.iter().rev().find(|envelope| {
-        envelope.event.node_id.as_deref() == Some(node_id)
-            && matches!(
-                &envelope.event.body,
-                EventBody::StageRetrying(_)
-                    | EventBody::StageStarted(_)
-                    | EventBody::StageCompleted(_)
-                    | EventBody::StageFailed(_)
-            )
-    });
+/// One row per `node_id`, latest visit wins.
+///
+/// Mirrors the aggregation rule used in `fabro_workflow::pipeline::finalize`:
+/// the displayed row uses the latest visit's data, but the row's sort key is
+/// the minimum `first_event_seq` across all visits of that node — i.e. the
+/// node's first appearance in the event log. This produces the same A, B
+/// order for an A → B → A loop that finalize produces.
+struct DedupedStage<'a> {
+    node_id:               String,
+    stage:                 &'a StageProjection,
+    sort_key_first_event:  u32,
+}
 
-    if latest.is_some_and(|e| matches!(&e.event.body, EventBody::StageRetrying(_))) {
-        StageState::Retrying
-    } else {
-        StageState::Running
+fn dedupe_by_node_id<'a>(
+    stages: impl IntoIterator<Item = (&'a StageId, &'a StageProjection)>,
+) -> Vec<DedupedStage<'a>> {
+    let mut by_node: HashMap<String, (u32, u32, &'a StageProjection)> = HashMap::new();
+    for (stage_id, stage) in stages {
+        let node_id = stage_id.node_id().to_string();
+        let visit = stage_id.visit();
+        let first_event = stage.first_event_seq.get();
+        by_node
+            .entry(node_id)
+            .and_modify(|entry| {
+                if first_event < entry.0 {
+                    entry.0 = first_event;
+                }
+                if visit >= entry.1 {
+                    entry.1 = visit;
+                    entry.2 = stage;
+                }
+            })
+            .or_insert((first_event, visit, stage));
     }
+
+    let mut deduped: Vec<DedupedStage<'a>> = by_node
+        .into_iter()
+        .map(|(node_id, (first_event, _visit, stage))| DedupedStage {
+            node_id,
+            stage,
+            sort_key_first_event: first_event,
+        })
+        .collect();
+    deduped.sort_by(|a, b| {
+        a.sort_key_first_event
+            .cmp(&b.sort_key_first_event)
+            .then_with(|| a.node_id.cmp(&b.node_id))
+    });
+    deduped
 }
 
 async fn list_run_stages(
@@ -46,81 +78,29 @@ async fn list_run_stages(
         Err(response) => return response,
     };
 
-    // Try live run first.
-    let (checkpoint, run_is_active) = {
-        let runs = state.runs.lock().expect("runs lock poisoned");
-        match runs.get(&id) {
-            Some(managed_run) => {
-                let active = !matches!(
-                    managed_run.status,
-                    RunStatus::Succeeded { .. } | RunStatus::Failed { .. } | RunStatus::Dead
-                );
-                (managed_run.checkpoint.clone(), active)
-            }
-            None => (None, false),
+    let Ok(run_store) = state.store.open_run_reader(&id).await else {
+        return ApiError::not_found("Run not found.").into_response();
+    };
+    let projection = match run_store.state().await {
+        Ok(state) => state,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
         }
     };
 
-    // Fall back to stored run.
-    let (checkpoint, run_is_active) = if checkpoint.is_some() {
-        (checkpoint, run_is_active)
-    } else {
-        match state.store.open_run_reader(&id).await {
-            Ok(run_store) => match run_store.state().await {
-                Ok(run_state) => {
-                    let active = run_state.status.is_some_and(|status| !status.is_terminal());
-                    (run_state.checkpoint, active)
-                }
-                Err(_) => (None, false),
-            },
-            Err(_) => return ApiError::not_found("Run not found.").into_response(),
-        }
-    };
-
-    let Some(checkpoint) = checkpoint else {
-        return (
-            StatusCode::OK,
-            Json(ListResponse::new(Vec::<RunStage>::new())),
-        )
-            .into_response();
-    };
-
-    let events = match state.store.open_run_reader(&id).await {
-        Ok(run_store) => run_store.list_events().await.unwrap_or_default(),
-        Err(_) => Vec::new(),
-    };
-    let stage_durations = fabro_workflow::extract_stage_durations_from_events(&events);
-
-    let mut stages = Vec::new();
-    for node_id in &checkpoint.completed_nodes {
-        let duration_ms = stage_durations.get(node_id).copied().unwrap_or(0);
-        let status = match checkpoint.node_outcomes.get(node_id) {
-            Some(outcome) => StageState::from(outcome.status),
-            None => StageState::Succeeded,
-        };
-        stages.push(RunStage {
-            id: node_id.clone(),
-            name: node_id.clone(),
-            status,
-            duration_secs: Some(duration_ms as f64 / 1000.0),
-            dot_id: Some(node_id.clone()),
-        });
-    }
-
-    // Add next node as running if the run is still active.
-    // The checkpoint's current_node is the last *completed* stage; next_node_id
-    // is the stage that is currently executing.
-    if let Some(next_id) = &checkpoint.next_node_id {
-        if run_is_active && next_id != "exit" && !checkpoint.completed_nodes.contains(next_id) {
-            stages.push(RunStage {
-                id:            next_id.clone(),
-                name:          next_id.clone(),
-                status:        active_stage_state_from_events(&events, next_id),
-                duration_secs: None,
-                dot_id:        Some(next_id.clone()),
-            });
-        }
-    }
+    let now = Utc::now();
+    let stages: Vec<RunStage> = dedupe_by_node_id(projection.iter_stages())
+        .into_iter()
+        .map(|entry| RunStage {
+            id:            entry.node_id.clone(),
+            name:          entry.node_id.clone(),
+            status:        entry.stage.effective_state(),
+            duration_secs: entry.stage.runtime_secs(now),
+            dot_id:        Some(entry.node_id.clone()),
+            started_at:    entry.stage.started_at,
+        })
+        .collect();
 
     (StatusCode::OK, Json(ListResponse::new(stages))).into_response()
 }
@@ -137,55 +117,29 @@ async fn get_run_billing(
         }
     };
 
-    let checkpoint = match run_store.state().await {
-        Ok(state) => state.checkpoint,
+    let projection = match run_store.state().await {
+        Ok(state) => state,
         Err(err) => {
             return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
                 .into_response();
         }
     };
 
-    let Some(checkpoint) = checkpoint else {
-        let empty = RunBilling {
-            by_model: Vec::new(),
-            stages:   Vec::new(),
-            totals:   RunBillingTotals {
-                cache_read_tokens:  0,
-                cache_write_tokens: 0,
-                input_tokens:       0,
-                output_tokens:      0,
-                reasoning_tokens:   0,
-                runtime_secs:       0.0,
-                total_tokens:       0,
-                total_usd_micros:   None,
-            },
-        };
-        return (StatusCode::OK, Json(empty)).into_response();
-    };
-
-    let stage_durations = match run_store.list_events().await {
-        Ok(events) => fabro_workflow::extract_stage_durations_from_events(&events),
-        Err(err) => {
-            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response();
-        }
-    };
+    let now = Utc::now();
 
     let mut by_model_totals = HashMap::<String, ModelBillingTotals>::new();
     let mut billed_usages = Vec::new();
     let mut runtime_secs = 0.0_f64;
     let mut stages = Vec::new();
 
-    for node_id in &checkpoint.completed_nodes {
-        let duration_ms = stage_durations.get(node_id).copied().unwrap_or(0);
-        runtime_secs += duration_ms as f64 / 1000.0;
+    for entry in dedupe_by_node_id(projection.iter_stages()) {
+        let stage = entry.stage;
+        let node_id = entry.node_id;
 
-        let usage = checkpoint
-            .node_outcomes
-            .get(node_id)
-            .and_then(|outcome| outcome.usage.as_ref());
+        let row_runtime = stage.runtime_secs(now).unwrap_or(0.0);
+        runtime_secs += row_runtime;
 
-        let (billing, model) = if let Some(usage) = usage {
+        let (billing, model) = if let Some(usage) = stage.usage.as_ref() {
             billed_usages.push(usage.clone());
             let tokens = usage.tokens();
             let billing = BilledTokenCounts {
@@ -207,11 +161,13 @@ async fn get_run_billing(
         stages.push(RunBillingStage {
             billing,
             model,
-            runtime_secs: duration_ms as f64 / 1000.0,
+            runtime_secs: row_runtime,
             stage: BillingStageRef {
                 id:   node_id.clone(),
-                name: node_id.clone(),
+                name: node_id,
             },
+            started_at: stage.started_at,
+            state: Some(stage.effective_state()),
         });
     }
 

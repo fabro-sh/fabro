@@ -19,6 +19,7 @@ describe("queryKeys", () => {
     ]);
     expect(queryKeysForRunEvent("run-1", "stage.completed", "stage-1")).toEqual([
       queryKeys.runs.stages("run-1"),
+      queryKeys.runs.billing("run-1"),
       queryKeys.runs.events("run-1", 1000),
       queryKeys.runs.graph("run-1", "LR"),
       queryKeys.runs.graph("run-1", "TB"),

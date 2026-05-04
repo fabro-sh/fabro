@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 import { EmptyState } from "../components/state";
 import { formatDurationSecs } from "../lib/format";
 import { useRunBilling } from "../lib/queries";
@@ -14,33 +16,87 @@ function formatUsdMicros(usdMicros?: number | null) {
   return usdMicros == null ? EMPTY_VALUE : `$${(usdMicros / 1_000_000).toFixed(2)}`;
 }
 
-function mapBilling(billing: RunBilling | undefined) {
+function isInFlightState(state: string | null | undefined): boolean {
+  return state === "running" || state === "retrying" || state === "pending";
+}
+
+interface MappedStageRow {
+  stage:          string;
+  model:          string | null;
+  inputTokens:    number | null;
+  outputTokens:   number | null;
+  runtimeSecs:    number;
+  totalUsdMicros: number | null | undefined;
+  inFlight:       boolean;
+  startedAt:      string | null | undefined;
+}
+
+interface MappedBilling {
+  rows:            MappedStageRow[];
+  totalRuntimeSecs: number;
+  totalUsdMicros:  number | null | undefined;
+  totalInput:      number | null;
+  totalOutput:     number | null;
+  modelBreakdown:  {
+    model:          string;
+    stages:         number;
+    inputTokens:    number;
+    outputTokens:   number;
+    totalUsdMicros: number | null | undefined;
+  }[];
+  modelStageCount: number;
+  hasInFlight:     boolean;
+}
+
+function mapBilling(billing: RunBilling | undefined, now: number): MappedBilling {
   if (!billing) {
     return {
-      stages: [],
-      totalRuntime: formatDurationSecs(0),
-      totalUsdMicros: undefined,
-      totalInput: null,
-      totalOutput: null,
-      modelBreakdown: [],
-      modelStageCount: 0,
+      rows:             [],
+      totalRuntimeSecs: 0,
+      totalUsdMicros:   undefined,
+      totalInput:       null,
+      totalOutput:      null,
+      modelBreakdown:   [],
+      modelStageCount:  0,
+      hasInFlight:      false,
     };
   }
 
-  const stages = billing.stages.map((stage) => {
+  let hasInFlight = false;
+  const rows: MappedStageRow[] = billing.stages.map((stage) => {
     const hasModel = stage.model != null;
+    const inFlight = isInFlightState(stage.state);
+    if (inFlight) hasInFlight = true;
+
+    let runtimeSecs = stage.runtime_secs;
+    if (inFlight && stage.started_at) {
+      const startedMs = new Date(stage.started_at).getTime();
+      if (Number.isFinite(startedMs)) {
+        runtimeSecs = Math.max(0, (now - startedMs) / 1000);
+      }
+    }
+
     return {
-      stage: stage.stage.name,
-      model: stage.model?.id ?? null,
-      inputTokens: hasModel ? stage.billing.input_tokens : null,
-      outputTokens: hasModel
+      stage:          stage.stage.name,
+      model:          stage.model?.id ?? null,
+      inputTokens:    hasModel ? stage.billing.input_tokens : null,
+      outputTokens:   hasModel
         ? stage.billing.output_tokens + stage.billing.reasoning_tokens
         : null,
-      runtime: formatDurationSecs(stage.runtime_secs),
+      runtimeSecs,
       totalUsdMicros: stage.billing.total_usd_micros,
+      inFlight,
+      startedAt:      stage.started_at,
     };
   });
-  const totalRuntime = formatDurationSecs(billing.totals.runtime_secs);
+
+  // While ticking, derive total runtime from the displayed row runtimes so the
+  // footer updates in lock-step with the in-flight row(s). Otherwise trust the
+  // server's authoritative total.
+  const totalRuntimeSecs = hasInFlight
+    ? rows.reduce((sum, row) => sum + row.runtimeSecs, 0)
+    : billing.totals.runtime_secs;
+
   const hasLlmStages = billing.by_model.length > 0;
   const totalInput = hasLlmStages ? billing.totals.input_tokens : null;
   const totalOutput = hasLlmStages
@@ -49,38 +105,53 @@ function mapBilling(billing: RunBilling | undefined) {
   const totalUsdMicros = billing.totals.total_usd_micros;
   const modelBreakdown = billing.by_model
     .map((entry) => ({
-      model: entry.model.id,
-      stages: entry.stages,
-      inputTokens: entry.billing.input_tokens,
-      outputTokens: entry.billing.output_tokens + entry.billing.reasoning_tokens,
+      model:          entry.model.id,
+      stages:         entry.stages,
+      inputTokens:    entry.billing.input_tokens,
+      outputTokens:   entry.billing.output_tokens + entry.billing.reasoning_tokens,
       totalUsdMicros: entry.billing.total_usd_micros,
     }))
     .sort((a, b) => (b.totalUsdMicros ?? -1) - (a.totalUsdMicros ?? -1));
   const modelStageCount = modelBreakdown.reduce((sum, row) => sum + row.stages, 0);
+
   return {
-    stages,
-    totalRuntime,
+    rows,
+    totalRuntimeSecs,
     totalUsdMicros,
     totalInput,
     totalOutput,
     modelBreakdown,
     modelStageCount,
+    hasInFlight,
   };
 }
 
 export default function RunBilling({ params }: { params: { id: string } }) {
   const billingQuery = useRunBilling(params.id);
+
+  // Tick state for live runtime computation. Re-rendered every second only
+  // while at least one stage is in-flight.
+  const [now, setNow] = useState(() => Date.now());
+  const billing = billingQuery.data;
+  const hasInFlight = billing?.stages.some((stage) => isInFlightState(stage.state)) ?? false;
+
+  useEffect(() => {
+    if (!hasInFlight) return;
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [hasInFlight]);
+
   const {
-    stages,
-    totalRuntime,
+    rows,
+    totalRuntimeSecs,
     totalUsdMicros,
     totalInput,
     totalOutput,
     modelBreakdown,
     modelStageCount,
-  } = mapBilling(billingQuery.data);
+  } = mapBilling(billing, now);
 
-  if (!stages.length) {
+  if (!rows.length) {
     return (
       <div className="py-12">
         <EmptyState
@@ -105,7 +176,7 @@ export default function RunBilling({ params }: { params: { id: string } }) {
             </tr>
           </thead>
           <tbody>
-            {stages.map((row) => (
+            {rows.map((row) => (
               <tr key={row.stage} className="border-b border-line last:border-b-0">
                 <td className="px-4 py-3 text-fg-2">{row.stage}</td>
                 <td className="px-4 py-3 font-mono text-xs text-fg-3">
@@ -115,7 +186,9 @@ export default function RunBilling({ params }: { params: { id: string } }) {
                   {formatTokens(row.inputTokens)} <span className="text-fg-muted">/</span>{" "}
                   {formatTokens(row.outputTokens)}
                 </td>
-                <td className="px-4 py-3 text-right font-mono text-xs text-fg-3">{row.runtime}</td>
+                <td className="px-4 py-3 text-right font-mono text-xs text-fg-3">
+                  {formatDurationSecs(row.runtimeSecs)}
+                </td>
                 <td className="px-4 py-3 text-right font-mono text-xs text-fg-3">
                   {formatUsdMicros(row.totalUsdMicros)}
                 </td>
@@ -131,7 +204,7 @@ export default function RunBilling({ params }: { params: { id: string } }) {
                 {formatTokens(totalOutput)}
               </td>
               <td className="px-4 py-3 text-right font-mono text-xs font-medium text-fg">
-                {totalRuntime}
+                {formatDurationSecs(totalRuntimeSecs)}
               </td>
               <td className="px-4 py-3 text-right font-mono text-xs font-medium text-fg">
                 {formatUsdMicros(totalUsdMicros)}

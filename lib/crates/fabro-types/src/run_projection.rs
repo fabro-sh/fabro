@@ -4,9 +4,9 @@ use std::num::NonZeroU32;
 use chrono::{DateTime, Utc};
 
 use crate::{
-    Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition, PullRequestRecord, Retro,
-    RunControlAction, RunId, RunSpec, RunStatus, SandboxRecord, StageCompletion, StageId,
-    StartRecord,
+    BilledModelUsage, Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition,
+    PullRequestRecord, Retro, RunControlAction, RunId, RunSpec, RunStatus, SandboxRecord,
+    StageCompletion, StageId, StageState, StartRecord,
 };
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -61,6 +61,17 @@ pub struct StageProjection {
     pub live_streaming:    Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub termination:       Option<crate::CommandTermination>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at:        Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms:       Option<u64>,
+    /// Server-internal billing usage for the latest attempt; not part of the
+    /// wire contract because `BilledModelUsage` is not modeled in OpenAPI.
+    /// Read only in-process by the billing handler.
+    #[serde(skip)]
+    pub usage:             Option<BilledModelUsage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state:             Option<StageState>,
 }
 
 /// Convert a 1-based event sequence number into the `NonZeroU32` form used for
@@ -90,7 +101,79 @@ impl StageProjection {
             streams_separated: None,
             live_streaming: None,
             termination: None,
+            started_at: None,
+            duration_ms: None,
+            usage: None,
+            state: None,
         }
+    }
+
+    /// Effective lifecycle state derived from stored event data.
+    ///
+    /// Falls back to deriving from `completion` for projections that predate
+    /// the stored `state` field, so old serialized projections still work
+    /// without a backfill.
+    #[must_use]
+    pub fn effective_state(&self) -> StageState {
+        self.state.unwrap_or_else(|| match &self.completion {
+            Some(completion) => StageState::from(completion.outcome),
+            None => StageState::Running,
+        })
+    }
+
+    /// Live wall-clock runtime in seconds.
+    ///
+    /// While the stage is non-terminal (`Pending`, `Running`, or `Retrying`),
+    /// this returns the elapsed time since `started_at` so the UI can tick
+    /// client-side. Once terminal, the stored `duration_ms` is returned. This
+    /// also handles retries safely: a new `StageStarted` resets the state
+    /// back to `Running` and keeps the live computation correct even if a
+    /// previous attempt left a stale `duration_ms`.
+    #[must_use]
+    pub fn runtime_secs(&self, now: DateTime<Utc>) -> Option<f64> {
+        let state = self.effective_state();
+        if matches!(
+            state,
+            StageState::Running | StageState::Retrying | StageState::Pending
+        ) {
+            return self.started_at.map(|started| {
+                now.signed_duration_since(started)
+                    .num_milliseconds()
+                    .max(0) as f64
+                    / 1000.0
+            });
+        }
+        self.duration_ms.map(|ms| ms as f64 / 1000.0)
+    }
+
+    /// Reset every per-attempt result field. Called when a stage starts a
+    /// new attempt (or visit) so prior-attempt data does not leak into the
+    /// new attempt's projection.
+    ///
+    /// Preserves `first_event_seq` (identity / sort key) and leaves
+    /// `started_at` / `state` to be set by the caller immediately after.
+    pub fn reset_for_new_attempt(&mut self) {
+        self.completion = None;
+        self.duration_ms = None;
+        self.usage = None;
+        self.state = None;
+
+        self.response = None;
+        self.prompt = None;
+        self.provider_used = None;
+        self.diff = None;
+
+        self.script_invocation = None;
+        self.script_timing = None;
+        self.parallel_results = None;
+
+        self.stdout = None;
+        self.stderr = None;
+        self.stdout_bytes = None;
+        self.stderr_bytes = None;
+        self.streams_separated = None;
+        self.live_streaming = None;
+        self.termination = None;
     }
 }
 

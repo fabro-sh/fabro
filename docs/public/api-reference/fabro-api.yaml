@@ -5328,6 +5328,20 @@ components:
           oneOf:
             - $ref: "#/components/schemas/CommandTermination"
             - type: "null"
+        started_at:
+          type: ["string", "null"]
+          format: date-time
+          description: Wall-clock time the latest attempt of this stage started, if known.
+        duration_ms:
+          type: ["integer", "null"]
+          format: uint64
+          minimum: 0
+          description: Wall-clock duration of the stage's latest terminal attempt, if known.
+        state:
+          oneOf:
+            - $ref: "#/components/schemas/StageState"
+            - type: "null"
+          description: Lifecycle state of the stage projection.
 
     InterviewOption:
       description: Option stored with an interview question in the event log.
@@ -6339,6 +6353,11 @@ components:
           type: string
           description: Node identifier in the Graphviz graph source.
           example: propose
+        started_at:
+          type: ["string", "null"]
+          format: date-time
+          description: Wall-clock time the latest attempt of this stage started, if known.
+          example: "2026-04-29T12:34:56Z"
 
     ToolUse:
       description: A single tool invocation with its input, result, and execution metadata.
@@ -6629,6 +6648,16 @@ components:
           type: number
           description: Wall-clock runtime in seconds.
           example: 154.0
+        started_at:
+          type: ["string", "null"]
+          format: date-time
+          description: Wall-clock time the latest attempt of this stage started, if known.
+          example: "2026-04-29T12:34:56Z"
+        state:
+          oneOf:
+            - $ref: "#/components/schemas/StageState"
+            - type: "null"
+          description: Lifecycle state of the stage. Use to detect in-flight rows for client-side runtime ticking.
 
     RunBillingTotals:
       description: Aggregate billing totals across all stages of a run.

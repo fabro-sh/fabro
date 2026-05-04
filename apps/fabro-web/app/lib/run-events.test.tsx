@@ -49,6 +49,18 @@ describe("queryKeysForRunEvent", () => {
       queryKeys.runs.graph("run-1", "TB"),
     ]);
   });
+
+  test("stage.retrying invalidates stages, billing, events, and stage turns", () => {
+    expect(queryKeysForRunEvent("run-1", "stage.retrying", "stage-7")).toEqual([
+      queryKeys.runs.stages("run-1"),
+      queryKeys.runs.billing("run-1"),
+      queryKeys.runs.events("run-1", 1000),
+      queryKeys.runs.graph("run-1", "LR"),
+      queryKeys.runs.graph("run-1", "TB"),
+      queryKeys.runs.detail("run-1"),
+      queryKeys.runs.stageTurns("run-1", "stage-7"),
+    ]);
+  });
 });
 
 describe("subscribeToRunEvents", () => {

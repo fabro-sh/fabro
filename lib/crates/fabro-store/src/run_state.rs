@@ -10,7 +10,7 @@ use fabro_types::{
     BilledModelUsage, Checkpoint, Conclusion, EventBody, FailureSignature, InterviewQuestionRecord,
     Outcome, PendingInterviewRecord, PullRequestRecord, RunControlAction, RunEvent, RunId,
     RunProjection, RunSpec, RunStatus, RunSummary, SandboxRecord, StageCompletion, StageOutcome,
-    StageProjection, StartRecord, TerminalStatus, first_event_seq,
+    StageProjection, StageState, StartRecord, TerminalStatus, first_event_seq,
 };
 use fabro_util::error::render_with_causes;
 use serde_json::Value;
@@ -290,11 +290,20 @@ impl RunProjectionReducer for RunProjection {
                 let Some(stage_id) = stored.stage_id.as_ref() else {
                     return Ok(());
                 };
-                self.stage_entry(
+                let stage = self.stage_entry(
                     stage_id.node_id(),
                     stage_id.visit(),
                     first_event_seq(event.seq),
                 );
+                stage.reset_for_new_attempt();
+                stage.started_at = Some(ts);
+                stage.state = Some(StageState::Running);
+            }
+            EventBody::StageRetrying(_) => {
+                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
+                    return Ok(());
+                };
+                stage.state = Some(StageState::Retrying);
             }
             EventBody::StagePrompt(props) => {
                 let Some(stage) = stage_at_visit(self, stored, props.visit, event.seq) else {
@@ -317,12 +326,19 @@ impl RunProjectionReducer for RunProjection {
                 let response = props.response.clone();
                 let outcome = stage_outcome_from_props(props);
                 let completion = stage_completion_from_outcome(&outcome, ts);
+                let usage = props.billing.clone();
+                let duration_ms = props.duration_ms;
+                let terminal_state = StageState::from(outcome.status);
                 let stage = self.stage_entry(node_id, visit, first_event_seq(event.seq));
                 stage.response = response;
                 stage.completion = Some(completion);
+                stage.duration_ms = Some(duration_ms);
+                stage.usage = usage;
+                stage.state = Some(terminal_state);
             }
             EventBody::StageFailed(props) => {
                 let failure_reason = props.failure.as_ref().map(|detail| detail.message.clone());
+                let duration_ms = props.duration_ms;
                 let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
                     return Ok(());
                 };
@@ -334,6 +350,8 @@ impl RunProjectionReducer for RunProjection {
                     failure_reason,
                     timestamp: ts,
                 });
+                stage.duration_ms = Some(duration_ms);
+                stage.state = Some(StageState::Failed);
             }
             EventBody::AgentSessionStarted(props) => {
                 let Some(stage) = stage_at_visit(self, stored, props.visit, event.seq) else {
@@ -613,12 +631,13 @@ mod tests {
     use fabro_types::run_event::run::RunFailedProps;
     use fabro_types::run_event::{
         CheckpointCompletedProps, InterviewCompletedProps, InterviewOption, InterviewStartedProps,
-        RunControlEffectProps, StagePromptProps, StageStartedProps,
+        RunControlEffectProps, StageCompletedProps, StageFailedProps, StagePromptProps,
+        StageRetryingProps, StageStartedProps,
     };
     use fabro_types::{
-        BlockedReason, Checkpoint, EventBody, FailureReason, Outcome, QuestionType, RunBlobId,
-        RunControlAction, RunEvent, RunStatus, StageOutcome, SuccessReason, TerminalStatus,
-        WorkflowSettings, first_event_seq, fixtures,
+        BlockedReason, Checkpoint, EventBody, FailureCategory, FailureDetail, FailureReason,
+        Outcome, QuestionType, RunBlobId, RunControlAction, RunEvent, RunStatus, StageOutcome,
+        StageState, SuccessReason, TerminalStatus, WorkflowSettings, first_event_seq, fixtures,
     };
     use serde_json::json;
 
@@ -1487,5 +1506,200 @@ mod tests {
             })
         );
         assert_eq!(state.status_updated_at, updated_at);
+    }
+
+    fn started_props() -> StageStartedProps {
+        StageStartedProps {
+            index:        0,
+            handler_type: "agent".to_string(),
+            attempt:      1,
+            max_attempts: 3,
+        }
+    }
+
+    fn failed_props(duration_ms: u64) -> StageFailedProps {
+        StageFailedProps {
+            index: 0,
+            failure: Some(FailureDetail::new(
+                "boom",
+                FailureCategory::TransientInfra,
+            )),
+            will_retry: true,
+            duration_ms,
+        }
+    }
+
+    fn retrying_props() -> StageRetryingProps {
+        StageRetryingProps {
+            index:        0,
+            attempt:      2,
+            max_attempts: 3,
+            delay_ms:     0,
+        }
+    }
+
+    fn completed_props(duration_ms: u64, status: StageOutcome) -> StageCompletedProps {
+        StageCompletedProps {
+            index: 0,
+            duration_ms,
+            status,
+            preferred_label: None,
+            suggested_next_ids: Vec::new(),
+            billing: None,
+            failure: None,
+            notes: None,
+            files_touched: Vec::new(),
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: None,
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
+            response: None,
+            attempt: 1,
+            max_attempts: 3,
+        }
+    }
+
+    #[test]
+    fn stage_started_records_started_at_and_running_state() {
+        let mut state = RunProjection::default();
+        let stage_id = StageId::new("build", 1);
+
+        state
+            .apply_event(&test_stage_event(
+                3,
+                EventBody::StageStarted(started_props()),
+                stage_id.clone(),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(stage.state, Some(StageState::Running));
+        assert!(stage.started_at.is_some());
+        assert_eq!(stage.effective_state(), StageState::Running);
+    }
+
+    #[test]
+    fn stage_completed_records_duration_and_terminal_state() {
+        let mut state = RunProjection::default();
+        let stage_id = StageId::new("build", 1);
+
+        state
+            .apply_event(&test_stage_event(
+                1,
+                EventBody::StageStarted(started_props()),
+                stage_id.clone(),
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                2,
+                EventBody::StageCompleted(completed_props(42, StageOutcome::Succeeded)),
+                Some("build"),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(stage.duration_ms, Some(42));
+        assert_eq!(stage.state, Some(StageState::Succeeded));
+        assert_eq!(stage.effective_state(), StageState::Succeeded);
+    }
+
+    #[test]
+    fn stage_failed_records_duration_and_failed_state() {
+        let mut state = RunProjection::default();
+        let stage_id = StageId::new("build", 1);
+
+        state
+            .apply_event(&test_stage_event(
+                1,
+                EventBody::StageStarted(started_props()),
+                stage_id.clone(),
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                2,
+                EventBody::StageFailed(failed_props(10)),
+                Some("build"),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(stage.duration_ms, Some(10));
+        assert_eq!(stage.state, Some(StageState::Failed));
+    }
+
+    #[test]
+    fn stage_retrying_sets_retrying_state() {
+        let mut state = RunProjection::default();
+        let stage_id = StageId::new("build", 1);
+
+        state
+            .apply_event(&test_stage_event(
+                1,
+                EventBody::StageStarted(started_props()),
+                stage_id.clone(),
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                2,
+                EventBody::StageFailed(failed_props(10)),
+                Some("build"),
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                3,
+                EventBody::StageRetrying(retrying_props()),
+                Some("build"),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(stage.state, Some(StageState::Retrying));
+    }
+
+    #[test]
+    fn stage_started_after_retrying_returns_to_running_and_resets_attempt_data() {
+        let mut state = RunProjection::default();
+        let stage_id = StageId::new("build", 1);
+
+        state
+            .apply_event(&test_stage_event(
+                1,
+                EventBody::StageStarted(started_props()),
+                stage_id.clone(),
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                2,
+                EventBody::StageFailed(failed_props(10)),
+                Some("build"),
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                3,
+                EventBody::StageRetrying(retrying_props()),
+                Some("build"),
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_stage_event(
+                4,
+                EventBody::StageStarted(started_props()),
+                stage_id.clone(),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(stage.state, Some(StageState::Running));
+        // Prior attempt's terminal data must not leak into the new attempt.
+        assert!(stage.completion.is_none());
+        assert_eq!(stage.duration_ms, None);
     }
 }
