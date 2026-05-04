@@ -30,6 +30,18 @@ CLI/miette output, logs, and telemetry may render the full cause chain.
 
 HTTP API responses must stay curated. Log the full internal chain, but return only a safe public message. Do not expose `format!("{err:#}")` in API JSON.
 
+### Rendering the chain
+
+Anyhow walks the chain in `format!("{err:#}")`. `thiserror`-derived `Display` impls do **not** — they only render the variant's `#[error("...")]` template, even with `:#`. Rendering a typed error directly silently drops every `#[source]`.
+
+Use `fabro_util::error::collect_chain` at any boundary that should preserve the chain:
+
+```rust
+let rendered = fabro_util::error::collect_chain(&err).join(": ");
+```
+
+When migrating from `anyhow::Result<T>` to a typed `Result<T, E>`, audit every formatter on the call path. `format!("{err}")` and `format!("{err:#}")` look identical but change behavior at the boundary — anyhow walks the chain, a typed error does not.
+
 ## Clone-bound storage
 
 Do not fall back to `String` only because `anyhow::Error` is not `Clone`.
@@ -43,4 +55,4 @@ Prefer, in order:
 
 ## Tests
 
-When changing error propagation, add a regression test that walks `err.chain()` and proves the underlying cause is still present.
+When changing error propagation, add a regression test that walks the source chain and proves the underlying cause is still present. For `anyhow::Error`, iterate `err.chain()`. For typed errors, recurse `err.source()` or assert on `collect_chain(&err)`.
