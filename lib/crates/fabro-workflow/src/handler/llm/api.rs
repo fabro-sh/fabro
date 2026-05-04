@@ -7,13 +7,13 @@ use fabro_agent::{
     AgentEvent, AgentProfile, AnthropicProfile, CompletionCoordinator, GeminiProfile,
     OpenAiProfile, Sandbox, Session, SessionControlHandle, SessionOptions, Turn,
 };
-use fabro_types::StageId;
 use fabro_auth::{CredentialSource, EnvCredentialSource};
 use fabro_graphviz::graph::Node;
 use fabro_llm::client::Client;
 use fabro_llm::types::{Message, Request, TokenCounts};
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::{FallbackTarget, Provider};
+use fabro_types::StageId;
 use tokio::sync::Mutex as TokioMutex;
 
 use super::super::agent::{CodergenBackend, CodergenResult};
@@ -665,11 +665,7 @@ impl CodergenBackend for AgentApiBackend {
 
 /// Register a session with the steering hub, setting up the completion
 /// coordinator so the close-the-door protocol works.
-fn register_session_steering(
-    hub: &Arc<SteeringHub>,
-    stage_id: &StageId,
-    session: &mut Session,
-) {
+fn register_session_steering(hub: &Arc<SteeringHub>, stage_id: &StageId, session: &mut Session) {
     let control_handle = session.control_handle();
     hub.register(stage_id, &control_handle);
     let coordinator = SteeringCompletionCoordinator {

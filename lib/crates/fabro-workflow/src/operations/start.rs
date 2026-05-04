@@ -33,7 +33,6 @@ use tokio::sync::RwLock as AsyncRwLock;
 
 use crate::ManifestPath;
 use crate::artifact_upload::ArtifactSink;
-use crate::steering_hub::SteeringHub;
 use crate::context::Context;
 use crate::error::Error;
 use crate::event::{
@@ -52,6 +51,7 @@ use crate::run_metadata::metadata_branch_name;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::run_status::{FailureReason, RunStatus};
 use crate::runtime_store::RunStoreHandle;
+use crate::steering_hub::SteeringHub;
 use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
 
 struct RunSession {

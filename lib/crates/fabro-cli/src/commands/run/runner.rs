@@ -638,6 +638,7 @@ mod tests {
     };
     use fabro_vault::{SecretType, Vault};
     use fabro_workflow::event::RunEventSink;
+    use fabro_workflow::steering_hub::SteeringHub;
 
     use super::{
         WorkerControlStreamEvent, WorkerTitlePhase, apply_worker_control_line,
@@ -645,7 +646,6 @@ mod tests {
         read_worker_control_stream_blocking, stamp_system_worker, worker_title,
         worker_title_phase_for_event,
     };
-    use fabro_workflow::steering_hub::SteeringHub;
     use crate::args::RunWorkerMode;
 
     #[test]

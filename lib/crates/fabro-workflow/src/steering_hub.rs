@@ -29,7 +29,7 @@ pub struct SteeringHub {
 impl SteeringHub {
     pub fn new(emitter: Arc<Emitter>) -> Self {
         Self {
-            active:  RwLock::new(HashMap::new()),
+            active: RwLock::new(HashMap::new()),
             pending: Mutex::new(VecDeque::new()),
             emitter,
         }
@@ -76,7 +76,12 @@ impl SteeringHub {
             let mut pending = self.pending.lock().expect("steering pending lock poisoned");
             for steer in pending.drain(..) {
                 // Buffered steers always delivered as append
-                Self::enqueue_into_session(handle, &steer.text, SteerKind::Append, steer.actor.as_ref());
+                Self::enqueue_into_session(
+                    handle,
+                    &steer.text,
+                    SteerKind::Append,
+                    steer.actor.as_ref(),
+                );
             }
             drop(pending);
 
@@ -106,7 +111,7 @@ impl SteeringHub {
             self.emitter.emit(&Event::SteerDropped {
                 count,
                 reason: "run_ended".to_string(),
-                actor:  None,
+                actor: None,
             });
         }
     }

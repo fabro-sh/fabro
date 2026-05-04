@@ -313,7 +313,12 @@ impl AgentEvent {
                 debug!(session_id, skill = skill_name.as_str(), "Skill expanded");
             }
             Self::SteeringInjected { text, kind, .. } => {
-                debug!(session_id, text_len = text.len(), ?kind, "Steering injected");
+                debug!(
+                    session_id,
+                    text_len = text.len(),
+                    ?kind,
+                    "Steering injected"
+                );
             }
             Self::CompactionStarted {
                 estimated_tokens,

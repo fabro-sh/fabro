@@ -607,8 +607,8 @@ fn event_body_from_event(event: &Event) -> EventBody {
             }
             AgentEvent::SteeringInjected { text, kind, .. } => {
                 EventBody::AgentSteeringInjected(fabro_types::AgentSteeringInjectedProps {
-                    text: text.clone(),
-                    kind: kind.to_string(),
+                    text:  text.clone(),
+                    kind:  kind.to_string(),
                     visit: *visit,
                 })
             }

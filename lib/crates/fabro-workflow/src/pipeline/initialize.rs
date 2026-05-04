@@ -27,7 +27,6 @@ use tokio::time::timeout as tokio_timeout;
 use super::types::{InitOptions, Initialized, LlmSpec, Persisted, SandboxEnvSpec};
 use crate::devcontainer_bridge::{devcontainer_to_snapshot_config, run_devcontainer_lifecycle};
 use crate::error::Error;
-use crate::steering_hub::SteeringHub;
 use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::git::RUN_BRANCH_PREFIX;
 use crate::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
@@ -39,6 +38,7 @@ use crate::run_options::{GitCheckpointOptions, RunOptions};
 use crate::sandbox_git::GIT_REMOTE;
 use crate::sandbox_git_runtime::SandboxGitRuntime;
 use crate::services::{EngineServices, RunServices};
+use crate::steering_hub::SteeringHub;
 
 struct WorktreePlan {
     branch_name:          String,

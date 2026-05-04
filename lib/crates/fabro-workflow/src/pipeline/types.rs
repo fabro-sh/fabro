@@ -18,7 +18,6 @@ use tokio::sync::RwLock as AsyncRwLock;
 
 use crate::ManifestPath;
 use crate::artifact_upload::ArtifactSink;
-use crate::steering_hub::SteeringHub;
 use crate::context::Context;
 use crate::error::Error;
 use crate::event::Emitter;
@@ -30,6 +29,7 @@ use crate::run_control::RunControlState;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::runtime_store::RunStoreHandle;
 use crate::services::{EngineServices, RunServices};
+use crate::steering_hub::SteeringHub;
 use crate::transforms::Transform;
 use crate::workflow_bundle::WorkflowBundle;
 

@@ -83,8 +83,9 @@ pub use secret::{SecretMetadata, SecretType};
 pub use stage_completion::StageCompletion;
 pub use stage_id::{ParallelBranchId, StageId};
 pub use start::StartRecord;
-pub use self::steering::SteerKind;
 pub use status::{
     BlockedReason, FailureReason, InvalidTransition, ParseFailureReasonError,
     ParseSuccessReasonError, RunControlAction, RunStatus, SuccessReason, TerminalStatus,
 };
+
+pub use self::steering::SteerKind;

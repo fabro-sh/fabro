@@ -43,27 +43,27 @@ use crate::types::{AgentEvent, CompletionCoordinator, SessionEvent, SessionState
 type SteeringEntry = (String, SteerKind, Option<Principal>);
 
 pub struct Session {
-    id:                       String,
-    config:                   SessionOptions,
-    history:                  History,
-    event_emitter:            Emitter,
-    state:                    SessionState,
-    llm_client:               Client,
-    provider_profile:         Arc<dyn AgentProfile>,
-    sandbox:                  Arc<dyn Sandbox>,
-    steering_queue:           Arc<Mutex<VecDeque<SteeringEntry>>>,
-    followup_queue:           Arc<Mutex<VecDeque<String>>>,
-    cancel_token:             CancellationToken,
-    interrupt_reason:         Arc<Mutex<Option<InterruptReason>>>,
-    round_token:              Arc<std::sync::RwLock<CancellationToken>>,
-    completion_coordinator:   Option<Arc<dyn CompletionCoordinator>>,
-    memory:                   Vec<String>,
-    env_context:              EnvContext,
-    skills:                   Vec<Skill>,
-    system_prompt:            String,
-    file_tracker:             FileTracker,
-    tool_env:                 Option<HashMap<String, String>>,
-    subagent_manager:         Option<Arc<AsyncMutex<SubAgentManager>>>,
+    id:                     String,
+    config:                 SessionOptions,
+    history:                History,
+    event_emitter:          Emitter,
+    state:                  SessionState,
+    llm_client:             Client,
+    provider_profile:       Arc<dyn AgentProfile>,
+    sandbox:                Arc<dyn Sandbox>,
+    steering_queue:         Arc<Mutex<VecDeque<SteeringEntry>>>,
+    followup_queue:         Arc<Mutex<VecDeque<String>>>,
+    cancel_token:           CancellationToken,
+    interrupt_reason:       Arc<Mutex<Option<InterruptReason>>>,
+    round_token:            Arc<std::sync::RwLock<CancellationToken>>,
+    completion_coordinator: Option<Arc<dyn CompletionCoordinator>>,
+    memory:                 Vec<String>,
+    env_context:            EnvContext,
+    skills:                 Vec<Skill>,
+    system_prompt:          String,
+    file_tracker:           FileTracker,
+    tool_env:               Option<HashMap<String, String>>,
+    subagent_manager:       Option<Arc<AsyncMutex<SubAgentManager>>>,
 }
 
 impl Session {
@@ -516,9 +516,7 @@ impl Session {
     }
 
     #[must_use]
-    pub fn steering_queue_handle(
-        &self,
-    ) -> Arc<Mutex<VecDeque<SteeringEntry>>> {
+    pub fn steering_queue_handle(&self) -> Arc<Mutex<VecDeque<SteeringEntry>>> {
         self.steering_queue.clone()
     }
 
@@ -724,10 +722,7 @@ impl Session {
 
             // Reset round token if it was cancelled (steer interrupt)
             {
-                let mut guard = self
-                    .round_token
-                    .write()
-                    .expect("round token lock poisoned");
+                let mut guard = self.round_token.write().expect("round token lock poisoned");
                 if guard.is_cancelled() {
                     *guard = CancellationToken::new();
                 }

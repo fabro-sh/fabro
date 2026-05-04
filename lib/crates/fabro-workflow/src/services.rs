@@ -16,12 +16,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::ManifestPath;
 use crate::event::Emitter;
-use crate::steering_hub::SteeringHub;
 use crate::handler::HandlerRegistry;
 use crate::run_metadata::{RunMetadataRuntime, RunMetadataWriterHandle};
 use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git::GitState;
 use crate::sandbox_git_runtime::SandboxGitRuntime;
+use crate::steering_hub::SteeringHub;
 use crate::workflow_bundle::WorkflowBundle;
 
 /// Services shared across workflow phases.

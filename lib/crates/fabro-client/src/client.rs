@@ -818,10 +818,7 @@ impl Client {
                 client
                     .steer_run()
                     .id(run_id)
-                    .body(types::SteerRunRequest {
-                        interrupt,
-                        text,
-                    })
+                    .body(types::SteerRunRequest { interrupt, text })
                     .send()
                     .await
             }
