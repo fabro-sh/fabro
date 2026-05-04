@@ -1,0 +1,521 @@
+{
+  "spec": {
+    "run_id": "01KQT9NFG90GWYZ7CZ0FAH0E12",
+    "settings": {
+      "project": {
+        "name": null,
+        "description": null,
+        "directory": ".",
+        "metadata": {}
+      },
+      "workflow": {
+        "name": null,
+        "description": null,
+        "graph": "workflow.fabro",
+        "metadata": {}
+      },
+      "run": {
+        "goal": {
+          "type": "inline",
+          "value": "# Per-Stage Events Endpoint\n\n## Context\n\nThe stage detail page at `/runs/{id}/stages/{stageId}` renders an empty right pane for stages whose events fall past the first 1000 events of a run (e.g. `fmt`, `fixup` after a long `implement` + `simplify_*` chain).\n\nTwo architectural problems compound:\n\n1. `/runs/{id}/stages/{stageId}/turns` is wired to `not_implemented` (501) in real mode (`lib/crates/fabro-server/src/server/handler/mod.rs:116`). The frontend treats 501 as `null` (`apps/fabro-web/app/lib/api-client.ts:43`) and falls back to events.\n2. The events fallback fetches the run-wide `/runs/{id}/events?limit=1000` (oldest-first, capped at 1000 per `lib/crates/fabro-server/src/server/handler/events.rs:35`). For a 43-minute run with chatty agent stages early in the timeline, later stages are stranded past the cap. `turnsFromEvents` filters by `node_id`, finds nothing, and renders an empty body.\n\n`StageTurn` is also a presentation-shaped wire schema that only models LLM kinds (`system | assistant | tool`), not commands — so even a real implementation of `/turns` would not serve shell stages without schema growth.\n\nThe intended outcome: stage detail renders correctly for every stage, scales to long stages, and removes the dual-source data path. We collapse to one concept on the wire — events, scoped to a single stage. The cross-tab SSE coordinator (already merged: `apps/fabro-web/app/lib/cross-tab-sse.ts`, `run-events.ts`, `board-events.ts`) provides liveness via cache invalidation; the new endpoint is its canonical-data counterpart.\n\n## Approach\n\nReplace `/runs/{id}/stages/{stageId}/turns` with `GET /runs/{id}/stages/{stageId}/events?since_seq=&limit=`. Same shape as `/runs/{id}/events`, scoped server-side to events whose `node_id` matches the path parameter. Delete the `StageTurn` schema family entirely. The frontend keeps its existing `TurnType` discriminated union as a *local* presentation type built from events.\n\nThe frontend stage detail page becomes single-source: fetch `/stages/{stageId}/events` (paginating from `since_seq=1` via cursor until `meta.has_more === false`), feed the array into the existing `turnsFromEvents` reducer, render. Live updates require two coordinated frontend changes — neither is \"free\":\n\n1. Swap `runs.stageTurns` → `runs.stageEvents` in `queryKeysForRunEvent`.\n2. **Expand `queryKeysForRunEvent`'s coverage** to include every event type the reducer reads. Today it only handles `stage.{started,completed,failed}` and `command.{started,completed}`; the reducer also reads `stage.prompt`, `agent.message`, `agent.tool.started`, `agent.tool.completed`, all of which currently return `[]` from the invalidation map and silently fail to refresh agent activity mid-run. Add a `STAGE_ACTIVITY_EVENTS` set covering all six and route them to `runs.stageEvents(runId, stageId)` invalidations.\n\n`run-detail.tsx` already calls `useRunEvents(runId)`, so once the invalidation map is correct, the stage page receives liveness without its own subscription.\n\n## Server changes\n\n### 1. Add `node_id` filter to the events store\n\n`lib/crates/fabro-store/src/slate/run_store.rs:205` — `list_events_from_with_limit` currently filters only by `seq`. Add a sibling that takes a node id:\n\n```rust\npub async fn list_events_for_node_from_with_limit(\n    &self,\n    node_id: &str,\n    start_seq: u32,\n    limit: usize,\n) -> Result<Vec<EventEnvelope>>\n```\n\n**Implementation order matters.** Do **not** call the existing `list_events_from_with_limit` and filter the result — that helper truncates at `limit + 1` before any node filter, so for stages with sparse events you would silently drop matches. The correct order is:\n\n1. Scan the run-events prefix from `start_seq` upward (unbounded inner scan, mirroring lines 314-335 in `run_store.rs`).\n2. For each envelope, keep only those where `event.node_id.as_deref() == Some(node_id)`.\n3. Take the first `limit + 1` matches and return them; the handler computes `has_more` from the +1.\n\n`EventEnvelope::event::node_id` is already exposed (`lib/crates/fabro-types/src/run_event/mod.rs:34`).\n\nPerformance note (acknowledged, not optimized in v1): for a stage whose events are sparse late in a long run's event log, this scans the full tail. A `node_id`-keyed secondary index is a future optimization — flag if profiling shows it matters.\n\nAdd unit tests covering: events for the requested node are returned in seq order; events for other nodes are skipped; events with `node_id = None` are skipped; pagination via `start_seq` works on the filtered slice; **a node with sparse matches preceded by many unrelated events still returns its full slice (no premature truncation)**.\n\n### 2. Add a stage-scoped extractor\n\n`lib/crates/fabro-server/src/principal_middleware.rs` — `RequireRunScoped` extracts `Path<String>` (line 178), which will fail on a two-param route. Add `RequireRunStageScoped(RunId, String)` modeled on the existing `RequireRunBlob` (lines 188-199), which already handles two-param paths:\n\n```rust\npub(crate) struct RequireRunStageScoped(pub(crate) RunId, pub(crate) String);\n\nimpl FromRequestParts<Arc<AppState>> for RequireRunStageScoped {\n    type Rejection = Response;\n    async fn from_request_parts(parts: &mut Parts, state: &Arc<AppState>) -> Result<Self, Self::Rejection> {\n        let Path((id, stage_id)): Path<(String, String)> = Path::from_request_parts(parts, state)\n            .await\n            .map_err(IntoResponse::into_response)?;\n        let run_id = parse_run_id_path(&id)?;\n        require_worker_or_user_for_run(&auth_slot_from_parts(parts), &run_id)\n            .map_err(IntoResponse::into_response)?;\n        Ok(Self(run_id, stage_id))\n    }\n}\n```\n\nVisibility (`pub(crate)` on struct and fields) matches every existing extractor at `principal_middleware.rs:52-56`. Do **not** use `pub` — it would widen the server crate's API surface without need.\n\n**Wire the new extractor through the server module.** Handlers reach extractors via `super::super::` re-exports from `server.rs` (e.g. `events.rs:3-9`). Add `RequireRunStageScoped` to the existing re-export bundle at `lib/crates/fabro-server/src/server.rs:126-129`:\n\n```rust\nuse crate::principal_middleware::{\n    AuthContextSlot, RequestAuth, RequestAuthContext, RequireRunBlob, RequireRunScoped,\n    RequireRunStageScoped, RequireStageArtifact, RequiredUser, principal_middleware,\n};\n```\n\nWithout this, `events.rs` cannot reference the new extractor through `super::super::`.\n\n### 3. Add the per-stage events route\n\n`lib/crates/fabro-server/src/server/handler/events.rs` — alongside `list_run_events` (lines 174-201), add `list_run_stage_events`:\n\n```rust\nasync fn list_run_stage_events(\n    RequireRunStageScoped(id, stage_id): RequireRunStageScoped,\n    State(state): State<Arc<AppState>>,\n    Query(params): Query<EventListParams>,\n) -> Response { ... }\n```\n\nReuse the existing `EventListParams` (since_seq + limit, default 100, max 1000). Wrap the response in `PaginatedEventList { data, meta: PaginationMeta { has_more } }` exactly as `list_run_events` does. Register the route in `events::routes()` (events.rs:11):\n\n```rust\n.route(\"/runs/{id}/stages/{stageId}/events\", get(list_run_stage_events))\n```\n\n**Unknown-stage contract:** when the run exists but `stageId` matches no events, return `200 { data: [], meta: { has_more: false } }`. This is a filtered event-log view, not a stage-metadata lookup; emptiness ≠ not-found. When the *run* doesn't exist, the existing `events.rs:199` pattern still applies — return 404. In OpenAPI: keep the 404 response on the new path; change its description to `\"Run not found.\"` (not \"Run or stage not found\"). Assert both behaviors in the handler test.\n\nThe `stageId` path param is `node_id` (matches the existing URL convention; `RunStage.id == node_id` per `lib/crates/fabro-server/src/server/handler/billing.rs:101-107`). No visit disambiguation — that mirrors today's behavior. *Out of scope:* the pre-existing UX issue where a node visited twice (e.g. `verify` after `simplify_gpt` and again after `fixup`) collapses to one `node_id` in the sidebar; both visits' events would be returned together. Document but do not fix here.\n\n### 4. Remove the turns route, schema, and demo fixture\n\n- `lib/crates/fabro-server/src/server/handler/mod.rs:60-62, 116` — remove the demo and real `/turns` route registrations.\n- `lib/crates/fabro-server/src/demo/mod.rs:136-143` — remove `get_stage_turns`. Remove `runs::turns()` fixture (lines 1215-1228).\n- `docs/public/api-reference/fabro-api.yaml`:\n  - Delete path `/runs/{id}/stages/{stageId}/turns` (lines 1909-1936).\n  - Delete schemas `StageTurn` (6378-6389), `SystemStageTurn` (6391-6404), `AssistantStageTurn` (6406-6419), `ToolStageTurn` (6421-6438), `PaginatedStageTurnList` (3859-3871). Verify no other path references them — `ToolUse` (6343-6376) is also referenced inside `ToolStageTurn`; check whether anything else uses it before deleting (the events stream carries tool data via `RunEvent.properties`, not via `ToolUse`, so it likely also goes).\n  - Add path `/runs/{id}/stages/{stageId}/events` modeled after `/runs/{id}/events` (lines 1603-1667). Use existing `SinceSeq` + `EventLimit` parameters and `PaginatedEventList` response. **Do not reuse the existing `StageId` parameter** (lines 2925-2932) — it documents `node_id@visit` with example `code@2` and is genuinely needed in that form by command-logs/artifacts paths (`principal_middleware.rs:236`). Add a new parameter:\n    ```yaml\n    StageNodeId:\n      name: stageId\n      in: path\n      required: true\n      description: Workflow node id (matches RunStage.id; not visit-qualified).\n      schema:\n        type: string\n      example: detect-drift\n    ```\n    Reference this new parameter on the events path; leave the existing `StageId` parameter in place for the other paths that legitimately use `node_id@visit`.\n\n### 5. Add a demo stage events fixture\n\n`lib/crates/fabro-server/src/server/handler/mod.rs:60` and `demo/mod.rs` — add `demo::get_stage_events` that returns `PaginatedEventList`. Hand-write ~7 `EventEnvelope`s for the existing `detect-drift` demo stage that recreate the content currently in `runs::turns()`:\n\n- `stage.prompt` (system prompt text)\n- `agent.message` (intro)\n- `agent.tool.started` + `agent.tool.completed` × 2 (tool calls)\n- `agent.message` (closing analysis)\n\nEach with `node_id: Some(\"detect-drift\")`, ascending `seq`, and `properties` matching the shape `turnsFromEvents` already reads (`text`, `tool_call_id`, `tool_name`, `arguments`, `output`, `is_error`).\n\n**Do not reuse the existing `paginated_response` helper** (`demo/mod.rs:28`) — it takes `PaginationParams` (offset-based, `page[limit]/page[offset]`) and would silently ignore `since_seq`/`limit` from the events endpoint. Instead, give `demo::get_stage_events` its own params. Either share the real-mode `EventListParams` (preferred, single source of truth) or define a small demo-local equivalent. The handler body should:\n\n1. Read `since_seq` (default 1, min 1) and `limit` (default 100, max 1000) from query.\n2. Filter the fixture. `EventEnvelope { seq: u32, event: RunEvent }` (per `event_envelope.rs:5-10`), and `node_id: Option<String>` lives on the inner `event`, so the predicate is:\n   ```rust\n   envelope.seq >= since_seq\n       && envelope.event.node_id.as_deref() == Some(stage_id.as_str())\n   ```\n   Use `.as_deref()` / `.as_str()` to avoid moving `stage_id` into the iterator closure.\n3. Take the first `limit + 1` matches; set `has_more = matches.len() > limit`; truncate to `limit`.\n4. Return `PaginatedEventList { data, meta: PaginationMeta { has_more } }`.\n\nThe cursor-pagination test in step 6 directly exercises this path.\n\n### 6. Update and add integration tests\n\n**Remove `listStageTurns` from the generic offset-pagination matrix.** `lib/crates/fabro-server/tests/it/pagination.rs:60-62` uses `?page[limit]=` (lines 82, 91). Events use `?since_seq=&limit=` — co-mingling them passes the shape assertion only because the limit param is silently ignored. Delete the `listStageTurns` entry from the `ENDPOINTS` array; do **not** replace it with `listStageEvents` in the same matrix.\n\n**Add a cursor-pagination test for the demo stage-events endpoint.** New test (file: `lib/crates/fabro-server/tests/it/event_pagination.rs` or appended to the existing IT module) that exercises the demo `/runs/run-1/stages/detect-drift/events` endpoint with:\n- `?limit=1` → `data.len() == 1`, `meta.has_more == true`.\n- `?since_seq=N` → only events with `seq >= N` (where N is a known mid-fixture seq).\n- No params → default `limit=100`, returns all 7 fixture events, `has_more == false`.\n\nDo **not** repeat these assertions against `/runs/run-1/events` in demo mode — that route is wired to `not_implemented` (`mod.rs:38`) and would 501. Cursor pagination on the run-wide endpoint is already covered by `list_run_events` real-mode tests; cursor semantics for the stage endpoint are covered here.\n\n**Add an HTTP handler test for the real-mode endpoint** (in `lib/crates/fabro-server/src/server/handler/events.rs` `#[cfg(test)]` block, or a dedicated `tests/it/stage_events.rs`):\n- Seed a run-event store with a mix of envelopes: some with `node_id = Some(\"alpha\")`, some with `node_id = Some(\"beta\")`, some with `node_id = None`. Interleave seqs and include sparse `alpha` events past seq 100 to prove the scan walks past unrelated events.\n- `GET /runs/{id}/stages/alpha/events` → only `alpha` events, in seq order.\n- `GET /runs/{id}/stages/alpha/events?since_seq=K` → only `alpha` events with `seq >= K`.\n- `GET /runs/{id}/stages/alpha/events?limit=1` → exactly one envelope, `has_more == true`.\n- `GET /runs/{id}/stages/unknown-stage/events` (run exists, stage doesn't) → `200 { data: [], meta: { has_more: false } }`.\n- `GET /runs/{absent_but_valid_id}/stages/alpha/events` → `404` with `\"Run not found.\"` body, where `absent_but_valid_id` is a syntactically valid `RunId` (ULID-shaped) that simply isn't in the test store. Do not use a malformed string like `\"nonexistent-run\"` — `parse_run_id_path` (`server.rs:1668-1670`) would 400 before the handler runs, which tests the wrong path. If you also want to assert the 400 path, add a separate explicit test for it.\n- Auth path coverage: a request without the appropriate run-scope auth returns 401/403, proving the new `RequireRunStageScoped` extractor enforces the same scope as `RequireRunScoped`.\n\n### 7. Regenerate Rust API types\n\n`lib/crates/fabro-api/build.rs` — `EventEnvelope` is already replaced with `fabro_types::EventEnvelope` (line 367); no new `with_replacement` calls needed. `cargo build -p fabro-api` will regenerate the reqwest client and progenitor types after the YAML edits.\n\n## Frontend changes\n\n### 1. Replace the query key\n\n`apps/fabro-web/app/lib/query-keys.ts:47-48` — remove `runs.stageTurns`. Add:\n\n```ts\nstageEvents: (id: string, stageId: string, sinceSeq?: number, limit?: number) =>\n  withQuery(\n    `/api/v1/runs/${pathSegment(id)}/stages/${pathSegment(stageId)}/events`,\n    { since_seq: sinceSeq, limit },\n  ),\n```\n\nThe base key (no params) is the SWR cache key for \"all events for this stage.\"\n\n### 2. Add a paginated stage-events hook\n\n`apps/fabro-web/app/lib/queries.ts` — remove `useRunStageTurns` (lines 144-153). Add:\n\n```ts\nexport function useRunStageEvents(id: string | undefined, stageId: string | undefined) {\n  return useSWR<EventEnvelope[]>(\n    id && stageId ? queryKeys.runs.stageEvents(id, stageId) : null,\n    fetchAllStageEvents,\n  );\n}\n```\n\n`fetchAllStageEvents` is a cursor-paginated loop modeled on `apiPaginatedFetcher` (`api-client.ts:166-218`) but using `since_seq` instead of `page[offset]`:\n\n- Start at `since_seq = 1`, `limit = 1000`.\n- Each page yields `EventEnvelope[]` and `meta.has_more`.\n- Append, set next `since_seq = highestSeq + 1`, loop until `!has_more` or safety cap (50 pages × 1000 = 50k events).\n- **Empty-page guard** (matching `api-client.ts:193`): if `page.data.length === 0`, exit the loop with the accumulated events. A page with `has_more: true` but no data would otherwise spin until the safety cap. Treat it as a server invariant violation: log a `console.warn` and return what we have. This protects against fixture/server bugs without masking them — the warn surfaces the violation while keeping the UI stable.\n- Return the flattened `EventEnvelope[]`.\n\nThis sits in `app/lib/api-client.ts` as `fetchAllStageEvents(key)` parsing `since_seq` out of the URL it's handed, mirroring how `apiPaginatedFetcher` is used today.\n\n### 3. Refetch policy on invalidation\n\nWhen `useRunEvents` invalidates the stage-events SWR key, SWR refetches via `fetchAllStageEvents`, which loops from `since_seq=1`. That is correct but potentially wasteful for long stages. Acceptable v1: the events list is bounded by stage size, not run size, and most stages have <1k events. If profiling shows otherwise, switch to a custom hook that holds the events array in component state and tail-fetches from `highestSeqSeen + 1` on invalidation. Not part of this plan.\n\n### 4. Update the stage detail page\n\n`apps/fabro-web/app/routes/run-stages.tsx`:\n\n- Remove the `useRunStageTurns` import and call (lines 43, 608).\n- Remove the `useRunEventsList` fallback wiring (lines 609-616).\n- Remove `mapTurns` (lines 176-189) and `mapApiStageTurn` (lines 156-174). Drop the `ApiStageTurn`, `PaginatedStageTurnList`, `PaginatedEventList` imports (lines 50-52).\n- Replace the dual-source flow. Note that the existing early return at `run-stages.tsx:619` (`if (!id || !stages.length) return EmptyState`) guarantees `selectedStage` is defined at this call site, so `selectedStage.id` (no `?.`) typechecks cleanly against the existing reducer signature `(events: EventEnvelope[], stageId: string)`:\n  ```ts\n  const stageEventsQuery = useRunStageEvents(id, selectedStage?.id);\n  const turns = useMemo(\n    () => selectedStage\n      ? eventsToActivity(stageEventsQuery.data ?? [], selectedStage.id)\n      : [],\n    [stageEventsQuery.data, selectedStage],\n  );\n  ```\n  The `selectedStage` ternary keeps the `useMemo` body type-safe even though the runtime path always has `selectedStage` defined; do not change the reducer signature.\n- Rename `turnsFromEvents` → `eventsToActivity` (line 71). It still filters `e.node_id === stageId` (defensive, since the server already scoped) and produces the same `TurnType[]`. Keep the existing event handling for `stage.prompt`, `agent.message`, `agent.tool.*`, `command.*`. Keep the `TurnType` union as-is (lines 57-61) — it's purely local now.\n\n### 5. Wire stage-events into cross-tab invalidation\n\n`apps/fabro-web/app/lib/run-events.ts:54-110` (`queryKeysForRunEvent`) — the existing branches handle only `STAGE_EVENTS` (`stage.started/completed/failed`) and `COMMAND_EVENTS` (`command.started/completed`). The `eventsToActivity` reducer also reads `stage.prompt`, `agent.message`, `agent.tool.started`, `agent.tool.completed` — events for which `queryKeysForRunEvent` currently returns `[]`, meaning agent-stage activity does not refresh live.\n\nAdd a `STAGE_ACTIVITY_EVENTS` set covering every event type the reducer consumes:\n\n```ts\nconst STAGE_ACTIVITY_EVENTS = new Set([\n  \"stage.prompt\",\n  \"agent.message\",\n  \"agent.tool.started\",\n  \"agent.tool.completed\",\n  \"command.started\",\n  \"command.completed\",\n]);\n```\n\nFor these (when the payload has a `node_id`), invalidate `queryKeys.runs.stageEvents(runId, stageId)`. The existing `STAGE_EVENTS` branch (lifecycle: `stage.started/completed/failed`) keeps its broader run-scoped invalidations (`stages`, `events`, `graph`, `detail`) and additionally invalidates `stageEvents(runId, stageId)` instead of `stageTurns`. The existing `COMMAND_EVENTS` branch is subsumed by `STAGE_ACTIVITY_EVENTS` — fold it in or keep separate, but ensure it invalidates `stageEvents` (not `stageTurns`).\n\nNo new subscription is needed: `run-detail.tsx:119` already calls `useRunEvents(params.id)`, and that subscription dispatches to per-stage keys via `queryKeysForRunEvent`. The stage detail page is a passive consumer — when any reducer-relevant event for its `node_id` arrives in any tab, SWR invalidates `runs.stageEvents(runId, stageId)`, the page refetches, the reducer rebuilds.\n\n`apps/fabro-web/app/lib/run-events.ts:162-173` — `resyncKeysForRun` resyncs run-scoped keys on leader change. The stage-events key is per-stage, so it's not naturally in this list. Acceptable: on leader change SWR's existing focus/reconnect revalidation will refresh active stage-events keys. If gap recovery becomes a problem, add `runs.stageEvents(runId, currentStageId)` here, but the page can also just call `mutate` on its own key on visibility return. Not part of this plan.\n\n**Tests for the live-invalidation path** (extend `apps/fabro-web/app/lib/query-keys.test.ts`):\n- `stage.prompt` with `node_id` → invalidations include `runs.stageEvents(runId, nodeId)`.\n- `agent.message` with `node_id` → invalidations include `runs.stageEvents(runId, nodeId)`.\n- `agent.tool.completed` with `node_id` → invalidations include `runs.stageEvents(runId, nodeId)`.\n- `command.completed` with `node_id` → invalidations include `runs.stageEvents(runId, nodeId)`.\n- `stage.completed` (lifecycle) still invalidates the run-scoped keys plus `runs.stageEvents`.\n\n### 6. Remove obsolete imports and tests\n\n- `apps/fabro-web/app/lib/queries.ts:2-18` — drop `PaginatedStageTurnList` from the import list.\n- `apps/fabro-web/app/lib/query-keys.test.ts:25-29` — replace the assertion that `stage.completed` invalidates `runs.stageTurns` with `runs.stageEvents`.\n- `apps/fabro-web/app/lib/run-events.test.tsx` — search for `stageTurns`; update to `stageEvents`.\n\n### 7. Regenerate the TS client (with explicit cleanup)\n\nThe generate script (`lib/packages/fabro-api-client/package.json:7`) writes `-o src` without a clean step — `openapi-generator-cli` writes file-by-file based on the schema list, so deleted schemas leave **stale model files behind** that remain importable. Steps:\n\n1. From `lib/packages/fabro-api-client/`: `rm -rf src/models src/api` to drop all generated models and API surface.\n2. `bun run generate` to repopulate from the updated YAML.\n3. Verify no stale references remain: `rg \"StageTurn|SystemStageTurn|AssistantStageTurn|ToolStageTurn|PaginatedStageTurnList|listStageTurns\" lib/packages/fabro-api-client apps/fabro-web` should return no matches.\n4. `cd apps/fabro-web && bun run typecheck` to confirm the import graph stays consistent.\n\n(Optional follow-up not in this plan: add a `prebuild` clean step to the package script so this doesn't trip future schema deletions.)\n\n## Reused infrastructure\n\n- `lib/crates/fabro-store` `list_events_from_with_limit` — the new method follows the same prefix-scan pattern.\n- `lib/crates/fabro-server` `EventListParams`, `PaginatedEventList`, `PaginationMeta` — reused as-is. `RequireRunBlob` (lines 188-199) is the model for the new `RequireRunStageScoped` extractor.\n- `apps/fabro-web/app/lib/cross-tab-sse.ts` `subscribeToCrossTabSse` — used implicitly via the existing `useRunEvents` plumbing in `run-events.ts`. No changes to the coordinator itself.\n- `apps/fabro-web/app/routes/run-stages.tsx` `turnsFromEvents` reducer (renamed) — kept as the local presentation projection.\n- `apps/fabro-web/app/lib/api-client.ts` `apiPaginatedFetcher` shape — `fetchAllStageEvents` mirrors its safety caps.\n\n## Out of scope\n\n- Same-`node_id` repeat visits (e.g. two `verify` rows in the sidebar pointing at the same URL). Pre-existing; needs URL design (`/stages/{nodeId}/{visit}` or similar) and `RunStage.id` disambiguation.\n- Tail-fetch optimization for the SWR invalidation path (refetch from `since_seq=highestSeen+1` instead of full reload). Defer to first profiling signal.\n- Any `/api/v1/attach` server-side replay or schema changes — explicitly excluded by the cross-tab SSE plan.\n\n## Verification\n\nTest commands:\n\n- `cargo nextest run -p fabro-store` — confirms the new `list_events_for_node_from_with_limit` filter, including the sparse-stage scan-then-filter case.\n- `cargo nextest run -p fabro-server` — runs the conformance test (`server::tests` + `it/pagination.rs`), the new cursor-pagination test, and the new stage-events handler test (mixed `node_id`s, `since_seq`, `limit`, unknown-stage 200, auth extractor).\n- `cd apps/fabro-web && bun run typecheck` — must pass after the generated TS client is regenerated and obsolete imports are removed. Will fail loudly if stale `StageTurn`-related files were left behind.\n- `cd apps/fabro-web && bun test` — runs `query-keys.test.ts` (now includes the new invalidation cases for `stage.prompt`, `agent.message`, `agent.tool.completed`), `run-events.test.tsx`, `board-events.test.tsx`.\n- Add `run-stages.test.ts` cases (currently only covers `isSafeMarkdownHref`) for `eventsToActivity`: given a sequence of `command.started` + `command.completed` events for `node_id=\"fmt\"`, return one `command` turn; given `agent.tool.started` + `agent.tool.completed`, return one `tool` turn; events for other `node_id`s are filtered out.\n\nEnd-to-end manual check:\n\n1. `fabro server start` (real mode), then in another terminal `cd apps/fabro-web && bun run dev`.\n2. Reproduce the original bug URL — a finished run with a long `implement`-style stage followed by `fmt`/`fixup`. Confirm those stages now render their command panes (script + stdout/stderr).\n3. Start a fresh run via the CLI; open its detail page mid-run. Watch a stage transition from running → succeeded; confirm the right pane updates without a manual reload (cross-tab invalidation).\n4. Open two tabs on the same running run; confirm only one `/api/v1/attach` EventStream is active in DevTools and both tabs' stage panes update from the same shared stream.\n5. Demo mode (`fabro server start` + `X-Fabro-Demo: 1` header via the toggle): open the `detect-drift` stage; confirm system prompt + assistant + tool turns still render from the new demo events fixture.\n"
+        },
+        "working_dir": null,
+        "metadata": {},
+        "inputs": {},
+        "model": {
+          "provider": "anthropic",
+          "name": "claude-sonnet-4-6",
+          "fallbacks": []
+        },
+        "git": {
+          "author": null
+        },
+        "prepare": {
+          "commands": [],
+          "timeout_ms": 300000
+        },
+        "execution": {
+          "mode": "normal",
+          "approval": "prompt",
+          "retros": true
+        },
+        "checkpoint": {
+          "exclude_globs": []
+        },
+        "sandbox": {
+          "provider": "daytona",
+          "preserve": false,
+          "devcontainer": false,
+          "env": {},
+          "local": {
+            "worktree_mode": "always"
+          },
+          "docker": {
+            "image": "buildpack-deps:noble",
+            "network_mode": null,
+            "memory_limit": 4000000000,
+            "cpu_quota": 200000,
+            "env_vars": {},
+            "skip_clone": false
+          },
+          "daytona": {
+            "auto_stop_interval": 30,
+            "labels": {
+              "repo": "fabro-sh/fabro"
+            },
+            "snapshot": {
+              "name": "fabro-v8",
+              "cpu": 8,
+              "memory_gb": 16,
+              "disk_gb": 20,
+              "dockerfile": {
+                "type": "inline",
+                "value": "FROM ubuntu:24.04\n\nRUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 && rm -rf /var/lib/apt/lists/*\n\n# GitHub CLI\nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*\n\n# Rust\nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\nENV PATH=\"/root/.cargo/bin:${PATH}\"\nRUN rustup toolchain install nightly-2026-04-14 --profile minimal --component clippy,rustfmt\nRUN cargo install cargo-nextest --locked\nENV CARGO_INCREMENTAL=0\n\n# Bun\nRUN curl -fsSL https://bun.sh/install | bash\nENV PATH=\"/root/.bun/bin:${PATH}\"\n\nWORKDIR /root\n"
+              }
+            },
+            "network": null,
+            "skip_clone": false
+          }
+        },
+        "notifications": {},
+        "interviews": {
+          "provider": null,
+          "slack": null,
+          "discord": null,
+          "teams": null
+        },
+        "agent": {
+          "permissions": null,
+          "mcps": {}
+        },
+        "hooks": [],
+        "scm": {
+          "provider": null,
+          "owner": null,
+          "repository": null,
+          "github": null
+        },
+        "pull_request": {
+          "enabled": true,
+          "draft": false,
+          "auto_merge": false,
+          "merge_strategy": "squash"
+        },
+        "artifacts": {
+          "include": []
+        }
+      }
+    },
+    "graph": {
+      "name": "ImplementPlan",
+      "nodes": {
+        "simplify_gpt": {
+          "id": "simplify_gpt",
+          "attrs": {
+            "model": {
+              "String": "gpt-5.5"
+            },
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "provider": {
+              "String": "openai"
+            },
+            "label": {
+              "String": "Simplify (GPT-55)"
+            }
+          }
+        },
+        "toolchain": {
+          "id": "toolchain",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "script": {
+              "String": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Toolchain"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "shape": {
+              "String": "parallelogram"
+            }
+          }
+        },
+        "fix_lints": {
+          "id": "fix_lints",
+          "attrs": {
+            "prompt": {
+              "String": "The preflight lint step failed. Read the build output from context and fix all clippy lint warnings."
+            },
+            "label": {
+              "String": "Fix Lints"
+            },
+            "max_visits": {
+              "Integer": 3
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "start": {
+          "id": "start",
+          "attrs": {
+            "label": {
+              "String": "Start"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "shape": {
+              "String": "Mdiamond"
+            }
+          }
+        },
+        "exit": {
+          "id": "exit",
+          "attrs": {
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Exit"
+            },
+            "shape": {
+              "String": "Msquare"
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "simplify_opus": {
+          "id": "simplify_opus",
+          "attrs": {
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "label": {
+              "String": "Simplify (Opus)"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "preflight_compile": {
+          "id": "preflight_compile",
+          "attrs": {
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Preflight Compile"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "script": {
+              "String": "cargo check -q --workspace 2>&1"
+            },
+            "shape": {
+              "String": "parallelogram"
+            }
+          }
+        },
+        "preflight_lint": {
+          "id": "preflight_lint",
+          "attrs": {
+            "max_retries": {
+              "Integer": 0
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Preflight Lint"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "shape": {
+              "String": "parallelogram"
+            }
+          }
+        },
+        "fmt": {
+          "id": "fmt",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 fmt --all 2>&1"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "label": {
+              "String": "Format"
+            }
+          }
+        },
+        "implement": {
+          "id": "implement",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "prompt": {
+              "String": "Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD."
+            },
+            "label": {
+              "String": "Implement"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "fixup": {
+          "id": "fixup",
+          "attrs": {
+            "label": {
+              "String": "Fixup"
+            },
+            "max_visits": {
+              "Integer": 3
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "prompt": {
+              "String": "The verify step failed. Read the build output from context and fix all clippy lint warnings, test failures, and generated docs errors."
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "verify": {
+          "id": "verify",
+          "attrs": {
+            "shape": {
+              "String": "parallelogram"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "retry_target": {
+              "String": "fixup"
+            },
+            "goal_gate": {
+              "Boolean": true
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1 && cargo dev docs refresh 2>&1 && cargo dev docs check 2>&1"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Verify"
+            }
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "start",
+          "to": "toolchain",
+          "attrs": {}
+        },
+        {
+          "from": "toolchain",
+          "to": "preflight_compile",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "toolchain",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_compile",
+          "to": "preflight_lint",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_compile",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_lint",
+          "to": "implement",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_lint",
+          "to": "fix_lints",
+          "attrs": {}
+        },
+        {
+          "from": "fix_lints",
+          "to": "preflight_lint",
+          "attrs": {}
+        },
+        {
+          "from": "implement",
+          "to": "simplify_opus",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_opus",
+          "to": "simplify_gpt",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_gpt",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "verify",
+          "to": "fmt",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "verify",
+          "to": "fixup",
+          "attrs": {}
+        },
+        {
+          "from": "fixup",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "fmt",
+          "to": "exit",
+          "attrs": {}
+        }
+      ],
+      "attrs": {
+        "rankdir": {
+          "String": "LR"
+        },
+        "model_stylesheet": {
+          "String": "\n            * { model: claude-opus-4-7; }\n        "
+        },
+        "goal": {
+          "String": "# Per-Stage Events Endpoint\n\n## Context\n\nThe stage detail page at `/runs/{id}/stages/{stageId}` renders an empty right pane for stages whose events fall past the first 1000 events of a run (e.g. `fmt`, `fixup` after a long `implement` + `simplify_*` chain).\n\nTwo architectural problems compound:\n\n1. `/runs/{id}/stages/{stageId}/turns` is wired to `not_implemented` (501) in real mode (`lib/crates/fabro-server/src/server/handler/mod.rs:116`). The frontend treats 501 as `null` (`apps/fabro-web/app/lib/api-client.ts:43`) and falls back to events.\n2. The events fallback fetches the run-wide `/runs/{id}/events?limit=1000` (oldest-first, capped at 1000 per `lib/crates/fabro-server/src/server/handler/events.rs:35`). For a 43-minute run with chatty agent stages early in the timeline, later stages are stranded past the cap. `turnsFromEvents` filters by `node_id`, finds nothing, and renders an empty body.\n\n`StageTurn` is also a presentation-shaped wire schema that only models LLM kinds (`system | assistant | tool`), not commands — so even a real implementation of `/turns` would not serve shell stages without schema growth.\n\nThe intended outcome: stage detail renders correctly for every stage, scales to long stages, and removes the dual-source data path. We collapse to one concept on the wire — events, scoped to a single stage. The cross-tab SSE coordinator (already merged: `apps/fabro-web/app/lib/cross-tab-sse.ts`, `run-events.ts`, `board-events.ts`) provides liveness via cache invalidation; the new endpoint is its canonical-data counterpart.\n\n## Approach\n\nReplace `/runs/{id}/stages/{stageId}/turns` with `GET /runs/{id}/stages/{stageId}/events?since_seq=&limit=`. Same shape as `/runs/{id}/events`, scoped server-side to events whose `node_id` matches the path parameter. Delete the `StageTurn` schema family entirely. The frontend keeps its existing `TurnType` discriminated union as a *local* presentation type built from events.\n\nThe frontend stage detail page becomes single-source: fetch `/stages/{stageId}/events` (paginating from `since_seq=1` via cursor until `meta.has_more === false`), feed the array into the existing `turnsFromEvents` reducer, render. Live updates require two coordinated frontend changes — neither is \"free\":\n\n1. Swap `runs.stageTurns` → `runs.stageEvents` in `queryKeysForRunEvent`.\n2. **Expand `queryKeysForRunEvent`'s coverage** to include every event type the reducer reads. Today it only handles `stage.{started,completed,failed}` and `command.{started,completed}`; the reducer also reads `stage.prompt`, `agent.message`, `agent.tool.started`, `agent.tool.completed`, all of which currently return `[]` from the invalidation map and silently fail to refresh agent activity mid-run. Add a `STAGE_ACTIVITY_EVENTS` set covering all six and route them to `runs.stageEvents(runId, stageId)` invalidations.\n\n`run-detail.tsx` already calls `useRunEvents(runId)`, so once the invalidation map is correct, the stage page receives liveness without its own subscription.\n\n## Server changes\n\n### 1. Add `node_id` filter to the events store\n\n`lib/crates/fabro-store/src/slate/run_store.rs:205` — `list_events_from_with_limit` currently filters only by `seq`. Add a sibling that takes a node id:\n\n```rust\npub async fn list_events_for_node_from_with_limit(\n    &self,\n    node_id: &str,\n    start_seq: u32,\n    limit: usize,\n) -> Result<Vec<EventEnvelope>>\n```\n\n**Implementation order matters.** Do **not** call the existing `list_events_from_with_limit` and filter the result — that helper truncates at `limit + 1` before any node filter, so for stages with sparse events you would silently drop matches. The correct order is:\n\n1. Scan the run-events prefix from `start_seq` upward (unbounded inner scan, mirroring lines 314-335 in `run_store.rs`).\n2. For each envelope, keep only those where `event.node_id.as_deref() == Some(node_id)`.\n3. Take the first `limit + 1` matches and return them; the handler computes `has_more` from the +1.\n\n`EventEnvelope::event::node_id` is already exposed (`lib/crates/fabro-types/src/run_event/mod.rs:34`).\n\nPerformance note (acknowledged, not optimized in v1): for a stage whose events are sparse late in a long run's event log, this scans the full tail. A `node_id`-keyed secondary index is a future optimization — flag if profiling shows it matters.\n\nAdd unit tests covering: events for the requested node are returned in seq order; events for other nodes are skipped; events with `node_id = None` are skipped; pagination via `start_seq` works on the filtered slice; **a node with sparse matches preceded by many unrelated events still returns its full slice (no premature truncation)**.\n\n### 2. Add a stage-scoped extractor\n\n`lib/crates/fabro-server/src/principal_middleware.rs` — `RequireRunScoped` extracts `Path<String>` (line 178), which will fail on a two-param route. Add `RequireRunStageScoped(RunId, String)` modeled on the existing `RequireRunBlob` (lines 188-199), which already handles two-param paths:\n\n```rust\npub(crate) struct RequireRunStageScoped(pub(crate) RunId, pub(crate) String);\n\nimpl FromRequestParts<Arc<AppState>> for RequireRunStageScoped {\n    type Rejection = Response;\n    async fn from_request_parts(parts: &mut Parts, state: &Arc<AppState>) -> Result<Self, Self::Rejection> {\n        let Path((id, stage_id)): Path<(String, String)> = Path::from_request_parts(parts, state)\n            .await\n            .map_err(IntoResponse::into_response)?;\n        let run_id = parse_run_id_path(&id)?;\n        require_worker_or_user_for_run(&auth_slot_from_parts(parts), &run_id)\n            .map_err(IntoResponse::into_response)?;\n        Ok(Self(run_id, stage_id))\n    }\n}\n```\n\nVisibility (`pub(crate)` on struct and fields) matches every existing extractor at `principal_middleware.rs:52-56`. Do **not** use `pub` — it would widen the server crate's API surface without need.\n\n**Wire the new extractor through the server module.** Handlers reach extractors via `super::super::` re-exports from `server.rs` (e.g. `events.rs:3-9`). Add `RequireRunStageScoped` to the existing re-export bundle at `lib/crates/fabro-server/src/server.rs:126-129`:\n\n```rust\nuse crate::principal_middleware::{\n    AuthContextSlot, RequestAuth, RequestAuthContext, RequireRunBlob, RequireRunScoped,\n    RequireRunStageScoped, RequireStageArtifact, RequiredUser, principal_middleware,\n};\n```\n\nWithout this, `events.rs` cannot reference the new extractor through `super::super::`.\n\n### 3. Add the per-stage events route\n\n`lib/crates/fabro-server/src/server/handler/events.rs` — alongside `list_run_events` (lines 174-201), add `list_run_stage_events`:\n\n```rust\nasync fn list_run_stage_events(\n    RequireRunStageScoped(id, stage_id): RequireRunStageScoped,\n    State(state): State<Arc<AppState>>,\n    Query(params): Query<EventListParams>,\n) -> Response { ... }\n```\n\nReuse the existing `EventListParams` (since_seq + limit, default 100, max 1000). Wrap the response in `PaginatedEventList { data, meta: PaginationMeta { has_more } }` exactly as `list_run_events` does. Register the route in `events::routes()` (events.rs:11):\n\n```rust\n.route(\"/runs/{id}/stages/{stageId}/events\", get(list_run_stage_events))\n```\n\n**Unknown-stage contract:** when the run exists but `stageId` matches no events, return `200 { data: [], meta: { has_more: false } }`. This is a filtered event-log view, not a stage-metadata lookup; emptiness ≠ not-found. When the *run* doesn't exist, the existing `events.rs:199` pattern still applies — return 404. In OpenAPI: keep the 404 response on the new path; change its description to `\"Run not found.\"` (not \"Run or stage not found\"). Assert both behaviors in the handler test.\n\nThe `stageId` path param is `node_id` (matches the existing URL convention; `RunStage.id == node_id` per `lib/crates/fabro-server/src/server/handler/billing.rs:101-107`). No visit disambiguation — that mirrors today's behavior. *Out of scope:* the pre-existing UX issue where a node visited twice (e.g. `verify` after `simplify_gpt` and again after `fixup`) collapses to one `node_id` in the sidebar; both visits' events would be returned together. Document but do not fix here.\n\n### 4. Remove the turns route, schema, and demo fixture\n\n- `lib/crates/fabro-server/src/server/handler/mod.rs:60-62, 116` — remove the demo and real `/turns` route registrations.\n- `lib/crates/fabro-server/src/demo/mod.rs:136-143` — remove `get_stage_turns`. Remove `runs::turns()` fixture (lines 1215-1228).\n- `docs/public/api-reference/fabro-api.yaml`:\n  - Delete path `/runs/{id}/stages/{stageId}/turns` (lines 1909-1936).\n  - Delete schemas `StageTurn` (6378-6389), `SystemStageTurn` (6391-6404), `AssistantStageTurn` (6406-6419), `ToolStageTurn` (6421-6438), `PaginatedStageTurnList` (3859-3871). Verify no other path references them — `ToolUse` (6343-6376) is also referenced inside `ToolStageTurn`; check whether anything else uses it before deleting (the events stream carries tool data via `RunEvent.properties`, not via `ToolUse`, so it likely also goes).\n  - Add path `/runs/{id}/stages/{stageId}/events` modeled after `/runs/{id}/events` (lines 1603-1667). Use existing `SinceSeq` + `EventLimit` parameters and `PaginatedEventList` response. **Do not reuse the existing `StageId` parameter** (lines 2925-2932) — it documents `node_id@visit` with example `code@2` and is genuinely needed in that form by command-logs/artifacts paths (`principal_middleware.rs:236`). Add a new parameter:\n    ```yaml\n    StageNodeId:\n      name: stageId\n      in: path\n      required: true\n      description: Workflow node id (matches RunStage.id; not visit-qualified).\n      schema:\n        type: string\n      example: detect-drift\n    ```\n    Reference this new parameter on the events path; leave the existing `StageId` parameter in place for the other paths that legitimately use `node_id@visit`.\n\n### 5. Add a demo stage events fixture\n\n`lib/crates/fabro-server/src/server/handler/mod.rs:60` and `demo/mod.rs` — add `demo::get_stage_events` that returns `PaginatedEventList`. Hand-write ~7 `EventEnvelope`s for the existing `detect-drift` demo stage that recreate the content currently in `runs::turns()`:\n\n- `stage.prompt` (system prompt text)\n- `agent.message` (intro)\n- `agent.tool.started` + `agent.tool.completed` × 2 (tool calls)\n- `agent.message` (closing analysis)\n\nEach with `node_id: Some(\"detect-drift\")`, ascending `seq`, and `properties` matching the shape `turnsFromEvents` already reads (`text`, `tool_call_id`, `tool_name`, `arguments`, `output`, `is_error`).\n\n**Do not reuse the existing `paginated_response` helper** (`demo/mod.rs:28`) — it takes `PaginationParams` (offset-based, `page[limit]/page[offset]`) and would silently ignore `since_seq`/`limit` from the events endpoint. Instead, give `demo::get_stage_events` its own params. Either share the real-mode `EventListParams` (preferred, single source of truth) or define a small demo-local equivalent. The handler body should:\n\n1. Read `since_seq` (default 1, min 1) and `limit` (default 100, max 1000) from query.\n2. Filter the fixture. `EventEnvelope { seq: u32, event: RunEvent }` (per `event_envelope.rs:5-10`), and `node_id: Option<String>` lives on the inner `event`, so the predicate is:\n   ```rust\n   envelope.seq >= since_seq\n       && envelope.event.node_id.as_deref() == Some(stage_id.as_str())\n   ```\n   Use `.as_deref()` / `.as_str()` to avoid moving `stage_id` into the iterator closure.\n3. Take the first `limit + 1` matches; set `has_more = matches.len() > limit`; truncate to `limit`.\n4. Return `PaginatedEventList { data, meta: PaginationMeta { has_more } }`.\n\nThe cursor-pagination test in step 6 directly exercises this path.\n\n### 6. Update and add integration tests\n\n**Remove `listStageTurns` from the generic offset-pagination matrix.** `lib/crates/fabro-server/tests/it/pagination.rs:60-62` uses `?page[limit]=` (lines 82, 91). Events use `?since_seq=&limit=` — co-mingling them passes the shape assertion only because the limit param is silently ignored. Delete the `listStageTurns` entry from the `ENDPOINTS` array; do **not** replace it with `listStageEvents` in the same matrix.\n\n**Add a cursor-pagination test for the demo stage-events endpoint.** New test (file: `lib/crates/fabro-server/tests/it/event_pagination.rs` or appended to the existing IT module) that exercises the demo `/runs/run-1/stages/detect-drift/events` endpoint with:\n- `?limit=1` → `data.len() == 1`, `meta.has_more == true`.\n- `?since_seq=N` → only events with `seq >= N` (where N is a known mid-fixture seq).\n- No params → default `limit=100`, returns all 7 fixture events, `has_more == false`.\n\nDo **not** repeat these assertions against `/runs/run-1/events` in demo mode — that route is wired to `not_implemented` (`mod.rs:38`) and would 501. Cursor pagination on the run-wide endpoint is already covered by `list_run_events` real-mode tests; cursor semantics for the stage endpoint are covered here.\n\n**Add an HTTP handler test for the real-mode endpoint** (in `lib/crates/fabro-server/src/server/handler/events.rs` `#[cfg(test)]` block, or a dedicated `tests/it/stage_events.rs`):\n- Seed a run-event store with a mix of envelopes: some with `node_id = Some(\"alpha\")`, some with `node_id = Some(\"beta\")`, some with `node_id = None`. Interleave seqs and include sparse `alpha` events past seq 100 to prove the scan walks past unrelated events.\n- `GET /runs/{id}/stages/alpha/events` → only `alpha` events, in seq order.\n- `GET /runs/{id}/stages/alpha/events?since_seq=K` → only `alpha` events with `seq >= K`.\n- `GET /runs/{id}/stages/alpha/events?limit=1` → exactly one envelope, `has_more == true`.\n- `GET /runs/{id}/stages/unknown-stage/events` (run exists, stage doesn't) → `200 { data: [], meta: { has_more: false } }`.\n- `GET /runs/{absent_but_valid_id}/stages/alpha/events` → `404` with `\"Run not found.\"` body, where `absent_but_valid_id` is a syntactically valid `RunId` (ULID-shaped) that simply isn't in the test store. Do not use a malformed string like `\"nonexistent-run\"` — `parse_run_id_path` (`server.rs:1668-1670`) would 400 before the handler runs, which tests the wrong path. If you also want to assert the 400 path, add a separate explicit test for it.\n- Auth path coverage: a request without the appropriate run-scope auth returns 401/403, proving the new `RequireRunStageScoped` extractor enforces the same scope as `RequireRunScoped`.\n\n### 7. Regenerate Rust API types\n\n`lib/crates/fabro-api/build.rs` — `EventEnvelope` is already replaced with `fabro_types::EventEnvelope` (line 367); no new `with_replacement` calls needed. `cargo build -p fabro-api` will regenerate the reqwest client and progenitor types after the YAML edits.\n\n## Frontend changes\n\n### 1. Replace the query key\n\n`apps/fabro-web/app/lib/query-keys.ts:47-48` — remove `runs.stageTurns`. Add:\n\n```ts\nstageEvents: (id: string, stageId: string, sinceSeq?: number, limit?: number) =>\n  withQuery(\n    `/api/v1/runs/${pathSegment(id)}/stages/${pathSegment(stageId)}/events`,\n    { since_seq: sinceSeq, limit },\n  ),\n```\n\nThe base key (no params) is the SWR cache key for \"all events for this stage.\"\n\n### 2. Add a paginated stage-events hook\n\n`apps/fabro-web/app/lib/queries.ts` — remove `useRunStageTurns` (lines 144-153). Add:\n\n```ts\nexport function useRunStageEvents(id: string | undefined, stageId: string | undefined) {\n  return useSWR<EventEnvelope[]>(\n    id && stageId ? queryKeys.runs.stageEvents(id, stageId) : null,\n    fetchAllStageEvents,\n  );\n}\n```\n\n`fetchAllStageEvents` is a cursor-paginated loop modeled on `apiPaginatedFetcher` (`api-client.ts:166-218`) but using `since_seq` instead of `page[offset]`:\n\n- Start at `since_seq = 1`, `limit = 1000`.\n- Each page yields `EventEnvelope[]` and `meta.has_more`.\n- Append, set next `since_seq = highestSeq + 1`, loop until `!has_more` or safety cap (50 pages × 1000 = 50k events).\n- **Empty-page guard** (matching `api-client.ts:193`): if `page.data.length === 0`, exit the loop with the accumulated events. A page with `has_more: true` but no data would otherwise spin until the safety cap. Treat it as a server invariant violation: log a `console.warn` and return what we have. This protects against fixture/server bugs without masking them — the warn surfaces the violation while keeping the UI stable.\n- Return the flattened `EventEnvelope[]`.\n\nThis sits in `app/lib/api-client.ts` as `fetchAllStageEvents(key)` parsing `since_seq` out of the URL it's handed, mirroring how `apiPaginatedFetcher` is used today.\n\n### 3. Refetch policy on invalidation\n\nWhen `useRunEvents` invalidates the stage-events SWR key, SWR refetches via `fetchAllStageEvents`, which loops from `since_seq=1`. That is correct but potentially wasteful for long stages. Acceptable v1: the events list is bounded by stage size, not run size, and most stages have <1k events. If profiling shows otherwise, switch to a custom hook that holds the events array in component state and tail-fetches from `highestSeqSeen + 1` on invalidation. Not part of this plan.\n\n### 4. Update the stage detail page\n\n`apps/fabro-web/app/routes/run-stages.tsx`:\n\n- Remove the `useRunStageTurns` import and call (lines 43, 608).\n- Remove the `useRunEventsList` fallback wiring (lines 609-616).\n- Remove `mapTurns` (lines 176-189) and `mapApiStageTurn` (lines 156-174). Drop the `ApiStageTurn`, `PaginatedStageTurnList`, `PaginatedEventList` imports (lines 50-52).\n- Replace the dual-source flow. Note that the existing early return at `run-stages.tsx:619` (`if (!id || !stages.length) return EmptyState`) guarantees `selectedStage` is defined at this call site, so `selectedStage.id` (no `?.`) typechecks cleanly against the existing reducer signature `(events: EventEnvelope[], stageId: string)`:\n  ```ts\n  const stageEventsQuery = useRunStageEvents(id, selectedStage?.id);\n  const turns = useMemo(\n    () => selectedStage\n      ? eventsToActivity(stageEventsQuery.data ?? [], selectedStage.id)\n      : [],\n    [stageEventsQuery.data, selectedStage],\n  );\n  ```\n  The `selectedStage` ternary keeps the `useMemo` body type-safe even though the runtime path always has `selectedStage` defined; do not change the reducer signature.\n- Rename `turnsFromEvents` → `eventsToActivity` (line 71). It still filters `e.node_id === stageId` (defensive, since the server already scoped) and produces the same `TurnType[]`. Keep the existing event handling for `stage.prompt`, `agent.message`, `agent.tool.*`, `command.*`. Keep the `TurnType` union as-is (lines 57-61) — it's purely local now.\n\n### 5. Wire stage-events into cross-tab invalidation\n\n`apps/fabro-web/app/lib/run-events.ts:54-110` (`queryKeysForRunEvent`) — the existing branches handle only `STAGE_EVENTS` (`stage.started/completed/failed`) and `COMMAND_EVENTS` (`command.started/completed`). The `eventsToActivity` reducer also reads `stage.prompt`, `agent.message`, `agent.tool.started`, `agent.tool.completed` — events for which `queryKeysForRunEvent` currently returns `[]`, meaning agent-stage activity does not refresh live.\n\nAdd a `STAGE_ACTIVITY_EVENTS` set covering every event type the reducer consumes:\n\n```ts\nconst STAGE_ACTIVITY_EVENTS = new Set([\n  \"stage.prompt\",\n  \"agent.message\",\n  \"agent.tool.started\",\n  \"agent.tool.completed\",\n  \"command.started\",\n  \"command.completed\",\n]);\n```\n\nFor these (when the payload has a `node_id`), invalidate `queryKeys.runs.stageEvents(runId, stageId)`. The existing `STAGE_EVENTS` branch (lifecycle: `stage.started/completed/failed`) keeps its broader run-scoped invalidations (`stages`, `events`, `graph`, `detail`) and additionally invalidates `stageEvents(runId, stageId)` instead of `stageTurns`. The existing `COMMAND_EVENTS` branch is subsumed by `STAGE_ACTIVITY_EVENTS` — fold it in or keep separate, but ensure it invalidates `stageEvents` (not `stageTurns`).\n\nNo new subscription is needed: `run-detail.tsx:119` already calls `useRunEvents(params.id)`, and that subscription dispatches to per-stage keys via `queryKeysForRunEvent`. The stage detail page is a passive consumer — when any reducer-relevant event for its `node_id` arrives in any tab, SWR invalidates `runs.stageEvents(runId, stageId)`, the page refetches, the reducer rebuilds.\n\n`apps/fabro-web/app/lib/run-events.ts:162-173` — `resyncKeysForRun` resyncs run-scoped keys on leader change. The stage-events key is per-stage, so it's not naturally in this list. Acceptable: on leader change SWR's existing focus/reconnect revalidation will refresh active stage-events keys. If gap recovery becomes a problem, add `runs.stageEvents(runId, currentStageId)` here, but the page can also just call `mutate` on its own key on visibility return. Not part of this plan.\n\n**Tests for the live-invalidation path** (extend `apps/fabro-web/app/lib/query-keys.test.ts`):\n- `stage.prompt` with `node_id` → invalidations include `runs.stageEvents(runId, nodeId)`.\n- `agent.message` with `node_id` → invalidations include `runs.stageEvents(runId, nodeId)`.\n- `agent.tool.completed` with `node_id` → invalidations include `runs.stageEvents(runId, nodeId)`.\n- `command.completed` with `node_id` → invalidations include `runs.stageEvents(runId, nodeId)`.\n- `stage.completed` (lifecycle) still invalidates the run-scoped keys plus `runs.stageEvents`.\n\n### 6. Remove obsolete imports and tests\n\n- `apps/fabro-web/app/lib/queries.ts:2-18` — drop `PaginatedStageTurnList` from the import list.\n- `apps/fabro-web/app/lib/query-keys.test.ts:25-29` — replace the assertion that `stage.completed` invalidates `runs.stageTurns` with `runs.stageEvents`.\n- `apps/fabro-web/app/lib/run-events.test.tsx` — search for `stageTurns`; update to `stageEvents`.\n\n### 7. Regenerate the TS client (with explicit cleanup)\n\nThe generate script (`lib/packages/fabro-api-client/package.json:7`) writes `-o src` without a clean step — `openapi-generator-cli` writes file-by-file based on the schema list, so deleted schemas leave **stale model files behind** that remain importable. Steps:\n\n1. From `lib/packages/fabro-api-client/`: `rm -rf src/models src/api` to drop all generated models and API surface.\n2. `bun run generate` to repopulate from the updated YAML.\n3. Verify no stale references remain: `rg \"StageTurn|SystemStageTurn|AssistantStageTurn|ToolStageTurn|PaginatedStageTurnList|listStageTurns\" lib/packages/fabro-api-client apps/fabro-web` should return no matches.\n4. `cd apps/fabro-web && bun run typecheck` to confirm the import graph stays consistent.\n\n(Optional follow-up not in this plan: add a `prebuild` clean step to the package script so this doesn't trip future schema deletions.)\n\n## Reused infrastructure\n\n- `lib/crates/fabro-store` `list_events_from_with_limit` — the new method follows the same prefix-scan pattern.\n- `lib/crates/fabro-server` `EventListParams`, `PaginatedEventList`, `PaginationMeta` — reused as-is. `RequireRunBlob` (lines 188-199) is the model for the new `RequireRunStageScoped` extractor.\n- `apps/fabro-web/app/lib/cross-tab-sse.ts` `subscribeToCrossTabSse` — used implicitly via the existing `useRunEvents` plumbing in `run-events.ts`. No changes to the coordinator itself.\n- `apps/fabro-web/app/routes/run-stages.tsx` `turnsFromEvents` reducer (renamed) — kept as the local presentation projection.\n- `apps/fabro-web/app/lib/api-client.ts` `apiPaginatedFetcher` shape — `fetchAllStageEvents` mirrors its safety caps.\n\n## Out of scope\n\n- Same-`node_id` repeat visits (e.g. two `verify` rows in the sidebar pointing at the same URL). Pre-existing; needs URL design (`/stages/{nodeId}/{visit}` or similar) and `RunStage.id` disambiguation.\n- Tail-fetch optimization for the SWR invalidation path (refetch from `since_seq=highestSeen+1` instead of full reload). Defer to first profiling signal.\n- Any `/api/v1/attach` server-side replay or schema changes — explicitly excluded by the cross-tab SSE plan.\n\n## Verification\n\nTest commands:\n\n- `cargo nextest run -p fabro-store` — confirms the new `list_events_for_node_from_with_limit` filter, including the sparse-stage scan-then-filter case.\n- `cargo nextest run -p fabro-server` — runs the conformance test (`server::tests` + `it/pagination.rs`), the new cursor-pagination test, and the new stage-events handler test (mixed `node_id`s, `since_seq`, `limit`, unknown-stage 200, auth extractor).\n- `cd apps/fabro-web && bun run typecheck` — must pass after the generated TS client is regenerated and obsolete imports are removed. Will fail loudly if stale `StageTurn`-related files were left behind.\n- `cd apps/fabro-web && bun test` — runs `query-keys.test.ts` (now includes the new invalidation cases for `stage.prompt`, `agent.message`, `agent.tool.completed`), `run-events.test.tsx`, `board-events.test.tsx`.\n- Add `run-stages.test.ts` cases (currently only covers `isSafeMarkdownHref`) for `eventsToActivity`: given a sequence of `command.started` + `command.completed` events for `node_id=\"fmt\"`, return one `command` turn; given `agent.tool.started` + `agent.tool.completed`, return one `tool` turn; events for other `node_id`s are filtered out.\n\nEnd-to-end manual check:\n\n1. `fabro server start` (real mode), then in another terminal `cd apps/fabro-web && bun run dev`.\n2. Reproduce the original bug URL — a finished run with a long `implement`-style stage followed by `fmt`/`fixup`. Confirm those stages now render their command panes (script + stdout/stderr).\n3. Start a fresh run via the CLI; open its detail page mid-run. Watch a stage transition from running → succeeded; confirm the right pane updates without a manual reload (cross-tab invalidation).\n4. Open two tabs on the same running run; confirm only one `/api/v1/attach` EventStream is active in DevTools and both tabs' stage panes update from the same shared stream.\n5. Demo mode (`fabro server start` + `X-Fabro-Demo: 1` header via the toggle): open the `detect-drift` stage; confirm system prompt + assistant + tool turns still render from the new demo events fixture.\n"
+        }
+      }
+    },
+    "workflow_slug": "implement-plan",
+    "source_directory": "/Users/bhelmkamp/p/fabro-sh/fabro",
+    "provenance": {
+      "server": {
+        "version": "0.223.0-nightly.0"
+      },
+      "client": {
+        "user_agent": "fabro-cli/0.223.0-nightly.0",
+        "name": "fabro-cli",
+        "version": "0.223.0-nightly.0"
+      },
+      "subject": {
+        "kind": "user",
+        "identity": {
+          "issuer": "https://github.com",
+          "subject": "19"
+        },
+        "login": "brynary",
+        "auth_method": "github"
+      }
+    },
+    "manifest_blob": "717b1a33acec46941b76af571a5180a550a8e7a8d15d484219b679e3eef65f41",
+    "definition_blob": "791b2ce7454b6fff8fa26bea4af48533a25d0e56c4cecc44be1ea071680b4f9d",
+    "git": {
+      "origin_url": "https://github.com/fabro-sh/fabro",
+      "branch": "main",
+      "sha": "b5b08e78d389a1746aa52490efe5d66f26a07eaa",
+      "dirty": "dirty",
+      "push_outcome": {
+        "type": "not_attempted"
+      }
+    },
+    "in_place": false
+  },
+  "graph_source": "digraph ImplementPlan {\n    graph [\n        goal=\"Implement and simplify\",\n        model_stylesheet=\"\n            * { model: claude-opus-4-7; }\n        \"\n    ]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    toolchain         [label=\"Toolchain\", shape=parallelogram, script=\"command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1\", max_retries=0]\n    preflight_compile [label=\"Preflight Compile\", shape=parallelogram, script=\"cargo check -q --workspace 2>&1\", max_retries=0]\n    preflight_lint    [label=\"Preflight Lint\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1\", max_retries=0]\n    fix_lints         [label=\"Fix Lints\", prompt=\"The preflight lint step failed. Read the build output from context and fix all clippy lint warnings.\", max_visits=3]\n    implement         [label=\"Implement\", prompt=\"Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD.\"]\n    simplify_opus     [label=\"Simplify (Opus)\", prompt=\"@prompts/simplify.md\"]\n    simplify_gpt      [label=\"Simplify (GPT-55)\", prompt=\"@prompts/simplify.md\", model=\"gpt-55\"]\n    verify            [label=\"Verify\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1 && cargo dev docs refresh 2>&1 && cargo dev docs check 2>&1\", goal_gate=true, retry_target=\"fixup\"]\n    fixup             [label=\"Fixup\", prompt=\"The verify step failed. Read the build output from context and fix all clippy lint warnings, test failures, and generated docs errors.\", max_visits=3]\n    fmt               [label=\"Format\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 fmt --all 2>&1\", max_retries=0]\n\n    start -> toolchain\n    toolchain -> preflight_compile [condition=\"outcome=succeeded\"]\n    toolchain -> exit\n    preflight_compile -> preflight_lint [condition=\"outcome=succeeded\"]\n    preflight_compile -> exit\n    preflight_lint -> implement [condition=\"outcome=succeeded\"]\n    preflight_lint -> fix_lints\n    fix_lints -> preflight_lint\n    implement -> simplify_opus -> simplify_gpt -> verify\n    verify -> fmt   [condition=\"outcome=succeeded\"]\n    verify -> fixup\n    fixup -> verify\n    fmt -> exit\n}\n",
+  "start": null,
+  "status": {
+    "kind": "starting"
+  },
+  "status_updated_at": "2026-05-04T20:07:55.177150Z",
+  "pending_control": null,
+  "checkpoint": null,
+  "checkpoints": [],
+  "conclusion": null,
+  "retro": null,
+  "retro_prompt": null,
+  "retro_response": null,
+  "sandbox": {
+    "provider": "daytona",
+    "working_directory": "/home/daytona/workspace",
+    "identifier": "fabro-01KQT9NFG90GWYZ7CZ0FAH0E12",
+    "repo_cloned": true,
+    "clone_origin_url": "https://github.com/fabro-sh/fabro",
+    "clone_branch": "main"
+  },
+  "final_patch": null,
+  "pull_request": null,
+  "superseded_by": null,
+  "pending_interviews": {},
+  "stages": {}
+}
