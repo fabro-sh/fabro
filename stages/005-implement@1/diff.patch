@@ -1,0 +1,2451 @@
+diff --git a/apps/fabro-web/app/components/steer-composer.tsx b/apps/fabro-web/app/components/steer-composer.tsx
+new file mode 100644
+index 00000000..b2b613fd
+--- /dev/null
++++ b/apps/fabro-web/app/components/steer-composer.tsx
+@@ -0,0 +1,92 @@
++import { useState, useCallback, useRef, useEffect } from "react";
++
++import { useSteerRun } from "../lib/mutations";
++
++interface SteerComposerProps {
++  runId: string;
++  onClose: () => void;
++}
++
++export function SteerComposer({ runId, onClose }: SteerComposerProps) {
++  const [text, setText] = useState("");
++  const [error, setError] = useState<string | null>(null);
++  const textareaRef = useRef<HTMLTextAreaElement>(null);
++  const steerMutation = useSteerRun(runId);
++
++  useEffect(() => {
++    textareaRef.current?.focus();
++  }, []);
++
++  const submit = useCallback(
++    async (interrupt: boolean) => {
++      if (!text.trim()) return;
++      setError(null);
++      try {
++        await steerMutation.trigger({ text: text.trim(), interrupt });
++        setText("");
++        onClose();
++      } catch (err: unknown) {
++        const message =
++          err instanceof Error ? err.message : "Failed to deliver steer.";
++        setError(message);
++      }
++    },
++    [text, steerMutation, onClose],
++  );
++
++  const handleKeyDown = useCallback(
++    (e: React.KeyboardEvent) => {
++      if (e.key === "Enter" && !e.shiftKey) {
++        e.preventDefault();
++        submit(false);
++      }
++    },
++    [submit],
++  );
++
++  return (
++    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30">
++      <div className="bg-linear-to-t from-page via-page/80 to-transparent pt-10">
++        <div className="pointer-events-auto mx-auto max-w-3xl px-4 pb-4">
++          <div className="rounded-2xl bg-panel shadow-lg ring-1 ring-line-strong p-4">
++            <div className="mb-3 flex items-center justify-between">
++              <h3 className="text-sm font-medium text-fg">Steer agent</h3>
++              <button
++                onClick={onClose}
++                className="text-xs text-fg-muted hover:text-fg"
++              >
++                Close
++              </button>
++            </div>
++            <textarea
++              ref={textareaRef}
++              value={text}
++              onChange={(e) => setText(e.target.value)}
++              onKeyDown={handleKeyDown}
++              placeholder="Type a steering message…"
++              rows={3}
++              className="w-full resize-none rounded-lg border border-line bg-page px-3 py-2 text-sm text-fg-2 placeholder:text-fg-muted focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
++            />
++            {error && <p className="mt-2 text-xs text-coral">{error}</p>}
++            <div className="mt-3 flex justify-end gap-2">
++              <button
++                onClick={() => submit(true)}
++                disabled={!text.trim() || steerMutation.isMutating}
++                className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-fg-2 hover:bg-overlay disabled:opacity-50"
++              >
++                Interrupt &amp; Send
++              </button>
++              <button
++                onClick={() => submit(false)}
++                disabled={!text.trim() || steerMutation.isMutating}
++                className="rounded-lg bg-teal-500 px-3 py-1.5 text-xs font-medium text-on-primary hover:bg-teal-300 disabled:opacity-50"
++              >
++                Send
++              </button>
++            </div>
++          </div>
++        </div>
++      </div>
++    </div>
++  );
++}
+diff --git a/apps/fabro-web/app/lib/mutations.ts b/apps/fabro-web/app/lib/mutations.ts
+index d7f888fa..bb6f706c 100644
+--- a/apps/fabro-web/app/lib/mutations.ts
++++ b/apps/fabro-web/app/lib/mutations.ts
+@@ -116,6 +116,31 @@ export function useSubmitInterviewAnswer(runId: string | undefined) {
+   );
+ }
+ 
++export interface SteerRunArg {
++  text: string;
++  interrupt: boolean;
++}
++
++export function useSteerRun(runId: string | undefined) {
++  const { mutate } = useSWRConfig();
++  return useSWRMutation(
++    runId ? `steer:${runId}` : null,
++    async (_key: string, { arg }: { arg: SteerRunArg }) => {
++      if (!runId) throw new Error("runId is required");
++      await apiJsonMutation<void, SteerRunArg>(
++        queryKeys.runs.steer(runId),
++        { arg },
++      );
++    },
++    {
++      onSuccess: () => {
++        if (!runId) return;
++        void mutate(queryKeys.runs.detail(runId));
++      },
++    },
++  );
++}
++
+ export function useToggleDemoMode() {
+   const { mutate } = useSWRConfig();
+   return useSWRMutation(
+@@ -147,4 +172,4 @@ export function useLoginDevToken() {
+       return response.json() as Promise<{ ok: boolean }>;
+     },
+   );
+-}
++}
+\ No newline at end of file
+diff --git a/apps/fabro-web/app/lib/query-keys.ts b/apps/fabro-web/app/lib/query-keys.ts
+index 7d3e847e..47c3c676 100644
+--- a/apps/fabro-web/app/lib/query-keys.ts
++++ b/apps/fabro-web/app/lib/query-keys.ts
+@@ -61,6 +61,7 @@ export const queryKeys = {
+     cancel: (id: string) => `/api/v1/runs/${pathSegment(id)}/cancel`,
+     archive: (id: string) => `/api/v1/runs/${pathSegment(id)}/archive`,
+     unarchive: (id: string) => `/api/v1/runs/${pathSegment(id)}/unarchive`,
++    steer: (id: string) => `/api/v1/runs/${pathSegment(id)}/steer`,
+     attach: (id: string) => `/api/v1/runs/${pathSegment(id)}/attach`,
+   },
+   workflows: {
+@@ -75,4 +76,4 @@ export const queryKeys = {
+   settings: {
+     server: () => "/api/v1/settings",
+   },
+-};
++};
+\ No newline at end of file
+diff --git a/apps/fabro-web/app/lib/run-events.ts b/apps/fabro-web/app/lib/run-events.ts
+index 924264af..2884f1ee 100644
+--- a/apps/fabro-web/app/lib/run-events.ts
++++ b/apps/fabro-web/app/lib/run-events.ts
+@@ -40,6 +40,10 @@ const INTERVIEW_EVENTS = new Set([
+   "interview.timeout",
+   "interview.interrupted",
+ ]);
++const STEERING_EVENTS = new Set([
++  "steering.received",
++  "steering.applied",
++]);
+ 
+ export function queryKeysForRunEvent(
+   runId: string,
+@@ -97,6 +101,13 @@ export function queryKeysForRunEvent(
+     return keys;
+   }
+ 
++  if (STEERING_EVENTS.has(event)) {
++    return [
++      queryKeys.runs.detail(runId),
++      queryKeys.runs.events(runId, 1000),
++    ];
++  }
++
+   return [];
+ }
+ 
+@@ -142,4 +153,4 @@ export function useRunEvents(runId: string | undefined) {
+     if (!runId) return;
+     return subscribeToRunEvents(runId, mutate as MutateFn);
+   }, [mutate, runId]);
+-}
++}
+\ No newline at end of file
+diff --git a/apps/fabro-web/app/routes/runs.tsx b/apps/fabro-web/app/routes/runs.tsx
+index dfc088e4..b83b7e1c 100644
+--- a/apps/fabro-web/app/routes/runs.tsx
++++ b/apps/fabro-web/app/routes/runs.tsx
+@@ -20,9 +20,9 @@ import {
+ import { CSS } from "@dnd-kit/utilities";
+ import { ciConfig, columnStatusDisplay, deriveCiStatus, mapRunListItem } from "../data/runs";
+ import type { CiStatus, CheckRun, CheckStatus, RunItem, RunWithStatus, ColumnStatus } from "../data/runs";
++import { SteerComposer } from "../components/steer-composer";
+ import { EmptyState } from "../components/state";
+ import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
+-import { useDemoMode } from "../lib/demo-mode";
+ import { useAuthConfig, useBoardsRuns, useSystemInfo } from "../lib/queries";
+ import type { PaginatedBoardRunList } from "@qltysh/fabro-api-client";
+ 
+@@ -276,11 +276,13 @@ function PrCard({
+   icon: Icon,
+   iconColor,
+   actions,
++  onSteer,
+ }: {
+   pr: RunItem;
+   icon: React.ComponentType<{ className?: string }>;
+   iconColor: string;
+   actions?: string[];
++  onSteer?: (runId: string) => void;
+ }) {
+   const lifecycleLabel = boardLifecycleStatusLabel(pr);
+ 
+@@ -347,6 +349,7 @@ function PrCard({
+               key={label}
+               type="button"
+               disabled={pr.actionDisabled}
++              onClick={label === "Steer" ? (e) => { e.preventDefault(); e.stopPropagation(); onSteer?.(pr.id); } : undefined}
+               className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:text-fg-muted disabled:border-line ${
+                 label === "Merge"
+                   ? "border-mint/20 text-mint hover:border-mint/50 hover:text-fg"
+@@ -396,11 +399,13 @@ function SortablePrCard({
+   icon,
+   iconColor,
+   actions,
++  onSteer,
+ }: {
+   pr: RunItem;
+   icon: React.ComponentType<{ className?: string }>;
+   iconColor: string;
+   actions?: string[];
++  onSteer?: (runId: string) => void;
+ }) {
+   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: pr.id });
+   const wasDragging = useRef(false);
+@@ -426,17 +431,13 @@ function SortablePrCard({
+         }
+       }}
+     >
+-      <PrCard pr={pr} icon={icon} iconColor={iconColor} actions={actions} />
++      <PrCard pr={pr} icon={icon} iconColor={iconColor} actions={actions} onSteer={onSteer} />
+     </div>
+   );
+ }
+ 
+-function BoardColumn({ column }: { column: Column }) {
++function BoardColumn({ column, onSteer }: { column: Column; onSteer: (runId: string) => void }) {
+   const Icon = iconMap[column.iconType];
+-  const demoMode = useDemoMode();
+-  const actions = demoMode
+-    ? column.actions
+-    : column.actions.filter((label) => label !== "Steer");
+   return (
+     <div className="flex min-w-0 flex-col">
+       <div className="mb-3 flex items-center gap-3">
+@@ -457,7 +458,8 @@ function BoardColumn({ column }: { column: Column }) {
+               pr={pr}
+               icon={Icon}
+               iconColor={column.text}
+-              actions={actions}
++              actions={column.actions}
++              onSteer={onSteer}
+             />
+           ))}
+         </div>
+@@ -684,6 +686,7 @@ export default function Runs() {
+   const [view, setView] = useState<ViewMode>("columns");
+   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+   const [columns, setColumns] = useState(initialColumns);
++  const [steerRunId, setSteerRunId] = useState<string | null>(null);
+   const lowerQuery = query.toLowerCase();
+   useBoardEvents();
+ 
+@@ -868,4 +871,4 @@ export default function Runs() {
+       </div>
+     </DndContext>
+   );
+-}
++}
+\ No newline at end of file
+diff --git a/docs/public/api-reference/fabro-api.yaml b/docs/public/api-reference/fabro-api.yaml
+index d1b8bc7f..22ad033a 100644
+--- a/docs/public/api-reference/fabro-api.yaml
++++ b/docs/public/api-reference/fabro-api.yaml
+@@ -1879,6 +1879,60 @@ paths:
+               schema:
+                 $ref: "#/components/schemas/ErrorResponse"
+ 
++  /api/v1/runs/{id}/steer:
++    post:
++      operationId: steerRun
++      tags: [Human-in-the-Loop]
++      summary: Steer Run
++      description: Sends a steering message to the agent running in the specified run.
++      parameters:
++        - $ref: "#/components/parameters/RunId"
++      requestBody:
++        required: true
++        content:
++          application/json:
++            schema:
++              $ref: "#/components/schemas/SteerRunRequest"
++      responses:
++        "202":
++          description: Steer accepted and forwarded to the agent.
++        "400":
++          description: Invalid request body
++          headers:
++            x-request-id:
++              $ref: "#/components/headers/XRequestId"
++          content:
++            application/json:
++              schema:
++                $ref: "#/components/schemas/ErrorResponse"
++        "404":
++          description: Run not found
++          headers:
++            x-request-id:
++              $ref: "#/components/headers/XRequestId"
++          content:
++            application/json:
++              schema:
++                $ref: "#/components/schemas/ErrorResponse"
++        "409":
++          description: Run is not in a steerable state.
++          headers:
++            x-request-id:
++              $ref: "#/components/headers/XRequestId"
++          content:
++            application/json:
++              schema:
++                $ref: "#/components/schemas/ErrorResponse"
++        "503":
++          description: Worker process is unavailable.
++          headers:
++            x-request-id:
++              $ref: "#/components/headers/XRequestId"
++          content:
++            application/json:
++              schema:
++                $ref: "#/components/schemas/ErrorResponse"
++
+   /api/v1/runs/{id}/stages:
+     get:
+       operationId: listRunStages
+@@ -4684,6 +4738,25 @@ components:
+           description: Keys of selected options (for multi-select questions).
+           example: ["option_a", "option_b"]
+ 
++    SteerRunRequest:
++      description: Request body for steering a running agent.
++      type: object
++      required:
++        - text
++      properties:
++        text:
++          type: string
++          minLength: 1
++          maxLength: 8192
++          description: Steering message to send to the agent.
++          example: "Try a different approach using the existing test helpers."
++        interrupt:
++          type: boolean
++          default: false
++          description: >
++            If true, cancel the in-flight LLM stream and tool calls in the
++            current round, delivering the message as the next user turn.
++
+     ErrorResponseEntry:
+       description: A single error entry in an error response.
+       type: object
+@@ -8322,4 +8395,4 @@ components:
+         login:
+           type: string
+           description: User's login identifier (e.g. GitHub username).
+-          example: octocat
++          example: octocat
+\ No newline at end of file
+diff --git a/lib/crates/fabro-agent/src/lib.rs b/lib/crates/fabro-agent/src/lib.rs
+index 4b8ffba6..b5d60da2 100644
+--- a/lib/crates/fabro-agent/src/lib.rs
++++ b/lib/crates/fabro-agent/src/lib.rs
+@@ -44,7 +44,7 @@ pub use sandbox::{
+     SandboxEvent, SandboxEventCallback, WorktreeEvent, WorktreeEventCallback, WorktreeOptions,
+     WorktreeSandbox, format_lines_numbered, shell_quote,
+ };
+-pub use session::Session;
++pub use session::{Session, SessionControlHandle};
+ pub use skills::Skill;
+ pub use subagent::{
+     SubAgent, SubAgentEventCallback, SubAgentManager, SubAgentResult, SubAgentStatus,
+@@ -55,11 +55,11 @@ pub use tools::{
+     make_shell_tool, make_shell_tool_with_config, make_write_file_tool, register_core_tools,
+ };
+ pub use truncation::{TruncationMode, truncate_lines, truncate_output, truncate_tool_output};
+-pub use types::{AgentEvent, SessionEvent, SessionState, Turn};
++pub use types::{AgentEvent, CompletionCoordinator, SessionEvent, SessionState, Turn};
+ 
+ #[cfg(test)]
+ #[allow(
+     unreachable_pub,
+     reason = "Test support stays crate-visible for cross-module unit tests."
+ )]
+-pub(crate) mod test_support;
++pub(crate) mod test_support;
+\ No newline at end of file
+diff --git a/lib/crates/fabro-agent/src/session.rs b/lib/crates/fabro-agent/src/session.rs
+index bdff3c0c..c99e6520 100644
+--- a/lib/crates/fabro-agent/src/session.rs
++++ b/lib/crates/fabro-agent/src/session.rs
+@@ -13,6 +13,7 @@ use fabro_llm::types::{
+ use fabro_llm::{Error as LlmError, retry};
+ use fabro_mcp::config::{McpServerSettings, McpTransport};
+ use fabro_mcp::connection_manager::McpConnectionManager;
++use fabro_types::{Principal, SteerKind};
+ use futures::StreamExt;
+ use tokio::sync::{Mutex as AsyncMutex, broadcast};
+ use tokio::time;
+@@ -36,28 +37,33 @@ use crate::skills::{
+ };
+ use crate::subagent::{SubAgentCallbackEvent, SubAgentEventCallback, SubAgentManager};
+ use crate::tool_execution::execute_tool_calls;
+-use crate::types::{AgentEvent, SessionEvent, SessionState, Turn};
++use crate::types::{AgentEvent, CompletionCoordinator, SessionEvent, SessionState, Turn};
++
++/// A single queued steering entry: (text, kind, actor).
++type SteeringEntry = (String, SteerKind, Option<Principal>);
+ 
+ pub struct Session {
+-    id:               String,
+-    config:           SessionOptions,
+-    history:          History,
+-    event_emitter:    Emitter,
+-    state:            SessionState,
+-    llm_client:       Client,
+-    provider_profile: Arc<dyn AgentProfile>,
+-    sandbox:          Arc<dyn Sandbox>,
+-    steering_queue:   Arc<Mutex<VecDeque<String>>>,
+-    followup_queue:   Arc<Mutex<VecDeque<String>>>,
+-    cancel_token:     CancellationToken,
+-    interrupt_reason: Arc<Mutex<Option<InterruptReason>>>,
+-    memory:           Vec<String>,
+-    env_context:      EnvContext,
+-    skills:           Vec<Skill>,
+-    system_prompt:    String,
+-    file_tracker:     FileTracker,
+-    tool_env:         Option<HashMap<String, String>>,
+-    subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
++    id:                       String,
++    config:                   SessionOptions,
++    history:                  History,
++    event_emitter:            Emitter,
++    state:                    SessionState,
++    llm_client:               Client,
++    provider_profile:         Arc<dyn AgentProfile>,
++    sandbox:                  Arc<dyn Sandbox>,
++    steering_queue:           Arc<Mutex<VecDeque<SteeringEntry>>>,
++    followup_queue:           Arc<Mutex<VecDeque<String>>>,
++    cancel_token:             CancellationToken,
++    interrupt_reason:         Arc<Mutex<Option<InterruptReason>>>,
++    round_token:              Arc<std::sync::RwLock<CancellationToken>>,
++    completion_coordinator:   Option<Arc<dyn CompletionCoordinator>>,
++    memory:                   Vec<String>,
++    env_context:              EnvContext,
++    skills:                   Vec<Skill>,
++    system_prompt:            String,
++    file_tracker:             FileTracker,
++    tool_env:                 Option<HashMap<String, String>>,
++    subagent_manager:         Option<Arc<AsyncMutex<SubAgentManager>>>,
+ }
+ 
+ impl Session {
+@@ -82,6 +88,8 @@ impl Session {
+             followup_queue: Arc::new(Mutex::new(VecDeque::new())),
+             cancel_token: CancellationToken::new(),
+             interrupt_reason: Arc::new(Mutex::new(None)),
++            round_token: Arc::new(std::sync::RwLock::new(CancellationToken::new())),
++            completion_coordinator: None,
+             memory: Vec::new(),
+             env_context: EnvContext::default(),
+             skills: Vec::new(),
+@@ -417,7 +425,32 @@ impl Session {
+         self.steering_queue
+             .lock()
+             .expect("steering queue lock poisoned")
+-            .push_back(message);
++            .push_back((message, SteerKind::Append, None));
++    }
++
++    /// Push an interrupt steer and cancel the current round token.
++    pub fn interrupt_with(&self, text: String, actor: Option<Principal>) {
++        self.steering_queue
++            .lock()
++            .expect("steering queue lock poisoned")
++            .push_back((text, SteerKind::Interrupt, actor));
++        self.round_token
++            .read()
++            .expect("round token lock poisoned")
++            .cancel();
++    }
++
++    /// Returns a lightweight handle for external steering control.
++    #[must_use]
++    pub fn control_handle(&self) -> SessionControlHandle {
++        SessionControlHandle {
++            steering_queue: self.steering_queue.clone(),
++            round_token:    self.round_token.clone(),
++        }
++    }
++
++    pub fn set_completion_coordinator(&mut self, coord: Arc<dyn CompletionCoordinator>) {
++        self.completion_coordinator = Some(coord);
+     }
+ 
+     pub fn follow_up(&self, message: String) {
+@@ -493,7 +526,9 @@ impl Session {
+     }
+ 
+     #[must_use]
+-    pub fn steering_queue_handle(&self) -> Arc<Mutex<VecDeque<String>>> {
++    pub fn steering_queue_handle(
++        &self,
++    ) -> Arc<Mutex<VecDeque<SteeringEntry>>> {
+         self.steering_queue.clone()
+     }
+ 
+@@ -690,12 +725,29 @@ impl Session {
+                 text: expanded_input.clone(),
+             });
+ 
+-        // Drain steering queue before first LLM call
+-        self.drain_steering();
+-
+         let mut round_count: usize = 0;
+ 
+         loop {
++            // Drain steering at top of every iteration (covers pre-loop,
++            // post-tool, and post-interrupt paths uniformly).
++            self.drain_steering();
++
++            // Reset round token if it was cancelled (steer interrupt)
++            {
++                let needs_reset = self
++                    .round_token
++                    .read()
++                    .expect("round token lock poisoned")
++                    .is_cancelled();
++                if needs_reset {
++                    let mut guard = self
++                        .round_token
++                        .write()
++                        .expect("round token lock poisoned");
++                    *guard = CancellationToken::new();
++                }
++            }
++
+             // Check max_tool_rounds_per_input
+             if self.config.max_tool_rounds_per_input > 0
+                 && round_count >= self.config.max_tool_rounds_per_input
+@@ -722,6 +774,26 @@ impl Session {
+                 return Err(self.interrupted_error());
+             }
+ 
++            // Build per-round composite token from cancel_token (terminal)
++            // and round_token (per-round steer interrupt).
++            let round_ct = self
++                .round_token
++                .read()
++                .expect("round token lock poisoned")
++                .clone();
++            let composite = CancellationToken::new();
++            let _composite_driver = {
++                let composite = composite.clone();
++                let cancel = self.cancel_token.clone();
++                let round = round_ct.clone();
++                tokio::spawn(async move {
++                    tokio::select! {
++                        () = cancel.cancelled() => composite.cancel(),
++                        () = round.cancelled() => composite.cancel(),
++                    }
++                })
++            };
++
+             // Pre-turn compaction: trim context before building the request
+             self.compact_if_needed().await;
+ 
+@@ -765,7 +837,12 @@ impl Session {
+                 let mut emitted_text = String::new();
+                 let mut emitted_reasoning = String::new();
+ 
+-                while let Some(event_result) = event_stream.next().await {
++                loop {
++                    let next = tokio::select! {
++                        next = event_stream.next() => next,
++                        () = composite.cancelled() => None,
++                    };
++                    let Some(event_result) = next else { break };
+                     match event_result {
+                         Ok(event) => {
+                             match &event {
+@@ -795,21 +872,32 @@ impl Session {
+                             return Err(self.emit_llm_error(err));
+                         }
+                     }
+-
+-                    // Check cancellation between chunks
+-                    if self.cancel_token.is_cancelled() {
+-                        break;
+-                    }
+                 }
+ 
+-                // If interrupted during streaming, drop the stream to cancel the HTTP
+-                // connection, then close the session before returning.
++                // If terminal cancel during streaming, close and return error.
+                 if self.cancel_token.is_cancelled() {
+                     drop(event_stream);
+                     self.close();
+                     return Err(self.interrupted_error());
+                 }
+ 
++                // Round-token steer interrupt during LLM streaming:
++                // drop the unrecorded turn and clear any partial UI output.
++                if round_ct.is_cancelled() {
++                    if !emitted_text.is_empty() || !emitted_reasoning.is_empty() {
++                        self.event_emitter.emit(
++                            self.id.clone(),
++                            AgentEvent::AssistantOutputReplace {
++                                text:      String::new(),
++                                reasoning: None,
++                            },
++                        );
++                    }
++                    drop(event_stream);
++                    response = None;
++                    break;
++                }
++
+                 if let Some(resp) = accumulator.response().cloned() {
+                     response = Some(resp);
+                     break;
+@@ -837,6 +925,12 @@ impl Session {
+                 }
+             }
+ 
++            // If round was interrupted during LLM streaming, continue to
++            // next iteration (drain_steering at top will pick up the steer).
++            if response.is_none() && round_ct.is_cancelled() && !self.cancel_token.is_cancelled() {
++                continue;
++            }
++
+             let Some(response) = response else {
+                 return Err(self.emit_llm_error(LlmError::Stream {
+                     message: "Stream ended without a Finish event (after retries)".into(),
+@@ -879,6 +973,13 @@ impl Session {
+ 
+             // If no tool calls, natural completion
+             if tool_calls.is_empty() {
++                let should_continue = self
++                    .completion_coordinator
++                    .as_ref()
++                    .is_some_and(|c| c.on_natural_completion());
++                if should_continue {
++                    continue;
++                }
+                 break;
+             }
+ 
+@@ -904,24 +1005,26 @@ impl Session {
+             self.file_tracker
+                 .record_from_tool_calls(&tool_calls, &results);
+ 
+-            // Check cancellation after tool execution
++            // Always push tool results (maintains tool_use ↔ tool_result invariant)
++            self.history.push(Turn::ToolResults {
++                results,
++                timestamp: SystemTime::now(),
++            });
++
++            // Check terminal cancellation
+             if self.cancel_token.is_cancelled() {
+-                self.history.push(Turn::ToolResults {
+-                    results,
+-                    timestamp: SystemTime::now(),
+-                });
+                 self.close();
+                 return Err(self.interrupted_error());
+             }
+ 
+-            // Record tool results turn
+-            self.history.push(Turn::ToolResults {
+-                results,
+-                timestamp: SystemTime::now(),
+-            });
++            // Check round-token interrupt (steer during tool execution).
++            // Continue to next iteration — drain_steering at top will pick up
++            // the message.
++            if round_ct.is_cancelled() {
++                self.transition(SessionState::Thinking);
++                continue;
++            }
+ 
+-            // Drain steering after tool execution
+-            self.drain_steering();
+             self.transition(SessionState::Thinking);
+ 
+             // Loop detection
+@@ -970,20 +1073,24 @@ impl Session {
+     }
+ 
+     fn drain_steering(&mut self) {
+-        let messages: Vec<String> = self
++        let messages: Vec<(String, SteerKind, Option<Principal>)> = self
+             .steering_queue
+             .lock()
+             .expect("steering queue lock poisoned")
+             .drain(..)
+             .collect();
+-        for msg in messages {
++        for (msg, kind, actor) in messages {
+             let text = msg.clone();
+             self.history.push(Turn::Steering {
+                 content:   msg,
+                 timestamp: SystemTime::now(),
+             });
+             self.event_emitter
+-                .emit(self.id.clone(), AgentEvent::SteeringInjected { text });
++                .emit(self.id.clone(), AgentEvent::SteeringInjected {
++                    text,
++                    kind,
++                    actor,
++                });
+         }
+     }
+ 
+@@ -1031,6 +1138,55 @@ const fn is_auth_error(err: &LlmError) -> bool {
+     )
+ }
+ 
++/// Lightweight, clonable handle for external steering into a `Session`.
++/// The `SteeringHub` stores this — not the `Session` itself.
++#[derive(Clone)]
++pub struct SessionControlHandle {
++    steering_queue: Arc<Mutex<VecDeque<SteeringEntry>>>,
++    round_token:    Arc<std::sync::RwLock<CancellationToken>>,
++}
++
++impl SessionControlHandle {
++    /// Create a new control handle from shared queue and round token.
++    pub fn new(
++        steering_queue: Arc<Mutex<VecDeque<SteeringEntry>>>,
++        round_token: Arc<std::sync::RwLock<CancellationToken>>,
++    ) -> Self {
++        Self {
++            steering_queue,
++            round_token,
++        }
++    }
++
++    /// Push an append steer.
++    pub fn steer(&self, text: String, actor: Option<Principal>) {
++        self.steering_queue
++            .lock()
++            .expect("steering queue lock poisoned")
++            .push_back((text, SteerKind::Append, actor));
++    }
++
++    /// Push an interrupt steer and cancel the round token.
++    pub fn interrupt_with(&self, text: String, actor: Option<Principal>) {
++        self.steering_queue
++            .lock()
++            .expect("steering queue lock poisoned")
++            .push_back((text, SteerKind::Interrupt, actor));
++        self.round_token
++            .read()
++            .expect("round token lock poisoned")
++            .cancel();
++    }
++
++    /// Check if the steering queue is empty.
++    pub fn queue_is_empty(&self) -> bool {
++        self.steering_queue
++            .lock()
++            .expect("steering queue lock poisoned")
++            .is_empty()
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use std::sync::Arc;
+@@ -2831,4 +2987,4 @@ mod tests {
+             "ProcessingEnd event should be emitted when returning to Idle"
+         );
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-agent/src/types.rs b/lib/crates/fabro-agent/src/types.rs
+index 2245272c..7c7562a0 100644
+--- a/lib/crates/fabro-agent/src/types.rs
++++ b/lib/crates/fabro-agent/src/types.rs
+@@ -2,6 +2,7 @@ use std::time::SystemTime;
+ 
+ use fabro_llm::Error as LlmError;
+ use fabro_llm::types::{ContentPart, ThinkingData, TokenCounts, ToolCall, ToolResult};
++use fabro_types::{Principal, SteerKind};
+ use serde::{Deserialize, Serialize};
+ 
+ use crate::error::Error;
+@@ -157,7 +158,9 @@ pub enum AgentEvent {
+         skill_name: String,
+     },
+     SteeringInjected {
+-        text: String,
++        text:  String,
++        kind:  SteerKind,
++        actor: Option<Principal>,
+     },
+     CompactionStarted {
+         estimated_tokens:    usize,
+@@ -309,8 +312,8 @@ impl AgentEvent {
+             Self::SkillExpanded { skill_name } => {
+                 debug!(session_id, skill = skill_name.as_str(), "Skill expanded");
+             }
+-            Self::SteeringInjected { text } => {
+-                debug!(session_id, text_len = text.len(), "Steering injected");
++            Self::SteeringInjected { text, kind, .. } => {
++                debug!(session_id, text_len = text.len(), ?kind, "Steering injected");
+             }
+             Self::CompactionStarted {
+                 estimated_tokens,
+@@ -420,6 +423,15 @@ pub struct SessionEvent {
+     pub parent_session_id: Option<String>,
+ }
+ 
++/// Called at natural completion (tool_calls empty) to coordinate with
++/// the steering source. Implementors can atomically check whether new
++/// steers arrived during the final response.
++pub trait CompletionCoordinator: Send + Sync {
++    /// Return `true` to continue the loop (queue is non-empty),
++    /// `false` to break.
++    fn on_natural_completion(&self) -> bool;
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+@@ -791,4 +803,4 @@ mod tests {
+             _ => panic!("expected McpServerFailed variant"),
+         }
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-agent/tests/it/parity_matrix.rs b/lib/crates/fabro-agent/tests/it/parity_matrix.rs
+index 8b8630e4..4c5792de 100644
+--- a/lib/crates/fabro-agent/tests/it/parity_matrix.rs
++++ b/lib/crates/fabro-agent/tests/it/parity_matrix.rs
+@@ -605,9 +605,11 @@ async fn scenario_steering_mid_task(session: &mut Session, dir: &Path) {
+                 steering_queue
+                     .lock()
+                     .expect("steering queue lock")
+-                    .push_back(
++                    .push_back((
+                         "Stop what you are doing. Create a file called steered.txt containing 'steered' and do nothing else.".to_string(),
+-                    );
++                        fabro_types::SteerKind::Append,
++                        None,
++                    ));
+                 break;
+             }
+         }
+@@ -1022,4 +1024,4 @@ async fn scenario_provider_specific_editing(session: &mut Session, dir: &Path) {
+         content.contains("goodbye"),
+         "Expected 'goodbye' in target.rs, got: {content}"
+     );
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-cli/src/args.rs b/lib/crates/fabro-cli/src/args.rs
+index 52ea3a87..2aefb65b 100644
+--- a/lib/crates/fabro-cli/src/args.rs
++++ b/lib/crates/fabro-cli/src/args.rs
+@@ -575,6 +575,26 @@ pub(crate) struct DumpArgs {
+     pub(crate) output: PathBuf,
+ }
+ 
++#[derive(Args)]
++pub(crate) struct SteerArgs {
++    #[command(flatten)]
++    pub(crate) server: ServerTargetArgs,
++
++    /// Run ID to steer
++    pub(crate) run_id: String,
++
++    /// Steering message text (omit if using --text-stdin)
++    pub(crate) text: Option<String>,
++
++    /// Read steering text from stdin
++    #[arg(long)]
++    pub(crate) text_stdin: bool,
++
++    /// Interrupt the current round before delivering the message
++    #[arg(long)]
++    pub(crate) interrupt: bool,
++}
++
+ #[derive(Args)]
+ pub(crate) struct SecretListArgs;
+ 
+@@ -1056,6 +1076,8 @@ pub(crate) enum Commands {
+     Uninstall(UninstallArgs),
+     /// Manage CLI authentication state
+     Auth(AuthNamespace),
++    /// Steer a running agent
++    Steer(SteerArgs),
+     /// Pull request operations
+     Pr(PrNamespace),
+     /// Manage server-owned secrets
+@@ -1180,6 +1202,7 @@ impl Commands {
+                 SystemCommand::Df(_) => "system df",
+                 SystemCommand::Events(_) => "system events",
+             },
++            Self::Steer(_) => "steer",
+             Self::SendAnalytics { .. } => "__send_analytics",
+             Self::SendPanic { .. } => "__send_panic",
+             Self::RenderGraph => "__render-graph",
+@@ -1533,4 +1556,4 @@ pub(crate) enum ProviderCommand {
+ pub(crate) struct CompletionArgs {
+     /// Shell to generate completions for
+     pub shell: clap_complete::Shell,
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-cli/src/commands/mod.rs b/lib/crates/fabro-cli/src/commands/mod.rs
+index 1b1fa6f1..513eee73 100644
+--- a/lib/crates/fabro-cli/src/commands/mod.rs
++++ b/lib/crates/fabro-cli/src/commands/mod.rs
+@@ -18,9 +18,10 @@ pub(crate) mod runs;
+ pub(crate) mod sandbox;
+ pub(crate) mod secret;
+ pub(crate) mod server;
++pub(crate) mod steer;
+ pub(crate) mod system;
+ pub(crate) mod uninstall;
+ pub(crate) mod upgrade;
+ pub(crate) mod validate;
+ pub(crate) mod version;
+-pub(crate) mod workflow;
++pub(crate) mod workflow;
+\ No newline at end of file
+diff --git a/lib/crates/fabro-cli/src/commands/run/runner.rs b/lib/crates/fabro-cli/src/commands/run/runner.rs
+index 288c45af..1f200b18 100644
+--- a/lib/crates/fabro-cli/src/commands/run/runner.rs
++++ b/lib/crates/fabro-cli/src/commands/run/runner.rs
+@@ -30,6 +30,7 @@ use fabro_workflow::event::{Emitter, RunEventSink};
+ use fabro_workflow::operations::{self, StartServices};
+ use fabro_workflow::run_control::RunControlState;
+ use fabro_workflow::runtime_store::{RunStoreBackend, RunStoreHandle};
++use fabro_workflow::steering_hub::SteeringHub;
+ #[cfg(unix)]
+ use tokio::signal::unix::{SignalKind, signal};
+ use tokio::sync::{Mutex, RwLock as AsyncRwLock, mpsc};
+@@ -87,7 +88,13 @@ pub(crate) async fn execute(
+     )));
+     let interviewer = Arc::new(ControlInterviewer::new());
+     let cancel_token = Arc::new(AtomicBool::new(false));
+-    spawn_worker_control_stream(Arc::clone(&interviewer), Arc::clone(&cancel_token))?;
++    let emitter = Arc::new(Emitter::new(run_id));
++    let steering_hub = Arc::new(SteeringHub::new(emitter.clone()));
++    spawn_worker_control_stream(
++        Arc::clone(&interviewer),
++        Arc::clone(&cancel_token),
++        Arc::clone(&steering_hub),
++    )?;
+     let run_control = RunControlState::new();
+     install_signal_handlers(Arc::clone(&run_control), Arc::clone(&cancel_token))?;
+     let vault = load_worker_vault(storage_dir.as_deref())?;
+@@ -101,7 +108,7 @@ pub(crate) async fn execute(
+     let services = StartServices {
+         run_id,
+         cancel_token: Some(Arc::clone(&cancel_token)),
+-        emitter: Arc::new(Emitter::new(run_id)),
++        emitter,
+         interviewer,
+         run_store: run_store.clone(),
+         event_sink: RunEventSink::map(
+@@ -121,6 +128,7 @@ pub(crate) async fn execute(
+         vault,
+         on_node: None,
+         registry_override: None,
++        steering_hub: Some(steering_hub),
+     };
+ 
+     match mode {
+@@ -163,11 +171,13 @@ enum WorkerControlStreamEvent {
+ fn spawn_worker_control_stream(
+     interviewer: Arc<ControlInterviewer>,
+     cancel_token: Arc<AtomicBool>,
++    steering_hub: Arc<SteeringHub>,
+ ) -> Result<()> {
+     let (event_tx, event_rx) = mpsc::unbounded_channel();
+     tokio::spawn(handle_worker_control_stream_events(
+         interviewer,
+         cancel_token,
++        steering_hub,
+         event_rx,
+     ));
+     std::thread::Builder::new()
+@@ -206,12 +216,13 @@ fn read_worker_control_stream_blocking<R>(
+ async fn handle_worker_control_stream_events(
+     interviewer: Arc<ControlInterviewer>,
+     cancel_token: Arc<AtomicBool>,
++    steering_hub: Arc<SteeringHub>,
+     mut event_rx: mpsc::UnboundedReceiver<WorkerControlStreamEvent>,
+ ) {
+     while let Some(event) = event_rx.recv().await {
+         match event {
+             WorkerControlStreamEvent::Line(line) => {
+-                apply_worker_control_line(&interviewer, &cancel_token, &line).await;
++                apply_worker_control_line(&interviewer, &cancel_token, &steering_hub, &line).await;
+             }
+             WorkerControlStreamEvent::Eof => {
+                 interviewer.interrupt_all().await;
+@@ -226,6 +237,7 @@ async fn handle_worker_control_stream_events(
+ async fn apply_worker_control_line(
+     interviewer: &ControlInterviewer,
+     cancel_token: &AtomicBool,
++    steering_hub: &SteeringHub,
+     line: &str,
+ ) {
+     if line.trim().is_empty() {
+@@ -246,6 +258,9 @@ async fn apply_worker_control_line(
+             cancel_token.store(true, Ordering::SeqCst);
+             interviewer.interrupt_all().await;
+         }
++        WorkerControlMessage::Steer { text, kind, actor } => {
++            steering_hub.deliver(&text, kind, Some(actor));
++        }
+     }
+ }
+ 
+@@ -630,6 +645,7 @@ mod tests {
+         read_worker_control_stream_blocking, stamp_system_worker, worker_title,
+         worker_title_phase_for_event,
+     };
++    use fabro_workflow::steering_hub::SteeringHub;
+     use crate::args::RunWorkerMode;
+ 
+     #[test]
+@@ -829,9 +845,15 @@ mod tests {
+         let ask_interviewer = Arc::clone(&interviewer);
+         let answer_task = tokio::spawn(async move { ask_interviewer.ask(question).await });
+ 
++        let emitter = Arc::new(fabro_workflow::event::Emitter::new(
++            fabro_types::fixtures::RUN_1,
++        ));
++        let hub = SteeringHub::new(emitter);
++
+         apply_worker_control_line(
+             &interviewer,
+             &cancel_token,
++            &hub,
+             r#"{"v":1,"type":"interview.answer","qid":"q-1","answer":{"kind":"yes"},"actor":{"kind":"system","system_kind":"engine"}}"#,
+         )
+         .await;
+@@ -851,9 +873,15 @@ mod tests {
+         let answer_task = tokio::spawn(async move { ask_interviewer.ask(question).await });
+         tokio::task::yield_now().await;
+ 
++        let emitter = Arc::new(fabro_workflow::event::Emitter::new(
++            fabro_types::fixtures::RUN_1,
++        ));
++        let hub = SteeringHub::new(emitter);
++
+         apply_worker_control_line(
+             &interviewer,
+             &cancel_token,
++            &hub,
+             r#"{"v":1,"type":"run.cancel"}"#,
+         )
+         .await;
+@@ -903,9 +931,15 @@ mod tests {
+         event_tx.send(WorkerControlStreamEvent::Eof).unwrap();
+         drop(event_tx);
+ 
++        let emitter = Arc::new(fabro_workflow::event::Emitter::new(
++            fabro_types::fixtures::RUN_1,
++        ));
++        let hub = Arc::new(SteeringHub::new(emitter));
++
+         handle_worker_control_stream_events(
+             Arc::clone(&interviewer),
+             Arc::clone(&cancel_token),
++            hub,
+             event_rx,
+         )
+         .await;
+@@ -941,4 +975,4 @@ mod tests {
+ 
+         assert!(credential.contains("vault-key"));
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-cli/src/commands/steer.rs b/lib/crates/fabro-cli/src/commands/steer.rs
+new file mode 100644
+index 00000000..5ed0a49e
+--- /dev/null
++++ b/lib/crates/fabro-cli/src/commands/steer.rs
+@@ -0,0 +1,37 @@
++use anyhow::{Context, Result, bail};
++use fabro_config::user::default_storage_dir;
++
++use crate::args::SteerArgs;
++use crate::server_client;
++
++#[expect(clippy::print_stdout, reason = "CLI feedback to the user.")]
++pub(crate) async fn execute(args: SteerArgs) -> Result<()> {
++    let text = if args.text_stdin {
++        let mut buf = String::new();
++        #[expect(
++            clippy::disallowed_methods,
++            reason = "Steer reads optional stdin text; no Tokio path involved."
++        )]
++        std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
++            .context("reading steering text from stdin")?;
++        buf
++    } else if let Some(text) = args.text {
++        text
++    } else {
++        bail!("provide steering text as an argument or use --text-stdin");
++    };
++
++    if text.trim().is_empty() {
++        bail!("steering text cannot be empty");
++    }
++
++    let storage_dir = default_storage_dir();
++    let client = server_client::connect_server(&storage_dir).await?;
++    client
++        .steer_run(&args.run_id, &text, args.interrupt)
++        .await
++        .context("failed to steer run")?;
++
++    println!("Steer delivered.");
++    Ok(())
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-cli/src/main.rs b/lib/crates/fabro-cli/src/main.rs
+index fb271310..b2ca2913 100644
+--- a/lib/crates/fabro-cli/src/main.rs
++++ b/lib/crates/fabro-cli/src/main.rs
+@@ -287,6 +287,9 @@ async fn main_inner(worker_token: Option<String>) -> (String, Result<()>) {
+                 ))
+                 .await?;
+             }
++            Commands::Steer(args) => {
++                commands::steer::execute(args).await?;
++            }
+             Commands::Doctor(args) => {
+                 let exit_code = Box::pin(commands::doctor::run_doctor(&args, &base_ctx)).await?;
+                 std::process::exit(exit_code);
+@@ -1321,4 +1324,4 @@ destination = "{destination}"
+             "should fail when both --quiet and --verbose"
+         );
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/fabro.rs b/lib/crates/fabro-cli/tests/it/cmd/fabro.rs
+index a8fbc255..4935df50 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/fabro.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/fabro.rs
+@@ -37,6 +37,7 @@ fn help() {
+       install     Set up the Fabro environment (LLMs, certs, GitHub)
+       uninstall   Uninstall Fabro from this machine
+       auth        Manage CLI authentication state
++      steer       Steer a running agent
+       pr          Pull request operations
+       secret      Manage server-owned secrets
+       settings    Inspect effective settings
+diff --git a/lib/crates/fabro-client/src/client.rs b/lib/crates/fabro-client/src/client.rs
+index 312b9c3d..648cd53e 100644
+--- a/lib/crates/fabro-client/src/client.rs
++++ b/lib/crates/fabro-client/src/client.rs
+@@ -805,6 +805,31 @@ impl Client {
+         Ok(())
+     }
+ 
++    pub async fn steer_run(&self, run_id: &str, text: &str, interrupt: bool) -> Result<()> {
++        let run_id = run_id.to_string();
++        let text: types::SteerRunRequestText = text
++            .to_string()
++            .try_into()
++            .map_err(|e| anyhow!("invalid steer text: {e}"))?;
++        self.send_api(|client| {
++            let run_id = run_id.clone();
++            let text = text.clone();
++            async move {
++                client
++                    .steer_run()
++                    .id(run_id)
++                    .body(types::SteerRunRequest {
++                        interrupt,
++                        text,
++                    })
++                    .send()
++                    .await
++            }
++        })
++        .await?;
++        Ok(())
++    }
++
+     pub async fn archive_run(&self, run_id: &RunId) -> Result<()> {
+         self.send_api(
+             |client| async move { client.archive_run().id(run_id.to_string()).send().await },
+@@ -1925,4 +1950,4 @@ mod tests {
+             "hint should only fire on unstructured 404s, got: {message}"
+         );
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-interview/src/control_protocol.rs b/lib/crates/fabro-interview/src/control_protocol.rs
+index e28dc4ec..03ff72d9 100644
+--- a/lib/crates/fabro-interview/src/control_protocol.rs
++++ b/lib/crates/fabro-interview/src/control_protocol.rs
+@@ -1,4 +1,4 @@
+-use fabro_types::Principal;
++use fabro_types::{Principal, SteerKind};
+ use serde::{Deserialize, Serialize};
+ 
+ use crate::{Answer, AnswerSubmission, AnswerValue};
+@@ -32,6 +32,14 @@ impl WorkerControlEnvelope {
+             message: WorkerControlMessage::RunCancel,
+         }
+     }
++
++    #[must_use]
++    pub fn steer(text: String, kind: SteerKind, actor: Principal) -> Self {
++        Self {
++            v:       WORKER_CONTROL_PROTOCOL_VERSION,
++            message: WorkerControlMessage::Steer { text, kind, actor },
++        }
++    }
+ }
+ 
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+@@ -45,6 +53,12 @@ pub enum WorkerControlMessage {
+     },
+     #[serde(rename = "run.cancel")]
+     RunCancel,
++    #[serde(rename = "run.steer")]
++    Steer {
++        text:  String,
++        kind:  SteerKind,
++        actor: Principal,
++    },
+ }
+ 
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+@@ -129,4 +143,36 @@ mod tests {
+         let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();
+         assert_eq!(parsed, envelope);
+     }
+-}
++
++    #[test]
++    fn steer_append_round_trips_through_json() {
++        let envelope = WorkerControlEnvelope::steer(
++            "try a different approach".into(),
++            SteerKind::Append,
++            Principal::System {
++                system_kind: fabro_types::SystemActorKind::Engine,
++            },
++        );
++        let json = serde_json::to_string(&envelope).unwrap();
++        let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();
++        assert_eq!(parsed, envelope);
++        assert!(json.contains(r#""type":"run.steer""#));
++        assert!(json.contains(r#""kind":"append""#));
++    }
++
++    #[test]
++    fn steer_interrupt_round_trips_through_json() {
++        let envelope = WorkerControlEnvelope::steer(
++            "stop, do X instead".into(),
++            SteerKind::Interrupt,
++            Principal::System {
++                system_kind: fabro_types::SystemActorKind::Engine,
++            },
++        );
++        let json = serde_json::to_string(&envelope).unwrap();
++        let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();
++        assert_eq!(parsed, envelope);
++        assert!(json.contains(r#""type":"run.steer""#));
++        assert!(json.contains(r#""kind":"interrupt""#));
++    }
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-interview/src/lib.rs b/lib/crates/fabro-interview/src/lib.rs
+index c242cf14..21443237 100644
+--- a/lib/crates/fabro-interview/src/lib.rs
++++ b/lib/crates/fabro-interview/src/lib.rs
+@@ -225,6 +225,7 @@ pub use control_protocol::{
+     WORKER_CONTROL_PROTOCOL_VERSION, WorkerControlAnswer, WorkerControlEnvelope,
+     WorkerControlMessage,
+ };
++pub use fabro_types::SteerKind;
+ pub use queue::QueueInterviewer;
+ pub use recording::RecordingInterviewer;
+ pub use replay::ReplayInterviewer;
+@@ -414,4 +415,4 @@ mod tests {
+         let answer = ask.await.unwrap().answer;
+         assert_eq!(answer.value, AnswerValue::Yes);
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-server/src/server.rs b/lib/crates/fabro-server/src/server.rs
+index 0fe52a57..43b9a142 100644
+--- a/lib/crates/fabro-server/src/server.rs
++++ b/lib/crates/fabro-server/src/server.rs
+@@ -2751,6 +2751,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
+         vault: Some(Arc::clone(&state.vault)),
+         on_node: None,
+         registry_override,
++        steering_hub: None,
+     };
+ 
+     let execution = async {
+@@ -3240,4 +3241,4 @@ async fn reject_if_archived(state: &AppState, run_id: &RunId) -> Option<Response
+     clippy::disallowed_methods,
+     reason = "server unit tests stage fixtures with sync std::fs writes"
+ )]
+-mod tests;
++mod tests;
+\ No newline at end of file
+diff --git a/lib/crates/fabro-types/src/lib.rs b/lib/crates/fabro-types/src/lib.rs
+index c04702c1..b98891ad 100644
+--- a/lib/crates/fabro-types/src/lib.rs
++++ b/lib/crates/fabro-types/src/lib.rs
+@@ -31,6 +31,7 @@ pub mod stage_completion;
+ pub mod stage_id;
+ pub mod start;
+ pub mod status;
++pub mod steering;
+ 
+ pub use artifact::ArtifactUpload;
+ pub use auth::{IdpIdentity, IdpIdentityError};
+@@ -82,7 +83,8 @@ pub use secret::{SecretMetadata, SecretType};
+ pub use stage_completion::StageCompletion;
+ pub use stage_id::{ParallelBranchId, StageId};
+ pub use start::StartRecord;
++pub use self::steering::SteerKind;
+ pub use status::{
+     BlockedReason, FailureReason, InvalidTransition, ParseFailureReasonError,
+     ParseSuccessReasonError, RunControlAction, RunStatus, SuccessReason, TerminalStatus,
+-};
++};
+\ No newline at end of file
+diff --git a/lib/crates/fabro-types/src/run_event/agent.rs b/lib/crates/fabro-types/src/run_event/agent.rs
+index 475dee84..8a51fb14 100644
+--- a/lib/crates/fabro-types/src/run_event/agent.rs
++++ b/lib/crates/fabro-types/src/run_event/agent.rs
+@@ -82,6 +82,7 @@ pub struct AgentTurnLimitReachedProps {
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+ pub struct AgentSteeringInjectedProps {
+     pub text:  String,
++    pub kind:  String,
+     pub visit: u32,
+ }
+ 
+@@ -156,3 +157,24 @@ pub struct AgentMcpFailedProps {
+     pub error:       String,
+     pub visit:       u32,
+ }
++
++/// Emitted when the `SteeringHub` attaches a session handle for a stage.
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
++pub struct AgentSteeringAttachedProps;
++
++/// Emitted when the `SteeringHub` detaches a session handle for a stage.
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
++pub struct AgentSteeringDetachedProps;
++
++/// Emitted when a steer arrives with no active session and is buffered.
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
++pub struct AgentSteerBufferedProps {
++    pub kind: String,
++}
++
++/// Emitted when buffered or queued steers are dropped.
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
++pub struct AgentSteerDroppedProps {
++    pub count:  usize,
++    pub reason: String,
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-types/src/run_event/mod.rs b/lib/crates/fabro-types/src/run_event/mod.rs
+index 9d5fbf11..d0e69c93 100644
+--- a/lib/crates/fabro-types/src/run_event/mod.rs
++++ b/lib/crates/fabro-types/src/run_event/mod.rs
+@@ -170,6 +170,14 @@ pub enum EventBody {
+     AgentTurnLimitReached(AgentTurnLimitReachedProps),
+     #[serde(rename = "agent.steering.injected")]
+     AgentSteeringInjected(AgentSteeringInjectedProps),
++    #[serde(rename = "agent.steering.attached")]
++    AgentSteeringAttached(AgentSteeringAttachedProps),
++    #[serde(rename = "agent.steering.detached")]
++    AgentSteeringDetached(AgentSteeringDetachedProps),
++    #[serde(rename = "agent.steer.buffered")]
++    AgentSteerBuffered(AgentSteerBufferedProps),
++    #[serde(rename = "agent.steer.dropped")]
++    AgentSteerDropped(AgentSteerDroppedProps),
+     #[serde(rename = "agent.compaction.started")]
+     AgentCompactionStarted(AgentCompactionStartedProps),
+     #[serde(rename = "agent.compaction.completed")]
+@@ -392,6 +400,10 @@ impl EventBody {
+             Self::AgentLoopDetected(_) => "agent.loop.detected",
+             Self::AgentTurnLimitReached(_) => "agent.turn.limit",
+             Self::AgentSteeringInjected(_) => "agent.steering.injected",
++            Self::AgentSteeringAttached(_) => "agent.steering.attached",
++            Self::AgentSteeringDetached(_) => "agent.steering.detached",
++            Self::AgentSteerBuffered(_) => "agent.steer.buffered",
++            Self::AgentSteerDropped(_) => "agent.steer.dropped",
+             Self::AgentCompactionStarted(_) => "agent.compaction.started",
+             Self::AgentCompactionCompleted(_) => "agent.compaction.completed",
+             Self::AgentLlmRetry(_) => "agent.llm.retry",
+@@ -524,6 +536,10 @@ fn is_known_event_name(event: &str) -> bool {
+             | "agent.loop.detected"
+             | "agent.turn.limit"
+             | "agent.steering.injected"
++            | "agent.steering.attached"
++            | "agent.steering.detached"
++            | "agent.steer.buffered"
++            | "agent.steer.dropped"
+             | "agent.compaction.started"
+             | "agent.compaction.completed"
+             | "agent.llm.retry"
+@@ -1431,4 +1447,4 @@ mod tests {
+             );
+         }
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-types/src/steering.rs b/lib/crates/fabro-types/src/steering.rs
+new file mode 100644
+index 00000000..4a652d9c
+--- /dev/null
++++ b/lib/crates/fabro-types/src/steering.rs
+@@ -0,0 +1,9 @@
++use serde::{Deserialize, Serialize};
++
++/// Whether a steer appends to the queue or interrupts the current round.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "lowercase")]
++pub enum SteerKind {
++    Append,
++    Interrupt,
++}
+diff --git a/lib/crates/fabro-workflow/src/event/convert.rs b/lib/crates/fabro-workflow/src/event/convert.rs
+index 815aaec1..8d73ba9a 100644
+--- a/lib/crates/fabro-workflow/src/event/convert.rs
++++ b/lib/crates/fabro-workflow/src/event/convert.rs
+@@ -605,9 +605,13 @@ fn event_body_from_event(event: &Event) -> EventBody {
+                     visit:     *visit,
+                 })
+             }
+-            AgentEvent::SteeringInjected { text } => {
++            AgentEvent::SteeringInjected { text, kind, .. } => {
+                 EventBody::AgentSteeringInjected(fabro_types::AgentSteeringInjectedProps {
+-                    text:  text.clone(),
++                    text: text.clone(),
++                    kind: match kind {
++                        ::fabro_types::SteerKind::Append => "append".to_string(),
++                        ::fabro_types::SteerKind::Interrupt => "interrupt".to_string(),
++                    },
+                     visit: *visit,
+                 })
+             }
+@@ -708,6 +712,26 @@ fn event_body_from_event(event: &Event) -> EventBody {
+                 panic!("streaming-noise agent event should not be converted to RunEvent")
+             }
+         },
++        Event::SteeringAttached { .. } => {
++            EventBody::AgentSteeringAttached(fabro_types::AgentSteeringAttachedProps)
++        }
++        Event::SteeringDetached { .. } => {
++            EventBody::AgentSteeringDetached(fabro_types::AgentSteeringDetachedProps)
++        }
++        Event::SteerBuffered { kind, .. } => {
++            EventBody::AgentSteerBuffered(fabro_types::AgentSteerBufferedProps {
++                kind: match kind {
++                    ::fabro_types::SteerKind::Append => "append".to_string(),
++                    ::fabro_types::SteerKind::Interrupt => "interrupt".to_string(),
++                },
++            })
++        }
++        Event::SteerDropped { count, reason, .. } => {
++            EventBody::AgentSteerDropped(fabro_types::AgentSteerDroppedProps {
++                count:  *count,
++                reason: reason.clone(),
++            })
++        }
+         Event::SubgraphStarted { start_node, .. } => {
+             EventBody::SubgraphStarted(fabro_types::SubgraphStartedProps {
+                 start_node: start_node.clone(),
+@@ -1857,4 +1881,4 @@ mod tests {
+         let actor = stored.actor.as_ref().expect("actor set");
+         assert_eq!(actor, &user_principal("alice"));
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflow/src/event/events.rs b/lib/crates/fabro-workflow/src/event/events.rs
+index a3b2e2b5..e888f56a 100644
+--- a/lib/crates/fabro-workflow/src/event/events.rs
++++ b/lib/crates/fabro-workflow/src/event/events.rs
+@@ -399,6 +399,27 @@ pub enum Event {
+         #[serde(default, skip_serializing_if = "Option::is_none")]
+         parent_session_id: Option<String>,
+     },
++    /// Emitted when the SteeringHub registers a session handle for a stage.
++    SteeringAttached {
++        stage: String,
++    },
++    /// Emitted when the SteeringHub unregisters a session handle for a stage.
++    SteeringDetached {
++        stage: String,
++    },
++    /// Emitted when a steer arrives with no active session and is buffered.
++    SteerBuffered {
++        kind:  ::fabro_types::SteerKind,
++        #[serde(default, skip_serializing_if = "Option::is_none")]
++        actor: Option<Principal>,
++    },
++    /// Emitted when buffered or queued steers are dropped.
++    SteerDropped {
++        count:  usize,
++        reason: String,
++        #[serde(default, skip_serializing_if = "Option::is_none")]
++        actor:  Option<Principal>,
++    },
+     SubgraphStarted {
+         node_id:    String,
+         start_node: String,
+@@ -1054,6 +1075,18 @@ impl Event {
+             } => {
+                 debug!(node_id, model, provider, "Prompt completed");
+             }
++            Self::SteeringAttached { stage } => {
++                debug!(stage, "Steering attached");
++            }
++            Self::SteeringDetached { stage } => {
++                debug!(stage, "Steering detached");
++            }
++            Self::SteerBuffered { kind, .. } => {
++                info!(?kind, "Steer buffered");
++            }
++            Self::SteerDropped { count, reason, .. } => {
++                warn!(count, reason, "Steer dropped");
++            }
+             Self::Agent { .. } | Self::Sandbox { .. } => {}
+             Self::SandboxInitialized {
+                 working_directory,
+@@ -1364,4 +1397,4 @@ impl Event {
+             }
+         }
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflow/src/event/names.rs b/lib/crates/fabro-workflow/src/event/names.rs
+index e176b247..28658c86 100644
+--- a/lib/crates/fabro-workflow/src/event/names.rs
++++ b/lib/crates/fabro-workflow/src/event/names.rs
+@@ -82,6 +82,10 @@ pub fn event_name(event: &Event) -> &'static str {
+             AgentEvent::McpServerReady { .. } => "agent.mcp.ready",
+             AgentEvent::McpServerFailed { .. } => "agent.mcp.failed",
+         },
++        Event::SteeringAttached { .. } => "agent.steering.attached",
++        Event::SteeringDetached { .. } => "agent.steering.detached",
++        Event::SteerBuffered { .. } => "agent.steer.buffered",
++        Event::SteerDropped { .. } => "agent.steer.dropped",
+         Event::SubgraphStarted { .. } => "subgraph.started",
+         Event::SubgraphCompleted { .. } => "subgraph.completed",
+         Event::Sandbox { event } => match event {
+@@ -188,4 +192,4 @@ mod tests {
+             "run.unarchived"
+         );
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflow/src/event/stored_fields.rs b/lib/crates/fabro-workflow/src/event/stored_fields.rs
+index 3c9fd587..ad75501c 100644
+--- a/lib/crates/fabro-workflow/src/event/stored_fields.rs
++++ b/lib/crates/fabro-workflow/src/event/stored_fields.rs
+@@ -176,6 +176,15 @@ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
+             fields.actor.clone_from(actor);
+             fields
+         }
++        Event::SteeringAttached { stage } | Event::SteeringDetached { stage } => {
++            node_stored_fields(Some(stage.clone()))
++        }
++        Event::SteerBuffered { actor, .. } | Event::SteerDropped { actor, .. } => {
++            StoredEventFields {
++                actor: actor.clone(),
++                ..StoredEventFields::default()
++            }
++        }
+         Event::StallWatchdogTimeout { node, .. } => {
+             let mut fields = node_stored_fields(Some(node.clone()));
+             fields.actor = Some(Principal::System {
+@@ -213,6 +222,7 @@ fn agent_actor_for_event(
+             parent_session_id: parent_session_id.map(str::to_string),
+             model:             None,
+         }),
++        AgentEvent::SteeringInjected { actor, .. } => actor.clone(),
+         _ => None,
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflow/src/handler/llm/api.rs b/lib/crates/fabro-workflow/src/handler/llm/api.rs
+index 5d21c7d3..0348a15a 100644
+--- a/lib/crates/fabro-workflow/src/handler/llm/api.rs
++++ b/lib/crates/fabro-workflow/src/handler/llm/api.rs
+@@ -4,9 +4,10 @@ use std::sync::{Arc, Mutex};
+ use async_trait::async_trait;
+ use fabro_agent::subagent::{SessionFactory, SubAgentManager};
+ use fabro_agent::{
+-    AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, OpenAiProfile, Sandbox, Session,
+-    SessionOptions, Turn,
++    AgentEvent, AgentProfile, AnthropicProfile, CompletionCoordinator, GeminiProfile,
++    OpenAiProfile, Sandbox, Session, SessionControlHandle, SessionOptions, Turn,
+ };
++use fabro_types::StageId;
+ use fabro_auth::{CredentialSource, EnvCredentialSource};
+ use fabro_graphviz::graph::Node;
+ use fabro_llm::client::Client;
+@@ -21,6 +22,7 @@ use crate::context::{Context, WorkflowContext};
+ use crate::error::Error;
+ use crate::event::{Emitter, Event, StageScope};
+ use crate::outcome::billed_model_usage_from_llm;
++use crate::steering_hub::SteeringHub;
+ 
+ fn build_profile(model: &str, provider: Provider) -> Box<dyn AgentProfile> {
+     match provider {
+@@ -122,6 +124,7 @@ pub struct AgentApiBackend {
+     env:            HashMap<String, String>,
+     mcp_servers:    Vec<McpServerSettings>,
+     source:         Arc<dyn CredentialSource>,
++    steering_hub:   Option<Arc<SteeringHub>>,
+ }
+ 
+ impl AgentApiBackend {
+@@ -140,6 +143,7 @@ impl AgentApiBackend {
+             env: HashMap::new(),
+             mcp_servers: Vec::new(),
+             source,
++            steering_hub: None,
+         }
+     }
+ 
+@@ -169,6 +173,12 @@ impl AgentApiBackend {
+         self
+     }
+ 
++    #[must_use]
++    pub fn with_steering_hub(mut self, hub: Arc<SteeringHub>) -> Self {
++        self.steering_hub = Some(hub);
++        self
++    }
++
+     async fn create_session(
+         &self,
+         node: &Node,
+@@ -491,6 +501,25 @@ impl CodergenBackend for AgentApiBackend {
+             session.initialize().await;
+         }
+ 
++        // Register with steering hub for steer delivery
++        let stage_id = stage_scope.stage_id();
++        let _steering_guard = if let Some(ref hub) = self.steering_hub {
++            let control_handle = session.control_handle();
++            hub.register(&stage_id, &control_handle);
++            let coordinator = SteeringCompletionCoordinator {
++                hub:      Arc::clone(hub),
++                stage_id: stage_id.clone(),
++                handle:   control_handle,
++            };
++            session.set_completion_coordinator(Arc::new(coordinator));
++            Some(SteeringGuard {
++                hub:      Arc::clone(hub),
++                stage_id: stage_id.clone(),
++            })
++        } else {
++            None
++        };
++
+         let result = session.process_input(prompt).await;
+ 
+         // On failover-eligible error, try fallback providers.
+@@ -544,6 +573,18 @@ impl CodergenBackend for AgentApiBackend {
+                     };
+                     session = new_session;
+ 
++                    // Re-register with steering hub for the new session
++                    if let Some(ref hub) = self.steering_hub {
++                        let control_handle = session.control_handle();
++                        hub.register(&stage_id, &control_handle);
++                        let coordinator = SteeringCompletionCoordinator {
++                            hub:      Arc::clone(hub),
++                            stage_id: stage_id.clone(),
++                            handle:   control_handle,
++                        };
++                        session.set_completion_coordinator(Arc::new(coordinator));
++                    }
++
+                     // Re-subscribe to forward events + track files from the new session
+                     spawn_event_forwarder(
+                         &session,
+@@ -636,6 +677,37 @@ impl CodergenBackend for AgentApiBackend {
+     }
+ }
+ 
++/// RAII guard that unregisters a session from the steering hub on drop.
++struct SteeringGuard {
++    hub:      Arc<SteeringHub>,
++    stage_id: StageId,
++}
++
++impl Drop for SteeringGuard {
++    fn drop(&mut self) {
++        self.hub.unregister(&self.stage_id);
++    }
++}
++
++/// Completion coordinator that atomically checks whether new steers arrived
++/// during a final (tool_calls-empty) response.
++struct SteeringCompletionCoordinator {
++    hub:      Arc<SteeringHub>,
++    stage_id: StageId,
++    handle:   SessionControlHandle,
++}
++
++impl CompletionCoordinator for SteeringCompletionCoordinator {
++    fn on_natural_completion(&self) -> bool {
++        self.hub.unregister(&self.stage_id);
++        if self.handle.queue_is_empty() {
++            return false;
++        }
++        self.hub.register(&self.stage_id, &self.handle);
++        true
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use fabro_agent::subagent::SessionFactory;
+@@ -820,4 +892,4 @@ mod tests {
+ 
+         assert_eq!(client.provider_names(), vec!["anthropic"]);
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflow/src/lib.rs b/lib/crates/fabro-workflow/src/lib.rs
+index 9af074d9..57148940 100644
+--- a/lib/crates/fabro-workflow/src/lib.rs
++++ b/lib/crates/fabro-workflow/src/lib.rs
+@@ -153,8 +153,9 @@ pub mod sandbox_git;
+ pub(crate) mod sandbox_git_runtime;
+ pub mod services;
+ mod stage_scope;
++pub mod steering_hub;
+ #[doc(hidden)]
+ pub mod test_support;
+ #[doc(hidden)]
+ pub mod transforms;
+-pub mod workflow_bundle;
++pub mod workflow_bundle;
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflow/src/lifecycle/git.rs b/lib/crates/fabro-workflow/src/lifecycle/git.rs
+index 0e0e9f19..23b2e8d9 100644
+--- a/lib/crates/fabro-workflow/src/lifecycle/git.rs
++++ b/lib/crates/fabro-workflow/src/lifecycle/git.rs
+@@ -1004,6 +1004,7 @@ mod tests {
+             Arc::new(SandboxGitRuntime::new()),
+             Arc::clone(&lifecycle.metadata_runtime),
+             lifecycle.metadata_writer.clone(),
++            None,
+         );
+         let conclusion = Conclusion {
+             timestamp:            chrono::Utc::now(),
+@@ -1062,4 +1063,4 @@ mod tests {
+             Ok(None)
+         }
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflow/src/operations/start.rs b/lib/crates/fabro-workflow/src/operations/start.rs
+index 4e623bce..a9da2a9f 100644
+--- a/lib/crates/fabro-workflow/src/operations/start.rs
++++ b/lib/crates/fabro-workflow/src/operations/start.rs
+@@ -33,6 +33,7 @@ use tokio::sync::RwLock as AsyncRwLock;
+ 
+ use crate::ManifestPath;
+ use crate::artifact_upload::ArtifactSink;
++use crate::steering_hub::SteeringHub;
+ use crate::context::Context;
+ use crate::error::Error;
+ use crate::event::{
+@@ -82,6 +83,7 @@ struct RunSession {
+     workflow_bundle:   Option<Arc<WorkflowBundle>>,
+     run_control:       Option<Arc<RunControlState>>,
+     vault:             Option<Arc<AsyncRwLock<Vault>>>,
++    steering_hub:      Option<Arc<SteeringHub>>,
+ }
+ 
+ pub struct StartServices {
+@@ -100,6 +102,7 @@ pub struct StartServices {
+     pub vault:              Option<Arc<AsyncRwLock<Vault>>>,
+     pub on_node:            crate::OnNodeCallback,
+     pub registry_override:  Option<Arc<HandlerRegistry>>,
++    pub steering_hub:       Option<Arc<SteeringHub>>,
+ }
+ 
+ pub struct Started {
+@@ -453,6 +456,7 @@ impl RunSession {
+             workflow_path,
+             workflow_bundle,
+             vault: services.vault,
++            steering_hub: services.steering_hub,
+         })
+     }
+ }
+@@ -759,6 +763,7 @@ impl RunSession {
+             run_control: self.run_control,
+             checkpoint,
+             seed_context: self.seed_context,
++            steering_hub: self.steering_hub,
+         };
+         let mut initialized = Box::pin(pipeline::initialize(persisted, init_options)).await?;
+         initialized.on_node = on_node;
+@@ -1120,6 +1125,7 @@ mod tests {
+             vault: None,
+             on_node: None,
+             registry_override: Some(registry),
++            steering_hub: None,
+         }
+     }
+ 
+@@ -1492,4 +1498,4 @@ mod tests {
+             result = result.as_ref().map(|_| "Ok"),
+         );
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflow/src/pipeline/execute/tests.rs b/lib/crates/fabro-workflow/src/pipeline/execute/tests.rs
+index ff70db28..9bb7bb34 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/execute/tests.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/execute/tests.rs
+@@ -237,6 +237,7 @@ async fn execute_test_run_with_options(
+             artifact_sink: None,
+             checkpoint: None,
+             seed_context: None,
++            steering_hub: None,
+         },
+     )
+     .await
+@@ -295,6 +296,7 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
+             artifact_sink:     None,
+             checkpoint:        None,
+             seed_context:      None,
++            steering_hub:      None,
+         },
+     )
+     .await
+@@ -363,6 +365,7 @@ async fn run_with_lifecycle(
+             artifact_sink: None,
+             checkpoint: None,
+             seed_context: None,
++            steering_hub: None,
+         },
+     )
+     .await?;
+@@ -1160,4 +1163,4 @@ async fn run_with_lifecycle_emits_initialize_and_setup_events() {
+     assert!(sandbox_idx < setup_idx);
+     assert!(setup_idx < run_started_idx);
+     assert!(run_started_idx < run_running_idx);
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflow/src/pipeline/finalize.rs b/lib/crates/fabro-workflow/src/pipeline/finalize.rs
+index 92169736..8ff17937 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/finalize.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/finalize.rs
+@@ -822,6 +822,7 @@ mod tests {
+             Arc::new(SandboxGitRuntime::new()),
+             metadata_runtime,
+             metadata_writer,
++            None,
+         )
+     }
+ 
+@@ -848,6 +849,7 @@ mod tests {
+             Arc::new(SandboxGitRuntime::new()),
+             Arc::new(RunMetadataRuntime::new()),
+             None,
++            None,
+         );
+         let retroed = Retroed {
+             graph: Graph::new("test"),
+@@ -1087,4 +1089,4 @@ mod tests {
+             Ok(None)
+         }
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflow/src/pipeline/initialize.rs b/lib/crates/fabro-workflow/src/pipeline/initialize.rs
+index ce125827..73db715a 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/initialize.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/initialize.rs
+@@ -27,6 +27,7 @@ use tokio::time::timeout as tokio_timeout;
+ use super::types::{InitOptions, Initialized, LlmSpec, Persisted, SandboxEnvSpec};
+ use crate::devcontainer_bridge::{devcontainer_to_snapshot_config, run_devcontainer_lifecycle};
+ use crate::error::Error;
++use crate::steering_hub::SteeringHub;
+ use crate::event::{Emitter, Event, RunNoticeLevel};
+ use crate::git::RUN_BRANCH_PREFIX;
+ use crate::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
+@@ -259,6 +260,7 @@ async fn build_registry(
+     graph: &graph::Graph,
+     llm_source: Arc<dyn CredentialSource>,
+     cli_resolver: Option<CredentialResolver>,
++    steering_hub: Option<Arc<SteeringHub>>,
+ ) -> Result<(Arc<HandlerRegistry>, bool), Error> {
+     let build_no_backend = || Arc::new(default_registry(Arc::clone(&interviewer), || None));
+ 
+@@ -299,8 +301,9 @@ async fn build_registry(
+             let fallback_chain = spec.fallback_chain.clone();
+             let mcp_servers = spec.mcp_servers.clone();
+             let llm_source_for_api = Arc::clone(&llm_source);
++            let steering_hub_for_api = steering_hub.clone();
+             let registry = Arc::new(default_registry(interviewer, move || {
+-                let api = AgentApiBackend::new(
++                let mut api = AgentApiBackend::new(
+                     model.clone(),
+                     provider,
+                     fallback_chain.clone(),
+@@ -308,6 +311,9 @@ async fn build_registry(
+                 )
+                 .with_env(env.clone())
+                 .with_mcp_servers(mcp_servers.clone());
++                if let Some(ref hub) = steering_hub_for_api {
++                    api = api.with_steering_hub(Arc::clone(hub));
++                }
+                 let cli = cli_resolver
+                     .clone()
+                     .map_or_else(
+@@ -575,6 +581,7 @@ pub async fn initialize(
+             &graph,
+             Arc::clone(&llm_source),
+             cli_resolver,
++            options.steering_hub.clone(),
+         )
+         .await?
+     };
+@@ -721,6 +728,7 @@ pub async fn initialize(
+         sandbox_git,
+         metadata_runtime,
+         metadata_writer,
++        options.steering_hub.clone(),
+     );
+     let engine = Arc::new(EngineServices {
+         run: Arc::clone(&run_services),
+@@ -947,6 +955,7 @@ mod tests {
+             artifact_sink: None,
+             checkpoint: None,
+             seed_context: None,
++            steering_hub: None,
+         })
+         .await;
+         let events = seen.lock().unwrap().clone();
+@@ -1002,6 +1011,7 @@ mod tests {
+             artifact_sink:     None,
+             checkpoint:        None,
+             seed_context:      None,
++            steering_hub:      None,
+         };
+ 
+         let plan = resolve_worktree_plan(&mut options);
+@@ -1064,6 +1074,7 @@ mod tests {
+             artifact_sink: None,
+             checkpoint: None,
+             seed_context: None,
++            steering_hub: None,
+         })
+         .await
+         .unwrap();
+@@ -1128,6 +1139,7 @@ mod tests {
+             &graph,
+             Arc::new(VaultCredentialSource::new(Arc::clone(&vault))),
+             Some(CredentialResolver::new(vault)),
++            None,
+         )
+         .await
+         .unwrap();
+@@ -1193,6 +1205,7 @@ mod tests {
+             artifact_sink: None,
+             checkpoint: None,
+             seed_context: None,
++            steering_hub: None,
+         })
+         .await
+         .unwrap();
+@@ -1305,6 +1318,7 @@ mod tests {
+             artifact_sink: None,
+             checkpoint: None,
+             seed_context: None,
++            steering_hub: None,
+         })
+         .await;
+ 
+@@ -1368,9 +1382,10 @@ mod tests {
+             artifact_sink: None,
+             checkpoint: None,
+             seed_context: None,
++            steering_hub: None,
+         })
+         .await;
+ 
+         assert!(matches!(result, Err(Error::Cancelled)));
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflow/src/pipeline/retro.rs b/lib/crates/fabro-workflow/src/pipeline/retro.rs
+index 649435c2..e9d94a98 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/retro.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/retro.rs
+@@ -346,6 +346,7 @@ mod tests {
+             Arc::new(crate::sandbox_git_runtime::SandboxGitRuntime::new()),
+             Arc::new(crate::run_metadata::RunMetadataRuntime::new()),
+             None,
++            None,
+         );
+         let mut engine = EngineServices::test_default();
+         engine.run = Arc::clone(&services);
+@@ -401,6 +402,7 @@ mod tests {
+             Arc::new(crate::sandbox_git_runtime::SandboxGitRuntime::new()),
+             Arc::new(crate::run_metadata::RunMetadataRuntime::new()),
+             None,
++            None,
+         );
+ 
+         let retro = run_retro(
+@@ -442,4 +444,4 @@ mod tests {
+         assert!(retro_completed_properties.get("retro").is_some());
+         assert_eq!(retro_completed_properties["retro"]["smoothness"], "smooth");
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflow/src/pipeline/types.rs b/lib/crates/fabro-workflow/src/pipeline/types.rs
+index b3181c87..def89daf 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/types.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/types.rs
+@@ -18,6 +18,7 @@ use tokio::sync::RwLock as AsyncRwLock;
+ 
+ use crate::ManifestPath;
+ use crate::artifact_upload::ArtifactSink;
++use crate::steering_hub::SteeringHub;
+ use crate::context::Context;
+ use crate::error::Error;
+ use crate::event::Emitter;
+@@ -255,6 +256,7 @@ pub struct InitOptions {
+     pub run_control:       Option<Arc<RunControlState>>,
+     pub checkpoint:        Option<Checkpoint>,
+     pub seed_context:      Option<Context>,
++    pub steering_hub:      Option<Arc<SteeringHub>>,
+ }
+ 
+ /// Output of the INITIALIZE phase.
+@@ -350,4 +352,4 @@ pub struct PullRequestOptions {
+     pub github_app: Option<fabro_github::GitHubCredentials>,
+     pub origin_url: Option<String>,
+     pub model:      String,
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflow/src/services.rs b/lib/crates/fabro-workflow/src/services.rs
+index ae391279..dcbe5713 100644
+--- a/lib/crates/fabro-workflow/src/services.rs
++++ b/lib/crates/fabro-workflow/src/services.rs
+@@ -16,6 +16,7 @@ use tokio_util::sync::CancellationToken;
+ 
+ use crate::ManifestPath;
+ use crate::event::Emitter;
++use crate::steering_hub::SteeringHub;
+ use crate::handler::HandlerRegistry;
+ use crate::run_metadata::{RunMetadataRuntime, RunMetadataWriterHandle};
+ use crate::runtime_store::RunStoreHandle;
+@@ -36,6 +37,7 @@ pub struct RunServices {
+     pub(crate) sandbox_git:      Arc<SandboxGitRuntime>,
+     pub(crate) metadata_runtime: Arc<RunMetadataRuntime>,
+     pub(crate) metadata_writer:  Option<RunMetadataWriterHandle>,
++    pub steering_hub:            Option<Arc<SteeringHub>>,
+ }
+ 
+ impl RunServices {
+@@ -51,6 +53,7 @@ impl RunServices {
+         sandbox_git: Arc<SandboxGitRuntime>,
+         metadata_runtime: Arc<RunMetadataRuntime>,
+         metadata_writer: Option<RunMetadataWriterHandle>,
++        steering_hub: Option<Arc<SteeringHub>>,
+     ) -> Arc<Self> {
+         Arc::new(Self {
+             run_store,
+@@ -63,6 +66,7 @@ impl RunServices {
+             sandbox_git,
+             metadata_runtime,
+             metadata_writer,
++            steering_hub,
+         })
+     }
+ 
+@@ -215,6 +219,7 @@ impl EngineServices {
+                 Arc::new(SandboxGitRuntime::new()),
+                 Arc::new(RunMetadataRuntime::new()),
+                 None,
++                None,
+             ),
+             registry:        Arc::new(HandlerRegistry::new(Box::new(start::StartHandler))),
+             git_state:       std::sync::RwLock::new(None),
+@@ -272,4 +277,4 @@ mod tests {
+                 .is_empty()
+         );
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflow/src/steering_hub.rs b/lib/crates/fabro-workflow/src/steering_hub.rs
+new file mode 100644
+index 00000000..5c9e77ef
+--- /dev/null
++++ b/lib/crates/fabro-workflow/src/steering_hub.rs
+@@ -0,0 +1,262 @@
++use std::collections::{HashMap, VecDeque};
++use std::sync::{Arc, Mutex, RwLock};
++
++use fabro_agent::SessionControlHandle;
++use fabro_types::{Principal, StageId, SteerKind};
++
++use crate::event::{Emitter, Event};
++
++/// Per-session steering queue capacity.
++pub const PER_SESSION_QUEUE_CAP: usize = 32;
++/// Per-run pending buffer capacity.
++pub const PER_RUN_PENDING_CAP: usize = 32;
++
++struct PendingSteer {
++    text:  String,
++    actor: Option<Principal>,
++}
++
++/// Coordinates steering message delivery across active agent sessions.
++///
++/// All locks are `std::sync` — methods are synchronous and never `.await`
++/// while holding any lock. Lock order: active first, then pending.
++pub struct SteeringHub {
++    active:  RwLock<HashMap<StageId, SessionControlHandle>>,
++    pending: Mutex<VecDeque<PendingSteer>>,
++    emitter: Arc<Emitter>,
++}
++
++impl SteeringHub {
++    pub fn new(emitter: Arc<Emitter>) -> Self {
++        Self {
++            active:  RwLock::new(HashMap::new()),
++            pending: Mutex::new(VecDeque::new()),
++            emitter,
++        }
++    }
++
++    /// Deliver a steer message. Broadcasts to all active sessions or buffers
++    /// if none are registered.
++    pub fn deliver(&self, text: &str, kind: SteerKind, actor: Option<Principal>) {
++        let active = self.active.read().expect("steering active lock poisoned");
++        if active.is_empty() {
++            drop(active);
++            let mut pending = self.pending.lock().expect("steering pending lock poisoned");
++            if pending.len() >= PER_RUN_PENDING_CAP {
++                let dropped = pending.pop_front();
++                if let Some(dropped) = dropped {
++                    self.emitter.emit(&Event::SteerDropped {
++                        count:  1,
++                        reason: "queue_full".to_string(),
++                        actor:  dropped.actor,
++                    });
++                }
++            }
++            pending.push_back(PendingSteer {
++                text:  text.to_string(),
++                actor: actor.clone(),
++            });
++            self.emitter.emit(&Event::SteerBuffered { kind, actor });
++        } else {
++            for (_, handle) in active.iter() {
++                Self::enqueue_into_session(handle, text, kind, actor.as_ref());
++            }
++        }
++    }
++
++    /// Register a session handle for a stage. If the stage is newly inserted
++    /// (not already active), drains pending steers into it.
++    pub fn register(&self, stage_id: &StageId, handle: &SessionControlHandle) {
++        let mut active = self.active.write().expect("steering active lock poisoned");
++        let is_new = !active.contains_key(stage_id);
++        active.insert(stage_id.clone(), handle.clone());
++
++        if is_new {
++            // Drain pending into the newly registered session
++            let mut pending = self.pending.lock().expect("steering pending lock poisoned");
++            for steer in pending.drain(..) {
++                // Buffered steers always delivered as append
++                Self::enqueue_into_session(handle, &steer.text, SteerKind::Append, steer.actor.as_ref());
++            }
++            drop(pending);
++
++            self.emitter.emit(&Event::SteeringAttached {
++                stage: stage_id.to_string(),
++            });
++        }
++    }
++
++    /// Unregister a session handle. Idempotent — emits `detached` only when
++    /// the entry was actually present.
++    pub fn unregister(&self, stage_id: &StageId) {
++        let mut active = self.active.write().expect("steering active lock poisoned");
++        if active.remove(stage_id).is_some() {
++            self.emitter.emit(&Event::SteeringDetached {
++                stage: stage_id.to_string(),
++            });
++        }
++    }
++
++    /// Emit `agent.steer.dropped` for any remaining pending steers at run end.
++    pub fn drain_pending_at_run_end(&self) {
++        let mut pending = self.pending.lock().expect("steering pending lock poisoned");
++        let count = pending.len();
++        if count > 0 {
++            pending.clear();
++            self.emitter.emit(&Event::SteerDropped {
++                count,
++                reason: "run_ended".to_string(),
++                actor:  None,
++            });
++        }
++    }
++
++    fn enqueue_into_session(
++        handle: &SessionControlHandle,
++        text: &str,
++        kind: SteerKind,
++        actor: Option<&Principal>,
++    ) {
++        match kind {
++            SteerKind::Append => handle.steer(text.to_string(), actor.cloned()),
++            SteerKind::Interrupt => handle.interrupt_with(text.to_string(), actor.cloned()),
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use std::collections::VecDeque;
++    use std::sync::{Arc, Mutex};
++
++    use fabro_agent::SessionControlHandle;
++    use fabro_types::{StageId, SteerKind};
++    use tokio_util::sync::CancellationToken;
++
++    use super::*;
++    use crate::event::Emitter;
++
++    fn test_emitter() -> Arc<Emitter> {
++        Arc::new(Emitter::new(fabro_types::fixtures::RUN_1))
++    }
++
++    #[expect(
++        clippy::type_complexity,
++        reason = "Test helper returns internal queue handle for direct inspection."
++    )]
++    fn test_handle() -> (
++        SessionControlHandle,
++        Arc<Mutex<VecDeque<(String, SteerKind, Option<Principal>)>>>,
++    ) {
++        let queue = Arc::new(Mutex::new(VecDeque::new()));
++        let round_token = Arc::new(std::sync::RwLock::new(CancellationToken::new()));
++        let handle = SessionControlHandle::new(queue.clone(), round_token);
++        (handle, queue)
++    }
++
++    #[test]
++    fn deliver_broadcasts_to_active_sessions() {
++        let hub = SteeringHub::new(test_emitter());
++        let (handle, queue) = test_handle();
++        let stage = StageId::new("node1", 1);
++        hub.register(&stage, &handle);
++
++        hub.deliver("hello", SteerKind::Append, None);
++
++        let q = queue.lock().unwrap();
++        assert_eq!(q.len(), 1);
++        assert_eq!(q[0].0, "hello");
++    }
++
++    #[test]
++    fn deliver_buffers_when_no_active() {
++        let hub = SteeringHub::new(test_emitter());
++        hub.deliver("hello", SteerKind::Append, None);
++
++        // Register drains pending
++        let (handle, queue) = test_handle();
++        let stage = StageId::new("node1", 1);
++        hub.register(&stage, &handle);
++
++        let q = queue.lock().unwrap();
++        assert_eq!(q.len(), 1);
++        assert_eq!(q[0].0, "hello");
++    }
++
++    #[test]
++    fn register_drains_pending_only_on_new_insert() {
++        let hub = SteeringHub::new(test_emitter());
++        hub.deliver("buffered", SteerKind::Append, None);
++
++        let (handle1, queue1) = test_handle();
++        let stage = StageId::new("node1", 1);
++        hub.register(&stage, &handle1);
++        assert_eq!(queue1.lock().unwrap().len(), 1);
++
++        // Second register with same stage_id should NOT drain again
++        let (handle2, queue2) = test_handle();
++        hub.register(&stage, &handle2);
++        assert_eq!(queue2.lock().unwrap().len(), 0);
++    }
++
++    #[test]
++    fn unregister_is_idempotent() {
++        let hub = SteeringHub::new(test_emitter());
++        let (handle, _queue) = test_handle();
++        let stage = StageId::new("node1", 1);
++        hub.register(&stage, &handle);
++
++        hub.unregister(&stage);
++        hub.unregister(&stage); // no panic, no double emit
++    }
++
++    #[test]
++    fn drain_pending_at_run_end_clears_buffer() {
++        let hub = SteeringHub::new(test_emitter());
++        hub.deliver("a", SteerKind::Append, None);
++        hub.deliver("b", SteerKind::Interrupt, None);
++
++        hub.drain_pending_at_run_end();
++
++        // Registering after drain should get nothing
++        let (handle, queue) = test_handle();
++        hub.register(&StageId::new("node1", 1), &handle);
++        assert_eq!(queue.lock().unwrap().len(), 0);
++    }
++
++    #[test]
++    fn pending_overflow_drops_oldest() {
++        let hub = SteeringHub::new(test_emitter());
++        for i in 0..PER_RUN_PENDING_CAP + 5 {
++            hub.deliver(&format!("msg-{i}"), SteerKind::Append, None);
++        }
++
++        let (handle, queue) = test_handle();
++        hub.register(&StageId::new("node1", 1), &handle);
++        let q = queue.lock().unwrap();
++        assert_eq!(q.len(), PER_RUN_PENDING_CAP);
++        // Oldest messages should have been dropped
++        assert_eq!(q[0].0, "msg-5");
++    }
++
++    #[test]
++    fn interrupt_cancels_round_token() {
++        let hub = SteeringHub::new(test_emitter());
++        let queue = Arc::new(Mutex::new(VecDeque::new()));
++        let round_token = Arc::new(std::sync::RwLock::new(CancellationToken::new()));
++        let rt_clone = round_token
++            .read()
++            .expect("round token lock poisoned")
++            .clone();
++        let handle = SessionControlHandle::new(queue.clone(), round_token);
++        let stage = StageId::new("node1", 1);
++        hub.register(&stage, &handle);
++
++        hub.deliver("stop", SteerKind::Interrupt, None);
++
++        assert!(rt_clone.is_cancelled());
++        let q = queue.lock().unwrap();
++        assert_eq!(q.len(), 1);
++        assert_eq!(q[0].1, SteerKind::Interrupt);
++    }
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflow/src/test_support.rs b/lib/crates/fabro-workflow/src/test_support.rs
+index 12aa40f1..3148600b 100644
+--- a/lib/crates/fabro-workflow/src/test_support.rs
++++ b/lib/crates/fabro-workflow/src/test_support.rs
+@@ -166,6 +166,7 @@ async fn initialized(
+                     Arc::new(SandboxGitRuntime::new()),
+                     Arc::new(RunMetadataRuntime::new()),
+                     None,
++                    None,
+                 ),
+                 registry:        Arc::new(registry),
+                 git_state:       std::sync::RwLock::new(None),
+@@ -522,4 +523,4 @@ impl WorkflowRunner {
+         ))
+         .await
+     }
+-}
++}
+\ No newline at end of file
