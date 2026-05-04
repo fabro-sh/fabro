@@ -1,0 +1,281 @@
+diff --git a/apps/fabro-web/app/components/stage-sidebar.tsx b/apps/fabro-web/app/components/stage-sidebar.tsx
+index 46138ac5..2d312260 100644
+--- a/apps/fabro-web/app/components/stage-sidebar.tsx
++++ b/apps/fabro-web/app/components/stage-sidebar.tsx
+@@ -157,4 +157,4 @@ export function StageSidebar({ stages, runId, selectedStageId, activeLink }: Sta
+       </div>
+     </nav>
+   );
+-}
+\ No newline at end of file
++}
+diff --git a/apps/fabro-web/app/lib/run-events.test.tsx b/apps/fabro-web/app/lib/run-events.test.tsx
+index 61700901..6e323e75 100644
+--- a/apps/fabro-web/app/lib/run-events.test.tsx
++++ b/apps/fabro-web/app/lib/run-events.test.tsx
+@@ -123,6 +123,27 @@ describe("subscribeToRunEvents", () => {
+     cleanup();
+   });
+ 
++  test("falls back to node_id when an event has no stage_id", () => {
++    const source = new FakeEventSource();
++    const keys: string[] = [];
++    const cleanup = subscribeToRunEvents(
++      "run-stage-node",
++      (key) => {
++        keys.push(key);
++        return Promise.resolve();
++      },
++      () => source,
++      { debounceMs: 0 },
++    );
++
++    source.emit({ event: "stage.started", node_id: "verify" });
++
++    expect(keys).toContain(queryKeys.runs.stageTurns("run-stage-node", "verify"));
++    expect(keys).toContain(queryKeys.runs.stages("run-stage-node"));
++
++    cleanup();
++  });
++
+   test("malformed events are ignored and StrictMode-style cleanup does not underflow", () => {
+     const firstSource = new FakeEventSource();
+     const secondSource = new FakeEventSource();
+@@ -156,4 +177,4 @@ describe("subscribeToRunEvents", () => {
+     expect(firstSource.closed).toBe(true);
+     expect(secondSource.closed).toBe(true);
+   });
+-});
+\ No newline at end of file
++});
+diff --git a/apps/fabro-web/app/lib/run-events.ts b/apps/fabro-web/app/lib/run-events.ts
+index 28115899..00bd93e4 100644
+--- a/apps/fabro-web/app/lib/run-events.ts
++++ b/apps/fabro-web/app/lib/run-events.ts
+@@ -136,10 +136,10 @@ export function subscribeToRunEvents(
+ }
+ 
+ function stageIdFromPayload(payload: RunEventPayload): string | undefined {
+-  // Only return a true `node_id@visit` StageId. A bare `node_id` would not
+-  // match the suffixed `stageTurns(runId, "verify@1")` cache key, so falling
+-  // back to it would silently no-op the invalidation.
+-  return typeof payload.stage_id === "string" ? payload.stage_id : undefined;
++  if (typeof payload.stage_id === "string") return payload.stage_id;
++  if (typeof payload.node_id === "string") return payload.node_id;
++  const nodeId = payload.properties?.node_id;
++  return typeof nodeId === "string" ? nodeId : undefined;
+ }
+ 
+ export function useRunEvents(runId: string | undefined) {
+@@ -149,4 +149,4 @@ export function useRunEvents(runId: string | undefined) {
+     if (!runId) return;
+     return subscribeToRunEvents(runId, mutate as MutateFn);
+   }, [mutate, runId]);
+-}
+\ No newline at end of file
++}
+diff --git a/apps/fabro-web/app/lib/stage-sidebar.test.ts b/apps/fabro-web/app/lib/stage-sidebar.test.ts
+index c34132e1..9e889164 100644
+--- a/apps/fabro-web/app/lib/stage-sidebar.test.ts
++++ b/apps/fabro-web/app/lib/stage-sidebar.test.ts
+@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
+ import type { PaginatedRunStageList, StageState } from "@qltysh/fabro-api-client";
+ 
+ import type { Stage } from "../components/stage-sidebar";
+-import { aggregateGraphNodeStatus, mapRunStagesToSidebarStages } from "./stage-sidebar";
++import { aggregateGraphNodeStatus, formatStageLabel, mapRunStagesToSidebarStages } from "./stage-sidebar";
+ 
+ function makeStage(nodeId: string, visit: number, status: StageState): Stage {
+   return {
+@@ -44,10 +44,12 @@ describe("mapRunStagesToSidebarStages", () => {
+     expect(result[0].id).toBe("apply-changes@1");
+     expect(result[0].nodeId).toBe("apply");
+     expect(result[0].visit).toBe(1);
++    expect(formatStageLabel(result[0])).toBe("Apply Changes");
+ 
+     expect(result[1].id).toBe("apply-changes@2");
+     expect(result[1].nodeId).toBe("apply");
+     expect(result[1].visit).toBe(2);
++    expect(formatStageLabel(result[1])).toBe("Apply Changes (2)");
+   });
+ 
+   test("filters by node_id (suffixed start@1 / exit@1 are still hidden)", () => {
+@@ -167,4 +169,4 @@ describe("aggregateGraphNodeStatus", () => {
+       latestStageId: "apply@1",
+     });
+   });
+-});
+\ No newline at end of file
++});
+diff --git a/apps/fabro-web/app/lib/stage-sidebar.ts b/apps/fabro-web/app/lib/stage-sidebar.ts
+index a820f549..e44e5f4a 100644
+--- a/apps/fabro-web/app/lib/stage-sidebar.ts
++++ b/apps/fabro-web/app/lib/stage-sidebar.ts
+@@ -71,4 +71,4 @@ export function aggregateGraphNodeStatus(stages: readonly Stage[]): Map<
+     result.set(nodeId, { displayStatus: display.status, latestStageId: latestStage.id });
+   }
+   return result;
+-}
+\ No newline at end of file
++}
+diff --git a/apps/fabro-web/app/routes/run-overview.tsx b/apps/fabro-web/app/routes/run-overview.tsx
+index 17982556..48066eae 100644
+--- a/apps/fabro-web/app/routes/run-overview.tsx
++++ b/apps/fabro-web/app/routes/run-overview.tsx
+@@ -54,9 +54,6 @@ export default function RunOverview() {
+     const inner = innerRef.current;
+     if (!inner || !graphSvg) return;
+ 
+-    let cancelled = false;
+-    (async () => {
+-    if (cancelled) return;
+     inner.innerHTML = graphSvg;
+     const svg = inner.querySelector("svg");
+     if (!svg) return;
+@@ -151,8 +148,6 @@ export default function RunOverview() {
+         }
+       }
+     }
+-    })();
+-    return () => { cancelled = true; };
+   }, [stages, graphSvg, id, navigate, terminalOutcome]);
+ 
+   const onPointerDown = useCallback((e: React.PointerEvent) => {
+@@ -237,4 +232,4 @@ export default function RunOverview() {
+       </div>
+     </div>
+   );
+-}
+\ No newline at end of file
++}
+diff --git a/apps/fabro-web/app/routes/run-stages.test.ts b/apps/fabro-web/app/routes/run-stages.test.ts
+index 9a7d9bc4..704c5cac 100644
+--- a/apps/fabro-web/app/routes/run-stages.test.ts
++++ b/apps/fabro-web/app/routes/run-stages.test.ts
+@@ -108,4 +108,4 @@ describe("turnsFromEvents", () => {
+       expect(turn.running).toBe(false);
+     }
+   });
+-});
+\ No newline at end of file
++});
+diff --git a/apps/fabro-web/app/routes/run-stages.tsx b/apps/fabro-web/app/routes/run-stages.tsx
+index 90ba4ed0..1176cb71 100644
+--- a/apps/fabro-web/app/routes/run-stages.tsx
++++ b/apps/fabro-web/app/routes/run-stages.tsx
+@@ -41,7 +41,7 @@ import { EmptyState } from "../components/state";
+ import { CopyButton } from "../components/ui";
+ import { formatDurationSecs } from "../lib/format";
+ import { fetchRunCommandLog, useRunEventsList, useRunStageTurns, useRunStages } from "../lib/queries";
+-import { formatStageLabel, mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
++import { ACTIVE_STAGE_STATES, formatStageLabel, mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
+ import { getNumber, getString, type UnknownRecord } from "../lib/unknown";
+ import {
+   CommandOutputStream,
+@@ -614,7 +614,7 @@ export default function RunStages() {
+     () => mapTurns(turnsQuery.data, eventsQuery.data, selectedStage?.id),
+     [eventsQuery.data, selectedStage?.id, turnsQuery.data],
+   );
+-  const isRunning = selectedStage?.status === "running";
++  const isActive = selectedStage ? ACTIVE_STAGE_STATES.has(selectedStage.status) : false;
+ 
+   if (!id || !stages.length) {
+     return (
+@@ -636,13 +636,13 @@ export default function RunStages() {
+ 
+       <div className="min-w-0 flex-1 space-y-3">
+         <div className="sticky top-0 z-10 -mx-2 flex items-center gap-2 bg-page/85 px-2 py-2 backdrop-blur">
+-          <SelectedIcon className={`size-5 ${selectedConfig.color} ${isRunning ? "animate-spin" : ""}`} />
++          <SelectedIcon className={`size-5 ${selectedConfig.color} ${isActive ? "animate-spin" : ""}`} />
+           <h3 className="text-base font-semibold text-fg">
+             {formatStageLabel(selectedStage)}
+           </h3>
+           <span className="font-mono text-xs tabular-nums text-fg-muted">
+             <RunningStageDuration
+-              isRunning={isRunning}
++              isRunning={isActive}
+               duration={selectedStage.duration}
+             />
+           </span>
+@@ -663,4 +663,4 @@ export default function RunStages() {
+       </div>
+     </div>
+   );
+-}
+\ No newline at end of file
++}
+diff --git a/docs/public/api-reference/fabro-api.yaml b/docs/public/api-reference/fabro-api.yaml
+index 9cad7b73..bea73340 100644
+--- a/docs/public/api-reference/fabro-api.yaml
++++ b/docs/public/api-reference/fabro-api.yaml
+@@ -8330,4 +8330,4 @@ components:
+         login:
+           type: string
+           description: User's login identifier (e.g. GitHub username).
+-          example: octocat
+\ No newline at end of file
++          example: octocat
+diff --git a/lib/crates/fabro-server/src/server/handler/billing.rs b/lib/crates/fabro-server/src/server/handler/billing.rs
+index 6bf442c0..36e815e7 100644
+--- a/lib/crates/fabro-server/src/server/handler/billing.rs
++++ b/lib/crates/fabro-server/src/server/handler/billing.rs
+@@ -2,7 +2,7 @@ use std::num::NonZeroU32;
+ use std::sync::Arc;
+ 
+ use fabro_store::RunProjectionReducer;
+-use fabro_types::{EventBody, RunProjection, StageId};
++use fabro_types::{EventBody, RunProjection, StageId, StageProjection};
+ 
+ use super::super::{
+     ApiError, AppState, BilledTokenCounts, BillingByModel, BillingStageRef, EventEnvelope, HashMap,
+@@ -72,8 +72,7 @@ async fn list_run_stages(
+     let stage_durations = fabro_workflow::extract_stage_durations_by_stage_id(&events);
+     let lifecycle_states = latest_stage_states(&events);
+ 
+-    let mut entries: Vec<(&StageId, &fabro_types::StageProjection)> =
+-        projection.iter_stages().collect();
++    let mut entries: Vec<(&StageId, &StageProjection)> = projection.iter_stages().collect();
+     entries.sort_by_key(|(_, stage)| stage.first_event_seq);
+ 
+     let mut stages = Vec::with_capacity(entries.len());
+@@ -217,4 +216,4 @@ async fn get_run_billing(
+     };
+ 
+     (StatusCode::OK, Json(response)).into_response()
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-workflow/src/lib.rs b/lib/crates/fabro-workflow/src/lib.rs
+index 40a48733..61289ec8 100644
+--- a/lib/crates/fabro-workflow/src/lib.rs
++++ b/lib/crates/fabro-workflow/src/lib.rs
+@@ -20,7 +20,7 @@ use std::sync::Arc;
+ 
+ use fabro_retro::retro::CompletedStage;
+ use fabro_store::EventEnvelope;
+-use fabro_types::EventBody;
++use fabro_types::{EventBody, StageId};
+ 
+ /// Callback invoked when a workflow node starts executing.
+ pub type OnNodeCallback = Option<Arc<dyn Fn(&str) + Send + Sync>>;
+@@ -114,11 +114,9 @@ pub fn extract_stage_durations_from_events(events: &[EventEnvelope]) -> HashMap<
+ /// Extract per-stage (node_id, visit) durations from `stage.completed` /
+ /// `stage.failed` events. Differs from
+ /// [`extract_stage_durations_from_events`] by keying on the full
+-/// [`fabro_types::StageId`] instead of just `node_id`, so multi-visit
++/// [`StageId`] instead of just `node_id`, so multi-visit
+ /// stages (e.g. a looped `verify` node) keep distinct durations.
+-pub fn extract_stage_durations_by_stage_id(
+-    events: &[EventEnvelope],
+-) -> HashMap<fabro_types::StageId, u64> {
++pub fn extract_stage_durations_by_stage_id(events: &[EventEnvelope]) -> HashMap<StageId, u64> {
+     let mut durations = HashMap::new();
+     for envelope in events {
+         let Some(duration_ms) = stage_completion_duration_ms(&envelope.event.body) else {
+@@ -179,4 +177,4 @@ mod stage_scope;
+ pub mod test_support;
+ #[doc(hidden)]
+ pub mod transforms;
+-pub mod workflow_bundle;
+\ No newline at end of file
++pub mod workflow_bundle;
