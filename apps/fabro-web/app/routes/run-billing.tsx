@@ -5,7 +5,7 @@ import { formatDurationSecs } from "../lib/format";
 import { useRunBilling } from "../lib/queries";
 import { IN_FLIGHT_STAGE_STATES } from "../lib/stage-sidebar";
 import { useTickingNow } from "../lib/time";
-import type { RunBilling, RunBillingStage, StageState } from "@qltysh/fabro-api-client";
+import type { RunBilling, RunBillingStage } from "@qltysh/fabro-api-client";
 
 const EMPTY_VALUE = "—";
 
@@ -19,7 +19,7 @@ function formatUsdMicros(usdMicros?: number | null) {
 }
 
 function isInFlight(stage: RunBillingStage): boolean {
-  return stage.state != null && IN_FLIGHT_STAGE_STATES.has(stage.state as StageState);
+  return stage.state != null && IN_FLIGHT_STAGE_STATES.has(stage.state);
 }
 
 interface MappedStageRow {
@@ -113,8 +113,8 @@ export default function RunBilling({ params }: { params: { id: string } }) {
     return (
       <div className="py-12">
         <EmptyState
-          title="No completed stages yet"
-          description="Stages will appear once the run produces completed nodes."
+          title="No stages yet"
+          description="Stages will appear as soon as the run starts executing."
         />
       </div>
     );

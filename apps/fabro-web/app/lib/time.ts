@@ -9,6 +9,7 @@ export function useTickingNow(active: boolean, intervalMs = 1000): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!active) return;
+    setNow(Date.now());
     const interval = setInterval(() => setNow(Date.now()), intervalMs);
     return () => clearInterval(interval);
   }, [active, intervalMs]);

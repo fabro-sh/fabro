@@ -633,9 +633,10 @@ mod tests {
         StageRetryingProps, StageStartedProps,
     };
     use fabro_types::{
-        BlockedReason, Checkpoint, EventBody, FailureCategory, FailureDetail, FailureReason,
-        Outcome, QuestionType, RunBlobId, RunControlAction, RunEvent, RunStatus, StageOutcome,
-        StageState, SuccessReason, TerminalStatus, WorkflowSettings, first_event_seq, fixtures,
+        BilledModelUsage, BlockedReason, Checkpoint, EventBody, FailureCategory, FailureDetail,
+        FailureReason, Outcome, QuestionType, RunBlobId, RunControlAction, RunEvent, RunStatus,
+        StageOutcome, StageState, SuccessReason, TerminalStatus, WorkflowSettings, first_event_seq,
+        fixtures,
     };
     use serde_json::json;
 
@@ -1556,6 +1557,29 @@ mod tests {
         }
     }
 
+    fn billed_usage() -> BilledModelUsage {
+        serde_json::from_value(json!({
+            "input": {
+                "usage": {
+                    "model": {
+                        "provider": "openai",
+                        "model_id": "gpt-test"
+                    },
+                    "tokens": {
+                        "input_tokens": 10,
+                        "output_tokens": 5,
+                        "reasoning_tokens": 2,
+                        "cache_read_tokens": 3,
+                        "cache_write_tokens": 4
+                    }
+                },
+                "facts": { "provider": "open_ai" }
+            },
+            "total_usd_micros": 123
+        }))
+        .expect("billing fixture should deserialize")
+    }
+
     #[test]
     fn stage_started_records_started_at_and_running_state() {
         let mut state = RunProjection::default();
@@ -1576,9 +1600,10 @@ mod tests {
     }
 
     #[test]
-    fn stage_completed_records_duration_and_terminal_state() {
+    fn stage_completed_records_duration_usage_and_terminal_state() {
         let mut state = RunProjection::default();
         let stage_id = StageId::new("build", 1);
+        let usage = billed_usage();
 
         state
             .apply_event(&test_stage_event(
@@ -1587,16 +1612,19 @@ mod tests {
                 stage_id.clone(),
             ))
             .unwrap();
+        let mut props = completed_props(42, StageOutcome::Succeeded);
+        props.billing = Some(usage.clone());
         state
             .apply_event(&test_event(
                 2,
-                EventBody::StageCompleted(completed_props(42, StageOutcome::Succeeded)),
+                EventBody::StageCompleted(props),
                 Some("build"),
             ))
             .unwrap();
 
         let stage = state.stage(&stage_id).unwrap();
         assert_eq!(stage.duration_ms, Some(42));
+        assert_eq!(stage.usage.as_ref(), Some(&usage));
         assert_eq!(stage.state, Some(StageState::Succeeded));
         assert_eq!(stage.effective_state(), StageState::Succeeded);
     }

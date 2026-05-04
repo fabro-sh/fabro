@@ -98,7 +98,7 @@ describe("RunBilling", () => {
     expect(text).toMatch(/—\s*\/\s*—/);
     expect(text).toContain("1m 1s");
     expect(text).not.toContain("By model");
-    expect(text).not.toContain("No completed stages yet");
+    expect(text).not.toContain("No stages yet");
   });
 
   test("renders mixed LLM and non-LLM rows while counting only LLM rows by model", () => {
@@ -159,12 +159,12 @@ describe("RunBilling", () => {
     expect(textFromInstance(byModelFooterCells[1])).toBe("1");
   });
 
-  test("keeps the empty state for runs with no completed stages", () => {
+  test("keeps the empty state for runs with no stages", () => {
     const renderer = renderBilling(billing());
 
     const text = textFromNode(renderer.toJSON());
-    expect(text).toContain("No completed stages yet");
-    expect(text).toContain("Stages will appear once the run produces completed nodes.");
+    expect(text).toContain("No stages yet");
+    expect(text).toContain("Stages will appear as soon as the run starts executing.");
   });
 
   test("renders an in-flight row with live runtime and includes its elapsed time in the footer", () => {
@@ -199,7 +199,7 @@ describe("RunBilling", () => {
       const text = textFromNode(renderer.toJSON());
       // Empty-state must NOT show — the table should appear as soon as the
       // first stage starts.
-      expect(text).not.toContain("No completed stages yet");
+      expect(text).not.toContain("No stages yet");
       expect(text).toContain("in-flight");
 
       // Both the row's runtime cell and the footer total should reflect

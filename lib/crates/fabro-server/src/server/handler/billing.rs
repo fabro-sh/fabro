@@ -141,16 +141,7 @@ async fn get_run_billing(
         runtime_secs += row_runtime;
 
         let (billing, model) = if let Some(usage) = stage.usage.as_ref() {
-            let tokens = usage.tokens();
-            let billing = BilledTokenCounts {
-                cache_read_tokens:  tokens.cache_read_tokens,
-                cache_write_tokens: tokens.cache_write_tokens,
-                input_tokens:       tokens.input_tokens,
-                output_tokens:      tokens.output_tokens,
-                reasoning_tokens:   tokens.reasoning_tokens,
-                total_tokens:       tokens.total_tokens(),
-                total_usd_micros:   usage.total_usd_micros,
-            };
+            let billing = BilledTokenCounts::from_billed_usage(std::slice::from_ref(usage));
             let model_id = usage.model_id();
             let model_totals = match by_model_totals.get_mut(model_id) {
                 Some(totals) => totals,
