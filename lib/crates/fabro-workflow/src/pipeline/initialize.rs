@@ -606,7 +606,8 @@ pub async fn initialize(
         .is_some();
     if !has_run_branch {
         let intent = git_setup_intent(&options.run_options);
-        if sandbox.origin_url().is_some() {
+        let sandbox_has_origin = sandbox.origin_url().is_some();
+        if sandbox_has_origin {
             sandbox_git
                 .ensure_git_available(&*sandbox)
                 .await
@@ -633,7 +634,7 @@ pub async fn initialize(
                 }
             }
             Ok(None) => {
-                if sandbox.origin_url().is_some() {
+                if sandbox_has_origin {
                     options.emitter.notice(
                         RunNoticeLevel::Warn,
                         "sandbox_git_unavailable",

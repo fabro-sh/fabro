@@ -207,13 +207,11 @@ impl Handler for ParallelHandler {
                         error = %fabro_sandbox::display_for_log(&e),
                         "parallel base checkpoint failed"
                     );
-                    services.run.emitter.notice(
+                    services.run.emitter.notice_with_tail(
                         RunNoticeLevel::Warn,
                         "parallel_base_checkpoint_failed",
-                        format!(
-                            "Could not checkpoint base state before parallel branches: {}",
-                            fabro_sandbox::display_for_log(&e)
-                        ),
+                        format!("Could not checkpoint base state before parallel branches: {e}"),
+                        fabro_sandbox::default_redacted_output_tail(&e),
                     );
                     None
                 }
