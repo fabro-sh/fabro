@@ -1,0 +1,71 @@
+diff --git a/lib/crates/fabro-cli/src/commands/model.rs b/lib/crates/fabro-cli/src/commands/model.rs
+index 65918472..9ccfc20a 100644
+--- a/lib/crates/fabro-cli/src/commands/model.rs
++++ b/lib/crates/fabro-cli/src/commands/model.rs
+@@ -163,22 +163,25 @@ fn print_models_table(models: &[Model], styles: &Styles) {
+     );
+ }
+ 
+-fn configured_model_test_status(result: Result<api_types::ModelTestResult>) -> (Color, String) {
++fn configured_model_test_status(
++    result: Result<api_types::ModelTestResult>,
++) -> (Color, String, bool) {
+     match result {
+         Ok(resp) if resp.status == api_types::ModelTestResultStatus::Ok => {
+-            (Color::Green, "ok".to_string())
++            (Color::Green, "ok".to_string(), false)
+         }
+         Ok(resp) if resp.status == api_types::ModelTestResultStatus::Skip => (
+             Color::Red,
+             "error: provider became unconfigured after listing".to_string(),
++            true,
+         ),
+         Ok(resp) => {
+             let message = resp
+                 .error_message
+                 .unwrap_or_else(|| "unknown error".to_string());
+-            (Color::Red, format!("error: {message}"))
++            (Color::Red, format!("error: {message}"), true)
+         }
+-        Err(err) => (Color::Red, format!("error: {err}")),
++        Err(err) => (Color::Red, format!("error: {err}"), true),
+     }
+ }
+ 
+@@ -325,23 +328,26 @@ async fn test_models_via_server(
+                     if !json_output {
+                         eprintln!("Testing {}... done", info.id);
+                     }
+-                    let (result_color, status) = configured_model_test_status(result);
+-                    CompletedModelTest {
+-                        index,
+-                        model: info,
+-                        result_color,
+-                        status,
+-                    }
++                    let (result_color, status, failed) = configured_model_test_status(result);
++                    (
++                        CompletedModelTest {
++                            index,
++                            model: info,
++                            result_color,
++                            status,
++                        },
++                        failed,
++                    )
+                 }
+             })
+             .buffer_unordered(jobs)
+             .collect::<Vec<_>>()
+             .await;
+ 
+-        completed.sort_by_key(|completed| completed.index);
++        completed.sort_by_key(|(completed, _)| completed.index);
+ 
+-        for completed in completed {
+-            if completed.result_color == Color::Red {
++        for (completed, failed) in completed {
++            if failed {
+                 failures += 1;
+             }
+ 
