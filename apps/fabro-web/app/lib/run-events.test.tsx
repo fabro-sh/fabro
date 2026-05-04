@@ -36,6 +36,14 @@ describe("queryKeysForRunEvent", () => {
       queryKeys.runs.graph("run-1", "TB"),
     ]);
   });
+
+  test("stage.retrying invalidates the same keys as other stage events", () => {
+    const keys = queryKeysForRunEvent("run-1", "stage.retrying", "verify@2");
+    expect(keys).toContain(queryKeys.runs.stages("run-1"));
+    expect(keys).toContain(queryKeys.runs.events("run-1", 1000));
+    expect(keys).toContain(queryKeys.runs.detail("run-1"));
+    expect(keys).toContain(queryKeys.runs.stageTurns("run-1", "verify@2"));
+  });
 });
 
 describe("subscribeToRunEvents", () => {
@@ -86,6 +94,31 @@ describe("subscribeToRunEvents", () => {
     expect(source.closed).toBe(true);
     expect(keys).toContain(queryKeys.runs.files("run-terminal"));
     expect(keys).toContain(queryKeys.runs.billing("run-terminal"));
+
+    cleanup();
+  });
+
+  test("envelope with suffixed stage_id invalidates stageTurns(runId, stageId)", () => {
+    const source = new FakeEventSource();
+    const keys: string[] = [];
+    const cleanup = subscribeToRunEvents(
+      "run-stage",
+      (key) => {
+        keys.push(key);
+        return Promise.resolve();
+      },
+      () => source,
+      { debounceMs: 0 },
+    );
+
+    source.emit({ event: "stage.retrying", stage_id: "verify@2", node_id: "verify" });
+
+    expect(keys).toContain(queryKeys.runs.stageTurns("run-stage", "verify@2"));
+    expect(keys).toContain(queryKeys.runs.stages("run-stage"));
+    expect(keys).toContain(queryKeys.runs.events("run-stage", 1000));
+    expect(keys).toContain(queryKeys.runs.graph("run-stage", "LR"));
+    expect(keys).toContain(queryKeys.runs.detail("run-stage"));
+    expect(keys).not.toContain(queryKeys.runs.stageTurns("run-stage", "verify"));
 
     cleanup();
   });

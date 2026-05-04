@@ -1154,34 +1154,49 @@ mod runs {
     }
 
     pub(super) fn stages() -> Vec<RunStage> {
+        fn visit(n: u32) -> std::num::NonZeroU32 {
+            std::num::NonZeroU32::new(n).expect("visit is 1-based")
+        }
         vec![
             RunStage {
-                id:            "detect-drift".into(),
+                id:            "detect-drift@1".into(),
                 name:          "Detect Drift".into(),
                 status:        StageState::Succeeded,
                 duration_secs: Some(72.0),
-                dot_id:        Some("detect".into()),
+                node_id:       "detect".into(),
+                visit:         visit(1),
             },
             RunStage {
-                id:            "propose-changes".into(),
+                id:            "propose-changes@1".into(),
                 name:          "Propose Changes".into(),
                 status:        StageState::Succeeded,
                 duration_secs: Some(154.0),
-                dot_id:        Some("propose".into()),
+                node_id:       "propose".into(),
+                visit:         visit(1),
             },
             RunStage {
-                id:            "review-changes".into(),
+                id:            "review-changes@1".into(),
                 name:          "Review Changes".into(),
                 status:        StageState::Succeeded,
                 duration_secs: Some(45.0),
-                dot_id:        Some("review".into()),
+                node_id:       "review".into(),
+                visit:         visit(1),
             },
             RunStage {
-                id:            "apply-changes".into(),
+                id:            "apply-changes@1".into(),
+                name:          "Apply Changes".into(),
+                status:        StageState::Succeeded,
+                duration_secs: Some(118.0),
+                node_id:       "apply".into(),
+                visit:         visit(1),
+            },
+            RunStage {
+                id:            "apply-changes@2".into(),
                 name:          "Apply Changes".into(),
                 status:        StageState::Running,
-                duration_secs: Some(118.0),
-                dot_id:        Some("apply".into()),
+                duration_secs: None,
+                node_id:       "apply".into(),
+                visit:         visit(2),
             },
         ]
     }

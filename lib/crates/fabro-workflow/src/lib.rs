@@ -110,6 +110,37 @@ pub fn extract_stage_durations_from_events(events: &[EventEnvelope]) -> HashMap<
     durations
 }
 
+/// Extract per-stage (node_id, visit) durations from `stage.completed` /
+/// `stage.failed` events. Differs from
+/// [`extract_stage_durations_from_events`] by keying on the full
+/// [`fabro_types::StageId`] instead of just `node_id`, so multi-visit
+/// stages (e.g. a looped `verify` node) keep distinct durations.
+pub fn extract_stage_durations_by_stage_id(
+    events: &[EventEnvelope],
+) -> HashMap<fabro_types::StageId, u64> {
+    let mut durations = HashMap::new();
+    for envelope in events {
+        let event = &envelope.event;
+        let event_name = event.event_name();
+        if event_name != "stage.completed" && event_name != "stage.failed" {
+            continue;
+        }
+        let Some(stage_id) = event.stage_id.as_ref() else {
+            continue;
+        };
+        let Some(duration_ms) = event
+            .properties()
+            .ok()
+            .and_then(|properties| properties.get("duration_ms").cloned())
+            .and_then(|duration| duration.as_u64())
+        else {
+            continue;
+        };
+        durations.insert(stage_id.clone(), duration_ms);
+    }
+    durations
+}
+
 #[doc(hidden)]
 pub mod artifact;
 pub mod artifact_snapshot;

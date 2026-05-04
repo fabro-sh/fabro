@@ -6319,11 +6319,13 @@ components:
         - id
         - name
         - status
+        - node_id
+        - visit
       properties:
         id:
           type: string
-          description: Unique stage identifier within the run.
-          example: propose-changes
+          description: StageId in "node_id@visit" form, e.g. verify@2.
+          example: verify@2
         name:
           type: string
           description: Human-readable stage name.
@@ -6334,10 +6336,16 @@ components:
           type: number
           description: Time spent in this stage, in seconds.
           example: 154.0
-        dot_id:
+        node_id:
           type: string
-          description: Node identifier in the Graphviz graph source.
-          example: propose
+          description: Node id in the workflow graph; multiple stages with different visits share the same node_id.
+          example: verify
+        visit:
+          type: integer
+          format: uint32
+          minimum: 1
+          description: 1-based visit count; bumped each time the workflow re-enters this node.
+          example: 2
 
     ToolUse:
       description: A single tool invocation with its input, result, and execution metadata.

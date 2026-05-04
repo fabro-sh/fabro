@@ -3,7 +3,6 @@ import { useNavigate, useParams } from "react-router";
 import { graphTheme } from "../lib/graph-theme";
 import { useRun, useRunGraph, useRunStages } from "../lib/queries";
 import { StageSidebar } from "../components/stage-sidebar";
-import type { Stage } from "../components/stage-sidebar";
 import {
   GRAPH_DEFAULT_ZOOM_INDEX,
   GRAPH_ZOOM_STEPS,
@@ -13,6 +12,7 @@ import { EmptyState } from "../components/state";
 import {
   ACTIVE_STAGE_STATES,
   SUCCEEDED_STAGE_STATES,
+  aggregateGraphNodeStatus,
   mapRunStagesToSidebarStages,
 } from "../lib/stage-sidebar";
 
@@ -63,18 +63,21 @@ export default function RunOverview() {
     svgRef.current = svg;
 
     const gt = graphTheme;
-    const runningDotIds = new Set<string>(
-      stages.filter((s: Stage) => ACTIVE_STAGE_STATES.has(s.status)).map((s: Stage) => s.dotId ?? s.id),
-    );
-    const failedDotIds = new Set<string>(
-      stages.filter((s: Stage) => s.status === "failed").map((s: Stage) => s.dotId ?? s.id),
-    );
-    const completedDotIds = new Set<string>(
-      stages.filter((s: Stage) => SUCCEEDED_STAGE_STATES.has(s.status)).map((s: Stage) => s.dotId ?? s.id),
-    );
-    const dotIdToStageId = new Map<string, string>(
-      stages.map((s: Stage) => [s.dotId ?? s.id, s.id]),
-    );
+    const aggregated = aggregateGraphNodeStatus(stages);
+    const runningDotIds = new Set<string>();
+    const failedDotIds = new Set<string>();
+    const completedDotIds = new Set<string>();
+    const dotIdToStageId = new Map<string, string>();
+    for (const [nodeId, { displayStatus, latestStageId }] of aggregated) {
+      dotIdToStageId.set(nodeId, latestStageId);
+      if (ACTIVE_STAGE_STATES.has(displayStatus)) {
+        runningDotIds.add(nodeId);
+      } else if (displayStatus === "failed") {
+        failedDotIds.add(nodeId);
+      } else if (SUCCEEDED_STAGE_STATES.has(displayStatus)) {
+        completedDotIds.add(nodeId);
+      }
+    }
 
     const ns = "http://www.w3.org/2000/svg";
     for (const group of svg.querySelectorAll(".node")) {

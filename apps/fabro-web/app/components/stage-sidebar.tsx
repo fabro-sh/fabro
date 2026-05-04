@@ -18,7 +18,8 @@ export interface Stage {
   name: string;
   status: StageState;
   duration: string;
-  dotId?: string;
+  nodeId: string;
+  visit: number;
 }
 
 export const statusConfig: Record<StageState, { icon: ComponentType<{ className?: string }>; color: string }> = {
@@ -100,7 +101,7 @@ export function StageSidebar({ stages, runId, selectedStageId, activeLink }: Sta
                     }`}
                   >
                     <Icon className={`size-4 shrink-0 ${config.color} ${ACTIVE_STAGE_STATES.has(stage.status) ? "animate-spin" : ""}`} />
-                    <span className="flex-1 truncate">{stage.name}</span>
+                    <span className="flex-1 truncate">{stage.visit > 1 ? `${stage.name} (${stage.visit})` : stage.name}</span>
                     <span className="font-mono text-xs tabular-nums text-fg-muted">{stageDuration(stage)}</span>
                   </Link>
                 </li>

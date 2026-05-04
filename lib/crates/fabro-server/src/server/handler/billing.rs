@@ -1,13 +1,14 @@
+use std::num::NonZeroU32;
 use std::sync::Arc;
 
-use fabro_types::EventBody;
+use fabro_store::RunProjectionReducer;
+use fabro_types::{EventBody, RunProjection, StageId};
 
 use super::super::{
     ApiError, AppState, BilledTokenCounts, BillingByModel, BillingStageRef, EventEnvelope, HashMap,
     IntoResponse, Json, ListResponse, ModelBillingTotals, ModelReference, PaginationParams, Path,
     Query, RequiredUser, Response, Router, RunBilling, RunBillingStage, RunBillingTotals, RunId,
-    RunStage, RunStatus, StageState, State, StatusCode, accumulate_model_billing, get,
-    parse_run_id_path,
+    RunStage, StageState, State, StatusCode, accumulate_model_billing, get, parse_run_id_path,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -16,23 +17,46 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/billing", get(get_run_billing))
 }
 
-fn active_stage_state_from_events(events: &[EventEnvelope], node_id: &str) -> StageState {
+/// Pick the stage state from the latest lifecycle event for `stage_id`,
+/// falling back to the projection's stored completion when no lifecycle
+/// events have landed yet (e.g. an empty event log for a completed run
+/// recovered from snapshot only).
+fn stage_status_from_events(
+    events: &[EventEnvelope],
+    stage_id: &StageId,
+    projection: &RunProjection,
+) -> StageState {
     let latest = events.iter().rev().find(|envelope| {
-        envelope.event.node_id.as_deref() == Some(node_id)
+        envelope.event.stage_id.as_ref() == Some(stage_id)
             && matches!(
                 &envelope.event.body,
-                EventBody::StageRetrying(_)
-                    | EventBody::StageStarted(_)
+                EventBody::StageStarted(_)
+                    | EventBody::StageRetrying(_)
                     | EventBody::StageCompleted(_)
                     | EventBody::StageFailed(_)
             )
     });
 
-    if latest.is_some_and(|e| matches!(&e.event.body, EventBody::StageRetrying(_))) {
-        StageState::Retrying
-    } else {
-        StageState::Running
+    if let Some(envelope) = latest {
+        return match &envelope.event.body {
+            EventBody::StageStarted(_) => StageState::Running,
+            EventBody::StageRetrying(_) => StageState::Retrying,
+            EventBody::StageFailed(props) => {
+                if props.will_retry {
+                    StageState::Retrying
+                } else {
+                    StageState::Failed
+                }
+            }
+            EventBody::StageCompleted(props) => StageState::from(props.status),
+            _ => StageState::Pending,
+        };
     }
+
+    projection
+        .stage(stage_id)
+        .and_then(|stage| stage.completion.as_ref())
+        .map_or(StageState::Pending, |c| StageState::from(c.outcome))
 }
 
 async fn list_run_stages(
@@ -46,80 +70,30 @@ async fn list_run_stages(
         Err(response) => return response,
     };
 
-    // Try live run first.
-    let (checkpoint, run_is_active) = {
-        let runs = state.runs.lock().expect("runs lock poisoned");
-        match runs.get(&id) {
-            Some(managed_run) => {
-                let active = !matches!(
-                    managed_run.status,
-                    RunStatus::Succeeded { .. } | RunStatus::Failed { .. } | RunStatus::Dead
-                );
-                (managed_run.checkpoint.clone(), active)
-            }
-            None => (None, false),
-        }
-    };
-
-    // Fall back to stored run.
-    let (checkpoint, run_is_active) = if checkpoint.is_some() {
-        (checkpoint, run_is_active)
-    } else {
-        match state.store.open_run_reader(&id).await {
-            Ok(run_store) => match run_store.state().await {
-                Ok(run_state) => {
-                    let active = run_state.status.is_some_and(|status| !status.is_terminal());
-                    (run_state.checkpoint, active)
-                }
-                Err(_) => (None, false),
-            },
-            Err(_) => return ApiError::not_found("Run not found.").into_response(),
-        }
-    };
-
-    let Some(checkpoint) = checkpoint else {
-        return (
-            StatusCode::OK,
-            Json(ListResponse::new(Vec::<RunStage>::new())),
-        )
-            .into_response();
-    };
-
     let events = match state.store.open_run_reader(&id).await {
         Ok(run_store) => run_store.list_events().await.unwrap_or_default(),
-        Err(_) => Vec::new(),
+        Err(_) => return ApiError::not_found("Run not found.").into_response(),
     };
-    let stage_durations = fabro_workflow::extract_stage_durations_from_events(&events);
 
-    let mut stages = Vec::new();
-    for node_id in &checkpoint.completed_nodes {
-        let duration_ms = stage_durations.get(node_id).copied().unwrap_or(0);
-        let status = match checkpoint.node_outcomes.get(node_id) {
-            Some(outcome) => StageState::from(outcome.status),
-            None => StageState::Succeeded,
-        };
+    let projection = RunProjection::apply_events(&events).unwrap_or_default();
+    let stage_durations = fabro_workflow::extract_stage_durations_by_stage_id(&events);
+
+    let mut entries: Vec<(&StageId, &fabro_types::StageProjection)> =
+        projection.iter_stages().collect();
+    entries.sort_by_key(|(_, projection)| projection.first_event_seq);
+
+    let mut stages = Vec::with_capacity(entries.len());
+    for (stage_id, _projection_stage) in entries {
+        let duration_ms = stage_durations.get(stage_id).copied();
+        let visit = NonZeroU32::new(stage_id.visit()).expect("StageId.visit is 1-based");
         stages.push(RunStage {
-            id: node_id.clone(),
-            name: node_id.clone(),
-            status,
-            duration_secs: Some(duration_ms as f64 / 1000.0),
-            dot_id: Some(node_id.clone()),
+            id: stage_id.to_string(),
+            name: stage_id.node_id().to_string(),
+            status: stage_status_from_events(&events, stage_id, &projection),
+            duration_secs: duration_ms.map(|ms| ms as f64 / 1000.0),
+            node_id: stage_id.node_id().to_string(),
+            visit,
         });
-    }
-
-    // Add next node as running if the run is still active.
-    // The checkpoint's current_node is the last *completed* stage; next_node_id
-    // is the stage that is currently executing.
-    if let Some(next_id) = &checkpoint.next_node_id {
-        if run_is_active && next_id != "exit" && !checkpoint.completed_nodes.contains(next_id) {
-            stages.push(RunStage {
-                id:            next_id.clone(),
-                name:          next_id.clone(),
-                status:        active_stage_state_from_events(&events, next_id),
-                duration_secs: None,
-                dot_id:        Some(next_id.clone()),
-            });
-        }
     }
 
     (StatusCode::OK, Json(ListResponse::new(stages))).into_response()
