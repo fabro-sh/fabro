@@ -1006,6 +1006,26 @@ fn event_body_from_event(event: &Event) -> EventBody {
             exit_code:   *exit_code,
             duration_ms: *duration_ms,
         }),
+        Event::AgentCliCancelled {
+            stdout,
+            stderr,
+            duration_ms,
+            ..
+        } => EventBody::AgentCliCancelled(fabro_types::AgentCliCancelledProps {
+            stdout:      stdout.clone(),
+            stderr:      stderr.clone(),
+            duration_ms: *duration_ms,
+        }),
+        Event::AgentCliTimedOut {
+            stdout,
+            stderr,
+            duration_ms,
+            ..
+        } => EventBody::AgentCliTimedOut(fabro_types::AgentCliTimedOutProps {
+            stdout:      stdout.clone(),
+            stderr:      stderr.clone(),
+            duration_ms: *duration_ms,
+        }),
         Event::PullRequestCreated {
             pr_url,
             pr_number,

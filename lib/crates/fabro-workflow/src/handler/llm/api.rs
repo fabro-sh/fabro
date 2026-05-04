@@ -14,6 +14,7 @@ use fabro_llm::types::{Message, Request, TokenCounts};
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::{FallbackTarget, Provider};
 use tokio::sync::Mutex as TokioMutex;
+use tokio_util::sync::CancellationToken;
 
 use super::super::agent::{CodergenBackend, CodergenResult};
 use crate::context::keys::Fidelity;
@@ -426,7 +427,9 @@ impl CodergenBackend for AgentApiBackend {
         emitter: &Arc<Emitter>,
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+        cancel_token: CancellationToken,
     ) -> Result<CodergenResult, Error> {
+        let _ = cancel_token; // TODO: wire into session bridge
         let actual_model = node.model().unwrap_or(&self.model).to_string();
         let _actual_provider = node
             .provider()

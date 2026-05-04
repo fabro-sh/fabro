@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use super::super::{
-    ApiError, AppState, FailureReason, ForkRequest, ForkResponse, IntoResponse, Json, Ordering,
-    Path, Principal, RequiredUser, Response, RewindRequest, RewindResponse, Router,
-    RunAnswerTransport, RunControlAction, RunExecutionMode, RunId, RunStatus, RunStatusResponse,
-    StartRunRequest, State, StatusCode, Storage, TimelineEntryResponse, WORKER_CANCEL_GRACE,
-    WorkflowError, append_control_request, get, load_pending_control, managed_run, operations,
-    parse_run_id_path, persist_cancelled_run_status, post, reject_if_archived, sleep,
-    update_live_run_from_event, workflow_event,
+    ApiError, AppState, FailureReason, ForkRequest, ForkResponse, IntoResponse, Json, Path,
+    Principal, RequiredUser, Response, RewindRequest, RewindResponse, Router, RunAnswerTransport,
+    RunControlAction, RunExecutionMode, RunId, RunStatus, RunStatusResponse, StartRunRequest,
+    State, StatusCode, Storage, TimelineEntryResponse, WORKER_CANCEL_GRACE, WorkflowError,
+    append_control_request, get, load_pending_control, managed_run, operations, parse_run_id_path,
+    persist_cancelled_run_status, post, reject_if_archived, sleep, update_live_run_from_event,
+    workflow_event,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -249,7 +249,7 @@ async fn cancel_run(
     }
 
     if let Some(token) = &cancel_token {
-        token.store(true, Ordering::SeqCst);
+        token.cancel();
     }
     let sent_cancel_signal = if let Some(cancel_tx) = cancel_tx {
         let _ = cancel_tx.send(());

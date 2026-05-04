@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -19,6 +19,7 @@ use fabro_sandbox::SandboxSpec;
 use fabro_store::Database;
 use fabro_types::{Principal, RunId, SystemActorKind, WorkflowSettings, fixtures, format_blob_ref};
 use object_store::memory::InMemory;
+use tokio_util::sync::CancellationToken;
 
 use super::*;
 use crate::context::{self, Context};
@@ -91,7 +92,7 @@ fn test_emitter_arc(label: &str) -> Arc<Emitter> {
 fn test_run_options(run_dir: &Path, run_id: &str) -> RunOptions {
     RunOptions {
         run_dir:          run_dir.to_path_buf(),
-        cancel_token:     None,
+        cancel_token:     CancellationToken::new(),
         run_id:           test_run_id(run_id),
         settings:         WorkflowSettings::default(),
         git:              None,
@@ -864,16 +865,18 @@ async fn execute_cancelled_mid_run() {
     g.edges.push(Edge::new("start", "work"));
     g.edges.push(Edge::new("work", "exit"));
 
-    let cancel_token = Arc::new(AtomicBool::new(false));
-    let cancel_token_clone = Arc::clone(&cancel_token);
+    let cancel_token = CancellationToken::new();
     let mut registry = make_registry();
     registry.register("slow", Box::new(SlowHandler { sleep_ms: 200 }));
     let mut run_options = test_run_options(dir.path(), "test-run");
-    run_options.cancel_token = Some(cancel_token);
+    run_options.cancel_token = cancel_token.clone();
 
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        cancel_token_clone.store(true, Ordering::Relaxed);
+    tokio::spawn({
+        let cancel_token = cancel_token.clone();
+        async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            cancel_token.cancel();
+        }
     });
 
     let result = run_graph(
@@ -901,16 +904,18 @@ async fn execute_cancelled_mid_run_persists_cancelled_status() {
     g.edges.push(Edge::new("start", "work"));
     g.edges.push(Edge::new("work", "exit"));
 
-    let cancel_token = Arc::new(AtomicBool::new(false));
-    let cancel_token_clone = Arc::clone(&cancel_token);
+    let cancel_token = CancellationToken::new();
     let mut registry = make_registry();
     registry.register("slow", Box::new(SlowHandler { sleep_ms: 200 }));
     let mut run_options = test_run_options(dir.path(), "test-run");
-    run_options.cancel_token = Some(cancel_token);
+    run_options.cancel_token = cancel_token.clone();
 
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        cancel_token_clone.store(true, Ordering::Relaxed);
+    tokio::spawn({
+        let cancel_token = cancel_token.clone();
+        async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            cancel_token.cancel();
+        }
     });
 
     let executed = execute_test_run_with_options(run_options, g, Some(Arc::new(registry))).await;

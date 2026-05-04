@@ -2,7 +2,7 @@ use std::collections::HashMap;
 #[cfg(test)]
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(test)]
 use std::time::Duration;
 
 use fabro_agent::Sandbox;
@@ -11,7 +11,6 @@ use fabro_auth::CredentialSource;
 use fabro_auth::ResolvedCredentials;
 use fabro_hooks::{HookContext, HookDecision, HookRunner};
 use fabro_model::Provider;
-use tokio::time;
 use tokio_util::sync::CancellationToken;
 
 use crate::ManifestPath;
@@ -30,7 +29,7 @@ pub struct RunServices {
     pub emitter:                 Arc<Emitter>,
     pub sandbox:                 Arc<dyn Sandbox>,
     pub hook_runner:             Option<Arc<HookRunner>>,
-    pub cancel_requested:        Option<Arc<AtomicBool>>,
+    pub cancel_token:            CancellationToken,
     pub provider:                Provider,
     pub llm_source:              Arc<dyn CredentialSource>,
     pub(crate) sandbox_git:      Arc<SandboxGitRuntime>,
@@ -39,13 +38,19 @@ pub struct RunServices {
 }
 
 impl RunServices {
+    /// Construct `RunServices` for a workflow run.
+    ///
+    /// Production construction is expected to happen from pipeline
+    /// initialization with the run's root token. Use
+    /// `with_cancel_token(...)` only with the same root token or a
+    /// `child_token()` derived from it.
     #[must_use]
     pub(crate) fn new(
         run_store: RunStoreHandle,
         emitter: Arc<Emitter>,
         sandbox: Arc<dyn Sandbox>,
         hook_runner: Option<Arc<HookRunner>>,
-        cancel_requested: Option<Arc<AtomicBool>>,
+        cancel_token: CancellationToken,
         provider: Provider,
         llm_source: Arc<dyn CredentialSource>,
         sandbox_git: Arc<SandboxGitRuntime>,
@@ -57,7 +62,7 @@ impl RunServices {
             emitter,
             sandbox,
             hook_runner,
-            cancel_requested,
+            cancel_token,
             provider,
             llm_source,
             sandbox_git,
@@ -66,10 +71,9 @@ impl RunServices {
         })
     }
 
-    /// Bridge the core executor's atomic cancel flag to sandbox command
-    /// cancellation.
-    pub fn sandbox_cancel_token(&self) -> Option<CancellationToken> {
-        sandbox_cancel_token(self.cancel_requested.clone())
+    /// Return the run's cancellation token.
+    pub fn cancel_token(&self) -> CancellationToken {
+        self.cancel_token.clone()
     }
 
     /// Run lifecycle hooks and return the merged decision.
@@ -107,13 +111,15 @@ impl RunServices {
         })
     }
 
+    /// Replace the cancel token. The token semantically means "cancel this
+    /// run or child run," not a generic shutdown signal.
     #[must_use]
-    pub fn with_cancel_requested(
+    pub(crate) fn with_cancel_token(
         self: &Arc<Self>,
-        cancel_requested: Option<Arc<AtomicBool>>,
+        cancel_token: CancellationToken,
     ) -> Arc<Self> {
         Arc::new(Self {
-            cancel_requested,
+            cancel_token,
             ..self.as_ref().clone()
         })
     }
@@ -209,7 +215,7 @@ impl EngineServices {
                     std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
                 )),
                 None,
-                None,
+                CancellationToken::new(),
                 Provider::Anthropic,
                 Arc::new(StubCredentialSource),
                 Arc::new(SandboxGitRuntime::new()),
@@ -225,34 +231,6 @@ impl EngineServices {
             workflow_bundle: None,
         }
     }
-}
-
-pub(crate) fn sandbox_cancel_token(
-    cancel_requested: Option<Arc<AtomicBool>>,
-) -> Option<CancellationToken> {
-    let cancel_requested = cancel_requested?;
-    let token = CancellationToken::new();
-
-    if cancel_requested.load(Ordering::Relaxed) {
-        token.cancel();
-        return Some(token);
-    }
-
-    let token_clone = token.clone();
-    tokio::spawn(async move {
-        loop {
-            if token_clone.is_cancelled() {
-                return;
-            }
-            if cancel_requested.load(Ordering::Relaxed) {
-                token_clone.cancel();
-                return;
-            }
-            time::sleep(Duration::from_millis(10)).await;
-        }
-    });
-
-    Some(token)
 }
 
 #[cfg(test)]

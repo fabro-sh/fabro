@@ -41,6 +41,7 @@ use fabro_workflow::records::Checkpoint;
 use fabro_workflow::run_options::{GitCheckpointOptions, RunOptions};
 use fabro_workflow::test_support::{WorkflowRunner, test_store_dir};
 use object_store::local::LocalFileSystem;
+use tokio_util::sync::CancellationToken;
 use ulid::Ulid;
 
 fn test_run_id(label: &str) -> RunId {
@@ -513,7 +514,7 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
     let run_options = RunOptions {
         settings:         WorkflowSettings::default(),
         run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
+        cancel_token:     CancellationToken::new(),
         run_id:           test_run_id("test-run"),
         labels:           std::collections::HashMap::new(),
         workflow_slug:    None,
@@ -698,7 +699,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
     let run_options = RunOptions {
         settings:         WorkflowSettings::default(),
         run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
+        cancel_token:     CancellationToken::new(),
         run_id:           test_run_id("git-cp-test"),
         labels:           std::collections::HashMap::new(),
         workflow_slug:    None,
@@ -871,7 +872,7 @@ async fn daytona_parallel_git_branching_e2e() {
     let run_options = RunOptions {
         settings: WorkflowSettings::default(),
         run_dir: run_tmp.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: CancellationToken::new(),
         run_id,
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
@@ -1078,6 +1079,7 @@ async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: 
             &emitter,
             &env,
             None,
+            CancellationToken::new(),
         )
         .await;
 
@@ -1209,7 +1211,7 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
     let run_options = RunOptions {
         settings: WorkflowSettings::default(),
         run_dir: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: CancellationToken::new(),
         run_id,
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
@@ -1366,7 +1368,7 @@ async fn daytona_asset_collection() {
             ..WorkflowSettings::default()
         },
         run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
+        cancel_token:     CancellationToken::new(),
         run_id:           test_run_id("artifact-test-daytona"),
         labels:           std::collections::HashMap::new(),
         workflow_slug:    None,
@@ -1634,7 +1636,7 @@ async fn daytona_git_push_run_branch_to_origin() {
     let run_options = RunOptions {
         settings: WorkflowSettings::default(),
         run_dir: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: CancellationToken::new(),
         run_id,
         labels: std::collections::HashMap::new(),
         workflow_slug: None,

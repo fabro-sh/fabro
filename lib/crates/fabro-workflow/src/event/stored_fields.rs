@@ -116,7 +116,9 @@ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
         | Event::CommandStarted { node_id, .. }
         | Event::CommandCompleted { node_id, .. }
         | Event::AgentCliStarted { node_id, .. }
-        | Event::AgentCliCompleted { node_id, .. } => node_stored_fields(Some(node_id.clone())),
+        | Event::AgentCliCompleted { node_id, .. }
+        | Event::AgentCliCancelled { node_id, .. }
+        | Event::AgentCliTimedOut { node_id, .. } => node_stored_fields(Some(node_id.clone())),
         Event::Agent {
             stage,
             visit,

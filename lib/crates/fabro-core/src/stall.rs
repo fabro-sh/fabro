@@ -5,6 +5,7 @@ use std::time::Duration;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
+use tokio_util::sync::CancellationToken;
 
 /// Trait for receiving stall timeout notifications.
 pub trait ActivityMonitor: Send + Sync {
@@ -16,11 +17,11 @@ pub trait ActivityMonitor: Send + Sync {
 /// Watches for inactivity and fires a stall timeout if no activity is
 /// reported within the configured duration.
 pub struct StallWatchdog {
-    timeout:      Duration,
-    cancel_token: Arc<AtomicBool>,
-    activity:     Arc<Notify>,
-    shutdown:     Arc<AtomicBool>,
-    monitor:      Arc<dyn ActivityMonitor>,
+    timeout:     Duration,
+    stall_token: CancellationToken,
+    activity:    Arc<Notify>,
+    shutdown:    Arc<AtomicBool>,
+    monitor:     Arc<dyn ActivityMonitor>,
 }
 
 /// Guard that resets the stall timer on activity. Drop to stop watching.
@@ -33,12 +34,12 @@ pub struct StallGuard {
 impl StallWatchdog {
     pub fn new(
         timeout: Duration,
-        cancel_token: Arc<AtomicBool>,
+        stall_token: CancellationToken,
         monitor: Arc<dyn ActivityMonitor>,
     ) -> Self {
         Self {
             timeout,
-            cancel_token,
+            stall_token,
             activity: Arc::new(Notify::new()),
             shutdown: Arc::new(AtomicBool::new(false)),
             monitor,
@@ -51,7 +52,7 @@ impl StallWatchdog {
         let activity = self.activity.clone();
         let shutdown = self.shutdown.clone();
         let timeout = self.timeout;
-        let cancel_token = self.cancel_token;
+        let stall_token = self.stall_token;
         let monitor = self.monitor;
 
         let handle = tokio::spawn(async move {
@@ -66,7 +67,7 @@ impl StallWatchdog {
                             "Stall timeout: no activity detected"
                         );
                         monitor.on_stall_timeout(timeout);
-                        cancel_token.store(true, Ordering::Relaxed);
+                        stall_token.cancel();
                         return;
                     }
                     () = activity.notified() => {
@@ -109,6 +110,7 @@ mod tests {
     use std::sync::atomic::AtomicU32;
 
     use tokio::time::sleep;
+    use tokio_util::sync::CancellationToken;
 
     use super::*;
 
@@ -136,25 +138,31 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn stall_watchdog_cancels_on_inactivity() {
-        let cancel = Arc::new(AtomicBool::new(false));
+        let stall_token = CancellationToken::new();
         let monitor = TestMonitor::new();
-        let watchdog =
-            StallWatchdog::new(Duration::from_millis(50), cancel.clone(), monitor.clone());
+        let watchdog = StallWatchdog::new(
+            Duration::from_millis(50),
+            stall_token.clone(),
+            monitor.clone(),
+        );
         let _guard = watchdog.start();
 
         // Wait for timeout to fire
         sleep(Duration::from_millis(100)).await;
 
-        assert!(cancel.load(Ordering::Relaxed));
+        assert!(stall_token.is_cancelled());
         assert_eq!(monitor.stalls(), 1);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn stall_watchdog_resets_on_activity() {
-        let cancel = Arc::new(AtomicBool::new(false));
+        let stall_token = CancellationToken::new();
         let monitor = TestMonitor::new();
-        let watchdog =
-            StallWatchdog::new(Duration::from_millis(80), cancel.clone(), monitor.clone());
+        let watchdog = StallWatchdog::new(
+            Duration::from_millis(80),
+            stall_token.clone(),
+            monitor.clone(),
+        );
         let guard = watchdog.start();
 
         // Report activity before timeout
@@ -164,20 +172,23 @@ mod tests {
         // After another 50ms (100ms total, but only 50ms since activity), should not
         // have timed out
         sleep(Duration::from_millis(50)).await;
-        assert!(!cancel.load(Ordering::Relaxed));
+        assert!(!stall_token.is_cancelled());
 
         // Wait long enough for timeout after last activity (80ms + margin)
         sleep(Duration::from_millis(60)).await;
-        assert!(cancel.load(Ordering::Relaxed));
+        assert!(stall_token.is_cancelled());
         assert_eq!(monitor.stalls(), 1);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn stall_watchdog_clean_shutdown_on_success() {
-        let cancel = Arc::new(AtomicBool::new(false));
+        let stall_token = CancellationToken::new();
         let monitor = TestMonitor::new();
-        let watchdog =
-            StallWatchdog::new(Duration::from_millis(50), cancel.clone(), monitor.clone());
+        let watchdog = StallWatchdog::new(
+            Duration::from_millis(50),
+            stall_token.clone(),
+            monitor.clone(),
+        );
         let guard = watchdog.start();
 
         // Drop the guard before timeout
@@ -187,16 +198,19 @@ mod tests {
         sleep(Duration::from_millis(100)).await;
 
         // Should NOT have triggered
-        assert!(!cancel.load(Ordering::Relaxed));
+        assert!(!stall_token.is_cancelled());
         assert_eq!(monitor.stalls(), 0);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn stall_guard_cleanup_on_drop() {
-        let cancel = Arc::new(AtomicBool::new(false));
+        let stall_token = CancellationToken::new();
         let monitor = TestMonitor::new();
-        let watchdog =
-            StallWatchdog::new(Duration::from_millis(50), cancel.clone(), monitor.clone());
+        let watchdog = StallWatchdog::new(
+            Duration::from_millis(50),
+            stall_token.clone(),
+            monitor.clone(),
+        );
         let guard = watchdog.start();
 
         // Drop guard — should abort the background task
@@ -206,6 +220,6 @@ mod tests {
         sleep(Duration::from_millis(150)).await;
 
         // Cancel should not be set
-        assert!(!cancel.load(Ordering::Relaxed));
+        assert!(!stall_token.is_cancelled());
     }
 }

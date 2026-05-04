@@ -4,6 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::{Graph, Node};
+use tokio_util::sync::CancellationToken;
 
 use super::agent::{CodergenBackend, CodergenResult};
 use super::{EngineServices, Handler};
@@ -86,6 +87,7 @@ impl Handler for FanInHandler {
                 &node.id,
                 &services.run.emitter,
                 &services.run.sandbox,
+                services.run.cancel_token(),
             )
             .await?
         } else {
@@ -223,6 +225,7 @@ async fn llm_evaluate(
     node_id: &str,
     emitter: &Arc<Emitter>,
     sandbox: &Arc<dyn Sandbox>,
+    cancel_token: CancellationToken,
 ) -> Result<Candidate, Error> {
     let results_text =
         serde_json::to_string_pretty(results).unwrap_or_else(|_| results.to_string());
@@ -259,6 +262,7 @@ async fn llm_evaluate(
             emitter,
             sandbox,
             None,
+            cancel_token,
         )
         .await
     {
@@ -474,6 +478,7 @@ mod tests {
                 _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+                _cancel_token: CancellationToken,
             ) -> Result<CodergenResult, Error> {
                 // Return text that contains the ID "branch_b"
                 Ok(CodergenResult::Text {

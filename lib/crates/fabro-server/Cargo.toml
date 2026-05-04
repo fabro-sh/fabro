@@ -60,6 +60,7 @@ base64.workspace = true
 jsonwebtoken.workspace = true
 hkdf.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml = "0.9"

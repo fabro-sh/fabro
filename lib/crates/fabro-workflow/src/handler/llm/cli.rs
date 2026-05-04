@@ -11,6 +11,7 @@ use fabro_model::Provider;
 use fabro_types::CommandTermination;
 use fabro_util::time::elapsed_ms;
 use tokio::time::sleep;
+use tokio_util::sync::CancellationToken;
 
 use super::super::agent::{CodergenBackend, CodergenResult};
 use crate::context::Context;
@@ -477,6 +478,7 @@ impl CodergenBackend for AgentCliBackend {
         emitter: &Arc<Emitter>,
         sandbox: &Arc<dyn Sandbox>,
         _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+        _cancel_token: CancellationToken,
     ) -> Result<CodergenResult, Error> {
         // 1. Snapshot git state before the CLI run
         let files_before = self.detect_changed_files(sandbox).await;
@@ -789,17 +791,32 @@ impl CodergenBackend for BackendRouter {
         emitter: &Arc<Emitter>,
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+        cancel_token: CancellationToken,
     ) -> Result<CodergenResult, Error> {
         if self.should_use_cli(node) {
             self.cli_backend
                 .run(
-                    node, prompt, context, thread_id, emitter, sandbox, tool_hooks,
+                    node,
+                    prompt,
+                    context,
+                    thread_id,
+                    emitter,
+                    sandbox,
+                    tool_hooks,
+                    cancel_token,
                 )
                 .await
         } else {
             self.api_backend
                 .run(
-                    node, prompt, context, thread_id, emitter, sandbox, tool_hooks,
+                    node,
+                    prompt,
+                    context,
+                    thread_id,
+                    emitter,
+                    sandbox,
+                    tool_hooks,
+                    cancel_token,
                 )
                 .await
         }
@@ -1276,6 +1293,7 @@ mod tests {
             _emitter: &Arc<Emitter>,
             _sandbox: &Arc<dyn Sandbox>,
             _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+            _cancel_token: CancellationToken,
         ) -> Result<CodergenResult, Error> {
             Ok(CodergenResult::Text {
                 text:              "stub".to_string(),

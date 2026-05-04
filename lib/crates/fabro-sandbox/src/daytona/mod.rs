@@ -1294,7 +1294,7 @@ impl Sandbox for DaytonaSandbox {
     async fn exec_command_streaming(
         &self,
         command: &str,
-        timeout_ms: u64,
+        timeout_ms: Option<u64>,
         working_dir: Option<&str>,
         env_vars: Option<&HashMap<String, String>>,
         cancel_token: Option<CancellationToken>,
@@ -1384,7 +1384,7 @@ impl Sandbox for DaytonaSandbox {
             &session,
             &command_id,
             session_exec.exit_code,
-            Duration::from_millis(timeout_ms),
+            timeout_ms.map(Duration::from_millis),
             cancel_token.unwrap_or_default(),
             &mut stream_task,
         )
@@ -1717,7 +1717,7 @@ async fn wait_for_completion(
     session: &DaytonaSession,
     command_id: &str,
     initial_exit_code: Option<i32>,
-    timeout: Duration,
+    timeout: Option<Duration>,
     cancel_token: CancellationToken,
     stream_task: &mut JoinHandle<Result<(), DaytonaError>>,
 ) -> crate::Result<WaitOutcome> {
@@ -1729,8 +1729,13 @@ async fn wait_for_completion(
         });
     }
 
-    let timeout_sleep = time::sleep(timeout);
-    tokio::pin!(timeout_sleep);
+    let timeout_future = async {
+        match timeout {
+            Some(dur) => time::sleep(dur).await,
+            None => std::future::pending::<()>().await,
+        }
+    };
+    tokio::pin!(timeout_future);
     loop {
         tokio::select! {
             () = time::sleep(Duration::from_millis(250)) => {
@@ -1752,7 +1757,7 @@ async fn wait_for_completion(
                     });
                 }
             }
-            () = &mut timeout_sleep => {
+            () = &mut timeout_future => {
                 return Ok(WaitOutcome {
                     exit_code:   None,
                     termination: CommandTermination::TimedOut,

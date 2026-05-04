@@ -115,6 +115,9 @@ impl Handler for PromptHandler {
                         files_touched,
                         ..
                     }) => (text, usage, files_touched),
+                    Err(Error::Cancelled) => {
+                        return Err(Error::Cancelled);
+                    }
                     Err(e) if e.is_retryable() => {
                         return Err(e);
                     }
@@ -185,6 +188,7 @@ mod tests {
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
     use tempfile::TempDir;
+    use tokio_util::sync::CancellationToken;
 
     use super::*;
 
@@ -270,6 +274,7 @@ mod tests {
                 _emitter: &Arc<crate::event::Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+                _cancel_token: CancellationToken,
             ) -> Result<CodergenResult, Error> {
                 panic!("run() should not be called for prompt handler");
             }
@@ -330,6 +335,7 @@ mod tests {
                 _emitter: &Arc<crate::event::Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+                _cancel_token: CancellationToken,
             ) -> Result<CodergenResult, Error> {
                 panic!("run() should not be called for prompt handler");
             }
@@ -387,6 +393,7 @@ mod tests {
             _emitter: &Arc<crate::event::Emitter>,
             _sandbox: &Arc<dyn fabro_agent::Sandbox>,
             _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+            _cancel_token: CancellationToken,
         ) -> Result<CodergenResult, Error> {
             panic!("run() should not be called for prompt handler");
         }

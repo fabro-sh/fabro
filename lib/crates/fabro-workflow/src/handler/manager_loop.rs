@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -197,13 +196,12 @@ impl Handler for SubWorkflowHandler {
         let child_logs = run_dir.join(format!("stages/{}@{visit}/child", node.id));
         let _ = fs::create_dir_all(&child_logs).await;
 
-        let cancel_token = Arc::new(AtomicBool::new(false));
-        let child_cancel = Arc::clone(&cancel_token);
+        let child_run_token = services.run.cancel_token().child_token();
 
         let child_run_options = RunOptions {
             settings:         WorkflowSettings::default(),
             run_dir:          child_logs,
-            cancel_token:     Some(cancel_token),
+            cancel_token:     child_run_token.clone(),
             // Child workflows are part of the parent run's event stream.
             run_id:           services.run.emitter.run_id(),
             labels:           HashMap::new(),
@@ -247,10 +245,11 @@ impl Handler for SubWorkflowHandler {
         let artifact_store = ArtifactStore::new(object_store, "artifacts");
 
         // Spawn child engine
+        let child_token_for_spawn = child_run_token.clone();
         let mut child_handle = tokio::spawn(async move {
             let child_run = parent_run
                 .with_run_store(run_store.into())
-                .with_cancel_requested(None);
+                .with_cancel_token(child_token_for_spawn);
             let initialized = Initialized {
                 graph:         child_graph,
                 source:        String::new(),
@@ -319,7 +318,7 @@ impl Handler for SubWorkflowHandler {
                     if !stop_condition.is_empty() {
                         let dummy_outcome = Outcome::success();
                         if evaluate_condition(stop_condition, &dummy_outcome, context) {
-                            child_cancel.store(true, Ordering::Relaxed);
+                            child_run_token.cancel();
                             // Give child a moment to wind down
                             let _ = timeout(
                                 Duration::from_millis(100),
@@ -337,7 +336,7 @@ impl Handler for SubWorkflowHandler {
         }
 
         // Max cycles exceeded — cancel child
-        child_cancel.store(true, Ordering::Relaxed);
+        child_run_token.cancel();
         let _ = timeout(Duration::from_millis(100), &mut child_handle).await;
 
         Ok(Outcome::fail_classify(format!(

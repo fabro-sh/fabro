@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use tokio::time::sleep;
@@ -18,7 +17,7 @@ use crate::state::ExecutionState;
 
 #[derive(Default)]
 pub struct ExecutorOptions {
-    pub cancel_token:    Option<Arc<AtomicBool>>,
+    pub cancel_token:    Option<CancellationToken>,
     pub stall_token:     Option<CancellationToken>,
     pub max_node_visits: Option<usize>,
 }
@@ -58,7 +57,7 @@ impl<G: Graph + 'static> ExecutorBuilder<G> {
     }
 
     #[must_use]
-    pub fn cancel_token(mut self, token: Arc<AtomicBool>) -> Self {
+    pub fn cancel_token(mut self, token: CancellationToken) -> Self {
         self.options.cancel_token = Some(token);
         self
     }
@@ -95,7 +94,7 @@ impl<G: Graph + 'static> Executor<G> {
         loop {
             // Check cancellation
             if let Some(ref token) = self.options.cancel_token {
-                if token.load(Ordering::Relaxed) {
+                if token.is_cancelled() {
                     state.cancelled = true;
                     let outcome = Outcome::fail("run cancelled");
                     self.lifecycle.on_run_end(&outcome, &state).await;
@@ -436,12 +435,13 @@ mod tests {
         reason = "Local helper items keep the test setup readable."
     )]
 
-    use std::sync::atomic::AtomicU32;
+    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     use async_trait::async_trait;
     use tokio::time::{self, Instant};
+    use tokio_util::sync::CancellationToken;
 
     use super::*;
     use crate::context::Context;
@@ -500,7 +500,8 @@ mod tests {
 
     #[tokio::test]
     async fn executor_builder_sets_cancel_token() {
-        let token = Arc::new(AtomicBool::new(true)); // already cancelled
+        let token = CancellationToken::new();
+        token.cancel(); // already cancelled
         let g = linear_graph(&["start", "end"]);
         let state = ExecutionState::new(&g).unwrap();
         let executor =
@@ -908,10 +909,10 @@ mod tests {
 
     #[tokio::test]
     async fn executor_cancellation_stops_run() {
-        let token = Arc::new(AtomicBool::new(false));
+        let token = CancellationToken::new();
         let token_clone = token.clone();
 
-        struct CancellingHandler(Arc<AtomicBool>);
+        struct CancellingHandler(CancellationToken);
         #[async_trait]
         impl NodeHandler<TestGraph> for CancellingHandler {
             async fn execute(
@@ -921,7 +922,7 @@ mod tests {
                 _g: &TestGraph,
             ) -> Result<Outcome> {
                 // Cancel after first node
-                self.0.store(true, Ordering::Relaxed);
+                self.0.cancel();
                 Ok(Outcome::success())
             }
         }

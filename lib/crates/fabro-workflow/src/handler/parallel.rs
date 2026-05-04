@@ -463,6 +463,9 @@ impl Handler for ParallelHandler {
                 Ok(Ok(result)) => {
                     results.push(result);
                 }
+                Ok(Err(Error::Cancelled)) => {
+                    return Err(Error::Cancelled);
+                }
                 Ok(Err(e)) => {
                     results.push(BranchResult {
                         id:            String::new(),

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use fabro_agent::sandbox::Sandbox;
@@ -7,10 +5,10 @@ use fabro_devcontainer::DevcontainerSpec;
 use fabro_sandbox::daytona::{DaytonaSnapshotConfig, DockerfileSource};
 use futures::future::try_join_all;
 use sha2::{Digest, Sha256};
+use tokio_util::sync::CancellationToken;
 
 use crate::error::Error;
 use crate::event::{Emitter, Event};
-use crate::handler::sandbox_cancel_token;
 
 /// Compute a deterministic snapshot name from Dockerfile content.
 pub fn snapshot_name_for_dockerfile(dockerfile: &str) -> String {
@@ -39,7 +37,7 @@ pub async fn run_devcontainer_lifecycle(
     phase: &str,
     commands: &[fabro_devcontainer::Command],
     timeout_ms: u64,
-    cancel_requested: Option<Arc<AtomicBool>>,
+    cancel_token: CancellationToken,
 ) -> Result<(), Error> {
     if commands.is_empty() {
         return Ok(());
@@ -61,7 +59,7 @@ pub async fn run_devcontainer_lifecycle(
                     &format!("sh -c {}", shlex::try_quote(s).unwrap_or_else(|_| s.into())),
                     index,
                     timeout_ms,
-                    cancel_requested.clone(),
+                    cancel_token.child_token(),
                 )
                 .await?;
             }
@@ -78,7 +76,7 @@ pub async fn run_devcontainer_lifecycle(
                     &joined,
                     index,
                     timeout_ms,
-                    cancel_requested.clone(),
+                    cancel_token.child_token(),
                 )
                 .await?;
             }
@@ -92,7 +90,7 @@ pub async fn run_devcontainer_lifecycle(
                         );
                         let phase = phase.to_string();
                         let name = name.clone();
-                        let cancel_requested = cancel_requested.clone();
+                        let child_token = cancel_token.child_token();
                         async move {
                             let cmd_start = Instant::now();
                             emitter.emit(&Event::DevcontainerLifecycleCommandStarted {
@@ -100,14 +98,13 @@ pub async fn run_devcontainer_lifecycle(
                                 command: name.clone(),
                                 index,
                             });
-                            let cancel_token = sandbox_cancel_token(cancel_requested);
                             let result = sandbox
                                 .exec_command(
                                     &command,
                                     timeout_ms,
                                     None,
                                     None,
-                                    cancel_token.clone(),
+                                    Some(child_token.clone()),
                                 )
                                 .await
                                 .map_err(|e| {
@@ -115,11 +112,8 @@ pub async fn run_devcontainer_lifecycle(
                                         "Devcontainer {phase} parallel command '{name}' failed: {e}"
                                     ))
                                 })?;
-                            if let Some(token) = &cancel_token {
-                                if token.is_cancelled() {
-                                    return Err(Error::Cancelled);
-                                }
-                                token.cancel();
+                            if child_token.is_cancelled() {
+                                return Err(Error::Cancelled);
                             }
                             let cmd_duration = crate::millis_u64(cmd_start.elapsed());
                             if !result.is_success() {
@@ -175,7 +169,7 @@ async fn run_single_lifecycle_command(
     command: &str,
     index: usize,
     timeout_ms: u64,
-    cancel_requested: Option<Arc<AtomicBool>>,
+    cancel_token: CancellationToken,
 ) -> Result<(), Error> {
     emitter.emit(&Event::DevcontainerLifecycleCommandStarted {
         phase: phase.to_string(),
@@ -183,18 +177,14 @@ async fn run_single_lifecycle_command(
         index,
     });
     let cmd_start = Instant::now();
-    let cancel_token = sandbox_cancel_token(cancel_requested);
     let result = sandbox
-        .exec_command(command, timeout_ms, None, None, cancel_token.clone())
+        .exec_command(command, timeout_ms, None, None, Some(cancel_token.clone()))
         .await
         .map_err(|e| {
             Error::engine_with_source(format!("Devcontainer {phase} command failed"), &e)
         })?;
-    if let Some(token) = &cancel_token {
-        if token.is_cancelled() {
-            return Err(Error::Cancelled);
-        }
-        token.cancel();
+    if cancel_token.is_cancelled() {
+        return Err(Error::Cancelled);
     }
     let cmd_duration = crate::millis_u64(cmd_start.elapsed());
     if !result.is_success() {
@@ -227,7 +217,6 @@ async fn run_single_lifecycle_command(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, Mutex};
 
     use async_trait::async_trait;
@@ -437,9 +426,16 @@ mod tests {
         let sandbox = TestSandbox::new();
         let emitter = Emitter::default();
         let commands = vec![fabro_devcontainer::Command::Shell("echo hi".to_string())];
-        run_devcontainer_lifecycle(&sandbox, &emitter, "on_create", &commands, 300_000, None)
-            .await
-            .unwrap();
+        run_devcontainer_lifecycle(
+            &sandbox,
+            &emitter,
+            "on_create",
+            &commands,
+            300_000,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         let captured = sandbox.captured_commands();
         assert_eq!(captured.len(), 1);
         assert!(captured[0].contains("echo hi"), "command: {}", captured[0]);
@@ -453,9 +449,16 @@ mod tests {
             "echo".to_string(),
             "hi".to_string(),
         ])];
-        run_devcontainer_lifecycle(&sandbox, &emitter, "on_create", &commands, 300_000, None)
-            .await
-            .unwrap();
+        run_devcontainer_lifecycle(
+            &sandbox,
+            &emitter,
+            "on_create",
+            &commands,
+            300_000,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         let captured = sandbox.captured_commands();
         assert_eq!(captured.len(), 1);
         assert!(
@@ -475,9 +478,16 @@ mod tests {
         });
         let sandbox = TestSandbox::new();
         let commands = vec![fabro_devcontainer::Command::Shell("echo hi".to_string())];
-        run_devcontainer_lifecycle(&sandbox, &emitter, "on_create", &commands, 300_000, None)
-            .await
-            .unwrap();
+        run_devcontainer_lifecycle(
+            &sandbox,
+            &emitter,
+            "on_create",
+            &commands,
+            300_000,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         let events = events.lock().unwrap();
         let started = events[0].properties().unwrap();
         assert_eq!(events[0].event_name(), "devcontainer.lifecycle.started");
@@ -515,9 +525,15 @@ mod tests {
         });
         let sandbox = TestSandbox::with_exit_code(1);
         let commands = vec![fabro_devcontainer::Command::Shell("false".to_string())];
-        let result =
-            run_devcontainer_lifecycle(&sandbox, &emitter, "on_create", &commands, 300_000, None)
-                .await;
+        let result = run_devcontainer_lifecycle(
+            &sandbox,
+            &emitter,
+            "on_create",
+            &commands,
+            300_000,
+            CancellationToken::new(),
+        )
+        .await;
         assert!(result.is_err());
         let events = events.lock().unwrap();
         let failed = events
@@ -550,9 +566,16 @@ mod tests {
             events_clone.lock().unwrap().push(event.clone());
         });
         let sandbox = TestSandbox::new();
-        run_devcontainer_lifecycle(&sandbox, &emitter, "on_create", &[], 300_000, None)
-            .await
-            .unwrap();
+        run_devcontainer_lifecycle(
+            &sandbox,
+            &emitter,
+            "on_create",
+            &[],
+            300_000,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         assert!(events.lock().unwrap().is_empty());
     }
 
@@ -564,9 +587,16 @@ mod tests {
         map.insert("install".to_string(), "npm install".to_string());
         map.insert("build".to_string(), "npm run build".to_string());
         let commands = vec![fabro_devcontainer::Command::Parallel(map)];
-        run_devcontainer_lifecycle(&sandbox, &emitter, "post_create", &commands, 300_000, None)
-            .await
-            .unwrap();
+        run_devcontainer_lifecycle(
+            &sandbox,
+            &emitter,
+            "post_create",
+            &commands,
+            300_000,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         let captured = sandbox.captured_commands();
         assert_eq!(captured.len(), 2);
     }
@@ -576,7 +606,8 @@ mod tests {
         let sandbox = TestSandbox::waiting_for_cancel();
         let emitter = Emitter::default();
         let commands = vec![fabro_devcontainer::Command::Shell("sleep 5".to_string())];
-        let cancel_requested = Arc::new(AtomicBool::new(true));
+        let cancel_token = CancellationToken::new();
+        cancel_token.cancel();
 
         let result = run_devcontainer_lifecycle(
             &sandbox,
@@ -584,7 +615,7 @@ mod tests {
             "on_create",
             &commands,
             300_000,
-            Some(cancel_requested),
+            cancel_token,
         )
         .await;
 
@@ -600,7 +631,8 @@ mod tests {
         map.insert("install".to_string(), "sleep 5".to_string());
         map.insert("build".to_string(), "sleep 5".to_string());
         let commands = vec![fabro_devcontainer::Command::Parallel(map)];
-        let cancel_requested = Arc::new(AtomicBool::new(true));
+        let cancel_token = CancellationToken::new();
+        cancel_token.cancel();
 
         let result = run_devcontainer_lifecycle(
             &sandbox,
@@ -608,7 +640,7 @@ mod tests {
             "post_create",
             &commands,
             300_000,
-            Some(cancel_requested),
+            cancel_token,
         )
         .await;
 

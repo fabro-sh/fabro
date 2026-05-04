@@ -604,6 +604,7 @@ mod tests {
         EventBody, RunBlobId, RunEvent, RunId, WorkflowSettings, first_event_seq, fixtures,
     };
     use object_store::memory::InMemory;
+    use tokio_util::sync::CancellationToken;
 
     use super::*;
     use crate::event::{Emitter, StoreProgressLogger, append_event};
@@ -621,7 +622,7 @@ mod tests {
         RunOptions {
             settings:         WorkflowSettings::default(),
             run_dir:          run_dir.to_path_buf(),
-            cancel_token:     None,
+            cancel_token:     CancellationToken::new(),
             run_id:           test_run_id(),
             labels:           HashMap::new(),
             workflow_slug:    None,
@@ -816,7 +817,7 @@ mod tests {
             emitter,
             sandbox,
             None,
-            None,
+            CancellationToken::new(),
             fabro_model::Provider::Anthropic,
             Arc::new(fabro_auth::EnvCredentialSource::new()),
             Arc::new(SandboxGitRuntime::new()),
@@ -842,7 +843,7 @@ mod tests {
                 std::env::current_dir().unwrap(),
             )),
             None,
-            None,
+            CancellationToken::new(),
             fabro_model::Provider::Anthropic,
             Arc::new(fabro_auth::EnvCredentialSource::new()),
             Arc::new(SandboxGitRuntime::new()),

@@ -528,6 +528,7 @@ mod tests {
     use fabro_store::RunProjection;
     use fabro_types::{DirtyStatus, GitContext, PreRunPushOutcome, RunSpec, WorkflowSettings};
     use git2::{ErrorClass, ErrorCode};
+    use tokio_util::sync::CancellationToken;
 
     use super::*;
     use crate::git::GitAuthor;
@@ -642,7 +643,7 @@ mod tests {
         RunOptions {
             settings:         WorkflowSettings::default(),
             run_dir:          tempfile::tempdir().unwrap().path().to_path_buf(),
-            cancel_token:     None,
+            cancel_token:     CancellationToken::new(),
             run_id:           fabro_types::fixtures::RUN_1,
             labels:           HashMap::new(),
             workflow_slug:    Some("metadata".to_string()),

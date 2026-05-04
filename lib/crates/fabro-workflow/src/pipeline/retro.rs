@@ -190,6 +190,7 @@ mod tests {
     use fabro_store::Database;
     use fabro_types::{RunId, WorkflowSettings, fixtures};
     use object_store::memory::InMemory;
+    use tokio_util::sync::CancellationToken;
 
     use super::*;
     use crate::context::Context;
@@ -304,7 +305,7 @@ mod tests {
         RunOptions {
             settings:         WorkflowSettings::default(),
             run_dir:          run_dir.to_path_buf(),
-            cancel_token:     None,
+            cancel_token:     CancellationToken::new(),
             run_id:           test_run_id(),
             labels:           HashMap::new(),
             workflow_slug:    None,
@@ -340,7 +341,7 @@ mod tests {
             Arc::clone(&emitter),
             Arc::clone(&sandbox),
             None,
-            None,
+            CancellationToken::new(),
             fabro_llm::Provider::Anthropic,
             test_llm_source(),
             Arc::new(crate::sandbox_git_runtime::SandboxGitRuntime::new()),
@@ -395,7 +396,7 @@ mod tests {
                 std::env::current_dir().unwrap(),
             )),
             None,
-            None,
+            CancellationToken::new(),
             fabro_llm::Provider::Anthropic,
             test_llm_source(),
             Arc::new(crate::sandbox_git_runtime::SandboxGitRuntime::new()),
