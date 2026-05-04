@@ -68,6 +68,10 @@ function readTermination(props: UnknownRecord): CommandTermination {
 
 const STAGE_ACTIVITY_EVENT_SET = new Set<string>(STAGE_ACTIVITY_EVENT_TYPES);
 
+function assertNever(value: never): never {
+  throw new Error(`Unhandled stage activity event type: ${value}`);
+}
+
 export function eventsToActivity(events: EventEnvelope[], stageId: string): TurnType[] {
   const turns: TurnType[] = [];
   // Collect tool pairs: started → completed
@@ -76,7 +80,7 @@ export function eventsToActivity(events: EventEnvelope[], stageId: string): Turn
   let pendingCommand: { stageId: string; script: string; language: string } | undefined;
 
   for (const e of events) {
-    if (!STAGE_ACTIVITY_EVENT_SET.has(e.event)) continue;
+    if (e.node_id !== stageId || !STAGE_ACTIVITY_EVENT_SET.has(e.event)) continue;
     // Exhaustive switch over StageActivityEventType: adding a new variant to
     // STAGE_ACTIVITY_EVENT_TYPES forces a TS error here until the case is
     // handled, keeping the SWR invalidation set and the reducer in sync.
@@ -140,6 +144,8 @@ export function eventsToActivity(events: EventEnvelope[], stageId: string): Turn
         pendingCommand = undefined;
         break;
       }
+      default:
+        assertNever(eventType);
     }
   }
 

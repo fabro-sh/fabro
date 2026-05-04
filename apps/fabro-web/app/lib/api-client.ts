@@ -218,7 +218,10 @@ export async function apiPaginatedFetcher<TItem, TExtra extends object = {}>(
 }
 
 function stageEventsPagePath(key: string, sinceSeq: number, limit: number): string {
-  return `${apiPath(key)}?since_seq=${sinceSeq}&limit=${limit}`;
+  const url = new URL(apiPath(key), "http://fabro.local");
+  url.searchParams.set("since_seq", String(sinceSeq));
+  url.searchParams.set("limit", String(limit));
+  return `${url.pathname}${url.search}`;
 }
 
 /**
@@ -230,7 +233,9 @@ function stageEventsPagePath(key: string, sinceSeq: number, limit: number): stri
  * `has_more` but returns no rows we exit and `console.warn` to surface the
  * server invariant violation without spinning the UI.
  */
-export async function fetchAllStageEvents<TItem>(key: string): Promise<TItem[]> {
+export async function fetchAllStageEvents<TItem extends { seq: number }>(
+  key: string,
+): Promise<TItem[]> {
   const PAGE_LIMIT = 1000;
   const MAX_PAGES = 50;
   const data: TItem[] = [];
@@ -242,7 +247,7 @@ export async function fetchAllStageEvents<TItem>(key: string): Promise<TItem[]> 
     if (!response.ok) {
       throw await apiErrorFromResponse(response);
     }
-    const page = (await response.json()) as PaginatedEnvelope<TItem & { seq: number }>;
+    const page = (await response.json()) as PaginatedEnvelope<TItem>;
     pagesLoaded += 1;
 
     if (page.data.length === 0) {
@@ -264,8 +269,14 @@ export async function fetchAllStageEvents<TItem>(key: string): Promise<TItem[]> 
       return data;
     }
 
-    const lastSeq = page.data[page.data.length - 1].seq;
-    sinceSeq = lastSeq + 1;
+    const highestSeq = page.data.reduce((max, event) => Math.max(max, event.seq), sinceSeq - 1);
+    if (highestSeq < sinceSeq) {
+      console.warn(
+        `Stage events fetch for ${key} returned a non-advancing page at since_seq=${sinceSeq}; stopping at ${data.length} items to avoid spinning.`,
+      );
+      return data;
+    }
+    sinceSeq = highestSeq + 1;
   }
 }
 

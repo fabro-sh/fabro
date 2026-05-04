@@ -396,6 +396,7 @@ where
         node_id: Option<&'a str>,
     }
 
+    let max_events = limit.saturating_add(1);
     let mut iter = db.scan_prefix(keys::run_events_prefix(run_id)).await?;
     let mut events: Vec<EventEnvelope> = Vec::new();
     while let Some(entry) = iter.next().await? {
@@ -411,10 +412,24 @@ where
             continue;
         }
         let event: RunEvent = serde_json::from_slice(&entry.value)?;
-        events.push(EventEnvelope { seq, event });
+        let envelope = EventEnvelope { seq, event };
+        if events.len() < max_events {
+            events.push(envelope);
+            continue;
+        }
+
+        if let Some((max_index, max_seq)) = events
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, existing)| existing.seq)
+            .map(|(index, existing)| (index, existing.seq))
+        {
+            if seq < max_seq {
+                events[max_index] = envelope;
+            }
+        }
     }
     events.sort_by_key(|event| event.seq);
-    events.truncate(limit.saturating_add(1));
     Ok(events)
 }
 

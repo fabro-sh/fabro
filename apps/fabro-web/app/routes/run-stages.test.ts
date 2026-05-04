@@ -97,10 +97,9 @@ describe("eventsToActivity", () => {
     }
   });
 
-  test("ignores events of unknown types", () => {
-    // The reducer only consumes STAGE_ACTIVITY_EVENT_TYPES; lifecycle and
-    // unrelated events are skipped. The server scopes the input to a single
-    // node, so node_id filtering is the server's responsibility.
+  test("ignores unknown event types and events for other nodes", () => {
+    // The reducer defensively filters by node_id even though the server scopes
+    // this endpoint, and only consumes STAGE_ACTIVITY_EVENT_TYPES.
     const events: EventEnvelope[] = [
       envelope(1, {
         event: "stage.started",
@@ -116,6 +115,11 @@ describe("eventsToActivity", () => {
         event: "run.running",
         node_id: "detect-drift",
         properties: {},
+      }),
+      envelope(4, {
+        event: "agent.message",
+        node_id: "other-stage",
+        properties: { text: "wrong stage" },
       }),
     ];
 
