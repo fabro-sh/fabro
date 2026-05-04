@@ -18,7 +18,8 @@ use fabro_model::Provider;
 use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{
     AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
-    InterviewQuestionRecord, QuestionType, RunBlobId, RunId, RunSpec, SystemActorKind, fixtures,
+    InterviewQuestionRecord, Outcome, QuestionType, RunBlobId, RunId, RunSpec, SystemActorKind,
+    fixtures,
 };
 use fabro_util::check_report::CheckStatus;
 use httpmock::Method::{GET, POST};
@@ -2426,6 +2427,149 @@ async fn list_run_stages_distinguishes_visits() {
 
     // Old `dot_id` field must be gone.
     assert!(first.get("dot_id").is_none(), "dot_id should be removed");
+}
+
+/// `checkpoint.completed_nodes` records every visit, so a looped node appears
+/// once per re-entry. Billing must dedup so a retried node renders as one row
+/// and `runtime_secs` is summed across all visits exactly once.
+#[tokio::test]
+async fn run_billing_dedups_retried_nodes_and_sums_their_durations() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+    ])
+    .await;
+
+    // Visit 1 of `verify` — completed in 1.5s.
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "verify",
+        1,
+        &workflow_event::Event::StageCompleted {
+            node_id: "verify".to_string(),
+            name: "Verify".to_string(),
+            index: 1,
+            duration_ms: 1500,
+            status: "failed".to_string(),
+            preferred_label: None,
+            suggested_next_ids: Vec::new(),
+            billing: None,
+            failure: None,
+            notes: None,
+            files_touched: Vec::new(),
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: None,
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
+            response: None,
+            attempt: 1,
+            max_attempts: 1,
+        },
+    )
+    .await;
+
+    // Visit 2 of `verify` — completed in 0.8s.
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "verify",
+        2,
+        &workflow_event::Event::StageCompleted {
+            node_id: "verify".to_string(),
+            name: "Verify".to_string(),
+            index: 1,
+            duration_ms: 800,
+            status: "succeeded".to_string(),
+            preferred_label: None,
+            suggested_next_ids: Vec::new(),
+            billing: None,
+            failure: None,
+            notes: None,
+            files_touched: Vec::new(),
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: None,
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
+            response: None,
+            attempt: 1,
+            max_attempts: 1,
+        },
+    )
+    .await;
+
+    // Checkpoint records `verify` twice (once per visit) — this is what makes
+    // the dedup necessary.
+    let run_store = state.store.open_run(&run_id).await.unwrap();
+    workflow_event::append_event(
+        &run_store,
+        &run_id,
+        &workflow_event::Event::CheckpointCompleted {
+            node_id: "verify".to_string(),
+            status: "running".to_string(),
+            current_node: "verify".to_string(),
+            completed_nodes: vec!["verify".to_string(), "verify".to_string()],
+            node_retries: std::collections::BTreeMap::new(),
+            context_values: std::collections::BTreeMap::new(),
+            node_outcomes: std::collections::BTreeMap::from([(
+                "verify".to_string(),
+                Outcome::default(),
+            )]),
+            next_node_id: Some("done".to_string()),
+            git_commit_sha: None,
+            loop_failure_signatures: std::collections::BTreeMap::new(),
+            restart_failure_signatures: std::collections::BTreeMap::new(),
+            node_visits: std::collections::BTreeMap::from([("verify".to_string(), 2usize)]),
+            diff: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}/billing")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+
+    let stages = body["stages"].as_array().unwrap();
+    assert_eq!(
+        stages.len(),
+        1,
+        "expected one row for the retried verify node"
+    );
+    assert_eq!(stages[0]["stage"]["id"], "verify");
+    // Duration on the row is the sum across visits (1.5s + 0.8s = 2.3s).
+    assert!(
+        (stages[0]["runtime_secs"].as_f64().unwrap() - 2.3).abs() < f64::EPSILON,
+        "row runtime_secs should sum visits, got {}",
+        stages[0]["runtime_secs"]
+    );
+
+    // Totals must not double-count: a single 2.3s, not 4.6s.
+    assert!(
+        (body["totals"]["runtime_secs"].as_f64().unwrap() - 2.3).abs() < f64::EPSILON,
+        "totals.runtime_secs should sum visits exactly once, got {}",
+        body["totals"]["runtime_secs"]
+    );
 }
 
 #[tokio::test]

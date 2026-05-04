@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
@@ -165,7 +166,16 @@ async fn get_run_billing(
     let mut runtime_secs = 0.0_f64;
     let mut stages = Vec::new();
 
+    // `completed_nodes` records every visit (one entry per re-entry of a
+    // looped node), but billing is per-node: the duration helper already sums
+    // across visits, and `node_outcomes` only stores the latest visit's usage.
+    // Dedup so we emit one row per node and don't multiply the sum by visit
+    // count.
+    let mut seen_nodes = HashSet::new();
     for node_id in &checkpoint.completed_nodes {
+        if !seen_nodes.insert(node_id.as_str()) {
+            continue;
+        }
         let duration_ms = stage_durations.get(node_id).copied().unwrap_or(0);
         runtime_secs += duration_ms as f64 / 1000.0;
 
