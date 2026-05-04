@@ -1,0 +1,5 @@
+{
+  "script": "rustc --version && cargo --version && bun --version 2>&1",
+  "command": "rustc --version && cargo --version && bun --version 2>&1",
+  "language": "shell"
+}
