@@ -66,7 +66,7 @@ impl Handler for PromptHandler {
                 .provider()
                 .and_then(|s| s.parse::<Provider>().ok())
                 .unwrap_or(services.run.provider);
-            let docs = fabro_agent::discover_memory(
+            let docs = match fabro_agent::discover_memory(
                 &*services.run.sandbox,
                 working_dir,
                 working_dir,
@@ -74,7 +74,13 @@ impl Handler for PromptHandler {
                 &services.run.cancel_token(),
             )
             .await
-            .unwrap_or_default();
+            {
+                Ok(docs) => docs,
+                Err(fabro_agent::Error::Interrupted(fabro_agent::InterruptReason::Cancelled)) => {
+                    return Err(Error::Cancelled);
+                }
+                Err(_) => Vec::new(),
+            };
 
             if docs.is_empty() {
                 None

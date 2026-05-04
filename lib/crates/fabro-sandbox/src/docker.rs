@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::Cursor;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use bollard::Docker;
@@ -24,7 +24,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::clone_source::{self, CloneDecision, EmptyWorkspaceReason};
 use crate::redact::redact_auth_url;
-use crate::sandbox::resolve_path;
+use crate::sandbox::{optional_timeout, resolve_path};
 use crate::{
     CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GrepOptions, Sandbox,
     SandboxEvent, SandboxEventCallback, format_lines_numbered, shell_quote,
@@ -380,12 +380,7 @@ impl DockerSandbox {
             controlled_command,
         ];
 
-        let timeout_future = async {
-            match timeout_ms {
-                Some(ms) => time::sleep(Duration::from_millis(ms)).await,
-                None => std::future::pending::<()>().await,
-            }
-        };
+        let timeout_future = optional_timeout(timeout_ms);
         tokio::pin!(timeout_future);
         let token = cancel_token.unwrap_or_default();
 
@@ -1545,6 +1540,7 @@ mod tests {
         reason = "unit test reads an in-memory tar entry synchronously"
     )]
     use std::io::Read as _;
+    use std::time::Duration;
 
     use tokio::process::Command;
 

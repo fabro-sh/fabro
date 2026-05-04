@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
@@ -9,8 +9,29 @@ use fabro_llm::types::TokenCounts;
 use fabro_model::Provider;
 use fabro_types::{CommandOutputStream, CommandTermination};
 use fabro_util::time::elapsed_ms;
-use tokio::sync::Mutex as TokioMutex;
 use tokio_util::sync::CancellationToken;
+
+/// Returns up to the last `n` characters of `s`, preserving char boundaries.
+fn tail_chars(s: &str, n: usize) -> String {
+    let total = s.chars().count();
+    if total <= n {
+        return s.to_string();
+    }
+    s.chars().skip(total - n).collect()
+}
+
+/// Build a "<stderr-tail>\nstdout: <stdout-tail>" detail string for CLI failure
+/// messages, falling back to the original command when both streams are empty.
+fn cli_failure_detail(stdout: &str, stderr: &str, command: &str) -> String {
+    let stderr_tail = tail_chars(stderr, 500);
+    let stdout_tail = tail_chars(stdout, 500);
+    match (stderr_tail.is_empty(), stdout_tail.is_empty()) {
+        (false, false) => format!("{stderr_tail}\nstdout: {stdout_tail}"),
+        (false, true) => stderr_tail,
+        (true, false) => format!("stdout: {stdout_tail}"),
+        (true, true) => format!("command: {command}"),
+    }
+}
 
 use super::super::agent::{CodergenBackend, CodergenResult};
 use crate::context::Context;
@@ -598,8 +619,11 @@ impl CodergenBackend for AgentCliBackend {
         // `exec_command_streaming` the run-level cancel token (and node
         // timeout, when set) terminate the CLI and its descendants.
         let outer_command = format!(". {env_path} && {command}");
-        let stdout_buffer: Arc<TokioMutex<Vec<u8>>> = Arc::new(TokioMutex::new(Vec::new()));
-        let stderr_buffer: Arc<TokioMutex<Vec<u8>>> = Arc::new(TokioMutex::new(Vec::new()));
+        // Use a synchronous Mutex: each callback invocation only does a short
+        // `extend_from_slice` with no awaits while the lock is held, so an
+        // async Mutex would just add per-chunk scheduling overhead.
+        let stdout_buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        let stderr_buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
         let stdout_buf_cb = Arc::clone(&stdout_buffer);
         let stderr_buf_cb = Arc::clone(&stderr_buffer);
         let emitter_for_callback = Arc::clone(emitter);
@@ -611,14 +635,13 @@ impl CodergenBackend for AgentCliBackend {
                 // Touch the stall watchdog whenever the CLI emits output
                 // so long-running invocations don't trip stall timeout.
                 emitter.touch();
-                match stream {
-                    CommandOutputStream::Stdout => {
-                        stdout_buf.lock().await.extend_from_slice(&bytes);
-                    }
-                    CommandOutputStream::Stderr => {
-                        stderr_buf.lock().await.extend_from_slice(&bytes);
-                    }
-                }
+                let buf = match stream {
+                    CommandOutputStream::Stdout => stdout_buf,
+                    CommandOutputStream::Stderr => stderr_buf,
+                };
+                buf.lock()
+                    .expect("CLI output buffer mutex poisoned")
+                    .extend_from_slice(&bytes);
                 Ok(())
             })
         });
@@ -664,8 +687,18 @@ impl CodergenBackend for AgentCliBackend {
         let result = streaming.result;
         // Prefer the buffered streaming output (live chunks); fall back to the
         // result struct for sandboxes that bundle output at the end.
-        let buffered_stdout = String::from_utf8_lossy(&stdout_buffer.lock().await).into_owned();
-        let buffered_stderr = String::from_utf8_lossy(&stderr_buffer.lock().await).into_owned();
+        let buffered_stdout = {
+            let buf = stdout_buffer
+                .lock()
+                .expect("CLI stdout buffer mutex poisoned");
+            String::from_utf8_lossy(&buf).into_owned()
+        };
+        let buffered_stderr = {
+            let buf = stderr_buffer
+                .lock()
+                .expect("CLI stderr buffer mutex poisoned");
+            String::from_utf8_lossy(&buf).into_owned()
+        };
         let stdout = if buffered_stdout.is_empty() {
             result.stdout.clone()
         } else {
@@ -676,7 +709,7 @@ impl CodergenBackend for AgentCliBackend {
         } else {
             buffered_stderr
         };
-        let duration_ms = u64::try_from(launch_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let duration_ms = elapsed_ms(launch_start);
 
         match result.termination {
             CommandTermination::Cancelled => {
@@ -703,23 +736,7 @@ impl CodergenBackend for AgentCliBackend {
                     &stage_scope,
                 );
                 cleanup_temp_files().await;
-                let tail = |s: &str, n: usize| -> String {
-                    s.chars()
-                        .rev()
-                        .take(n)
-                        .collect::<Vec<_>>()
-                        .into_iter()
-                        .rev()
-                        .collect()
-                };
-                let stderr_tail = tail(&stderr, 500);
-                let stdout_tail = tail(&stdout, 500);
-                let detail = match (stderr_tail.is_empty(), stdout_tail.is_empty()) {
-                    (false, false) => format!("{stderr_tail}\nstdout: {stdout_tail}"),
-                    (false, true) => stderr_tail,
-                    (true, false) => format!("stdout: {stdout_tail}"),
-                    (true, true) => format!("command: {command}"),
-                };
+                let detail = cli_failure_detail(&stdout, &stderr, &command);
                 return Err(Error::handler(format!(
                     "CLI command timed out after {duration_ms} ms: {detail}"
                 )));
@@ -744,23 +761,7 @@ impl CodergenBackend for AgentCliBackend {
         let exited_success =
             result.termination == CommandTermination::Exited && result.exit_code == Some(0);
         if !exited_success {
-            let tail = |s: &str, n: usize| -> String {
-                s.chars()
-                    .rev()
-                    .take(n)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect()
-            };
-            let stderr_tail = tail(&stderr, 500);
-            let stdout_tail = tail(&stdout, 500);
-            let detail = match (stderr_tail.is_empty(), stdout_tail.is_empty()) {
-                (false, false) => format!("{stderr_tail}\nstdout: {stdout_tail}"),
-                (false, true) => stderr_tail,
-                (true, false) => format!("stdout: {stdout_tail}"),
-                (true, true) => format!("command: {command}"),
-            };
+            let detail = cli_failure_detail(&stdout, &stderr, &command);
             return Err(Error::handler(format!(
                 "CLI command exited with code {}: {detail}",
                 result

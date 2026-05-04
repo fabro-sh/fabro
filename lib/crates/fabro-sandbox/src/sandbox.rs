@@ -17,6 +17,16 @@ const GIT: &str = "git -c maintenance.auto=0 -c gc.auto=0";
 
 pub const DEFAULT_EXEC_OUTPUT_TAIL_BYTES: usize = 8 * 1024;
 
+/// Sleep for `timeout_ms` if `Some`, otherwise never resolves. Used by
+/// streaming `exec_command` impls to model "no timeout" without scheduling a
+/// `Duration::from_millis(u64::MAX)` sleep.
+pub(crate) async fn optional_timeout(timeout_ms: Option<u64>) {
+    match timeout_ms {
+        Some(ms) => time::sleep(Duration::from_millis(ms)).await,
+        None => std::future::pending::<()>().await,
+    }
+}
+
 /// Information returned when a sandbox sets up git for a workflow run.
 #[derive(Debug, Clone)]
 pub struct GitRunInfo {

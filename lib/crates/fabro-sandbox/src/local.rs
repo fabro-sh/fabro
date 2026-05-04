@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use async_trait::async_trait;
 use fabro_static::EnvVars;
@@ -10,6 +10,7 @@ use tokio::task::spawn_blocking;
 use tokio::{fs, time};
 use tokio_util::sync::CancellationToken;
 
+use crate::sandbox::optional_timeout;
 use crate::{
     CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GrepOptions, Sandbox,
     SandboxEvent, SandboxEventCallback, format_lines_numbered,
@@ -367,12 +368,7 @@ impl Sandbox for LocalSandbox {
             .spawn()
             .map_err(|e| crate::Error::context("Failed to spawn command", e))?;
 
-        let timeout_future = async {
-            match timeout_ms {
-                Some(ms) => time::sleep(Duration::from_millis(ms)).await,
-                None => std::future::pending::<()>().await,
-            }
-        };
+        let timeout_future = optional_timeout(timeout_ms);
         tokio::pin!(timeout_future);
         let token = cancel_token.unwrap_or_default();
 
