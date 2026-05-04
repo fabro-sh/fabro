@@ -93,7 +93,7 @@ macro_rules! delegate_sandbox {
             async fn exec_command_streaming(
                 &self,
                 command: &str,
-                timeout_ms: u64,
+                timeout_ms: Option<u64>,
                 working_dir: Option<&str>,
                 env_vars: Option<&std::collections::HashMap<String, String>>,
                 cancel_token: Option<tokio_util::sync::CancellationToken>,
@@ -607,14 +607,21 @@ pub trait Sandbox: Send + Sync {
     async fn exec_command_streaming(
         &self,
         command: &str,
-        timeout_ms: u64,
+        timeout_ms: Option<u64>,
         working_dir: Option<&str>,
         env_vars: Option<&std::collections::HashMap<String, String>>,
         cancel_token: Option<CancellationToken>,
         output_callback: CommandOutputCallback,
     ) -> crate::Result<ExecStreamingResult> {
+        let fallback_timeout_ms = timeout_ms.unwrap_or(u64::MAX);
         let result = self
-            .exec_command(command, timeout_ms, working_dir, env_vars, cancel_token)
+            .exec_command(
+                command,
+                fallback_timeout_ms,
+                working_dir,
+                env_vars,
+                cancel_token,
+            )
             .await?;
         if !result.stdout.is_empty() {
             output_callback(

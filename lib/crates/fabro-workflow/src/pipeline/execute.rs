@@ -243,9 +243,7 @@ pub async fn execute(init: Initialized) -> Executed {
     let mut builder = ExecutorBuilder::new(handler as Arc<dyn NodeHandler<WorkflowGraph>>)
         .lifecycle(Box::new(lifecycle));
 
-    if let Some(ref cancel) = run_options.cancel_token {
-        builder = builder.cancel_token(cancel.clone());
-    }
+    builder = builder.cancel_token(run_options.cancel_token.clone());
     if let Some(token) = stall_token.clone() {
         builder = builder.stall_token(token);
     }

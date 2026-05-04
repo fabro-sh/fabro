@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = SessionOptions::default();
 
     let mut session = Session::new(client, profile, sandbox, config);
-    session.initialize().await;
+    session.initialize().await?;
 
     // Subscribe to events before sending input
     let mut events = session.subscribe();

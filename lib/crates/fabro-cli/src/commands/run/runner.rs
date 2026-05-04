@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use std::io::{BufRead as StdBufRead, BufReader as StdBufReader};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
@@ -34,6 +33,7 @@ use fabro_workflow::runtime_store::{RunStoreBackend, RunStoreHandle};
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::{Mutex, RwLock as AsyncRwLock, mpsc};
 use tokio::time::sleep;
+use tokio_util::sync::CancellationToken;
 
 use crate::args::RunWorkerMode;
 use crate::server_client;
@@ -86,10 +86,10 @@ pub(crate) async fn execute(
         worker_token.to_owned(),
     )));
     let interviewer = Arc::new(ControlInterviewer::new());
-    let cancel_token = Arc::new(AtomicBool::new(false));
-    spawn_worker_control_stream(Arc::clone(&interviewer), Arc::clone(&cancel_token))?;
+    let cancel_token = CancellationToken::new();
+    spawn_worker_control_stream(Arc::clone(&interviewer), cancel_token.clone())?;
     let run_control = RunControlState::new();
-    install_signal_handlers(Arc::clone(&run_control), Arc::clone(&cancel_token))?;
+    install_signal_handlers(Arc::clone(&run_control), cancel_token.clone())?;
     let vault = load_worker_vault(storage_dir.as_deref())?;
     let github_app = {
         let vault_guard = match &vault {
@@ -100,7 +100,7 @@ pub(crate) async fn execute(
     };
     let services = StartServices {
         run_id,
-        cancel_token: Some(Arc::clone(&cancel_token)),
+        cancel_token: cancel_token.clone(),
         emitter: Arc::new(Emitter::new(run_id)),
         interviewer,
         run_store: run_store.clone(),
@@ -162,7 +162,7 @@ enum WorkerControlStreamEvent {
 )]
 fn spawn_worker_control_stream(
     interviewer: Arc<ControlInterviewer>,
-    cancel_token: Arc<AtomicBool>,
+    cancel_token: CancellationToken,
 ) -> Result<()> {
     let (event_tx, event_rx) = mpsc::unbounded_channel();
     tokio::spawn(handle_worker_control_stream_events(
@@ -205,7 +205,7 @@ fn read_worker_control_stream_blocking<R>(
 
 async fn handle_worker_control_stream_events(
     interviewer: Arc<ControlInterviewer>,
-    cancel_token: Arc<AtomicBool>,
+    cancel_token: CancellationToken,
     mut event_rx: mpsc::UnboundedReceiver<WorkerControlStreamEvent>,
 ) {
     while let Some(event) = event_rx.recv().await {
@@ -225,7 +225,7 @@ async fn handle_worker_control_stream_events(
 
 async fn apply_worker_control_line(
     interviewer: &ControlInterviewer,
-    cancel_token: &AtomicBool,
+    cancel_token: &CancellationToken,
     line: &str,
 ) {
     if line.trim().is_empty() {
@@ -243,7 +243,7 @@ async fn apply_worker_control_line(
                 .await;
         }
         WorkerControlMessage::RunCancel => {
-            cancel_token.store(true, Ordering::SeqCst);
+            cancel_token.cancel();
             interviewer.interrupt_all().await;
         }
     }
@@ -561,7 +561,7 @@ fn clone_sandbox_requires_github_credentials(provider: &str) -> bool {
 
 fn install_signal_handlers(
     run_control: Arc<RunControlState>,
-    cancel_token: Arc<AtomicBool>,
+    cancel_token: CancellationToken,
 ) -> Result<()> {
     #[cfg(unix)]
     {
@@ -581,17 +581,17 @@ fn install_signal_handlers(
         });
 
         let mut terminate = signal(SignalKind::terminate())?;
-        let terminate_cancel = Arc::clone(&cancel_token);
+        let terminate_cancel = cancel_token.clone();
         tokio::spawn(async move {
             while terminate.recv().await.is_some() {
-                terminate_cancel.store(true, Ordering::SeqCst);
+                terminate_cancel.cancel();
             }
         });
 
         let mut interrupt = signal(SignalKind::interrupt())?;
         tokio::spawn(async move {
             while interrupt.recv().await.is_some() {
-                cancel_token.store(true, Ordering::SeqCst);
+                cancel_token.cancel();
             }
         });
     }
@@ -606,7 +606,6 @@ fn install_signal_handlers(
 )]
 mod tests {
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
 
     use chrono::Utc;
     use fabro_auth::{AuthCredential, AuthDetails};
@@ -623,6 +622,7 @@ mod tests {
     };
     use fabro_vault::{SecretType, Vault};
     use fabro_workflow::event::RunEventSink;
+    use tokio_util::sync::CancellationToken;
 
     use super::{
         WorkerControlStreamEvent, WorkerTitlePhase, apply_worker_control_line,
@@ -823,7 +823,7 @@ mod tests {
     #[tokio::test]
     async fn worker_control_line_routes_answer_by_question_id() {
         let interviewer = Arc::new(ControlInterviewer::new());
-        let cancel_token = Arc::new(AtomicBool::new(false));
+        let cancel_token = CancellationToken::new();
         let mut question = Question::new("Approve?", QuestionType::YesNo);
         question.id = "q-1".to_string();
         let ask_interviewer = Arc::clone(&interviewer);
@@ -838,13 +838,13 @@ mod tests {
 
         let answer = answer_task.await.unwrap().answer;
         assert_eq!(answer.value, AnswerValue::Yes);
-        assert!(!cancel_token.load(Ordering::SeqCst));
+        assert!(!cancel_token.is_cancelled());
     }
 
     #[tokio::test]
     async fn worker_control_line_cancel_sets_cancel_token_and_interrupts_pending_interviews() {
         let interviewer = Arc::new(ControlInterviewer::new());
-        let cancel_token = Arc::new(AtomicBool::new(false));
+        let cancel_token = CancellationToken::new();
         let mut question = Question::new("Approve?", QuestionType::YesNo);
         question.id = "q-1".to_string();
         let ask_interviewer = Arc::clone(&interviewer);
@@ -860,7 +860,7 @@ mod tests {
 
         let answer = answer_task.await.unwrap().answer;
         assert_eq!(answer.value, AnswerValue::Interrupted);
-        assert!(cancel_token.load(Ordering::SeqCst));
+        assert!(cancel_token.is_cancelled());
     }
 
     #[tokio::test]
@@ -893,7 +893,7 @@ mod tests {
     #[tokio::test]
     async fn worker_control_event_loop_eof_interrupts_pending_interviews() {
         let interviewer = Arc::new(ControlInterviewer::new());
-        let cancel_token = Arc::new(AtomicBool::new(false));
+        let cancel_token = CancellationToken::new();
         let mut question = Question::new("Approve?", QuestionType::YesNo);
         question.id = "q-1".to_string();
         let ask_interviewer = Arc::clone(&interviewer);
@@ -905,14 +905,14 @@ mod tests {
 
         handle_worker_control_stream_events(
             Arc::clone(&interviewer),
-            Arc::clone(&cancel_token),
+            cancel_token.clone(),
             event_rx,
         )
         .await;
 
         let answer = answer_task.await.unwrap().answer;
         assert_eq!(answer.value, AnswerValue::Interrupted);
-        assert!(!cancel_token.load(Ordering::SeqCst));
+        assert!(!cancel_token.is_cancelled());
     }
 
     #[tokio::test]

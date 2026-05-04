@@ -1006,6 +1006,26 @@ fn event_body_from_event(event: &Event) -> EventBody {
             exit_code:   *exit_code,
             duration_ms: *duration_ms,
         }),
+        Event::AgentCliCancelled {
+            stdout,
+            stderr,
+            duration_ms,
+            ..
+        } => EventBody::AgentCliCancelled(fabro_types::AgentCliCancelledProps {
+            stdout:      stdout.clone(),
+            stderr:      stderr.clone(),
+            duration_ms: *duration_ms,
+        }),
+        Event::AgentCliTimedOut {
+            stdout,
+            stderr,
+            duration_ms,
+            ..
+        } => EventBody::AgentCliTimedOut(fabro_types::AgentCliTimedOutProps {
+            stdout:      stdout.clone(),
+            stderr:      stderr.clone(),
+            duration_ms: *duration_ms,
+        }),
         Event::PullRequestCreated {
             pr_url,
             pr_number,
@@ -1807,6 +1827,48 @@ mod tests {
             parent_session_id: None,
             model:             Some("claude-sonnet".to_string()),
         });
+    }
+
+    #[test]
+    fn agent_cli_cancelled_maps_to_event_body_with_node_id() {
+        let stored = to_run_event(&fixtures::RUN_1, &Event::AgentCliCancelled {
+            node_id:     "code".to_string(),
+            stdout:      "out".to_string(),
+            stderr:      "err".to_string(),
+            duration_ms: 42,
+        });
+
+        assert_eq!(stored.event_name(), "agent.cli.cancelled");
+        assert_eq!(stored.node_id.as_deref(), Some("code"));
+        match &stored.body {
+            EventBody::AgentCliCancelled(props) => {
+                assert_eq!(props.stdout, "out");
+                assert_eq!(props.stderr, "err");
+                assert_eq!(props.duration_ms, 42);
+            }
+            other => panic!("expected AgentCliCancelled, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn agent_cli_timed_out_maps_to_event_body_with_node_id() {
+        let stored = to_run_event(&fixtures::RUN_1, &Event::AgentCliTimedOut {
+            node_id:     "code".to_string(),
+            stdout:      "out".to_string(),
+            stderr:      "err".to_string(),
+            duration_ms: 99,
+        });
+
+        assert_eq!(stored.event_name(), "agent.cli.timed_out");
+        assert_eq!(stored.node_id.as_deref(), Some("code"));
+        match &stored.body {
+            EventBody::AgentCliTimedOut(props) => {
+                assert_eq!(props.stdout, "out");
+                assert_eq!(props.stderr, "err");
+                assert_eq!(props.duration_ms, 99);
+            }
+            other => panic!("expected AgentCliTimedOut, got {other:?}"),
+        }
     }
 
     #[test]

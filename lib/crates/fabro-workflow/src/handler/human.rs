@@ -325,12 +325,7 @@ impl Handler for HumanHandler {
 
         // 5. Handle unanswered / interrupted interview sessions.
         if answer.value == AnswerValue::Interrupted {
-            if services
-                .run
-                .cancel_requested
-                .as_ref()
-                .is_some_and(|flag| flag.load(Ordering::SeqCst))
-            {
+            if services.run.cancel_token().is_cancelled() {
                 return Err(Error::Cancelled);
             }
             self.emit(

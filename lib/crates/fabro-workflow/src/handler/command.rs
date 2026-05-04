@@ -109,7 +109,7 @@ impl Handler for CommandHandler {
         } else {
             Some(&services.env)
         };
-        let cancel_token = services.run.sandbox_cancel_token();
+        let cancel_token = services.run.cancel_token().child_token();
         let stage_id = stage_scope.stage_id();
         let recorder = CommandLogRecorder::create(run_dir, &stage_id).await?;
         let output_callback: CommandOutputCallback = {
@@ -130,16 +130,14 @@ impl Handler for CommandHandler {
             .sandbox
             .exec_command_streaming(
                 &command,
-                timeout_ms,
+                Some(timeout_ms),
                 None,
                 env_vars,
-                cancel_token.clone(),
+                Some(cancel_token.clone()),
                 output_callback,
             )
             .await;
-        if let Some(token) = cancel_token {
-            token.cancel();
-        }
+        cancel_token.cancel();
         let streaming = match result {
             Ok(streaming) => streaming,
             Err(err) => {
@@ -237,7 +235,6 @@ fn tail_bytes(text: &str, max_bytes: usize) -> String {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
     use std::time::Duration;
 
     use bytes::Bytes;
@@ -1126,7 +1123,7 @@ mod tests {
         let mut services = make_spy_services(spy.clone());
         services.run = services
             .run
-            .with_cancel_requested(Some(Arc::new(AtomicBool::new(false))));
+            .with_cancel_token(tokio_util::sync::CancellationToken::new());
 
         handler
             .execute(&node, &context, &graph, run_dir.path(), &services)

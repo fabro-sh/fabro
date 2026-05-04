@@ -21,6 +21,7 @@ use fabro_workflow::handler::exit::ExitHandler;
 use fabro_workflow::handler::start::StartHandler;
 use fabro_workflow::run_options::{GitCheckpointOptions, RunOptions};
 use fabro_workflow::test_support::run_graph;
+use tokio_util::sync::CancellationToken;
 
 fn assert_success(output: &Output, context: &str) {
     assert!(
@@ -154,7 +155,7 @@ fn make_registry() -> HandlerRegistry {
 fn test_run_options(run_dir: &Path) -> RunOptions {
     RunOptions {
         run_dir:          run_dir.to_path_buf(),
-        cancel_token:     None,
+        cancel_token:     CancellationToken::new(),
         run_id:           fixtures::RUN_2,
         settings:         WorkflowSettings::default(),
         git:              None,

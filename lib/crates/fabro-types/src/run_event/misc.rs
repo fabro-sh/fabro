@@ -240,6 +240,20 @@ pub struct AgentCliCompletedProps {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentCliCancelledProps {
+    pub stdout:      String,
+    pub stderr:      String,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentCliTimedOutProps {
+    pub stdout:      String,
+    pub stderr:      String,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PullRequestCreatedProps {
     pub pr_url:      String,
     pub pr_number:   u64,
