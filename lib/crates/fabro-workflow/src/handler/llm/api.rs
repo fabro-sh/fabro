@@ -108,9 +108,11 @@ fn classify_agent_error(err: fabro_agent::Error, allow_failover: bool) -> AgentA
             AgentApiErrorDisposition::FailoverEligible(err)
         }
         fabro_agent::Error::Llm(err) => AgentApiErrorDisposition::Terminal(Error::Llm(err)),
-        other => AgentApiErrorDisposition::Terminal(Error::handler(format!(
-            "Agent session failed: {other}"
-        ))),
+        other @ (fabro_agent::Error::SessionClosed
+        | fabro_agent::Error::InvalidState(_)
+        | fabro_agent::Error::ToolExecution(_)) => AgentApiErrorDisposition::Terminal(
+            Error::Precondition(format!("Agent session failed: {other}")),
+        ),
     }
 }
 
@@ -546,18 +548,18 @@ impl CodergenBackend for AgentApiBackend {
             if let Some(s) = existing {
                 (s, true)
             } else {
-                (
-                    self.create_session(node, sandbox, tool_hooks.clone())
-                        .await?,
-                    false,
-                )
+                let created = self.create_session(node, sandbox, tool_hooks.clone()).await;
+                if cancel_token.is_cancelled() {
+                    return Err(Error::Cancelled);
+                }
+                (created?, false)
             }
         } else {
-            (
-                self.create_session(node, sandbox, tool_hooks.clone())
-                    .await?,
-                false,
-            )
+            let created = self.create_session(node, sandbox, tool_hooks.clone()).await;
+            if cancel_token.is_cancelled() {
+                return Err(Error::Cancelled);
+            }
+            (created?, false)
         };
         if cancel_token.is_cancelled() {
             return Err(Error::Cancelled);
@@ -664,7 +666,7 @@ impl CodergenBackend for AgentApiBackend {
                         if cancel_token.is_cancelled() {
                             return Err(Error::Cancelled);
                         }
-                        let new_session = match Self::create_session_for(
+                        let new_session_result = Self::create_session_for(
                             &target.model,
                             target_provider,
                             node,
@@ -674,17 +676,17 @@ impl CodergenBackend for AgentApiBackend {
                             tool_hooks.clone(),
                             self.mcp_servers.clone(),
                         )
-                        .await
-                        {
+                        .await;
+                        if cancel_token.is_cancelled() {
+                            return Err(Error::Cancelled);
+                        }
+                        let new_session = match new_session_result {
                             Ok(s) => s,
                             Err(e) => {
                                 last_err = e;
                                 continue;
                             }
                         };
-                        if cancel_token.is_cancelled() {
-                            return Err(Error::Cancelled);
-                        }
                         session = new_session;
                         bridge.replace(cancel_token.clone(), &session);
 
@@ -1188,35 +1190,35 @@ mod tests {
     }
 
     #[test]
-    fn classify_session_closed_is_terminal_handler() {
+    fn classify_session_closed_is_terminal_precondition() {
         let err = fabro_agent::Error::SessionClosed;
         match classify_agent_error(err, true) {
-            AgentApiErrorDisposition::Terminal(Error::Handler { message, .. }) => {
+            AgentApiErrorDisposition::Terminal(Error::Precondition(message)) => {
                 assert!(message.contains("Agent session failed"));
             }
-            _ => panic!("expected Terminal(Error::Handler) for SessionClosed"),
+            _ => panic!("expected Terminal(Error::Precondition) for SessionClosed"),
         }
     }
 
     #[test]
-    fn classify_invalid_state_is_terminal_handler() {
+    fn classify_invalid_state_is_terminal_precondition() {
         let err = fabro_agent::Error::InvalidState("oops".into());
         match classify_agent_error(err, true) {
-            AgentApiErrorDisposition::Terminal(Error::Handler { message, .. }) => {
+            AgentApiErrorDisposition::Terminal(Error::Precondition(message)) => {
                 assert!(message.contains("Agent session failed"));
             }
-            _ => panic!("expected Terminal(Error::Handler) for InvalidState"),
+            _ => panic!("expected Terminal(Error::Precondition) for InvalidState"),
         }
     }
 
     #[test]
-    fn classify_tool_execution_is_terminal_handler() {
+    fn classify_tool_execution_is_terminal_precondition() {
         let err = fabro_agent::Error::ToolExecution("tool blew up".into());
         match classify_agent_error(err, true) {
-            AgentApiErrorDisposition::Terminal(Error::Handler { message, .. }) => {
+            AgentApiErrorDisposition::Terminal(Error::Precondition(message)) => {
                 assert!(message.contains("Agent session failed"));
             }
-            _ => panic!("expected Terminal(Error::Handler) for ToolExecution"),
+            _ => panic!("expected Terminal(Error::Precondition) for ToolExecution"),
         }
     }
 }

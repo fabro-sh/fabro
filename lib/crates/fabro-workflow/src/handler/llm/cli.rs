@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use fabro_agent::Sandbox;
+use fabro_agent::{Sandbox, shell_quote};
 use fabro_auth::{CliAgentKind, CredentialResolver, CredentialUsage, ResolvedCredential};
 use fabro_graphviz::graph::Node;
 use fabro_llm::types::TokenCounts;
@@ -189,9 +189,11 @@ pub fn is_cli_only_model(model: &str) -> bool {
 /// is piped into the command's stdin via `cat`.
 #[must_use]
 pub fn cli_command_for_provider(provider: Provider, model: &str, prompt_file: &str) -> String {
+    let prompt_file = shell_quote(prompt_file);
     let model_flag = if model.is_empty() {
         String::new()
     } else {
+        let model = shell_quote(model);
         match provider {
             Provider::OpenAi
             | Provider::Gemini
@@ -388,14 +390,6 @@ pub fn parse_cli_response(provider: Provider, output: &str) -> Option<CliRespons
         Provider::Gemini => parse_gemini_json(output),
         Provider::Anthropic => parse_claude_ndjson(output),
     }
-}
-
-/// Escape a value for safe embedding inside single quotes in a shell command.
-fn shell_quote(val: &str) -> String {
-    shlex::try_quote(val).map_or_else(
-        |_| format!("'{}'", val.replace('\'', "'\\''")),
-        std::borrow::Cow::into_owned,
-    )
 }
 
 /// CLI backend that invokes external CLI tools (claude, codex, gemini) via
@@ -618,7 +612,7 @@ impl CodergenBackend for AgentCliBackend {
         // launcher could not be cancelled mid-flight. By running through
         // `exec_command_streaming` the run-level cancel token (and node
         // timeout, when set) terminate the CLI and its descendants.
-        let outer_command = format!(". {env_path} && {command}");
+        let outer_command = format!(". {} && {command}", shell_quote(&env_path));
         // Use a synchronous Mutex: each callback invocation only does a short
         // `extend_from_slice` with no awaits while the lock is held, so an
         // async Mutex would just add per-chunk scheduling overhead.
@@ -666,7 +660,7 @@ impl CodergenBackend for AgentCliBackend {
 
         let cleanup_temp_files = || {
             let sandbox = Arc::clone(sandbox);
-            let cleanup_cmd = format!("rm -f {tmp_prefix}_*");
+            let cleanup_cmd = format!("rm -f {}_*", shell_quote(&tmp_prefix));
             async move {
                 let _ = sandbox
                     .exec_command(&cleanup_cmd, 30_000, None, None, None)
@@ -785,10 +779,7 @@ impl CodergenBackend for AgentCliBackend {
         let last_file_touched = if files_touched.is_empty() {
             None
         } else {
-            let quoted_files: Vec<String> = files_touched
-                .iter()
-                .filter_map(|f| shlex::try_quote(f).ok().map(std::borrow::Cow::into_owned))
-                .collect();
+            let quoted_files: Vec<String> = files_touched.iter().map(|f| shell_quote(f)).collect();
             let cmd = format!("ls -t {} | head -1", quoted_files.join(" "));
             if let Ok(result) = sandbox.exec_command(&cmd, 5_000, None, None, None).await {
                 let trimmed = result.stdout.trim().to_string();
