@@ -1,0 +1,711 @@
+diff --git a/apps/fabro-web/app/components/stage-sidebar.tsx b/apps/fabro-web/app/components/stage-sidebar.tsx
+index b72ee77b..36d1d5d0 100644
+--- a/apps/fabro-web/app/components/stage-sidebar.tsx
++++ b/apps/fabro-web/app/components/stage-sidebar.tsx
+@@ -1,4 +1,4 @@
+-import { useState, useEffect, useRef, type ComponentType } from "react";
++import { useEffect, useRef, type ComponentType } from "react";
+ import { Link } from "react-router";
+ import type { StageState } from "@qltysh/fabro-api-client";
+ import {
+@@ -12,6 +12,7 @@ import {
+ import { Bars3BottomLeftIcon, DocumentTextIcon, MapIcon } from "@heroicons/react/24/outline";
+ import { formatDurationSecs } from "../lib/format";
+ import { ACTIVE_STAGE_STATES } from "../lib/stage-sidebar";
++import { useTickingNow } from "../lib/time";
+ 
+ export interface Stage {
+   id: string;
+@@ -42,7 +43,6 @@ interface StageSidebarProps {
+ export function StageSidebar({ stages, runId, selectedStageId, activeLink }: StageSidebarProps) {
+   // Track when we first observed each running stage (for ticking timer)
+   const runningStartRef = useRef<Map<string, number>>(new Map());
+-  const [, setTick] = useState(0);
+ 
+   // Track start times for running stages
+   useEffect(() => {
+@@ -62,16 +62,13 @@ export function StageSidebar({ stages, runId, selectedStageId, activeLink }: Sta
+   }, [stages]);
+ 
+   // Tick every second while any stage is running
+-  useEffect(() => {
+-    if (!stages.some((s) => ACTIVE_STAGE_STATES.has(s.status))) return;
+-    const interval = setInterval(() => setTick((t) => t + 1), 1000);
+-    return () => clearInterval(interval);
+-  }, [stages]);
++  const hasActive = stages.some((s) => ACTIVE_STAGE_STATES.has(s.status));
++  const now = useTickingNow(hasActive);
+ 
+   function stageDuration(stage: Stage): string {
+     if (ACTIVE_STAGE_STATES.has(stage.status)) {
+       const start = runningStartRef.current.get(stage.id);
+-      if (start) return formatDurationSecs(Math.floor((Date.now() - start) / 1000));
++      if (start) return formatDurationSecs(Math.floor((now - start) / 1000));
+       return "0s";
+     }
+     return stage.duration;
+@@ -156,4 +153,4 @@ export function StageSidebar({ stages, runId, selectedStageId, activeLink }: Sta
+       </div>
+     </nav>
+   );
+-}
++}
+\ No newline at end of file
+diff --git a/apps/fabro-web/app/lib/stage-sidebar.ts b/apps/fabro-web/app/lib/stage-sidebar.ts
+index 747c6a70..1423ec2c 100644
+--- a/apps/fabro-web/app/lib/stage-sidebar.ts
++++ b/apps/fabro-web/app/lib/stage-sidebar.ts
+@@ -1,13 +1,22 @@
+-import type { PaginatedRunStageList, StageState } from "@qltysh/fabro-api-client";
++import { StageState } from "@qltysh/fabro-api-client";
++import type { PaginatedRunStageList } from "@qltysh/fabro-api-client";
+ 
+ import type { Stage } from "../components/stage-sidebar";
+ import { isVisibleStage } from "../data/runs";
+ import { formatDurationSecs } from "./format";
+ 
+-export const ACTIVE_STAGE_STATES: ReadonlySet<StageState> = new Set(["running", "retrying"]);
++export const ACTIVE_STAGE_STATES: ReadonlySet<StageState> = new Set([
++  StageState.RUNNING,
++  StageState.RETRYING,
++]);
++export const IN_FLIGHT_STAGE_STATES: ReadonlySet<StageState> = new Set([
++  StageState.PENDING,
++  StageState.RUNNING,
++  StageState.RETRYING,
++]);
+ export const SUCCEEDED_STAGE_STATES: ReadonlySet<StageState> = new Set([
+-  "succeeded",
+-  "partially_succeeded",
++  StageState.SUCCEEDED,
++  StageState.PARTIALLY_SUCCEEDED,
+ ]);
+ 
+ export function mapRunStagesToSidebarStages(
+@@ -24,4 +33,4 @@ export function mapRunStagesToSidebarStages(
+         ? formatDurationSecs(stage.duration_secs)
+         : "--",
+     }));
+-}
++}
+\ No newline at end of file
+diff --git a/apps/fabro-web/app/lib/time.ts b/apps/fabro-web/app/lib/time.ts
+index 1d8a818d..1810ce94 100644
+--- a/apps/fabro-web/app/lib/time.ts
++++ b/apps/fabro-web/app/lib/time.ts
+@@ -1,3 +1,20 @@
++import { useEffect, useState } from "react";
++
++/**
++ * Re-renders the calling component every `intervalMs` milliseconds while
++ * `active` is true, returning the current `Date.now()` value at each tick.
++ * Returns the captured value when paused, so renders are stable.
++ */
++export function useTickingNow(active: boolean, intervalMs = 1000): number {
++  const [now, setNow] = useState(() => Date.now());
++  useEffect(() => {
++    if (!active) return;
++    const interval = setInterval(() => setNow(Date.now()), intervalMs);
++    return () => clearInterval(interval);
++  }, [active, intervalMs]);
++  return now;
++}
++
+ function relativeTime(seconds: number, past: boolean): string {
+   if (seconds < 60) return past ? "just now" : "in <1m";
+   const minutes = Math.floor(seconds / 60);
+@@ -21,4 +38,3 @@ export function timeAgo(iso: string): string {
+ export function timeUntil(iso: string): string {
+   return relativeTime(Math.floor((new Date(iso).getTime() - Date.now()) / 1000), false);
+ }
+-
+diff --git a/apps/fabro-web/app/routes/run-billing.tsx b/apps/fabro-web/app/routes/run-billing.tsx
+index 74c712fd..959e9ef9 100644
+--- a/apps/fabro-web/app/routes/run-billing.tsx
++++ b/apps/fabro-web/app/routes/run-billing.tsx
+@@ -1,9 +1,11 @@
+-import { useEffect, useState } from "react";
++import { useMemo } from "react";
+ 
+ import { EmptyState } from "../components/state";
+ import { formatDurationSecs } from "../lib/format";
+ import { useRunBilling } from "../lib/queries";
+-import type { RunBilling } from "@qltysh/fabro-api-client";
++import { IN_FLIGHT_STAGE_STATES } from "../lib/stage-sidebar";
++import { useTickingNow } from "../lib/time";
++import type { RunBilling, RunBillingStage, StageState } from "@qltysh/fabro-api-client";
+ 
+ const EMPTY_VALUE = "—";
+ 
+@@ -16,8 +18,8 @@ function formatUsdMicros(usdMicros?: number | null) {
+   return usdMicros == null ? EMPTY_VALUE : `$${(usdMicros / 1_000_000).toFixed(2)}`;
+ }
+ 
+-function isInFlightState(state: string | null | undefined): boolean {
+-  return state === "running" || state === "retrying" || state === "pending";
++function isInFlight(stage: RunBillingStage): boolean {
++  return stage.state != null && IN_FLIGHT_STAGE_STATES.has(stage.state as StageState);
+ }
+ 
+ interface MappedStageRow {
+@@ -27,129 +29,85 @@ interface MappedStageRow {
+   outputTokens:   number | null;
+   runtimeSecs:    number;
+   totalUsdMicros: number | null | undefined;
+-  inFlight:       boolean;
+-  startedAt:      string | null | undefined;
+ }
+ 
+-interface MappedBilling {
+-  rows:            MappedStageRow[];
+-  totalRuntimeSecs: number;
+-  totalUsdMicros:  number | null | undefined;
+-  totalInput:      number | null;
+-  totalOutput:     number | null;
+-  modelBreakdown:  {
+-    model:          string;
+-    stages:         number;
+-    inputTokens:    number;
+-    outputTokens:   number;
+-    totalUsdMicros: number | null | undefined;
+-  }[];
+-  modelStageCount: number;
+-  hasInFlight:     boolean;
+-}
+-
+-function mapBilling(billing: RunBilling | undefined, now: number): MappedBilling {
+-  if (!billing) {
+-    return {
+-      rows:             [],
+-      totalRuntimeSecs: 0,
+-      totalUsdMicros:   undefined,
+-      totalInput:       null,
+-      totalOutput:      null,
+-      modelBreakdown:   [],
+-      modelStageCount:  0,
+-      hasInFlight:      false,
+-    };
+-  }
+-
+-  let hasInFlight = false;
+-  const rows: MappedStageRow[] = billing.stages.map((stage) => {
+-    const hasModel = stage.model != null;
+-    const inFlight = isInFlightState(stage.state);
+-    if (inFlight) hasInFlight = true;
+-
+-    let runtimeSecs = stage.runtime_secs;
+-    if (inFlight && stage.started_at) {
+-      const startedMs = new Date(stage.started_at).getTime();
+-      if (Number.isFinite(startedMs)) {
+-        runtimeSecs = Math.max(0, (now - startedMs) / 1000);
+-      }
++function liveRuntimeSecs(stage: RunBillingStage, now: number): number {
++  if (stage.started_at) {
++    const startedMs = new Date(stage.started_at).getTime();
++    if (Number.isFinite(startedMs)) {
++      return Math.max(0, (now - startedMs) / 1000);
+     }
++  }
++  return stage.runtime_secs;
++}
+ 
+-    return {
+-      stage:          stage.stage.name,
+-      model:          stage.model?.id ?? null,
+-      inputTokens:    hasModel ? stage.billing.input_tokens : null,
+-      outputTokens:   hasModel
+-        ? stage.billing.output_tokens + stage.billing.reasoning_tokens
+-        : null,
+-      runtimeSecs,
+-      totalUsdMicros: stage.billing.total_usd_micros,
+-      inFlight,
+-      startedAt:      stage.started_at,
+-    };
+-  });
+-
+-  // While ticking, derive total runtime from the displayed row runtimes so the
+-  // footer updates in lock-step with the in-flight row(s). Otherwise trust the
+-  // server's authoritative total.
+-  const totalRuntimeSecs = hasInFlight
+-    ? rows.reduce((sum, row) => sum + row.runtimeSecs, 0)
+-    : billing.totals.runtime_secs;
+-
+-  const hasLlmStages = billing.by_model.length > 0;
+-  const totalInput = hasLlmStages ? billing.totals.input_tokens : null;
+-  const totalOutput = hasLlmStages
+-    ? billing.totals.output_tokens + billing.totals.reasoning_tokens
+-    : null;
+-  const totalUsdMicros = billing.totals.total_usd_micros;
+-  const modelBreakdown = billing.by_model
+-    .map((entry) => ({
+-      model:          entry.model.id,
+-      stages:         entry.stages,
+-      inputTokens:    entry.billing.input_tokens,
+-      outputTokens:   entry.billing.output_tokens + entry.billing.reasoning_tokens,
+-      totalUsdMicros: entry.billing.total_usd_micros,
+-    }))
+-    .sort((a, b) => (b.totalUsdMicros ?? -1) - (a.totalUsdMicros ?? -1));
+-  const modelStageCount = modelBreakdown.reduce((sum, row) => sum + row.stages, 0);
+-
++function mapStageRow(stage: RunBillingStage, runtimeSecs: number): MappedStageRow {
++  const hasModel = stage.model != null;
+   return {
+-    rows,
+-    totalRuntimeSecs,
+-    totalUsdMicros,
+-    totalInput,
+-    totalOutput,
+-    modelBreakdown,
+-    modelStageCount,
+-    hasInFlight,
++    stage:          stage.stage.name,
++    model:          stage.model?.id ?? null,
++    inputTokens:    hasModel ? stage.billing.input_tokens : null,
++    outputTokens:   hasModel
++      ? stage.billing.output_tokens + stage.billing.reasoning_tokens
++      : null,
++    runtimeSecs,
++    totalUsdMicros: stage.billing.total_usd_micros,
+   };
+ }
+ 
+ export default function RunBilling({ params }: { params: { id: string } }) {
+   const billingQuery = useRunBilling(params.id);
+-
+-  // Tick state for live runtime computation. Re-rendered every second only
+-  // while at least one stage is in-flight.
+-  const [now, setNow] = useState(() => Date.now());
+   const billing = billingQuery.data;
+-  const hasInFlight = billing?.stages.some((stage) => isInFlightState(stage.state)) ?? false;
++  const hasInFlight = billing?.stages.some(isInFlight) ?? false;
++
++  // Tick once per second only while a stage is in-flight.
++  const now = useTickingNow(hasInFlight);
++
++  // Completed rows don't depend on `now`; memoize them by `billing` so we
++  // don't reallocate them every tick.
++  const completedRows = useMemo<MappedStageRow[]>(() => {
++    if (!billing) return [];
++    return billing.stages.map((stage) => mapStageRow(stage, stage.runtime_secs));
++  }, [billing]);
++
++  // The model breakdown is server-derived and stable across ticks too.
++  const modelBreakdown = useMemo(() => {
++    if (!billing) return [];
++    return billing.by_model
++      .map((entry) => ({
++        model:          entry.model.id,
++        stages:         entry.stages,
++        inputTokens:    entry.billing.input_tokens,
++        outputTokens:   entry.billing.output_tokens + entry.billing.reasoning_tokens,
++        totalUsdMicros: entry.billing.total_usd_micros,
++      }))
++      .sort((a, b) => (b.totalUsdMicros ?? -1) - (a.totalUsdMicros ?? -1));
++  }, [billing]);
++
++  // Re-derive only the in-flight rows on each tick; everything else stays put.
++  const rows = useMemo<MappedStageRow[]>(() => {
++    if (!billing) return [];
++    if (!hasInFlight) return completedRows;
++    return billing.stages.map((stage, idx) =>
++      isInFlight(stage)
++        ? mapStageRow(stage, liveRuntimeSecs(stage, now))
++        : completedRows[idx],
++    );
++  }, [billing, completedRows, hasInFlight, now]);
+ 
+-  useEffect(() => {
+-    if (!hasInFlight) return;
+-    const interval = setInterval(() => setNow(Date.now()), 1000);
+-    return () => clearInterval(interval);
+-  }, [hasInFlight]);
++  // While ticking, sum the displayed row runtimes so the footer updates in
++  // lock-step. Otherwise trust the server's authoritative total.
++  const totalRuntimeSecs = hasInFlight
++    ? rows.reduce((sum, row) => sum + row.runtimeSecs, 0)
++    : (billing?.totals.runtime_secs ?? 0);
+ 
+-  const {
+-    rows,
+-    totalRuntimeSecs,
+-    totalUsdMicros,
+-    totalInput,
+-    totalOutput,
+-    modelBreakdown,
+-    modelStageCount,
+-  } = mapBilling(billing, now);
++  const hasLlmStages = (billing?.by_model.length ?? 0) > 0;
++  const totalInput = hasLlmStages ? (billing?.totals.input_tokens ?? null) : null;
++  const totalOutput = hasLlmStages && billing
++    ? billing.totals.output_tokens + billing.totals.reasoning_tokens
++    : null;
++  const totalUsdMicros = billing?.totals.total_usd_micros;
++  const modelStageCount = modelBreakdown.reduce((sum, row) => sum + row.stages, 0);
+ 
+   if (!rows.length) {
+     return (
+@@ -265,4 +223,4 @@ export default function RunBilling({ params }: { params: { id: string } }) {
+       ) : null}
+     </div>
+   );
+-}
++}
+\ No newline at end of file
+diff --git a/apps/fabro-web/app/routes/run-stages.tsx b/apps/fabro-web/app/routes/run-stages.tsx
+index 6d179d70..ab70b98c 100644
+--- a/apps/fabro-web/app/routes/run-stages.tsx
++++ b/apps/fabro-web/app/routes/run-stages.tsx
+@@ -40,6 +40,7 @@ import type { Stage } from "../components/stage-sidebar";
+ import { EmptyState } from "../components/state";
+ import { CopyButton } from "../components/ui";
+ import { formatDurationSecs } from "../lib/format";
++import { useTickingNow } from "../lib/time";
+ import { fetchRunCommandLog, useRunEventsList, useRunStageTurns, useRunStages } from "../lib/queries";
+ import { mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
+ import { getNumber, getString, type UnknownRecord } from "../lib/unknown";
+@@ -575,7 +576,6 @@ function RunningStageDuration({
+   const [startedAt, setStartedAt] = useState<number | null>(() =>
+     isRunning ? Date.now() : null,
+   );
+-  const [, setTick] = useState(0);
+ 
+   useEffect(() => {
+     setStartedAt((current) => {
+@@ -584,14 +584,10 @@ function RunningStageDuration({
+     });
+   }, [isRunning]);
+ 
+-  useEffect(() => {
+-    if (!isRunning) return;
+-    const interval = setInterval(() => setTick((tick) => tick + 1), 1000);
+-    return () => clearInterval(interval);
+-  }, [isRunning]);
++  const now = useTickingNow(isRunning);
+ 
+   if (isRunning && startedAt) {
+-    return formatDurationSecs(Math.floor((Date.now() - startedAt) / 1000));
++    return formatDurationSecs(Math.floor((now - startedAt) / 1000));
+   }
+   return duration;
+ }
+@@ -661,4 +657,4 @@ export default function RunStages() {
+       </div>
+     </div>
+   );
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-api/tests/run_billing_stage_round_trip.rs b/lib/crates/fabro-api/tests/run_billing_stage_round_trip.rs
+index 5323e3dd..52fb4ece 100644
+--- a/lib/crates/fabro-api/tests/run_billing_stage_round_trip.rs
++++ b/lib/crates/fabro-api/tests/run_billing_stage_round_trip.rs
+@@ -51,8 +51,8 @@ fn run_billing_stage_round_trips_terminal_row_with_started_at_and_state() {
+         "state": "succeeded"
+     });
+ 
+-    let stage: RunBillingStage = serde_json::from_value(value.clone())
+-        .expect("terminal stage row should deserialize");
++    let stage: RunBillingStage =
++        serde_json::from_value(value.clone()).expect("terminal stage row should deserialize");
+     assert!(stage.started_at.is_some());
+     assert_eq!(stage.state, Some(StageState::Succeeded));
+     assert_eq!(serde_json::to_value(stage).unwrap(), value);
+@@ -79,9 +79,9 @@ fn run_billing_stage_round_trips_in_flight_row() {
+         "state": "running"
+     });
+ 
+-    let stage: RunBillingStage = serde_json::from_value(value.clone())
+-        .expect("in-flight stage row should deserialize");
++    let stage: RunBillingStage =
++        serde_json::from_value(value.clone()).expect("in-flight stage row should deserialize");
+     assert!(stage.model.is_none());
+     assert_eq!(stage.state, Some(StageState::Running));
+     assert_eq!(serde_json::to_value(stage).unwrap(), value);
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-api/tests/stage_projection_round_trip.rs b/lib/crates/fabro-api/tests/stage_projection_round_trip.rs
+index 5ec8ab69..ad4dcb57 100644
+--- a/lib/crates/fabro-api/tests/stage_projection_round_trip.rs
++++ b/lib/crates/fabro-api/tests/stage_projection_round_trip.rs
+@@ -46,4 +46,4 @@ fn assert_same_type<T: 'static, U: 'static>() {
+         type_name::<T>(),
+         type_name::<U>()
+     );
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-server/src/demo/mod.rs b/lib/crates/fabro-server/src/demo/mod.rs
+index c0c9858b..a51cb405 100644
+--- a/lib/crates/fabro-server/src/demo/mod.rs
++++ b/lib/crates/fabro-server/src/demo/mod.rs
+@@ -1709,4 +1709,4 @@ session_sandboxes = false
+             })
+             .clone()
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-server/src/server/handler/billing.rs b/lib/crates/fabro-server/src/server/handler/billing.rs
+index cb50b27d..f128aadc 100644
+--- a/lib/crates/fabro-server/src/server/handler/billing.rs
++++ b/lib/crates/fabro-server/src/server/handler/billing.rs
+@@ -24,17 +24,17 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
+ /// node's first appearance in the event log. This produces the same A, B
+ /// order for an A → B → A loop that finalize produces.
+ struct DedupedStage<'a> {
+-    node_id:               String,
+-    stage:                 &'a StageProjection,
+-    sort_key_first_event:  u32,
++    node_id:              String,
++    stage:                &'a StageProjection,
++    sort_key_first_event: u32,
+ }
+ 
+ fn dedupe_by_node_id<'a>(
+     stages: impl IntoIterator<Item = (&'a StageId, &'a StageProjection)>,
+ ) -> Vec<DedupedStage<'a>> {
+-    let mut by_node: HashMap<String, (u32, u32, &'a StageProjection)> = HashMap::new();
++    let mut by_node: HashMap<&'a str, (u32, u32, &'a StageProjection)> = HashMap::new();
+     for (stage_id, stage) in stages {
+-        let node_id = stage_id.node_id().to_string();
++        let node_id = stage_id.node_id();
+         let visit = stage_id.visit();
+         let first_event = stage.first_event_seq.get();
+         by_node
+@@ -54,7 +54,7 @@ fn dedupe_by_node_id<'a>(
+     let mut deduped: Vec<DedupedStage<'a>> = by_node
+         .into_iter()
+         .map(|(node_id, (first_event, _visit, stage))| DedupedStage {
+-            node_id,
++            node_id: node_id.to_string(),
+             stage,
+             sort_key_first_event: first_event,
+         })
+@@ -92,13 +92,16 @@ async fn list_run_stages(
+     let now = Utc::now();
+     let stages: Vec<RunStage> = dedupe_by_node_id(projection.iter_stages())
+         .into_iter()
+-        .map(|entry| RunStage {
+-            id:            entry.node_id.clone(),
+-            name:          entry.node_id.clone(),
+-            status:        entry.stage.effective_state(),
+-            duration_secs: entry.stage.runtime_secs(now),
+-            dot_id:        Some(entry.node_id.clone()),
+-            started_at:    entry.stage.started_at,
++        .map(|entry| {
++            let DedupedStage { node_id, stage, .. } = entry;
++            RunStage {
++                id:            node_id.clone(),
++                name:          node_id.clone(),
++                status:        stage.effective_state(),
++                duration_secs: stage.runtime_secs(now),
++                dot_id:        Some(node_id),
++                started_at:    stage.started_at,
++            }
+         })
+         .collect();
+ 
+@@ -128,19 +131,16 @@ async fn get_run_billing(
+     let now = Utc::now();
+ 
+     let mut by_model_totals = HashMap::<String, ModelBillingTotals>::new();
+-    let mut billed_usages = Vec::new();
+     let mut runtime_secs = 0.0_f64;
+     let mut stages = Vec::new();
+ 
+     for entry in dedupe_by_node_id(projection.iter_stages()) {
+-        let stage = entry.stage;
+-        let node_id = entry.node_id;
++        let DedupedStage { node_id, stage, .. } = entry;
+ 
+         let row_runtime = stage.runtime_secs(now).unwrap_or(0.0);
+         runtime_secs += row_runtime;
+ 
+         let (billing, model) = if let Some(usage) = stage.usage.as_ref() {
+-            billed_usages.push(usage.clone());
+             let tokens = usage.tokens();
+             let billing = BilledTokenCounts {
+                 cache_read_tokens:  tokens.cache_read_tokens,
+@@ -151,9 +151,18 @@ async fn get_run_billing(
+                 total_tokens:       tokens.total_tokens(),
+                 total_usd_micros:   usage.total_usd_micros,
+             };
+-            let model_id = usage.model_id().to_string();
+-            accumulate_model_billing(by_model_totals.entry(model_id.clone()).or_default(), usage);
+-            (billing, Some(ModelReference { id: model_id }))
++            let model_id = usage.model_id();
++            let model_totals = match by_model_totals.get_mut(model_id) {
++                Some(totals) => totals,
++                None => by_model_totals.entry(model_id.to_string()).or_default(),
++            };
++            accumulate_model_billing(model_totals, usage);
++            (
++                billing,
++                Some(ModelReference {
++                    id: model_id.to_string(),
++                }),
++            )
+         } else {
+             (BilledTokenCounts::default(), None)
+         };
+@@ -171,7 +180,20 @@ async fn get_run_billing(
+         });
+     }
+ 
+-    let totals = BilledTokenCounts::from_billed_usage(&billed_usages);
++    // Grand totals are the sum of the per-model totals we already accumulated.
++    let mut totals = BilledTokenCounts::default();
++    for model_totals in by_model_totals.values() {
++        totals.input_tokens += model_totals.billing.input_tokens;
++        totals.output_tokens += model_totals.billing.output_tokens;
++        totals.reasoning_tokens += model_totals.billing.reasoning_tokens;
++        totals.cache_read_tokens += model_totals.billing.cache_read_tokens;
++        totals.cache_write_tokens += model_totals.billing.cache_write_tokens;
++        totals.total_tokens += model_totals.billing.total_tokens;
++        if let Some(value) = model_totals.billing.total_usd_micros {
++            *totals.total_usd_micros.get_or_insert(0) += value;
++        }
++    }
++
+     let by_model = by_model_totals
+         .into_iter()
+         .map(|(model, totals)| BillingByModel {
+@@ -197,4 +219,4 @@ async fn get_run_billing(
+     };
+ 
+     (StatusCode::OK, Json(response)).into_response()
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-server/src/server/tests.rs b/lib/crates/fabro-server/src/server/tests.rs
+index 6de28d70..47fd611c 100644
+--- a/lib/crates/fabro-server/src/server/tests.rs
++++ b/lib/crates/fabro-server/src/server/tests.rs
+@@ -7462,4 +7462,4 @@ fn validate_github_slug_rejects_path_traversal_and_separators() {
+ fn validate_github_slug_rejects_overlong() {
+     let long = "a".repeat(40);
+     assert!(super::validate_github_slug("owner", &long, 39).is_err());
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-server/tests/it/scenario/usage.rs b/lib/crates/fabro-server/tests/it/scenario/usage.rs
+index 264124bc..5f5f250e 100644
+--- a/lib/crates/fabro-server/tests/it/scenario/usage.rs
++++ b/lib/crates/fabro-server/tests/it/scenario/usage.rs
+@@ -67,7 +67,7 @@ async fn run_billing_includes_completed_non_llm_stages() {
+     assert_eq!(status, "succeeded");
+ 
+     let billing = run_billing(&app, &run_id).await;
+-    assert_non_llm_billing(&billing, &["start"]);
++    assert_non_llm_billing(&billing, &["exit", "start"]);
+ }
+ 
+ #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+@@ -81,7 +81,7 @@ async fn run_billing_includes_completed_command_stages() {
+     assert_eq!(status, "succeeded");
+ 
+     let billing = run_billing(&app, &run_id).await;
+-    assert_non_llm_billing(&billing, &["echo_task", "start"]);
++    assert_non_llm_billing(&billing, &["echo_task", "exit", "start"]);
+ }
+ 
+ async fn run_billing(app: &axum::Router, run_id: &str) -> serde_json::Value {
+diff --git a/lib/crates/fabro-store/src/run_state.rs b/lib/crates/fabro-store/src/run_state.rs
+index c9209859..6dc0efb6 100644
+--- a/lib/crates/fabro-store/src/run_state.rs
++++ b/lib/crates/fabro-store/src/run_state.rs
+@@ -295,9 +295,7 @@ impl RunProjectionReducer for RunProjection {
+                     stage_id.visit(),
+                     first_event_seq(event.seq),
+                 );
+-                stage.reset_for_new_attempt();
+-                stage.started_at = Some(ts);
+-                stage.state = Some(StageState::Running);
++                stage.begin_attempt(ts);
+             }
+             EventBody::StageRetrying(_) => {
+                 let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
+@@ -1520,10 +1518,7 @@ mod tests {
+     fn failed_props(duration_ms: u64) -> StageFailedProps {
+         StageFailedProps {
+             index: 0,
+-            failure: Some(FailureDetail::new(
+-                "boom",
+-                FailureCategory::TransientInfra,
+-            )),
++            failure: Some(FailureDetail::new("boom", FailureCategory::TransientInfra)),
+             will_retry: true,
+             duration_ms,
+         }
+@@ -1702,4 +1697,4 @@ mod tests {
+         assert!(stage.completion.is_none());
+         assert_eq!(stage.duration_ms, None);
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-types/src/run_projection.rs b/lib/crates/fabro-types/src/run_projection.rs
+index 32cdbabc..b8aca23b 100644
+--- a/lib/crates/fabro-types/src/run_projection.rs
++++ b/lib/crates/fabro-types/src/run_projection.rs
+@@ -137,43 +137,20 @@ impl StageProjection {
+             StageState::Running | StageState::Retrying | StageState::Pending
+         ) {
+             return self.started_at.map(|started| {
+-                now.signed_duration_since(started)
+-                    .num_milliseconds()
+-                    .max(0) as f64
+-                    / 1000.0
++                now.signed_duration_since(started).num_milliseconds().max(0) as f64 / 1000.0
+             });
+         }
+         self.duration_ms.map(|ms| ms as f64 / 1000.0)
+     }
+ 
+-    /// Reset every per-attempt result field. Called when a stage starts a
+-    /// new attempt (or visit) so prior-attempt data does not leak into the
+-    /// new attempt's projection.
+-    ///
+-    /// Preserves `first_event_seq` (identity / sort key) and leaves
+-    /// `started_at` / `state` to be set by the caller immediately after.
+-    pub fn reset_for_new_attempt(&mut self) {
+-        self.completion = None;
+-        self.duration_ms = None;
+-        self.usage = None;
+-        self.state = None;
+-
+-        self.response = None;
+-        self.prompt = None;
+-        self.provider_used = None;
+-        self.diff = None;
+-
+-        self.script_invocation = None;
+-        self.script_timing = None;
+-        self.parallel_results = None;
+-
+-        self.stdout = None;
+-        self.stderr = None;
+-        self.stdout_bytes = None;
+-        self.stderr_bytes = None;
+-        self.streams_separated = None;
+-        self.live_streaming = None;
+-        self.termination = None;
++    /// Begin a new attempt (or visit) for this stage: clear every
++    /// per-attempt field so prior-attempt data does not leak, then record
++    /// `started_at` and `state = Running`. Preserves `first_event_seq`
++    /// (identity / sort key).
++    pub fn begin_attempt(&mut self, started_at: DateTime<Utc>) {
++        *self = Self::new(self.first_event_seq);
++        self.started_at = Some(started_at);
++        self.state = Some(StageState::Running);
+     }
+ }
+ 
+@@ -268,4 +245,4 @@ impl RunProjection {
+             }
+         }
+     }
+-}
+\ No newline at end of file
++}
