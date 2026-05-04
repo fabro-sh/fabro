@@ -33,6 +33,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::maps::MergeMap;
 
+const CREDENTIAL_REF_PREFIX: &str = "credential:";
+const ENV_REF_PREFIX: &str = "env:";
+
 /// Top-level `[llm]` settings layer.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
@@ -233,8 +236,8 @@ impl std::fmt::Display for CredentialRef {
         // any resolved secret value. Env names and credential IDs are not
         // themselves secret.
         match self {
-            Self::Credential(id) => write!(f, "credential:{id}"),
-            Self::Env(name) => write!(f, "env:{name}"),
+            Self::Credential(id) => write!(f, "{CREDENTIAL_REF_PREFIX}{id}"),
+            Self::Env(name) => write!(f, "{ENV_REF_PREFIX}{name}"),
         }
     }
 }
@@ -247,17 +250,31 @@ impl From<CredentialRef> for String {
 
 /// Error returned when a credential string is neither `credential:<id>` nor
 /// `env:<NAME>`. Literal secret strings always fall into this branch and
-/// fail deserialization — by design.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CredentialRefParseError {
-    /// Reason the input was rejected. Never echoes the input itself, since
-    /// it could be a literal secret.
-    message: String,
+/// fail deserialization — by design. Variants deliberately never carry the
+/// rejected input, since it could be a literal secret.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CredentialRefParseError(CredentialRefParseErrorKind);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CredentialRefParseErrorKind {
+    MissingCredentialId,
+    MissingEnvName,
+    InvalidForm,
 }
 
 impl std::fmt::Display for CredentialRefParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
+        match self.0 {
+            CredentialRefParseErrorKind::MissingCredentialId => {
+                f.write_str("credential reference is missing an ID after `credential:`")
+            }
+            CredentialRefParseErrorKind::MissingEnvName => {
+                f.write_str("credential reference is missing a name after `env:`")
+            }
+            CredentialRefParseErrorKind::InvalidForm => f.write_str(
+                "credential reference must be `credential:<id>` or `env:<NAME>`; literal secret strings are rejected",
+            ),
+        }
     }
 }
 
@@ -267,28 +284,25 @@ impl std::str::FromStr for CredentialRef {
     type Err = CredentialRefParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some(id) = s.strip_prefix("credential:") {
+        if let Some(id) = s.strip_prefix(CREDENTIAL_REF_PREFIX) {
             if id.is_empty() {
-                return Err(CredentialRefParseError {
-                    message: "credential reference is missing an ID after `credential:`"
-                        .to_string(),
-                });
+                return Err(CredentialRefParseError(
+                    CredentialRefParseErrorKind::MissingCredentialId,
+                ));
             }
             return Ok(Self::Credential(id.to_string()));
         }
-        if let Some(name) = s.strip_prefix("env:") {
+        if let Some(name) = s.strip_prefix(ENV_REF_PREFIX) {
             if name.is_empty() {
-                return Err(CredentialRefParseError {
-                    message: "credential reference is missing a name after `env:`".to_string(),
-                });
+                return Err(CredentialRefParseError(
+                    CredentialRefParseErrorKind::MissingEnvName,
+                ));
             }
             return Ok(Self::Env(name.to_string()));
         }
-        Err(CredentialRefParseError {
-            message: "credential reference must be `credential:<id>` or `env:<NAME>`; literal \
-                      secret strings are rejected"
-                .to_string(),
-        })
+        Err(CredentialRefParseError(
+            CredentialRefParseErrorKind::InvalidForm,
+        ))
     }
 }
 
@@ -300,44 +314,12 @@ impl TryFrom<String> for CredentialRef {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Combine glue for primitives that don't already have it.
-// ---------------------------------------------------------------------------
-
-use super::combine::Combine;
-
-// `Option<i32>`, `Option<i64>`, etc. already have `Combine` impls in
-// `combine.rs`. Only add the impls that are unique to the LLM layer types.
-
-impl Combine for Option<f64> {
-    fn combine(self, other: Self) -> Self {
-        self.or(other)
-    }
-}
-
-impl Combine for Option<NaiveDate> {
-    fn combine(self, other: Self) -> Self {
-        self.or(other)
-    }
-}
-
-impl Combine for Option<Vec<CredentialRef>> {
-    fn combine(self, other: Self) -> Self {
-        self.or(other)
-    }
-}
-
-impl Combine for Option<BTreeMap<String, CostRates>> {
-    fn combine(self, other: Self) -> Self {
-        self.or(other)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
 
     use super::*;
+    use crate::layers::Combine;
 
     // ---- CredentialRef ----------------------------------------------------
 

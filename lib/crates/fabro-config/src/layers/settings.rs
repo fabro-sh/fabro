@@ -65,6 +65,15 @@ impl From<FeaturesLayer> for SettingsLayer {
     }
 }
 
+impl From<LlmLayer> for SettingsLayer {
+    fn from(llm: LlmLayer) -> Self {
+        Self {
+            llm: Some(llm),
+            ..Self::default()
+        }
+    }
+}
+
 impl From<ProjectLayer> for SettingsLayer {
     fn from(project: ProjectLayer) -> Self {
         Self {

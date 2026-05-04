@@ -132,10 +132,13 @@ fn build_openai_compatible(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
 /// Single source of truth pairing every adapter key with its factory. Both
 /// `factory_for` and `registered_keys` derive from this table.
 const FACTORIES: &[(&str, AdapterFactory)] = &[
-    ("anthropic", build_anthropic),
-    ("openai", build_openai),
-    ("gemini", build_gemini),
-    ("openai_compatible", build_openai_compatible),
+    (model_adapter::ANTHROPIC.key, build_anthropic),
+    (model_adapter::OPENAI.key, build_openai),
+    (model_adapter::GEMINI.key, build_gemini),
+    (
+        model_adapter::OPENAI_COMPATIBLE.key,
+        build_openai_compatible,
+    ),
 ];
 
 /// Look up a factory by adapter key. Returns `None` if the key has no factory

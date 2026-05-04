@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
+use chrono::NaiveDate;
 use fabro_types::settings::cli::{CliAuthStrategy, OutputFormat, OutputVerbosity};
 use fabro_types::settings::run::{
     AgentPermissions, ApprovalMode, DaytonaNetworkLayer, MergeStrategy, RunMode, WorktreeMode,
@@ -13,6 +14,7 @@ use fabro_types::settings::{Duration, InterpString, Size};
 use super::LogFilter;
 use super::cli::{CliAuthLayer, CliLoggingLayer, CliTargetLayer};
 use super::features::FeaturesLayer;
+use super::llm::{CostRates, CredentialRef};
 use super::run::{
     DaytonaSnapshotLayer, HookAgentMarker, HookEntry, HookTlsMode, InterviewProviderLayer,
     LocalSandboxLayer, ModelRefOrSplice, NotificationProviderLayer, RunArtifactsLayer,
@@ -57,6 +59,7 @@ macro_rules! impl_combine_or_option {
 impl_combine_or_option!(
     String,
     bool,
+    f64,
     u16,
     u32,
     u64,
@@ -78,6 +81,7 @@ impl_combine_or_option!(
     WorktreeMode,
     GithubIntegrationStrategy,
     LogDestination,
+    NaiveDate,
     ObjectStoreProvider,
     ServerAuthMethod,
     WebhookStrategy,
@@ -90,7 +94,19 @@ impl Combine for Option<Vec<String>> {
     }
 }
 
+impl Combine for Option<Vec<CredentialRef>> {
+    fn combine(self, other: Self) -> Self {
+        self.or(other)
+    }
+}
+
 impl Combine for Option<Vec<ServerAuthMethod>> {
+    fn combine(self, other: Self) -> Self {
+        self.or(other)
+    }
+}
+
+impl Combine for Option<BTreeMap<String, CostRates>> {
     fn combine(self, other: Self) -> Self {
         self.or(other)
     }
