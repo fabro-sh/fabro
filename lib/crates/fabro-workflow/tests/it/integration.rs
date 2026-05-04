@@ -6809,7 +6809,13 @@ async fn workflow_run_with_vault_only_openai_codex_builds_pr_body() {
                 .header("authorization", "Bearer vault-openai-key");
             then.status(200)
                 .header("content-type", "application/json")
-                .json_body(openai_responses_payload("Narrative from vault source."));
+                .json_body(openai_responses_payload(
+                    &serde_json::to_string(&serde_json::json!({
+                        "title": "Vault title",
+                        "body": "Narrative from vault source.",
+                    }))
+                    .unwrap(),
+                ));
         })
         .await;
 
@@ -6890,7 +6896,7 @@ async fn workflow_run_with_vault_only_openai_codex_builds_pr_body() {
     let run_store = store.open_run_reader(&run_options.run_id).await.unwrap();
     let run_store_handle: fabro_workflow::runtime_store::RunStoreHandle = run_store.into();
 
-    let body = fabro_workflow::pull_request::build_pr_body(
+    let (title, body) = fabro_workflow::pull_request::build_pr_body(
         "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
         "Implement feature",
         "gpt-5.4",
@@ -6910,6 +6916,7 @@ async fn workflow_run_with_vault_only_openai_codex_builds_pr_body() {
     .await
     .expect("PR body should build from vault-only credentials");
 
+    assert_eq!(title, "Vault title");
     assert!(body.contains("Narrative from vault source."));
     response_mock.assert_async().await;
 }
