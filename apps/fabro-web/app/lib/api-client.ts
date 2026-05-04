@@ -218,10 +218,7 @@ export async function apiPaginatedFetcher<TItem, TExtra extends object = {}>(
 }
 
 function stageEventsPagePath(key: string, sinceSeq: number, limit: number): string {
-  const url = new URL(apiPath(key), "http://fabro.local");
-  url.searchParams.set("since_seq", String(sinceSeq));
-  url.searchParams.set("limit", String(limit));
-  return `${url.pathname}${url.search}`;
+  return `${apiPath(key)}?since_seq=${sinceSeq}&limit=${limit}`;
 }
 
 /**

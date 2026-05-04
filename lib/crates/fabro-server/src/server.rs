@@ -138,6 +138,7 @@ use crate::{
 
 mod handler;
 
+pub(crate) use handler::events::EventListParams;
 #[cfg(test)]
 pub(in crate::server) use handler::events::filtered_global_events;
 pub(crate) use handler::graph::render_graph_bytes;

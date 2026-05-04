@@ -44,11 +44,8 @@ export const queryKeys = {
       }),
     events: (id: string, limit = 1000) =>
       withQuery(`/api/v1/runs/${pathSegment(id)}/events`, { limit }),
-    stageEvents: (id: string, stageId: string, sinceSeq?: number, limit?: number) =>
-      withQuery(
-        `/api/v1/runs/${pathSegment(id)}/stages/${pathSegment(stageId)}/events`,
-        { since_seq: sinceSeq, limit },
-      ),
+    stageEvents: (id: string, stageId: string) =>
+      `/api/v1/runs/${pathSegment(id)}/stages/${pathSegment(stageId)}/events`,
     stageLog: (
       id: string,
       stageId: string,

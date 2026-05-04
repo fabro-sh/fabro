@@ -385,6 +385,17 @@ where
     // Unbounded scan first: filtering by node_id with a generic
     // limit-bounded scan would silently drop matches whenever the stage's
     // events are sparse late in the event log.
+    //
+    // We probe just the `node_id` field with a small partial deserialize and
+    // only run the full `RunEvent` parse on matches. Most events in a run
+    // belong to other nodes, so this avoids deserializing large payloads
+    // (`agent.tool.completed.output`, `agent.message.text`, …) we'd discard.
+    #[derive(serde::Deserialize)]
+    struct NodeIdProbe<'a> {
+        #[serde(default, borrow)]
+        node_id: Option<&'a str>,
+    }
+
     let mut iter = db.scan_prefix(keys::run_events_prefix(run_id)).await?;
     let mut events: Vec<EventEnvelope> = Vec::new();
     while let Some(entry) = iter.next().await? {
@@ -395,10 +406,11 @@ where
         if seq < start_seq {
             continue;
         }
-        let event: RunEvent = serde_json::from_slice(&entry.value)?;
-        if event.node_id.as_deref() != Some(node_id) {
+        let probe: NodeIdProbe = serde_json::from_slice(&entry.value)?;
+        if probe.node_id != Some(node_id) {
             continue;
         }
+        let event: RunEvent = serde_json::from_slice(&entry.value)?;
         events.push(EventEnvelope { seq, event });
     }
     events.sort_by_key(|event| event.seq);

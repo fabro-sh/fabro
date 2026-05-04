@@ -41,6 +41,7 @@ import { EmptyState } from "../components/state";
 import { CopyButton } from "../components/ui";
 import { formatDurationSecs } from "../lib/format";
 import { fetchRunCommandLog, useRunStageEvents, useRunStages } from "../lib/queries";
+import { STAGE_ACTIVITY_EVENT_TYPES, type StageActivityEventType } from "../lib/run-events";
 import { mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
 import { getNumber, getString, type UnknownRecord } from "../lib/unknown";
 import {
@@ -65,17 +66,23 @@ function readTermination(props: UnknownRecord): CommandTermination {
   return CommandTermination.EXITED;
 }
 
+const STAGE_ACTIVITY_EVENT_SET = new Set<string>(STAGE_ACTIVITY_EVENT_TYPES);
+
 export function eventsToActivity(events: EventEnvelope[], stageId: string): TurnType[] {
-  const stageEvents = events.filter((e) => e.node_id === stageId);
   const turns: TurnType[] = [];
   // Collect tool pairs: started → completed
   const pendingTools = new Map<string, { toolName: string; input: string }>();
   // Track pending command for pairing started → completed
   let pendingCommand: { stageId: string; script: string; language: string } | undefined;
 
-  for (const e of stageEvents) {
+  for (const e of events) {
+    if (!STAGE_ACTIVITY_EVENT_SET.has(e.event)) continue;
+    // Exhaustive switch over StageActivityEventType: adding a new variant to
+    // STAGE_ACTIVITY_EVENT_TYPES forces a TS error here until the case is
+    // handled, keeping the SWR invalidation set and the reducer in sync.
+    const eventType = e.event as StageActivityEventType;
     const props = e.properties ?? {};
-    switch (e.event) {
+    switch (eventType) {
       case "stage.prompt":
         turns.push({ kind: "system", content: getString(props, "text") ?? e.text ?? "" });
         break;
@@ -567,13 +574,14 @@ export default function RunStages() {
   );
 
   const selectedStage = stages.find((s: Stage) => s.id === stageId) ?? stages[0];
-  const stageEventsQuery = useRunStageEvents(id, selectedStage?.id);
+  const selectedStageId = selectedStage?.id;
+  const stageEventsQuery = useRunStageEvents(id, selectedStageId);
   const turns = useMemo(
     () =>
-      selectedStage
-        ? eventsToActivity(stageEventsQuery.data ?? [], selectedStage.id)
+      selectedStageId
+        ? eventsToActivity(stageEventsQuery.data ?? [], selectedStageId)
         : [],
-    [stageEventsQuery.data, selectedStage],
+    [stageEventsQuery.data, selectedStageId],
   );
   const isRunning = selectedStage?.status === "running";
 

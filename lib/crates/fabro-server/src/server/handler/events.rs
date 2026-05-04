@@ -23,7 +23,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
 }
 
 #[derive(serde::Deserialize)]
-struct EventListParams {
+pub(crate) struct EventListParams {
     #[serde(default)]
     since_seq: Option<u32>,
     #[serde(default)]
@@ -31,11 +31,11 @@ struct EventListParams {
 }
 
 impl EventListParams {
-    fn since_seq(&self) -> u32 {
+    pub(crate) fn since_seq(&self) -> u32 {
         self.since_seq.unwrap_or(1).max(1)
     }
 
-    fn limit(&self) -> usize {
+    pub(crate) fn limit(&self) -> usize {
         self.limit.unwrap_or(100).clamp(1, 1000)
     }
 }

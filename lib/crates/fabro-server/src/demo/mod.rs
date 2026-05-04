@@ -24,7 +24,7 @@ use serde_json::json;
 use crate::error::ApiError;
 use crate::principal_middleware::RequiredUser;
 use crate::run_selector::{ResolveRunError, resolve_run_by_selector};
-use crate::server::{AppState, PaginationParams};
+use crate::server::{AppState, EventListParams, PaginationParams};
 
 fn paginated_response<T: serde::Serialize>(
     items: Vec<T>,
@@ -134,29 +134,11 @@ pub(crate) async fn get_run_stages(
     paginated_response(runs::stages(), &pagination)
 }
 
-#[derive(serde::Deserialize)]
-pub(crate) struct DemoEventListParams {
-    #[serde(default)]
-    since_seq: Option<u32>,
-    #[serde(default)]
-    limit:     Option<usize>,
-}
-
-impl DemoEventListParams {
-    fn since_seq(&self) -> u32 {
-        self.since_seq.unwrap_or(1).max(1)
-    }
-
-    fn limit(&self) -> usize {
-        self.limit.unwrap_or(100).clamp(1, 1000)
-    }
-}
-
 pub(crate) async fn get_stage_events(
     _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
     Path((_id, stage_id)): Path<(String, String)>,
-    Query(params): Query<DemoEventListParams>,
+    Query(params): Query<EventListParams>,
 ) -> Response {
     let since_seq = params.since_seq();
     let limit = params.limit();

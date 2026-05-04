@@ -43,19 +43,25 @@ const RUN_SUMMARY_EVENTS = new Set([
   "run.unarchived",
 ]);
 const STAGE_EVENTS = new Set(["stage.started", "stage.completed", "stage.failed"]);
-// Every event type the `eventsToActivity` reducer in `routes/run-stages.tsx`
-// consumes. When any of these arrive for a stage we currently view, the
-// stage-events SWR key for that stage must be invalidated so the panel
-// refetches. The lifecycle `STAGE_EVENTS` set is kept separate because it
-// also fans out to run-scoped invalidations (stages list, graph, detail).
-const STAGE_ACTIVITY_EVENTS = new Set([
+// Single source of truth: every event type the `eventsToActivity` reducer in
+// `routes/run-stages.tsx` consumes. When any of these arrive for a stage we
+// currently view, the stage-events SWR key for that stage must be invalidated
+// so the panel refetches. The reducer imports this list so the switch stays
+// in sync with the invalidation set; if the reducer grows a new case, this
+// list is the single edit point.
+//
+// The lifecycle `STAGE_EVENTS` set is kept separate because it also fans out
+// to run-scoped invalidations (stages list, graph, detail).
+export const STAGE_ACTIVITY_EVENT_TYPES = [
   "stage.prompt",
   "agent.message",
   "agent.tool.started",
   "agent.tool.completed",
   "command.started",
   "command.completed",
-]);
+] as const;
+export type StageActivityEventType = (typeof STAGE_ACTIVITY_EVENT_TYPES)[number];
+const STAGE_ACTIVITY_EVENTS = new Set<string>(STAGE_ACTIVITY_EVENT_TYPES);
 const INTERVIEW_EVENTS = new Set([
   "interview.started",
   "interview.completed",
