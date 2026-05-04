@@ -193,6 +193,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use crate::event::Emitter;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
@@ -273,7 +274,7 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<crate::event::Emitter>,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, Error> {
@@ -285,7 +286,7 @@ mod tests {
                 _node: &Node,
                 _prompt: &str,
                 _system_prompt: Option<&str>,
-                _emitter: &Arc<crate::event::Emitter>,
+                _emitter: &Arc<Emitter>,
                 _stage_scope: &StageScope,
             ) -> Result<CodergenResult, Error> {
                 Ok(CodergenResult::Text {
@@ -335,7 +336,7 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<crate::event::Emitter>,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, Error> {
@@ -347,7 +348,7 @@ mod tests {
                 _node: &Node,
                 _prompt: &str,
                 _system_prompt: Option<&str>,
-                _emitter: &Arc<crate::event::Emitter>,
+                _emitter: &Arc<Emitter>,
                 _stage_scope: &StageScope,
             ) -> Result<CodergenResult, Error> {
                 Ok(CodergenResult::Text {
@@ -394,7 +395,7 @@ mod tests {
             _prompt: &str,
             _context: &Context,
             _thread_id: Option<&str>,
-            _emitter: &Arc<crate::event::Emitter>,
+            _emitter: &Arc<Emitter>,
             _sandbox: &Arc<dyn fabro_agent::Sandbox>,
             _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
         ) -> Result<CodergenResult, Error> {
@@ -406,7 +407,7 @@ mod tests {
             _node: &Node,
             prompt: &str,
             system_prompt: Option<&str>,
-            _emitter: &Arc<crate::event::Emitter>,
+            _emitter: &Arc<Emitter>,
             _stage_scope: &StageScope,
         ) -> Result<CodergenResult, Error> {
             *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());

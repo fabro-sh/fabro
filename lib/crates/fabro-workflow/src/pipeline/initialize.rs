@@ -1051,6 +1051,11 @@ mod tests {
             move |event| seen.lock().unwrap().push(event.clone())
         });
 
+        // The notice we assert below is emitted before any later sandbox/setup work
+        // that could fail in this minimal fixture (no real
+        // git/devcontainer/lifecycle), so the overall result is intentionally
+        // ignored — the assertion runs against the captured event stream
+        // regardless of how `initialize` ultimately resolves.
         let _ = initialize(persisted, InitOptions {
             run_id: test_run_id(),
             run_store: {
