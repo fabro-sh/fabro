@@ -6896,7 +6896,7 @@ async fn workflow_run_with_vault_only_openai_codex_builds_pr_body() {
     let run_store = store.open_run_reader(&run_options.run_id).await.unwrap();
     let run_store_handle: fabro_workflow::runtime_store::RunStoreHandle = run_store.into();
 
-    let pr = fabro_workflow::pull_request::build_pr_body(
+    let (title, body) = fabro_workflow::pull_request::build_pr_body(
         "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
         "Implement feature",
         "gpt-5.4",
@@ -6916,8 +6916,8 @@ async fn workflow_run_with_vault_only_openai_codex_builds_pr_body() {
     .await
     .expect("PR body should build from vault-only credentials");
 
-    assert_eq!(pr.title, "Vault title");
-    assert!(pr.body.contains("Narrative from vault source."));
+    assert_eq!(title, "Vault title");
+    assert!(body.contains("Narrative from vault source."));
     response_mock.assert_async().await;
 }
 
