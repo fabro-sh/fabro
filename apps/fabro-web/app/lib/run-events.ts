@@ -125,7 +125,7 @@ export function subscribeToRunEvents(
     resyncKeys: () => resyncKeysForRun(runId),
     resolveInvalidation: (payload) => {
       if (payload.run_id !== runId) return { keys: [] };
-      return runInvalidation(runId, payload, { closeOnTerminal: false });
+      return runInvalidation(runId, payload);
     },
     fallbackSubscribe: () =>
       subscribeToSharedEventSource<RunEventPayload>({
@@ -135,28 +135,22 @@ export function subscribeToRunEvents(
         mutate,
         eventSourceFactory,
         debounceMs,
-        resolveInvalidation: (payload) =>
-          runInvalidation(runId, payload, { closeOnTerminal: true }),
+        resolveInvalidation: (payload) => {
+          const result = runInvalidation(runId, payload);
+          return { ...result, close: result.immediate };
+        },
       }),
   });
 }
 
-function runInvalidation(
-  runId: string,
-  payload: RunEventPayload,
-  { closeOnTerminal }: { closeOnTerminal: boolean },
-) {
+function runInvalidation(runId: string, payload: RunEventPayload) {
   const event = payload.event;
-  if (!event) return { keys: [] };
+  if (!event) return { keys: [], immediate: false };
 
   const stageId = stageIdFromPayload(payload);
   const keys = queryKeysForRunEvent(runId, event, stageId);
   const terminal = TERMINAL_EVENTS.has(event);
-  return {
-    keys,
-    close: closeOnTerminal && terminal,
-    immediate: terminal,
-  };
+  return { keys, immediate: terminal };
 }
 
 function resyncKeysForRun(runId: string) {

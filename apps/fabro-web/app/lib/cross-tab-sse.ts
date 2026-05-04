@@ -6,7 +6,7 @@ import {
   type EventSourceLike,
   type MutateFn,
 } from "./sse";
-import { isRecord } from "./unknown";
+import { getNumber, getString, isRecord, type UnknownRecord } from "./unknown";
 
 export const CROSS_TAB_SSE_CHANNEL = "fabro:sse:v1";
 export const HEARTBEAT_MS = 1000;
@@ -156,7 +156,7 @@ class RecentEventCache {
 
   remember(key: string | undefined, now: number): boolean {
     if (!key) return true;
-    this.prune(now);
+    this.evictExpired(now);
     if (this.seen.has(key)) return false;
 
     this.seen.set(key, now);
@@ -168,11 +168,10 @@ class RecentEventCache {
     return true;
   }
 
-  private prune(now: number) {
+  private evictExpired(now: number) {
     for (const [key, seenAt] of this.seen) {
-      if (now - seenAt > this.ttlMs) {
-        this.seen.delete(key);
-      }
+      if (now - seenAt <= this.ttlMs) return;
+      this.seen.delete(key);
     }
   }
 }
@@ -547,7 +546,7 @@ export class CrossTabSseCoordinator {
       return;
     }
 
-    if (this.now() - current.lastSeen > this.timing.leaderStaleMs) {
+    if (!this.leaderIsFresh(current)) {
       this.leader = null;
       this.generation = Math.max(this.generation, current.generation);
       this.pruneStaleCandidates();
@@ -568,7 +567,7 @@ export class CrossTabSseCoordinator {
       reason === "no-leader" &&
       this.leader &&
       this.leader.visibility === "visible" &&
-      this.now() - this.leader.lastSeen <= this.timing.leaderStaleMs
+      this.leaderIsFresh(this.leader)
     ) {
       return;
     }
@@ -618,10 +617,7 @@ export class CrossTabSseCoordinator {
       }
     }
 
-    if (
-      this.leader &&
-      this.now() - this.leader.lastSeen <= this.timing.leaderStaleMs
-    ) {
+    if (this.leader && this.leaderIsFresh(this.leader)) {
       if (this.leader.generation > candidate.candidateGeneration) {
         this.clearCandidate();
         return;
@@ -968,6 +964,10 @@ export class CrossTabSseCoordinator {
   private currentVisibility(): TabVisibility {
     return this.getVisibility() === "hidden" ? "hidden" : "visible";
   }
+
+  private leaderIsFresh(leader: LeaderState): boolean {
+    return this.now() - leader.lastSeen <= this.timing.leaderStaleMs;
+  }
 }
 
 const defaultCoordinator = new CrossTabSseCoordinator();
@@ -1017,130 +1017,106 @@ function addBrowserPagehideListener(handler: () => void): () => void {
 function parseMessage(data: unknown): CrossTabSseMessage | undefined {
   if (!isRecord(data)) return undefined;
   if (data.version !== MESSAGE_VERSION) return undefined;
-  const type = data.type;
-  const tabId = data.tabId;
-  const sentAt = data.sentAt;
-  if (typeof type !== "string") return undefined;
-  if (typeof tabId !== "string") return undefined;
-  if (typeof sentAt !== "number") return undefined;
-  const base = { tabId, sentAt };
+  const type = getString(data, "type");
+  const tabId = getString(data, "tabId");
+  const sentAt = getNumber(data, "sentAt");
+  if (!type || !tabId || sentAt === undefined) return undefined;
+  const base = { type, version: MESSAGE_VERSION, tabId, sentAt };
 
   switch (type) {
     case "hello":
-      return baseMessage(base, "hello");
+      return { ...base, type: "hello" };
     case "heartbeat": {
-      const { leaderId, generation, visibility } = data;
-      if (typeof leaderId === "string" && typeof generation === "number" && isVisibility(visibility)) {
-        return {
-          ...baseMessage(base, "heartbeat"),
-          leaderId,
-          generation,
-          visibility,
-        };
-      }
-      return undefined;
+      const triple = parseLeaderTriple(data);
+      return triple && { ...base, type: "heartbeat", ...triple };
     }
-    case "candidate": {
-      const {
-        candidateId,
-        candidateGeneration,
-        visibility,
-        observedLeaderId,
-        observedGeneration,
-        reason,
-      } = data;
-      if (
-        typeof candidateId === "string" &&
-        typeof candidateGeneration === "number" &&
-        isVisibility(visibility) &&
-        (typeof observedLeaderId === "string" || observedLeaderId === null) &&
-        typeof observedGeneration === "number" &&
-        isCandidateReason(reason)
-      ) {
-        const normalizedObservedLeaderId =
-          typeof observedLeaderId === "string" ? observedLeaderId : null;
-        return {
-          ...baseMessage(base, "candidate"),
-          candidateId,
-          candidateGeneration,
-          visibility,
-          observedLeaderId: normalizedObservedLeaderId,
-          observedGeneration,
-          reason,
-        };
-      }
-      return undefined;
-    }
+    case "candidate":
+      return parseCandidate(data, base);
     case "leader-changed": {
-      const { leaderId, generation, visibility } = data;
-      if (typeof leaderId === "string" && typeof generation === "number" && isVisibility(visibility)) {
-        return {
-          ...baseMessage(base, "leader-changed"),
-          leaderId,
-          generation,
-          visibility,
-        };
-      }
-      return undefined;
+      const triple = parseLeaderTriple(data);
+      return triple && { ...base, type: "leader-changed", ...triple };
     }
     case "release": {
-      const { leaderId, generation } = data;
-      if (typeof leaderId === "string" && typeof generation === "number") {
-        return {
-          ...baseMessage(base, "release"),
-          leaderId,
-          generation,
-        };
-      }
-      return undefined;
+      const pair = parseLeaderPair(data);
+      return pair && { ...base, type: "release", ...pair };
     }
-    case "resync": {
-      const { leaderId, generation, reason } = data;
-      if (
-        (typeof leaderId === "string" || leaderId === null) &&
-        typeof generation === "number" &&
-        isCandidateReason(reason)
-      ) {
-        const normalizedLeaderId = typeof leaderId === "string" ? leaderId : null;
-        return {
-          ...baseMessage(base, "resync"),
-          leaderId: normalizedLeaderId,
-          generation,
-          reason,
-        };
-      }
-      return undefined;
-    }
-    case "event": {
-      const { leaderId, generation, payload } = data;
-      if (typeof leaderId === "string" && typeof generation === "number" && isRecord(payload)) {
-        return {
-          ...baseMessage(base, "event"),
-          leaderId,
-          generation,
-          payload,
-        };
-      }
-      return undefined;
-    }
+    case "resync":
+      return parseResync(data, base);
+    case "event":
+      return parseEvent(data, base);
     default:
       return undefined;
   }
 }
 
-function baseMessage<TType extends CrossTabSseMessage["type"]>(
-  data: {
-    tabId: string;
-    sentAt: number;
-  },
-  type: TType,
-) {
+interface ParsedBase {
+  version: typeof MESSAGE_VERSION;
+  tabId: string;
+  sentAt: number;
+}
+
+function parseLeaderPair(data: unknown): { leaderId: string; generation: number } | undefined {
+  const leaderId = getString(data, "leaderId");
+  const generation = getNumber(data, "generation");
+  if (!leaderId || generation === undefined) return undefined;
+  return { leaderId, generation };
+}
+
+function parseLeaderTriple(
+  data: unknown,
+): { leaderId: string; generation: number; visibility: TabVisibility } | undefined {
+  const pair = parseLeaderPair(data);
+  const visibility = getString(data, "visibility");
+  if (!pair || !isVisibility(visibility)) return undefined;
+  return { ...pair, visibility };
+}
+
+function parseCandidate(data: UnknownRecord, base: ParsedBase): CandidateMessage | undefined {
+  const candidateId = getString(data, "candidateId");
+  const candidateGeneration = getNumber(data, "candidateGeneration");
+  const visibility = getString(data, "visibility");
+  const observedGeneration = getNumber(data, "observedGeneration");
+  const reason = getString(data, "reason");
+  const observedLeaderRaw = data.observedLeaderId;
+  const observedLeaderId =
+    typeof observedLeaderRaw === "string" ? observedLeaderRaw : observedLeaderRaw === null ? null : undefined;
+  if (
+    !candidateId ||
+    candidateGeneration === undefined ||
+    !isVisibility(visibility) ||
+    observedLeaderId === undefined ||
+    observedGeneration === undefined ||
+    !isCandidateReason(reason)
+  ) {
+    return undefined;
+  }
   return {
-    type,
-    version: MESSAGE_VERSION,
-    tabId: data.tabId,
-    sentAt: data.sentAt,
+    ...base,
+    type: "candidate",
+    candidateId,
+    candidateGeneration,
+    visibility,
+    observedLeaderId,
+    observedGeneration,
+    reason,
   };
+}
+
+function parseResync(data: UnknownRecord, base: ParsedBase): ResyncMessage | undefined {
+  const generation = getNumber(data, "generation");
+  const reason = getString(data, "reason");
+  const leaderRaw = data.leaderId;
+  const leaderId = typeof leaderRaw === "string" ? leaderRaw : leaderRaw === null ? null : undefined;
+  if (generation === undefined || !isCandidateReason(reason) || leaderId === undefined) {
+    return undefined;
+  }
+  return { ...base, type: "resync", leaderId, generation, reason };
+}
+
+function parseEvent(data: UnknownRecord, base: ParsedBase): EventMessage | undefined {
+  const pair = parseLeaderPair(data);
+  if (!pair || !isRecord(data.payload)) return undefined;
+  return { ...base, type: "event", ...pair, payload: data.payload };
 }
 
 function isVisibility(value: unknown): value is TabVisibility {
