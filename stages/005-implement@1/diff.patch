@@ -1,0 +1,1440 @@
+diff --git a/apps/fabro-web/app/components/stage-sidebar.tsx b/apps/fabro-web/app/components/stage-sidebar.tsx
+index b72ee77b..4936eb0f 100644
+--- a/apps/fabro-web/app/components/stage-sidebar.tsx
++++ b/apps/fabro-web/app/components/stage-sidebar.tsx
+@@ -18,7 +18,8 @@ export interface Stage {
+   name: string;
+   status: StageState;
+   duration: string;
+-  dotId?: string;
++  nodeId: string;
++  visit: number;
+ }
+ 
+ export const statusConfig: Record<StageState, { icon: ComponentType<{ className?: string }>; color: string }> = {
+@@ -100,7 +101,7 @@ export function StageSidebar({ stages, runId, selectedStageId, activeLink }: Sta
+                     }`}
+                   >
+                     <Icon className={`size-4 shrink-0 ${config.color} ${ACTIVE_STAGE_STATES.has(stage.status) ? "animate-spin" : ""}`} />
+-                    <span className="flex-1 truncate">{stage.name}</span>
++                    <span className="flex-1 truncate">{stage.visit > 1 ? `${stage.name} (${stage.visit})` : stage.name}</span>
+                     <span className="font-mono text-xs tabular-nums text-fg-muted">{stageDuration(stage)}</span>
+                   </Link>
+                 </li>
+@@ -156,4 +157,4 @@ export function StageSidebar({ stages, runId, selectedStageId, activeLink }: Sta
+       </div>
+     </nav>
+   );
+-}
++}
+\ No newline at end of file
+diff --git a/apps/fabro-web/app/lib/run-events.test.tsx b/apps/fabro-web/app/lib/run-events.test.tsx
+index 14acf4f2..61700901 100644
+--- a/apps/fabro-web/app/lib/run-events.test.tsx
++++ b/apps/fabro-web/app/lib/run-events.test.tsx
+@@ -36,6 +36,14 @@ describe("queryKeysForRunEvent", () => {
+       queryKeys.runs.graph("run-1", "TB"),
+     ]);
+   });
++
++  test("stage.retrying invalidates the same keys as other stage events", () => {
++    const keys = queryKeysForRunEvent("run-1", "stage.retrying", "verify@2");
++    expect(keys).toContain(queryKeys.runs.stages("run-1"));
++    expect(keys).toContain(queryKeys.runs.events("run-1", 1000));
++    expect(keys).toContain(queryKeys.runs.detail("run-1"));
++    expect(keys).toContain(queryKeys.runs.stageTurns("run-1", "verify@2"));
++  });
+ });
+ 
+ describe("subscribeToRunEvents", () => {
+@@ -90,6 +98,31 @@ describe("subscribeToRunEvents", () => {
+     cleanup();
+   });
+ 
++  test("envelope with suffixed stage_id invalidates stageTurns(runId, stageId)", () => {
++    const source = new FakeEventSource();
++    const keys: string[] = [];
++    const cleanup = subscribeToRunEvents(
++      "run-stage",
++      (key) => {
++        keys.push(key);
++        return Promise.resolve();
++      },
++      () => source,
++      { debounceMs: 0 },
++    );
++
++    source.emit({ event: "stage.retrying", stage_id: "verify@2", node_id: "verify" });
++
++    expect(keys).toContain(queryKeys.runs.stageTurns("run-stage", "verify@2"));
++    expect(keys).toContain(queryKeys.runs.stages("run-stage"));
++    expect(keys).toContain(queryKeys.runs.events("run-stage", 1000));
++    expect(keys).toContain(queryKeys.runs.graph("run-stage", "LR"));
++    expect(keys).toContain(queryKeys.runs.detail("run-stage"));
++    expect(keys).not.toContain(queryKeys.runs.stageTurns("run-stage", "verify"));
++
++    cleanup();
++  });
++
+   test("malformed events are ignored and StrictMode-style cleanup does not underflow", () => {
+     const firstSource = new FakeEventSource();
+     const secondSource = new FakeEventSource();
+@@ -123,4 +156,4 @@ describe("subscribeToRunEvents", () => {
+     expect(firstSource.closed).toBe(true);
+     expect(secondSource.closed).toBe(true);
+   });
+-});
++});
+\ No newline at end of file
+diff --git a/apps/fabro-web/app/lib/run-events.ts b/apps/fabro-web/app/lib/run-events.ts
+index 924264af..d964cc4d 100644
+--- a/apps/fabro-web/app/lib/run-events.ts
++++ b/apps/fabro-web/app/lib/run-events.ts
+@@ -14,6 +14,7 @@ import {
+ interface RunEventPayload extends EventPayload {
+   event?: string;
+   node_id?: string;
++  stage_id?: string;
+   properties?: Record<string, unknown>;
+ }
+ 
+@@ -32,7 +33,12 @@ const RUN_SUMMARY_EVENTS = new Set([
+   "run.archived",
+   "run.unarchived",
+ ]);
+-const STAGE_EVENTS = new Set(["stage.started", "stage.completed", "stage.failed"]);
++const STAGE_EVENTS = new Set([
++  "stage.started",
++  "stage.completed",
++  "stage.failed",
++  "stage.retrying",
++]);
+ const COMMAND_EVENTS = new Set(["command.started", "command.completed"]);
+ const INTERVIEW_EVENTS = new Set([
+   "interview.started",
+@@ -130,6 +136,7 @@ export function subscribeToRunEvents(
+ }
+ 
+ function stageIdFromPayload(payload: RunEventPayload): string | undefined {
++  if (typeof payload.stage_id === "string") return payload.stage_id;
+   if (typeof payload.node_id === "string") return payload.node_id;
+   const nodeId = payload.properties?.node_id;
+   return typeof nodeId === "string" ? nodeId : undefined;
+@@ -142,4 +149,4 @@ export function useRunEvents(runId: string | undefined) {
+     if (!runId) return;
+     return subscribeToRunEvents(runId, mutate as MutateFn);
+   }, [mutate, runId]);
+-}
++}
+\ No newline at end of file
+diff --git a/apps/fabro-web/app/lib/stage-sidebar.test.ts b/apps/fabro-web/app/lib/stage-sidebar.test.ts
+new file mode 100644
+index 00000000..c34132e1
+--- /dev/null
++++ b/apps/fabro-web/app/lib/stage-sidebar.test.ts
+@@ -0,0 +1,170 @@
++import { describe, expect, test } from "bun:test";
++import type { PaginatedRunStageList, StageState } from "@qltysh/fabro-api-client";
++
++import type { Stage } from "../components/stage-sidebar";
++import { aggregateGraphNodeStatus, mapRunStagesToSidebarStages } from "./stage-sidebar";
++
++function makeStage(nodeId: string, visit: number, status: StageState): Stage {
++  return {
++    id: `${nodeId}@${visit}`,
++    name: nodeId,
++    nodeId,
++    visit,
++    status,
++    duration: "--",
++  };
++}
++
++describe("mapRunStagesToSidebarStages", () => {
++  test("maps two visits of the same node to distinct sidebar entries", () => {
++    const stages: PaginatedRunStageList = {
++      data: [
++        {
++          id: "apply-changes@1",
++          name: "Apply Changes",
++          status: "succeeded",
++          duration_secs: 12.5,
++          node_id: "apply",
++          visit: 1,
++        },
++        {
++          id: "apply-changes@2",
++          name: "Apply Changes",
++          status: "running",
++          node_id: "apply",
++          visit: 2,
++        },
++      ],
++      meta: { has_more: false },
++    };
++
++    const result = mapRunStagesToSidebarStages(stages);
++    expect(result).toHaveLength(2);
++
++    expect(result[0].id).toBe("apply-changes@1");
++    expect(result[0].nodeId).toBe("apply");
++    expect(result[0].visit).toBe(1);
++
++    expect(result[1].id).toBe("apply-changes@2");
++    expect(result[1].nodeId).toBe("apply");
++    expect(result[1].visit).toBe(2);
++  });
++
++  test("filters by node_id (suffixed start@1 / exit@1 are still hidden)", () => {
++    const stages: PaginatedRunStageList = {
++      data: [
++        {
++          id: "start@1",
++          name: "start",
++          status: "succeeded",
++          node_id: "start",
++          visit: 1,
++        },
++        {
++          id: "verify@1",
++          name: "verify",
++          status: "succeeded",
++          node_id: "verify",
++          visit: 1,
++        },
++        {
++          id: "exit@1",
++          name: "exit",
++          status: "succeeded",
++          node_id: "exit",
++          visit: 1,
++        },
++      ],
++      meta: { has_more: false },
++    };
++
++    const result = mapRunStagesToSidebarStages(stages);
++    expect(result.map((s) => s.id)).toEqual(["verify@1"]);
++  });
++
++  test("missing duration renders as '--'", () => {
++    const stages: PaginatedRunStageList = {
++      data: [
++        {
++          id: "verify@1",
++          name: "verify",
++          status: "running",
++          node_id: "verify",
++          visit: 1,
++        },
++      ],
++      meta: { has_more: false },
++    };
++
++    expect(mapRunStagesToSidebarStages(stages)[0].duration).toBe("--");
++  });
++});
++
++describe("aggregateGraphNodeStatus", () => {
++  test("(failed, running) renders as running and clicks open the latest visit", () => {
++    const result = aggregateGraphNodeStatus([
++      makeStage("verify", 1, "failed"),
++      makeStage("verify", 2, "running"),
++    ]);
++    expect(result.get("verify")).toEqual({
++      displayStatus: "running",
++      latestStageId: "verify@2",
++    });
++  });
++
++  test("(failed, succeeded) renders as succeeded — failure-then-fix shows healed", () => {
++    const result = aggregateGraphNodeStatus([
++      makeStage("verify", 1, "failed"),
++      makeStage("verify", 2, "succeeded"),
++    ]);
++    expect(result.get("verify")).toEqual({
++      displayStatus: "succeeded",
++      latestStageId: "verify@2",
++    });
++  });
++
++  test("(succeeded, failed) renders as failed and clicks open the latest visit", () => {
++    const result = aggregateGraphNodeStatus([
++      makeStage("verify", 1, "succeeded"),
++      makeStage("verify", 2, "failed"),
++    ]);
++    expect(result.get("verify")).toEqual({
++      displayStatus: "failed",
++      latestStageId: "verify@2",
++    });
++  });
++
++  test("(running, retrying) — latest active wins", () => {
++    const result = aggregateGraphNodeStatus([
++      makeStage("verify", 1, "running"),
++      makeStage("verify", 2, "retrying"),
++    ]);
++    expect(result.get("verify")).toEqual({
++      displayStatus: "retrying",
++      latestStageId: "verify@2",
++    });
++  });
++
++  test("orders by visit even when input is shuffled", () => {
++    const result = aggregateGraphNodeStatus([
++      makeStage("verify", 2, "running"),
++      makeStage("verify", 1, "failed"),
++    ]);
++    expect(result.get("verify")?.latestStageId).toBe("verify@2");
++  });
++
++  test("single visit per node is unaffected", () => {
++    const result = aggregateGraphNodeStatus([
++      makeStage("plan", 1, "succeeded"),
++      makeStage("apply", 1, "running"),
++    ]);
++    expect(result.get("plan")).toEqual({
++      displayStatus: "succeeded",
++      latestStageId: "plan@1",
++    });
++    expect(result.get("apply")).toEqual({
++      displayStatus: "running",
++      latestStageId: "apply@1",
++    });
++  });
++});
+\ No newline at end of file
+diff --git a/apps/fabro-web/app/lib/stage-sidebar.ts b/apps/fabro-web/app/lib/stage-sidebar.ts
+index 747c6a70..73fdc112 100644
+--- a/apps/fabro-web/app/lib/stage-sidebar.ts
++++ b/apps/fabro-web/app/lib/stage-sidebar.ts
+@@ -14,14 +14,46 @@ export function mapRunStagesToSidebarStages(
+   stagesResult: PaginatedRunStageList | null | undefined,
+ ): Stage[] {
+   return (stagesResult?.data ?? [])
+-    .filter((stage) => isVisibleStage(stage.id))
++    .filter((stage) => isVisibleStage(stage.node_id))
+     .map((stage) => ({
+       id: stage.id,
+       name: stage.name,
+-      dotId: stage.dot_id ?? stage.id,
++      nodeId: stage.node_id,
++      visit: stage.visit,
+       status: stage.status,
+       duration: stage.duration_secs != null
+         ? formatDurationSecs(stage.duration_secs)
+         : "--",
+     }));
+ }
++
++/**
++ * Aggregate per-node display state for the workflow graph.
++ *
++ * Status policy: if any visit is active (running/retrying), the node renders
++ * that active state (latest active visit wins). Otherwise the node renders
++ * the latest visit's terminal state. The click target is always the latest
++ * visit's stageId.
++ */
++export function aggregateGraphNodeStatus(stages: readonly Stage[]): Map<
++  string,
++  { displayStatus: StageState; latestStageId: string }
++> {
++  const grouped = new Map<string, Stage[]>();
++  for (const stage of stages) {
++    const list = grouped.get(stage.nodeId) ?? [];
++    list.push(stage);
++    grouped.set(stage.nodeId, list);
++  }
++  const result = new Map<string, { displayStatus: StageState; latestStageId: string }>();
++  for (const [nodeId, list] of grouped) {
++    list.sort((a, b) => a.visit - b.visit);
++    const latest = list[list.length - 1];
++    const activeVisit = [...list]
++      .reverse()
++      .find((s) => ACTIVE_STAGE_STATES.has(s.status));
++    const display = activeVisit ?? latest;
++    result.set(nodeId, { displayStatus: display.status, latestStageId: latest.id });
++  }
++  return result;
++}
+\ No newline at end of file
+diff --git a/apps/fabro-web/app/routes/run-overview.tsx b/apps/fabro-web/app/routes/run-overview.tsx
+index bf0c0dd9..17982556 100644
+--- a/apps/fabro-web/app/routes/run-overview.tsx
++++ b/apps/fabro-web/app/routes/run-overview.tsx
+@@ -3,7 +3,6 @@ import { useNavigate, useParams } from "react-router";
+ import { graphTheme } from "../lib/graph-theme";
+ import { useRun, useRunGraph, useRunStages } from "../lib/queries";
+ import { StageSidebar } from "../components/stage-sidebar";
+-import type { Stage } from "../components/stage-sidebar";
+ import {
+   GRAPH_DEFAULT_ZOOM_INDEX,
+   GRAPH_ZOOM_STEPS,
+@@ -13,6 +12,7 @@ import { EmptyState } from "../components/state";
+ import {
+   ACTIVE_STAGE_STATES,
+   SUCCEEDED_STAGE_STATES,
++  aggregateGraphNodeStatus,
+   mapRunStagesToSidebarStages,
+ } from "../lib/stage-sidebar";
+ 
+@@ -63,18 +63,21 @@ export default function RunOverview() {
+     svgRef.current = svg;
+ 
+     const gt = graphTheme;
+-    const runningDotIds = new Set<string>(
+-      stages.filter((s: Stage) => ACTIVE_STAGE_STATES.has(s.status)).map((s: Stage) => s.dotId ?? s.id),
+-    );
+-    const failedDotIds = new Set<string>(
+-      stages.filter((s: Stage) => s.status === "failed").map((s: Stage) => s.dotId ?? s.id),
+-    );
+-    const completedDotIds = new Set<string>(
+-      stages.filter((s: Stage) => SUCCEEDED_STAGE_STATES.has(s.status)).map((s: Stage) => s.dotId ?? s.id),
+-    );
+-    const dotIdToStageId = new Map<string, string>(
+-      stages.map((s: Stage) => [s.dotId ?? s.id, s.id]),
+-    );
++    const aggregated = aggregateGraphNodeStatus(stages);
++    const runningDotIds = new Set<string>();
++    const failedDotIds = new Set<string>();
++    const completedDotIds = new Set<string>();
++    const dotIdToStageId = new Map<string, string>();
++    for (const [nodeId, { displayStatus, latestStageId }] of aggregated) {
++      dotIdToStageId.set(nodeId, latestStageId);
++      if (ACTIVE_STAGE_STATES.has(displayStatus)) {
++        runningDotIds.add(nodeId);
++      } else if (displayStatus === "failed") {
++        failedDotIds.add(nodeId);
++      } else if (SUCCEEDED_STAGE_STATES.has(displayStatus)) {
++        completedDotIds.add(nodeId);
++      }
++    }
+ 
+     const ns = "http://www.w3.org/2000/svg";
+     for (const group of svg.querySelectorAll(".node")) {
+@@ -234,4 +237,4 @@ export default function RunOverview() {
+       </div>
+     </div>
+   );
+-}
++}
+\ No newline at end of file
+diff --git a/apps/fabro-web/app/routes/run-stages.test.ts b/apps/fabro-web/app/routes/run-stages.test.ts
+index d10b5b2d..9a7d9bc4 100644
+--- a/apps/fabro-web/app/routes/run-stages.test.ts
++++ b/apps/fabro-web/app/routes/run-stages.test.ts
+@@ -1,6 +1,7 @@
+ import { describe, expect, test } from "bun:test";
++import type { EventEnvelope } from "@qltysh/fabro-api-client";
+ 
+-import { isSafeMarkdownHref } from "./run-stages";
++import { isSafeMarkdownHref, turnsFromEvents } from "./run-stages";
+ 
+ describe("isSafeMarkdownHref", () => {
+   test("rejects protocol-relative URLs", () => {
+@@ -15,3 +16,96 @@ describe("isSafeMarkdownHref", () => {
+     expect(isSafeMarkdownHref("mailto:test@example.com")).toBe(true);
+   });
+ });
++
++function makeEnvelope(overrides: Partial<EventEnvelope>): EventEnvelope {
++  return {
++    seq: 1,
++    id: "evt",
++    ts: "2026-01-01T00:00:00Z",
++    run_id: "run-1",
++    event: "stage.prompt",
++    ...overrides,
++  } as EventEnvelope;
++}
++
++describe("turnsFromEvents", () => {
++  test("filters events by stage_id (verify@1 vs verify@2 do not cross-contaminate)", () => {
++    const events: EventEnvelope[] = [
++      makeEnvelope({
++        seq: 1,
++        event: "stage.prompt",
++        stage_id: "verify@1",
++        node_id: "verify",
++        properties: { text: "first visit prompt" },
++      }),
++      makeEnvelope({
++        seq: 2,
++        event: "stage.prompt",
++        stage_id: "verify@2",
++        node_id: "verify",
++        properties: { text: "second visit prompt" },
++      }),
++      makeEnvelope({
++        seq: 3,
++        event: "agent.message",
++        stage_id: "verify@1",
++        node_id: "verify",
++        properties: { text: "first visit reply" },
++      }),
++      makeEnvelope({
++        seq: 4,
++        event: "agent.message",
++        stage_id: "verify@2",
++        node_id: "verify",
++        properties: { text: "second visit reply" },
++      }),
++    ];
++
++    const firstVisit = turnsFromEvents(events, "verify@1");
++    expect(firstVisit).toEqual([
++      { kind: "system", content: "first visit prompt" },
++      { kind: "assistant", content: "first visit reply" },
++    ]);
++
++    const secondVisit = turnsFromEvents(events, "verify@2");
++    expect(secondVisit).toEqual([
++      { kind: "system", content: "second visit prompt" },
++      { kind: "assistant", content: "second visit reply" },
++    ]);
++  });
++
++  test("command turn carries the requested stage_id, no @1 fallback", () => {
++    const events: EventEnvelope[] = [
++      makeEnvelope({
++        seq: 1,
++        event: "command.started",
++        stage_id: "verify@2",
++        node_id: "verify",
++        properties: { script: "echo hi", language: "shell" },
++      }),
++      makeEnvelope({
++        seq: 2,
++        event: "command.completed",
++        stage_id: "verify@2",
++        node_id: "verify",
++        properties: {
++          stdout: "hi",
++          stderr: "",
++          exit_code: 0,
++          duration_ms: 5,
++          termination: "exited",
++        },
++      }),
++    ];
++
++    const turns = turnsFromEvents(events, "verify@2");
++    expect(turns).toHaveLength(1);
++    const turn = turns[0];
++    expect(turn.kind).toBe("command");
++    if (turn.kind === "command") {
++      expect(turn.stageId).toBe("verify@2");
++      expect(turn.script).toBe("echo hi");
++      expect(turn.running).toBe(false);
++    }
++  });
++});
+\ No newline at end of file
+diff --git a/apps/fabro-web/app/routes/run-stages.tsx b/apps/fabro-web/app/routes/run-stages.tsx
+index 6d179d70..bb66bfd7 100644
+--- a/apps/fabro-web/app/routes/run-stages.tsx
++++ b/apps/fabro-web/app/routes/run-stages.tsx
+@@ -68,8 +68,8 @@ function readTermination(props: UnknownRecord): CommandTermination {
+   return CommandTermination.EXITED;
+ }
+ 
+-function turnsFromEvents(events: EventEnvelope[], stageId: string): TurnType[] {
+-  const stageEvents = events.filter((e) => e.node_id === stageId);
++export function turnsFromEvents(events: EventEnvelope[], stageId: string): TurnType[] {
++  const stageEvents = events.filter((e) => e.stage_id === stageId);
+   const turns: TurnType[] = [];
+   // Collect tool pairs: started → completed
+   const pendingTools = new Map<string, { toolName: string; input: string }>();
+@@ -114,7 +114,7 @@ function turnsFromEvents(events: EventEnvelope[], stageId: string): TurnType[] {
+       }
+       case "command.started": {
+         pendingCommand = {
+-          stageId: e.stage_id ?? `${stageId}@1`,
++          stageId,
+           script: getString(props, "script") ?? "",
+           language: getString(props, "language") ?? "shell",
+         };
+@@ -123,7 +123,7 @@ function turnsFromEvents(events: EventEnvelope[], stageId: string): TurnType[] {
+       case "command.completed": {
+         turns.push({
+           kind: "command",
+-          stageId: pendingCommand?.stageId ?? e.stage_id ?? `${stageId}@1`,
++          stageId: pendingCommand?.stageId ?? stageId,
+           script: pendingCommand?.script ?? "",
+           language: pendingCommand?.language ?? "shell",
+           stdout: getString(props, "stdout") ?? "",
+@@ -637,7 +637,9 @@ export default function RunStages() {
+       <div className="min-w-0 flex-1 space-y-3">
+         <div className="sticky top-0 z-10 -mx-2 flex items-center gap-2 bg-page/85 px-2 py-2 backdrop-blur">
+           <SelectedIcon className={`size-5 ${selectedConfig.color} ${isRunning ? "animate-spin" : ""}`} />
+-          <h3 className="text-base font-semibold text-fg">{selectedStage.name}</h3>
++          <h3 className="text-base font-semibold text-fg">
++            {selectedStage.visit > 1 ? `${selectedStage.name} (${selectedStage.visit})` : selectedStage.name}
++          </h3>
+           <span className="font-mono text-xs tabular-nums text-fg-muted">
+             <RunningStageDuration
+               isRunning={isRunning}
+@@ -661,4 +663,4 @@ export default function RunStages() {
+       </div>
+     </div>
+   );
+-}
++}
+\ No newline at end of file
+diff --git a/docs/public/api-reference/fabro-api.yaml b/docs/public/api-reference/fabro-api.yaml
+index d1b8bc7f..9cad7b73 100644
+--- a/docs/public/api-reference/fabro-api.yaml
++++ b/docs/public/api-reference/fabro-api.yaml
+@@ -6319,11 +6319,13 @@ components:
+         - id
+         - name
+         - status
++        - node_id
++        - visit
+       properties:
+         id:
+           type: string
+-          description: Unique stage identifier within the run.
+-          example: propose-changes
++          description: StageId in "node_id@visit" form, e.g. verify@2.
++          example: verify@2
+         name:
+           type: string
+           description: Human-readable stage name.
+@@ -6334,10 +6336,16 @@ components:
+           type: number
+           description: Time spent in this stage, in seconds.
+           example: 154.0
+-        dot_id:
++        node_id:
+           type: string
+-          description: Node identifier in the Graphviz graph source.
+-          example: propose
++          description: Node id in the workflow graph; multiple stages with different visits share the same node_id.
++          example: verify
++        visit:
++          type: integer
++          format: uint32
++          minimum: 1
++          description: 1-based visit count; bumped each time the workflow re-enters this node.
++          example: 2
+ 
+     ToolUse:
+       description: A single tool invocation with its input, result, and execution metadata.
+@@ -8322,4 +8330,4 @@ components:
+         login:
+           type: string
+           description: User's login identifier (e.g. GitHub username).
+-          example: octocat
++          example: octocat
+\ No newline at end of file
+diff --git a/lib/crates/fabro-server/src/demo/mod.rs b/lib/crates/fabro-server/src/demo/mod.rs
+index c9751cf8..f338cdc0 100644
+--- a/lib/crates/fabro-server/src/demo/mod.rs
++++ b/lib/crates/fabro-server/src/demo/mod.rs
+@@ -1154,34 +1154,49 @@ mod runs {
+     }
+ 
+     pub(super) fn stages() -> Vec<RunStage> {
++        fn visit(n: u32) -> std::num::NonZeroU32 {
++            std::num::NonZeroU32::new(n).expect("visit is 1-based")
++        }
+         vec![
+             RunStage {
+-                id:            "detect-drift".into(),
++                id:            "detect-drift@1".into(),
+                 name:          "Detect Drift".into(),
+                 status:        StageState::Succeeded,
+                 duration_secs: Some(72.0),
+-                dot_id:        Some("detect".into()),
++                node_id:       "detect".into(),
++                visit:         visit(1),
+             },
+             RunStage {
+-                id:            "propose-changes".into(),
++                id:            "propose-changes@1".into(),
+                 name:          "Propose Changes".into(),
+                 status:        StageState::Succeeded,
+                 duration_secs: Some(154.0),
+-                dot_id:        Some("propose".into()),
++                node_id:       "propose".into(),
++                visit:         visit(1),
+             },
+             RunStage {
+-                id:            "review-changes".into(),
++                id:            "review-changes@1".into(),
+                 name:          "Review Changes".into(),
+                 status:        StageState::Succeeded,
+                 duration_secs: Some(45.0),
+-                dot_id:        Some("review".into()),
++                node_id:       "review".into(),
++                visit:         visit(1),
+             },
+             RunStage {
+-                id:            "apply-changes".into(),
++                id:            "apply-changes@1".into(),
+                 name:          "Apply Changes".into(),
+-                status:        StageState::Running,
++                status:        StageState::Succeeded,
+                 duration_secs: Some(118.0),
+-                dot_id:        Some("apply".into()),
++                node_id:       "apply".into(),
++                visit:         visit(1),
++            },
++            RunStage {
++                id:            "apply-changes@2".into(),
++                name:          "Apply Changes".into(),
++                status:        StageState::Running,
++                duration_secs: None,
++                node_id:       "apply".into(),
++                visit:         visit(2),
+             },
+         ]
+     }
+diff --git a/lib/crates/fabro-server/src/server/handler/billing.rs b/lib/crates/fabro-server/src/server/handler/billing.rs
+index dfe7d517..b3ae9c1b 100644
+--- a/lib/crates/fabro-server/src/server/handler/billing.rs
++++ b/lib/crates/fabro-server/src/server/handler/billing.rs
+@@ -1,13 +1,14 @@
++use std::num::NonZeroU32;
+ use std::sync::Arc;
+ 
+-use fabro_types::EventBody;
++use fabro_store::RunProjectionReducer;
++use fabro_types::{EventBody, RunProjection, StageId};
+ 
+ use super::super::{
+     ApiError, AppState, BilledTokenCounts, BillingByModel, BillingStageRef, EventEnvelope, HashMap,
+     IntoResponse, Json, ListResponse, ModelBillingTotals, ModelReference, PaginationParams, Path,
+     Query, RequiredUser, Response, Router, RunBilling, RunBillingStage, RunBillingTotals, RunId,
+-    RunStage, RunStatus, StageState, State, StatusCode, accumulate_model_billing, get,
+-    parse_run_id_path,
++    RunStage, StageState, State, StatusCode, accumulate_model_billing, get, parse_run_id_path,
+ };
+ 
+ pub(super) fn routes() -> Router<Arc<AppState>> {
+@@ -16,23 +17,46 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
+         .route("/runs/{id}/billing", get(get_run_billing))
+ }
+ 
+-fn active_stage_state_from_events(events: &[EventEnvelope], node_id: &str) -> StageState {
++/// Pick the stage state from the latest lifecycle event for `stage_id`,
++/// falling back to the projection's stored completion when no lifecycle
++/// events have landed yet (e.g. an empty event log for a completed run
++/// recovered from snapshot only).
++fn stage_status_from_events(
++    events: &[EventEnvelope],
++    stage_id: &StageId,
++    projection: &RunProjection,
++) -> StageState {
+     let latest = events.iter().rev().find(|envelope| {
+-        envelope.event.node_id.as_deref() == Some(node_id)
++        envelope.event.stage_id.as_ref() == Some(stage_id)
+             && matches!(
+                 &envelope.event.body,
+-                EventBody::StageRetrying(_)
+-                    | EventBody::StageStarted(_)
++                EventBody::StageStarted(_)
++                    | EventBody::StageRetrying(_)
+                     | EventBody::StageCompleted(_)
+                     | EventBody::StageFailed(_)
+             )
+     });
+ 
+-    if latest.is_some_and(|e| matches!(&e.event.body, EventBody::StageRetrying(_))) {
+-        StageState::Retrying
+-    } else {
+-        StageState::Running
++    if let Some(envelope) = latest {
++        return match &envelope.event.body {
++            EventBody::StageStarted(_) => StageState::Running,
++            EventBody::StageRetrying(_) => StageState::Retrying,
++            EventBody::StageFailed(props) => {
++                if props.will_retry {
++                    StageState::Retrying
++                } else {
++                    StageState::Failed
++                }
++            }
++            EventBody::StageCompleted(props) => StageState::from(props.status),
++            _ => StageState::Pending,
++        };
+     }
++
++    projection
++        .stage(stage_id)
++        .and_then(|stage| stage.completion.as_ref())
++        .map_or(StageState::Pending, |c| StageState::from(c.outcome))
+ }
+ 
+ async fn list_run_stages(
+@@ -46,82 +70,32 @@ async fn list_run_stages(
+         Err(response) => return response,
+     };
+ 
+-    // Try live run first.
+-    let (checkpoint, run_is_active) = {
+-        let runs = state.runs.lock().expect("runs lock poisoned");
+-        match runs.get(&id) {
+-            Some(managed_run) => {
+-                let active = !matches!(
+-                    managed_run.status,
+-                    RunStatus::Succeeded { .. } | RunStatus::Failed { .. } | RunStatus::Dead
+-                );
+-                (managed_run.checkpoint.clone(), active)
+-            }
+-            None => (None, false),
+-        }
+-    };
+-
+-    // Fall back to stored run.
+-    let (checkpoint, run_is_active) = if checkpoint.is_some() {
+-        (checkpoint, run_is_active)
+-    } else {
+-        match state.store.open_run_reader(&id).await {
+-            Ok(run_store) => match run_store.state().await {
+-                Ok(run_state) => {
+-                    let active = run_state.status.is_some_and(|status| !status.is_terminal());
+-                    (run_state.checkpoint, active)
+-                }
+-                Err(_) => (None, false),
+-            },
+-            Err(_) => return ApiError::not_found("Run not found.").into_response(),
+-        }
+-    };
+-
+-    let Some(checkpoint) = checkpoint else {
+-        return (
+-            StatusCode::OK,
+-            Json(ListResponse::new(Vec::<RunStage>::new())),
+-        )
+-            .into_response();
+-    };
+-
+     let events = match state.store.open_run_reader(&id).await {
+         Ok(run_store) => run_store.list_events().await.unwrap_or_default(),
+-        Err(_) => Vec::new(),
++        Err(_) => return ApiError::not_found("Run not found.").into_response(),
+     };
+-    let stage_durations = fabro_workflow::extract_stage_durations_from_events(&events);
+ 
+-    let mut stages = Vec::new();
+-    for node_id in &checkpoint.completed_nodes {
+-        let duration_ms = stage_durations.get(node_id).copied().unwrap_or(0);
+-        let status = match checkpoint.node_outcomes.get(node_id) {
+-            Some(outcome) => StageState::from(outcome.status),
+-            None => StageState::Succeeded,
+-        };
++    let projection = RunProjection::apply_events(&events).unwrap_or_default();
++    let stage_durations = fabro_workflow::extract_stage_durations_by_stage_id(&events);
++
++    let mut entries: Vec<(&StageId, &fabro_types::StageProjection)> =
++        projection.iter_stages().collect();
++    entries.sort_by_key(|(_, projection)| projection.first_event_seq);
++
++    let mut stages = Vec::with_capacity(entries.len());
++    for (stage_id, _projection_stage) in entries {
++        let duration_ms = stage_durations.get(stage_id).copied();
++        let visit = NonZeroU32::new(stage_id.visit()).expect("StageId.visit is 1-based");
+         stages.push(RunStage {
+-            id: node_id.clone(),
+-            name: node_id.clone(),
+-            status,
+-            duration_secs: Some(duration_ms as f64 / 1000.0),
+-            dot_id: Some(node_id.clone()),
++            id: stage_id.to_string(),
++            name: stage_id.node_id().to_string(),
++            status: stage_status_from_events(&events, stage_id, &projection),
++            duration_secs: duration_ms.map(|ms| ms as f64 / 1000.0),
++            node_id: stage_id.node_id().to_string(),
++            visit,
+         });
+     }
+ 
+-    // Add next node as running if the run is still active.
+-    // The checkpoint's current_node is the last *completed* stage; next_node_id
+-    // is the stage that is currently executing.
+-    if let Some(next_id) = &checkpoint.next_node_id {
+-        if run_is_active && next_id != "exit" && !checkpoint.completed_nodes.contains(next_id) {
+-            stages.push(RunStage {
+-                id:            next_id.clone(),
+-                name:          next_id.clone(),
+-                status:        active_stage_state_from_events(&events, next_id),
+-                duration_secs: None,
+-                dot_id:        Some(next_id.clone()),
+-            });
+-        }
+-    }
+-
+     (StatusCode::OK, Json(ListResponse::new(stages))).into_response()
+ }
+ 
+diff --git a/lib/crates/fabro-server/src/server/tests.rs b/lib/crates/fabro-server/src/server/tests.rs
+index 6078c362..12933386 100644
+--- a/lib/crates/fabro-server/src/server/tests.rs
++++ b/lib/crates/fabro-server/src/server/tests.rs
+@@ -18,8 +18,7 @@ use fabro_model::Provider;
+ use fabro_types::settings::ServerAuthMethod;
+ use fabro_types::{
+     AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
+-    InterviewQuestionRecord, Outcome, QuestionType, RunBlobId, RunId, RunSpec, StageOutcome,
+-    SystemActorKind, fixtures,
++    InterviewQuestionRecord, QuestionType, RunBlobId, RunId, RunSpec, SystemActorKind, fixtures,
+ };
+ use fabro_util::check_report::CheckStatus;
+ use httpmock::Method::{GET, POST};
+@@ -2112,6 +2111,30 @@ async fn create_durable_run_with_events(
+     }
+ }
+ 
++/// Append a stage lifecycle event with an explicit `StageScope`, so the
++/// stored envelope carries the full `stage_id` (`node_id@visit`). The bare
++/// [`workflow_event::append_event`] helper only writes `node_id` because
++/// stage lifecycle variants don't carry visit in their payload — production
++/// always emits via `Emitter::emit_scoped`.
++async fn append_scoped_stage_event(
++    state: &Arc<AppState>,
++    run_id: RunId,
++    node_id: &str,
++    visit: u32,
++    event: &workflow_event::Event,
++) {
++    let scope = fabro_workflow::event::StageScope {
++        node_id: node_id.to_string(),
++        visit,
++        parallel_group_id: None,
++        parallel_branch_id: None,
++    };
++    let stored = fabro_workflow::event::to_run_event_at(&run_id, event, Utc::now(), Some(&scope));
++    let payload = fabro_workflow::event::build_redacted_event_payload(&stored, &run_id).unwrap();
++    let run_store = state.store.open_run(&run_id).await.unwrap();
++    run_store.append_event(&payload).await.unwrap();
++}
++
+ fn stage_status<'a>(body: &'a serde_json::Value, id: &str) -> &'a str {
+     body["data"]
+         .as_array()
+@@ -2134,7 +2157,58 @@ async fn list_run_stages_projects_retrying_until_completion() {
+         },
+         workflow_event::Event::RunStarting,
+         workflow_event::Event::RunRunning,
+-        workflow_event::Event::StageStarted {
++    ])
++    .await;
++    append_scoped_stage_event(
++        &state,
++        run_id,
++        "setup",
++        1,
++        &workflow_event::Event::StageStarted {
++            node_id:      "setup".to_string(),
++            name:         "Setup".to_string(),
++            index:        0,
++            handler_type: "command".to_string(),
++            attempt:      1,
++            max_attempts: 1,
++        },
++    )
++    .await;
++    append_scoped_stage_event(
++        &state,
++        run_id,
++        "setup",
++        1,
++        &workflow_event::Event::StageCompleted {
++            node_id: "setup".to_string(),
++            name: "Setup".to_string(),
++            index: 0,
++            duration_ms: 5,
++            status: "succeeded".to_string(),
++            preferred_label: None,
++            suggested_next_ids: Vec::new(),
++            billing: None,
++            failure: None,
++            notes: None,
++            files_touched: Vec::new(),
++            context_updates: None,
++            jump_to_node: None,
++            context_values: None,
++            node_visits: None,
++            loop_failure_signatures: None,
++            restart_failure_signatures: None,
++            response: None,
++            attempt: 1,
++            max_attempts: 1,
++        },
++    )
++    .await;
++    append_scoped_stage_event(
++        &state,
++        run_id,
++        "work",
++        1,
++        &workflow_event::Event::StageStarted {
+             node_id:      "work".to_string(),
+             name:         "Work".to_string(),
+             index:        1,
+@@ -2142,7 +2216,14 @@ async fn list_run_stages_projects_retrying_until_completion() {
+             attempt:      1,
+             max_attempts: 3,
+         },
+-        workflow_event::Event::StageFailed {
++    )
++    .await;
++    append_scoped_stage_event(
++        &state,
++        run_id,
++        "work",
++        1,
++        &workflow_event::Event::StageFailed {
+             node_id:     "work".to_string(),
+             name:        "Work".to_string(),
+             index:       1,
+@@ -2151,7 +2232,14 @@ async fn list_run_stages_projects_retrying_until_completion() {
+             duration_ms: 10,
+             actor:       None,
+         },
+-        workflow_event::Event::StageRetrying {
++    )
++    .await;
++    append_scoped_stage_event(
++        &state,
++        run_id,
++        "work",
++        1,
++        &workflow_event::Event::StageRetrying {
+             node_id:      "work".to_string(),
+             name:         "Work".to_string(),
+             index:        1,
+@@ -2159,41 +2247,9 @@ async fn list_run_stages_projects_retrying_until_completion() {
+             max_attempts: 3,
+             delay_ms:     100,
+         },
+-    ])
++    )
+     .await;
+ 
+-    let mut node_outcomes = HashMap::new();
+-    node_outcomes.insert("setup".to_string(), Outcome::success());
+-    let mut checkpoint = Checkpoint {
+-        timestamp: Utc::now(),
+-        current_node: "setup".to_string(),
+-        completed_nodes: vec!["setup".to_string()],
+-        node_retries: HashMap::new(),
+-        context_values: HashMap::new(),
+-        node_outcomes,
+-        next_node_id: Some("work".to_string()),
+-        git_commit_sha: None,
+-        loop_failure_signatures: HashMap::new(),
+-        restart_failure_signatures: HashMap::new(),
+-        node_visits: HashMap::new(),
+-    };
+-
+-    let run_dir = std::env::temp_dir().join(format!("fabro-server-test-{run_id}"));
+-    std::fs::create_dir_all(&run_dir).unwrap();
+-    let mut managed = managed_run(
+-        MINIMAL_DOT.to_string(),
+-        RunStatus::Running,
+-        Utc::now(),
+-        run_dir,
+-        RunExecutionMode::Start,
+-    );
+-    managed.checkpoint = Some(checkpoint.clone());
+-    state
+-        .runs
+-        .lock()
+-        .expect("runs lock poisoned")
+-        .insert(run_id, managed);
+-
+     let response = app
+         .clone()
+         .oneshot(
+@@ -2206,29 +2262,14 @@ async fn list_run_stages_projects_retrying_until_completion() {
+         .await
+         .unwrap();
+     let body = response_json!(response, StatusCode::OK).await;
+-    assert_eq!(stage_status(&body, "setup"), "succeeded");
+-    assert_eq!(stage_status(&body, "work"), "retrying");
+-
+-    let mut work_outcome = Outcome::success();
+-    work_outcome.status = StageOutcome::PartiallySucceeded;
+-    checkpoint.completed_nodes.push("work".to_string());
+-    checkpoint
+-        .node_outcomes
+-        .insert("work".to_string(), work_outcome);
+-    checkpoint.current_node = "work".to_string();
+-    checkpoint.next_node_id = Some("exit".to_string());
+-    state
+-        .runs
+-        .lock()
+-        .expect("runs lock poisoned")
+-        .get_mut(&run_id)
+-        .unwrap()
+-        .checkpoint = Some(checkpoint);
++    assert_eq!(stage_status(&body, "setup@1"), "succeeded");
++    assert_eq!(stage_status(&body, "work@1"), "retrying");
+ 
+-    let run_store = state.store.open_run(&run_id).await.unwrap();
+-    workflow_event::append_event(
+-        &run_store,
+-        &run_id,
++    append_scoped_stage_event(
++        &state,
++        run_id,
++        "work",
++        1,
+         &workflow_event::Event::StageCompleted {
+             node_id: "work".to_string(),
+             name: "Work".to_string(),
+@@ -2252,10 +2293,269 @@ async fn list_run_stages_projects_retrying_until_completion() {
+             max_attempts: 3,
+         },
+     )
+-    .await
+-    .unwrap();
++    .await;
++
++    let response = app
++        .oneshot(
++            Request::builder()
++                .method("GET")
++                .uri(api(&format!("/runs/{run_id}/stages")))
++                .body(Body::empty())
++                .unwrap(),
++        )
++        .await
++        .unwrap();
++    let body = response_json!(response, StatusCode::OK).await;
++    assert_eq!(stage_status(&body, "work@1"), "partially_succeeded");
++}
++
++fn stage_entry<'a>(body: &'a serde_json::Value, id: &str) -> &'a serde_json::Value {
++    body["data"]
++        .as_array()
++        .unwrap()
++        .iter()
++        .find(|stage| stage["id"] == id)
++        .unwrap_or_else(|| panic!("stage {id} not found in {body:#?}"))
++}
++
++#[tokio::test]
++async fn list_run_stages_distinguishes_visits() {
++    let state = test_app_state_with_isolated_storage();
++    let app = crate::test_support::build_test_router(Arc::clone(&state));
++    let run_id = RunId::new();
++
++    create_durable_run_with_events(&state, run_id, &[
++        workflow_event::Event::RunSubmitted {
++            definition_blob: None,
++        },
++        workflow_event::Event::RunStarting,
++        workflow_event::Event::RunRunning,
++    ])
++    .await;
++
++    // First visit of `verify` — failed.
++    append_scoped_stage_event(
++        &state,
++        run_id,
++        "verify",
++        1,
++        &workflow_event::Event::StageStarted {
++            node_id:      "verify".to_string(),
++            name:         "Verify".to_string(),
++            index:        1,
++            handler_type: "command".to_string(),
++            attempt:      1,
++            max_attempts: 1,
++        },
++    )
++    .await;
++    append_scoped_stage_event(
++        &state,
++        run_id,
++        "verify",
++        1,
++        &workflow_event::Event::StageCompleted {
++            node_id: "verify".to_string(),
++            name: "Verify".to_string(),
++            index: 1,
++            duration_ms: 1500,
++            status: "failed".to_string(),
++            preferred_label: None,
++            suggested_next_ids: Vec::new(),
++            billing: None,
++            failure: None,
++            notes: None,
++            files_touched: Vec::new(),
++            context_updates: None,
++            jump_to_node: None,
++            context_values: None,
++            node_visits: None,
++            loop_failure_signatures: None,
++            restart_failure_signatures: None,
++            response: None,
++            attempt: 1,
++            max_attempts: 1,
++        },
++    )
++    .await;
++
++    // Second visit of `verify` — running.
++    append_scoped_stage_event(
++        &state,
++        run_id,
++        "verify",
++        2,
++        &workflow_event::Event::StageStarted {
++            node_id:      "verify".to_string(),
++            name:         "Verify".to_string(),
++            index:        1,
++            handler_type: "command".to_string(),
++            attempt:      1,
++            max_attempts: 1,
++        },
++    )
++    .await;
+ 
+     let response = app
++        .clone()
++        .oneshot(
++            Request::builder()
++                .method("GET")
++                .uri(api(&format!("/runs/{run_id}/stages")))
++                .body(Body::empty())
++                .unwrap(),
++        )
++        .await
++        .unwrap();
++    let body = response_json!(response, StatusCode::OK).await;
++
++    let data = body["data"].as_array().unwrap();
++    let verify_entries: Vec<_> = data.iter().filter(|s| s["node_id"] == "verify").collect();
++    assert_eq!(verify_entries.len(), 2, "expected two verify visits");
++
++    let first = stage_entry(&body, "verify@1");
++    assert_eq!(first["node_id"], "verify");
++    assert_eq!(first["visit"], 1);
++    assert_eq!(first["status"], "failed");
++    assert_eq!(first["duration_secs"], 1.5);
++
++    let second = stage_entry(&body, "verify@2");
++    assert_eq!(second["node_id"], "verify");
++    assert_eq!(second["visit"], 2);
++    assert_eq!(second["status"], "running");
++
++    // Old `dot_id` field must be gone.
++    assert!(first.get("dot_id").is_none(), "dot_id should be removed");
++}
++
++#[tokio::test]
++async fn list_run_stages_shows_retrying_after_failed_event() {
++    let state = test_app_state_with_isolated_storage();
++    let app = crate::test_support::build_test_router(Arc::clone(&state));
++    let run_id = RunId::new();
++
++    create_durable_run_with_events(&state, run_id, &[
++        workflow_event::Event::RunSubmitted {
++            definition_blob: None,
++        },
++        workflow_event::Event::RunStarting,
++        workflow_event::Event::RunRunning,
++    ])
++    .await;
++
++    append_scoped_stage_event(
++        &state,
++        run_id,
++        "work",
++        1,
++        &workflow_event::Event::StageStarted {
++            node_id:      "work".to_string(),
++            name:         "Work".to_string(),
++            index:        0,
++            handler_type: "command".to_string(),
++            attempt:      1,
++            max_attempts: 3,
++        },
++    )
++    .await;
++    append_scoped_stage_event(
++        &state,
++        run_id,
++        "work",
++        1,
++        &workflow_event::Event::StageFailed {
++            node_id:     "work".to_string(),
++            name:        "Work".to_string(),
++            index:       0,
++            failure:     FailureDetail::new("flake", FailureCategory::TransientInfra),
++            will_retry:  true,
++            duration_ms: 5,
++            actor:       None,
++        },
++    )
++    .await;
++    append_scoped_stage_event(
++        &state,
++        run_id,
++        "work",
++        1,
++        &workflow_event::Event::StageRetrying {
++            node_id:      "work".to_string(),
++            name:         "Work".to_string(),
++            index:        0,
++            attempt:      2,
++            max_attempts: 3,
++            delay_ms:     50,
++        },
++    )
++    .await;
++
++    let response = app
++        .clone()
++        .oneshot(
++            Request::builder()
++                .method("GET")
++                .uri(api(&format!("/runs/{run_id}/stages")))
++                .body(Body::empty())
++                .unwrap(),
++        )
++        .await
++        .unwrap();
++    let body = response_json!(response, StatusCode::OK).await;
++    assert_eq!(stage_status(&body, "work@1"), "retrying");
++}
++
++#[tokio::test]
++async fn list_run_stages_shows_retrying_when_failed_will_retry() {
++    let state = test_app_state_with_isolated_storage();
++    let app = crate::test_support::build_test_router(Arc::clone(&state));
++    let run_id = RunId::new();
++
++    create_durable_run_with_events(&state, run_id, &[
++        workflow_event::Event::RunSubmitted {
++            definition_blob: None,
++        },
++        workflow_event::Event::RunStarting,
++        workflow_event::Event::RunRunning,
++    ])
++    .await;
++
++    append_scoped_stage_event(
++        &state,
++        run_id,
++        "work",
++        1,
++        &workflow_event::Event::StageStarted {
++            node_id:      "work".to_string(),
++            name:         "Work".to_string(),
++            index:        0,
++            handler_type: "command".to_string(),
++            attempt:      1,
++            max_attempts: 3,
++        },
++    )
++    .await;
++    // Only StageFailed, no StageRetrying yet — should still render retrying
++    // because props.will_retry is true.
++    append_scoped_stage_event(
++        &state,
++        run_id,
++        "work",
++        1,
++        &workflow_event::Event::StageFailed {
++            node_id:     "work".to_string(),
++            name:        "Work".to_string(),
++            index:       0,
++            failure:     FailureDetail::new("flake", FailureCategory::TransientInfra),
++            will_retry:  true,
++            duration_ms: 5,
++            actor:       None,
++        },
++    )
++    .await;
++
++    let response = app
++        .clone()
+         .oneshot(
+             Request::builder()
+                 .method("GET")
+@@ -2266,7 +2566,7 @@ async fn list_run_stages_projects_retrying_until_completion() {
+         .await
+         .unwrap();
+     let body = response_json!(response, StatusCode::OK).await;
+-    assert_eq!(stage_status(&body, "work"), "partially_succeeded");
++    assert_eq!(stage_status(&body, "work@1"), "retrying");
+ }
+ 
+ async fn append_raw_run_event(
+diff --git a/lib/crates/fabro-workflow/src/lib.rs b/lib/crates/fabro-workflow/src/lib.rs
+index 9af074d9..fd6398be 100644
+--- a/lib/crates/fabro-workflow/src/lib.rs
++++ b/lib/crates/fabro-workflow/src/lib.rs
+@@ -110,6 +110,37 @@ pub fn extract_stage_durations_from_events(events: &[EventEnvelope]) -> HashMap<
+     durations
+ }
+ 
++/// Extract per-stage (node_id, visit) durations from `stage.completed` /
++/// `stage.failed` events. Differs from
++/// [`extract_stage_durations_from_events`] by keying on the full
++/// [`fabro_types::StageId`] instead of just `node_id`, so multi-visit
++/// stages (e.g. a looped `verify` node) keep distinct durations.
++pub fn extract_stage_durations_by_stage_id(
++    events: &[EventEnvelope],
++) -> HashMap<fabro_types::StageId, u64> {
++    let mut durations = HashMap::new();
++    for envelope in events {
++        let event = &envelope.event;
++        let event_name = event.event_name();
++        if event_name != "stage.completed" && event_name != "stage.failed" {
++            continue;
++        }
++        let Some(stage_id) = event.stage_id.as_ref() else {
++            continue;
++        };
++        let Some(duration_ms) = event
++            .properties()
++            .ok()
++            .and_then(|properties| properties.get("duration_ms").cloned())
++            .and_then(|duration| duration.as_u64())
++        else {
++            continue;
++        };
++        durations.insert(stage_id.clone(), duration_ms);
++    }
++    durations
++}
++
+ #[doc(hidden)]
+ pub mod artifact;
+ pub mod artifact_snapshot;
+diff --git a/lib/packages/fabro-api-client/src/models/run-stage.ts b/lib/packages/fabro-api-client/src/models/run-stage.ts
+index c98ec9be..ad01b979 100644
+--- a/lib/packages/fabro-api-client/src/models/run-stage.ts
++++ b/lib/packages/fabro-api-client/src/models/run-stage.ts
+@@ -22,7 +22,7 @@ import type { StageState } from './stage-state';
+  */
+ export interface RunStage {
+     /**
+-     * Unique stage identifier within the run.
++     * StageId in \"node_id@visit\" form, e.g. verify@2.
+      */
+     'id': string;
+     /**
+@@ -35,9 +35,13 @@ export interface RunStage {
+      */
+     'duration_secs'?: number;
+     /**
+-     * Node identifier in the Graphviz graph source.
++     * Node id in the workflow graph; multiple stages with different visits share the same node_id.
+      */
+-    'dot_id'?: string;
++    'node_id': string;
++    /**
++     * 1-based visit count; bumped each time the workflow re-enters this node.
++     */
++    'visit': number;
+ }
+ 
+ 
