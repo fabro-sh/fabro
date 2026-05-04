@@ -1,0 +1,6 @@
+{
+  "outcome": "succeeded",
+  "notes": "Script completed: ulimit -n 4096 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1",
+  "failure_reason": null,
+  "timestamp": "2026-05-04T01:40:23.397686Z"
+}
