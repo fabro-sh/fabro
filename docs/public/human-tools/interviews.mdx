@@ -83,7 +83,9 @@ If the console prompt is canceled or stdin is already closed, the interviewer re
 
 The default for API server runs. The web interviewer holds questions in a queue until answers are submitted externally — typically by the web UI or a REST API call. Each question gets a unique ID (e.g. `q-1`), and the `ask()` call blocks on a oneshot channel until `submit_answer(id, answer)` is called.
 
-This decoupling means the workflow engine and the user interface can run in different processes. The web UI polls for pending questions and posts answers back to the API.
+This decoupling means the workflow engine and the user interface can run in different processes. The web UI shows pending questions in the run page's interview dock, listens for interview events, and posts answers back to the API.
+
+The dock supports yes/no, confirmation, multiple choice, multi-select, and freeform questions. When multiple questions are pending, the dock lets you cycle through them without leaving the run detail page.
 
 If the pending session disappears before an answer is submitted, the waiting question resolves as `Interrupted`.
 

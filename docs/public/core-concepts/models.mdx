@@ -13,7 +13,8 @@ No single model is best at everything. Fabro lets you assign the right model to 
 
 | Model | Provider | Aliases | Context | Cost (in/out per Mtok) | Speed |
 |---|---|---|---|---|---|
-| `claude-opus-4-6` | anthropic | `opus`, `claude-opus` | 1M | $15.00 / $75.00 | 25 tok/s |
+| `claude-opus-4-7` | anthropic | `opus`, `claude-opus` | 1M | $5.00 / $25.00 | 25 tok/s |
+| `claude-opus-4-6` | anthropic | | 1M | $5.00 / $25.00 | 25 tok/s |
 | `claude-sonnet-4-6` | anthropic | `sonnet`, `claude-sonnet` | 200K | $3.00 / $15.00 | 50 tok/s |
 | `claude-sonnet-4-5` | anthropic | | 200K | $3.00 / $15.00 | 50 tok/s |
 | `claude-haiku-4-5` | anthropic | `haiku`, `claude-haiku` | 200K | $0.80 / $4.00 | 100 tok/s |
@@ -23,6 +24,8 @@ No single model is best at everything. Fabro lets you assign the right model to 
 | `gpt-5.3-codex` | openai | `codex` | 1M | $1.80 / $14.00 | 100 tok/s |
 | `gpt-5.3-codex-spark` | openai | `codex-spark` | 128K | n/a | 1000 tok/s |
 | `gpt-5.4` | openai | `gpt54` | 1M | $2.50 / $15.00 | 70 tok/s |
+| `gpt-5.5` | openai | `gpt55` | 1M | $5.00 / $30.00 | 70 tok/s |
+| `gpt-5.5-pro` | openai | `gpt55-pro` | 1M | $30.00 / $180.00 | 20 tok/s |
 | `gpt-5.4-mini` | openai | `gpt54-mini` | 400K | $0.75 / $4.50 | 140 tok/s |
 | `gpt-5.4-pro` | openai | `gpt54-pro` | 1M | $30.00 / $180.00 | 20 tok/s |
 | `gemini-3.1-pro-preview` | gemini | `gemini-pro` | 1M | $2.00 / $12.00 | 85 tok/s |
@@ -42,8 +45,8 @@ When no model or provider is specified, Fabro auto-detects the provider by check
 
 | Provider | Default model |
 |---|---|
-| `anthropic` | `claude-sonnet-4-6` |
-| `openai` | `gpt-5.4` |
+| `anthropic` | `claude-opus-4-7` |
+| `openai` | `gpt-5.5` |
 | `gemini` | `gemini-3.1-pro-preview` |
 | `kimi` | `kimi-k2.5` |
 | `zai` | `glm-4.7` |

@@ -123,6 +123,8 @@ The Daytona sandbox runs all tool operations inside a cloud-hosted VM managed by
 - A `DAYTONA_API_KEY` environment variable
 - GitHub access configured via `fabro install` or `gh auth login` (for private repository cloning)
 
+The Daytona API key must include `write:snapshots`, `delete:snapshots`, `write:sandboxes`, and `delete:sandboxes`. `fabro install`, `fabro secret set DAYTONA_API_KEY`, and `fabro doctor` validate these scopes before the first run reaches sandbox creation.
+
 ### How it works
 
 - **Sandbox lifecycle** — On `initialize()`, Fabro creates a Daytona sandbox (from an image or a snapshot), clones the run's GitHub origin into it when one is available, and waits until it's ready. On `cleanup()`, the sandbox is deleted.

@@ -15,9 +15,11 @@ fabro doctor --server https://fabro.example.com/api/v1
 
 It checks:
 - Local user config and storage directory health
-- Server-reported LLM provider connectivity
+- Server-reported LLM provider connectivity, with configured providers probed concurrently
 - GitHub App, sandbox, and Brave Search credentials
 - Server authentication and crypto configuration
+
+LLM provider probe failures are reported as errors. Use `--verbose` to see the underlying provider error chain when a key, network route, or model endpoint fails.
 
 ## Common issues
 
@@ -29,7 +31,7 @@ It checks:
 
 **Stall watchdog timeouts** — If runs are cancelled unexpectedly, the agent may be stuck or the LLM provider may be slow. Check `FABRO_LOG=debug` output for `Agent.LlmRetry` events. Increase `stall_timeout` in the graph if needed, or add [fallback providers](/core-concepts/models) to handle outages.
 
-**Sandbox creation failures** — For Docker: ensure the Docker daemon is running and the configured image exists. For Daytona: verify `DAYTONA_API_KEY` is set and the `gh` CLI is authenticated. For Exe: verify your SSH keys are configured for `exe.dev` and that `ssh exe.dev` connects successfully.
+**Sandbox creation failures** — For Docker: ensure the Docker daemon is running and the configured image exists. For Daytona: verify `DAYTONA_API_KEY` is set, includes `write:snapshots`, `delete:snapshots`, `write:sandboxes`, and `delete:sandboxes`, and that the `gh` CLI is authenticated. For Exe: verify your SSH keys are configured for `exe.dev` and that `ssh exe.dev` connects successfully.
 
 **Port already in use** — Change the port with `fabro server start --port 3001` or stop the conflicting process.
 

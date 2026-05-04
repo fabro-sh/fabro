@@ -20,6 +20,8 @@ description: "Run Fabro workflows in sandboxed Daytona cloud environments"
 - A `DAYTONA_API_KEY` environment variable (get one from [app.daytona.io](https://app.daytona.io))
 - GitHub access configured via the default `token` strategy or a [GitHub App](/integrations/github) (required for private repository cloning and checkpoint pushing)
 
+The Daytona key must include the snapshot and sandbox scopes Fabro uses to create and clean up environments: `write:snapshots`, `delete:snapshots`, `write:sandboxes`, and `delete:sandboxes`. Fabro validates these scopes during install, when you run `fabro secret set DAYTONA_API_KEY`, and in `fabro doctor`.
+
 ## Configuration
 
 Set the sandbox provider in your run config TOML or via CLI flag:
@@ -174,7 +176,9 @@ See [Server Configuration](/administration/server-configuration) for details.
 
 ### "Failed to create Daytona sandbox"
 
-The `DAYTONA_API_KEY` environment variable is missing or invalid. Store it with `fabro secret set DAYTONA_API_KEY ...` or export it in the server process environment, then check that it's a valid key from [app.daytona.io](https://app.daytona.io).
+The `DAYTONA_API_KEY` environment variable is missing, invalid, or missing the required snapshot/sandbox scopes. Store it with `fabro secret set DAYTONA_API_KEY ...` or export it in the server process environment, then run `fabro doctor` to verify that Daytona reports the key as valid.
+
+If doctor reports missing scopes, regenerate the Daytona key with `write:snapshots`, `delete:snapshots`, `write:sandboxes`, and `delete:sandboxes`, then save it again with `fabro secret set DAYTONA_API_KEY`.
 
 ### "Snapshot does not exist and no dockerfile provided"
 
