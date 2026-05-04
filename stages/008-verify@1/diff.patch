@@ -1,0 +1,42 @@
+diff --git a/docs/public/reference/cli.mdx b/docs/public/reference/cli.mdx
+index 7fd748ec..f3c83498 100644
+--- a/docs/public/reference/cli.mdx
++++ b/docs/public/reference/cli.mdx
+@@ -92,6 +92,7 @@ fabro [OPTIONS] [COMMAND]
+ | `fabro server` | Server operations |
+ | `fabro settings` | Inspect effective settings |
+ | `fabro start` | Start a created workflow run on the server |
++| `fabro steer` | Steer a running agent mid-execution |
+ | `fabro system` | System maintenance commands |
+ | `fabro unarchive` | Restore archived runs to their prior terminal status |
+ | `fabro uninstall` | Uninstall Fabro from this machine |
+@@ -1108,6 +1109,29 @@ fabro start [OPTIONS] <RUN>
+ | --- | --- |
+ | `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
+ 
++### `fabro steer`
++
++Steer a running agent mid-execution
++
++```bash
++fabro steer [OPTIONS] <RUN> [TEXT]
++```
++
++#### Arguments
++
++| Name | Description |
++| --- | --- |
++| `RUN` | Run ID prefix to steer |
++| `TEXT` | Steer message text (omit when --text-stdin is used) |
++
++#### Options
++
++| Option | Description |
++| --- | --- |
++| `--interrupt` | Cancel the in-flight LLM stream / tool calls and deliver the message as the next user turn (default: append to the steering queue) |
++| `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
++| `--text-stdin` | Read steer text from stdin instead of a positional arg |
++
+ ### `fabro system`
+ 
+ System maintenance commands

@@ -1,0 +1,11 @@
+{
+  "stdout": "blob://sha256/0bd466ddd5d5e75c96f3ad4f466c8444697947186bd0406c9fb0b6a1f5d7641a",
+  "stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+  "exit_code": 0,
+  "duration_ms": 129023,
+  "termination": "exited",
+  "stdout_bytes": 3178,
+  "stderr_bytes": 0,
+  "streams_separated": true,
+  "live_streaming": true
+}
