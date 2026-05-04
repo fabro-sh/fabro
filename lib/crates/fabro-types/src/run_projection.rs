@@ -137,43 +137,20 @@ impl StageProjection {
             StageState::Running | StageState::Retrying | StageState::Pending
         ) {
             return self.started_at.map(|started| {
-                now.signed_duration_since(started)
-                    .num_milliseconds()
-                    .max(0) as f64
-                    / 1000.0
+                now.signed_duration_since(started).num_milliseconds().max(0) as f64 / 1000.0
             });
         }
         self.duration_ms.map(|ms| ms as f64 / 1000.0)
     }
 
-    /// Reset every per-attempt result field. Called when a stage starts a
-    /// new attempt (or visit) so prior-attempt data does not leak into the
-    /// new attempt's projection.
-    ///
-    /// Preserves `first_event_seq` (identity / sort key) and leaves
-    /// `started_at` / `state` to be set by the caller immediately after.
-    pub fn reset_for_new_attempt(&mut self) {
-        self.completion = None;
-        self.duration_ms = None;
-        self.usage = None;
-        self.state = None;
-
-        self.response = None;
-        self.prompt = None;
-        self.provider_used = None;
-        self.diff = None;
-
-        self.script_invocation = None;
-        self.script_timing = None;
-        self.parallel_results = None;
-
-        self.stdout = None;
-        self.stderr = None;
-        self.stdout_bytes = None;
-        self.stderr_bytes = None;
-        self.streams_separated = None;
-        self.live_streaming = None;
-        self.termination = None;
+    /// Begin a new attempt (or visit) for this stage: clear every
+    /// per-attempt field so prior-attempt data does not leak, then record
+    /// `started_at` and `state = Running`. Preserves `first_event_seq`
+    /// (identity / sort key).
+    pub fn begin_attempt(&mut self, started_at: DateTime<Utc>) {
+        *self = Self::new(self.first_event_seq);
+        self.started_at = Some(started_at);
+        self.state = Some(StageState::Running);
     }
 }
 

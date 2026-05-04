@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 
 import { EmptyState } from "../components/state";
 import { formatDurationSecs } from "../lib/format";
 import { useRunBilling } from "../lib/queries";
-import type { RunBilling } from "@qltysh/fabro-api-client";
+import { IN_FLIGHT_STAGE_STATES } from "../lib/stage-sidebar";
+import { useTickingNow } from "../lib/time";
+import type { RunBilling, RunBillingStage, StageState } from "@qltysh/fabro-api-client";
 
 const EMPTY_VALUE = "—";
 
@@ -16,8 +18,8 @@ function formatUsdMicros(usdMicros?: number | null) {
   return usdMicros == null ? EMPTY_VALUE : `$${(usdMicros / 1_000_000).toFixed(2)}`;
 }
 
-function isInFlightState(state: string | null | undefined): boolean {
-  return state === "running" || state === "retrying" || state === "pending";
+function isInFlight(stage: RunBillingStage): boolean {
+  return stage.state != null && IN_FLIGHT_STAGE_STATES.has(stage.state as StageState);
 }
 
 interface MappedStageRow {
@@ -27,129 +29,85 @@ interface MappedStageRow {
   outputTokens:   number | null;
   runtimeSecs:    number;
   totalUsdMicros: number | null | undefined;
-  inFlight:       boolean;
-  startedAt:      string | null | undefined;
 }
 
-interface MappedBilling {
-  rows:            MappedStageRow[];
-  totalRuntimeSecs: number;
-  totalUsdMicros:  number | null | undefined;
-  totalInput:      number | null;
-  totalOutput:     number | null;
-  modelBreakdown:  {
-    model:          string;
-    stages:         number;
-    inputTokens:    number;
-    outputTokens:   number;
-    totalUsdMicros: number | null | undefined;
-  }[];
-  modelStageCount: number;
-  hasInFlight:     boolean;
-}
-
-function mapBilling(billing: RunBilling | undefined, now: number): MappedBilling {
-  if (!billing) {
-    return {
-      rows:             [],
-      totalRuntimeSecs: 0,
-      totalUsdMicros:   undefined,
-      totalInput:       null,
-      totalOutput:      null,
-      modelBreakdown:   [],
-      modelStageCount:  0,
-      hasInFlight:      false,
-    };
-  }
-
-  let hasInFlight = false;
-  const rows: MappedStageRow[] = billing.stages.map((stage) => {
-    const hasModel = stage.model != null;
-    const inFlight = isInFlightState(stage.state);
-    if (inFlight) hasInFlight = true;
-
-    let runtimeSecs = stage.runtime_secs;
-    if (inFlight && stage.started_at) {
-      const startedMs = new Date(stage.started_at).getTime();
-      if (Number.isFinite(startedMs)) {
-        runtimeSecs = Math.max(0, (now - startedMs) / 1000);
-      }
+function liveRuntimeSecs(stage: RunBillingStage, now: number): number {
+  if (stage.started_at) {
+    const startedMs = new Date(stage.started_at).getTime();
+    if (Number.isFinite(startedMs)) {
+      return Math.max(0, (now - startedMs) / 1000);
     }
+  }
+  return stage.runtime_secs;
+}
 
-    return {
-      stage:          stage.stage.name,
-      model:          stage.model?.id ?? null,
-      inputTokens:    hasModel ? stage.billing.input_tokens : null,
-      outputTokens:   hasModel
-        ? stage.billing.output_tokens + stage.billing.reasoning_tokens
-        : null,
-      runtimeSecs,
-      totalUsdMicros: stage.billing.total_usd_micros,
-      inFlight,
-      startedAt:      stage.started_at,
-    };
-  });
-
-  // While ticking, derive total runtime from the displayed row runtimes so the
-  // footer updates in lock-step with the in-flight row(s). Otherwise trust the
-  // server's authoritative total.
-  const totalRuntimeSecs = hasInFlight
-    ? rows.reduce((sum, row) => sum + row.runtimeSecs, 0)
-    : billing.totals.runtime_secs;
-
-  const hasLlmStages = billing.by_model.length > 0;
-  const totalInput = hasLlmStages ? billing.totals.input_tokens : null;
-  const totalOutput = hasLlmStages
-    ? billing.totals.output_tokens + billing.totals.reasoning_tokens
-    : null;
-  const totalUsdMicros = billing.totals.total_usd_micros;
-  const modelBreakdown = billing.by_model
-    .map((entry) => ({
-      model:          entry.model.id,
-      stages:         entry.stages,
-      inputTokens:    entry.billing.input_tokens,
-      outputTokens:   entry.billing.output_tokens + entry.billing.reasoning_tokens,
-      totalUsdMicros: entry.billing.total_usd_micros,
-    }))
-    .sort((a, b) => (b.totalUsdMicros ?? -1) - (a.totalUsdMicros ?? -1));
-  const modelStageCount = modelBreakdown.reduce((sum, row) => sum + row.stages, 0);
-
+function mapStageRow(stage: RunBillingStage, runtimeSecs: number): MappedStageRow {
+  const hasModel = stage.model != null;
   return {
-    rows,
-    totalRuntimeSecs,
-    totalUsdMicros,
-    totalInput,
-    totalOutput,
-    modelBreakdown,
-    modelStageCount,
-    hasInFlight,
+    stage:          stage.stage.name,
+    model:          stage.model?.id ?? null,
+    inputTokens:    hasModel ? stage.billing.input_tokens : null,
+    outputTokens:   hasModel
+      ? stage.billing.output_tokens + stage.billing.reasoning_tokens
+      : null,
+    runtimeSecs,
+    totalUsdMicros: stage.billing.total_usd_micros,
   };
 }
 
 export default function RunBilling({ params }: { params: { id: string } }) {
   const billingQuery = useRunBilling(params.id);
-
-  // Tick state for live runtime computation. Re-rendered every second only
-  // while at least one stage is in-flight.
-  const [now, setNow] = useState(() => Date.now());
   const billing = billingQuery.data;
-  const hasInFlight = billing?.stages.some((stage) => isInFlightState(stage.state)) ?? false;
+  const hasInFlight = billing?.stages.some(isInFlight) ?? false;
 
-  useEffect(() => {
-    if (!hasInFlight) return;
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, [hasInFlight]);
+  // Tick once per second only while a stage is in-flight.
+  const now = useTickingNow(hasInFlight);
 
-  const {
-    rows,
-    totalRuntimeSecs,
-    totalUsdMicros,
-    totalInput,
-    totalOutput,
-    modelBreakdown,
-    modelStageCount,
-  } = mapBilling(billing, now);
+  // Completed rows don't depend on `now`; memoize them by `billing` so we
+  // don't reallocate them every tick.
+  const completedRows = useMemo<MappedStageRow[]>(() => {
+    if (!billing) return [];
+    return billing.stages.map((stage) => mapStageRow(stage, stage.runtime_secs));
+  }, [billing]);
+
+  // The model breakdown is server-derived and stable across ticks too.
+  const modelBreakdown = useMemo(() => {
+    if (!billing) return [];
+    return billing.by_model
+      .map((entry) => ({
+        model:          entry.model.id,
+        stages:         entry.stages,
+        inputTokens:    entry.billing.input_tokens,
+        outputTokens:   entry.billing.output_tokens + entry.billing.reasoning_tokens,
+        totalUsdMicros: entry.billing.total_usd_micros,
+      }))
+      .sort((a, b) => (b.totalUsdMicros ?? -1) - (a.totalUsdMicros ?? -1));
+  }, [billing]);
+
+  // Re-derive only the in-flight rows on each tick; everything else stays put.
+  const rows = useMemo<MappedStageRow[]>(() => {
+    if (!billing) return [];
+    if (!hasInFlight) return completedRows;
+    return billing.stages.map((stage, idx) =>
+      isInFlight(stage)
+        ? mapStageRow(stage, liveRuntimeSecs(stage, now))
+        : completedRows[idx],
+    );
+  }, [billing, completedRows, hasInFlight, now]);
+
+  // While ticking, sum the displayed row runtimes so the footer updates in
+  // lock-step. Otherwise trust the server's authoritative total.
+  const totalRuntimeSecs = hasInFlight
+    ? rows.reduce((sum, row) => sum + row.runtimeSecs, 0)
+    : (billing?.totals.runtime_secs ?? 0);
+
+  const hasLlmStages = (billing?.by_model.length ?? 0) > 0;
+  const totalInput = hasLlmStages ? (billing?.totals.input_tokens ?? null) : null;
+  const totalOutput = hasLlmStages && billing
+    ? billing.totals.output_tokens + billing.totals.reasoning_tokens
+    : null;
+  const totalUsdMicros = billing?.totals.total_usd_micros;
+  const modelStageCount = modelBreakdown.reduce((sum, row) => sum + row.stages, 0);
 
   if (!rows.length) {
     return (

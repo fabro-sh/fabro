@@ -40,6 +40,7 @@ import type { Stage } from "../components/stage-sidebar";
 import { EmptyState } from "../components/state";
 import { CopyButton } from "../components/ui";
 import { formatDurationSecs } from "../lib/format";
+import { useTickingNow } from "../lib/time";
 import { fetchRunCommandLog, useRunEventsList, useRunStageTurns, useRunStages } from "../lib/queries";
 import { mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
 import { getNumber, getString, type UnknownRecord } from "../lib/unknown";
@@ -575,7 +576,6 @@ function RunningStageDuration({
   const [startedAt, setStartedAt] = useState<number | null>(() =>
     isRunning ? Date.now() : null,
   );
-  const [, setTick] = useState(0);
 
   useEffect(() => {
     setStartedAt((current) => {
@@ -584,14 +584,10 @@ function RunningStageDuration({
     });
   }, [isRunning]);
 
-  useEffect(() => {
-    if (!isRunning) return;
-    const interval = setInterval(() => setTick((tick) => tick + 1), 1000);
-    return () => clearInterval(interval);
-  }, [isRunning]);
+  const now = useTickingNow(isRunning);
 
   if (isRunning && startedAt) {
-    return formatDurationSecs(Math.floor((Date.now() - startedAt) / 1000));
+    return formatDurationSecs(Math.floor((now - startedAt) / 1000));
   }
   return duration;
 }

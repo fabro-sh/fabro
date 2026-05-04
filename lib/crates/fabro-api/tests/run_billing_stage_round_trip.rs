@@ -51,8 +51,8 @@ fn run_billing_stage_round_trips_terminal_row_with_started_at_and_state() {
         "state": "succeeded"
     });
 
-    let stage: RunBillingStage = serde_json::from_value(value.clone())
-        .expect("terminal stage row should deserialize");
+    let stage: RunBillingStage =
+        serde_json::from_value(value.clone()).expect("terminal stage row should deserialize");
     assert!(stage.started_at.is_some());
     assert_eq!(stage.state, Some(StageState::Succeeded));
     assert_eq!(serde_json::to_value(stage).unwrap(), value);
@@ -79,8 +79,8 @@ fn run_billing_stage_round_trips_in_flight_row() {
         "state": "running"
     });
 
-    let stage: RunBillingStage = serde_json::from_value(value.clone())
-        .expect("in-flight stage row should deserialize");
+    let stage: RunBillingStage =
+        serde_json::from_value(value.clone()).expect("in-flight stage row should deserialize");
     assert!(stage.model.is_none());
     assert_eq!(stage.state, Some(StageState::Running));
     assert_eq!(serde_json::to_value(stage).unwrap(), value);

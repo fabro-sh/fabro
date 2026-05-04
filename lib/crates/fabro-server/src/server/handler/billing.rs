@@ -24,17 +24,17 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
 /// node's first appearance in the event log. This produces the same A, B
 /// order for an A → B → A loop that finalize produces.
 struct DedupedStage<'a> {
-    node_id:               String,
-    stage:                 &'a StageProjection,
-    sort_key_first_event:  u32,
+    node_id:              String,
+    stage:                &'a StageProjection,
+    sort_key_first_event: u32,
 }
 
 fn dedupe_by_node_id<'a>(
     stages: impl IntoIterator<Item = (&'a StageId, &'a StageProjection)>,
 ) -> Vec<DedupedStage<'a>> {
-    let mut by_node: HashMap<String, (u32, u32, &'a StageProjection)> = HashMap::new();
+    let mut by_node: HashMap<&'a str, (u32, u32, &'a StageProjection)> = HashMap::new();
     for (stage_id, stage) in stages {
-        let node_id = stage_id.node_id().to_string();
+        let node_id = stage_id.node_id();
         let visit = stage_id.visit();
         let first_event = stage.first_event_seq.get();
         by_node
@@ -54,7 +54,7 @@ fn dedupe_by_node_id<'a>(
     let mut deduped: Vec<DedupedStage<'a>> = by_node
         .into_iter()
         .map(|(node_id, (first_event, _visit, stage))| DedupedStage {
-            node_id,
+            node_id: node_id.to_string(),
             stage,
             sort_key_first_event: first_event,
         })
@@ -92,13 +92,16 @@ async fn list_run_stages(
     let now = Utc::now();
     let stages: Vec<RunStage> = dedupe_by_node_id(projection.iter_stages())
         .into_iter()
-        .map(|entry| RunStage {
-            id:            entry.node_id.clone(),
-            name:          entry.node_id.clone(),
-            status:        entry.stage.effective_state(),
-            duration_secs: entry.stage.runtime_secs(now),
-            dot_id:        Some(entry.node_id.clone()),
-            started_at:    entry.stage.started_at,
+        .map(|entry| {
+            let DedupedStage { node_id, stage, .. } = entry;
+            RunStage {
+                id:            node_id.clone(),
+                name:          node_id.clone(),
+                status:        stage.effective_state(),
+                duration_secs: stage.runtime_secs(now),
+                dot_id:        Some(node_id),
+                started_at:    stage.started_at,
+            }
         })
         .collect();
 
@@ -128,19 +131,16 @@ async fn get_run_billing(
     let now = Utc::now();
 
     let mut by_model_totals = HashMap::<String, ModelBillingTotals>::new();
-    let mut billed_usages = Vec::new();
     let mut runtime_secs = 0.0_f64;
     let mut stages = Vec::new();
 
     for entry in dedupe_by_node_id(projection.iter_stages()) {
-        let stage = entry.stage;
-        let node_id = entry.node_id;
+        let DedupedStage { node_id, stage, .. } = entry;
 
         let row_runtime = stage.runtime_secs(now).unwrap_or(0.0);
         runtime_secs += row_runtime;
 
         let (billing, model) = if let Some(usage) = stage.usage.as_ref() {
-            billed_usages.push(usage.clone());
             let tokens = usage.tokens();
             let billing = BilledTokenCounts {
                 cache_read_tokens:  tokens.cache_read_tokens,
@@ -151,9 +151,18 @@ async fn get_run_billing(
                 total_tokens:       tokens.total_tokens(),
                 total_usd_micros:   usage.total_usd_micros,
             };
-            let model_id = usage.model_id().to_string();
-            accumulate_model_billing(by_model_totals.entry(model_id.clone()).or_default(), usage);
-            (billing, Some(ModelReference { id: model_id }))
+            let model_id = usage.model_id();
+            let model_totals = match by_model_totals.get_mut(model_id) {
+                Some(totals) => totals,
+                None => by_model_totals.entry(model_id.to_string()).or_default(),
+            };
+            accumulate_model_billing(model_totals, usage);
+            (
+                billing,
+                Some(ModelReference {
+                    id: model_id.to_string(),
+                }),
+            )
         } else {
             (BilledTokenCounts::default(), None)
         };
@@ -171,7 +180,20 @@ async fn get_run_billing(
         });
     }
 
-    let totals = BilledTokenCounts::from_billed_usage(&billed_usages);
+    // Grand totals are the sum of the per-model totals we already accumulated.
+    let mut totals = BilledTokenCounts::default();
+    for model_totals in by_model_totals.values() {
+        totals.input_tokens += model_totals.billing.input_tokens;
+        totals.output_tokens += model_totals.billing.output_tokens;
+        totals.reasoning_tokens += model_totals.billing.reasoning_tokens;
+        totals.cache_read_tokens += model_totals.billing.cache_read_tokens;
+        totals.cache_write_tokens += model_totals.billing.cache_write_tokens;
+        totals.total_tokens += model_totals.billing.total_tokens;
+        if let Some(value) = model_totals.billing.total_usd_micros {
+            *totals.total_usd_micros.get_or_insert(0) += value;
+        }
+    }
+
     let by_model = by_model_totals
         .into_iter()
         .map(|(model, totals)| BillingByModel {

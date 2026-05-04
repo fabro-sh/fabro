@@ -295,9 +295,7 @@ impl RunProjectionReducer for RunProjection {
                     stage_id.visit(),
                     first_event_seq(event.seq),
                 );
-                stage.reset_for_new_attempt();
-                stage.started_at = Some(ts);
-                stage.state = Some(StageState::Running);
+                stage.begin_attempt(ts);
             }
             EventBody::StageRetrying(_) => {
                 let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
@@ -1520,10 +1518,7 @@ mod tests {
     fn failed_props(duration_ms: u64) -> StageFailedProps {
         StageFailedProps {
             index: 0,
-            failure: Some(FailureDetail::new(
-                "boom",
-                FailureCategory::TransientInfra,
-            )),
+            failure: Some(FailureDetail::new("boom", FailureCategory::TransientInfra)),
             will_retry: true,
             duration_ms,
         }

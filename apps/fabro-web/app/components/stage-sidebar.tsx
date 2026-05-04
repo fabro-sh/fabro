@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type ComponentType } from "react";
+import { useEffect, useRef, type ComponentType } from "react";
 import { Link } from "react-router";
 import type { StageState } from "@qltysh/fabro-api-client";
 import {
@@ -12,6 +12,7 @@ import {
 import { Bars3BottomLeftIcon, DocumentTextIcon, MapIcon } from "@heroicons/react/24/outline";
 import { formatDurationSecs } from "../lib/format";
 import { ACTIVE_STAGE_STATES } from "../lib/stage-sidebar";
+import { useTickingNow } from "../lib/time";
 
 export interface Stage {
   id: string;
@@ -42,7 +43,6 @@ interface StageSidebarProps {
 export function StageSidebar({ stages, runId, selectedStageId, activeLink }: StageSidebarProps) {
   // Track when we first observed each running stage (for ticking timer)
   const runningStartRef = useRef<Map<string, number>>(new Map());
-  const [, setTick] = useState(0);
 
   // Track start times for running stages
   useEffect(() => {
@@ -62,16 +62,13 @@ export function StageSidebar({ stages, runId, selectedStageId, activeLink }: Sta
   }, [stages]);
 
   // Tick every second while any stage is running
-  useEffect(() => {
-    if (!stages.some((s) => ACTIVE_STAGE_STATES.has(s.status))) return;
-    const interval = setInterval(() => setTick((t) => t + 1), 1000);
-    return () => clearInterval(interval);
-  }, [stages]);
+  const hasActive = stages.some((s) => ACTIVE_STAGE_STATES.has(s.status));
+  const now = useTickingNow(hasActive);
 
   function stageDuration(stage: Stage): string {
     if (ACTIVE_STAGE_STATES.has(stage.status)) {
       const start = runningStartRef.current.get(stage.id);
-      if (start) return formatDurationSecs(Math.floor((Date.now() - start) / 1000));
+      if (start) return formatDurationSecs(Math.floor((now - start) / 1000));
       return "0s";
     }
     return stage.duration;
