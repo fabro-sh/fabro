@@ -37,8 +37,11 @@ pub fn materialize_run(
     let model = configured_model.or(graph_model).unwrap_or_else(|| {
         provider
             .as_deref()
-            .and_then(|value| value.parse::<Provider>().ok())
-            .and_then(|provider| catalog.default_for_provider(&provider.to_string()))
+            .and_then(|value| {
+                // Validate the provider string is known before looking up its default.
+                value.parse::<Provider>().ok()?;
+                catalog.default_for_provider(value)
+            })
             .unwrap_or_else(|| catalog.default_for_configured(configured_providers))
             .id
             .clone()

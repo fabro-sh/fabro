@@ -4,9 +4,8 @@ use fabro_model::{Catalog, Provider};
 #[test]
 fn profile_context_window_matches_catalog_for_default_models() {
     for &provider in Provider::ALL {
-        let provider_str: &str = provider.into();
         let catalog_info = Catalog::builtin()
-            .default_for_provider(provider_str)
+            .default_for_provider(<&str>::from(provider))
             .cloned()
             .unwrap_or_else(|| panic!("no default model for {provider:?} in catalog"));
         let model = &catalog_info.id;

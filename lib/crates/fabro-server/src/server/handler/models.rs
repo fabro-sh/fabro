@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::super::{
     ApiError, AppState, FromStr, HashSet, IntoResponse, Json, MAX_PAGE_OFFSET, ModelTestMode, Path,
-    Provider, Query, RequiredUser, Response, Router, State, StatusCode, auth_issue_message,
+    Query, RequiredUser, Response, Router, State, StatusCode, auth_issue_message,
     default_page_limit, error, get, post, run_model_test,
 };
 
@@ -116,14 +116,12 @@ async fn test_model(
             .into_response();
         }
     };
-    if let Some((_, issue)) = llm_result
+    if let Some((provider_enum, issue)) = llm_result
         .auth_issues
         .iter()
-        .find(|(provider, _)| provider.to_string() == info.provider.as_str())
+        .find(|(provider, _)| info.provider == <&str>::from(*provider))
     {
-        let provider_enum =
-            Provider::from_str(info.provider.as_str()).unwrap_or(Provider::Anthropic);
-        return ApiError::bad_request(auth_issue_message(provider_enum, issue)).into_response();
+        return ApiError::bad_request(auth_issue_message(*provider_enum, issue)).into_response();
     }
     let provider_name = info.provider.as_str();
     if !llm_result.client.provider_names().contains(&provider_name) {

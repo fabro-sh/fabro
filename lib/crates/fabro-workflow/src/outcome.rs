@@ -27,8 +27,7 @@ pub fn billed_model_usage_from_llm(
         speed,
     };
     let tokens = token_counts_from_llm_usage(usage);
-    let provider_str = provider.to_string();
-    let facts = billing_facts_for_stage_usage(&provider_str, &tokens);
+    let facts = billing_facts_for_stage_usage(model.provider.as_str(), &tokens);
     let input = ModelBillingInput {
         usage: ModelUsage {
             model: model.clone(),
@@ -39,7 +38,7 @@ pub fn billed_model_usage_from_llm(
 
     let total_usd_micros = Catalog::builtin()
         .get(model_id)
-        .filter(|candidate| candidate.provider == provider_str.as_str())
+        .filter(|candidate| candidate.provider == model.provider)
         .and_then(|candidate| candidate.pricing_for(speed))
         .and_then(|pricing| pricing.bill(&input))
         .map(|amount| amount.0);

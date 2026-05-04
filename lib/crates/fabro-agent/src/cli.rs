@@ -484,7 +484,7 @@ pub async fn run_with_args_and_client(
         model
     } else {
         Catalog::builtin()
-            .default_for_provider(&provider.to_string())
+            .default_for_provider(<&str>::from(provider))
             .map(|model| model.id.clone())
             .ok_or_else(|| {
                 anyhow::anyhow!(

@@ -80,7 +80,7 @@ impl Catalog {
     #[must_use]
     pub fn default_from_env(&self) -> &Model {
         let provider = Provider::default_from_env();
-        self.default_for_provider(provider.to_string().as_str())
+        self.default_for_provider(<&str>::from(provider))
             .unwrap_or_else(|| self.default_model())
     }
 
@@ -89,7 +89,7 @@ impl Catalog {
     #[must_use]
     pub fn default_for_configured(&self, configured: &[Provider]) -> &Model {
         let provider = Provider::default_for_configured(configured);
-        self.default_for_provider(provider.to_string().as_str())
+        self.default_for_provider(<&str>::from(provider))
             .unwrap_or_else(|| self.default_model())
     }
 

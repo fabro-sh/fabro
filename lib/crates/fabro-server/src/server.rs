@@ -54,7 +54,7 @@ use fabro_llm::types::{
     ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest, Role, ToolChoice,
     ToolDefinition,
 };
-use fabro_model::{BilledModelUsage, BilledTokenCounts, Catalog, ModelTestMode, Provider};
+use fabro_model::{BilledModelUsage, BilledTokenCounts, Catalog, ModelTestMode};
 use fabro_redact::redact_jsonl_line;
 use fabro_sandbox::daytona::{self, DaytonaSandbox};
 use fabro_sandbox::reconnect::reconnect;

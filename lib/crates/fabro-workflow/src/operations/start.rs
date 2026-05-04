@@ -534,7 +534,7 @@ fn resolve_fallback_chain(
             .or_default()
             .push(model_ref.to_string());
     }
-    Catalog::builtin().build_fallback_chain(&provider.to_string(), model, &by_provider)
+    Catalog::builtin().build_fallback_chain(<&str>::from(provider), model, &by_provider)
 }
 
 fn runtime_mcp_server(settings: &ResolvedMcpServerSettings) -> McpServerSettings {
