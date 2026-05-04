@@ -2,7 +2,7 @@ digraph ImplementIssue {
     graph [
         goal="Implement a GitHub issue",
         model_stylesheet="
-            * { model: claude-opus-4-6; }
+            * { model: claude-opus-4-7; }
         "
     ]
     rankdir=LR

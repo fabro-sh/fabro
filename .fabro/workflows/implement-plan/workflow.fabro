@@ -2,7 +2,7 @@ digraph ImplementPlan {
     graph [
         goal="Implement and simplify",
         model_stylesheet="
-            * { model: claude-opus-4-6; }
+            * { model: claude-opus-4-7; }
         "
     ]
     rankdir=LR
