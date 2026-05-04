@@ -6618,7 +6618,10 @@ components:
         stage:
           $ref: "#/components/schemas/BillingStageRef"
         model:
-          $ref: "#/components/schemas/ModelReference"
+          description: Model used for this stage; null for non-LLM stages.
+          oneOf:
+            - $ref: "#/components/schemas/ModelReference"
+            - type: "null"
         billing:
           $ref: "#/components/schemas/BilledTokenCounts"
         runtime_secs:

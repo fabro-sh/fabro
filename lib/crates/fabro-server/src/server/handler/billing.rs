@@ -180,30 +180,44 @@ async fn get_run_billing(
         let duration_ms = stage_durations.get(node_id).copied().unwrap_or(0);
         runtime_secs += duration_ms as f64 / 1000.0;
 
-        let Some(usage) = checkpoint
+        let usage = checkpoint
             .node_outcomes
             .get(node_id)
-            .and_then(|outcome| outcome.usage.as_ref())
-        else {
-            continue;
+            .and_then(|outcome| outcome.usage.as_ref());
+
+        let (billing, model) = if let Some(usage) = usage {
+            billed_usages.push(usage.clone());
+            let tokens = usage.tokens();
+            let billing = BilledTokenCounts {
+                cache_read_tokens:  tokens.cache_read_tokens,
+                cache_write_tokens: tokens.cache_write_tokens,
+                input_tokens:       tokens.input_tokens,
+                output_tokens:      tokens.output_tokens,
+                reasoning_tokens:   tokens.reasoning_tokens,
+                total_tokens:       tokens.total_tokens(),
+                total_usd_micros:   usage.total_usd_micros,
+            };
+            let model_id = usage.model_id().to_string();
+            accumulate_model_billing(by_model_totals.entry(model_id.clone()).or_default(), usage);
+            (billing, Some(ModelReference { id: model_id }))
+        } else {
+            (
+                BilledTokenCounts {
+                    cache_read_tokens:  0,
+                    cache_write_tokens: 0,
+                    input_tokens:       0,
+                    output_tokens:      0,
+                    reasoning_tokens:   0,
+                    total_tokens:       0,
+                    total_usd_micros:   None,
+                },
+                None,
+            )
         };
 
-        billed_usages.push(usage.clone());
-        let tokens = usage.tokens();
-        let billing = BilledTokenCounts {
-            cache_read_tokens:  tokens.cache_read_tokens,
-            cache_write_tokens: tokens.cache_write_tokens,
-            input_tokens:       tokens.input_tokens,
-            output_tokens:      tokens.output_tokens,
-            reasoning_tokens:   tokens.reasoning_tokens,
-            total_tokens:       tokens.total_tokens(),
-            total_usd_micros:   usage.total_usd_micros,
-        };
-        let model_id = usage.model_id().to_string();
-        accumulate_model_billing(by_model_totals.entry(model_id.clone()).or_default(), usage);
         stages.push(RunBillingStage {
             billing,
-            model: ModelReference { id: model_id },
+            model,
             runtime_secs: duration_ms as f64 / 1000.0,
             stage: BillingStageRef {
                 id:   node_id.clone(),

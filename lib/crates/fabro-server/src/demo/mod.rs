@@ -1209,9 +1209,9 @@ mod runs {
                         id:   "detect-drift".into(),
                         name: "Detect Drift".into(),
                     },
-                    model:        ModelReference {
+                    model:        Some(ModelReference {
                         id: "Opus 4.6".into(),
-                    },
+                    }),
                     billing:      BilledTokenCounts {
                         cache_read_tokens:  0,
                         cache_write_tokens: 0,
@@ -1228,9 +1228,9 @@ mod runs {
                         id:   "propose-changes".into(),
                         name: "Propose Changes".into(),
                     },
-                    model:        ModelReference {
+                    model:        Some(ModelReference {
                         id: "Gemini 3.1".into(),
-                    },
+                    }),
                     billing:      BilledTokenCounts {
                         cache_read_tokens:  0,
                         cache_write_tokens: 0,
@@ -1247,9 +1247,9 @@ mod runs {
                         id:   "review-changes".into(),
                         name: "Review Changes".into(),
                     },
-                    model:        ModelReference {
+                    model:        Some(ModelReference {
                         id: "Codex 5.3".into(),
-                    },
+                    }),
                     billing:      BilledTokenCounts {
                         cache_read_tokens:  0,
                         cache_write_tokens: 0,
@@ -1266,9 +1266,9 @@ mod runs {
                         id:   "apply-changes".into(),
                         name: "Apply Changes".into(),
                     },
-                    model:        ModelReference {
+                    model:        Some(ModelReference {
                         id: "Opus 4.6".into(),
-                    },
+                    }),
                     billing:      BilledTokenCounts {
                         cache_read_tokens:  0,
                         cache_write_tokens: 0,

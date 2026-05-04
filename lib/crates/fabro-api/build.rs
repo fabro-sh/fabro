@@ -29,10 +29,17 @@ fn patch_nullable(value: &mut serde_json::Value) {
                         if variants.len() == 1 {
                             // Collapse single-variant oneOf into the schema itself
                             let mut inner = variants.remove(0);
-                            inner
-                                .as_object_mut()
-                                .expect("oneOf collapse should leave an object schema")
-                                .insert("nullable".to_string(), serde_json::Value::Bool(true));
+                            if inner.get("$ref").is_some() {
+                                inner = serde_json::json!({
+                                    "allOf": [inner],
+                                    "nullable": true,
+                                });
+                            } else {
+                                inner
+                                    .as_object_mut()
+                                    .expect("oneOf collapse should leave an object schema")
+                                    .insert("nullable".to_string(), serde_json::Value::Bool(true));
+                            }
                             patch_nullable(&mut inner);
                             *value = inner;
                             return;

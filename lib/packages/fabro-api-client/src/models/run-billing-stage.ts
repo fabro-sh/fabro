@@ -28,7 +28,7 @@ import type { ModelReference } from './model-reference';
  */
 export interface RunBillingStage {
     'stage': BillingStageRef;
-    'model': ModelReference;
+    'model': ModelReference | null;
     'billing': BilledTokenCounts;
     /**
      * Wall-clock runtime in seconds.
