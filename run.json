@@ -1,0 +1,521 @@
+{
+  "spec": {
+    "run_id": "01KQRF98KVJANMHY45N67NTKPC",
+    "settings": {
+      "project": {
+        "name": null,
+        "description": null,
+        "directory": ".",
+        "metadata": {}
+      },
+      "workflow": {
+        "name": null,
+        "description": null,
+        "graph": "workflow.fabro",
+        "metadata": {}
+      },
+      "run": {
+        "goal": {
+          "type": "inline",
+          "value": "# Fix Agent Stage Cancellation Implementation Plan\n\n> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task.\n\n**Goal:** Make workflow cancellation stop in-flight agent stages, including CLI-mode agent subprocesses and API-mode agent sessions.\n\n**Architecture:** Make `tokio_util::sync::CancellationToken` the workflow/executor cancellation primitive, then clone or derive child tokens through setup, node execution, manager-loop children, CLI subprocesses, and API sessions. Dropping services or tokens must not mean \"user cancelled\"; only an explicit `.cancel()` does. CLI-mode agents will run through `Sandbox::exec_command_streaming` after local, Docker, and Daytona streaming cancellation terminate descendants; API-mode agents will link each backend invocation to the existing `Session` interrupt token with a bridge guard that aborts stale bridge tasks before cached sessions are reused.\n\n**Tech Stack:** Rust, Tokio cancellation tokens, Fabro workflow events, Fabro sandbox streaming command execution, fabro-types run event schemas.\n\n---\n\n## Summary\n\n- Replace workflow-run cancellation's `Arc<AtomicBool>` core path with `CancellationToken`, including manager-loop child workflows and executor between-node checks.\n- Replace CLI agent detached subprocess execution with sandbox-managed execution that observes the workflow run cancellation token and terminates descendants for local, Docker, and Daytona.\n- Add explicit cancellation plumbing to all agent backends so API-mode and CLI-mode stages share the same non-optional cancellation contract.\n- Preserve run semantics: cancellation returns `Error::Cancelled`, reaches `fabro-core::Error::Cancelled`, and terminates the run as cancelled instead of as a retryable stage failure.\n\n## Key Changes\n\n- Promote `CancellationToken` to the workflow-run cancellation type.\n  - In `lib/crates/fabro-core/src/executor.rs`, change `ExecutorOptions.cancel_token` and `ExecutorBuilder::cancel_token(...)` from `Option<Arc<AtomicBool>>` to `Option<CancellationToken>`. The run loop must check `token.is_cancelled()` at the existing between-node cancellation point.\n  - Keep `ExecutorOptions.stall_token: Option<CancellationToken>` separate from user cancellation. User cancellation must return `Error::Cancelled`; stall timeout must continue returning `Error::StallTimeout { node_id }`.\n  - In `lib/crates/fabro-workflow/src/run_options.rs`, change `RunOptions.cancel_token` from `Option<Arc<AtomicBool>>` to non-optional `CancellationToken`. Tests and constructors that currently use `None` must pass `CancellationToken::new()`.\n  - In `lib/crates/fabro-workflow/src/services.rs`, replace `cancel_requested: Option<Arc<AtomicBool>>` with `cancel_token: CancellationToken` and expose `RunServices::cancel_token(&self) -> CancellationToken`.\n  - Do **not** implement cancellation in `Drop` for `RunServices` or any wrapper type. A successfully completed run may drop every token handle; that must not be observable as user cancellation by a child task that outlives the run.\n  - Remove `sandbox_cancel_token(...)` and the 10ms atomic-polling bridge once call sites are migrated. New cancellation-aware code must receive `CancellationToken` directly.\n  - Update `RunServices::new(...)` and add a doc comment: production construction is expected to happen from pipeline initialization with the run's root token; use `with_cancel_token(...)` only with the same root token or a `child_token()` derived from it.\n  - Make `with_cancel_token(token: CancellationToken)` `pub(crate)`. It must document that the token semantically means \"cancel this run or child run,\" not a generic shutdown signal.\n  - Update `lib/crates/fabro-workflow/src/pipeline/execute.rs` to pass `run_options.cancel_token.clone()` into `ExecutorBuilder::cancel_token(...)`.\n  - Update setup/devcontainer paths in `lib/crates/fabro-workflow/src/pipeline/initialize.rs` and `lib/crates/fabro-workflow/src/devcontainer_bridge.rs` to pass `Some(run_options.cancel_token.child_token())` into sandbox commands instead of creating a new bridge from an atomic.\n  - Update `lib/crates/fabro-workflow/src/handler/command.rs` to pass `Some(services.run.cancel_token().child_token())` into `exec_command_streaming` instead of calling `services.run.sandbox_cancel_token()`.\n  - Do not wire stall timeout into the run cancel token. If `lib/crates/fabro-core/src/stall.rs` is migrated away from `Arc<AtomicBool>`, give it a field named `stall_token: CancellationToken` and call `stall_token.cancel()` on timeout. The executor must continue racing node execution against `ExecutorOptions.stall_token` and returning `Error::StallTimeout { node_id }` from that select branch.\n  - Update CLI and server run entry points (`lib/crates/fabro-cli/src/commands/run/runner.rs`, `lib/crates/fabro-server/src/server.rs`, `lib/crates/fabro-workflow/src/operations/start.rs`) to create/store/cancel `CancellationToken` directly. `StartServices.cancel_token` and `RunSession.cancel_token` must become non-optional `CancellationToken` fields; managed server run state and CLI worker-control/signal handlers must use `CancellationToken`; places that currently call `load(Ordering::SeqCst)` must use `token.is_cancelled()`.\n  - Specific `cancel_requested.load(SeqCst)` / `is_some_and(|flag| flag.load(...))` sites that must migrate (this is not exhaustive — the migration is compiler-driven once the type changes — but these are the ones easy to miss):\n    - `lib/crates/fabro-workflow/src/handler/human.rs:328-332` — `cancel_requested.as_ref().is_some_and(|flag| flag.load(Ordering::SeqCst))` becomes `services.run.cancel_token().is_cancelled()`.\n    - `lib/crates/fabro-workflow/src/operations/start.rs:858-886` (`DetachedRunBootstrapGuard::drop`) and `start.rs:913-958` (`DetachedRunCompletionGuard::drop`) read the cancel state to choose `FailureReason::Cancelled` vs other reasons. The \"do not implement cancellation in `Drop`\" rule above prohibits *triggering* cancellation in `Drop`, not *reading* it; these reads are load-bearing and must migrate to `cancel_token.is_cancelled()`.\n  - Do not keep a compatibility atomic in `RunOptions`, `RunServices`, or the core executor. If server/CLI code still needs a separate boolean for status bookkeeping during migration, keep that flag local to the server/CLI module and set it in the same code path that calls `CancellationToken::cancel()`.\n  - Tests that need to trigger cancellation from outside the system under test must create a token, clone it into `RunOptions`, and retain the original clone. The example below pre-cancels (run never starts a stage); for in-flight cancellation, replace the synchronous `cancel_token.cancel()` with a `tokio::spawn(...)` that awaits a marker (e.g., the first stage event) before cancelling, or call `cancel_token.cancel()` from inside a handler hook.\n    ```rust\n    // Pre-cancellation example:\n    let cancel_token = CancellationToken::new();\n    let mut run_options = test_run_options(run_dir, run_id);\n    run_options.cancel_token = cancel_token.clone();\n    cancel_token.cancel(); // for in-flight cancellation, fire from a spawned task or hook instead\n    ```\n\n- Fix manager-loop child workflow cancellation in `lib/crates/fabro-workflow/src/handler/manager_loop.rs`.\n  - Do not build child `RunServices` with `.with_cancel_requested(None)`; that method is removed by the token migration.\n  - Create a child run token with `let child_run_token = services.run.cancel_token().child_token();` before spawning the child engine.\n  - Put `child_run_token.clone()` into `child_run_options.cancel_token`.\n  - Pass `child_run_token.clone()` into child `RunServices` with `.with_cancel_token(child_run_token.clone())`.\n  - At the current stop-condition and max-cycle sites (`manager_loop.rs:322` and `manager_loop.rs:340`), call `child_run_token.cancel()`. Parent cancellation propagates parent-to-child through `child_token()`, and the child executor sees cancellation between every node because `RunOptions.cancel_token` is now a `CancellationToken`.\n  - Cancellation is intentionally one-way for manager-loop child workflows: parent cancellation cancels the child, and manager-loop stop/max-cycle cancellation cancels the child, but child cancellation does not cancel the parent run.\n\n- Update `CodergenBackend::run` in `lib/crates/fabro-workflow/src/handler/agent.rs` to accept `cancel_token: CancellationToken`.\n  - `AgentHandler` passes `services.run.cancel_token()` into every backend invocation.\n  - `BackendRouter` still implements `CodergenBackend`; it routes as today and forwards the same token to either `AgentApiBackend` or `AgentCliBackend`.\n  - `AgentApiBackend`, `AgentCliBackend`, `BackendRouter`, and all test stubs must update to the non-optional signature.\n  - In `AgentHandler::execute`, add an explicit `Err(Error::Cancelled) => return Err(Error::Cancelled)` match arm before the bare `Err(e) => Ok(e.to_fail_outcome())` arm at the current `handler/agent.rs:310-315` decision point.\n  - Add the same explicit `Err(Error::Cancelled) => return Err(Error::Cancelled)` arm in `lib/crates/fabro-workflow/src/handler/prompt.rs:118-123`, because prompt backends use the same retryable/non-retryable-to-failure-outcome pattern.\n  - Add explicit `Error::Cancelled` propagation in `lib/crates/fabro-workflow/src/handler/parallel.rs:466`, where a branch's `Err(e)` is currently converted via `e.to_fail_outcome()` into a `BranchResult`. A branch that returns `Err(Error::Cancelled)` from a parallel agent stage must propagate cancellation to the parent rather than aggregating into a failed-branch outcome.\n  - Audit the remaining handlers with `rg -n \"is_retryable\\\\(\\\\)|to_fail_outcome\\\\(\" lib/crates/fabro-workflow/src/handler lib/crates/fabro-workflow/src/pipeline` and add explicit `Error::Cancelled` propagation anywhere cancellation could otherwise be converted to a stage failure outcome.\n\n- Rework `AgentCliBackend::run` in `lib/crates/fabro-workflow/src/handler/llm/cli.rs`.\n  - Remove the detached `setsid ... &`, PID logging-only path, exit-code temp file, and polling loop.\n  - Run `. <env_path> && <cli command>` via `sandbox.exec_command_streaming(..., Some(cancel_token.child_token()), callback)`.\n  - Treat the `cancel_token` argument as the invocation's parent token. Pass child tokens into CLI version checks, install commands, credential login commands, and the final CLI command. Do not create new `sandbox_cancel_token()` bridge tasks for each subprocess.\n  - Preserve today's unbounded CLI-agent runtime when `node.timeout()` is absent. Do **not** introduce a 10-minute or 24-hour default cap.\n  - Change `Sandbox::exec_command_streaming` in `lib/crates/fabro-sandbox/src/sandbox.rs` and every implementation/decorator (`local.rs`, `docker.rs`, `daytona/mod.rs`, `worktree.rs`, test fakes) from `timeout_ms: u64` to `timeout_ms: Option<u64>`. `None` means wait until natural exit or cancellation; `Some(ms)` means return `CommandTermination::TimedOut` after that duration.\n  - Keep the default trait implementation in `sandbox.rs` for test mocks and simple fakes. Update it to bridge `Option<u64>` into the existing non-streaming `exec_command(..., timeout_ms: u64, ...)` fallback with:\n    ```rust\n    let fallback_timeout_ms = timeout_ms.unwrap_or(u64::MAX);\n    let result = self\n        .exec_command(command, fallback_timeout_ms, working_dir, env_vars, cancel_token)\n        .await?;\n    ```\n    This `u64::MAX` conversion is allowed only in the default non-streaming fallback. Production streaming implementations and decorators must override `exec_command_streaming` and implement `None` with a pending timeout future, not a giant Tokio sleep.\n  - Implement optional timeout arms with a pending future, not a giant duration:\n    ```rust\n    let timeout_future = async {\n        match timeout_ms {\n            Some(ms) => tokio::time::sleep(Duration::from_millis(ms)).await,\n            None => std::future::pending::<()>().await,\n        }\n    };\n    tokio::pin!(timeout_future);\n\n    tokio::select! {\n        result = wait_for_process => { /* natural exit */ }\n        () = &mut timeout_future => { /* CommandTermination::TimedOut */ }\n        () = cancel_token.cancelled() => { /* CommandTermination::Cancelled */ }\n    }\n    ```\n  - Apply that pattern in `local.rs` and `daytona/mod.rs` where timeout is currently a pinned `time::sleep(...)` select branch. Do not use `Duration::from_millis(u64::MAX)`.\n  - Docker streaming (`docker.rs:377`) currently uses `Duration::from_millis(timeout_ms)` with no grace window, so no streaming grace adjustment is required there. The only `timeout_ms + 2000` grace site in the sandbox crate is `daytona/mod.rs:1105` inside the non-streaming `exec_command` impl, which this PR does not change. If a future change makes `exec_command` also accept `Option<u64>`, that grace window should become `timeout_ms.map(|ms| ms.saturating_add(2000))`.\n  - Command stages keep their existing behavior by passing `Some(node.timeout().map_or(600_000, crate::millis_u64))` — note the outer `Some(...)` is required because `exec_command_streaming` now takes `Option<u64>`.\n  - CLI agent stages pass `node.timeout().map(crate::millis_u64)` so missing `timeout` remains unbounded and an explicit timeout still works.\n  - On `CommandTermination::Cancelled`, emit `agent.cli.cancelled`, clean temp prompt/env files, and return `Error::Cancelled`. This intentionally diverges from command stages because workflow run cancellation must propagate to `fabro-core::Error::Cancelled`, not become a stage failure outcome.\n  - On `CommandTermination::TimedOut`, emit `agent.cli.timed_out`, clean temp prompt/env files, and return `Error::handler(\"CLI command timed out after ...\")` with stdout/stderr tails like command stages.\n  - On `CommandTermination::Exited`, keep existing parsing, usage accounting, changed-file detection, and cleanup behavior. Emit `agent.cli.completed` only for natural process exit.\n\n- Make sandbox streaming cancellation actually terminate CLI-shaped descendants.\n  - Local and Docker provider behavior must be covered by process-probe tests before switching CLI agents to `exec_command_streaming`.\n  - Daytona is in scope and merge-blocking. Today `lib/crates/fabro-sandbox/src/daytona/mod.rs:1628-1634` returns `CommandTermination::Cancelled` without killing the process. Update Daytona streaming cancellation and timeout paths to terminate the running command/session and verify that descendant processes are gone before returning.\n  - If the Daytona SDK has no per-command kill operation, delete/close the Daytona session on cancellation/timeout and wait for the process probe to show the marker process has exited. The PR is not complete until Daytona's streaming cancellation contract is reliable enough for CLI agents.\n\n- Harden `AgentApiBackend` cancellation in `lib/crates/fabro-workflow/src/handler/llm/api.rs`.\n  - Do not drop a running `session.initialize()` or `session.process_input(prompt)` future. Check `cancel_token.is_cancelled()` at fallback boundaries, and once a `Session` exists let the session bridge handle in-flight cancellation.\n  - Do not race/drop `create_session_for(...)` or `self.create_session(...)`. Both call `Client::from_source(source).await`, which may refresh or persist credentials; use a pre-check and post-check around the awaited call instead of dropping it mid-flight. Specific sites that need pre/post-cancellation checks: the main-path constructions at `api.rs:450` and `api.rs:457`, and the failover-path construction at `api.rs:527`. Pattern: `if cancel_token.is_cancelled() { return Err(Error::Cancelled); } let session = self.create_session(...).await?; if cancel_token.is_cancelled() { return Err(Error::Cancelled); }` — the post-check catches cancellation that arrived during credential refresh inside `Client::from_source`.\n  - Immediately after the `Session` is acquired (whether freshly created or pulled from `self.sessions` cache) and before any further `session.initialize().await` or `session.process_input(prompt).await`, install a per-invocation bridge task: await `cancel_token.cancelled()`, set `InterruptReason::Cancelled` through `session.interrupt_reason_handle()`, and cancel `session.cancel_token()`. The bridge must be installed on both the fresh-session path and the reuse path so cached sessions are also cancellable mid-`process_input`.\n  - Add a local bridge guard type in `api.rs` so fallback cannot overwrite and leak old handles:\n    ```rust\n    struct SessionCancelBridgeGuard {\n        handle: Option<tokio::task::JoinHandle<()>>,\n    }\n\n    impl SessionCancelBridgeGuard {\n        fn replace(&mut self, run_token: CancellationToken, session: &Session) {\n            self.abort();\n            let interrupt_reason = session.interrupt_reason_handle();\n            let session_token = session.cancel_token();\n            self.handle = Some(tokio::spawn(async move {\n                run_token.cancelled().await;\n                *interrupt_reason.lock().unwrap() = Some(InterruptReason::Cancelled);\n                session_token.cancel();\n            }));\n        }\n\n        fn abort(&mut self) {\n            if let Some(handle) = self.handle.take() {\n                handle.abort();\n            }\n        }\n    }\n\n    impl Drop for SessionCancelBridgeGuard {\n        fn drop(&mut self) {\n            self.abort();\n        }\n    }\n    ```\n  - Use one `SessionCancelBridgeGuard` for the backend invocation. Call `bridge.replace(cancel_token.clone(), &session)` after acquiring the initial session and again after each fallback session replacement; `replace` aborts the previous bridge before installing the new one. Call `bridge.abort()` before reinserting a full-fidelity session into `AgentApiBackend.sessions`, before replacing/dropping a `Session` outside `bridge.replace(...)`, and before every explicit `return`. The guard's `Drop` is the panic-safety fallback, not the primary cleanup path.\n  - Add an `AgentApiErrorDisposition` helper instead of a lossy `fabro_agent::Error -> fabro_workflow::Error` conversion:\n    ```rust\n    enum AgentApiErrorDisposition {\n        Cancelled,\n        FailoverEligible(fabro_llm::Error),\n        Terminal(Error),\n    }\n\n    fn classify_agent_error(\n        err: fabro_agent::Error,\n        allow_failover: bool,\n    ) -> AgentApiErrorDisposition {\n        match err {\n            fabro_agent::Error::Interrupted(InterruptReason::Cancelled) => {\n                AgentApiErrorDisposition::Cancelled\n            }\n            fabro_agent::Error::Interrupted(InterruptReason::WallClockTimeout) => {\n                AgentApiErrorDisposition::Terminal(Error::Precondition(\n                    \"Agent session hit its wall-clock timeout\".to_string(),\n                ))\n            }\n            fabro_agent::Error::Llm(err) if allow_failover && err.failover_eligible() => {\n                AgentApiErrorDisposition::FailoverEligible(err)\n            }\n            fabro_agent::Error::Llm(err) => AgentApiErrorDisposition::Terminal(Error::Llm(err)),\n            other @ (\n                fabro_agent::Error::SessionClosed\n                | fabro_agent::Error::InvalidState(_)\n                | fabro_agent::Error::ToolExecution(_)\n            ) => {\n                AgentApiErrorDisposition::Terminal(Error::Precondition(format!(\n                    \"Agent session failed: {other}\"\n                )))\n            }\n        }\n    }\n    ```\n  - Use failover-aware classification for `initialize()` as well as `process_input()`. On the primary provider, call `classify_agent_error(err, !self.fallback_chain.is_empty())` for `initialize()` errors; if it returns `FailoverEligible(err)`, set `last_err = Error::Llm(err)` and enter the fallback loop without calling primary `process_input()`.\n  - Inside the fallback loop, compute `let allow_more_failover = index + 1 < self.fallback_chain.len();` and pass that value to `classify_agent_error` for both `session.initialize().await` and `session.process_input(prompt).await`. `FailoverEligible(err)` records `last_err = Error::Llm(err)` and continues to the next provider; `Terminal(err)` returns immediately; `Cancelled` returns `Error::Cancelled`.\n  - Update `fabro-agent::Session::initialize` signature to `pub async fn initialize(&mut self) -> Result<(), fabro_agent::Error>`.\n  - Sweep test call sites with `rg -n \"session\\\\.initialize\\\\(\\\\)\\\\.await\" lib/crates/fabro-agent` and update each to `.await?` (where the surrounding fn returns a Result) or `.await.unwrap()` for tests; the signature change is a compile break and these sites are not enumerated below. Known non-test call sites:\n    - `lib/crates/fabro-workflow/src/handler/llm/api.rs:491`: convert `Interrupted(Cancelled)` to `fabro_workflow::Error::Cancelled`; convert other `fabro_agent::Error` values with the same helper used for `process_input` errors.\n    - `lib/crates/fabro-workflow/src/handler/llm/api.rs:556`: same conversion as the main provider path, inside the fallback loop, before `process_input(prompt)` is attempted.\n    - `lib/crates/fabro-retro/src/retro_agent.rs:207`: propagate with context, e.g. `session.initialize().await.context(\"Retro agent session initialization failed\")?;`.\n    - `lib/crates/fabro-agent/src/cli.rs:727`: use `session.initialize().await?;` so the CLI exits non-zero and renders the existing `fabro_agent::Error`.\n    - `lib/crates/fabro-agent/src/subagent.rs:114`: use `session.initialize().await?;` inside the spawned task so subagent initialization failure is returned to the parent as `fabro_agent::Error`.\n    - `lib/crates/fabro-agent/src/v4a_patch.rs:1469`: use `.await.unwrap()` or `?` according to the surrounding test/helper return type.\n  - Update public examples/docs that call `initialize()`:\n    - `lib/crates/fabro-agent/README.md:143` (the top-level repo `README.md` does not contain a call site at line 143)\n    - `docs/public/reference/sdk.mdx:45` (code example)\n    - `docs/public/reference/sdk.mdx:82` is a method-description table row and can stay as-is (or update to `initialize().await?` if the example signature changes)\n  - Make initialization cancellation-aware by threading a `CancellationToken` through helper methods that start or wait on sandbox work:\n    - `lib/crates/fabro-agent/src/session.rs::resolve_sandbox_mcp_servers`\n    - `lib/crates/fabro-agent/src/session.rs::start_sandbox_mcp_server`\n    - `lib/crates/fabro-agent/src/session.rs::build_env_context`\n    - `lib/crates/fabro-agent/src/memory.rs::discover_memory`\n    - `lib/crates/fabro-agent/src/skills.rs::discover_skills`\n  - Pass child tokens to all `exec_command` calls in initialization (`session.rs:300`, `312`, `324`, `363`, `373`, `385`). Check the token before and after `read_file` and `glob` calls in `discover_memory` and `discover_skills`; this PR does not change the `Sandbox::read_file` or `Sandbox::glob` signatures, so an individual provider file call is not interruptible mid-await.\n  - For sandbox MCP startup, if cancellation happens after a detached MCP server PID is known, terminate the MCP process group before returning `fabro_agent::Error::Interrupted(InterruptReason::Cancelled)`.\n  - Apply `AgentApiErrorDisposition` consistently at `api.rs:491`, `api.rs:556`, and every `process_input(prompt)` error match. `Interrupted(Cancelled)` must propagate as `Error::Cancelled`; `Interrupted(WallClockTimeout)`, `SessionClosed`, `InvalidState`, and `ToolExecution` must be terminal/non-retryable workflow errors; failover-eligible LLM errors must still advance to the next configured provider.\n  - The full-fidelity session cache is `AgentApiBackend.sessions`, keyed by thread id. The backend already removes a cached session before use and reinserts it only on success. Keep that pattern: cancelled, failed, or timed-out sessions are dropped and never reinserted.\n  - Apply the same cancellation bridge and conversion behavior to fallback-provider sessions.\n\n- Add public event shapes for non-exited CLI termination.\n  - Add `Event::AgentCliCancelled` and external name `agent.cli.cancelled`.\n  - Add `Event::AgentCliTimedOut` and external name `agent.cli.timed_out`.\n  - Add matching `EventBody` variants and props in `fabro-types`.\n  - Props for both events: `stdout`, `stderr`, `duration_ms`.\n  - Store `node_id` in the event envelope like `agent.cli.started` and `agent.cli.completed`.\n  - `RunEvent` is reused into `fabro-api` via `lib/crates/fabro-api/build.rs`, while the OpenAPI schema currently models `event` as a free string and `properties` as `additionalProperties`. Adding typed `EventBody` variants therefore requires Rust type changes and event tests, not an OpenAPI schema discriminator change. Change `docs/public/api-reference/fabro-api.yaml` only if adding or updating event examples.\n  - Audit run-event consumers with:\n    ```bash\n    rg \"agent\\\\.cli\\\\.completed|AgentCliCompleted|agent\\\\.cli|EventBody::AgentCli|RunEvent\" apps lib docs/public README.md\n    rg \"agent\\\\.cli\\\\.completed|agent\\\\.cli\\\\.started|AgentCli\" apps/fabro-web/app\n    ```\n  - Update every exhaustive `EventBody` match that needs to compile after adding variants, including run projection, fork replay filters, CLI progress rendering, and server event handling if the compiler reports them.\n  - Inspect by hand (these compile silently because they use `_ =>` or `matches!` and the compiler will NOT flag them):\n    - `lib/crates/fabro-store/src/run_state.rs` apply_event match — populate `stdout`/`stderr`/`duration_ms`/termination for the new variants analogously to `CommandCompleted`/`AgentCliCompleted`, otherwise stage projection drops the cancellation/timeout metadata.\n    - `lib/crates/fabro-workflow/src/operations/fork.rs` `is_replay_relevant` `matches!` — decide whether `AgentCliCancelled`/`AgentCliTimedOut` are replay-relevant and add to the list.\n    - `lib/crates/fabro-cli/src/commands/run/run_progress/event.rs` — add explicit progress rendering for the new variants.\n    - `lib/crates/fabro-server/src/server.rs` event-dispatch matches — confirm wildcard arms are intentional or add explicit handling.\n    - `apps/fabro-web/app/**/*.ts*` — `rg -i \"agent\\\\.cli|AgentCli|agent_cli\" apps/fabro-web/` is currently empty; the web app does not render `agent.cli.*` events explicitly today. The new variants will fall through whatever generic event-rendering path `agent.cli.completed` uses today (likely none beyond the run timeline). No web changes are required for cancellation/timeout unless a renderer is added in this PR.\n  - If `docs/public/api-reference/fabro-api.yaml` changes, run `cargo build -p fabro-api` and `cd lib/packages/fabro-api-client && bun run generate`. If it does not change, record why regeneration is unnecessary in the PR notes.\n\n## Test Plan\n\n- Add core/workflow cancellation-token tests.\n  - `fabro-core` executor: a cancelled `CancellationToken` returns `Err(Error::Cancelled)` at the existing between-node check.\n  - `fabro-core` executor: cancelling the token from a handler causes the next node boundary to return `Err(Error::Cancelled)`.\n  - `fabro-workflow` run options: default/test constructors create a non-cancelled `CancellationToken`.\n  - `RunServices`: `with_emitter`, `with_run_store`, `with_sandbox`, and `with_cancel_token` clone/rebuild paths must not cancel the original run token when intermediate `Arc<RunServices>` values are dropped.\n  - Stall timeout remains distinct from user cancellation: existing `executor_stall_token_interrupts_handler`, `executor_stall_token_interrupts_backoff_sleep`, and `executor_stall_token_interrupts_before_attempt` tests must continue asserting `Err(Error::StallTimeout { .. })`, while user cancellation tests assert `Err(Error::Cancelled)`.\n  - Manager loop: parent-token cancellation cancels the child token and the child executor stops before the next non-agent node.\n\n- Add focused workflow tests for agent cancellation.\n  - CLI backend: fake sandbox returns `ExecStreamingResult` with `CommandTermination::Cancelled`; assert backend returns `Error::Cancelled`, records a streaming cancel token, emits `agent.cli.cancelled`, does not emit `agent.cli.completed`, and runs temp cleanup.\n  - CLI backend: fake sandbox returns `ExecStreamingResult` with `CommandTermination::TimedOut`; assert backend returns a handler timeout error, emits `agent.cli.timed_out`, does not emit `agent.cli.completed`, and runs temp cleanup.\n  - CLI backend: no `node.timeout()` passes `None` to `exec_command_streaming`, preserving the current unbounded CLI-agent runtime.\n  - Command handler: command stages still pass `Some(600_000)` when `node.timeout()` is absent.\n  - Agent handler: mock backend captures its `CancellationToken`; assert `AgentHandler` passes the same run token semantics as `services.run.cancel_token()` and that it fires when the run token is cancelled.\n  - Agent handler: mock backend returns `Error::Cancelled`; assert `AgentHandler::execute` returns `Err(Error::Cancelled)`.\n  - Prompt handler: mock backend returns `Error::Cancelled`; assert `PromptHandler::execute` returns `Err(Error::Cancelled)` instead of a failed outcome.\n  - End-to-end workflow executor: cancel during an agent stage and assert the run terminates through the cancelled path, not through a non-retryable failed stage outcome. This test must cover the bridge from `AgentHandler::execute` through node-handler outcome conversion, `Error::is_retryable`, retry handling, and final run status classification.\n  - Manager loop: child workflow containing an agent stage receives a token that fires both on parent run cancellation and on direct manager-loop child cancellation from stop-condition and max-cycle paths.\n\n- Add API backend cancellation coverage.\n  - Unit test the run-token-to-session-token bridge: when the run token fires, the session cancel token fires and `InterruptReason::Cancelled` is set.\n  - Unit test bridge cleanup: after a successful full-fidelity backend invocation reinserts a cached session, cancelling the old invocation token does not cancel or interrupt that cached session.\n  - Unit test `SessionCancelBridgeGuard::replace`: replacing the bridge aborts the prior handle before storing the new handle.\n  - Unit test `SessionCancelBridgeGuard::drop`: dropping the guard aborts an installed bridge.\n  - Unit test fallback cleanup: when failover replaces one `Session` with another, the bridge for the previous session is aborted before the previous session is dropped.\n  - Unit test `AgentApiErrorDisposition`: `Interrupted(Cancelled)` becomes `Cancelled`; failover-eligible `Llm` becomes `FailoverEligible` only when `allow_failover` is true; non-eligible `Llm` becomes `Terminal(Error::Llm(_))`; `Interrupted(WallClockTimeout)`, `SessionClosed`, `InvalidState`, and `ToolExecution` become terminal non-retryable workflow errors.\n  - Unit test failover loop behavior: failover-eligible `process_input` LLM errors still advance to the next fallback provider instead of returning immediately through the conversion helper.\n  - Unit test initialize failover behavior: a failover-eligible LLM error from primary `session.initialize().await` enters the fallback loop when providers remain, and a failover-eligible LLM error from a fallback session's initialize continues to the next fallback provider when one remains.\n  - Add a test that a cancelled API backend path does not reinsert the session into the reuse cache.\n  - Add `Session::initialize` tests that cancel before memory discovery, during sandbox MCP startup/readiness polling, and during environment-context `exec_command`; each returns `Interrupted(Cancelled)` and does not proceed to `process_input`.\n  - Add call-site tests or compile-time updates proving `retro_agent`, `fabro-agent` CLI, subagent spawning, and `v4a_patch` handle `initialize().await?` or explicit error conversion.\n\n- Add event conversion tests.\n  - Verify `agent.cli.cancelled` event name.\n  - Verify `agent.cli.timed_out` event name.\n  - Verify `to_run_event` maps `node_id` into the envelope and serializes props under `properties` for both new events.\n  - If OpenAPI docs/examples change, run the existing OpenAPI conformance test and regenerate the TypeScript client.\n\n- Add sandbox-provider verification for CLI subprocess cleanup.\n  - Local fake/unit tests cover token propagation.\n  - Sandbox trait tests cover `exec_command_streaming(..., None, ...)`: it does not time out by default and still returns promptly on cancellation.\n  - Default trait implementation test: a mock that implements only `exec_command` receives `u64::MAX` when `exec_command_streaming(..., None, ...)` uses the fallback implementation.\n  - Docker: add or reuse a streaming timeout/cancel process-probe test that proves descendant CLI-shaped commands are gone before return.\n  - Daytona: add an ignored live test that runs a long `node` or shell command through `exec_command_streaming`, cancels it, then probes the Daytona sandbox for the marker process. This is a merge gate for the Daytona streaming path: the process must be gone before CLI agents are routed through `exec_command_streaming` on Daytona.\n\n- Run verification:\n  - `cargo nextest run -p fabro-workflow`\n  - `cargo nextest run -p fabro-agent`\n  - `cargo nextest run -p fabro-types`\n  - `cargo nextest run -p fabro-sandbox`\n  - `cargo nextest run -p fabro-server openapi_conformance`\n  - `cd apps/fabro-web && bun test`\n  - `cd apps/fabro-web && bun run typecheck`\n  - `cargo +nightly-2026-04-14 fmt --check --all`\n  - `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`\n\n## Assumptions\n\n- Scope includes both CLI and API agent backend cancellation, per the chosen direction.\n- The fix uses the existing `Sandbox::exec_command_streaming` cancellation behavior instead of introducing local-only `tokio::process::Command` management, but only after provider cancellation actually kills descendant processes.\n- `agent.cli.cancelled` and `agent.cli.timed_out` are additive events; existing `agent.cli.completed` remains only for natural process completion.\n- `CodergenBackend::run` signature churn is accepted because cancellation is a required execution input. Do not hide cancellation in `Context`.\n- `Session::initialize` signature churn is accepted and must be propagated to all workspace callers and public examples.\n- This PR does not make `Sandbox::read_file` or `Sandbox::glob` cancellable mid-await. Initialization checks cancellation before and after those calls; sandbox `exec_command` calls receive child tokens.\n- CLI-agent runtime remains effectively unbounded when `node.timeout()` is absent. The rejected alternative was reusing the command-stage 600-second default; the plan instead makes streaming timeout optional.\n- Daytona streaming cancellation is merge-blocking for routing Daytona CLI agents through the new managed streaming path.\n- Live steering of CLI-mode agents remains out of scope.\n"
+        },
+        "working_dir": null,
+        "metadata": {},
+        "inputs": {},
+        "model": {
+          "provider": "anthropic",
+          "name": "claude-sonnet-4-6",
+          "fallbacks": []
+        },
+        "git": {
+          "author": null
+        },
+        "prepare": {
+          "commands": [],
+          "timeout_ms": 300000
+        },
+        "execution": {
+          "mode": "normal",
+          "approval": "prompt",
+          "retros": true
+        },
+        "checkpoint": {
+          "exclude_globs": []
+        },
+        "sandbox": {
+          "provider": "daytona",
+          "preserve": false,
+          "devcontainer": false,
+          "env": {},
+          "local": {
+            "worktree_mode": "always"
+          },
+          "docker": {
+            "image": "buildpack-deps:noble",
+            "network_mode": null,
+            "memory_limit": 4000000000,
+            "cpu_quota": 200000,
+            "env_vars": {},
+            "skip_clone": false
+          },
+          "daytona": {
+            "auto_stop_interval": 30,
+            "labels": {
+              "repo": "fabro-sh/fabro"
+            },
+            "snapshot": {
+              "name": "fabro-v8",
+              "cpu": 8,
+              "memory_gb": 16,
+              "disk_gb": 20,
+              "dockerfile": {
+                "type": "inline",
+                "value": "FROM ubuntu:24.04\n\nRUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 && rm -rf /var/lib/apt/lists/*\n\n# GitHub CLI\nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*\n\n# Rust\nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\nENV PATH=\"/root/.cargo/bin:${PATH}\"\nRUN rustup toolchain install nightly-2026-04-14 --profile minimal --component clippy,rustfmt\nRUN cargo install cargo-nextest --locked\nENV CARGO_INCREMENTAL=0\n\n# Bun\nRUN curl -fsSL https://bun.sh/install | bash\nENV PATH=\"/root/.bun/bin:${PATH}\"\n\nWORKDIR /root\n"
+              }
+            },
+            "network": null,
+            "skip_clone": false
+          }
+        },
+        "notifications": {},
+        "interviews": {
+          "provider": null,
+          "slack": null,
+          "discord": null,
+          "teams": null
+        },
+        "agent": {
+          "permissions": null,
+          "mcps": {}
+        },
+        "hooks": [],
+        "scm": {
+          "provider": null,
+          "owner": null,
+          "repository": null,
+          "github": null
+        },
+        "pull_request": {
+          "enabled": true,
+          "draft": false,
+          "auto_merge": false,
+          "merge_strategy": "squash"
+        },
+        "artifacts": {
+          "include": []
+        }
+      }
+    },
+    "graph": {
+      "name": "ImplementPlan",
+      "nodes": {
+        "fixup": {
+          "id": "fixup",
+          "attrs": {
+            "max_visits": {
+              "Integer": 3
+            },
+            "model": {
+              "String": "claude-opus-4-6"
+            },
+            "label": {
+              "String": "Fixup"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "prompt": {
+              "String": "The verify step failed. Read the build output from context and fix all clippy lint warnings and test failures."
+            }
+          }
+        },
+        "simplify_opus": {
+          "id": "simplify_opus",
+          "attrs": {
+            "model": {
+              "String": "claude-opus-4-6"
+            },
+            "label": {
+              "String": "Simplify (Opus)"
+            },
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "fmt": {
+          "id": "fmt",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Format"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 fmt --all 2>&1"
+            },
+            "model": {
+              "String": "claude-opus-4-6"
+            }
+          }
+        },
+        "start": {
+          "id": "start",
+          "attrs": {
+            "shape": {
+              "String": "Mdiamond"
+            },
+            "label": {
+              "String": "Start"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-6"
+            }
+          }
+        },
+        "implement": {
+          "id": "implement",
+          "attrs": {
+            "prompt": {
+              "String": "Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD."
+            },
+            "model": {
+              "String": "claude-opus-4-6"
+            },
+            "label": {
+              "String": "Implement"
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "simplify_gpt": {
+          "id": "simplify_gpt",
+          "attrs": {
+            "label": {
+              "String": "Simplify (GPT-54)"
+            },
+            "model": {
+              "String": "gpt-5.4"
+            },
+            "provider": {
+              "String": "openai"
+            },
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            }
+          }
+        },
+        "exit": {
+          "id": "exit",
+          "attrs": {
+            "label": {
+              "String": "Exit"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "shape": {
+              "String": "Msquare"
+            },
+            "model": {
+              "String": "claude-opus-4-6"
+            }
+          }
+        },
+        "preflight_compile": {
+          "id": "preflight_compile",
+          "attrs": {
+            "label": {
+              "String": "Preflight Compile"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "script": {
+              "String": "cargo check -q --workspace 2>&1"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "model": {
+              "String": "claude-opus-4-6"
+            }
+          }
+        },
+        "verify": {
+          "id": "verify",
+          "attrs": {
+            "shape": {
+              "String": "parallelogram"
+            },
+            "label": {
+              "String": "Verify"
+            },
+            "goal_gate": {
+              "Boolean": true
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-6"
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1"
+            },
+            "retry_target": {
+              "String": "fixup"
+            }
+          }
+        },
+        "preflight_lint": {
+          "id": "preflight_lint",
+          "attrs": {
+            "shape": {
+              "String": "parallelogram"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace -- -D warnings 2>&1"
+            },
+            "label": {
+              "String": "Preflight Lint"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-6"
+            }
+          }
+        },
+        "fix_lints": {
+          "id": "fix_lints",
+          "attrs": {
+            "prompt": {
+              "String": "The preflight lint step failed. Read the build output from context and fix all clippy lint warnings."
+            },
+            "max_visits": {
+              "Integer": 3
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Fix Lints"
+            },
+            "model": {
+              "String": "claude-opus-4-6"
+            }
+          }
+        },
+        "toolchain": {
+          "id": "toolchain",
+          "attrs": {
+            "shape": {
+              "String": "parallelogram"
+            },
+            "script": {
+              "String": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Toolchain"
+            },
+            "model": {
+              "String": "claude-opus-4-6"
+            },
+            "max_retries": {
+              "Integer": 0
+            }
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "start",
+          "to": "toolchain",
+          "attrs": {}
+        },
+        {
+          "from": "toolchain",
+          "to": "preflight_compile",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "toolchain",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_compile",
+          "to": "preflight_lint",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_compile",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_lint",
+          "to": "implement",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_lint",
+          "to": "fix_lints",
+          "attrs": {}
+        },
+        {
+          "from": "fix_lints",
+          "to": "preflight_lint",
+          "attrs": {}
+        },
+        {
+          "from": "implement",
+          "to": "simplify_opus",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_opus",
+          "to": "simplify_gpt",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_gpt",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "verify",
+          "to": "fmt",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "verify",
+          "to": "fixup",
+          "attrs": {}
+        },
+        {
+          "from": "fixup",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "fmt",
+          "to": "exit",
+          "attrs": {}
+        }
+      ],
+      "attrs": {
+        "rankdir": {
+          "String": "LR"
+        },
+        "goal": {
+          "String": "# Fix Agent Stage Cancellation Implementation Plan\n\n> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task.\n\n**Goal:** Make workflow cancellation stop in-flight agent stages, including CLI-mode agent subprocesses and API-mode agent sessions.\n\n**Architecture:** Make `tokio_util::sync::CancellationToken` the workflow/executor cancellation primitive, then clone or derive child tokens through setup, node execution, manager-loop children, CLI subprocesses, and API sessions. Dropping services or tokens must not mean \"user cancelled\"; only an explicit `.cancel()` does. CLI-mode agents will run through `Sandbox::exec_command_streaming` after local, Docker, and Daytona streaming cancellation terminate descendants; API-mode agents will link each backend invocation to the existing `Session` interrupt token with a bridge guard that aborts stale bridge tasks before cached sessions are reused.\n\n**Tech Stack:** Rust, Tokio cancellation tokens, Fabro workflow events, Fabro sandbox streaming command execution, fabro-types run event schemas.\n\n---\n\n## Summary\n\n- Replace workflow-run cancellation's `Arc<AtomicBool>` core path with `CancellationToken`, including manager-loop child workflows and executor between-node checks.\n- Replace CLI agent detached subprocess execution with sandbox-managed execution that observes the workflow run cancellation token and terminates descendants for local, Docker, and Daytona.\n- Add explicit cancellation plumbing to all agent backends so API-mode and CLI-mode stages share the same non-optional cancellation contract.\n- Preserve run semantics: cancellation returns `Error::Cancelled`, reaches `fabro-core::Error::Cancelled`, and terminates the run as cancelled instead of as a retryable stage failure.\n\n## Key Changes\n\n- Promote `CancellationToken` to the workflow-run cancellation type.\n  - In `lib/crates/fabro-core/src/executor.rs`, change `ExecutorOptions.cancel_token` and `ExecutorBuilder::cancel_token(...)` from `Option<Arc<AtomicBool>>` to `Option<CancellationToken>`. The run loop must check `token.is_cancelled()` at the existing between-node cancellation point.\n  - Keep `ExecutorOptions.stall_token: Option<CancellationToken>` separate from user cancellation. User cancellation must return `Error::Cancelled`; stall timeout must continue returning `Error::StallTimeout { node_id }`.\n  - In `lib/crates/fabro-workflow/src/run_options.rs`, change `RunOptions.cancel_token` from `Option<Arc<AtomicBool>>` to non-optional `CancellationToken`. Tests and constructors that currently use `None` must pass `CancellationToken::new()`.\n  - In `lib/crates/fabro-workflow/src/services.rs`, replace `cancel_requested: Option<Arc<AtomicBool>>` with `cancel_token: CancellationToken` and expose `RunServices::cancel_token(&self) -> CancellationToken`.\n  - Do **not** implement cancellation in `Drop` for `RunServices` or any wrapper type. A successfully completed run may drop every token handle; that must not be observable as user cancellation by a child task that outlives the run.\n  - Remove `sandbox_cancel_token(...)` and the 10ms atomic-polling bridge once call sites are migrated. New cancellation-aware code must receive `CancellationToken` directly.\n  - Update `RunServices::new(...)` and add a doc comment: production construction is expected to happen from pipeline initialization with the run's root token; use `with_cancel_token(...)` only with the same root token or a `child_token()` derived from it.\n  - Make `with_cancel_token(token: CancellationToken)` `pub(crate)`. It must document that the token semantically means \"cancel this run or child run,\" not a generic shutdown signal.\n  - Update `lib/crates/fabro-workflow/src/pipeline/execute.rs` to pass `run_options.cancel_token.clone()` into `ExecutorBuilder::cancel_token(...)`.\n  - Update setup/devcontainer paths in `lib/crates/fabro-workflow/src/pipeline/initialize.rs` and `lib/crates/fabro-workflow/src/devcontainer_bridge.rs` to pass `Some(run_options.cancel_token.child_token())` into sandbox commands instead of creating a new bridge from an atomic.\n  - Update `lib/crates/fabro-workflow/src/handler/command.rs` to pass `Some(services.run.cancel_token().child_token())` into `exec_command_streaming` instead of calling `services.run.sandbox_cancel_token()`.\n  - Do not wire stall timeout into the run cancel token. If `lib/crates/fabro-core/src/stall.rs` is migrated away from `Arc<AtomicBool>`, give it a field named `stall_token: CancellationToken` and call `stall_token.cancel()` on timeout. The executor must continue racing node execution against `ExecutorOptions.stall_token` and returning `Error::StallTimeout { node_id }` from that select branch.\n  - Update CLI and server run entry points (`lib/crates/fabro-cli/src/commands/run/runner.rs`, `lib/crates/fabro-server/src/server.rs`, `lib/crates/fabro-workflow/src/operations/start.rs`) to create/store/cancel `CancellationToken` directly. `StartServices.cancel_token` and `RunSession.cancel_token` must become non-optional `CancellationToken` fields; managed server run state and CLI worker-control/signal handlers must use `CancellationToken`; places that currently call `load(Ordering::SeqCst)` must use `token.is_cancelled()`.\n  - Specific `cancel_requested.load(SeqCst)` / `is_some_and(|flag| flag.load(...))` sites that must migrate (this is not exhaustive — the migration is compiler-driven once the type changes — but these are the ones easy to miss):\n    - `lib/crates/fabro-workflow/src/handler/human.rs:328-332` — `cancel_requested.as_ref().is_some_and(|flag| flag.load(Ordering::SeqCst))` becomes `services.run.cancel_token().is_cancelled()`.\n    - `lib/crates/fabro-workflow/src/operations/start.rs:858-886` (`DetachedRunBootstrapGuard::drop`) and `start.rs:913-958` (`DetachedRunCompletionGuard::drop`) read the cancel state to choose `FailureReason::Cancelled` vs other reasons. The \"do not implement cancellation in `Drop`\" rule above prohibits *triggering* cancellation in `Drop`, not *reading* it; these reads are load-bearing and must migrate to `cancel_token.is_cancelled()`.\n  - Do not keep a compatibility atomic in `RunOptions`, `RunServices`, or the core executor. If server/CLI code still needs a separate boolean for status bookkeeping during migration, keep that flag local to the server/CLI module and set it in the same code path that calls `CancellationToken::cancel()`.\n  - Tests that need to trigger cancellation from outside the system under test must create a token, clone it into `RunOptions`, and retain the original clone. The example below pre-cancels (run never starts a stage); for in-flight cancellation, replace the synchronous `cancel_token.cancel()` with a `tokio::spawn(...)` that awaits a marker (e.g., the first stage event) before cancelling, or call `cancel_token.cancel()` from inside a handler hook.\n    ```rust\n    // Pre-cancellation example:\n    let cancel_token = CancellationToken::new();\n    let mut run_options = test_run_options(run_dir, run_id);\n    run_options.cancel_token = cancel_token.clone();\n    cancel_token.cancel(); // for in-flight cancellation, fire from a spawned task or hook instead\n    ```\n\n- Fix manager-loop child workflow cancellation in `lib/crates/fabro-workflow/src/handler/manager_loop.rs`.\n  - Do not build child `RunServices` with `.with_cancel_requested(None)`; that method is removed by the token migration.\n  - Create a child run token with `let child_run_token = services.run.cancel_token().child_token();` before spawning the child engine.\n  - Put `child_run_token.clone()` into `child_run_options.cancel_token`.\n  - Pass `child_run_token.clone()` into child `RunServices` with `.with_cancel_token(child_run_token.clone())`.\n  - At the current stop-condition and max-cycle sites (`manager_loop.rs:322` and `manager_loop.rs:340`), call `child_run_token.cancel()`. Parent cancellation propagates parent-to-child through `child_token()`, and the child executor sees cancellation between every node because `RunOptions.cancel_token` is now a `CancellationToken`.\n  - Cancellation is intentionally one-way for manager-loop child workflows: parent cancellation cancels the child, and manager-loop stop/max-cycle cancellation cancels the child, but child cancellation does not cancel the parent run.\n\n- Update `CodergenBackend::run` in `lib/crates/fabro-workflow/src/handler/agent.rs` to accept `cancel_token: CancellationToken`.\n  - `AgentHandler` passes `services.run.cancel_token()` into every backend invocation.\n  - `BackendRouter` still implements `CodergenBackend`; it routes as today and forwards the same token to either `AgentApiBackend` or `AgentCliBackend`.\n  - `AgentApiBackend`, `AgentCliBackend`, `BackendRouter`, and all test stubs must update to the non-optional signature.\n  - In `AgentHandler::execute`, add an explicit `Err(Error::Cancelled) => return Err(Error::Cancelled)` match arm before the bare `Err(e) => Ok(e.to_fail_outcome())` arm at the current `handler/agent.rs:310-315` decision point.\n  - Add the same explicit `Err(Error::Cancelled) => return Err(Error::Cancelled)` arm in `lib/crates/fabro-workflow/src/handler/prompt.rs:118-123`, because prompt backends use the same retryable/non-retryable-to-failure-outcome pattern.\n  - Add explicit `Error::Cancelled` propagation in `lib/crates/fabro-workflow/src/handler/parallel.rs:466`, where a branch's `Err(e)` is currently converted via `e.to_fail_outcome()` into a `BranchResult`. A branch that returns `Err(Error::Cancelled)` from a parallel agent stage must propagate cancellation to the parent rather than aggregating into a failed-branch outcome.\n  - Audit the remaining handlers with `rg -n \"is_retryable\\\\(\\\\)|to_fail_outcome\\\\(\" lib/crates/fabro-workflow/src/handler lib/crates/fabro-workflow/src/pipeline` and add explicit `Error::Cancelled` propagation anywhere cancellation could otherwise be converted to a stage failure outcome.\n\n- Rework `AgentCliBackend::run` in `lib/crates/fabro-workflow/src/handler/llm/cli.rs`.\n  - Remove the detached `setsid ... &`, PID logging-only path, exit-code temp file, and polling loop.\n  - Run `. <env_path> && <cli command>` via `sandbox.exec_command_streaming(..., Some(cancel_token.child_token()), callback)`.\n  - Treat the `cancel_token` argument as the invocation's parent token. Pass child tokens into CLI version checks, install commands, credential login commands, and the final CLI command. Do not create new `sandbox_cancel_token()` bridge tasks for each subprocess.\n  - Preserve today's unbounded CLI-agent runtime when `node.timeout()` is absent. Do **not** introduce a 10-minute or 24-hour default cap.\n  - Change `Sandbox::exec_command_streaming` in `lib/crates/fabro-sandbox/src/sandbox.rs` and every implementation/decorator (`local.rs`, `docker.rs`, `daytona/mod.rs`, `worktree.rs`, test fakes) from `timeout_ms: u64` to `timeout_ms: Option<u64>`. `None` means wait until natural exit or cancellation; `Some(ms)` means return `CommandTermination::TimedOut` after that duration.\n  - Keep the default trait implementation in `sandbox.rs` for test mocks and simple fakes. Update it to bridge `Option<u64>` into the existing non-streaming `exec_command(..., timeout_ms: u64, ...)` fallback with:\n    ```rust\n    let fallback_timeout_ms = timeout_ms.unwrap_or(u64::MAX);\n    let result = self\n        .exec_command(command, fallback_timeout_ms, working_dir, env_vars, cancel_token)\n        .await?;\n    ```\n    This `u64::MAX` conversion is allowed only in the default non-streaming fallback. Production streaming implementations and decorators must override `exec_command_streaming` and implement `None` with a pending timeout future, not a giant Tokio sleep.\n  - Implement optional timeout arms with a pending future, not a giant duration:\n    ```rust\n    let timeout_future = async {\n        match timeout_ms {\n            Some(ms) => tokio::time::sleep(Duration::from_millis(ms)).await,\n            None => std::future::pending::<()>().await,\n        }\n    };\n    tokio::pin!(timeout_future);\n\n    tokio::select! {\n        result = wait_for_process => { /* natural exit */ }\n        () = &mut timeout_future => { /* CommandTermination::TimedOut */ }\n        () = cancel_token.cancelled() => { /* CommandTermination::Cancelled */ }\n    }\n    ```\n  - Apply that pattern in `local.rs` and `daytona/mod.rs` where timeout is currently a pinned `time::sleep(...)` select branch. Do not use `Duration::from_millis(u64::MAX)`.\n  - Docker streaming (`docker.rs:377`) currently uses `Duration::from_millis(timeout_ms)` with no grace window, so no streaming grace adjustment is required there. The only `timeout_ms + 2000` grace site in the sandbox crate is `daytona/mod.rs:1105` inside the non-streaming `exec_command` impl, which this PR does not change. If a future change makes `exec_command` also accept `Option<u64>`, that grace window should become `timeout_ms.map(|ms| ms.saturating_add(2000))`.\n  - Command stages keep their existing behavior by passing `Some(node.timeout().map_or(600_000, crate::millis_u64))` — note the outer `Some(...)` is required because `exec_command_streaming` now takes `Option<u64>`.\n  - CLI agent stages pass `node.timeout().map(crate::millis_u64)` so missing `timeout` remains unbounded and an explicit timeout still works.\n  - On `CommandTermination::Cancelled`, emit `agent.cli.cancelled`, clean temp prompt/env files, and return `Error::Cancelled`. This intentionally diverges from command stages because workflow run cancellation must propagate to `fabro-core::Error::Cancelled`, not become a stage failure outcome.\n  - On `CommandTermination::TimedOut`, emit `agent.cli.timed_out`, clean temp prompt/env files, and return `Error::handler(\"CLI command timed out after ...\")` with stdout/stderr tails like command stages.\n  - On `CommandTermination::Exited`, keep existing parsing, usage accounting, changed-file detection, and cleanup behavior. Emit `agent.cli.completed` only for natural process exit.\n\n- Make sandbox streaming cancellation actually terminate CLI-shaped descendants.\n  - Local and Docker provider behavior must be covered by process-probe tests before switching CLI agents to `exec_command_streaming`.\n  - Daytona is in scope and merge-blocking. Today `lib/crates/fabro-sandbox/src/daytona/mod.rs:1628-1634` returns `CommandTermination::Cancelled` without killing the process. Update Daytona streaming cancellation and timeout paths to terminate the running command/session and verify that descendant processes are gone before returning.\n  - If the Daytona SDK has no per-command kill operation, delete/close the Daytona session on cancellation/timeout and wait for the process probe to show the marker process has exited. The PR is not complete until Daytona's streaming cancellation contract is reliable enough for CLI agents.\n\n- Harden `AgentApiBackend` cancellation in `lib/crates/fabro-workflow/src/handler/llm/api.rs`.\n  - Do not drop a running `session.initialize()` or `session.process_input(prompt)` future. Check `cancel_token.is_cancelled()` at fallback boundaries, and once a `Session` exists let the session bridge handle in-flight cancellation.\n  - Do not race/drop `create_session_for(...)` or `self.create_session(...)`. Both call `Client::from_source(source).await`, which may refresh or persist credentials; use a pre-check and post-check around the awaited call instead of dropping it mid-flight. Specific sites that need pre/post-cancellation checks: the main-path constructions at `api.rs:450` and `api.rs:457`, and the failover-path construction at `api.rs:527`. Pattern: `if cancel_token.is_cancelled() { return Err(Error::Cancelled); } let session = self.create_session(...).await?; if cancel_token.is_cancelled() { return Err(Error::Cancelled); }` — the post-check catches cancellation that arrived during credential refresh inside `Client::from_source`.\n  - Immediately after the `Session` is acquired (whether freshly created or pulled from `self.sessions` cache) and before any further `session.initialize().await` or `session.process_input(prompt).await`, install a per-invocation bridge task: await `cancel_token.cancelled()`, set `InterruptReason::Cancelled` through `session.interrupt_reason_handle()`, and cancel `session.cancel_token()`. The bridge must be installed on both the fresh-session path and the reuse path so cached sessions are also cancellable mid-`process_input`.\n  - Add a local bridge guard type in `api.rs` so fallback cannot overwrite and leak old handles:\n    ```rust\n    struct SessionCancelBridgeGuard {\n        handle: Option<tokio::task::JoinHandle<()>>,\n    }\n\n    impl SessionCancelBridgeGuard {\n        fn replace(&mut self, run_token: CancellationToken, session: &Session) {\n            self.abort();\n            let interrupt_reason = session.interrupt_reason_handle();\n            let session_token = session.cancel_token();\n            self.handle = Some(tokio::spawn(async move {\n                run_token.cancelled().await;\n                *interrupt_reason.lock().unwrap() = Some(InterruptReason::Cancelled);\n                session_token.cancel();\n            }));\n        }\n\n        fn abort(&mut self) {\n            if let Some(handle) = self.handle.take() {\n                handle.abort();\n            }\n        }\n    }\n\n    impl Drop for SessionCancelBridgeGuard {\n        fn drop(&mut self) {\n            self.abort();\n        }\n    }\n    ```\n  - Use one `SessionCancelBridgeGuard` for the backend invocation. Call `bridge.replace(cancel_token.clone(), &session)` after acquiring the initial session and again after each fallback session replacement; `replace` aborts the previous bridge before installing the new one. Call `bridge.abort()` before reinserting a full-fidelity session into `AgentApiBackend.sessions`, before replacing/dropping a `Session` outside `bridge.replace(...)`, and before every explicit `return`. The guard's `Drop` is the panic-safety fallback, not the primary cleanup path.\n  - Add an `AgentApiErrorDisposition` helper instead of a lossy `fabro_agent::Error -> fabro_workflow::Error` conversion:\n    ```rust\n    enum AgentApiErrorDisposition {\n        Cancelled,\n        FailoverEligible(fabro_llm::Error),\n        Terminal(Error),\n    }\n\n    fn classify_agent_error(\n        err: fabro_agent::Error,\n        allow_failover: bool,\n    ) -> AgentApiErrorDisposition {\n        match err {\n            fabro_agent::Error::Interrupted(InterruptReason::Cancelled) => {\n                AgentApiErrorDisposition::Cancelled\n            }\n            fabro_agent::Error::Interrupted(InterruptReason::WallClockTimeout) => {\n                AgentApiErrorDisposition::Terminal(Error::Precondition(\n                    \"Agent session hit its wall-clock timeout\".to_string(),\n                ))\n            }\n            fabro_agent::Error::Llm(err) if allow_failover && err.failover_eligible() => {\n                AgentApiErrorDisposition::FailoverEligible(err)\n            }\n            fabro_agent::Error::Llm(err) => AgentApiErrorDisposition::Terminal(Error::Llm(err)),\n            other @ (\n                fabro_agent::Error::SessionClosed\n                | fabro_agent::Error::InvalidState(_)\n                | fabro_agent::Error::ToolExecution(_)\n            ) => {\n                AgentApiErrorDisposition::Terminal(Error::Precondition(format!(\n                    \"Agent session failed: {other}\"\n                )))\n            }\n        }\n    }\n    ```\n  - Use failover-aware classification for `initialize()` as well as `process_input()`. On the primary provider, call `classify_agent_error(err, !self.fallback_chain.is_empty())` for `initialize()` errors; if it returns `FailoverEligible(err)`, set `last_err = Error::Llm(err)` and enter the fallback loop without calling primary `process_input()`.\n  - Inside the fallback loop, compute `let allow_more_failover = index + 1 < self.fallback_chain.len();` and pass that value to `classify_agent_error` for both `session.initialize().await` and `session.process_input(prompt).await`. `FailoverEligible(err)` records `last_err = Error::Llm(err)` and continues to the next provider; `Terminal(err)` returns immediately; `Cancelled` returns `Error::Cancelled`.\n  - Update `fabro-agent::Session::initialize` signature to `pub async fn initialize(&mut self) -> Result<(), fabro_agent::Error>`.\n  - Sweep test call sites with `rg -n \"session\\\\.initialize\\\\(\\\\)\\\\.await\" lib/crates/fabro-agent` and update each to `.await?` (where the surrounding fn returns a Result) or `.await.unwrap()` for tests; the signature change is a compile break and these sites are not enumerated below. Known non-test call sites:\n    - `lib/crates/fabro-workflow/src/handler/llm/api.rs:491`: convert `Interrupted(Cancelled)` to `fabro_workflow::Error::Cancelled`; convert other `fabro_agent::Error` values with the same helper used for `process_input` errors.\n    - `lib/crates/fabro-workflow/src/handler/llm/api.rs:556`: same conversion as the main provider path, inside the fallback loop, before `process_input(prompt)` is attempted.\n    - `lib/crates/fabro-retro/src/retro_agent.rs:207`: propagate with context, e.g. `session.initialize().await.context(\"Retro agent session initialization failed\")?;`.\n    - `lib/crates/fabro-agent/src/cli.rs:727`: use `session.initialize().await?;` so the CLI exits non-zero and renders the existing `fabro_agent::Error`.\n    - `lib/crates/fabro-agent/src/subagent.rs:114`: use `session.initialize().await?;` inside the spawned task so subagent initialization failure is returned to the parent as `fabro_agent::Error`.\n    - `lib/crates/fabro-agent/src/v4a_patch.rs:1469`: use `.await.unwrap()` or `?` according to the surrounding test/helper return type.\n  - Update public examples/docs that call `initialize()`:\n    - `lib/crates/fabro-agent/README.md:143` (the top-level repo `README.md` does not contain a call site at line 143)\n    - `docs/public/reference/sdk.mdx:45` (code example)\n    - `docs/public/reference/sdk.mdx:82` is a method-description table row and can stay as-is (or update to `initialize().await?` if the example signature changes)\n  - Make initialization cancellation-aware by threading a `CancellationToken` through helper methods that start or wait on sandbox work:\n    - `lib/crates/fabro-agent/src/session.rs::resolve_sandbox_mcp_servers`\n    - `lib/crates/fabro-agent/src/session.rs::start_sandbox_mcp_server`\n    - `lib/crates/fabro-agent/src/session.rs::build_env_context`\n    - `lib/crates/fabro-agent/src/memory.rs::discover_memory`\n    - `lib/crates/fabro-agent/src/skills.rs::discover_skills`\n  - Pass child tokens to all `exec_command` calls in initialization (`session.rs:300`, `312`, `324`, `363`, `373`, `385`). Check the token before and after `read_file` and `glob` calls in `discover_memory` and `discover_skills`; this PR does not change the `Sandbox::read_file` or `Sandbox::glob` signatures, so an individual provider file call is not interruptible mid-await.\n  - For sandbox MCP startup, if cancellation happens after a detached MCP server PID is known, terminate the MCP process group before returning `fabro_agent::Error::Interrupted(InterruptReason::Cancelled)`.\n  - Apply `AgentApiErrorDisposition` consistently at `api.rs:491`, `api.rs:556`, and every `process_input(prompt)` error match. `Interrupted(Cancelled)` must propagate as `Error::Cancelled`; `Interrupted(WallClockTimeout)`, `SessionClosed`, `InvalidState`, and `ToolExecution` must be terminal/non-retryable workflow errors; failover-eligible LLM errors must still advance to the next configured provider.\n  - The full-fidelity session cache is `AgentApiBackend.sessions`, keyed by thread id. The backend already removes a cached session before use and reinserts it only on success. Keep that pattern: cancelled, failed, or timed-out sessions are dropped and never reinserted.\n  - Apply the same cancellation bridge and conversion behavior to fallback-provider sessions.\n\n- Add public event shapes for non-exited CLI termination.\n  - Add `Event::AgentCliCancelled` and external name `agent.cli.cancelled`.\n  - Add `Event::AgentCliTimedOut` and external name `agent.cli.timed_out`.\n  - Add matching `EventBody` variants and props in `fabro-types`.\n  - Props for both events: `stdout`, `stderr`, `duration_ms`.\n  - Store `node_id` in the event envelope like `agent.cli.started` and `agent.cli.completed`.\n  - `RunEvent` is reused into `fabro-api` via `lib/crates/fabro-api/build.rs`, while the OpenAPI schema currently models `event` as a free string and `properties` as `additionalProperties`. Adding typed `EventBody` variants therefore requires Rust type changes and event tests, not an OpenAPI schema discriminator change. Change `docs/public/api-reference/fabro-api.yaml` only if adding or updating event examples.\n  - Audit run-event consumers with:\n    ```bash\n    rg \"agent\\\\.cli\\\\.completed|AgentCliCompleted|agent\\\\.cli|EventBody::AgentCli|RunEvent\" apps lib docs/public README.md\n    rg \"agent\\\\.cli\\\\.completed|agent\\\\.cli\\\\.started|AgentCli\" apps/fabro-web/app\n    ```\n  - Update every exhaustive `EventBody` match that needs to compile after adding variants, including run projection, fork replay filters, CLI progress rendering, and server event handling if the compiler reports them.\n  - Inspect by hand (these compile silently because they use `_ =>` or `matches!` and the compiler will NOT flag them):\n    - `lib/crates/fabro-store/src/run_state.rs` apply_event match — populate `stdout`/`stderr`/`duration_ms`/termination for the new variants analogously to `CommandCompleted`/`AgentCliCompleted`, otherwise stage projection drops the cancellation/timeout metadata.\n    - `lib/crates/fabro-workflow/src/operations/fork.rs` `is_replay_relevant` `matches!` — decide whether `AgentCliCancelled`/`AgentCliTimedOut` are replay-relevant and add to the list.\n    - `lib/crates/fabro-cli/src/commands/run/run_progress/event.rs` — add explicit progress rendering for the new variants.\n    - `lib/crates/fabro-server/src/server.rs` event-dispatch matches — confirm wildcard arms are intentional or add explicit handling.\n    - `apps/fabro-web/app/**/*.ts*` — `rg -i \"agent\\\\.cli|AgentCli|agent_cli\" apps/fabro-web/` is currently empty; the web app does not render `agent.cli.*` events explicitly today. The new variants will fall through whatever generic event-rendering path `agent.cli.completed` uses today (likely none beyond the run timeline). No web changes are required for cancellation/timeout unless a renderer is added in this PR.\n  - If `docs/public/api-reference/fabro-api.yaml` changes, run `cargo build -p fabro-api` and `cd lib/packages/fabro-api-client && bun run generate`. If it does not change, record why regeneration is unnecessary in the PR notes.\n\n## Test Plan\n\n- Add core/workflow cancellation-token tests.\n  - `fabro-core` executor: a cancelled `CancellationToken` returns `Err(Error::Cancelled)` at the existing between-node check.\n  - `fabro-core` executor: cancelling the token from a handler causes the next node boundary to return `Err(Error::Cancelled)`.\n  - `fabro-workflow` run options: default/test constructors create a non-cancelled `CancellationToken`.\n  - `RunServices`: `with_emitter`, `with_run_store`, `with_sandbox`, and `with_cancel_token` clone/rebuild paths must not cancel the original run token when intermediate `Arc<RunServices>` values are dropped.\n  - Stall timeout remains distinct from user cancellation: existing `executor_stall_token_interrupts_handler`, `executor_stall_token_interrupts_backoff_sleep`, and `executor_stall_token_interrupts_before_attempt` tests must continue asserting `Err(Error::StallTimeout { .. })`, while user cancellation tests assert `Err(Error::Cancelled)`.\n  - Manager loop: parent-token cancellation cancels the child token and the child executor stops before the next non-agent node.\n\n- Add focused workflow tests for agent cancellation.\n  - CLI backend: fake sandbox returns `ExecStreamingResult` with `CommandTermination::Cancelled`; assert backend returns `Error::Cancelled`, records a streaming cancel token, emits `agent.cli.cancelled`, does not emit `agent.cli.completed`, and runs temp cleanup.\n  - CLI backend: fake sandbox returns `ExecStreamingResult` with `CommandTermination::TimedOut`; assert backend returns a handler timeout error, emits `agent.cli.timed_out`, does not emit `agent.cli.completed`, and runs temp cleanup.\n  - CLI backend: no `node.timeout()` passes `None` to `exec_command_streaming`, preserving the current unbounded CLI-agent runtime.\n  - Command handler: command stages still pass `Some(600_000)` when `node.timeout()` is absent.\n  - Agent handler: mock backend captures its `CancellationToken`; assert `AgentHandler` passes the same run token semantics as `services.run.cancel_token()` and that it fires when the run token is cancelled.\n  - Agent handler: mock backend returns `Error::Cancelled`; assert `AgentHandler::execute` returns `Err(Error::Cancelled)`.\n  - Prompt handler: mock backend returns `Error::Cancelled`; assert `PromptHandler::execute` returns `Err(Error::Cancelled)` instead of a failed outcome.\n  - End-to-end workflow executor: cancel during an agent stage and assert the run terminates through the cancelled path, not through a non-retryable failed stage outcome. This test must cover the bridge from `AgentHandler::execute` through node-handler outcome conversion, `Error::is_retryable`, retry handling, and final run status classification.\n  - Manager loop: child workflow containing an agent stage receives a token that fires both on parent run cancellation and on direct manager-loop child cancellation from stop-condition and max-cycle paths.\n\n- Add API backend cancellation coverage.\n  - Unit test the run-token-to-session-token bridge: when the run token fires, the session cancel token fires and `InterruptReason::Cancelled` is set.\n  - Unit test bridge cleanup: after a successful full-fidelity backend invocation reinserts a cached session, cancelling the old invocation token does not cancel or interrupt that cached session.\n  - Unit test `SessionCancelBridgeGuard::replace`: replacing the bridge aborts the prior handle before storing the new handle.\n  - Unit test `SessionCancelBridgeGuard::drop`: dropping the guard aborts an installed bridge.\n  - Unit test fallback cleanup: when failover replaces one `Session` with another, the bridge for the previous session is aborted before the previous session is dropped.\n  - Unit test `AgentApiErrorDisposition`: `Interrupted(Cancelled)` becomes `Cancelled`; failover-eligible `Llm` becomes `FailoverEligible` only when `allow_failover` is true; non-eligible `Llm` becomes `Terminal(Error::Llm(_))`; `Interrupted(WallClockTimeout)`, `SessionClosed`, `InvalidState`, and `ToolExecution` become terminal non-retryable workflow errors.\n  - Unit test failover loop behavior: failover-eligible `process_input` LLM errors still advance to the next fallback provider instead of returning immediately through the conversion helper.\n  - Unit test initialize failover behavior: a failover-eligible LLM error from primary `session.initialize().await` enters the fallback loop when providers remain, and a failover-eligible LLM error from a fallback session's initialize continues to the next fallback provider when one remains.\n  - Add a test that a cancelled API backend path does not reinsert the session into the reuse cache.\n  - Add `Session::initialize` tests that cancel before memory discovery, during sandbox MCP startup/readiness polling, and during environment-context `exec_command`; each returns `Interrupted(Cancelled)` and does not proceed to `process_input`.\n  - Add call-site tests or compile-time updates proving `retro_agent`, `fabro-agent` CLI, subagent spawning, and `v4a_patch` handle `initialize().await?` or explicit error conversion.\n\n- Add event conversion tests.\n  - Verify `agent.cli.cancelled` event name.\n  - Verify `agent.cli.timed_out` event name.\n  - Verify `to_run_event` maps `node_id` into the envelope and serializes props under `properties` for both new events.\n  - If OpenAPI docs/examples change, run the existing OpenAPI conformance test and regenerate the TypeScript client.\n\n- Add sandbox-provider verification for CLI subprocess cleanup.\n  - Local fake/unit tests cover token propagation.\n  - Sandbox trait tests cover `exec_command_streaming(..., None, ...)`: it does not time out by default and still returns promptly on cancellation.\n  - Default trait implementation test: a mock that implements only `exec_command` receives `u64::MAX` when `exec_command_streaming(..., None, ...)` uses the fallback implementation.\n  - Docker: add or reuse a streaming timeout/cancel process-probe test that proves descendant CLI-shaped commands are gone before return.\n  - Daytona: add an ignored live test that runs a long `node` or shell command through `exec_command_streaming`, cancels it, then probes the Daytona sandbox for the marker process. This is a merge gate for the Daytona streaming path: the process must be gone before CLI agents are routed through `exec_command_streaming` on Daytona.\n\n- Run verification:\n  - `cargo nextest run -p fabro-workflow`\n  - `cargo nextest run -p fabro-agent`\n  - `cargo nextest run -p fabro-types`\n  - `cargo nextest run -p fabro-sandbox`\n  - `cargo nextest run -p fabro-server openapi_conformance`\n  - `cd apps/fabro-web && bun test`\n  - `cd apps/fabro-web && bun run typecheck`\n  - `cargo +nightly-2026-04-14 fmt --check --all`\n  - `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`\n\n## Assumptions\n\n- Scope includes both CLI and API agent backend cancellation, per the chosen direction.\n- The fix uses the existing `Sandbox::exec_command_streaming` cancellation behavior instead of introducing local-only `tokio::process::Command` management, but only after provider cancellation actually kills descendant processes.\n- `agent.cli.cancelled` and `agent.cli.timed_out` are additive events; existing `agent.cli.completed` remains only for natural process completion.\n- `CodergenBackend::run` signature churn is accepted because cancellation is a required execution input. Do not hide cancellation in `Context`.\n- `Session::initialize` signature churn is accepted and must be propagated to all workspace callers and public examples.\n- This PR does not make `Sandbox::read_file` or `Sandbox::glob` cancellable mid-await. Initialization checks cancellation before and after those calls; sandbox `exec_command` calls receive child tokens.\n- CLI-agent runtime remains effectively unbounded when `node.timeout()` is absent. The rejected alternative was reusing the command-stage 600-second default; the plan instead makes streaming timeout optional.\n- Daytona streaming cancellation is merge-blocking for routing Daytona CLI agents through the new managed streaming path.\n- Live steering of CLI-mode agents remains out of scope.\n"
+        },
+        "model_stylesheet": {
+          "String": "\n            * { model: claude-opus-4-6; }\n        "
+        }
+      }
+    },
+    "workflow_slug": "implement-plan",
+    "source_directory": "/Users/bhelmkamp/p/fabro-sh/fabro",
+    "provenance": {
+      "server": {
+        "version": "0.221.0-nightly.1"
+      },
+      "client": {
+        "user_agent": "fabro-cli/0.221.0-nightly.1",
+        "name": "fabro-cli",
+        "version": "0.221.0-nightly.1"
+      },
+      "subject": {
+        "kind": "user",
+        "identity": {
+          "issuer": "https://github.com",
+          "subject": "19"
+        },
+        "login": "brynary",
+        "auth_method": "github"
+      }
+    },
+    "manifest_blob": "1e0fb2de3993b556ee776fdccb46939088140e558f4d30205350a4786aa57403",
+    "definition_blob": "1c91f85075f82e2131d90f2aa492d4af0ed9898678b479796d2176dd3790af8f",
+    "git": {
+      "origin_url": "https://github.com/fabro-sh/fabro",
+      "branch": "main",
+      "sha": "253af1150818e93a49eade3c262440295256d278",
+      "dirty": "clean",
+      "push_outcome": {
+        "type": "not_attempted"
+      }
+    },
+    "in_place": false
+  },
+  "graph_source": "digraph ImplementPlan {\n    graph [\n        goal=\"Implement and simplify\",\n        model_stylesheet=\"\n            * { model: claude-opus-4-6; }\n        \"\n    ]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    toolchain         [label=\"Toolchain\", shape=parallelogram, script=\"command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1\", max_retries=0]\n    preflight_compile [label=\"Preflight Compile\", shape=parallelogram, script=\"cargo check -q --workspace 2>&1\", max_retries=0]\n    preflight_lint    [label=\"Preflight Lint\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace -- -D warnings 2>&1\", max_retries=0]\n    fix_lints         [label=\"Fix Lints\", prompt=\"The preflight lint step failed. Read the build output from context and fix all clippy lint warnings.\", max_visits=3]\n    implement         [label=\"Implement\", prompt=\"Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD.\"]\n    simplify_opus     [label=\"Simplify (Opus)\", prompt=\"@prompts/simplify.md\"]\n    simplify_gpt      [label=\"Simplify (GPT-54)\", prompt=\"@prompts/simplify.md\", model=\"gpt-54\"]\n    verify            [label=\"Verify\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1\", goal_gate=true, retry_target=\"fixup\"]\n    fixup             [label=\"Fixup\", prompt=\"The verify step failed. Read the build output from context and fix all clippy lint warnings and test failures.\", max_visits=3]\n    fmt               [label=\"Format\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 fmt --all 2>&1\", max_retries=0]\n\n    start -> toolchain\n    toolchain -> preflight_compile [condition=\"outcome=succeeded\"]\n    toolchain -> exit\n    preflight_compile -> preflight_lint [condition=\"outcome=succeeded\"]\n    preflight_compile -> exit\n    preflight_lint -> implement [condition=\"outcome=succeeded\"]\n    preflight_lint -> fix_lints\n    fix_lints -> preflight_lint\n    implement -> simplify_opus -> simplify_gpt -> verify\n    verify -> fmt   [condition=\"outcome=succeeded\"]\n    verify -> fixup\n    fixup -> verify\n    fmt -> exit\n}\n",
+  "start": null,
+  "status": {
+    "kind": "starting"
+  },
+  "status_updated_at": "2026-05-04T03:07:37.492717Z",
+  "pending_control": null,
+  "checkpoint": null,
+  "checkpoints": [],
+  "conclusion": null,
+  "retro": null,
+  "retro_prompt": null,
+  "retro_response": null,
+  "sandbox": {
+    "provider": "daytona",
+    "working_directory": "/home/daytona/workspace",
+    "identifier": "fabro-01KQRF98KVJANMHY45N67NTKPC",
+    "repo_cloned": true,
+    "clone_origin_url": "https://github.com/fabro-sh/fabro",
+    "clone_branch": "main"
+  },
+  "final_patch": null,
+  "pull_request": null,
+  "superseded_by": null,
+  "pending_interviews": {},
+  "stages": {}
+}
