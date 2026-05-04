@@ -190,12 +190,15 @@ fn build_api_keys_configuration(
     api_key: &str,
     http_client: fabro_http::HttpClient,
 ) -> Configuration {
-    let mut cfg = Configuration::new();
-    cfg.base_path = base_url.to_string();
-    cfg.bearer_access_token = Some(api_key.to_string());
-    cfg.user_agent = Some(FABRO_SANDBOX_USER_AGENT.to_string());
-    cfg.client = reqwest_middleware::ClientBuilder::new(http_client).build();
-    cfg
+    Configuration {
+        base_path:           base_url.to_string(),
+        user_agent:          Some(FABRO_SANDBOX_USER_AGENT.to_string()),
+        client:              reqwest_middleware::ClientBuilder::new(http_client).build(),
+        basic_auth:          None,
+        oauth_access_token:  None,
+        bearer_access_token: Some(api_key.to_string()),
+        api_key:             None,
+    }
 }
 
 fn command_kind(command: &str) -> &'static str {

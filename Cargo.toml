@@ -68,8 +68,8 @@ twin-openai = { path = "test/twin/openai" }
 twin-github = { path = "test/twin/github" }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
-daytona-sdk = { git = "https://github.com/brynary/daytona-sdk-rust", rev = "314ffd9", package = "daytona-sdk" }
-daytona-api-client = { git = "https://github.com/brynary/daytona-sdk-rust", rev = "314ffd9", package = "daytona-api-client" }
+daytona-sdk = { git = "https://github.com/brynary/daytona-sdk-rust", rev = "fa4870f", package = "daytona-sdk" }
+daytona-api-client = { git = "https://github.com/brynary/daytona-sdk-rust", rev = "fa4870f", package = "daytona-api-client" }
 sentry = { version = "0.35", default-features = false, features = ["backtrace", "contexts", "ureq", "rustls"] }
 fork = "0.2"
 exec = "0.3"
