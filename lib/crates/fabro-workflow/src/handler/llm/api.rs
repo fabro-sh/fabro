@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use fabro_agent::subagent::{SessionFactory, SubAgentManager};
 use fabro_agent::{
-    AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, OpenAiProfile, Sandbox, Session,
-    SessionOptions, Turn,
+    AgentEvent, AgentProfile, AnthropicProfile, CompletionCoordinator, GeminiProfile,
+    OpenAiProfile, Sandbox, Session, SessionControlHandle, SessionOptions, Turn,
 };
 use fabro_auth::{CredentialSource, EnvCredentialSource};
 use fabro_graphviz::graph::Node;
@@ -13,6 +13,7 @@ use fabro_llm::client::Client;
 use fabro_llm::types::{Message, Request, TokenCounts};
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::{FallbackTarget, Provider};
+use fabro_types::StageId;
 use tokio::sync::Mutex as TokioMutex;
 
 use super::super::agent::{CodergenBackend, CodergenResult};
@@ -21,6 +22,7 @@ use crate::context::{Context, WorkflowContext};
 use crate::error::Error;
 use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::billed_model_usage_from_llm;
+use crate::steering_hub::SteeringHub;
 
 fn build_profile(model: &str, provider: Provider) -> Box<dyn AgentProfile> {
     match provider {
@@ -122,6 +124,7 @@ pub struct AgentApiBackend {
     env:            HashMap<String, String>,
     mcp_servers:    Vec<McpServerSettings>,
     source:         Arc<dyn CredentialSource>,
+    steering_hub:   Option<Arc<SteeringHub>>,
 }
 
 impl AgentApiBackend {
@@ -140,7 +143,14 @@ impl AgentApiBackend {
             env: HashMap::new(),
             mcp_servers: Vec::new(),
             source,
+            steering_hub: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_steering_hub(mut self, steering_hub: Arc<SteeringHub>) -> Self {
+        self.steering_hub = Some(steering_hub);
+        self
     }
 
     #[must_use]
@@ -491,6 +501,29 @@ impl CodergenBackend for AgentApiBackend {
             session.initialize().await;
         }
 
+        // Register with the steering hub so HTTP `POST /runs/{id}/steer`
+        // calls reach this session. The RAII guard below unregisters on
+        // every exit path (success, error, failover replace).
+        let stage_id = stage_scope.stage_id();
+        let _hub_guard = if let Some(ref hub) = self.steering_hub {
+            hub.register(&stage_id, &session.control_handle());
+            // Wire the completion coordinator so a steer that arrives
+            // during a final no-tool response triggers an extra round
+            // rather than being silently dropped.
+            let coordinator = Arc::new(SteeringCompletionCoordinator {
+                hub:      Arc::clone(hub),
+                stage_id: stage_id.clone(),
+                handle:   session.control_handle(),
+            });
+            session.set_completion_coordinator(coordinator);
+            Some(SteeringHubGuard {
+                hub:      Arc::clone(hub),
+                stage_id: stage_id.clone(),
+            })
+        } else {
+            None
+        };
+
         let result = session.process_input(prompt).await;
 
         // On failover-eligible error, try fallback providers.
@@ -552,6 +585,18 @@ impl CodergenBackend for AgentApiBackend {
                         Arc::clone(emitter),
                         Arc::clone(&file_tracking),
                     );
+
+                    // Re-register the new session's handle under the same
+                    // stage_id (replace, no re-drain, no attached event).
+                    if let Some(ref hub) = self.steering_hub {
+                        hub.register(&stage_id, &session.control_handle());
+                        let coordinator = Arc::new(SteeringCompletionCoordinator {
+                            hub:      Arc::clone(hub),
+                            stage_id: stage_id.clone(),
+                            handle:   session.control_handle(),
+                        });
+                        session.set_completion_coordinator(coordinator);
+                    }
 
                     session.initialize().await;
                     match session.process_input(prompt).await {
@@ -633,6 +678,48 @@ impl CodergenBackend for AgentApiBackend {
             files_touched,
             last_file_touched,
         })
+    }
+}
+
+/// RAII guard that unregisters a session from the steering hub when the
+/// stage completes (success, error, or panic).
+struct SteeringHubGuard {
+    hub:      Arc<SteeringHub>,
+    stage_id: StageId,
+}
+
+impl Drop for SteeringHubGuard {
+    fn drop(&mut self) {
+        self.hub.unregister(&self.stage_id);
+    }
+}
+
+/// Coordinator that lets the agent loop ask the workflow layer whether to
+/// keep iterating after a no-tool natural completion. Implements the
+/// "close-the-door" pattern: unregister, check the queue, then either
+/// break or re-register and report `true` so the loop drains.
+struct SteeringCompletionCoordinator {
+    hub:      Arc<SteeringHub>,
+    stage_id: StageId,
+    handle:   SessionControlHandle,
+}
+
+impl CompletionCoordinator for SteeringCompletionCoordinator {
+    fn on_natural_completion(&self) -> bool {
+        // Close the door: take this session out of the active set so no
+        // further deliver() races with the queue check. (Idempotent if
+        // already unregistered.)
+        self.hub.unregister(&self.stage_id);
+        if self.handle.queue_is_empty() {
+            return false;
+        }
+        // A steer landed in the queue (or arrived between unregister and
+        // this check — impossible under the lock discipline since
+        // deliver/unregister serialize on `active`'s RwLock). Re-register
+        // so future deliveries continue to land here, and tell the loop
+        // to drain.
+        self.hub.register(&self.stage_id, &self.handle);
+        true
     }
 }
 

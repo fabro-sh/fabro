@@ -21,8 +21,8 @@ import { CSS } from "@dnd-kit/utilities";
 import { ciConfig, columnStatusDisplay, deriveCiStatus, mapRunListItem } from "../data/runs";
 import type { CiStatus, CheckRun, CheckStatus, RunItem, RunWithStatus, ColumnStatus } from "../data/runs";
 import { EmptyState } from "../components/state";
+import { SteerComposer } from "../components/steer-composer";
 import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
-import { useDemoMode } from "../lib/demo-mode";
 import { useAuthConfig, useBoardsRuns, useSystemInfo } from "../lib/queries";
 import type { PaginatedBoardRunList } from "@qltysh/fabro-api-client";
 
@@ -305,8 +305,15 @@ function PrCard({
   actions?: string[];
 }) {
   const lifecycleLabel = boardLifecycleStatusLabel(pr);
+  const [steerOpen, setSteerOpen] = useState(false);
 
   return (
+    <>
+    <SteerComposer
+      runId={pr.id}
+      open={steerOpen}
+      onClose={() => setSteerOpen(false)}
+    />
     <Link to={`/runs/${pr.id}`} className="group block rounded-md border border-line bg-panel p-4 transition-all duration-200 hover:border-line-strong hover:shadow-lg hover:shadow-black/20">
       <div className="mb-2 flex items-center gap-1.5">
         <Icon className={`size-3.5 shrink-0 ${iconColor}`} />
@@ -369,6 +376,13 @@ function PrCard({
               key={label}
               type="button"
               disabled={pr.actionDisabled}
+              onClick={(e) => {
+                if (label === "Steer") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setSteerOpen(true);
+                }
+              }}
               className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:text-fg-muted disabled:border-line ${
                 label === "Merge"
                   ? "border-mint/20 text-mint hover:border-mint/50 hover:text-fg"
@@ -410,6 +424,7 @@ function PrCard({
         </div>
       )}
     </Link>
+    </>
   );
 }
 
@@ -455,10 +470,9 @@ function SortablePrCard({
 
 function BoardColumn({ column }: { column: Column }) {
   const Icon = iconMap[column.iconType];
-  const demoMode = useDemoMode();
-  const actions = demoMode
-    ? column.actions
-    : column.actions.filter((label) => label !== "Steer");
+  // Steer button is shown in all modes (no longer demo-gated). The modal/
+  // composer logic lives below in `PrCard`; clicking the button opens it.
+  const actions = column.actions;
   return (
     <div className="flex min-w-0 flex-col">
       <div className="mb-3 flex items-center gap-3">

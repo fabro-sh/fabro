@@ -29,6 +29,7 @@ use crate::run_control::RunControlState;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::runtime_store::RunStoreHandle;
 use crate::services::{EngineServices, RunServices};
+use crate::steering_hub::SteeringHub;
 use crate::transforms::Transform;
 use crate::workflow_bundle::WorkflowBundle;
 
@@ -240,6 +241,7 @@ pub struct InitOptions {
     pub sandbox:           SandboxSpec,
     pub llm:               LlmSpec,
     pub interviewer:       Arc<dyn Interviewer>,
+    pub steering_hub:      Arc<SteeringHub>,
     pub lifecycle:         LifecycleOptions,
     pub run_options:       RunOptions,
     pub workflow_path:     Option<ManifestPath>,

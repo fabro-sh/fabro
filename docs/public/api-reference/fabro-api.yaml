@@ -878,6 +878,68 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/runs/{id}/steer:
+    post:
+      operationId: steerRun
+      tags: [Human-in-the-Loop]
+      summary: Steer Run
+      description: |
+        Send a mid-run steering message to the live agent session(s) of a
+        running run. Set `interrupt=true` to cancel the in-flight LLM stream
+        and tool calls in the current round and deliver the message as the
+        next user turn; otherwise the message is appended to the steering
+        queue and picked up at the next turn boundary.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SteerRunRequest"
+      responses:
+        "202":
+          description: Steer accepted and forwarded to the worker
+        "400":
+          description: Invalid request body
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: |
+            Run is not currently steerable. Returned when the run is in a
+            terminal state, blocked (use the answer endpoint instead), or
+            all currently running agent stages are CLI-mode.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Worker control channel unavailable
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/runs/{id}/start:
     post:
       operationId: startRun
@@ -4545,6 +4607,27 @@ components:
           type: string
         warn:
           type: boolean
+
+    SteerRunRequest:
+      description: Request body for steering a running run mid-execution.
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          description: The steering message text to deliver as a user turn.
+          minLength: 1
+          maxLength: 8192
+          example: Try a different approach
+        interrupt:
+          type: boolean
+          description: |
+            When true, cancel the in-flight LLM stream and tool calls in the
+            current round before delivering. When false (default), append to
+            the steering queue and let the agent pick it up at the next
+            turn boundary.
+          default: false
 
     StartRunRequest:
       description: Request body for starting or resuming a run.

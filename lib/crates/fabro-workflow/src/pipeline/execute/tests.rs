@@ -201,7 +201,7 @@ async fn execute_test_run_with_options(
             run_id: run_id_value,
             run_store: run_store.into(),
             dry_run: false,
-            emitter,
+            emitter: emitter.clone(),
             sandbox: SandboxSpec::Local {
                 working_directory: std::env::current_dir().unwrap(),
             },
@@ -213,6 +213,7 @@ async fn execute_test_run_with_options(
                 dry_run:        true,
             },
             interviewer: Arc::new(AutoApproveInterviewer::engine()),
+            steering_hub: Arc::new(crate::steering_hub::SteeringHub::new(emitter.clone())),
             lifecycle: LifecycleOptions {
                 setup_commands:           vec![],
                 setup_command_timeout_ms: 1_000,
@@ -271,6 +272,9 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
                 dry_run:        true,
             },
             interviewer:       Arc::new(AutoApproveInterviewer::engine()),
+            steering_hub:      Arc::new(crate::steering_hub::SteeringHub::new(test_emitter_arc(
+                "run-test",
+            ))),
             lifecycle:         LifecycleOptions {
                 setup_commands:           vec![],
                 setup_command_timeout_ms: 1_000,
@@ -331,7 +335,7 @@ async fn run_with_lifecycle(
             run_id,
             run_store: test_run_store(&run_id).await.into(),
             dry_run: false,
-            emitter,
+            emitter: emitter.clone(),
             sandbox: SandboxSpec::Local {
                 working_directory: PathBuf::from(sandbox.working_directory()),
             },
@@ -343,6 +347,7 @@ async fn run_with_lifecycle(
                 dry_run:        true,
             },
             interviewer: Arc::new(AutoApproveInterviewer::engine()),
+            steering_hub: Arc::new(crate::steering_hub::SteeringHub::new(emitter.clone())),
             lifecycle,
             run_options,
             workflow_path: None,

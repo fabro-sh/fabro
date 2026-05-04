@@ -144,6 +144,7 @@ pub mod run_lookup;
 
 pub use error::{Error, FailureCategory, FailureSignature, FailureSignatureExt, Result};
 pub use manifest_path::ManifestPath;
+pub use steering_hub::SteeringHub;
 pub mod run_materialization;
 pub(crate) mod run_metadata;
 pub mod run_options;
@@ -153,6 +154,7 @@ pub mod sandbox_git;
 pub(crate) mod sandbox_git_runtime;
 pub mod services;
 mod stage_scope;
+pub mod steering_hub;
 #[doc(hidden)]
 pub mod test_support;
 #[doc(hidden)]

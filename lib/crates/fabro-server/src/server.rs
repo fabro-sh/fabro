@@ -194,6 +194,14 @@ struct ManagedRun {
     // Populated when running:
     answer_transport:   Option<RunAnswerTransport>,
     accepted_questions: HashSet<String>,
+    /// Stage IDs of currently running API-mode (SDK) agent sessions, as
+    /// observed from the worker's `agent.steering.attached/detached`
+    /// events. Used by the steerability predicate.
+    active_api_stages:  HashSet<StageId>,
+    /// Stage IDs of currently running CLI-mode agent sessions, observed
+    /// from `agent.cli.started/completed` plus `stage.completed`/
+    /// `stage.failed` backstops.
+    active_cli_stages:  HashSet<StageId>,
     event_tx:           Option<broadcast::Sender<RunEvent>>,
     checkpoint:         Option<Checkpoint>,
     cancel_tx:          Option<oneshot::Sender<()>>,
@@ -243,7 +251,8 @@ enum RunAnswerTransport {
         control_tx: mpsc::Sender<WorkerControlEnvelope>,
     },
     InProcess {
-        interviewer: Arc<ControlInterviewer>,
+        interviewer:  Arc<ControlInterviewer>,
+        steering_hub: Arc<fabro_workflow::SteeringHub>,
     },
 }
 
@@ -267,7 +276,7 @@ impl RunAnswerTransport {
                     .map_err(|_| AnswerTransportError::Timeout)?
                     .map_err(|_| AnswerTransportError::Closed)
             }
-            Self::InProcess { interviewer } => interviewer
+            Self::InProcess { interviewer, .. } => interviewer
                 .submit(qid, submission)
                 .await
                 .map_err(|_| AnswerTransportError::Closed),
@@ -283,8 +292,31 @@ impl RunAnswerTransport {
                     .map_err(|_| AnswerTransportError::Timeout)?
                     .map_err(|_| AnswerTransportError::Closed)
             }
-            Self::InProcess { interviewer } => {
+            Self::InProcess { interviewer, .. } => {
                 interviewer.cancel_all().await;
+                Ok(())
+            }
+        }
+    }
+
+    /// Forward a steer to the worker (subprocess) or directly into the
+    /// in-process steering hub.
+    async fn steer(
+        &self,
+        text: String,
+        kind: fabro_types::SteerKind,
+        actor: Principal,
+    ) -> Result<(), AnswerTransportError> {
+        match self {
+            Self::Subprocess { control_tx } => {
+                let message = WorkerControlEnvelope::steer(text, kind, actor);
+                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
+                    .await
+                    .map_err(|_| AnswerTransportError::Timeout)?
+                    .map_err(|_| AnswerTransportError::Closed)
+            }
+            Self::InProcess { steering_hub, .. } => {
+                steering_hub.deliver(text, kind, Some(actor));
                 Ok(())
             }
         }
@@ -1752,6 +1784,8 @@ fn octet_stream_response(bytes: Bytes) -> Response {
 fn clear_live_run_state(run: &mut ManagedRun) {
     run.answer_transport = None;
     run.accepted_questions.clear();
+    run.active_api_stages.clear();
+    run.active_cli_stages.clear();
     run.event_tx = None;
     run.cancel_tx = None;
     run.cancel_token = None;
@@ -2079,6 +2113,8 @@ fn managed_run(
         enqueued_at: Instant::now(),
         answer_transport: None,
         accepted_questions: HashSet::new(),
+        active_api_stages: HashSet::new(),
+        active_cli_stages: HashSet::new(),
         event_tx: None,
         checkpoint: None,
         cancel_tx: None,
@@ -2174,12 +2210,16 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
                 reason: props.reason,
             };
             managed_run.error = None;
+            managed_run.active_api_stages.clear();
+            managed_run.active_cli_stages.clear();
         }
         EventBody::RunFailed(props) => {
             managed_run.status = RunStatus::Failed {
                 reason: props.reason,
             };
             managed_run.error = Some(props.error.clone());
+            managed_run.active_api_stages.clear();
+            managed_run.active_cli_stages.clear();
         }
         EventBody::RunArchived(_) => {
             if let Some(prior) = managed_run.status.terminal_status() {
@@ -2189,6 +2229,41 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
         EventBody::RunUnarchived(_) => {
             if let RunStatus::Archived { prior } = managed_run.status {
                 managed_run.status = prior.into();
+            }
+        }
+        // Track API-mode steerable sessions. attached/detached fire
+        // deterministically inside `AgentApiBackend::run` (register/
+        // unregister), so they're the authoritative window in which a
+        // steer can be delivered to a live session.
+        EventBody::AgentSteeringAttached(_) => {
+            if let Some(stage_id) = event.stage_id.clone() {
+                managed_run.active_api_stages.insert(stage_id);
+            }
+        }
+        EventBody::AgentSteeringDetached(_) => {
+            if let Some(stage_id) = &event.stage_id {
+                managed_run.active_api_stages.remove(stage_id);
+            }
+        }
+        // Track CLI-mode agent stages. CLI started/completed are coarser
+        // and sometimes fail to emit `completed` on error paths — the
+        // stage.completed/stage.failed handler below is the backstop.
+        EventBody::AgentCliStarted(_) => {
+            if let Some(stage_id) = event.stage_id.clone() {
+                managed_run.active_cli_stages.insert(stage_id);
+            }
+        }
+        EventBody::AgentCliCompleted(_) => {
+            if let Some(stage_id) = &event.stage_id {
+                managed_run.active_cli_stages.remove(stage_id);
+            }
+        }
+        // Stage lifecycle backstop: cover both completion and failure
+        // paths so a failing CLI stage doesn't strand its entry.
+        EventBody::StageCompleted(_) | EventBody::StageFailed(_) => {
+            if let Some(stage_id) = &event.stage_id {
+                managed_run.active_api_stages.remove(stage_id);
+                managed_run.active_cli_stages.remove(stage_id);
             }
         }
         _ => {}
@@ -2614,6 +2689,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         .as_ref()
         .map(|factory| Arc::new(factory(Arc::clone(&interview_runtime))));
     let emitter = Arc::new(emitter);
+    let steering_hub = Arc::new(fabro_workflow::SteeringHub::new(Arc::clone(&emitter)));
 
     // Transition to Running, populate interviewer
     let cancelled_during_setup = {
@@ -2622,7 +2698,8 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
             if managed_run.status == RunStatus::Starting {
                 managed_run.status = RunStatus::Running;
                 managed_run.answer_transport = Some(RunAnswerTransport::InProcess {
-                    interviewer: Arc::clone(&interviewer),
+                    interviewer:  Arc::clone(&interviewer),
+                    steering_hub: Arc::clone(&steering_hub),
                 });
                 false
             } else {
@@ -2744,6 +2821,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         cancel_token: Some(Arc::clone(&cancel_token)),
         emitter: Arc::clone(&emitter),
         interviewer: Arc::clone(&interview_runtime),
+        steering_hub: Arc::clone(&steering_hub),
         run_store: run_store.clone().into(),
         event_sink: workflow_event::RunEventSink::store(run_store.clone()),
         artifact_sink: Some(ArtifactSink::Store(state.artifact_store.clone())),

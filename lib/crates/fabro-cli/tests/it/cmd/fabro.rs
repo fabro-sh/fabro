@@ -21,6 +21,7 @@ fn help() {
       rewind      Rewind a workflow run to an earlier checkpoint
       fork        Fork a workflow run from an earlier checkpoint into a new run
       wait        Block until a workflow run completes
+      steer       Steer a running agent mid-execution
       preflight   Validate run configuration without executing
       validate    Validate a workflow
       graph       Render a workflow graph as SVG

@@ -40,6 +40,13 @@ const INTERVIEW_EVENTS = new Set([
   "interview.timeout",
   "interview.interrupted",
 ]);
+const STEERING_EVENTS = new Set([
+  "agent.steering.injected",
+  "agent.steering.attached",
+  "agent.steering.detached",
+  "agent.steer.buffered",
+  "agent.steer.dropped",
+]);
 
 export function queryKeysForRunEvent(
   runId: string,
@@ -90,6 +97,17 @@ export function queryKeysForRunEvent(
     const keys = [
       queryKeys.runs.stages(runId),
       queryKeys.runs.events(runId, 1000),
+    ];
+    if (stageId) {
+      keys.push(queryKeys.runs.stageTurns(runId, stageId));
+    }
+    return keys;
+  }
+
+  if (STEERING_EVENTS.has(event)) {
+    const keys = [
+      queryKeys.runs.events(runId, 1000),
+      queryKeys.runs.detail(runId),
     ];
     if (stageId) {
       keys.push(queryKeys.runs.stageTurns(runId, stageId));

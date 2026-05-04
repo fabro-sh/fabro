@@ -2,6 +2,7 @@ use std::time::SystemTime;
 
 use fabro_llm::Error as LlmError;
 use fabro_llm::types::{ContentPart, ThinkingData, TokenCounts, ToolCall, ToolResult};
+pub use fabro_types::SteerKind;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
@@ -157,7 +158,13 @@ pub enum AgentEvent {
         skill_name: String,
     },
     SteeringInjected {
-        text: String,
+        text:  String,
+        kind:  SteerKind,
+        /// Principal that authored the steer. Lifted to top-level
+        /// `RunEvent.actor` by the workflow event-conversion layer; never
+        /// serialized into event props.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<fabro_types::Principal>,
     },
     CompactionStarted {
         estimated_tokens:    usize,
@@ -309,8 +316,13 @@ impl AgentEvent {
             Self::SkillExpanded { skill_name } => {
                 debug!(session_id, skill = skill_name.as_str(), "Skill expanded");
             }
-            Self::SteeringInjected { text } => {
-                debug!(session_id, text_len = text.len(), "Steering injected");
+            Self::SteeringInjected { text, kind, .. } => {
+                debug!(
+                    session_id,
+                    text_len = text.len(),
+                    kind = kind.as_str(),
+                    "Steering injected"
+                );
             }
             Self::CompactionStarted {
                 estimated_tokens,

@@ -51,6 +51,7 @@ use crate::run_metadata::metadata_branch_name;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::run_status::{FailureReason, RunStatus};
 use crate::runtime_store::RunStoreHandle;
+use crate::steering_hub::SteeringHub;
 use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
 
 struct RunSession {
@@ -59,6 +60,7 @@ struct RunSession {
     sandbox:           SandboxSpec,
     llm:               LlmSpec,
     interviewer:       Arc<dyn Interviewer>,
+    steering_hub:      Arc<SteeringHub>,
     on_node:           crate::OnNodeCallback,
     lifecycle:         LifecycleOptions,
     hooks:             fabro_hooks::HookSettings,
@@ -89,6 +91,7 @@ pub struct StartServices {
     pub cancel_token:       Option<Arc<AtomicBool>>,
     pub emitter:            Arc<Emitter>,
     pub interviewer:        Arc<dyn Interviewer>,
+    pub steering_hub:       Arc<SteeringHub>,
     pub run_store:          RunStoreHandle,
     pub event_sink:         RunEventSink,
     pub artifact_sink:      Option<ArtifactSink>,
@@ -426,6 +429,7 @@ impl RunSession {
                 dry_run: resolved.execution.mode == RunMode::DryRun,
             },
             interviewer,
+            steering_hub: services.steering_hub,
             on_node: services.on_node,
             lifecycle: LifecycleOptions {
                 setup_commands:           resolved.prepare.commands.clone(),
@@ -744,6 +748,7 @@ impl RunSession {
             sandbox: self.sandbox,
             llm: self.llm,
             interviewer: self.interviewer,
+            steering_hub: Arc::clone(&self.steering_hub),
             lifecycle: self.lifecycle,
             run_options,
             workflow_path: self.workflow_path,
@@ -815,6 +820,9 @@ impl RunSession {
         let retro = retroed.retro.clone();
         let concluded = Box::pin(pipeline::finalize(retroed, &finalize_opts)).await?;
         let finalized = Box::pin(pipeline::pull_request(concluded, &pr_opts)).await;
+        // Emit `agent.steer.dropped { reason: run_ended }` for any
+        // unconsumed pending steers, then flush so it lands in the store.
+        self.steering_hub.drain_pending_at_run_end();
         store_progress_logger.flush().await;
 
         scopeguard::ScopeGuard::into_inner(cleanup_guard);
@@ -1106,11 +1114,13 @@ mod tests {
         emitter: Arc<Emitter>,
         registry: Arc<HandlerRegistry>,
     ) -> StartServices {
+        let steering_hub = Arc::new(crate::steering_hub::SteeringHub::new(emitter.clone()));
         StartServices {
             run_id: fixtures::RUN_1,
             cancel_token: None,
             emitter,
             interviewer: Arc::new(fabro_interview::AutoApproveInterviewer::engine()),
+            steering_hub,
             run_store: store.open_run(&fixtures::RUN_1).await.unwrap().into(),
             event_sink: RunEventSink::store(store.open_run(&fixtures::RUN_1).await.unwrap()),
             artifact_sink: None,

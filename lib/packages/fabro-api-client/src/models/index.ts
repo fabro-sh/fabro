@@ -281,6 +281,7 @@ export * from './stage-projection';
 export * from './stage-state';
 export * from './stage-turn';
 export * from './start-run-request';
+export * from './steer-run-request';
 export * from './submit-answer-request';
 export * from './success-reason';
 export * from './system-actor-kind';
