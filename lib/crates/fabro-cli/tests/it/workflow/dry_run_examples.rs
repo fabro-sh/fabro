@@ -21,6 +21,7 @@ fn dry_run_branching() {
     warning [node: implement]: Node 'implement' has goal_gate=true but no retry_target or fallback_retry_target (goal_gate_has_retry)
         Run: [ULID]
         Web UI: http://localhost:3000/runs/[ULID]
+        Warning: Worktree mode requested but no Git repository was found; running without a worktree. [worktree_skipped_no_git]
         Sandbox: local (ready in [TIME])
         ✓ Start  [TIME]
         ✓ Plan  [TIME]
@@ -57,6 +58,7 @@ fn dry_run_conditions() {
 
         Run: [ULID]
         Web UI: http://localhost:3000/runs/[ULID]
+        Warning: Worktree mode requested but no Git repository was found; running without a worktree. [worktree_skipped_no_git]
         Sandbox: local (ready in [TIME])
         ✓ start  [TIME]
         ✓ Decide  [TIME]
@@ -91,6 +93,7 @@ fn dry_run_parallel() {
 
         Run: [ULID]
         Web UI: http://localhost:3000/runs/[ULID]
+        Warning: Worktree mode requested but no Git repository was found; running without a worktree. [worktree_skipped_no_git]
         Sandbox: local (ready in [TIME])
         ✓ start  [TIME]
         ✓ Fork Work  [TIME]
@@ -126,6 +129,7 @@ fn dry_run_styled() {
 
         Run: [ULID]
         Web UI: http://localhost:3000/runs/[ULID]
+        Warning: Worktree mode requested but no Git repository was found; running without a worktree. [worktree_skipped_no_git]
         Sandbox: local (ready in [TIME])
         ✓ start  [TIME]
         ✓ Plan  [TIME]
@@ -161,6 +165,7 @@ fn dry_run_legacy_tool() {
 
         Run: [ULID]
         Web UI: http://localhost:3000/runs/[ULID]
+        Warning: Worktree mode requested but no Git repository was found; running without a worktree. [worktree_skipped_no_git]
         Sandbox: local (ready in [TIME])
         ✓ Start  [TIME]
         ✓ Echo  [TIME]
