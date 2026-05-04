@@ -295,9 +295,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                                     self.emitter.notice_with_tail(
                                         RunNoticeLevel::Warn,
                                         "git_push_failed",
-                                        format!(
-                                            "Failed to push run branch {branch}: {err}"
-                                        ),
+                                        format!("Failed to push run branch {branch}: {err}"),
                                         exec_output_tail.clone(),
                                     );
                                     (false, exec_output_tail)
