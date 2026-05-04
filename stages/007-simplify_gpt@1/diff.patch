@@ -1,0 +1,222 @@
+diff --git a/apps/fabro-web/app/lib/run-events.ts b/apps/fabro-web/app/lib/run-events.ts
+index caea8122..c06c251a 100644
+--- a/apps/fabro-web/app/lib/run-events.ts
++++ b/apps/fabro-web/app/lib/run-events.ts
+@@ -184,4 +184,4 @@ export function useRunEvents(runId: string | undefined) {
+     if (!runId) return;
+     return subscribeToRunEvents(runId, mutate as MutateFn);
+   }, [mutate, runId]);
+-}
+\ No newline at end of file
++}
+diff --git a/apps/fabro-web/app/lib/stage-sidebar.ts b/apps/fabro-web/app/lib/stage-sidebar.ts
+index 1423ec2c..8ddccb26 100644
+--- a/apps/fabro-web/app/lib/stage-sidebar.ts
++++ b/apps/fabro-web/app/lib/stage-sidebar.ts
+@@ -33,4 +33,4 @@ export function mapRunStagesToSidebarStages(
+         ? formatDurationSecs(stage.duration_secs)
+         : "--",
+     }));
+-}
+\ No newline at end of file
++}
+diff --git a/apps/fabro-web/app/lib/time.ts b/apps/fabro-web/app/lib/time.ts
+index 1810ce94..fb6f9b87 100644
+--- a/apps/fabro-web/app/lib/time.ts
++++ b/apps/fabro-web/app/lib/time.ts
+@@ -9,6 +9,7 @@ export function useTickingNow(active: boolean, intervalMs = 1000): number {
+   const [now, setNow] = useState(() => Date.now());
+   useEffect(() => {
+     if (!active) return;
++    setNow(Date.now());
+     const interval = setInterval(() => setNow(Date.now()), intervalMs);
+     return () => clearInterval(interval);
+   }, [active, intervalMs]);
+diff --git a/apps/fabro-web/app/routes/run-billing.test.tsx b/apps/fabro-web/app/routes/run-billing.test.tsx
+index 4953b749..c35ab52c 100644
+--- a/apps/fabro-web/app/routes/run-billing.test.tsx
++++ b/apps/fabro-web/app/routes/run-billing.test.tsx
+@@ -98,7 +98,7 @@ describe("RunBilling", () => {
+     expect(text).toMatch(/—\s*\/\s*—/);
+     expect(text).toContain("1m 1s");
+     expect(text).not.toContain("By model");
+-    expect(text).not.toContain("No completed stages yet");
++    expect(text).not.toContain("No stages yet");
+   });
+ 
+   test("renders mixed LLM and non-LLM rows while counting only LLM rows by model", () => {
+@@ -159,12 +159,12 @@ describe("RunBilling", () => {
+     expect(textFromInstance(byModelFooterCells[1])).toBe("1");
+   });
+ 
+-  test("keeps the empty state for runs with no completed stages", () => {
++  test("keeps the empty state for runs with no stages", () => {
+     const renderer = renderBilling(billing());
+ 
+     const text = textFromNode(renderer.toJSON());
+-    expect(text).toContain("No completed stages yet");
+-    expect(text).toContain("Stages will appear once the run produces completed nodes.");
++    expect(text).toContain("No stages yet");
++    expect(text).toContain("Stages will appear as soon as the run starts executing.");
+   });
+ 
+   test("renders an in-flight row with live runtime and includes its elapsed time in the footer", () => {
+@@ -199,7 +199,7 @@ describe("RunBilling", () => {
+       const text = textFromNode(renderer.toJSON());
+       // Empty-state must NOT show — the table should appear as soon as the
+       // first stage starts.
+-      expect(text).not.toContain("No completed stages yet");
++      expect(text).not.toContain("No stages yet");
+       expect(text).toContain("in-flight");
+ 
+       // Both the row's runtime cell and the footer total should reflect
+@@ -216,4 +216,4 @@ describe("RunBilling", () => {
+       Date.now = originalNow;
+     }
+   });
+-});
+\ No newline at end of file
++});
+diff --git a/apps/fabro-web/app/routes/run-billing.tsx b/apps/fabro-web/app/routes/run-billing.tsx
+index 959e9ef9..be0d5238 100644
+--- a/apps/fabro-web/app/routes/run-billing.tsx
++++ b/apps/fabro-web/app/routes/run-billing.tsx
+@@ -5,7 +5,7 @@ import { formatDurationSecs } from "../lib/format";
+ import { useRunBilling } from "../lib/queries";
+ import { IN_FLIGHT_STAGE_STATES } from "../lib/stage-sidebar";
+ import { useTickingNow } from "../lib/time";
+-import type { RunBilling, RunBillingStage, StageState } from "@qltysh/fabro-api-client";
++import type { RunBilling, RunBillingStage } from "@qltysh/fabro-api-client";
+ 
+ const EMPTY_VALUE = "—";
+ 
+@@ -19,7 +19,7 @@ function formatUsdMicros(usdMicros?: number | null) {
+ }
+ 
+ function isInFlight(stage: RunBillingStage): boolean {
+-  return stage.state != null && IN_FLIGHT_STAGE_STATES.has(stage.state as StageState);
++  return stage.state != null && IN_FLIGHT_STAGE_STATES.has(stage.state);
+ }
+ 
+ interface MappedStageRow {
+@@ -113,8 +113,8 @@ export default function RunBilling({ params }: { params: { id: string } }) {
+     return (
+       <div className="py-12">
+         <EmptyState
+-          title="No completed stages yet"
+-          description="Stages will appear once the run produces completed nodes."
++          title="No stages yet"
++          description="Stages will appear as soon as the run starts executing."
+         />
+       </div>
+     );
+@@ -223,4 +223,4 @@ export default function RunBilling({ params }: { params: { id: string } }) {
+       ) : null}
+     </div>
+   );
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-server/src/server/handler/billing.rs b/lib/crates/fabro-server/src/server/handler/billing.rs
+index f128aadc..7506cf45 100644
+--- a/lib/crates/fabro-server/src/server/handler/billing.rs
++++ b/lib/crates/fabro-server/src/server/handler/billing.rs
+@@ -141,16 +141,7 @@ async fn get_run_billing(
+         runtime_secs += row_runtime;
+ 
+         let (billing, model) = if let Some(usage) = stage.usage.as_ref() {
+-            let tokens = usage.tokens();
+-            let billing = BilledTokenCounts {
+-                cache_read_tokens:  tokens.cache_read_tokens,
+-                cache_write_tokens: tokens.cache_write_tokens,
+-                input_tokens:       tokens.input_tokens,
+-                output_tokens:      tokens.output_tokens,
+-                reasoning_tokens:   tokens.reasoning_tokens,
+-                total_tokens:       tokens.total_tokens(),
+-                total_usd_micros:   usage.total_usd_micros,
+-            };
++            let billing = BilledTokenCounts::from_billed_usage(std::slice::from_ref(usage));
+             let model_id = usage.model_id();
+             let model_totals = match by_model_totals.get_mut(model_id) {
+                 Some(totals) => totals,
+diff --git a/lib/crates/fabro-store/src/run_state.rs b/lib/crates/fabro-store/src/run_state.rs
+index 6dc0efb6..c6962746 100644
+--- a/lib/crates/fabro-store/src/run_state.rs
++++ b/lib/crates/fabro-store/src/run_state.rs
+@@ -633,9 +633,10 @@ mod tests {
+         StageRetryingProps, StageStartedProps,
+     };
+     use fabro_types::{
+-        BlockedReason, Checkpoint, EventBody, FailureCategory, FailureDetail, FailureReason,
+-        Outcome, QuestionType, RunBlobId, RunControlAction, RunEvent, RunStatus, StageOutcome,
+-        StageState, SuccessReason, TerminalStatus, WorkflowSettings, first_event_seq, fixtures,
++        BilledModelUsage, BlockedReason, Checkpoint, EventBody, FailureCategory, FailureDetail,
++        FailureReason, Outcome, QuestionType, RunBlobId, RunControlAction, RunEvent, RunStatus,
++        StageOutcome, StageState, SuccessReason, TerminalStatus, WorkflowSettings, first_event_seq,
++        fixtures,
+     };
+     use serde_json::json;
+ 
+@@ -1556,6 +1557,29 @@ mod tests {
+         }
+     }
+ 
++    fn billed_usage() -> BilledModelUsage {
++        serde_json::from_value(json!({
++            "input": {
++                "usage": {
++                    "model": {
++                        "provider": "openai",
++                        "model_id": "gpt-test"
++                    },
++                    "tokens": {
++                        "input_tokens": 10,
++                        "output_tokens": 5,
++                        "reasoning_tokens": 2,
++                        "cache_read_tokens": 3,
++                        "cache_write_tokens": 4
++                    }
++                },
++                "facts": { "provider": "open_ai" }
++            },
++            "total_usd_micros": 123
++        }))
++        .expect("billing fixture should deserialize")
++    }
++
+     #[test]
+     fn stage_started_records_started_at_and_running_state() {
+         let mut state = RunProjection::default();
+@@ -1576,9 +1600,10 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn stage_completed_records_duration_and_terminal_state() {
++    fn stage_completed_records_duration_usage_and_terminal_state() {
+         let mut state = RunProjection::default();
+         let stage_id = StageId::new("build", 1);
++        let usage = billed_usage();
+ 
+         state
+             .apply_event(&test_stage_event(
+@@ -1587,16 +1612,19 @@ mod tests {
+                 stage_id.clone(),
+             ))
+             .unwrap();
++        let mut props = completed_props(42, StageOutcome::Succeeded);
++        props.billing = Some(usage.clone());
+         state
+             .apply_event(&test_event(
+                 2,
+-                EventBody::StageCompleted(completed_props(42, StageOutcome::Succeeded)),
++                EventBody::StageCompleted(props),
+                 Some("build"),
+             ))
+             .unwrap();
+ 
+         let stage = state.stage(&stage_id).unwrap();
+         assert_eq!(stage.duration_ms, Some(42));
++        assert_eq!(stage.usage.as_ref(), Some(&usage));
+         assert_eq!(stage.state, Some(StageState::Succeeded));
+         assert_eq!(stage.effective_state(), StageState::Succeeded);
+     }
