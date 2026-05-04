@@ -389,12 +389,13 @@ struct ConcurrencyGate {
 
 impl ConcurrencyGate {
     fn new(expected: usize) -> Self {
+        assert!(expected > 0, "ConcurrencyGate requires expected > 0");
         Self {
             expected,
             arrived: AtomicUsize::new(0),
             in_flight: AtomicUsize::new(0),
             max_in_flight: AtomicUsize::new(0),
-            released: AtomicBool::new(expected == 0),
+            released: AtomicBool::new(false),
             timed_out: AtomicBool::new(false),
             release: Semaphore::new(0),
         }
@@ -410,8 +411,11 @@ impl ConcurrencyGate {
 
         let arrived = self.arrived.fetch_add(1, Ordering::SeqCst) + 1;
         if arrived >= self.expected {
+            // The expected-th arrival releases the (expected - 1) tasks already
+            // blocked on `release.acquire()`. Late arrivals short-circuit on the
+            // `released` check above and never touch the semaphore.
             if !self.released.swap(true, Ordering::SeqCst) {
-                self.release.add_permits(self.expected);
+                self.release.add_permits(self.expected - 1);
             }
             return;
         }
@@ -427,7 +431,7 @@ impl ConcurrencyGate {
         {
             self.timed_out.store(true, Ordering::SeqCst);
             if !self.released.swap(true, Ordering::SeqCst) {
-                self.release.add_permits(self.expected);
+                self.release.add_permits(self.expected - 1);
             }
         }
     }
@@ -525,17 +529,25 @@ async fn concurrent_test_model(
     }))
 }
 
+const FIVE_ANTHROPIC_MODEL_IDS: [&str; 5] = [
+    "claude-opus-4-7",
+    "claude-opus-4-6",
+    "claude-sonnet-4-5",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5",
+];
+
+fn five_anthropic_models() -> Vec<serde_json::Value> {
+    FIVE_ANTHROPIC_MODEL_IDS
+        .iter()
+        .map(|id| model_json(id, "anthropic", true))
+        .collect()
+}
+
 #[test]
 fn model_test_default_jobs_runs_four_concurrently() {
     let context = test_context!();
-    let models = vec![
-        model_json("claude-opus-4-7", "anthropic", true),
-        model_json("claude-opus-4-6", "anthropic", true),
-        model_json("claude-sonnet-4-5", "anthropic", true),
-        model_json("claude-sonnet-4-6", "anthropic", true),
-        model_json("claude-haiku-4-5", "anthropic", true),
-    ];
-    let server = start_concurrent_model_server(models, 4, HashMap::new());
+    let server = start_concurrent_model_server(five_anthropic_models(), 4, HashMap::new());
     context.set_http_target(&server.base_url);
 
     let mut cmd = context.command();
@@ -563,14 +575,7 @@ fn model_test_default_jobs_runs_four_concurrently() {
 #[test]
 fn model_test_explicit_jobs_two_runs_two_concurrently() {
     let context = test_context!();
-    let models = vec![
-        model_json("claude-opus-4-7", "anthropic", true),
-        model_json("claude-opus-4-6", "anthropic", true),
-        model_json("claude-sonnet-4-5", "anthropic", true),
-        model_json("claude-sonnet-4-6", "anthropic", true),
-        model_json("claude-haiku-4-5", "anthropic", true),
-    ];
-    let server = start_concurrent_model_server(models, 2, HashMap::new());
+    let server = start_concurrent_model_server(five_anthropic_models(), 2, HashMap::new());
     context.set_http_target(&server.base_url);
 
     let mut cmd = context.command();
@@ -598,21 +603,19 @@ fn model_test_explicit_jobs_two_runs_two_concurrently() {
 #[test]
 fn model_test_json_preserves_listing_order_under_concurrency() {
     let context = test_context!();
-    let models = vec![
-        model_json("claude-opus-4-7", "anthropic", true),
-        model_json("claude-opus-4-6", "anthropic", true),
-        model_json("claude-sonnet-4-5", "anthropic", true),
-        model_json("claude-sonnet-4-6", "anthropic", true),
-        model_json("claude-haiku-4-5", "anthropic", true),
-    ];
-    let response_delays = HashMap::from([
-        ("claude-opus-4-7".to_string(), Duration::from_millis(250)),
-        ("claude-opus-4-6".to_string(), Duration::from_millis(200)),
-        ("claude-sonnet-4-5".to_string(), Duration::from_millis(150)),
-        ("claude-sonnet-4-6".to_string(), Duration::from_millis(100)),
-        ("claude-haiku-4-5".to_string(), Duration::from_millis(50)),
-    ]);
-    let server = start_concurrent_model_server(models, 5, response_delays);
+    // Reverse-order delays force completion order opposite to listing order so
+    // the test fails if the configured-list `index` sort is dropped.
+    let response_delays = FIVE_ANTHROPIC_MODEL_IDS
+        .iter()
+        .enumerate()
+        .map(|(i, id)| {
+            (
+                (*id).to_string(),
+                Duration::from_millis(50 * (FIVE_ANTHROPIC_MODEL_IDS.len() - i) as u64),
+            )
+        })
+        .collect();
+    let server = start_concurrent_model_server(five_anthropic_models(), 5, response_delays);
     context.set_http_target(&server.base_url);
 
     let mut cmd = context.command();
@@ -643,11 +646,5 @@ fn model_test_json_preserves_listing_order_under_concurrency() {
         .iter()
         .map(|row| row["model"].as_str().expect("model should be a string"))
         .collect::<Vec<_>>();
-    assert_eq!(models, vec![
-        "claude-opus-4-7",
-        "claude-opus-4-6",
-        "claude-sonnet-4-5",
-        "claude-sonnet-4-6",
-        "claude-haiku-4-5",
-    ]);
+    assert_eq!(models, FIVE_ANTHROPIC_MODEL_IDS.to_vec());
 }

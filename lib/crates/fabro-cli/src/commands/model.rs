@@ -163,25 +163,22 @@ fn print_models_table(models: &[Model], styles: &Styles) {
     );
 }
 
-fn configured_model_test_status(
-    result: Result<api_types::ModelTestResult>,
-) -> (Color, String, bool) {
+fn configured_model_test_status(result: Result<api_types::ModelTestResult>) -> (Color, String) {
     match result {
         Ok(resp) if resp.status == api_types::ModelTestResultStatus::Ok => {
-            (Color::Green, "ok".to_string(), false)
+            (Color::Green, "ok".to_string())
         }
         Ok(resp) if resp.status == api_types::ModelTestResultStatus::Skip => (
             Color::Red,
             "error: provider became unconfigured after listing".to_string(),
-            true,
         ),
         Ok(resp) => {
             let message = resp
                 .error_message
                 .unwrap_or_else(|| "unknown error".to_string());
-            (Color::Red, format!("error: {message}"), true)
+            (Color::Red, format!("error: {message}"))
         }
-        Err(err) => (Color::Red, format!("error: {err}"), true),
+        Err(err) => (Color::Red, format!("error: {err}")),
     }
 }
 
@@ -328,43 +325,39 @@ async fn test_models_via_server(
                     if !json_output {
                         eprintln!("Testing {}... done", info.id);
                     }
-                    let (result_color, status, failed) = configured_model_test_status(result);
-                    (
-                        CompletedModelTest {
-                            index,
-                            model: info,
-                            result_color,
-                            status,
-                        },
-                        failed,
-                    )
+                    let (result_color, status) = configured_model_test_status(result);
+                    CompletedModelTest {
+                        index,
+                        model: info,
+                        result_color,
+                        status,
+                    }
                 }
             })
             .buffer_unordered(jobs)
             .collect::<Vec<_>>()
             .await;
 
-        completed.sort_by_key(|(completed, _)| completed.index);
+        completed.sort_by_key(|completed| completed.index);
 
-        for (completed, failed) in completed {
-            if failed {
+        for completed in completed {
+            if completed.result_color == Color::Red {
                 failures += 1;
             }
 
             let mut row = model_row(&completed.model, use_color);
-            row.push(
-                completed
-                    .status
-                    .clone()
-                    .cell()
-                    .foreground_color(color_if(use_color, completed.result_color)),
-            );
-            rows.push(row);
             json_rows.push(model_test_row_from_status(
                 &completed.model,
                 &completed.status,
                 completed.result_color,
             ));
+            row.push(
+                completed
+                    .status
+                    .cell()
+                    .foreground_color(color_if(use_color, completed.result_color)),
+            );
+            rows.push(row);
         }
     }
 
