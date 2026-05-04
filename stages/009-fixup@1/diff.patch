@@ -1,0 +1,115 @@
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/attach.rs b/lib/crates/fabro-cli/tests/it/cmd/attach.rs
+index e703e320..fae61225 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/attach.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/attach.rs
+@@ -160,6 +160,7 @@ fn attach_replays_completed_detached_run() {
+     ----- stdout -----
+     ----- stderr -----
+         Web UI: http://localhost:3000/runs/[ULID]
++        Warning: Worktree mode requested but no Git repository was found; running without a worktree. [worktree_skipped_no_git]
+         Sandbox: local (ready in [TIME])
+         ✓ Start  [TIME]
+         ✓ Run Tests  [TIME]
+@@ -267,6 +268,7 @@ fn attach_before_completion_streams_to_finished_state() {
+     ----- stdout -----
+     ----- stderr -----
+         Web UI: http://localhost:3000/runs/[ULID]
++        Warning: Worktree mode requested but no Git repository was found; running without a worktree. [worktree_skipped_no_git]
+         Sandbox: local (ready in [TIME])
+         ✓ start  [DURATION]
+         ✓ wait  [DURATION]
+@@ -699,6 +701,21 @@ fn attach_json_errors_without_prompting_for_human_input() {
+         "run_id": "[ULID]",
+         "ts": "[TIMESTAMP]"
+       },
++      {
++        "actor": {
++          "kind": "worker",
++          "run_id": "[ULID]"
++        },
++        "event": "run.notice",
++        "id": "[EVENT_ID]",
++        "properties": {
++          "code": "worktree_skipped_no_git",
++          "level": "warn",
++          "message": "Worktree mode requested but no Git repository was found; running without a worktree."
++        },
++        "run_id": "[ULID]",
++        "ts": "[TIMESTAMP]"
++      },
+       {
+         "actor": {
+           "kind": "worker",
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/dump.rs b/lib/crates/fabro-cli/tests/it/cmd/dump.rs
+index 12b13ee9..c541b59e 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/dump.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/dump.rs
+@@ -278,9 +278,9 @@ fn dump_exports_completed_run_snapshot() {
+     ");
+ 
+     assert_snapshot!(dump_file_summary(&output_dir), @"
+-    checkpoints/0013.json
+-    checkpoints/0017.json
+-    checkpoints/0021.json
++    checkpoints/0014.json
++    checkpoints/0018.json
++    checkpoints/0022.json
+     events.jsonl
+     graph.fabro
+     run.json
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/run.rs b/lib/crates/fabro-cli/tests/it/cmd/run.rs
+index 19d876cf..2fb38ec7 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/run.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/run.rs
+@@ -684,6 +684,7 @@ fn dry_run_simple() {
+ 
+         Run: [ULID]
+         Web UI: http://localhost:3000/runs/[ULID]
++        Warning: Worktree mode requested but no Git repository was found; running without a worktree. [worktree_skipped_no_git]
+         Sandbox: local (ready in [TIME])
+         ✓ Start  [TIME]
+         ✓ Run Tests  [TIME]
+diff --git a/lib/crates/fabro-cli/tests/it/workflow/dry_run_examples.rs b/lib/crates/fabro-cli/tests/it/workflow/dry_run_examples.rs
+index bb8a50c8..06b799a4 100644
+--- a/lib/crates/fabro-cli/tests/it/workflow/dry_run_examples.rs
++++ b/lib/crates/fabro-cli/tests/it/workflow/dry_run_examples.rs
+@@ -21,6 +21,7 @@ fn dry_run_branching() {
+     warning [node: implement]: Node 'implement' has goal_gate=true but no retry_target or fallback_retry_target (goal_gate_has_retry)
+         Run: [ULID]
+         Web UI: http://localhost:3000/runs/[ULID]
++        Warning: Worktree mode requested but no Git repository was found; running without a worktree. [worktree_skipped_no_git]
+         Sandbox: local (ready in [TIME])
+         ✓ Start  [TIME]
+         ✓ Plan  [TIME]
+@@ -57,6 +58,7 @@ fn dry_run_conditions() {
+ 
+         Run: [ULID]
+         Web UI: http://localhost:3000/runs/[ULID]
++        Warning: Worktree mode requested but no Git repository was found; running without a worktree. [worktree_skipped_no_git]
+         Sandbox: local (ready in [TIME])
+         ✓ start  [TIME]
+         ✓ Decide  [TIME]
+@@ -91,6 +93,7 @@ fn dry_run_parallel() {
+ 
+         Run: [ULID]
+         Web UI: http://localhost:3000/runs/[ULID]
++        Warning: Worktree mode requested but no Git repository was found; running without a worktree. [worktree_skipped_no_git]
+         Sandbox: local (ready in [TIME])
+         ✓ start  [TIME]
+         ✓ Fork Work  [TIME]
+@@ -126,6 +129,7 @@ fn dry_run_styled() {
+ 
+         Run: [ULID]
+         Web UI: http://localhost:3000/runs/[ULID]
++        Warning: Worktree mode requested but no Git repository was found; running without a worktree. [worktree_skipped_no_git]
+         Sandbox: local (ready in [TIME])
+         ✓ start  [TIME]
+         ✓ Plan  [TIME]
+@@ -161,6 +165,7 @@ fn dry_run_legacy_tool() {
+ 
+         Run: [ULID]
+         Web UI: http://localhost:3000/runs/[ULID]
++        Warning: Worktree mode requested but no Git repository was found; running without a worktree. [worktree_skipped_no_git]
+         Sandbox: local (ready in [TIME])
+         ✓ Start  [TIME]
+         ✓ Echo  [TIME]
