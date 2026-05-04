@@ -2788,7 +2788,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
     // Accumulate aggregate usage after execution completes.
     if let Some(ref cp) = checkpoint {
         let stage_durations = match run_store.list_events().await {
-            Ok(events) => fabro_workflow::extract_stage_durations_from_events(&events),
+            Ok(events) => fabro_workflow::total_stage_duration_by_node(&events),
             Err(err) => {
                 tracing::warn!(run_id = %run_id, error = %err, "Failed to load run events from store");
                 HashMap::default()
@@ -3105,7 +3105,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
 
     if let Some(ref checkpoint) = final_state.checkpoint {
         let stage_durations = match run_store.list_events().await {
-            Ok(events) => fabro_workflow::extract_stage_durations_from_events(&events),
+            Ok(events) => fabro_workflow::total_stage_duration_by_node(&events),
             Err(err) => {
                 tracing::warn!(run_id = %run_id, error = %err, "Failed to load run events from store");
                 HashMap::default()

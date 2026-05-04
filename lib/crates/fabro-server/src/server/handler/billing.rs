@@ -2,7 +2,7 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use fabro_store::RunProjectionReducer;
-use fabro_types::{EventBody, RunProjection, StageId, StageProjection};
+use fabro_types::{EventBody, RunProjection, StageId};
 
 use super::super::{
     ApiError, AppState, BilledTokenCounts, BillingByModel, BillingStageRef, EventEnvelope, HashMap,
@@ -82,11 +82,8 @@ async fn list_run_stages(
     let stage_durations = fabro_workflow::extract_stage_durations_by_stage_id(&events);
     let lifecycle_states = latest_stage_states(&events);
 
-    let mut entries: Vec<(&StageId, &StageProjection)> = projection.iter_stages().collect();
-    entries.sort_by_key(|(_, stage)| stage.first_event_seq);
-
-    let mut stages = Vec::with_capacity(entries.len());
-    for (stage_id, stage_projection) in entries {
+    let mut stages = Vec::new();
+    for (stage_id, stage_projection) in projection.iter_stages() {
         let node_id = stage_id.node_id().to_string();
         let Some(visit) = NonZeroU32::new(stage_id.visit()) else {
             tracing::warn!(
@@ -156,7 +153,7 @@ async fn get_run_billing(
     };
 
     let stage_durations = match run_store.list_events().await {
-        Ok(events) => fabro_workflow::extract_stage_durations_from_events(&events),
+        Ok(events) => fabro_workflow::total_stage_duration_by_node(&events),
         Err(err) => {
             return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
                 .into_response();

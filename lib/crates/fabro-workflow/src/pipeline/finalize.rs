@@ -78,7 +78,7 @@ pub(crate) async fn build_conclusion_from_store(
         .as_ref()
         .and_then(|state| state.checkpoint.as_ref());
     let stage_durations = events_result
-        .map(|events| crate::extract_stage_durations_from_events(&events))
+        .map(|events| crate::latest_stage_duration_by_node(&events))
         .unwrap_or_default();
 
     build_conclusion_from_parts(
@@ -503,7 +503,7 @@ pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Con
     let (final_status, failure_reason, _run_status) = classify_engine_result(&outcome);
 
     let events = services.run_store.list_events().await.unwrap_or_default();
-    let stage_durations = crate::extract_stage_durations_from_events(&events);
+    let stage_durations = crate::latest_stage_duration_by_node(&events);
     let artifact_count = events
         .iter()
         .filter(|envelope| matches!(envelope.event.body, EventBody::ArtifactCaptured(_)))

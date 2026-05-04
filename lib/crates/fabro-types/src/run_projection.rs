@@ -99,12 +99,22 @@ impl RunProjection {
         self.stages.get(stage)
     }
 
+    /// Iterate stages in `first_event_seq` order (the chronological order in
+    /// which each stage's first lifecycle event was recorded). Internal
+    /// storage is a `HashMap`, so iteration would otherwise be
+    /// non-deterministic; every caller wants chronological order, so we sort
+    /// here once instead of asking each caller to remember.
     pub fn iter_stages(&self) -> impl Iterator<Item = (&StageId, &StageProjection)> {
-        self.stages.iter()
+        let mut entries: Vec<(&StageId, &StageProjection)> = self.stages.iter().collect();
+        entries.sort_by_key(|(_, stage)| stage.first_event_seq);
+        entries.into_iter()
     }
 
+    /// Mutable counterpart of [`iter_stages`]. Same chronological ordering.
     pub fn iter_stages_mut(&mut self) -> impl Iterator<Item = (&StageId, &mut StageProjection)> {
-        self.stages.iter_mut()
+        let mut entries: Vec<(&StageId, &mut StageProjection)> = self.stages.iter_mut().collect();
+        entries.sort_by_key(|(_, stage)| stage.first_event_seq);
+        entries.into_iter()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -184,5 +194,60 @@ impl RunProjection {
                 Ok(())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod iter_stages_tests {
+    use std::num::NonZeroU32;
+
+    use super::RunProjection;
+
+    fn seq(n: u32) -> NonZeroU32 {
+        NonZeroU32::new(n).unwrap()
+    }
+
+    #[test]
+    fn iter_stages_yields_chronological_order_across_nodes() {
+        let mut p = RunProjection::default();
+        // Insert in non-monotonic seq order to exercise the sort.
+        p.stage_entry("c", 1, seq(30));
+        p.stage_entry("a", 1, seq(10));
+        p.stage_entry("b", 1, seq(20));
+
+        let order: Vec<&str> = p
+            .iter_stages()
+            .map(|(stage_id, _)| stage_id.node_id())
+            .collect();
+        assert_eq!(order, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn iter_stages_orders_visits_within_a_node() {
+        let mut p = RunProjection::default();
+        // Visit 2 inserted first; visit 1's earlier first_event_seq must still
+        // win the chronological ordering.
+        p.stage_entry("verify", 2, seq(50));
+        p.stage_entry("verify", 1, seq(20));
+
+        let visits: Vec<u32> = p
+            .iter_stages()
+            .map(|(stage_id, _)| stage_id.visit())
+            .collect();
+        assert_eq!(visits, vec![1, 2]);
+    }
+
+    #[test]
+    fn iter_stages_mut_yields_chronological_order() {
+        let mut p = RunProjection::default();
+        p.stage_entry("c", 1, seq(30));
+        p.stage_entry("a", 1, seq(10));
+        p.stage_entry("b", 1, seq(20));
+
+        let order: Vec<String> = p
+            .iter_stages_mut()
+            .map(|(stage_id, _)| stage_id.node_id().to_string())
+            .collect();
+        assert_eq!(order, vec!["a", "b", "c"]);
     }
 }
