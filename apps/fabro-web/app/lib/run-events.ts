@@ -1,6 +1,10 @@
 import { useEffect } from "react";
 import { useSWRConfig } from "swr";
 
+import {
+  subscribeToCrossTabSse,
+  type CrossTabSseCoordinator,
+} from "./cross-tab-sse";
 import { queryKeys } from "./query-keys";
 import {
   createBrowserEventSource,
@@ -13,8 +17,14 @@ import {
 
 interface RunEventPayload extends EventPayload {
   event?: string;
+  run_id?: string;
   node_id?: string;
   properties?: Record<string, unknown>;
+}
+
+interface RunEventOptions {
+  debounceMs?: number;
+  coordinator?: CrossTabSseCoordinator;
 }
 
 const subscriptions = new Map<string, SharedEventSubscription>();
@@ -104,29 +114,62 @@ export function subscribeToRunEvents(
   runId: string,
   mutate: MutateFn,
   eventSourceFactory: (url: string) => EventSourceLike = createBrowserEventSource,
-  { debounceMs = 300 }: { debounceMs?: number } = {},
+  { debounceMs = 300, coordinator }: RunEventOptions = {},
 ): () => void {
-  return subscribeToSharedEventSource<RunEventPayload>({
-    subscriptions,
-    subscriptionKey: runId,
-    url: queryKeys.runs.attach(runId),
+  return subscribeToCrossTabSse<RunEventPayload>({
+    coordinator,
+    subscriptionKey: `run:${runId}`,
     mutate,
     eventSourceFactory,
     debounceMs,
+    resyncKeys: () => resyncKeysForRun(runId),
     resolveInvalidation: (payload) => {
-      const event = payload.event;
-      if (!event) return { keys: [] };
-
-      const stageId = stageIdFromPayload(payload);
-      const keys = queryKeysForRunEvent(runId, event, stageId);
-      const terminal = TERMINAL_EVENTS.has(event);
-      return {
-        keys,
-        close: terminal,
-        immediate: terminal,
-      };
+      if (payload.run_id !== runId) return { keys: [] };
+      return runInvalidation(runId, payload, { closeOnTerminal: false });
     },
+    fallbackSubscribe: () =>
+      subscribeToSharedEventSource<RunEventPayload>({
+        subscriptions,
+        subscriptionKey: runId,
+        url: queryKeys.runs.attach(runId),
+        mutate,
+        eventSourceFactory,
+        debounceMs,
+        resolveInvalidation: (payload) =>
+          runInvalidation(runId, payload, { closeOnTerminal: true }),
+      }),
   });
+}
+
+function runInvalidation(
+  runId: string,
+  payload: RunEventPayload,
+  { closeOnTerminal }: { closeOnTerminal: boolean },
+) {
+  const event = payload.event;
+  if (!event) return { keys: [] };
+
+  const stageId = stageIdFromPayload(payload);
+  const keys = queryKeysForRunEvent(runId, event, stageId);
+  const terminal = TERMINAL_EVENTS.has(event);
+  return {
+    keys,
+    close: closeOnTerminal && terminal,
+    immediate: terminal,
+  };
+}
+
+function resyncKeysForRun(runId: string) {
+  return [
+    queryKeys.runs.detail(runId),
+    queryKeys.runs.files(runId),
+    queryKeys.runs.billing(runId),
+    queryKeys.runs.stages(runId),
+    queryKeys.runs.events(runId, 1000),
+    queryKeys.runs.graph(runId, "LR"),
+    queryKeys.runs.graph(runId, "TB"),
+    queryKeys.runs.questions(runId, 25, 0),
+  ];
 }
 
 function stageIdFromPayload(payload: RunEventPayload): string | undefined {
