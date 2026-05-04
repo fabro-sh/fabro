@@ -1,0 +1,427 @@
+diff --git a/lib/crates/fabro-store/src/run_state.rs b/lib/crates/fabro-store/src/run_state.rs
+index 77b36796..d54eec31 100644
+--- a/lib/crates/fabro-store/src/run_state.rs
++++ b/lib/crates/fabro-store/src/run_state.rs
+@@ -7,10 +7,10 @@ use fabro_types::run_event::{
+     RunFailedProps, StageCompletedProps, StagePromptProps,
+ };
+ use fabro_types::{
+-    BilledModelUsage, Checkpoint, Conclusion, EventBody, FailureSignature, InterviewQuestionRecord,
+-    Outcome, PendingInterviewRecord, PullRequestRecord, RunControlAction, RunEvent, RunId,
+-    RunProjection, RunSpec, RunStatus, RunSummary, SandboxRecord, StageCompletion, StageOutcome,
+-    StageProjection, StartRecord, TerminalStatus, first_event_seq,
++    BilledModelUsage, Checkpoint, CommandTermination, Conclusion, EventBody, FailureSignature,
++    InterviewQuestionRecord, Outcome, PendingInterviewRecord, PullRequestRecord, RunControlAction,
++    RunEvent, RunId, RunProjection, RunSpec, RunStatus, RunSummary, SandboxRecord, StageCompletion,
++    StageOutcome, StageProjection, StartRecord, TerminalStatus, first_event_seq,
+ };
+ use fabro_util::error::render_with_causes;
+ use serde_json::Value;
+@@ -372,6 +372,42 @@ impl RunProjectionReducer for RunProjection {
+                 stage.termination = Some(props.termination);
+                 stage.script_timing = Some(script_timing);
+             }
++            EventBody::AgentCliCompleted(props) => {
++                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
++                    return Ok(());
++                };
++                apply_agent_cli_terminal(
++                    stage,
++                    props,
++                    &props.stdout,
++                    &props.stderr,
++                    CommandTermination::Exited,
++                )?;
++            }
++            EventBody::AgentCliCancelled(props) => {
++                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
++                    return Ok(());
++                };
++                apply_agent_cli_terminal(
++                    stage,
++                    props,
++                    &props.stdout,
++                    &props.stderr,
++                    CommandTermination::Cancelled,
++                )?;
++            }
++            EventBody::AgentCliTimedOut(props) => {
++                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
++                    return Ok(());
++                };
++                apply_agent_cli_terminal(
++                    stage,
++                    props,
++                    &props.stdout,
++                    &props.stderr,
++                    CommandTermination::TimedOut,
++                )?;
++            }
+             EventBody::ParallelCompleted(props) => {
+                 let parallel_results = serde_json::to_value(&props.results).map_err(|err| {
+                     Error::InvalidEvent(format!("invalid parallel.completed payload: {err}"))
+@@ -605,6 +641,22 @@ fn provider_used_from_agent_cli_started(props: &AgentCliStartedProps) -> Value {
+     Value::Object(provider_used)
+ }
+ 
++fn apply_agent_cli_terminal(
++    stage: &mut StageProjection,
++    props: &impl serde::Serialize,
++    stdout: &str,
++    stderr: &str,
++    termination: CommandTermination,
++) -> Result<()> {
++    let script_timing = serde_json::to_value(props)
++        .map_err(|err| Error::InvalidEvent(format!("invalid agent.cli terminal payload: {err}")))?;
++    stage.stdout = Some(stdout.to_string());
++    stage.stderr = Some(stderr.to_string());
++    stage.termination = Some(termination);
++    stage.script_timing = Some(script_timing);
++    Ok(())
++}
++
+ #[cfg(test)]
+ mod tests {
+     use std::collections::{BTreeMap, HashMap};
+@@ -612,13 +664,14 @@ mod tests {
+     use chrono::Utc;
+     use fabro_types::run_event::run::RunFailedProps;
+     use fabro_types::run_event::{
++        AgentCliCancelledProps, AgentCliCompletedProps, AgentCliTimedOutProps,
+         CheckpointCompletedProps, InterviewCompletedProps, InterviewOption, InterviewStartedProps,
+         RunControlEffectProps, StagePromptProps, StageStartedProps,
+     };
+     use fabro_types::{
+-        BlockedReason, Checkpoint, EventBody, FailureReason, Outcome, QuestionType, RunBlobId,
+-        RunControlAction, RunEvent, RunStatus, StageOutcome, SuccessReason, TerminalStatus,
+-        WorkflowSettings, first_event_seq, fixtures,
++        BlockedReason, Checkpoint, CommandTermination, EventBody, FailureReason, Outcome,
++        QuestionType, RunBlobId, RunControlAction, RunEvent, RunStatus, StageOutcome,
++        SuccessReason, TerminalStatus, WorkflowSettings, first_event_seq, fixtures,
+     };
+     use serde_json::json;
+ 
+@@ -861,6 +914,106 @@ mod tests {
+         assert_eq!(stage.prompt.as_deref(), Some("prompt"));
+     }
+ 
++    fn start_stage(state: &mut RunProjection, stage_id: &StageId) {
++        state
++            .apply_event(&test_stage_event(
++                3,
++                EventBody::StageStarted(StageStartedProps {
++                    index:        0,
++                    handler_type: "agent".to_string(),
++                    attempt:      1,
++                    max_attempts: 1,
++                }),
++                stage_id.clone(),
++            ))
++            .unwrap();
++    }
++
++    #[test]
++    fn agent_cli_completed_updates_stage_output_projection() {
++        let mut state = RunProjection::default();
++        let stage_id = StageId::new("code", 1);
++        start_stage(&mut state, &stage_id);
++
++        state
++            .apply_event(&test_stage_event(
++                4,
++                EventBody::AgentCliCompleted(AgentCliCompletedProps {
++                    stdout:      "done".to_string(),
++                    stderr:      "warn".to_string(),
++                    exit_code:   0,
++                    duration_ms: 42,
++                }),
++                stage_id.clone(),
++            ))
++            .unwrap();
++
++        let stage = state.stage(&stage_id).unwrap();
++        assert_eq!(stage.stdout.as_deref(), Some("done"));
++        assert_eq!(stage.stderr.as_deref(), Some("warn"));
++        assert_eq!(stage.termination, Some(CommandTermination::Exited));
++        assert_eq!(
++            stage.script_timing.as_ref().unwrap()["duration_ms"],
++            serde_json::json!(42)
++        );
++    }
++
++    #[test]
++    fn agent_cli_cancelled_updates_stage_output_projection() {
++        let mut state = RunProjection::default();
++        let stage_id = StageId::new("code", 1);
++        start_stage(&mut state, &stage_id);
++
++        state
++            .apply_event(&test_stage_event(
++                4,
++                EventBody::AgentCliCancelled(AgentCliCancelledProps {
++                    stdout:      "partial".to_string(),
++                    stderr:      "cancelled".to_string(),
++                    duration_ms: 7,
++                }),
++                stage_id.clone(),
++            ))
++            .unwrap();
++
++        let stage = state.stage(&stage_id).unwrap();
++        assert_eq!(stage.stdout.as_deref(), Some("partial"));
++        assert_eq!(stage.stderr.as_deref(), Some("cancelled"));
++        assert_eq!(stage.termination, Some(CommandTermination::Cancelled));
++        assert_eq!(
++            stage.script_timing.as_ref().unwrap()["duration_ms"],
++            serde_json::json!(7)
++        );
++    }
++
++    #[test]
++    fn agent_cli_timed_out_updates_stage_output_projection() {
++        let mut state = RunProjection::default();
++        let stage_id = StageId::new("code", 1);
++        start_stage(&mut state, &stage_id);
++
++        state
++            .apply_event(&test_stage_event(
++                4,
++                EventBody::AgentCliTimedOut(AgentCliTimedOutProps {
++                    stdout:      "partial".to_string(),
++                    stderr:      "timeout".to_string(),
++                    duration_ms: 600,
++                }),
++                stage_id.clone(),
++            ))
++            .unwrap();
++
++        let stage = state.stage(&stage_id).unwrap();
++        assert_eq!(stage.stdout.as_deref(), Some("partial"));
++        assert_eq!(stage.stderr.as_deref(), Some("timeout"));
++        assert_eq!(stage.termination, Some(CommandTermination::TimedOut));
++        assert_eq!(
++            stage.script_timing.as_ref().unwrap()["duration_ms"],
++            serde_json::json!(600)
++        );
++    }
++
+     #[test]
+     fn checkpoint_completed_creates_projection_entry_for_skipped_stage() {
+         let mut state = RunProjection::default();
+diff --git a/lib/crates/fabro-workflow/src/handler/llm/api.rs b/lib/crates/fabro-workflow/src/handler/llm/api.rs
+index 466af0a2..d7d11d3c 100644
+--- a/lib/crates/fabro-workflow/src/handler/llm/api.rs
++++ b/lib/crates/fabro-workflow/src/handler/llm/api.rs
+@@ -108,9 +108,11 @@ fn classify_agent_error(err: fabro_agent::Error, allow_failover: bool) -> AgentA
+             AgentApiErrorDisposition::FailoverEligible(err)
+         }
+         fabro_agent::Error::Llm(err) => AgentApiErrorDisposition::Terminal(Error::Llm(err)),
+-        other => AgentApiErrorDisposition::Terminal(Error::handler(format!(
+-            "Agent session failed: {other}"
+-        ))),
++        other @ (fabro_agent::Error::SessionClosed
++        | fabro_agent::Error::InvalidState(_)
++        | fabro_agent::Error::ToolExecution(_)) => AgentApiErrorDisposition::Terminal(
++            Error::Precondition(format!("Agent session failed: {other}")),
++        ),
+     }
+ }
+ 
+@@ -546,18 +548,18 @@ impl CodergenBackend for AgentApiBackend {
+             if let Some(s) = existing {
+                 (s, true)
+             } else {
+-                (
+-                    self.create_session(node, sandbox, tool_hooks.clone())
+-                        .await?,
+-                    false,
+-                )
++                let created = self.create_session(node, sandbox, tool_hooks.clone()).await;
++                if cancel_token.is_cancelled() {
++                    return Err(Error::Cancelled);
++                }
++                (created?, false)
+             }
+         } else {
+-            (
+-                self.create_session(node, sandbox, tool_hooks.clone())
+-                    .await?,
+-                false,
+-            )
++            let created = self.create_session(node, sandbox, tool_hooks.clone()).await;
++            if cancel_token.is_cancelled() {
++                return Err(Error::Cancelled);
++            }
++            (created?, false)
+         };
+         if cancel_token.is_cancelled() {
+             return Err(Error::Cancelled);
+@@ -664,7 +666,7 @@ impl CodergenBackend for AgentApiBackend {
+                         if cancel_token.is_cancelled() {
+                             return Err(Error::Cancelled);
+                         }
+-                        let new_session = match Self::create_session_for(
++                        let new_session_result = Self::create_session_for(
+                             &target.model,
+                             target_provider,
+                             node,
+@@ -674,17 +676,17 @@ impl CodergenBackend for AgentApiBackend {
+                             tool_hooks.clone(),
+                             self.mcp_servers.clone(),
+                         )
+-                        .await
+-                        {
++                        .await;
++                        if cancel_token.is_cancelled() {
++                            return Err(Error::Cancelled);
++                        }
++                        let new_session = match new_session_result {
+                             Ok(s) => s,
+                             Err(e) => {
+                                 last_err = e;
+                                 continue;
+                             }
+                         };
+-                        if cancel_token.is_cancelled() {
+-                            return Err(Error::Cancelled);
+-                        }
+                         session = new_session;
+                         bridge.replace(cancel_token.clone(), &session);
+ 
+@@ -1188,35 +1190,35 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn classify_session_closed_is_terminal_handler() {
++    fn classify_session_closed_is_terminal_precondition() {
+         let err = fabro_agent::Error::SessionClosed;
+         match classify_agent_error(err, true) {
+-            AgentApiErrorDisposition::Terminal(Error::Handler { message, .. }) => {
++            AgentApiErrorDisposition::Terminal(Error::Precondition(message)) => {
+                 assert!(message.contains("Agent session failed"));
+             }
+-            _ => panic!("expected Terminal(Error::Handler) for SessionClosed"),
++            _ => panic!("expected Terminal(Error::Precondition) for SessionClosed"),
+         }
+     }
+ 
+     #[test]
+-    fn classify_invalid_state_is_terminal_handler() {
++    fn classify_invalid_state_is_terminal_precondition() {
+         let err = fabro_agent::Error::InvalidState("oops".into());
+         match classify_agent_error(err, true) {
+-            AgentApiErrorDisposition::Terminal(Error::Handler { message, .. }) => {
++            AgentApiErrorDisposition::Terminal(Error::Precondition(message)) => {
+                 assert!(message.contains("Agent session failed"));
+             }
+-            _ => panic!("expected Terminal(Error::Handler) for InvalidState"),
++            _ => panic!("expected Terminal(Error::Precondition) for InvalidState"),
+         }
+     }
+ 
+     #[test]
+-    fn classify_tool_execution_is_terminal_handler() {
++    fn classify_tool_execution_is_terminal_precondition() {
+         let err = fabro_agent::Error::ToolExecution("tool blew up".into());
+         match classify_agent_error(err, true) {
+-            AgentApiErrorDisposition::Terminal(Error::Handler { message, .. }) => {
++            AgentApiErrorDisposition::Terminal(Error::Precondition(message)) => {
+                 assert!(message.contains("Agent session failed"));
+             }
+-            _ => panic!("expected Terminal(Error::Handler) for ToolExecution"),
++            _ => panic!("expected Terminal(Error::Precondition) for ToolExecution"),
+         }
+     }
+ }
+diff --git a/lib/crates/fabro-workflow/src/handler/llm/cli.rs b/lib/crates/fabro-workflow/src/handler/llm/cli.rs
+index 22064a10..b692f630 100644
+--- a/lib/crates/fabro-workflow/src/handler/llm/cli.rs
++++ b/lib/crates/fabro-workflow/src/handler/llm/cli.rs
+@@ -2,7 +2,7 @@ use std::collections::HashMap;
+ use std::sync::{Arc, Mutex};
+ 
+ use async_trait::async_trait;
+-use fabro_agent::Sandbox;
++use fabro_agent::{Sandbox, shell_quote};
+ use fabro_auth::{CliAgentKind, CredentialResolver, CredentialUsage, ResolvedCredential};
+ use fabro_graphviz::graph::Node;
+ use fabro_llm::types::TokenCounts;
+@@ -189,9 +189,11 @@ pub fn is_cli_only_model(model: &str) -> bool {
+ /// is piped into the command's stdin via `cat`.
+ #[must_use]
+ pub fn cli_command_for_provider(provider: Provider, model: &str, prompt_file: &str) -> String {
++    let prompt_file = shell_quote(prompt_file);
+     let model_flag = if model.is_empty() {
+         String::new()
+     } else {
++        let model = shell_quote(model);
+         match provider {
+             Provider::OpenAi
+             | Provider::Gemini
+@@ -390,14 +392,6 @@ pub fn parse_cli_response(provider: Provider, output: &str) -> Option<CliRespons
+     }
+ }
+ 
+-/// Escape a value for safe embedding inside single quotes in a shell command.
+-fn shell_quote(val: &str) -> String {
+-    shlex::try_quote(val).map_or_else(
+-        |_| format!("'{}'", val.replace('\'', "'\\''")),
+-        std::borrow::Cow::into_owned,
+-    )
+-}
+-
+ /// CLI backend that invokes external CLI tools (claude, codex, gemini) via
+ /// `exec_command()`.
+ pub struct AgentCliBackend {
+@@ -618,7 +612,7 @@ impl CodergenBackend for AgentCliBackend {
+         // launcher could not be cancelled mid-flight. By running through
+         // `exec_command_streaming` the run-level cancel token (and node
+         // timeout, when set) terminate the CLI and its descendants.
+-        let outer_command = format!(". {env_path} && {command}");
++        let outer_command = format!(". {} && {command}", shell_quote(&env_path));
+         // Use a synchronous Mutex: each callback invocation only does a short
+         // `extend_from_slice` with no awaits while the lock is held, so an
+         // async Mutex would just add per-chunk scheduling overhead.
+@@ -666,7 +660,7 @@ impl CodergenBackend for AgentCliBackend {
+ 
+         let cleanup_temp_files = || {
+             let sandbox = Arc::clone(sandbox);
+-            let cleanup_cmd = format!("rm -f {tmp_prefix}_*");
++            let cleanup_cmd = format!("rm -f {}_*", shell_quote(&tmp_prefix));
+             async move {
+                 let _ = sandbox
+                     .exec_command(&cleanup_cmd, 30_000, None, None, None)
+@@ -785,10 +779,7 @@ impl CodergenBackend for AgentCliBackend {
+         let last_file_touched = if files_touched.is_empty() {
+             None
+         } else {
+-            let quoted_files: Vec<String> = files_touched
+-                .iter()
+-                .filter_map(|f| shlex::try_quote(f).ok().map(std::borrow::Cow::into_owned))
+-                .collect();
++            let quoted_files: Vec<String> = files_touched.iter().map(|f| shell_quote(f)).collect();
+             let cmd = format!("ls -t {} | head -1", quoted_files.join(" "));
+             if let Ok(result) = sandbox.exec_command(&cmd, 5_000, None, None, None).await {
+                 let trimmed = result.stdout.trim().to_string();
+diff --git a/lib/crates/fabro-workflow/src/handler/parallel.rs b/lib/crates/fabro-workflow/src/handler/parallel.rs
+index 4f1d7568..57323b82 100644
+--- a/lib/crates/fabro-workflow/src/handler/parallel.rs
++++ b/lib/crates/fabro-workflow/src/handler/parallel.rs
+@@ -458,12 +458,16 @@ impl Handler for ParallelHandler {
+ 
+         // Collect results
+         let mut results: Vec<BranchResult> = Vec::new();
+-        for handle in handles {
++        let mut handles = handles.into_iter();
++        while let Some(handle) = handles.next() {
+             match handle.await {
+                 Ok(Ok(result)) => {
+                     results.push(result);
+                 }
+                 Ok(Err(Error::Cancelled)) => {
++                    for handle in handles {
++                        handle.abort();
++                    }
+                     return Err(Error::Cancelled);
+                 }
+                 Ok(Err(e)) => {
