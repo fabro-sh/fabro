@@ -43,6 +43,9 @@ pub fn billing_rollup_from_projection(projection: &RunProjection) -> ProjectionB
     let mut billed_visit_count = 0_usize;
 
     for (stage_id, stage) in projection.iter_stages() {
+        if is_exit_stage(projection, stage_id.node_id()) {
+            continue;
+        }
         if stage.completion.is_none() && stage.duration_ms.is_none() && stage.usage.is_none() {
             continue;
         }
@@ -94,6 +97,13 @@ pub fn billing_rollup_from_projection(projection: &RunProjection) -> ProjectionB
     }
 }
 
+fn is_exit_stage(projection: &RunProjection, node_id: &str) -> bool {
+    projection
+        .spec()
+        .and_then(|spec| spec.graph().nodes.get(node_id))
+        .is_some_and(|node| node.handler_type() == Some("exit"))
+}
+
 fn accumulate_usage(counts: &mut BilledTokenCounts, usage: &BilledModelUsage) {
     let tokens = usage.tokens();
     counts.input_tokens += tokens.input_tokens;
@@ -109,7 +119,12 @@ fn accumulate_usage(counts: &mut BilledTokenCounts, usage: &BilledModelUsage) {
 
 #[cfg(test)]
 mod tests {
-    use fabro_types::{BilledModelUsage, RunProjection, StageOutcome, first_event_seq};
+    use std::collections::HashMap;
+
+    use fabro_types::{
+        AttrValue, BilledModelUsage, Graph, Node, RunProjection, RunSpec, StageCompletion,
+        StageOutcome, WorkflowSettings, first_event_seq, fixtures,
+    };
     use serde_json::json;
 
     use super::billing_rollup_from_projection;
@@ -144,7 +159,7 @@ mod tests {
         let first = projection.stage_entry("verify", 1, first_event_seq(1));
         first.duration_ms = Some(1200);
         first.usage = Some(failed_usage);
-        first.completion = Some(fabro_types::StageCompletion {
+        first.completion = Some(StageCompletion {
             outcome:        StageOutcome::Failed {
                 retry_requested: true,
             },
@@ -155,7 +170,7 @@ mod tests {
         let second = projection.stage_entry("verify", 2, first_event_seq(2));
         second.duration_ms = Some(800);
         second.usage = Some(success_usage);
-        second.completion = Some(fabro_types::StageCompletion {
+        second.completion = Some(StageCompletion {
             outcome:        StageOutcome::Succeeded,
             notes:          None,
             failure_reason: None,
@@ -192,7 +207,7 @@ mod tests {
         let mut projection = RunProjection::default();
         let stage = projection.stage_entry("start", 1, first_event_seq(1));
         stage.duration_ms = Some(25);
-        stage.completion = Some(fabro_types::StageCompletion {
+        stage.completion = Some(StageCompletion {
             outcome:        StageOutcome::Succeeded,
             notes:          None,
             failure_reason: None,
@@ -209,5 +224,68 @@ mod tests {
         assert_eq!(rollup.runtime_ms, 25);
         assert!(rollup.by_model.is_empty());
         assert!(rollup.billing_if_present().is_none());
+    }
+
+    #[test]
+    fn rollup_excludes_terminal_exit_stage_rows() {
+        let mut projection = RunProjection::default();
+        projection.spec = Some(run_spec_with_exit_node());
+        let start = projection.stage_entry("start", 1, first_event_seq(1));
+        start.duration_ms = Some(25);
+        start.completion = Some(StageCompletion {
+            outcome:        StageOutcome::Succeeded,
+            notes:          None,
+            failure_reason: None,
+            timestamp:      chrono::Utc::now(),
+        });
+        let exit = projection.stage_entry("exit", 1, first_event_seq(2));
+        exit.duration_ms = Some(7);
+        exit.completion = Some(StageCompletion {
+            outcome:        StageOutcome::Succeeded,
+            notes:          None,
+            failure_reason: None,
+            timestamp:      chrono::Utc::now(),
+        });
+
+        let rollup = billing_rollup_from_projection(&projection);
+
+        assert_eq!(rollup.stages.len(), 1);
+        assert_eq!(rollup.stages[0].node_id, "start");
+        assert_eq!(rollup.runtime_ms, 25);
+    }
+
+    fn run_spec_with_exit_node() -> RunSpec {
+        let mut graph = Graph::new("test");
+        graph.nodes.insert("start".to_string(), {
+            let mut node = Node::new("start");
+            node.attrs.insert(
+                "shape".to_string(),
+                AttrValue::String("Mdiamond".to_string()),
+            );
+            node
+        });
+        graph.nodes.insert("exit".to_string(), {
+            let mut node = Node::new("exit");
+            node.attrs.insert(
+                "shape".to_string(),
+                AttrValue::String("Msquare".to_string()),
+            );
+            node
+        });
+
+        RunSpec {
+            run_id: fixtures::RUN_1,
+            settings: WorkflowSettings::default(),
+            graph,
+            workflow_slug: None,
+            source_directory: None,
+            labels: HashMap::new(),
+            provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
+            git: None,
+            fork_source_ref: None,
+            in_place: false,
+        }
     }
 }
