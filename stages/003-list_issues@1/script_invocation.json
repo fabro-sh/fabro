@@ -1,0 +1,5 @@
+{
+  "script": "gh issue list --state open --limit 50 2>&1",
+  "command": "gh issue list --state open --limit 50 2>&1",
+  "language": "shell"
+}

@@ -236,26 +236,29 @@
   "status_updated_at": "2026-05-05T12:51:17.524710Z",
   "pending_control": null,
   "checkpoint": {
-    "timestamp": "2026-05-05T12:51:21.132589Z",
-    "current_node": "list_prs",
+    "timestamp": "2026-05-05T12:51:26.423805Z",
+    "current_node": "list_issues",
     "completed_nodes": [
       "start",
-      "list_prs"
+      "list_prs",
+      "list_issues"
     ],
     "node_retries": {},
     "context_values": {
       "internal.retry_count.start": 0,
       "outcome": "failed",
       "graph.goal": "List open PRs and issues via the gh CLI to verify GITHUB_TOKEN injection",
-      "internal.thread_id": "start",
-      "failure_signature": "list_prs|deterministic|script failed with exit code: <n> ## stdout to get started with github cli,please run: gh auth login alternatively,populate the gh_token environment variable with a github api authentication token.",
+      "internal.thread_id": "list_prs",
+      "thread.list_prs.current_node": "list_issues",
+      "failure_signature": "list_issues|deterministic|script failed with exit code: <n> ## stdout to get started with github cli,please run: gh auth login alternatively,populate the gh_token environment variable with a github api authentication token.",
       "failure_class": "deterministic",
       "thread.start.current_node": "list_prs",
       "command.stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
-      "current_node": "list_prs",
+      "current_node": "list_issues",
       "internal.work_dir": "/home/daytona/workspace",
       "internal.fidelity": "compact",
       "internal.retry_count.list_prs": 0,
+      "internal.retry_count.list_issues": 0,
       "internal.run_id": "01KQW3293BWKEXCA7F3YVFPAH5",
       "internal.node_visit_count": 1,
       "command.output": "blob://sha256/a0048c50413bfb223e1d164309f1fe45a8f133697290dfdec70253ec29f0814a",
@@ -277,12 +280,25 @@
           "failure_class": "deterministic"
         },
         "usage": null
+      },
+      "list_issues": {
+        "status": "failed",
+        "context_updates": {
+          "command.stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "command.output": "blob://sha256/a0048c50413bfb223e1d164309f1fe45a8f133697290dfdec70253ec29f0814a"
+        },
+        "failure": {
+          "message": "Script failed with exit code: 4\n\n## stdout\nTo get started with GitHub CLI, please run:  gh auth login\nAlternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.\n",
+          "failure_class": "deterministic"
+        },
+        "usage": null
       }
     },
-    "next_node_id": "list_issues",
+    "next_node_id": "exit",
     "node_visits": {
       "list_prs": 1,
-      "start": 1
+      "start": 1,
+      "list_issues": 1
     }
   },
   "checkpoints": [
@@ -317,6 +333,63 @@
         },
         "next_node_id": "list_prs",
         "node_visits": {
+          "start": 1
+        }
+      }
+    ],
+    [
+      27,
+      {
+        "timestamp": "2026-05-05T12:51:25.070804Z",
+        "current_node": "list_prs",
+        "completed_nodes": [
+          "start",
+          "list_prs"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "command.stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "internal.work_dir": "/home/daytona/workspace",
+          "graph.goal": "List open PRs and issues via the gh CLI to verify GITHUB_TOKEN injection",
+          "internal.thread_id": "start",
+          "internal.retry_count.start": 0,
+          "internal.run_id": "01KQW3293BWKEXCA7F3YVFPAH5",
+          "failure_signature": "list_prs|deterministic|script failed with exit code: <n> ## stdout to get started with github cli,please run: gh auth login alternatively,populate the gh_token environment variable with a github api authentication token.",
+          "internal.fidelity": "compact",
+          "internal.retry_count.list_prs": 0,
+          "outcome": "failed",
+          "thread.start.current_node": "list_prs",
+          "current_node": "list_prs",
+          "failure_class": "deterministic",
+          "command.output": "blob://sha256/a0048c50413bfb223e1d164309f1fe45a8f133697290dfdec70253ec29f0814a",
+          "graph.rankdir": "LR",
+          "internal.node_visit_count": 1
+        },
+        "node_outcomes": {
+          "list_prs": {
+            "status": "failed",
+            "context_updates": {
+              "command.output": "blob://sha256/a0048c50413bfb223e1d164309f1fe45a8f133697290dfdec70253ec29f0814a",
+              "command.stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "failure": {
+              "message": "Script failed with exit code: 4\n\n## stdout\nTo get started with GitHub CLI, please run:  gh auth login\nAlternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.\n",
+              "failure_class": "deterministic"
+            },
+            "usage": null
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "list_issues",
+        "git_commit_sha": "39c172ae28c29af0c1e084e5154984e3506cedd4",
+        "loop_failure_signatures": {
+          "list_prs|deterministic|script failed with exit code: <n> ## stdout to get started with github cli,please run: gh auth login alternatively,populate the gh_token environment variable with a github api authentication token.": 1
+        },
+        "node_visits": {
+          "list_prs": 1,
           "start": 1
         }
       }
@@ -361,12 +434,49 @@
       "first_event_seq": 20,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "failed",
+        "notes": null,
+        "failure_reason": "Script failed with exit code: 4\n\n## stdout\nTo get started with GitHub CLI, please run:  gh auth login\nAlternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.\n",
+        "timestamp": "2026-05-05T12:51:21.131788Z"
+      },
       "provider_used": null,
       "diff": null,
       "script_invocation": {
         "script": "gh pr list --state open --limit 50 2>&1",
         "command": "gh pr list --state open --limit 50 2>&1",
+        "language": "shell"
+      },
+      "script_timing": {
+        "stdout": "blob://sha256/a0048c50413bfb223e1d164309f1fe45a8f133697290dfdec70253ec29f0814a",
+        "stderr": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+        "exit_code": 4,
+        "duration_ms": 1375,
+        "termination": "exited",
+        "stdout_bytes": 157,
+        "stderr_bytes": 0,
+        "streams_separated": true,
+        "live_streaming": true
+      },
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null,
+      "stdout_bytes": 157,
+      "stderr_bytes": 0,
+      "streams_separated": true,
+      "live_streaming": true,
+      "termination": "exited"
+    },
+    "list_issues@1": {
+      "first_event_seq": 30,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "gh issue list --state open --limit 50 2>&1",
+        "command": "gh issue list --state open --limit 50 2>&1",
         "language": "shell"
       },
       "script_timing": null,
