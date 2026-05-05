@@ -9,8 +9,8 @@ use fabro_types::run_event::{
 use fabro_types::{
     BilledModelUsage, Checkpoint, Conclusion, EventBody, FailureSignature, InterviewQuestionRecord,
     Outcome, PendingInterviewRecord, PullRequestRecord, RunControlAction, RunEvent, RunId,
-    RunProjection, RunSpec, RunStatus, RunSummary, SandboxRecord, StageCompletion, StageOutcome,
-    StageProjection, StartRecord, TerminalStatus, first_event_seq,
+    RunProjection, RunSpec, RunStatus, RunSummary, SandboxRecord, StageCompletion, StageId,
+    StageOutcome, StageProjection, StartRecord, TerminalStatus, first_event_seq,
 };
 use fabro_util::error::render_with_causes;
 use serde_json::Value;
@@ -297,27 +297,28 @@ impl RunProjectionReducer for RunProjection {
                 );
             }
             EventBody::StagePrompt(props) => {
-                let Some(stage) = stage_at_visit(self, stored, props.visit, event.seq) else {
+                let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
+                else {
                     return Ok(());
                 };
                 stage.prompt = Some(props.text.clone());
                 stage.provider_used = provider_used_from_prompt(props);
             }
             EventBody::PromptCompleted(props) => {
-                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
+                let Some(stage) = stage_at_stored_or_current_visit(self, stored, event.seq) else {
                     return Ok(());
                 };
                 stage.response = Some(props.response.clone());
             }
             EventBody::StageCompleted(props) => {
-                let Some(node_id) = stored.node_id.as_deref() else {
-                    return Ok(());
-                };
-                let visit = stage_visit(node_id, props.node_visits.as_ref(), self).unwrap_or(1);
                 let response = props.response.clone();
                 let outcome = stage_outcome_from_props(props);
                 let completion = stage_completion_from_outcome(&outcome, ts);
-                let stage = self.stage_entry(node_id, visit, first_event_seq(event.seq));
+                let Some(stage) =
+                    stage_at_completed_visit(self, stored, props.node_visits.as_ref(), event.seq)
+                else {
+                    return Ok(());
+                };
                 stage.response = response;
                 stage.completion = Some(completion);
                 stage.duration_ms = Some(props.duration_ms);
@@ -325,12 +326,12 @@ impl RunProjectionReducer for RunProjection {
             }
             EventBody::StageFailed(props) => {
                 let failure_reason = props.failure.as_ref().map(|detail| detail.message.clone());
-                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
+                let Some(stage) = stage_at_stored_or_current_visit(self, stored, event.seq) else {
                     return Ok(());
                 };
                 stage.completion = Some(StageCompletion {
                     outcome: StageOutcome::Failed {
-                        retry_requested: false,
+                        retry_requested: props.will_retry,
                     },
                     notes: None,
                     failure_reason,
@@ -340,13 +341,15 @@ impl RunProjectionReducer for RunProjection {
                 stage.usage.clone_from(&props.billing);
             }
             EventBody::AgentSessionStarted(props) => {
-                let Some(stage) = stage_at_visit(self, stored, props.visit, event.seq) else {
+                let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
+                else {
                     return Ok(());
                 };
                 stage.provider_used = Some(provider_used_from_agent_session_started(props));
             }
             EventBody::AgentCliStarted(props) => {
-                let Some(stage) = stage_at_visit(self, stored, props.visit, event.seq) else {
+                let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
+                else {
                     return Ok(());
                 };
                 stage.provider_used = Some(provider_used_from_agent_cli_started(props));
@@ -355,7 +358,7 @@ impl RunProjectionReducer for RunProjection {
                 let script_invocation = serde_json::to_value(props).map_err(|err| {
                     Error::InvalidEvent(format!("invalid command.started payload: {err}"))
                 })?;
-                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
+                let Some(stage) = stage_at_stored_or_current_visit(self, stored, event.seq) else {
                     return Ok(());
                 };
                 stage.script_invocation = Some(script_invocation);
@@ -364,7 +367,7 @@ impl RunProjectionReducer for RunProjection {
                 let script_timing = serde_json::to_value(props).map_err(|err| {
                     Error::InvalidEvent(format!("invalid command.completed payload: {err}"))
                 })?;
-                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
+                let Some(stage) = stage_at_stored_or_current_visit(self, stored, event.seq) else {
                     return Ok(());
                 };
                 stage.stdout = Some(props.stdout.clone());
@@ -380,7 +383,7 @@ impl RunProjectionReducer for RunProjection {
                 let parallel_results = serde_json::to_value(&props.results).map_err(|err| {
                     Error::InvalidEvent(format!("invalid parallel.completed payload: {err}"))
                 })?;
-                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
+                let Some(stage) = stage_at_stored_or_current_visit(self, stored, event.seq) else {
                     return Ok(());
                 };
                 stage.parallel_results = Some(parallel_results);
@@ -398,6 +401,9 @@ fn stage_at_visit<'a>(
     visit: u32,
     seq: u32,
 ) -> Option<&'a mut StageProjection> {
+    if visit == 0 {
+        return None;
+    }
     let node_id = stored.node_id.as_deref()?;
     Some(state.stage_entry(node_id, visit, first_event_seq(seq)))
 }
@@ -409,6 +415,51 @@ fn stage_at_current_visit<'a>(
 ) -> Option<&'a mut StageProjection> {
     let node_id = stored.node_id.as_deref()?;
     let visit = state.current_visit_for(node_id).unwrap_or(1);
+    Some(state.stage_entry(node_id, visit, first_event_seq(seq)))
+}
+
+fn stage_at_stored_stage_id<'a>(
+    state: &'a mut RunProjection,
+    stage_id: &StageId,
+    seq: u32,
+) -> &'a mut StageProjection {
+    state.stage_entry(stage_id.node_id(), stage_id.visit(), first_event_seq(seq))
+}
+
+fn stage_at_stored_or_visit<'a>(
+    state: &'a mut RunProjection,
+    stored: &RunEvent,
+    visit: u32,
+    seq: u32,
+) -> Option<&'a mut StageProjection> {
+    if let Some(stage_id) = stored.stage_id.as_ref() {
+        return Some(stage_at_stored_stage_id(state, stage_id, seq));
+    }
+    stage_at_visit(state, stored, visit, seq)
+}
+
+fn stage_at_stored_or_current_visit<'a>(
+    state: &'a mut RunProjection,
+    stored: &RunEvent,
+    seq: u32,
+) -> Option<&'a mut StageProjection> {
+    if let Some(stage_id) = stored.stage_id.as_ref() {
+        return Some(stage_at_stored_stage_id(state, stage_id, seq));
+    }
+    stage_at_current_visit(state, stored, seq)
+}
+
+fn stage_at_completed_visit<'a>(
+    state: &'a mut RunProjection,
+    stored: &RunEvent,
+    node_visits: Option<&BTreeMap<String, usize>>,
+    seq: u32,
+) -> Option<&'a mut StageProjection> {
+    if let Some(stage_id) = stored.stage_id.as_ref() {
+        return Some(stage_at_stored_stage_id(state, stage_id, seq));
+    }
+    let node_id = stored.node_id.as_deref()?;
+    let visit = stage_visit(node_id, node_visits, state).unwrap_or(1);
     Some(state.stage_entry(node_id, visit, first_event_seq(seq)))
 }
 
@@ -533,6 +584,7 @@ fn stage_visit(
     node_visits
         .and_then(|visits| visits.get(node_id).copied())
         .and_then(|visit| u32::try_from(visit).ok())
+        .filter(|visit| *visit > 0)
         .or_else(|| state.current_visit_for(node_id))
 }
 
@@ -617,7 +669,8 @@ mod tests {
     use fabro_types::run_event::run::RunFailedProps;
     use fabro_types::run_event::{
         CheckpointCompletedProps, InterviewCompletedProps, InterviewOption, InterviewStartedProps,
-        RunControlEffectProps, StageCompletedProps, StagePromptProps, StageStartedProps,
+        RunControlEffectProps, StageCompletedProps, StageFailedProps, StagePromptProps,
+        StageStartedProps,
     };
     use fabro_types::{
         BilledModelUsage, BlockedReason, Checkpoint, EventBody, FailureReason, Outcome,
@@ -1013,6 +1066,86 @@ mod tests {
         assert_eq!(first_stage.usage.as_ref(), Some(&first_usage));
         assert_eq!(second_stage.duration_ms, Some(222));
         assert_eq!(second_stage.usage.as_ref(), Some(&second_usage));
+    }
+
+    #[test]
+    fn stage_completed_prefers_stored_stage_id_over_legacy_node_visits() {
+        let mut state = RunProjection::default();
+        let usage = test_usage("gpt-5.2", 300, 30);
+        let scoped_stage_id = StageId::new("build", 2);
+
+        state
+            .apply_event(&test_stage_event(
+                3,
+                EventBody::StageCompleted(StageCompletedProps {
+                    index: 0,
+                    duration_ms: 333,
+                    status: StageOutcome::Succeeded,
+                    preferred_label: None,
+                    suggested_next_ids: Vec::new(),
+                    billing: Some(usage.clone()),
+                    failure: None,
+                    notes: None,
+                    files_touched: Vec::new(),
+                    context_updates: None,
+                    jump_to_node: None,
+                    context_values: None,
+                    node_visits: Some(BTreeMap::from([("build".to_string(), 1usize)])),
+                    loop_failure_signatures: None,
+                    restart_failure_signatures: None,
+                    response: Some("done".to_string()),
+                    attempt: 1,
+                    max_attempts: 1,
+                }),
+                scoped_stage_id.clone(),
+            ))
+            .unwrap();
+
+        assert!(
+            state.stage(&StageId::new("build", 1)).is_none(),
+            "legacy node_visits must not override stored stage_id"
+        );
+        let stage = state.stage(&scoped_stage_id).unwrap();
+        assert_eq!(stage.duration_ms, Some(333));
+        assert_eq!(stage.usage.as_ref(), Some(&usage));
+        assert_eq!(stage.response.as_deref(), Some("done"));
+    }
+
+    #[test]
+    fn stage_failed_prefers_stored_stage_id_and_preserves_retry_request() {
+        let mut state = RunProjection::default();
+        let usage = test_usage("gpt-5.2", 400, 40);
+        let scoped_stage_id = StageId::new("build", 2);
+
+        state
+            .apply_event(&test_stage_event(
+                3,
+                EventBody::StageFailed(StageFailedProps {
+                    index:       0,
+                    failure:     Some(fabro_types::FailureDetail::new(
+                        "try again",
+                        fabro_types::FailureCategory::TransientInfra,
+                    )),
+                    will_retry:  true,
+                    duration_ms: 444,
+                    billing:     Some(usage.clone()),
+                }),
+                scoped_stage_id.clone(),
+            ))
+            .unwrap();
+
+        assert!(
+            state.stage(&StageId::new("build", 1)).is_none(),
+            "current-visit fallback must not override stored stage_id"
+        );
+        let stage = state.stage(&scoped_stage_id).unwrap();
+        assert_eq!(stage.duration_ms, Some(444));
+        assert_eq!(stage.usage.as_ref(), Some(&usage));
+        let completion = stage.completion.as_ref().unwrap();
+        assert_eq!(completion.outcome, StageOutcome::Failed {
+            retry_requested: true,
+        });
+        assert_eq!(completion.failure_reason.as_deref(), Some("try again"));
     }
 
     #[test]

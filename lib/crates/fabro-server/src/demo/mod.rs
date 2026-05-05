@@ -784,9 +784,10 @@ mod runs {
         RunNamespace, RunPrepareSettings, RunSandboxSettings,
     };
     use fabro_types::settings::{InterpString, ProjectNamespace, WorkflowNamespace};
-    use fabro_types::{RunId, WorkflowSettings};
+    use fabro_types::{RunId, StageId, WorkflowSettings};
 
     use super::ts;
+    use crate::server::run_stage_from_stage_id;
 
     fn labels(entries: &[(&str, &str)]) -> HashMap<String, String> {
         entries
@@ -1180,50 +1181,37 @@ mod runs {
     }
 
     pub(super) fn stages() -> Vec<RunStage> {
-        fn visit(n: u32) -> std::num::NonZeroU32 {
-            std::num::NonZeroU32::new(n).expect("visit is 1-based")
-        }
         vec![
-            RunStage {
-                id:            "detect-drift@1".into(),
-                name:          "Detect Drift".into(),
-                status:        StageState::Succeeded,
-                duration_secs: Some(72.0),
-                node_id:       "detect".into(),
-                visit:         visit(1),
-            },
-            RunStage {
-                id:            "propose-changes@1".into(),
-                name:          "Propose Changes".into(),
-                status:        StageState::Succeeded,
-                duration_secs: Some(154.0),
-                node_id:       "propose".into(),
-                visit:         visit(1),
-            },
-            RunStage {
-                id:            "review-changes@1".into(),
-                name:          "Review Changes".into(),
-                status:        StageState::Succeeded,
-                duration_secs: Some(45.0),
-                node_id:       "review".into(),
-                visit:         visit(1),
-            },
-            RunStage {
-                id:            "apply-changes@1".into(),
-                name:          "Apply Changes".into(),
-                status:        StageState::Succeeded,
-                duration_secs: Some(118.0),
-                node_id:       "apply".into(),
-                visit:         visit(1),
-            },
-            RunStage {
-                id:            "apply-changes@2".into(),
-                name:          "Apply Changes".into(),
-                status:        StageState::Running,
-                duration_secs: None,
-                node_id:       "apply".into(),
-                visit:         visit(2),
-            },
+            run_stage_from_stage_id(
+                &StageId::new("detect-drift", 1),
+                "Detect Drift",
+                StageState::Succeeded,
+                Some(72.0),
+            ),
+            run_stage_from_stage_id(
+                &StageId::new("propose-changes", 1),
+                "Propose Changes",
+                StageState::Succeeded,
+                Some(154.0),
+            ),
+            run_stage_from_stage_id(
+                &StageId::new("review-changes", 1),
+                "Review Changes",
+                StageState::Succeeded,
+                Some(45.0),
+            ),
+            run_stage_from_stage_id(
+                &StageId::new("apply-changes", 1),
+                "Apply Changes",
+                StageState::Succeeded,
+                Some(118.0),
+            ),
+            run_stage_from_stage_id(
+                &StageId::new("apply-changes", 2),
+                "Apply Changes",
+                StageState::Running,
+                None,
+            ),
         ]
     }
 

@@ -2320,6 +2320,32 @@ fn stage_entry<'a>(body: &'a serde_json::Value, id: &str) -> &'a serde_json::Val
         .unwrap_or_else(|| panic!("stage {id} not found in {body:#?}"))
 }
 
+fn test_billed_usage(
+    model_id: &str,
+    input_tokens: i64,
+    output_tokens: i64,
+) -> fabro_model::BilledModelUsage {
+    serde_json::from_value(json!({
+        "input": {
+            "usage": {
+                "model": {
+                    "provider": "openai",
+                    "model_id": model_id
+                },
+                "tokens": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens
+                }
+            },
+            "facts": {
+                "provider": "open_ai"
+            }
+        },
+        "total_usd_micros": input_tokens + output_tokens
+    }))
+    .unwrap()
+}
+
 #[tokio::test]
 async fn list_run_stages_distinguishes_visits() {
     let state = test_app_state_with_isolated_storage();
@@ -2571,6 +2597,142 @@ async fn run_billing_dedups_retried_nodes_and_sums_their_durations() {
         "totals.runtime_secs should sum visits exactly once, got {}",
         body["totals"]["runtime_secs"]
     );
+}
+
+#[tokio::test]
+async fn run_billing_sums_usage_across_retry_visits_and_uses_latest_model() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+    let failed_usage = test_billed_usage("gpt-old", 100, 10);
+    let success_usage = test_billed_usage("gpt-new", 200, 20);
+
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+    ])
+    .await;
+
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "verify",
+        1,
+        &workflow_event::Event::StageFailed {
+            node_id:     "verify".to_string(),
+            name:        "Verify".to_string(),
+            index:       1,
+            failure:     FailureDetail::new("try again", FailureCategory::TransientInfra),
+            will_retry:  true,
+            duration_ms: 1200,
+            billing:     Some(failed_usage),
+            actor:       None,
+        },
+    )
+    .await;
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "verify",
+        2,
+        &workflow_event::Event::StageCompleted {
+            node_id: "verify".to_string(),
+            name: "Verify".to_string(),
+            index: 1,
+            duration_ms: 800,
+            status: "succeeded".to_string(),
+            preferred_label: None,
+            suggested_next_ids: Vec::new(),
+            billing: Some(success_usage.clone()),
+            failure: None,
+            notes: None,
+            files_touched: Vec::new(),
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: None,
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
+            response: None,
+            attempt: 2,
+            max_attempts: 2,
+        },
+    )
+    .await;
+
+    let mut latest_outcome: Outcome<Option<fabro_model::BilledModelUsage>> = Outcome::success();
+    latest_outcome.usage = Some(success_usage);
+    latest_outcome.duration_ms = Some(800);
+    let run_store = state.store.open_run(&run_id).await.unwrap();
+    workflow_event::append_event(
+        &run_store,
+        &run_id,
+        &workflow_event::Event::CheckpointCompleted {
+            node_id: "verify".to_string(),
+            status: "running".to_string(),
+            current_node: "verify".to_string(),
+            completed_nodes: vec!["verify".to_string(), "verify".to_string()],
+            node_retries: std::collections::BTreeMap::from([("verify".to_string(), 2)]),
+            context_values: std::collections::BTreeMap::new(),
+            node_outcomes: std::collections::BTreeMap::from([(
+                "verify".to_string(),
+                latest_outcome,
+            )]),
+            next_node_id: None,
+            git_commit_sha: None,
+            loop_failure_signatures: std::collections::BTreeMap::new(),
+            restart_failure_signatures: std::collections::BTreeMap::new(),
+            node_visits: std::collections::BTreeMap::from([("verify".to_string(), 2usize)]),
+            diff: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}/billing")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+
+    let stages = body["stages"].as_array().unwrap();
+    assert_eq!(stages.len(), 1);
+    assert_eq!(stages[0]["stage"]["id"], "verify");
+    assert_eq!(stages[0]["model"]["id"], "gpt-new");
+    assert_eq!(stages[0]["billing"]["input_tokens"], 300);
+    assert_eq!(stages[0]["billing"]["output_tokens"], 30);
+    assert_eq!(stages[0]["billing"]["total_usd_micros"], 330);
+    assert!((stages[0]["runtime_secs"].as_f64().unwrap() - 2.0).abs() < f64::EPSILON);
+
+    assert_eq!(body["totals"]["input_tokens"], 300);
+    assert_eq!(body["totals"]["output_tokens"], 30);
+    assert_eq!(body["totals"]["total_usd_micros"], 330);
+    assert!((body["totals"]["runtime_secs"].as_f64().unwrap() - 2.0).abs() < f64::EPSILON);
+
+    let by_model = body["by_model"].as_array().unwrap();
+    assert_eq!(by_model.len(), 2);
+    let old_model = by_model
+        .iter()
+        .find(|entry| entry["model"]["id"] == "gpt-old")
+        .unwrap();
+    let new_model = by_model
+        .iter()
+        .find(|entry| entry["model"]["id"] == "gpt-new")
+        .unwrap();
+    assert_eq!(old_model["stages"], 1);
+    assert_eq!(old_model["billing"]["input_tokens"], 100);
+    assert_eq!(new_model["stages"], 1);
+    assert_eq!(new_model["billing"]["input_tokens"], 200);
 }
 
 #[tokio::test]
@@ -6280,6 +6442,62 @@ async fn get_aggregate_billing_returns_zeros_initially() {
     assert_eq!(body["totals"]["runtime_secs"].as_f64().unwrap(), 0.0);
     assert!(body["totals"]["total_usd_micros"].is_null());
     assert!(body["by_model"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn aggregate_billing_counts_projection_rollup_usage_visits() {
+    let mut accumulator = BillingAccumulator::default();
+    let rollup = fabro_workflow::ProjectionBillingRollup {
+        stages:             Vec::new(),
+        totals:             BilledTokenCounts {
+            input_tokens:       300,
+            output_tokens:      30,
+            total_tokens:       330,
+            reasoning_tokens:   0,
+            cache_read_tokens:  0,
+            cache_write_tokens: 0,
+            total_usd_micros:   Some(330),
+        },
+        by_model:           vec![
+            fabro_workflow::ProjectionBillingByModel {
+                model_id: "gpt-old".to_string(),
+                stages:   1,
+                billing:  BilledTokenCounts {
+                    input_tokens:       100,
+                    output_tokens:      10,
+                    total_tokens:       110,
+                    reasoning_tokens:   0,
+                    cache_read_tokens:  0,
+                    cache_write_tokens: 0,
+                    total_usd_micros:   Some(110),
+                },
+            },
+            fabro_workflow::ProjectionBillingByModel {
+                model_id: "gpt-new".to_string(),
+                stages:   1,
+                billing:  BilledTokenCounts {
+                    input_tokens:       200,
+                    output_tokens:      20,
+                    total_tokens:       220,
+                    reasoning_tokens:   0,
+                    cache_read_tokens:  0,
+                    cache_write_tokens: 0,
+                    total_usd_micros:   Some(220),
+                },
+            },
+        ],
+        runtime_ms:         2000,
+        billed_visit_count: 2,
+    };
+
+    accumulate_billing_rollup(&mut accumulator, &rollup);
+
+    assert_eq!(accumulator.total_runs, 1);
+    assert_eq!(accumulator.total_runtime_secs, 2.0);
+    assert_eq!(accumulator.by_model["gpt-old"].stages, 1);
+    assert_eq!(accumulator.by_model["gpt-old"].billing.input_tokens, 100);
+    assert_eq!(accumulator.by_model["gpt-new"].stages, 1);
+    assert_eq!(accumulator.by_model["gpt-new"].billing.input_tokens, 200);
 }
 
 #[tokio::test]

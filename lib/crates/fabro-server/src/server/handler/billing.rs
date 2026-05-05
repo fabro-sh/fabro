@@ -1,15 +1,13 @@
-use std::collections::HashSet;
-use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use fabro_store::RunProjectionReducer;
 use fabro_types::{EventBody, RunProjection, StageId};
 
 use super::super::{
-    ApiError, AppState, BilledTokenCounts, BillingByModel, BillingStageRef, EventEnvelope, HashMap,
-    IntoResponse, Json, ListResponse, ModelBillingTotals, ModelReference, PaginationParams, Path,
-    Query, RequiredUser, Response, Router, RunBilling, RunBillingStage, RunBillingTotals, RunId,
-    RunStage, StageState, State, StatusCode, accumulate_model_billing, get, parse_run_id_path,
+    ApiError, AppState, BillingByModel, BillingStageRef, EventEnvelope, HashMap, IntoResponse,
+    Json, ListResponse, ModelReference, PaginationParams, Path, Query, RequiredUser, Response,
+    Router, RunBilling, RunBillingStage, RunBillingTotals, RunId, StageState, State, StatusCode,
+    get, parse_run_id_path, run_stage_from_stage_id,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -85,15 +83,6 @@ async fn list_run_stages(
 
     let mut stages = Vec::new();
     for (stage_id, stage_projection) in projection.iter_stages() {
-        let node_id = stage_id.node_id().to_string();
-        let Some(visit) = NonZeroU32::new(stage_id.visit()) else {
-            tracing::warn!(
-                run_id = %id,
-                stage_id = %stage_id,
-                "Skipping stage with non-positive visit",
-            );
-            continue;
-        };
         // Prefer the latest lifecycle event; fall back to the projection's
         // stored completion (e.g. for runs recovered from snapshot only).
         let status = lifecycle_states.get(stage_id).copied().unwrap_or_else(|| {
@@ -102,14 +91,12 @@ async fn list_run_stages(
                 .as_ref()
                 .map_or(StageState::Pending, |c| StageState::from(c.outcome))
         });
-        stages.push(RunStage {
-            id: stage_id.to_string(),
-            name: node_id.clone(),
+        stages.push(run_stage_from_stage_id(
+            stage_id,
+            stage_id.node_id().to_string(),
             status,
-            duration_secs: stage_durations.get(stage_id).map(|ms| *ms as f64 / 1000.0),
-            node_id,
-            visit,
-        });
+            stage_durations.get(stage_id).map(|ms| *ms as f64 / 1000.0),
+        ));
     }
 
     (StatusCode::OK, Json(ListResponse::new(stages))).into_response()
@@ -127,100 +114,39 @@ async fn get_run_billing(
         }
     };
 
-    let checkpoint = match run_store.state().await {
-        Ok(state) => state.checkpoint,
+    let projection = match run_store.state().await {
+        Ok(state) => state,
         Err(err) => {
             return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
                 .into_response();
         }
     };
-
-    let Some(checkpoint) = checkpoint else {
-        let empty = RunBilling {
-            by_model: Vec::new(),
-            stages:   Vec::new(),
-            totals:   RunBillingTotals {
-                cache_read_tokens:  0,
-                cache_write_tokens: 0,
-                input_tokens:       0,
-                output_tokens:      0,
-                reasoning_tokens:   0,
-                runtime_secs:       0.0,
-                total_tokens:       0,
-                total_usd_micros:   None,
+    let rollup = fabro_workflow::billing_rollup_from_projection(&projection);
+    let by_model = rollup
+        .by_model
+        .iter()
+        .map(|model| BillingByModel {
+            billing: model.billing.clone(),
+            model:   ModelReference {
+                id: model.model_id.clone(),
             },
-        };
-        return (StatusCode::OK, Json(empty)).into_response();
-    };
-
-    let stage_durations = match run_store.list_events().await {
-        Ok(events) => fabro_workflow::total_stage_duration_by_node(&events),
-        Err(err) => {
-            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response();
-        }
-    };
-
-    let mut by_model_totals = HashMap::<String, ModelBillingTotals>::new();
-    let mut billed_usages = Vec::new();
-    let mut runtime_secs = 0.0_f64;
-    let mut stages = Vec::new();
-
-    // `completed_nodes` records every visit (one entry per re-entry of a
-    // looped node), but billing is per-node: the duration helper already sums
-    // across visits, and `node_outcomes` only stores the latest visit's usage.
-    // Dedup so we emit one row per node and don't multiply the sum by visit
-    // count.
-    let mut seen_nodes = HashSet::new();
-    for node_id in &checkpoint.completed_nodes {
-        if !seen_nodes.insert(node_id.as_str()) {
-            continue;
-        }
-        let duration_ms = stage_durations.get(node_id).copied().unwrap_or(0);
-        runtime_secs += duration_ms as f64 / 1000.0;
-
-        let usage = checkpoint
-            .node_outcomes
-            .get(node_id)
-            .and_then(|outcome| outcome.usage.as_ref());
-
-        let (billing, model) = if let Some(usage) = usage {
-            billed_usages.push(usage.clone());
-            let tokens = usage.tokens();
-            let billing = BilledTokenCounts {
-                cache_read_tokens:  tokens.cache_read_tokens,
-                cache_write_tokens: tokens.cache_write_tokens,
-                input_tokens:       tokens.input_tokens,
-                output_tokens:      tokens.output_tokens,
-                reasoning_tokens:   tokens.reasoning_tokens,
-                total_tokens:       tokens.total_tokens(),
-                total_usd_micros:   usage.total_usd_micros,
-            };
-            let model_id = usage.model_id().to_string();
-            accumulate_model_billing(by_model_totals.entry(model_id.clone()).or_default(), usage);
-            (billing, Some(ModelReference { id: model_id }))
-        } else {
-            (BilledTokenCounts::default(), None)
-        };
-
-        stages.push(RunBillingStage {
-            billing,
-            model,
-            runtime_secs: duration_ms as f64 / 1000.0,
-            stage: BillingStageRef {
-                id:   node_id.clone(),
-                name: node_id.clone(),
+            stages:  model.stages,
+        })
+        .collect::<Vec<_>>();
+    let stages = rollup
+        .stages
+        .iter()
+        .map(|stage| RunBillingStage {
+            billing:      stage.billing.clone(),
+            model:        stage
+                .model_id
+                .as_ref()
+                .map(|id| ModelReference { id: id.clone() }),
+            runtime_secs: stage.duration_ms as f64 / 1000.0,
+            stage:        BillingStageRef {
+                id:   stage.node_id.clone(),
+                name: stage.node_id.clone(),
             },
-        });
-    }
-
-    let totals = BilledTokenCounts::from_billed_usage(&billed_usages);
-    let by_model = by_model_totals
-        .into_iter()
-        .map(|(model, totals)| BillingByModel {
-            billing: totals.billing,
-            model:   ModelReference { id: model },
-            stages:  totals.stages,
         })
         .collect::<Vec<_>>();
 
@@ -228,14 +154,14 @@ async fn get_run_billing(
         by_model,
         stages,
         totals: RunBillingTotals {
-            cache_read_tokens: totals.cache_read_tokens,
-            cache_write_tokens: totals.cache_write_tokens,
-            input_tokens: totals.input_tokens,
-            output_tokens: totals.output_tokens,
-            reasoning_tokens: totals.reasoning_tokens,
-            runtime_secs,
-            total_tokens: totals.total_tokens,
-            total_usd_micros: totals.total_usd_micros,
+            cache_read_tokens:  rollup.totals.cache_read_tokens,
+            cache_write_tokens: rollup.totals.cache_write_tokens,
+            input_tokens:       rollup.totals.input_tokens,
+            output_tokens:      rollup.totals.output_tokens,
+            reasoning_tokens:   rollup.totals.reasoning_tokens,
+            runtime_secs:       rollup.runtime_ms as f64 / 1000.0,
+            total_tokens:       rollup.totals.total_tokens,
+            total_usd_micros:   rollup.totals.total_usd_micros,
         },
     };
 

@@ -112,14 +112,24 @@ impl RunProjection {
     /// here once instead of asking each caller to remember.
     pub fn iter_stages(&self) -> impl Iterator<Item = (&StageId, &StageProjection)> {
         let mut entries: Vec<(&StageId, &StageProjection)> = self.stages.iter().collect();
-        entries.sort_by_key(|(_, stage)| stage.first_event_seq);
+        entries.sort_by(|(left_id, left_stage), (right_id, right_stage)| {
+            left_stage
+                .first_event_seq
+                .cmp(&right_stage.first_event_seq)
+                .then_with(|| left_id.cmp(right_id))
+        });
         entries.into_iter()
     }
 
     /// Mutable counterpart of [`iter_stages`]. Same chronological ordering.
     pub fn iter_stages_mut(&mut self) -> impl Iterator<Item = (&StageId, &mut StageProjection)> {
         let mut entries: Vec<(&StageId, &mut StageProjection)> = self.stages.iter_mut().collect();
-        entries.sort_by_key(|(_, stage)| stage.first_event_seq);
+        entries.sort_by(|(left_id, left_stage), (right_id, right_stage)| {
+            left_stage
+                .first_event_seq
+                .cmp(&right_stage.first_event_seq)
+                .then_with(|| left_id.cmp(right_id))
+        });
         entries.into_iter()
     }
 
@@ -255,5 +265,37 @@ mod iter_stages_tests {
             .map(|(stage_id, _)| stage_id.node_id().to_string())
             .collect();
         assert_eq!(order, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn iter_stages_tie_breaks_same_first_event_seq_by_stage_id() {
+        for _ in 0..128 {
+            let mut p = RunProjection::default();
+            p.stage_entry("verify", 2, seq(10));
+            p.stage_entry("build", 1, seq(10));
+            p.stage_entry("verify", 1, seq(10));
+
+            let order: Vec<String> = p
+                .iter_stages()
+                .map(|(stage_id, _)| stage_id.to_string())
+                .collect();
+            assert_eq!(order, vec!["build@1", "verify@1", "verify@2"]);
+        }
+    }
+
+    #[test]
+    fn iter_stages_mut_tie_breaks_same_first_event_seq_by_stage_id() {
+        for _ in 0..128 {
+            let mut p = RunProjection::default();
+            p.stage_entry("verify", 2, seq(10));
+            p.stage_entry("build", 1, seq(10));
+            p.stage_entry("verify", 1, seq(10));
+
+            let order: Vec<String> = p
+                .iter_stages_mut()
+                .map(|(stage_id, _)| stage_id.to_string())
+                .collect();
+            assert_eq!(order, vec!["build@1", "verify@1", "verify@2"]);
+        }
     }
 }

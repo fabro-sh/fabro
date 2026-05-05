@@ -270,6 +270,7 @@ mod duration_tests {
 pub mod artifact;
 pub mod artifact_snapshot;
 pub mod artifact_upload;
+pub mod billing_rollup;
 pub mod command_log;
 pub(crate) mod condition;
 pub mod context;
@@ -298,6 +299,10 @@ pub mod run_control;
 pub(crate) mod run_dir;
 pub mod run_lookup;
 
+pub use billing_rollup::{
+    ProjectionBillingByModel, ProjectionBillingRollup, ProjectionBillingStage,
+    billing_rollup_from_projection,
+};
 pub use error::{Error, FailureCategory, FailureSignature, FailureSignatureExt, Result};
 pub use manifest_path::ManifestPath;
 pub mod run_materialization;

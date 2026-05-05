@@ -6160,7 +6160,7 @@ components:
           example: 3501.0
 
     BillingStageRef:
-      description: Reference to a billing stage.
+      description: Reference to a workflow node in a billing stage row.
       type: object
       required:
         - id
@@ -6616,7 +6616,7 @@ components:
     # ── Billing Schemas ──────────────────────────────────────────────────
 
     RunBillingStage:
-      description: Token counts and billed totals for a single stage within a run.
+      description: Token counts and billed totals for one workflow node within a run. Rows are grouped by node; billing and runtime sum every visit of that node.
       type: object
       required:
         - stage
@@ -6627,7 +6627,7 @@ components:
         stage:
           $ref: "#/components/schemas/BillingStageRef"
         model:
-          description: Model used for this stage; null for non-LLM stages.
+          description: Latest usage-bearing visit model for this node; null when no visit used an LLM model.
           oneOf:
             - $ref: "#/components/schemas/ModelReference"
             - type: "null"
@@ -6635,7 +6635,7 @@ components:
           $ref: "#/components/schemas/BilledTokenCounts"
         runtime_secs:
           type: number
-          description: Wall-clock runtime in seconds.
+          description: Wall-clock runtime in seconds, summed across every visit of this node.
           example: 154.0
 
     RunBillingTotals:
@@ -6696,7 +6696,7 @@ components:
           $ref: "#/components/schemas/ModelReference"
         stages:
           type: integer
-          description: Number of stages that used this model.
+          description: Number of usage-bearing stage visits that used this model.
           example: 2
         billing:
           $ref: "#/components/schemas/BilledTokenCounts"
@@ -6711,7 +6711,7 @@ components:
       properties:
         stages:
           type: array
-          description: Per-stage billing breakdown.
+          description: Per-node billing breakdown. Each row sums billing and runtime across all visits of that node.
           items:
             $ref: "#/components/schemas/RunBillingStage"
         totals:
