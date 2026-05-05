@@ -14,7 +14,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use fabro_redact::redact_jsonl_line;
-use fabro_types::run_event::is_metadata_snapshot_compat_notice_code;
+use fabro_types::RunNoticeCode;
 use fabro_util::json::normalize_json_value;
 use fabro_util::terminal::Styles;
 use tokio::time;
@@ -801,7 +801,9 @@ fn format_event_pretty_value(envelope: &serde_json::Value, styles: &Styles) -> O
 }
 
 fn is_metadata_snapshot_compat_notice(envelope: &serde_json::Value) -> bool {
-    prop_str_field(envelope, "code").is_some_and(is_metadata_snapshot_compat_notice_code)
+    prop_str_field(envelope, "code")
+        .and_then(|code| code.parse::<RunNoticeCode>().ok())
+        .is_some_and(RunNoticeCode::is_metadata_snapshot_compat)
 }
 
 fn str_field<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
@@ -1150,14 +1152,27 @@ mod tests {
     #[test]
     fn pretty_run_notice_warn() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"run.notice","properties":{"level":"warn","code":"sandbox_cleanup_failed","message":"sandbox cleanup failed: boom"}}"#;
-        let result = format_event_pretty(line, &styles).unwrap();
+        let code = RunNoticeCode::SandboxCleanupFailed.to_string();
+        let line = serde_json::json!({
+            "ts": "2026-01-01T14:25:00Z",
+            "event": "run.notice",
+            "properties": {
+                "level": "warn",
+                "code": code,
+                "message": "sandbox cleanup failed: boom",
+            },
+        })
+        .to_string();
+        let result = format_event_pretty(&line, &styles).unwrap();
         assert!(result.contains("Warning:"), "got: {result}");
         assert!(
             result.contains("sandbox cleanup failed: boom"),
             "got: {result}"
         );
-        assert!(result.contains("[sandbox_cleanup_failed]"), "got: {result}");
+        assert!(
+            result.contains(&format!("[{}]", RunNoticeCode::SandboxCleanupFailed)),
+            "got: {result}"
+        );
     }
 
     #[test]
@@ -1235,13 +1250,31 @@ mod tests {
     fn pretty_stream_suppresses_metadata_compat_notice_only() {
         let styles = no_color_styles();
         let failed = r#"{"ts":"2026-01-01T14:25:00Z","event":"metadata.snapshot.failed","properties":{"phase":"checkpoint","branch":"fabro/meta","duration_ms":900,"failure_kind":"write","error":"write failed"}}"#;
-        let compat_notice = r#"{"ts":"2026-01-01T14:25:01Z","event":"run.notice","properties":{"level":"warn","code":"checkpoint_metadata_write_failed","message":"legacy metadata warning"}}"#;
-        let degraded_notice = r#"{"ts":"2026-01-01T14:25:02Z","event":"run.notice","properties":{"level":"warn","code":"checkpoint_metadata_degraded","message":"metadata snapshots disabled"}}"#;
+        let compat_notice = serde_json::json!({
+            "ts": "2026-01-01T14:25:01Z",
+            "event": "run.notice",
+            "properties": {
+                "level": "warn",
+                "code": RunNoticeCode::CheckpointMetadataWriteFailed,
+                "message": "legacy metadata warning",
+            },
+        })
+        .to_string();
+        let degraded_notice = serde_json::json!({
+            "ts": "2026-01-01T14:25:02Z",
+            "event": "run.notice",
+            "properties": {
+                "level": "warn",
+                "code": RunNoticeCode::CheckpointMetadataDegraded,
+                "message": "metadata snapshots disabled",
+            },
+        })
+        .to_string();
         let mut state = PrettyEventState::default();
 
         assert!(format_event_pretty_streamed(failed, &styles, &mut state).is_some());
-        assert!(format_event_pretty_streamed(compat_notice, &styles, &mut state).is_none());
-        let degraded = format_event_pretty_streamed(degraded_notice, &styles, &mut state).unwrap();
+        assert!(format_event_pretty_streamed(&compat_notice, &styles, &mut state).is_none());
+        let degraded = format_event_pretty_streamed(&degraded_notice, &styles, &mut state).unwrap();
         assert!(
             degraded.contains("metadata snapshots disabled"),
             "got: {degraded}"

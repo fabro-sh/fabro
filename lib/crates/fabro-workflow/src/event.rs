@@ -8,7 +8,7 @@ mod stored_fields;
 #[cfg(test)]
 mod test_support;
 
-pub use fabro_types::{EventBody, RunNoticeLevel};
+pub use fabro_types::{EventBody, RunNoticeCode, RunNoticeLevel};
 
 pub use self::convert::{to_run_event, to_run_event_at};
 pub use self::emitter::Emitter;

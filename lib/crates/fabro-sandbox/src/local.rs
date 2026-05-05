@@ -126,24 +126,14 @@ fn process_env_vars() -> Vec<(String, String)> {
     std::env::vars().collect()
 }
 
-async fn drain_pipe<R>(mut pipe: Option<R>, stream: &'static str) -> String
+async fn drain_pipe<R>(mut pipe: Option<R>, stream: CommandOutputStream) -> String
 where
     R: AsyncRead + Unpin,
 {
     let mut buf = String::new();
     if let Some(ref mut reader) = pipe {
         if let Err(err) = reader.read_to_string(&mut buf).await {
-            match stream {
-                "stdout" => {
-                    tracing::warn!(error = %err, stream, "Failed to drain child stdout");
-                }
-                "stderr" => {
-                    tracing::warn!(error = %err, stream, "Failed to drain child stderr");
-                }
-                _ => {
-                    tracing::warn!(error = %err, stream, "Failed to drain child output");
-                }
-            }
+            tracing::warn!(error = %err, ?stream, "Failed to drain child output");
         }
     }
     buf
@@ -302,8 +292,10 @@ impl Sandbox for LocalSandbox {
         // on child.wait().
         let stdout_pipe = child.stdout.take();
         let stderr_pipe = child.stderr.take();
-        let stdout_task = tokio::spawn(async move { drain_pipe(stdout_pipe, "stdout").await });
-        let stderr_task = tokio::spawn(async move { drain_pipe(stderr_pipe, "stderr").await });
+        let stdout_task =
+            tokio::spawn(async move { drain_pipe(stdout_pipe, CommandOutputStream::Stdout).await });
+        let stderr_task =
+            tokio::spawn(async move { drain_pipe(stderr_pipe, CommandOutputStream::Stderr).await });
 
         let (termination, exit_code) = tokio::select! {
             status_result = child.wait() => {
@@ -752,7 +744,7 @@ mod tests {
             }
         }
 
-        let output = drain_pipe(Some(FailingReader), "stdout").await;
+        let output = drain_pipe(Some(FailingReader), CommandOutputStream::Stdout).await;
 
         assert!(output.is_empty());
     }

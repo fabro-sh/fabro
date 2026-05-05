@@ -72,7 +72,7 @@ pub use run::{
 pub use run_blob_id::RunBlobId;
 pub use run_event::{
     EventBody, ExecOutputTail, InterviewOption, MetadataSnapshotFailureKind, MetadataSnapshotPhase,
-    RunEvent, RunNoticeLevel,
+    RunEvent, RunNoticeCode, RunNoticeLevel,
 };
 pub use run_id::{RunId, fixtures};
 pub use run_projection::{PendingInterviewRecord, RunProjection, StageProjection, first_event_seq};

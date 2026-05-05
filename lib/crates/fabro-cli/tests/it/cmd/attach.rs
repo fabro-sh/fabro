@@ -160,7 +160,7 @@ fn attach_replays_completed_detached_run() {
     ----- stdout -----
     ----- stderr -----
         Web UI: http://localhost:3000/runs/[ULID]
-        Warning: Worktree mode requested but no Git repository was found; running without a worktree. [worktree_skipped_no_git]
+        Warning: Worktree mode `always` requested but no Git repository was found; running without a worktree. [worktree_skipped_no_git]
         Sandbox: local (ready in [TIME])
         ✓ Start  [TIME]
         ✓ Run Tests  [TIME]
@@ -268,7 +268,7 @@ fn attach_before_completion_streams_to_finished_state() {
     ----- stdout -----
     ----- stderr -----
         Web UI: http://localhost:3000/runs/[ULID]
-        Warning: Worktree mode requested but no Git repository was found; running without a worktree. [worktree_skipped_no_git]
+        Warning: Worktree mode `always` requested but no Git repository was found; running without a worktree. [worktree_skipped_no_git]
         Sandbox: local (ready in [TIME])
         ✓ start  [DURATION]
         ✓ wait  [DURATION]
@@ -711,7 +711,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
         "properties": {
           "code": "worktree_skipped_no_git",
           "level": "warn",
-          "message": "Worktree mode requested but no Git repository was found; running without a worktree."
+          "message": "Worktree mode `always` requested but no Git repository was found; running without a worktree."
         },
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"

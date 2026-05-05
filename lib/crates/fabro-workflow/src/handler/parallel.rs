@@ -12,7 +12,7 @@ use tokio::sync::Semaphore;
 use super::{EngineServices, Handler};
 use crate::context::{Context, WorkflowContext, keys};
 use crate::error::Error;
-use crate::event::{Event, RunNoticeLevel, StageScope};
+use crate::event::{Event, RunNoticeCode, RunNoticeLevel, StageScope};
 use crate::git::sanitize_ref_component;
 use crate::hook_context::set_hook_node;
 use crate::millis_u64;
@@ -209,7 +209,7 @@ impl Handler for ParallelHandler {
                     );
                     services.run.emitter.notice_with_tail(
                         RunNoticeLevel::Warn,
-                        "parallel_base_checkpoint_failed",
+                        RunNoticeCode::ParallelBaseCheckpointFailed,
                         format!("Could not checkpoint base state before parallel branches: {e}"),
                         fabro_sandbox::default_redacted_output_tail(&e),
                     );

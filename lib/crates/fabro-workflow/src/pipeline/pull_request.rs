@@ -13,7 +13,7 @@ use fabro_util::text::strip_goal_decoration;
 use tracing::{debug, info};
 
 use super::types::{Concluded, Finalized, PullRequestOptions};
-use crate::event::{Event, RunNoticeLevel};
+use crate::event::{Event, RunNoticeCode, RunNoticeLevel};
 use crate::outcome::{StageOutcome, format_cost as outcome_format_cost};
 use crate::records::{Conclusion, RunSpec};
 use crate::runtime_store::RunStoreHandle;
@@ -603,7 +603,7 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                                 .emit(&Event::PullRequestFailed { error: e.clone() });
                             services.emitter.notice(
                                 RunNoticeLevel::Warn,
-                                "pull_request_failed",
+                                RunNoticeCode::PullRequestFailed,
                                 format!("PR creation failed: {e}"),
                             );
                         }

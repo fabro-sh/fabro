@@ -14,7 +14,7 @@ use fabro_util::error::collect_causes;
 use fabro_util::time::elapsed_ms;
 
 use crate::artifact;
-use crate::event::{Emitter, Event, RunNoticeLevel, StageScope};
+use crate::event::{Emitter, Event, RunNoticeCode, RunNoticeLevel, StageScope};
 use crate::graph::{WorkflowGraph, WorkflowNode};
 use crate::lifecycle::event::stage_scope_for;
 use crate::outcome::BilledModelUsage;
@@ -128,7 +128,10 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                             None,
                             None,
                         );
-                        self.emit_metadata_warning("checkpoint_metadata_write_failed", message);
+                        self.emit_metadata_warning(
+                            RunNoticeCode::CheckpointMetadataWriteFailed,
+                            message,
+                        );
                     }
                 },
                 Err(err) => {
@@ -145,7 +148,10 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                         None,
                         None,
                     );
-                    self.emit_metadata_warning("checkpoint_metadata_write_failed", message);
+                    self.emit_metadata_warning(
+                        RunNoticeCode::CheckpointMetadataWriteFailed,
+                        message,
+                    );
                 }
             }
         }
@@ -217,7 +223,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                                     Some(&scope),
                                 );
                                 self.emit_metadata_warning(
-                                    "checkpoint_metadata_write_failed",
+                                    RunNoticeCode::CheckpointMetadataWriteFailed,
                                     message,
                                 );
                                 None
@@ -239,7 +245,10 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                             None,
                             Some(&scope),
                         );
-                        self.emit_metadata_warning("checkpoint_metadata_write_failed", message);
+                        self.emit_metadata_warning(
+                            RunNoticeCode::CheckpointMetadataWriteFailed,
+                            message,
+                        );
                         None
                     }
                 }
@@ -294,7 +303,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                                     );
                                     self.emitter.notice_with_tail(
                                         RunNoticeLevel::Warn,
-                                        "git_push_failed",
+                                        RunNoticeCode::GitPushFailed,
                                         format!("Failed to push run branch {branch}: {err}"),
                                         exec_output_tail.clone(),
                                     );
@@ -327,7 +336,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                                 fabro_sandbox::default_redacted_output_tail(&err);
                             self.emitter.notice_with_tail(
                                 RunNoticeLevel::Warn,
-                                "git_diff_failed",
+                                RunNoticeCode::GitDiffFailed,
                                 format!("[node: {node_id}] git diff failed: {err}"),
                                 exec_output_tail,
                             );
@@ -401,7 +410,10 @@ impl GitLifecycle {
                         Some(snapshot.bytes),
                         scope,
                     );
-                    self.emit_metadata_warning("checkpoint_metadata_push_failed", message);
+                    self.emit_metadata_warning(
+                        RunNoticeCode::CheckpointMetadataPushFailed,
+                        message,
+                    );
                 } else {
                     self.emit_metadata_snapshot_completed(
                         phase,
@@ -427,7 +439,7 @@ impl GitLifecycle {
                     None,
                     scope,
                 );
-                self.emit_metadata_warning("checkpoint_metadata_write_failed", message);
+                self.emit_metadata_warning(RunNoticeCode::CheckpointMetadataWriteFailed, message);
                 None
             }
         }
@@ -512,14 +524,9 @@ impl GitLifecycle {
         }
     }
 
-    fn emit_metadata_warning(&self, code: &str, message: String) {
+    fn emit_metadata_warning(&self, code: RunNoticeCode, message: String) {
         if self.metadata_runtime.mark_metadata_degraded() {
-            self.emitter.emit(&Event::RunNotice {
-                level: RunNoticeLevel::Warn,
-                code: code.to_string(),
-                message,
-                exec_output_tail: None,
-            });
+            self.emitter.notice(RunNoticeLevel::Warn, code, message);
         }
     }
 }

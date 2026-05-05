@@ -27,7 +27,7 @@ use tokio::time::timeout as tokio_timeout;
 use super::types::{InitOptions, Initialized, LlmSpec, Persisted, SandboxEnvSpec};
 use crate::devcontainer_bridge::{devcontainer_to_snapshot_config, run_devcontainer_lifecycle};
 use crate::error::Error;
-use crate::event::{Emitter, Event, RunNoticeLevel};
+use crate::event::{Emitter, Event, RunNoticeCode, RunNoticeLevel};
 use crate::git::RUN_BRANCH_PREFIX;
 use crate::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use crate::handler::{HandlerRegistry, default_registry, sandbox_cancel_token};
@@ -155,7 +155,7 @@ fn resolve_worktree_plan(options: &mut InitOptions) -> Option<WorktreePlan> {
         if let Some(env_name) = env_name {
             options.emitter.notice(
                 RunNoticeLevel::Warn,
-                "dirty_worktree",
+                RunNoticeCode::DirtyWorktree,
                 format!("Uncommitted changes will not be included in the {env_name}."),
             );
         }
@@ -198,6 +198,14 @@ fn resolve_worktree_plan(options: &mut InitOptions) -> Option<WorktreePlan> {
         worktree_path: RunScratch::new(&options.run_options.run_dir).worktree_dir(),
         skip_branch_creation: false,
     })
+}
+
+fn worktree_skipped_notice(mode: Option<WorktreeMode>) -> Option<(RunNoticeCode, &'static str)> {
+    matches!(mode, Some(WorktreeMode::Always)).then_some((
+        RunNoticeCode::WorktreeSkippedNoGit,
+        "Worktree mode `always` requested but no Git repository was found; running without a \
+         worktree.",
+    ))
 }
 
 fn git_setup_intent(run_options: &RunOptions) -> GitSetupIntent {
@@ -243,7 +251,7 @@ async fn build_sandbox_env(
                         tracing::warn!(error = %e, "Failed to mint GitHub token");
                         emitter.notice(
                             RunNoticeLevel::Warn,
-                            "github_token_failed",
+                            RunNoticeCode::GithubTokenFailed,
                             format!("Failed to mint GitHub token: {e}"),
                         );
                     }
@@ -519,16 +527,13 @@ pub async fn initialize(
         ))
     };
     if worktree_plan.is_some() && !worktree_created {
-        tracing::warn!(
-            worktree_mode = ?options.worktree_mode,
-            "worktree requested but cwd is not a git repository; running without a worktree"
-        );
-        options.emitter.notice(
-            RunNoticeLevel::Warn,
-            "worktree_skipped_no_git",
-            "Worktree mode requested but no Git repository was found; running without a \
-             worktree.",
-        );
+        if let Some((code, message)) = worktree_skipped_notice(options.worktree_mode) {
+            tracing::warn!(
+                worktree_mode = ?options.worktree_mode,
+                "worktree skipped: cwd is not a git repository"
+            );
+            options.emitter.notice(RunNoticeLevel::Warn, code, message);
+        }
         options.run_options.git = None;
     }
     let cleanup_guard = scopeguard::guard(Arc::clone(&sandbox), |sandbox| {
@@ -637,7 +642,7 @@ pub async fn initialize(
                 if sandbox_has_origin {
                     options.emitter.notice(
                         RunNoticeLevel::Warn,
-                        "sandbox_git_unavailable",
+                        RunNoticeCode::SandboxGitUnavailable,
                         "Sandbox could not set up Git despite a configured origin; running \
                          without checkpointing or PR support.",
                     );
@@ -725,7 +730,7 @@ pub async fn initialize(
             if metadata_runtime.mark_metadata_degraded() {
                 options.emitter.notice(
                     RunNoticeLevel::Warn,
-                    "checkpoint_metadata_write_failed",
+                    RunNoticeCode::CheckpointMetadataWriteFailed,
                     message,
                 );
             }
@@ -1034,87 +1039,15 @@ mod tests {
         assert!(options.run_options.git.is_none());
     }
 
-    #[tokio::test]
-    async fn initialize_emits_worktree_skipped_no_git_in_non_git_cwd() {
-        let temp = tempfile::tempdir().unwrap();
-        let run_dir = temp.path().join("run");
-        std::fs::create_dir_all(&run_dir).unwrap();
-        // Non-git working directory: a tmpdir without a `.git` parent.
-        let cwd = temp.path().join("cwd");
-        std::fs::create_dir_all(&cwd).unwrap();
+    #[test]
+    fn worktree_skipped_notice_only_warns_for_always() {
+        assert!(worktree_skipped_notice(None).is_none());
+        assert!(worktree_skipped_notice(Some(WorktreeMode::Clean)).is_none());
+        assert!(worktree_skipped_notice(Some(WorktreeMode::Dirty)).is_none());
+        assert!(worktree_skipped_notice(Some(WorktreeMode::Never)).is_none());
 
-        let (graph, source) = simple_graph();
-        let persisted = test_persisted(graph, source, &run_dir);
-        let emitter = Arc::new(crate::event::Emitter::new(test_run_id()));
-        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
-        emitter.on_event({
-            let seen = Arc::clone(&seen);
-            move |event| seen.lock().unwrap().push(event.clone())
-        });
-
-        // The notice we assert below is emitted before any later sandbox/setup work
-        // that could fail in this minimal fixture (no real
-        // git/devcontainer/lifecycle), so the overall result is intentionally
-        // ignored — the assertion runs against the captured event stream
-        // regardless of how `initialize` ultimately resolves.
-        let _ = initialize(persisted, InitOptions {
-            run_id: test_run_id(),
-            run_store: {
-                let store = memory_store();
-                let inner = store.create_run(&test_run_id()).await.unwrap();
-                inner.into()
-            },
-            dry_run: false,
-            emitter,
-            sandbox: SandboxSpec::Local {
-                working_directory: cwd,
-            },
-            llm: LlmSpec {
-                model:          "test-model".to_string(),
-                provider:       fabro_llm::Provider::Anthropic,
-                fallback_chain: Vec::new(),
-                mcp_servers:    Vec::new(),
-                dry_run:        true,
-            },
-            interviewer: Arc::new(AutoApproveInterviewer::engine()),
-            lifecycle: crate::run_options::LifecycleOptions {
-                setup_commands:           vec![],
-                setup_command_timeout_ms: 1_000,
-                devcontainer_phases:      vec![],
-            },
-            run_options: test_settings(&run_dir),
-            workflow_path: None,
-            workflow_bundle: None,
-            hooks: fabro_hooks::HookSettings { hooks: vec![] },
-            sandbox_env: SandboxEnvSpec {
-                devcontainer_env:   HashMap::new(),
-                toml_env:           HashMap::new(),
-                github_permissions: None,
-                origin_url:         None,
-            },
-            vault: None,
-            devcontainer: None,
-            git: None,
-            worktree_mode: Some(WorktreeMode::Always),
-            run_control: None,
-            registry_override: None,
-            artifact_sink: None,
-            checkpoint: None,
-            seed_context: None,
-        })
-        .await;
-
-        let events = seen.lock().unwrap().clone();
-        let notice = events
-            .iter()
-            .find_map(|event| match &event.body {
-                EventBody::RunNotice(props) if props.code == "worktree_skipped_no_git" => {
-                    Some(props.clone())
-                }
-                _ => None,
-            })
-            .expect("worktree_skipped_no_git notice");
-        assert!(matches!(notice.level, fabro_types::RunNoticeLevel::Warn));
+        let (code, _) = worktree_skipped_notice(Some(WorktreeMode::Always)).unwrap();
+        assert_eq!(code, RunNoticeCode::WorktreeSkippedNoGit);
     }
 
     #[tokio::test]
