@@ -66,10 +66,17 @@ pub struct RunIntegrationsLayer {
 
 /// `[run.integrations.github]` — runtime GitHub token shape.
 ///
-/// `Combine` is hand-rolled (not derived) so that `Some({})` from a higher
-/// layer is honored as a "clear" sentinel rather than triggering the
-/// blanket `Option<T: Combine>` recursion that would inherit lower-layer
-/// permissions.
+/// `Combine` is hand-rolled (not derived) for two reasons:
+/// 1. `HashMap<String, InterpString>: Combine` is not implemented in this
+///    crate, so `#[derive(Combine)]` would not even compile.
+/// 2. The `ReplaceMap` "empty inherits from below" semantics (`maps.rs:76-80`)
+///    are the wrong fit: we want `Some({})` from a higher layer to be honored
+///    as an explicit clear (no token requested) rather than fall through to a
+///    lower layer's permissions.
+///
+/// Note: this diverges from sibling map fields like `RunLayer::metadata`
+/// (`ReplaceMap`), where empty-table-means-inherit. Document the
+/// difference for workflow authors reading the schema by analogy.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RunIntegrationsGithubLayer {

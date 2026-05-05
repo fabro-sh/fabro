@@ -491,8 +491,8 @@ async fn build_preflight_report(
         } else {
             sandbox_provider
         };
-    let needs_github_credentials = sandbox_provider.is_clone_based()
-        || !resolved_run.integrations.github.permissions.is_empty();
+    let needs_github_credentials =
+        sandbox_provider.is_clone_based() || resolved_run.integrations.github.is_token_requested();
     let github_app = if needs_github_credentials {
         state
             .github_credentials(github_integration)
@@ -1182,22 +1182,19 @@ fn runtime_docker_config(settings: &DockerSettings) -> DockerSandboxOptions {
 async fn run_github_token_check(
     checks: &mut Vec<CheckResult>,
     prepared: &PreparedManifest,
-    run: &RunNamespace,
+    resolved_run: &RunNamespace,
     github_app: Option<fabro_github::GitHubCredentials>,
 ) {
-    if run.integrations.github.permissions.is_empty() {
+    if !resolved_run.integrations.github.is_token_requested() {
         return;
     }
 
     // Resolve InterpString permission values eagerly for token minting and
     // for display in the preflight report.
-    let github_permissions: HashMap<String, String> = run
+    let github_permissions = resolved_run
         .integrations
         .github
-        .permissions
-        .iter()
-        .map(|(k, v)| (k.clone(), resolve_interp(v)))
-        .collect();
+        .resolve_permissions(process_env_var);
 
     let perm_details = github_permissions
         .iter()

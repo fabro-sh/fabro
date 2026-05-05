@@ -25,12 +25,19 @@ pub(crate) fn load_run_config(path: &Path) -> Result<SettingsLayer> {
     load_settings_path(path)
 }
 
-/// Parse a settings TOML source and extract its `[run]` layer.
+/// Parse a settings TOML source string and extract its `[run]` layer.
 ///
-/// The full source goes through `SettingsLayer::from_str`, so any unknown
-/// top-level domain (`server.*`, `cli.*`, etc.) or unknown nested key under
-/// a known domain trips the strict `deny_unknown_fields` validation. This
-/// is the parsing path bundled workflow.toml configurations use.
+/// Goes through the strict `SettingsLayer` `FromStr` impl, so any unknown
+/// top-level domain (`server.*`, `cli.*`, etc.) or unknown nested key
+/// under a known domain trips `deny_unknown_fields`. Bundled
+/// `workflow.toml` configurations parse through this path so stale
+/// schema (e.g. `[server.integrations.github.permissions]` after the
+/// move to `[run.integrations.github.permissions]`) is rejected up front
+/// rather than silently dropped by `RunLayer::try_from(toml::Value)`.
+///
+/// Exists as a public helper because `SettingsLayer` itself is
+/// `pub(crate)`, so external crates cannot replicate this two-line dance
+/// inline.
 pub fn parse_run_layer_from_settings_toml(source: &str) -> Result<RunLayer> {
     let layer = source
         .parse::<SettingsLayer>()

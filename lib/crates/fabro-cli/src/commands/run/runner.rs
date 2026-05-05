@@ -4,7 +4,6 @@
               std::io::BufReader; not on a Tokio path"
 )]
 
-use std::collections::HashMap;
 use std::io::{BufRead as StdBufRead, BufReader as StdBufReader};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -117,7 +116,12 @@ pub(crate) async fn execute(
         artifact_sink,
         run_control: Some(run_control),
         github_app,
-        github_permissions: resolve_run_github_permissions(&run_spec.settings.run),
+        github_permissions: run_spec
+            .settings
+            .run
+            .integrations
+            .github
+            .resolve_permissions(process_env_var),
         vault,
         on_node: None,
         registry_override: None,
@@ -548,35 +552,6 @@ fn maybe_build_github_credentials(
     Ok(None)
 }
 
-/// Resolve `[run.integrations.github.permissions]` `InterpString` values to
-/// concrete strings against the live process environment, preserving the
-/// same fallback as the server side: if resolution fails the source form is
-/// used. Thin wrapper over [`resolve_run_github_permissions_with`] so the
-/// loop is testable against a stub lookup.
-fn resolve_run_github_permissions(run: &RunNamespace) -> HashMap<String, String> {
-    resolve_run_github_permissions_with(run, process_env_var)
-}
-
-fn resolve_run_github_permissions_with<F>(
-    run: &RunNamespace,
-    mut lookup: F,
-) -> HashMap<String, String>
-where
-    F: FnMut(&str) -> Option<String>,
-{
-    run.integrations
-        .github
-        .permissions
-        .iter()
-        .map(|(name, value)| {
-            let resolved = value
-                .resolve(&mut lookup)
-                .map_or_else(|_| value.as_source(), |resolved| resolved.value);
-            (name.clone(), resolved)
-        })
-        .collect()
-}
-
 #[expect(
     clippy::disallowed_methods,
     reason = "CLI worker InterpString resolution facade for {{ env.* }} values."
@@ -585,12 +560,12 @@ fn process_env_var(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
-/// Truth table for whether a CLI-launched run needs GitHub credentials to
-/// proceed. Mirrors the gates checked on the server launch path: a
-/// non-empty run-level `permissions` map (any execution mode), or
-/// clone-based sandbox in non-dry-run mode.
+/// Hard-gate for the CLI worker path: a run-level token is requested, or
+/// a clone-based sandbox in non-dry-run mode will need credentials to
+/// pull the repository. Pull-request-driven credential acquisition is
+/// handled separately by the caller as a soft fallback.
 fn requires_github_credentials(run: &RunNamespace) -> bool {
-    if !run.integrations.github.permissions.is_empty() {
+    if run.integrations.github.is_token_requested() {
         return true;
     }
     run.execution.mode != RunMode::DryRun
@@ -984,13 +959,10 @@ mod tests {
         assert!(credential.contains("vault-key"));
     }
 
-    mod run_github_permissions_helpers {
-        //! Unit tests for the worker's run-level GitHub helpers.
-        //!
-        //! These cover the two private functions called from the CLI worker
-        //! launch path:
-        //!   - `resolve_run_github_permissions` — `InterpString` → `String`
-        //!   - `requires_github_credentials` — boolean gate truth table
+    mod requires_github_credentials_truth_table {
+        //! Truth-table coverage for the worker-side credential gate.
+        //! `InterpString` → `String` resolution is tested in `fabro-types`
+        //! next to `RunIntegrationsGithubSettings::resolve_permissions`.
 
         use std::collections::HashMap;
 
@@ -1000,7 +972,7 @@ mod tests {
             RunSandboxSettings,
         };
 
-        use super::super::{requires_github_credentials, resolve_run_github_permissions_with};
+        use super::super::requires_github_credentials;
 
         fn run_with(
             permissions: HashMap<String, InterpString>,
@@ -1017,46 +989,6 @@ mod tests {
                 github: RunIntegrationsGithubSettings { permissions },
             };
             run
-        }
-
-        #[test]
-        fn resolve_run_github_permissions_resolves_env_tokens_via_lookup() {
-            let permissions = HashMap::from([
-                (
-                    "issues".to_string(),
-                    InterpString::parse("{{ env.GH_PERM_LEVEL }}"),
-                ),
-                ("contents".to_string(), InterpString::parse("read")),
-            ]);
-            let run = run_with(permissions, "local", RunMode::Normal);
-
-            let lookup = |name: &str| match name {
-                "GH_PERM_LEVEL" => Some("write".to_string()),
-                _ => None,
-            };
-            let resolved = resolve_run_github_permissions_with(&run, lookup);
-
-            assert_eq!(resolved.get("issues"), Some(&"write".to_string()));
-            assert_eq!(resolved.get("contents"), Some(&"read".to_string()));
-        }
-
-        #[test]
-        fn resolve_run_github_permissions_falls_back_to_source_when_lookup_fails() {
-            let permissions = HashMap::from([(
-                "issues".to_string(),
-                InterpString::parse("{{ env.GH_PERM_MISSING }}"),
-            )]);
-            let run = run_with(permissions, "local", RunMode::Normal);
-
-            // Lookup that always returns `None` simulates an unset env var.
-            let resolved = resolve_run_github_permissions_with(&run, |_| None);
-
-            // Fallback preserves the source form so callers can surface a
-            // useful diagnostic instead of silently dropping the entry.
-            assert_eq!(
-                resolved.get("issues"),
-                Some(&"{{ env.GH_PERM_MISSING }}".to_string())
-            );
         }
 
         #[test]
