@@ -23,11 +23,53 @@ function envelope(seq: number, partial: Partial<EventEnvelope>): EventEnvelope {
     id: `evt-${seq}`,
     ts: "2026-04-09T12:00:00Z",
     run_id: "run-1",
+    event: "stage.prompt",
     ...partial,
   } as EventEnvelope;
 }
 
 describe("eventsToActivity", () => {
+  test("filters events by stage_id (verify@1 vs verify@2 do not cross-contaminate)", () => {
+    const events: EventEnvelope[] = [
+      envelope(1, {
+        event: "stage.prompt",
+        stage_id: "verify@1",
+        node_id: "verify",
+        properties: { text: "first visit prompt" },
+      }),
+      envelope(2, {
+        event: "stage.prompt",
+        stage_id: "verify@2",
+        node_id: "verify",
+        properties: { text: "second visit prompt" },
+      }),
+      envelope(3, {
+        event: "agent.message",
+        stage_id: "verify@1",
+        node_id: "verify",
+        properties: { text: "first visit reply" },
+      }),
+      envelope(4, {
+        event: "agent.message",
+        stage_id: "verify@2",
+        node_id: "verify",
+        properties: { text: "second visit reply" },
+      }),
+    ];
+
+    const firstVisit = eventsToActivity(events, "verify@1");
+    expect(firstVisit).toEqual([
+      { kind: "system", content: "first visit prompt" },
+      { kind: "assistant", content: "first visit reply" },
+    ]);
+
+    const secondVisit = eventsToActivity(events, "verify@2");
+    expect(secondVisit).toEqual([
+      { kind: "system", content: "second visit prompt" },
+      { kind: "assistant", content: "second visit reply" },
+    ]);
+  });
+
   test("pairs command.started + command.completed into a single command turn", () => {
     const events: EventEnvelope[] = [
       envelope(1, {
@@ -52,12 +94,46 @@ describe("eventsToActivity", () => {
     expect(turns).toHaveLength(1);
     expect(turns[0]).toMatchObject({
       kind: "command",
+      stageId: "fmt",
       script: "cargo fmt",
       language: "shell",
       stdout: "ok",
       exitCode: 0,
       running: false,
     });
+  });
+
+  test("command turn carries the requested stage_id, no @1 fallback", () => {
+    const events: EventEnvelope[] = [
+      envelope(1, {
+        event: "command.started",
+        stage_id: "verify@2",
+        node_id: "verify",
+        properties: { script: "echo hi", language: "shell" },
+      }),
+      envelope(2, {
+        event: "command.completed",
+        stage_id: "verify@2",
+        node_id: "verify",
+        properties: {
+          stdout: "hi",
+          stderr: "",
+          exit_code: 0,
+          duration_ms: 5,
+          termination: "exited",
+        },
+      }),
+    ];
+
+    const turns = eventsToActivity(events, "verify@2");
+    expect(turns).toHaveLength(1);
+    const turn = turns[0];
+    expect(turn.kind).toBe("command");
+    if (turn.kind === "command") {
+      expect(turn.stageId).toBe("verify@2");
+      expect(turn.script).toBe("echo hi");
+      expect(turn.running).toBe(false);
+    }
   });
 
   test("pairs agent.tool.started + agent.tool.completed into a single tool turn", () => {
@@ -97,9 +173,7 @@ describe("eventsToActivity", () => {
     }
   });
 
-  test("ignores unknown event types and events for other nodes", () => {
-    // The reducer defensively filters by node_id even though the server scopes
-    // this endpoint, and only consumes STAGE_ACTIVITY_EVENT_TYPES.
+  test("ignores unknown event types and events for other stages", () => {
     const events: EventEnvelope[] = [
       envelope(1, {
         event: "stage.started",

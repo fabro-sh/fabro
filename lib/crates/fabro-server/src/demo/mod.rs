@@ -24,7 +24,7 @@ use serde_json::json;
 use crate::error::ApiError;
 use crate::principal_middleware::RequiredUser;
 use crate::run_selector::{ResolveRunError, resolve_run_by_selector};
-use crate::server::{AppState, EventListParams, PaginationParams};
+use crate::server::{AppState, EventListParams, PaginationParams, parse_stage_id_path};
 
 fn paginated_response<T: serde::Serialize>(
     items: Vec<T>,
@@ -140,13 +140,20 @@ pub(crate) async fn get_stage_events(
     Path((_id, stage_id)): Path<(String, String)>,
     Query(params): Query<EventListParams>,
 ) -> Response {
+    let stage_id = match parse_stage_id_path(&stage_id) {
+        Ok(stage_id) => stage_id,
+        Err(response) => return response,
+    };
     let since_seq = params.since_seq();
     let limit = params.limit();
     let mut matches: Vec<EventEnvelope> = runs::stage_events()
         .into_iter()
         .filter(|envelope| {
             envelope.seq >= since_seq
-                && envelope.event.node_id.as_deref() == Some(stage_id.as_str())
+                && (envelope.event.stage_id.as_ref() == Some(&stage_id)
+                    || (envelope.event.stage_id.is_none()
+                        && stage_id.visit() == 1
+                        && envelope.event.node_id.as_deref() == Some(stage_id.node_id())))
         })
         .take(limit + 1)
         .collect();
@@ -804,9 +811,10 @@ mod runs {
         RunNamespace, RunPrepareSettings, RunSandboxSettings,
     };
     use fabro_types::settings::{InterpString, ProjectNamespace, WorkflowNamespace};
-    use fabro_types::{RunId, WorkflowSettings};
+    use fabro_types::{RunId, StageId, WorkflowSettings};
 
     use super::ts;
+    use crate::server::run_stage_from_stage_id;
 
     fn labels(entries: &[(&str, &str)]) -> HashMap<String, String> {
         entries
@@ -1201,34 +1209,36 @@ mod runs {
 
     pub(super) fn stages() -> Vec<RunStage> {
         vec![
-            RunStage {
-                id:            "detect-drift".into(),
-                name:          "Detect Drift".into(),
-                status:        StageState::Succeeded,
-                duration_secs: Some(72.0),
-                dot_id:        Some("detect".into()),
-            },
-            RunStage {
-                id:            "propose-changes".into(),
-                name:          "Propose Changes".into(),
-                status:        StageState::Succeeded,
-                duration_secs: Some(154.0),
-                dot_id:        Some("propose".into()),
-            },
-            RunStage {
-                id:            "review-changes".into(),
-                name:          "Review Changes".into(),
-                status:        StageState::Succeeded,
-                duration_secs: Some(45.0),
-                dot_id:        Some("review".into()),
-            },
-            RunStage {
-                id:            "apply-changes".into(),
-                name:          "Apply Changes".into(),
-                status:        StageState::Running,
-                duration_secs: Some(118.0),
-                dot_id:        Some("apply".into()),
-            },
+            run_stage_from_stage_id(
+                &StageId::new("detect-drift", 1),
+                "Detect Drift",
+                StageState::Succeeded,
+                Some(72.0),
+            ),
+            run_stage_from_stage_id(
+                &StageId::new("propose-changes", 1),
+                "Propose Changes",
+                StageState::Succeeded,
+                Some(154.0),
+            ),
+            run_stage_from_stage_id(
+                &StageId::new("review-changes", 1),
+                "Review Changes",
+                StageState::Succeeded,
+                Some(45.0),
+            ),
+            run_stage_from_stage_id(
+                &StageId::new("apply-changes", 1),
+                "Apply Changes",
+                StageState::Succeeded,
+                Some(118.0),
+            ),
+            run_stage_from_stage_id(
+                &StageId::new("apply-changes", 2),
+                "Apply Changes",
+                StageState::Running,
+                None,
+            ),
         ]
     }
 
@@ -1242,6 +1252,7 @@ mod runs {
 
         let run_id = demo_run_id(1);
         let node_id = "detect-drift";
+        let stage_id = fabro_types::StageId::new(node_id, 1);
         let ts = ts("2026-03-06T14:30:00Z");
 
         let make_envelope = |seq: u32, id: &str, body: EventBody| EventEnvelope {
@@ -1252,7 +1263,7 @@ mod runs {
                 run_id,
                 node_id: Some(node_id.into()),
                 node_label: Some("Detect Drift".into()),
-                stage_id: None,
+                stage_id: Some(stage_id.clone()),
                 parallel_group_id: None,
                 parallel_branch_id: None,
                 session_id: None,

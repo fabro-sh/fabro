@@ -5,7 +5,8 @@ use super::super::{
     EventPayload, HashSet, IntoResponse, Json, KeepAlive, PaginatedEventList, PaginationMeta, Path,
     Query, RequireRunScoped, RequireRunStageScoped, RequiredUser, Response, Router, RunEvent,
     RunId, RunStatus, Sse, State, StatusCode, StreamExt, UnboundedReceiverStream, broadcast, get,
-    mpsc, parse_run_id_path, redact_jsonl_line, reject_if_archived, update_live_run_from_event,
+    mpsc, parse_run_id_path, parse_stage_id_path, redact_jsonl_line, reject_if_archived,
+    update_live_run_from_event,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -209,11 +210,15 @@ async fn list_run_stage_events(
     State(state): State<Arc<AppState>>,
     Query(params): Query<EventListParams>,
 ) -> Response {
+    let stage_id = match parse_stage_id_path(&stage_id) {
+        Ok(stage_id) => stage_id,
+        Err(response) => return response,
+    };
     let since_seq = params.since_seq();
     let limit = params.limit();
     match state.store.open_run_reader(&id).await {
         Ok(run_store) => match run_store
-            .list_events_for_node_from_with_limit(&stage_id, since_seq, limit)
+            .list_events_for_stage_from_with_limit(&stage_id, since_seq, limit)
             .await
         {
             Ok(mut events) => {
@@ -396,6 +401,15 @@ mod stage_events_tests {
     }
 
     fn make_event(run_id: &RunId, idx: u32, node_id: Option<&str>) -> EventPayload {
+        make_event_with_stage_id(run_id, idx, node_id, None)
+    }
+
+    fn make_event_with_stage_id(
+        run_id: &RunId,
+        idx: u32,
+        node_id: Option<&str>,
+        stage_id: Option<&str>,
+    ) -> EventPayload {
         let mut value = json!({
             "id": format!("evt-{idx}"),
             "ts": "2026-04-09T12:00:00Z",
@@ -411,6 +425,12 @@ mod stage_events_tests {
                 .as_object_mut()
                 .unwrap()
                 .insert("node_id".into(), json!(node));
+        }
+        if let Some(stage_id) = stage_id {
+            value
+                .as_object_mut()
+                .unwrap()
+                .insert("stage_id".into(), json!(stage_id));
         }
         EventPayload::new(value, run_id).expect("event payload should validate")
     }
@@ -460,7 +480,7 @@ mod stage_events_tests {
         let (run_id, app) = seed_run_with_mixed_events().await;
         let response = app
             .oneshot(req_get(&format!(
-                "/api/v1/runs/{run_id}/stages/alpha/events"
+                "/api/v1/runs/{run_id}/stages/alpha@1/events"
             )))
             .await
             .unwrap();
@@ -478,7 +498,7 @@ mod stage_events_tests {
         let (run_id, app) = seed_run_with_mixed_events().await;
         let response = app
             .oneshot(req_get(&format!(
-                "/api/v1/runs/{run_id}/stages/alpha/events?since_seq=203"
+                "/api/v1/runs/{run_id}/stages/alpha@1/events?since_seq=203"
             )))
             .await
             .unwrap();
@@ -499,7 +519,7 @@ mod stage_events_tests {
         let (run_id, app) = seed_run_with_mixed_events().await;
         let response = app
             .oneshot(req_get(&format!(
-                "/api/v1/runs/{run_id}/stages/alpha/events?limit=1"
+                "/api/v1/runs/{run_id}/stages/alpha@1/events?limit=1"
             )))
             .await
             .unwrap();
@@ -517,7 +537,7 @@ mod stage_events_tests {
         let (run_id, app) = seed_run_with_mixed_events().await;
         let response = app
             .oneshot(req_get(&format!(
-                "/api/v1/runs/{run_id}/stages/unknown-stage/events"
+                "/api/v1/runs/{run_id}/stages/unknown-stage@1/events"
             )))
             .await
             .unwrap();
@@ -538,7 +558,7 @@ mod stage_events_tests {
         let absent = RunId::new();
         let response = app
             .oneshot(req_get(&format!(
-                "/api/v1/runs/{absent}/stages/alpha/events"
+                "/api/v1/runs/{absent}/stages/alpha@1/events"
             )))
             .await
             .unwrap();
@@ -565,12 +585,59 @@ mod stage_events_tests {
 
         let request = Request::builder()
             .method("GET")
-            .uri(format!("/api/v1/runs/{run_id}/stages/alpha/events"))
+            .uri(format!("/api/v1/runs/{run_id}/stages/alpha@1/events"))
             .header(header::ACCEPT, "application/json")
             .body(Body::empty())
             .unwrap();
         let response = app.oneshot(request).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn returns_only_requested_visit_when_stage_id_is_present() {
+        let state = test_app_state();
+        let app = build_test_router(state.clone());
+        let run_id = RunId::new();
+        let run_store = state
+            .store_ref()
+            .create_run(&run_id)
+            .await
+            .expect("test run should be creatable");
+        run_store
+            .append_event(&make_event_with_stage_id(
+                &run_id,
+                1,
+                Some("verify"),
+                Some("verify@1"),
+            ))
+            .await
+            .expect("append should succeed");
+        run_store
+            .append_event(&make_event_with_stage_id(
+                &run_id,
+                2,
+                Some("verify"),
+                Some("verify@2"),
+            ))
+            .await
+            .expect("append should succeed");
+
+        let response = app
+            .oneshot(req_get(&format!(
+                "/api/v1/runs/{run_id}/stages/verify@2/events"
+            )))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = body_json(response).await;
+        let seqs: Vec<u64> = body["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["seq"].as_u64().unwrap())
+            .collect();
+        assert_eq!(seqs, vec![2]);
     }
 }

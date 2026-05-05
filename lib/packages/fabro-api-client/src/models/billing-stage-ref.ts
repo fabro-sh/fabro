@@ -15,7 +15,7 @@
 
 
 /**
- * Reference to a billing stage.
+ * Reference to a workflow node in a billing stage row.
  */
 export interface BillingStageRef {
     /**

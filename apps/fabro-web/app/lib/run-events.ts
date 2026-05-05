@@ -19,6 +19,7 @@ interface RunEventPayload extends EventPayload {
   event?: string;
   run_id?: string;
   node_id?: string;
+  stage_id?: string;
   properties?: Record<string, unknown>;
 }
 
@@ -42,7 +43,12 @@ const RUN_SUMMARY_EVENTS = new Set([
   "run.archived",
   "run.unarchived",
 ]);
-const STAGE_EVENTS = new Set(["stage.started", "stage.completed", "stage.failed"]);
+const STAGE_EVENTS = new Set([
+  "stage.started",
+  "stage.completed",
+  "stage.failed",
+  "stage.retrying",
+]);
 // Single source of truth: every event type the `eventsToActivity` reducer in
 // `routes/run-stages.tsx` consumes. When any of these arrive for a stage we
 // currently view, the stage-events SWR key for that stage must be invalidated
@@ -177,6 +183,7 @@ function resyncKeysForRun(runId: string) {
 }
 
 function stageIdFromPayload(payload: RunEventPayload): string | undefined {
+  if (typeof payload.stage_id === "string") return payload.stage_id;
   if (typeof payload.node_id === "string") return payload.node_id;
   const nodeId = payload.properties?.node_id;
   return typeof nodeId === "string" ? nodeId : undefined;

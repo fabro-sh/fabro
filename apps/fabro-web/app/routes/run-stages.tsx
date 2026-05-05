@@ -42,7 +42,7 @@ import { CopyButton } from "../components/ui";
 import { formatDurationSecs } from "../lib/format";
 import { fetchRunCommandLog, useRunStageEvents, useRunStages } from "../lib/queries";
 import { STAGE_ACTIVITY_EVENT_TYPES, type StageActivityEventType } from "../lib/run-events";
-import { mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
+import { ACTIVE_STAGE_STATES, formatStageLabel, mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
 import { getNumber, getString, type UnknownRecord } from "../lib/unknown";
 import {
   CommandOutputStream,
@@ -72,6 +72,12 @@ function assertNever(value: never): never {
   throw new Error(`Unhandled stage activity event type: ${value}`);
 }
 
+function activityEventStageId(event: EventEnvelope): string | undefined {
+  if (typeof event.stage_id === "string") return event.stage_id;
+  if (typeof event.node_id === "string") return event.node_id;
+  return getString(event.properties ?? {}, "node_id");
+}
+
 export function eventsToActivity(events: EventEnvelope[], stageId: string): TurnType[] {
   const turns: TurnType[] = [];
   // Collect tool pairs: started → completed
@@ -80,11 +86,18 @@ export function eventsToActivity(events: EventEnvelope[], stageId: string): Turn
   let pendingCommand: { stageId: string; script: string; language: string } | undefined;
 
   for (const e of events) {
-    if (e.node_id !== stageId || !STAGE_ACTIVITY_EVENT_SET.has(e.event)) continue;
+    const eventName = e.event;
+    if (
+      activityEventStageId(e) !== stageId ||
+      !eventName ||
+      !STAGE_ACTIVITY_EVENT_SET.has(eventName)
+    ) {
+      continue;
+    }
     // Exhaustive switch over StageActivityEventType: adding a new variant to
     // STAGE_ACTIVITY_EVENT_TYPES forces a TS error here until the case is
     // handled, keeping the SWR invalidation set and the reducer in sync.
-    const eventType = e.event as StageActivityEventType;
+    const eventType = eventName as StageActivityEventType;
     const props = e.properties ?? {};
     switch (eventType) {
       case "stage.prompt":
@@ -122,7 +135,7 @@ export function eventsToActivity(events: EventEnvelope[], stageId: string): Turn
       }
       case "command.started": {
         pendingCommand = {
-          stageId: e.stage_id ?? `${stageId}@1`,
+          stageId,
           script: getString(props, "script") ?? "",
           language: getString(props, "language") ?? "shell",
         };
@@ -131,7 +144,7 @@ export function eventsToActivity(events: EventEnvelope[], stageId: string): Turn
       case "command.completed": {
         turns.push({
           kind: "command",
-          stageId: pendingCommand?.stageId ?? e.stage_id ?? `${stageId}@1`,
+          stageId: pendingCommand?.stageId ?? stageId,
           script: pendingCommand?.script ?? "",
           language: pendingCommand?.language ?? "shell",
           stdout: getString(props, "stdout") ?? "",
@@ -589,7 +602,7 @@ export default function RunStages() {
         : [],
     [stageEventsQuery.data, selectedStageId],
   );
-  const isRunning = selectedStage?.status === "running";
+  const isActive = selectedStage ? ACTIVE_STAGE_STATES.has(selectedStage.status) : false;
 
   if (!id || !stages.length) {
     return (
@@ -611,11 +624,13 @@ export default function RunStages() {
 
       <div className="min-w-0 flex-1 space-y-3">
         <div className="sticky top-0 z-10 -mx-2 flex items-center gap-2 bg-page/85 px-2 py-2 backdrop-blur">
-          <SelectedIcon className={`size-5 ${selectedConfig.color} ${isRunning ? "animate-spin" : ""}`} />
-          <h3 className="text-base font-semibold text-fg">{selectedStage.name}</h3>
+          <SelectedIcon className={`size-5 ${selectedConfig.color} ${isActive ? "animate-spin" : ""}`} />
+          <h3 className="text-base font-semibold text-fg">
+            {formatStageLabel(selectedStage)}
+          </h3>
           <span className="font-mono text-xs tabular-nums text-fg-muted">
             <RunningStageDuration
-              isRunning={isRunning}
+              isRunning={isActive}
               duration={selectedStage.duration}
             />
           </span>

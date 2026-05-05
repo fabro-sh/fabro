@@ -18,8 +18,8 @@ use fabro_model::Provider;
 use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{
     AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
-    InterviewQuestionRecord, Outcome, QuestionType, RunBlobId, RunId, RunSpec, StageOutcome,
-    SystemActorKind, fixtures,
+    InterviewQuestionRecord, Outcome, QuestionType, RunBlobId, RunId, RunSpec, SystemActorKind,
+    fixtures,
 };
 use fabro_util::check_report::CheckStatus;
 use httpmock::Method::{GET, POST};
@@ -2112,6 +2112,30 @@ async fn create_durable_run_with_events(
     }
 }
 
+/// Append a stage lifecycle event with an explicit `StageScope`, so the
+/// stored envelope carries the full `stage_id` (`node_id@visit`). The bare
+/// [`workflow_event::append_event`] helper only writes `node_id` because
+/// stage lifecycle variants don't carry visit in their payload — production
+/// always emits via `Emitter::emit_scoped`.
+async fn append_scoped_stage_event(
+    state: &Arc<AppState>,
+    run_id: RunId,
+    node_id: &str,
+    visit: u32,
+    event: &workflow_event::Event,
+) {
+    let scope = fabro_workflow::event::StageScope {
+        node_id: node_id.to_string(),
+        visit,
+        parallel_group_id: None,
+        parallel_branch_id: None,
+    };
+    let stored = fabro_workflow::event::to_run_event_at(&run_id, event, Utc::now(), Some(&scope));
+    let payload = fabro_workflow::event::build_redacted_event_payload(&stored, &run_id).unwrap();
+    let run_store = state.store.open_run(&run_id).await.unwrap();
+    run_store.append_event(&payload).await.unwrap();
+}
+
 fn stage_status<'a>(body: &'a serde_json::Value, id: &str) -> &'a str {
     body["data"]
         .as_array()
@@ -2134,7 +2158,58 @@ async fn list_run_stages_projects_retrying_until_completion() {
         },
         workflow_event::Event::RunStarting,
         workflow_event::Event::RunRunning,
-        workflow_event::Event::StageStarted {
+    ])
+    .await;
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "setup",
+        1,
+        &workflow_event::Event::StageStarted {
+            node_id:      "setup".to_string(),
+            name:         "Setup".to_string(),
+            index:        0,
+            handler_type: "command".to_string(),
+            attempt:      1,
+            max_attempts: 1,
+        },
+    )
+    .await;
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "setup",
+        1,
+        &workflow_event::Event::StageCompleted {
+            node_id: "setup".to_string(),
+            name: "Setup".to_string(),
+            index: 0,
+            duration_ms: 5,
+            status: "succeeded".to_string(),
+            preferred_label: None,
+            suggested_next_ids: Vec::new(),
+            billing: None,
+            failure: None,
+            notes: None,
+            files_touched: Vec::new(),
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: None,
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
+            response: None,
+            attempt: 1,
+            max_attempts: 1,
+        },
+    )
+    .await;
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "work",
+        1,
+        &workflow_event::Event::StageStarted {
             node_id:      "work".to_string(),
             name:         "Work".to_string(),
             index:        1,
@@ -2142,16 +2217,31 @@ async fn list_run_stages_projects_retrying_until_completion() {
             attempt:      1,
             max_attempts: 3,
         },
-        workflow_event::Event::StageFailed {
+    )
+    .await;
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "work",
+        1,
+        &workflow_event::Event::StageFailed {
             node_id:     "work".to_string(),
             name:        "Work".to_string(),
             index:       1,
             failure:     FailureDetail::new("try again", FailureCategory::TransientInfra),
             will_retry:  true,
             duration_ms: 10,
+            billing:     None,
             actor:       None,
         },
-        workflow_event::Event::StageRetrying {
+    )
+    .await;
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "work",
+        1,
+        &workflow_event::Event::StageRetrying {
             node_id:      "work".to_string(),
             name:         "Work".to_string(),
             index:        1,
@@ -2159,40 +2249,8 @@ async fn list_run_stages_projects_retrying_until_completion() {
             max_attempts: 3,
             delay_ms:     100,
         },
-    ])
+    )
     .await;
-
-    let mut node_outcomes = HashMap::new();
-    node_outcomes.insert("setup".to_string(), Outcome::success());
-    let mut checkpoint = Checkpoint {
-        timestamp: Utc::now(),
-        current_node: "setup".to_string(),
-        completed_nodes: vec!["setup".to_string()],
-        node_retries: HashMap::new(),
-        context_values: HashMap::new(),
-        node_outcomes,
-        next_node_id: Some("work".to_string()),
-        git_commit_sha: None,
-        loop_failure_signatures: HashMap::new(),
-        restart_failure_signatures: HashMap::new(),
-        node_visits: HashMap::new(),
-    };
-
-    let run_dir = std::env::temp_dir().join(format!("fabro-server-test-{run_id}"));
-    std::fs::create_dir_all(&run_dir).unwrap();
-    let mut managed = managed_run(
-        MINIMAL_DOT.to_string(),
-        RunStatus::Running,
-        Utc::now(),
-        run_dir,
-        RunExecutionMode::Start,
-    );
-    managed.checkpoint = Some(checkpoint.clone());
-    state
-        .runs
-        .lock()
-        .expect("runs lock poisoned")
-        .insert(run_id, managed);
 
     let response = app
         .clone()
@@ -2206,29 +2264,14 @@ async fn list_run_stages_projects_retrying_until_completion() {
         .await
         .unwrap();
     let body = response_json!(response, StatusCode::OK).await;
-    assert_eq!(stage_status(&body, "setup"), "succeeded");
-    assert_eq!(stage_status(&body, "work"), "retrying");
+    assert_eq!(stage_status(&body, "setup@1"), "succeeded");
+    assert_eq!(stage_status(&body, "work@1"), "retrying");
 
-    let mut work_outcome = Outcome::success();
-    work_outcome.status = StageOutcome::PartiallySucceeded;
-    checkpoint.completed_nodes.push("work".to_string());
-    checkpoint
-        .node_outcomes
-        .insert("work".to_string(), work_outcome);
-    checkpoint.current_node = "work".to_string();
-    checkpoint.next_node_id = Some("exit".to_string());
-    state
-        .runs
-        .lock()
-        .expect("runs lock poisoned")
-        .get_mut(&run_id)
-        .unwrap()
-        .checkpoint = Some(checkpoint);
-
-    let run_store = state.store.open_run(&run_id).await.unwrap();
-    workflow_event::append_event(
-        &run_store,
-        &run_id,
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "work",
+        1,
         &workflow_event::Event::StageCompleted {
             node_id: "work".to_string(),
             name: "Work".to_string(),
@@ -2252,8 +2295,7 @@ async fn list_run_stages_projects_retrying_until_completion() {
             max_attempts: 3,
         },
     )
-    .await
-    .unwrap();
+    .await;
 
     let response = app
         .oneshot(
@@ -2266,7 +2308,574 @@ async fn list_run_stages_projects_retrying_until_completion() {
         .await
         .unwrap();
     let body = response_json!(response, StatusCode::OK).await;
-    assert_eq!(stage_status(&body, "work"), "partially_succeeded");
+    assert_eq!(stage_status(&body, "work@1"), "partially_succeeded");
+}
+
+fn stage_entry<'a>(body: &'a serde_json::Value, id: &str) -> &'a serde_json::Value {
+    body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|stage| stage["id"] == id)
+        .unwrap_or_else(|| panic!("stage {id} not found in {body:#?}"))
+}
+
+fn test_billed_usage(
+    model_id: &str,
+    input_tokens: i64,
+    output_tokens: i64,
+) -> fabro_model::BilledModelUsage {
+    serde_json::from_value(json!({
+        "input": {
+            "usage": {
+                "model": {
+                    "provider": "openai",
+                    "model_id": model_id
+                },
+                "tokens": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens
+                }
+            },
+            "facts": {
+                "provider": "open_ai"
+            }
+        },
+        "total_usd_micros": input_tokens + output_tokens
+    }))
+    .unwrap()
+}
+
+#[tokio::test]
+async fn list_run_stages_distinguishes_visits() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+    ])
+    .await;
+
+    // First visit of `verify` — failed.
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "verify",
+        1,
+        &workflow_event::Event::StageStarted {
+            node_id:      "verify".to_string(),
+            name:         "Verify".to_string(),
+            index:        1,
+            handler_type: "command".to_string(),
+            attempt:      1,
+            max_attempts: 1,
+        },
+    )
+    .await;
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "verify",
+        1,
+        &workflow_event::Event::StageCompleted {
+            node_id: "verify".to_string(),
+            name: "Verify".to_string(),
+            index: 1,
+            duration_ms: 1500,
+            status: "failed".to_string(),
+            preferred_label: None,
+            suggested_next_ids: Vec::new(),
+            billing: None,
+            failure: None,
+            notes: None,
+            files_touched: Vec::new(),
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: None,
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
+            response: None,
+            attempt: 1,
+            max_attempts: 1,
+        },
+    )
+    .await;
+
+    // Second visit of `verify` — running.
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "verify",
+        2,
+        &workflow_event::Event::StageStarted {
+            node_id:      "verify".to_string(),
+            name:         "Verify".to_string(),
+            index:        1,
+            handler_type: "command".to_string(),
+            attempt:      1,
+            max_attempts: 1,
+        },
+    )
+    .await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}/stages")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+
+    let data = body["data"].as_array().unwrap();
+    let verify_entries: Vec<_> = data.iter().filter(|s| s["node_id"] == "verify").collect();
+    assert_eq!(verify_entries.len(), 2, "expected two verify visits");
+
+    let first = stage_entry(&body, "verify@1");
+    assert_eq!(first["node_id"], "verify");
+    assert_eq!(first["visit"], 1);
+    assert_eq!(first["status"], "failed");
+    assert_eq!(first["duration_secs"], 1.5);
+
+    let second = stage_entry(&body, "verify@2");
+    assert_eq!(second["node_id"], "verify");
+    assert_eq!(second["visit"], 2);
+    assert_eq!(second["status"], "running");
+
+    // Old `dot_id` field must be gone.
+    assert!(first.get("dot_id").is_none(), "dot_id should be removed");
+}
+
+/// `checkpoint.completed_nodes` records every visit, so a looped node appears
+/// once per re-entry. Billing must dedup so a retried node renders as one row
+/// and `runtime_secs` is summed across all visits exactly once.
+#[tokio::test]
+async fn run_billing_dedups_retried_nodes_and_sums_their_durations() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+    ])
+    .await;
+
+    // Visit 1 of `verify` — completed in 1.5s.
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "verify",
+        1,
+        &workflow_event::Event::StageCompleted {
+            node_id: "verify".to_string(),
+            name: "Verify".to_string(),
+            index: 1,
+            duration_ms: 1500,
+            status: "failed".to_string(),
+            preferred_label: None,
+            suggested_next_ids: Vec::new(),
+            billing: None,
+            failure: None,
+            notes: None,
+            files_touched: Vec::new(),
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: None,
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
+            response: None,
+            attempt: 1,
+            max_attempts: 1,
+        },
+    )
+    .await;
+
+    // Visit 2 of `verify` — completed in 0.8s.
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "verify",
+        2,
+        &workflow_event::Event::StageCompleted {
+            node_id: "verify".to_string(),
+            name: "Verify".to_string(),
+            index: 1,
+            duration_ms: 800,
+            status: "succeeded".to_string(),
+            preferred_label: None,
+            suggested_next_ids: Vec::new(),
+            billing: None,
+            failure: None,
+            notes: None,
+            files_touched: Vec::new(),
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: None,
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
+            response: None,
+            attempt: 1,
+            max_attempts: 1,
+        },
+    )
+    .await;
+
+    // Checkpoint records `verify` twice (once per visit) — this is what makes
+    // the dedup necessary.
+    let run_store = state.store.open_run(&run_id).await.unwrap();
+    workflow_event::append_event(
+        &run_store,
+        &run_id,
+        &workflow_event::Event::CheckpointCompleted {
+            node_id: "verify".to_string(),
+            status: "running".to_string(),
+            current_node: "verify".to_string(),
+            completed_nodes: vec!["verify".to_string(), "verify".to_string()],
+            node_retries: std::collections::BTreeMap::new(),
+            context_values: std::collections::BTreeMap::new(),
+            node_outcomes: std::collections::BTreeMap::from([(
+                "verify".to_string(),
+                Outcome::default(),
+            )]),
+            next_node_id: Some("done".to_string()),
+            git_commit_sha: None,
+            loop_failure_signatures: std::collections::BTreeMap::new(),
+            restart_failure_signatures: std::collections::BTreeMap::new(),
+            node_visits: std::collections::BTreeMap::from([("verify".to_string(), 2usize)]),
+            diff: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}/billing")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+
+    let stages = body["stages"].as_array().unwrap();
+    assert_eq!(
+        stages.len(),
+        1,
+        "expected one row for the retried verify node"
+    );
+    assert_eq!(stages[0]["stage"]["id"], "verify");
+    // Duration on the row is the sum across visits (1.5s + 0.8s = 2.3s).
+    assert!(
+        (stages[0]["runtime_secs"].as_f64().unwrap() - 2.3).abs() < f64::EPSILON,
+        "row runtime_secs should sum visits, got {}",
+        stages[0]["runtime_secs"]
+    );
+
+    // Totals must not double-count: a single 2.3s, not 4.6s.
+    assert!(
+        (body["totals"]["runtime_secs"].as_f64().unwrap() - 2.3).abs() < f64::EPSILON,
+        "totals.runtime_secs should sum visits exactly once, got {}",
+        body["totals"]["runtime_secs"]
+    );
+}
+
+#[tokio::test]
+async fn run_billing_sums_usage_across_retry_visits_and_uses_latest_model() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+    let failed_usage = test_billed_usage("gpt-old", 100, 10);
+    let success_usage = test_billed_usage("gpt-new", 200, 20);
+
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+    ])
+    .await;
+
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "verify",
+        1,
+        &workflow_event::Event::StageFailed {
+            node_id:     "verify".to_string(),
+            name:        "Verify".to_string(),
+            index:       1,
+            failure:     FailureDetail::new("try again", FailureCategory::TransientInfra),
+            will_retry:  true,
+            duration_ms: 1200,
+            billing:     Some(failed_usage),
+            actor:       None,
+        },
+    )
+    .await;
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "verify",
+        2,
+        &workflow_event::Event::StageCompleted {
+            node_id: "verify".to_string(),
+            name: "Verify".to_string(),
+            index: 1,
+            duration_ms: 800,
+            status: "succeeded".to_string(),
+            preferred_label: None,
+            suggested_next_ids: Vec::new(),
+            billing: Some(success_usage.clone()),
+            failure: None,
+            notes: None,
+            files_touched: Vec::new(),
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: None,
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
+            response: None,
+            attempt: 2,
+            max_attempts: 2,
+        },
+    )
+    .await;
+
+    let mut latest_outcome: Outcome<Option<fabro_model::BilledModelUsage>> = Outcome::success();
+    latest_outcome.usage = Some(success_usage);
+    latest_outcome.duration_ms = Some(800);
+    let run_store = state.store.open_run(&run_id).await.unwrap();
+    workflow_event::append_event(
+        &run_store,
+        &run_id,
+        &workflow_event::Event::CheckpointCompleted {
+            node_id: "verify".to_string(),
+            status: "running".to_string(),
+            current_node: "verify".to_string(),
+            completed_nodes: vec!["verify".to_string(), "verify".to_string()],
+            node_retries: std::collections::BTreeMap::from([("verify".to_string(), 2)]),
+            context_values: std::collections::BTreeMap::new(),
+            node_outcomes: std::collections::BTreeMap::from([(
+                "verify".to_string(),
+                latest_outcome,
+            )]),
+            next_node_id: None,
+            git_commit_sha: None,
+            loop_failure_signatures: std::collections::BTreeMap::new(),
+            restart_failure_signatures: std::collections::BTreeMap::new(),
+            node_visits: std::collections::BTreeMap::from([("verify".to_string(), 2usize)]),
+            diff: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}/billing")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+
+    let stages = body["stages"].as_array().unwrap();
+    assert_eq!(stages.len(), 1);
+    assert_eq!(stages[0]["stage"]["id"], "verify");
+    assert_eq!(stages[0]["model"]["id"], "gpt-new");
+    assert_eq!(stages[0]["billing"]["input_tokens"], 300);
+    assert_eq!(stages[0]["billing"]["output_tokens"], 30);
+    assert_eq!(stages[0]["billing"]["total_usd_micros"], 330);
+    assert!((stages[0]["runtime_secs"].as_f64().unwrap() - 2.0).abs() < f64::EPSILON);
+
+    assert_eq!(body["totals"]["input_tokens"], 300);
+    assert_eq!(body["totals"]["output_tokens"], 30);
+    assert_eq!(body["totals"]["total_usd_micros"], 330);
+    assert!((body["totals"]["runtime_secs"].as_f64().unwrap() - 2.0).abs() < f64::EPSILON);
+
+    let by_model = body["by_model"].as_array().unwrap();
+    assert_eq!(by_model.len(), 2);
+    let old_model = by_model
+        .iter()
+        .find(|entry| entry["model"]["id"] == "gpt-old")
+        .unwrap();
+    let new_model = by_model
+        .iter()
+        .find(|entry| entry["model"]["id"] == "gpt-new")
+        .unwrap();
+    assert_eq!(old_model["stages"], 1);
+    assert_eq!(old_model["billing"]["input_tokens"], 100);
+    assert_eq!(new_model["stages"], 1);
+    assert_eq!(new_model["billing"]["input_tokens"], 200);
+}
+
+#[tokio::test]
+async fn list_run_stages_shows_retrying_after_failed_event() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+    ])
+    .await;
+
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "work",
+        1,
+        &workflow_event::Event::StageStarted {
+            node_id:      "work".to_string(),
+            name:         "Work".to_string(),
+            index:        0,
+            handler_type: "command".to_string(),
+            attempt:      1,
+            max_attempts: 3,
+        },
+    )
+    .await;
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "work",
+        1,
+        &workflow_event::Event::StageFailed {
+            node_id:     "work".to_string(),
+            name:        "Work".to_string(),
+            index:       0,
+            failure:     FailureDetail::new("flake", FailureCategory::TransientInfra),
+            will_retry:  true,
+            duration_ms: 5,
+            billing:     None,
+            actor:       None,
+        },
+    )
+    .await;
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "work",
+        1,
+        &workflow_event::Event::StageRetrying {
+            node_id:      "work".to_string(),
+            name:         "Work".to_string(),
+            index:        0,
+            attempt:      2,
+            max_attempts: 3,
+            delay_ms:     50,
+        },
+    )
+    .await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}/stages")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(stage_status(&body, "work@1"), "retrying");
+}
+
+#[tokio::test]
+async fn list_run_stages_shows_retrying_when_failed_will_retry() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+    ])
+    .await;
+
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "work",
+        1,
+        &workflow_event::Event::StageStarted {
+            node_id:      "work".to_string(),
+            name:         "Work".to_string(),
+            index:        0,
+            handler_type: "command".to_string(),
+            attempt:      1,
+            max_attempts: 3,
+        },
+    )
+    .await;
+    // Only StageFailed, no StageRetrying yet — should still render retrying
+    // because props.will_retry is true.
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "work",
+        1,
+        &workflow_event::Event::StageFailed {
+            node_id:     "work".to_string(),
+            name:        "Work".to_string(),
+            index:       0,
+            failure:     FailureDetail::new("flake", FailureCategory::TransientInfra),
+            will_retry:  true,
+            duration_ms: 5,
+            billing:     None,
+            actor:       None,
+        },
+    )
+    .await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}/stages")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(stage_status(&body, "work@1"), "retrying");
 }
 
 async fn append_raw_run_event(
@@ -3665,7 +4274,13 @@ async fn create_run_pull_request_creates_and_persists_record() {
                 .header("authorization", "Bearer openai-key");
             then.status(200)
                 .header("content-type", "application/json")
-                .json_body(openai_responses_payload("Narrative from mock."));
+                .json_body(openai_responses_payload(
+                    &serde_json::to_string(&json!({
+                        "title": "Mock title",
+                        "body": "Narrative from mock.",
+                    }))
+                    .unwrap(),
+                ));
         })
         .await;
     let openai_base_url = llm.url("/v1");
@@ -5827,6 +6442,62 @@ async fn get_aggregate_billing_returns_zeros_initially() {
     assert_eq!(body["totals"]["runtime_secs"].as_f64().unwrap(), 0.0);
     assert!(body["totals"]["total_usd_micros"].is_null());
     assert!(body["by_model"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn aggregate_billing_counts_projection_rollup_usage_visits() {
+    let mut accumulator = BillingAccumulator::default();
+    let rollup = fabro_workflow::ProjectionBillingRollup {
+        stages:             Vec::new(),
+        totals:             BilledTokenCounts {
+            input_tokens:       300,
+            output_tokens:      30,
+            total_tokens:       330,
+            reasoning_tokens:   0,
+            cache_read_tokens:  0,
+            cache_write_tokens: 0,
+            total_usd_micros:   Some(330),
+        },
+        by_model:           vec![
+            fabro_workflow::ProjectionBillingByModel {
+                model_id: "gpt-old".to_string(),
+                stages:   1,
+                billing:  BilledTokenCounts {
+                    input_tokens:       100,
+                    output_tokens:      10,
+                    total_tokens:       110,
+                    reasoning_tokens:   0,
+                    cache_read_tokens:  0,
+                    cache_write_tokens: 0,
+                    total_usd_micros:   Some(110),
+                },
+            },
+            fabro_workflow::ProjectionBillingByModel {
+                model_id: "gpt-new".to_string(),
+                stages:   1,
+                billing:  BilledTokenCounts {
+                    input_tokens:       200,
+                    output_tokens:      20,
+                    total_tokens:       220,
+                    reasoning_tokens:   0,
+                    cache_read_tokens:  0,
+                    cache_write_tokens: 0,
+                    total_usd_micros:   Some(220),
+                },
+            },
+        ],
+        runtime_ms:         2000,
+        billed_visit_count: 2,
+    };
+
+    accumulate_billing_rollup(&mut accumulator, &rollup);
+
+    assert_eq!(accumulator.total_runs, 1);
+    assert_eq!(accumulator.total_runtime_secs, 2.0);
+    assert_eq!(accumulator.by_model["gpt-old"].stages, 1);
+    assert_eq!(accumulator.by_model["gpt-old"].billing.input_tokens, 100);
+    assert_eq!(accumulator.by_model["gpt-new"].stages, 1);
+    assert_eq!(accumulator.by_model["gpt-new"].billing.input_tokens, 200);
 }
 
 #[tokio::test]

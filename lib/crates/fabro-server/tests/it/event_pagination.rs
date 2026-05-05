@@ -31,7 +31,7 @@ async fn get_json(app: &axum::Router, uri: &str) -> serde_json::Value {
 async fn demo_stage_events_default_returns_all_fixture_events_with_no_more() {
     let app = fabro_server::test_support::build_test_router(test_app_state());
 
-    let body = get_json(&app, "/api/v1/runs/run-1/stages/detect-drift/events").await;
+    let body = get_json(&app, "/api/v1/runs/run-1/stages/detect-drift@1/events").await;
     let data = body["data"].as_array().expect("data is an array");
 
     assert_eq!(data.len(), 7, "all seven fixture events should be returned");
@@ -44,7 +44,7 @@ async fn demo_stage_events_limit_one_signals_has_more() {
 
     let body = get_json(
         &app,
-        "/api/v1/runs/run-1/stages/detect-drift/events?limit=1",
+        "/api/v1/runs/run-1/stages/detect-drift@1/events?limit=1",
     )
     .await;
     let data = body["data"].as_array().expect("data is an array");
@@ -60,7 +60,7 @@ async fn demo_stage_events_since_seq_filters_out_earlier_events() {
     // The fixture seqs are 1..=7. since_seq=4 should skip the first three.
     let body = get_json(
         &app,
-        "/api/v1/runs/run-1/stages/detect-drift/events?since_seq=4",
+        "/api/v1/runs/run-1/stages/detect-drift@1/events?since_seq=4",
     )
     .await;
     let data = body["data"].as_array().expect("data is an array");

@@ -525,10 +525,10 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             };
         },
         /**
-         * Returns a paginated JSON list of stored run events scoped to a single workflow node (stage).
+         * Returns a paginated JSON list of stored run events scoped to a single stage visit.
          * @summary List Stage Events
          * @param {string} id Unique run identifier (ULID).
-         * @param {string} stageId Workflow node id (matches RunStage.id; not visit-qualified).
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
          * @param {number} [sinceSeq] First event sequence number to include.
          * @param {number} [limit] Maximum number of events to return.
          * @param {*} [options] Override http request option.
@@ -962,10 +962,10 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Returns a paginated JSON list of stored run events scoped to a single workflow node (stage).
+         * Returns a paginated JSON list of stored run events scoped to a single stage visit.
          * @summary List Stage Events
          * @param {string} id Unique run identifier (ULID).
-         * @param {string} stageId Workflow node id (matches RunStage.id; not visit-qualified).
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
          * @param {number} [sinceSeq] First event sequence number to include.
          * @param {number} [limit] Maximum number of events to return.
          * @param {*} [options] Override http request option.
@@ -1172,10 +1172,10 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
             return localVarFp.listStageArtifacts(id, stageId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Returns a paginated JSON list of stored run events scoped to a single workflow node (stage).
+         * Returns a paginated JSON list of stored run events scoped to a single stage visit.
          * @summary List Stage Events
          * @param {string} id Unique run identifier (ULID).
-         * @param {string} stageId Workflow node id (matches RunStage.id; not visit-qualified).
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
          * @param {number} [sinceSeq] First event sequence number to include.
          * @param {number} [limit] Maximum number of events to return.
          * @param {*} [options] Override http request option.
@@ -1372,10 +1372,10 @@ export class RunInternalsApi extends BaseAPI {
     }
 
     /**
-     * Returns a paginated JSON list of stored run events scoped to a single workflow node (stage).
+     * Returns a paginated JSON list of stored run events scoped to a single stage visit.
      * @summary List Stage Events
      * @param {string} id Unique run identifier (ULID).
-     * @param {string} stageId Workflow node id (matches RunStage.id; not visit-qualified).
+     * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
      * @param {number} [sinceSeq] First event sequence number to include.
      * @param {number} [limit] Maximum number of events to return.
      * @param {*} [options] Override http request option.

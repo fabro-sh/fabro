@@ -12,7 +12,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::blob_store::BlobStore;
 use crate::run_state::{EventProjectionCache, RunProjectionReducer, build_summary};
-use crate::{Error, EventEnvelope, EventPayload, Result, RunProjection, keys};
+use crate::{Error, EventEnvelope, EventPayload, Result, RunProjection, StageId, keys};
 
 const DEFAULT_EVENT_TAIL_LIMIT: usize = 1024;
 #[derive(Clone)]
@@ -213,24 +213,24 @@ impl RunDatabase {
         list_events_from_with_limit(&self.inner.db, &self.inner.run_id, start_seq, limit).await
     }
 
-    /// Returns up to `limit + 1` events for the given workflow node,
+    /// Returns up to `limit + 1` events for the given stage visit,
     /// starting at `start_seq`. The `+1` lets callers compute `has_more`.
     ///
     /// Implementation note: scans the unbounded run-event prefix and
-    /// filters by `node_id` *before* applying `limit`, so a stage with
+    /// filters by stage identity *before* applying `limit`, so a stage with
     /// matches sparsely scattered late in the event log still returns its
     /// full slice (no premature truncation from a generic `limit`-bounded
     /// scan).
-    pub async fn list_events_for_node_from_with_limit(
+    pub async fn list_events_for_stage_from_with_limit(
         &self,
-        node_id: &str,
+        stage_id: &StageId,
         start_seq: u32,
         limit: usize,
     ) -> Result<Vec<EventEnvelope>> {
-        list_events_for_node_from_with_limit(
+        list_events_for_stage_from_with_limit(
             &self.inner.db,
             &self.inner.run_id,
-            node_id,
+            stage_id,
             start_seq,
             limit,
         )
@@ -372,30 +372,33 @@ where
     Ok(events)
 }
 
-async fn list_events_for_node_from_with_limit<R>(
+async fn list_events_for_stage_from_with_limit<R>(
     db: &R,
     run_id: &RunId,
-    node_id: &str,
+    stage_id: &StageId,
     start_seq: u32,
     limit: usize,
 ) -> Result<Vec<EventEnvelope>>
 where
     R: DbRead + Sync,
 {
-    // Unbounded scan first: filtering by node_id with a generic
+    // Unbounded scan first: filtering by stage identity with a generic
     // limit-bounded scan would silently drop matches whenever the stage's
     // events are sparse late in the event log.
     //
-    // We probe just the `node_id` field with a small partial deserialize and
+    // We probe just the stage identity fields with a small partial deserialize and
     // only run the full `RunEvent` parse on matches. Most events in a run
     // belong to other nodes, so this avoids deserializing large payloads
     // (`agent.tool.completed.output`, `agent.message.text`, …) we'd discard.
     #[derive(serde::Deserialize)]
-    struct NodeIdProbe<'a> {
+    struct StageIdProbe<'a> {
         #[serde(default, borrow)]
-        node_id: Option<&'a str>,
+        stage_id: Option<&'a str>,
+        #[serde(default, borrow)]
+        node_id:  Option<&'a str>,
     }
 
+    let stage_id_string = stage_id.to_string();
     let max_events = limit.saturating_add(1);
     let mut iter = db.scan_prefix(keys::run_events_prefix(run_id)).await?;
     let mut events: Vec<EventEnvelope> = Vec::new();
@@ -407,8 +410,12 @@ where
         if seq < start_seq {
             continue;
         }
-        let probe: NodeIdProbe = serde_json::from_slice(&entry.value)?;
-        if probe.node_id != Some(node_id) {
+        let probe: StageIdProbe = serde_json::from_slice(&entry.value)?;
+        let matches_stage_id = probe.stage_id == Some(stage_id_string.as_str());
+        let matches_legacy_node_id = probe.stage_id.is_none()
+            && stage_id.visit() == 1
+            && probe.node_id == Some(stage_id.node_id());
+        if !matches_stage_id && !matches_legacy_node_id {
             continue;
         }
         let event: RunEvent = serde_json::from_slice(&entry.value)?;
@@ -460,7 +467,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use fabro_types::RunId;
+    use fabro_types::{RunId, StageId};
     use object_store::memory::InMemory;
     use serde_json::json;
 
@@ -484,6 +491,15 @@ mod tests {
     }
 
     fn stage_prompt_payload(run_id: &RunId, idx: u32, node_id: Option<&str>) -> EventPayload {
+        stage_prompt_payload_for_stage(run_id, idx, node_id, None)
+    }
+
+    fn stage_prompt_payload_for_stage(
+        run_id: &RunId,
+        idx: u32,
+        node_id: Option<&str>,
+        stage_id: Option<&StageId>,
+    ) -> EventPayload {
         let mut value = json!({
             "id": format!("evt-{idx}"),
             "ts": "2026-04-09T12:00:00Z",
@@ -500,6 +516,12 @@ mod tests {
                 .unwrap()
                 .insert("node_id".into(), json!(node_id));
         }
+        if let Some(stage_id) = stage_id {
+            value
+                .as_object_mut()
+                .unwrap()
+                .insert("stage_id".into(), json!(stage_id.to_string()));
+        }
         EventPayload::new(value, run_id).unwrap()
     }
 
@@ -511,7 +533,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_events_for_node_returns_only_matching_events_in_seq_order() {
+    async fn list_events_for_stage_returns_only_matching_events_in_seq_order() {
         let run = fresh_run().await;
         let run_id = run.run_id();
         run.append_event(&stage_prompt_payload(&run_id, 1, Some("alpha")))
@@ -525,7 +547,7 @@ mod tests {
             .unwrap();
 
         let events = run
-            .list_events_for_node_from_with_limit("alpha", 1, 100)
+            .list_events_for_stage_from_with_limit(&StageId::new("alpha", 1), 1, 100)
             .await
             .unwrap();
 
@@ -534,7 +556,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_events_for_node_skips_events_with_no_node_id() {
+    async fn list_events_for_stage_skips_events_with_no_stage_identity() {
         let run = fresh_run().await;
         let run_id = run.run_id();
         run.append_event(&stage_prompt_payload(&run_id, 1, None))
@@ -545,7 +567,7 @@ mod tests {
             .unwrap();
 
         let events = run
-            .list_events_for_node_from_with_limit("alpha", 1, 100)
+            .list_events_for_stage_from_with_limit(&StageId::new("alpha", 1), 1, 100)
             .await
             .unwrap();
 
@@ -554,7 +576,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_events_for_node_paginates_via_start_seq_on_filtered_slice() {
+    async fn list_events_for_stage_paginates_via_start_seq_on_filtered_slice() {
         let run = fresh_run().await;
         let run_id = run.run_id();
         for idx in 1..=5 {
@@ -566,7 +588,7 @@ mod tests {
 
         // alpha events live at seqs 1, 3, 5. Start at seq=2 should skip seq=1.
         let events = run
-            .list_events_for_node_from_with_limit("alpha", 2, 100)
+            .list_events_for_stage_from_with_limit(&StageId::new("alpha", 1), 2, 100)
             .await
             .unwrap();
 
@@ -575,7 +597,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_events_for_node_walks_past_unrelated_events_for_sparse_matches() {
+    async fn list_events_for_stage_walks_past_unrelated_events_for_sparse_matches() {
         let run = fresh_run().await;
         let run_id = run.run_id();
         // 200 unrelated events first.
@@ -594,7 +616,7 @@ mod tests {
         // limit smaller than the number of unrelated events would have
         // truncated the upstream scan if we had post-filtered.
         let events = run
-            .list_events_for_node_from_with_limit("alpha", 1, 5)
+            .list_events_for_stage_from_with_limit(&StageId::new("alpha", 1), 1, 5)
             .await
             .unwrap();
 
@@ -603,7 +625,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_events_for_node_returns_limit_plus_one_for_has_more_signal() {
+    async fn list_events_for_stage_returns_limit_plus_one_for_has_more_signal() {
         let run = fresh_run().await;
         let run_id = run.run_id();
         for idx in 1..=5 {
@@ -613,12 +635,44 @@ mod tests {
         }
 
         let events = run
-            .list_events_for_node_from_with_limit("alpha", 1, 2)
+            .list_events_for_stage_from_with_limit(&StageId::new("alpha", 1), 1, 2)
             .await
             .unwrap();
 
         // With limit=2, we expect up to limit+1 = 3 envelopes so the
         // caller can compute has_more.
         assert_eq!(events.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn list_events_for_stage_prefers_stage_id_over_node_id() {
+        let run = fresh_run().await;
+        let run_id = run.run_id();
+        let first_visit = StageId::new("verify", 1);
+        let second_visit = StageId::new("verify", 2);
+        run.append_event(&stage_prompt_payload_for_stage(
+            &run_id,
+            1,
+            Some("verify"),
+            Some(&first_visit),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&stage_prompt_payload_for_stage(
+            &run_id,
+            2,
+            Some("verify"),
+            Some(&second_visit),
+        ))
+        .await
+        .unwrap();
+
+        let events = run
+            .list_events_for_stage_from_with_limit(&second_visit, 1, 100)
+            .await
+            .unwrap();
+
+        let seqs: Vec<u32> = events.iter().map(|e| e.seq).collect();
+        assert_eq!(seqs, vec![2]);
     }
 }
