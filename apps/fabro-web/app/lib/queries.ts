@@ -1,12 +1,11 @@
 import useSWR, { type SWRConfiguration } from "swr";
 import type {
   ApiQuestion,
+  EventEnvelope,
   PaginatedBoardRunList,
-  PaginatedEventList,
   PaginatedRunFileList,
   PaginatedRunList,
   PaginatedRunStageList,
-  PaginatedStageTurnList,
   CommandLogResponse,
   CommandOutputStream,
   RunBilling,
@@ -24,6 +23,7 @@ import {
   apiNullableTextFetcher,
   apiPaginatedFetcher,
   apiTextFetcher,
+  fetchAllStageEvents,
   type PaginatedEnvelope,
 } from "./api-client";
 import { queryKeys } from "./query-keys";
@@ -140,21 +140,10 @@ export function useRunQuestions(id: string | undefined, enabled: boolean) {
   );
 }
 
-export function useRunStageTurns(
-  id: string | undefined,
-  stageId: string | undefined,
-  enabled = true,
-) {
-  return useSWR<PaginatedStageTurnList | null>(
-    id && stageId && enabled ? queryKeys.runs.stageTurns(id, stageId) : null,
-    apiNullableFetcher,
-  );
-}
-
-export function useRunEventsList(id: string | undefined, enabled = true) {
-  return useSWR<PaginatedEventList | null>(
-    id && enabled ? queryKeys.runs.events(id, 1000) : null,
-    apiNullableFetcher,
+export function useRunStageEvents(id: string | undefined, stageId: string | undefined) {
+  return useSWR<EventEnvelope[]>(
+    id && stageId ? queryKeys.runs.stageEvents(id, stageId) : null,
+    fetchAllStageEvents<EventEnvelope>,
   );
 }
 

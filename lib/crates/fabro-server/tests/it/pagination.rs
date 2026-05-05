@@ -57,10 +57,6 @@ const ENDPOINTS: &[PaginatedEndpoint] = &[
         name: "listModels",
     },
     PaginatedEndpoint {
-        path: "/api/v1/runs/run-1/stages/detect-drift/turns",
-        name: "listStageTurns",
-    },
-    PaginatedEndpoint {
         path: "/api/v1/runs/run-1/questions",
         name: "listRunQuestions",
     },

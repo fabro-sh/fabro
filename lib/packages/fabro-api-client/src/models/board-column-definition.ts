@@ -21,3 +21,6 @@ export interface BoardColumnDefinition {
     'id': BoardColumn;
     'name': string;
 }
+
+
+
