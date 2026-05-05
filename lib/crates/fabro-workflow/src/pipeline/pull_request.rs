@@ -11,7 +11,7 @@ use fabro_store::RunProjection;
 use fabro_types::PullRequestRecord;
 use fabro_types::settings::run::MergeStrategy;
 use fabro_util::text::strip_goal_decoration;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::types::{Concluded, Finalized, PullRequestOptions};
 use crate::event::{Event, RunNoticeLevel};
@@ -19,130 +19,75 @@ use crate::outcome::{StageOutcome, format_cost as outcome_format_cost};
 use crate::records::{Conclusion, RunSpec};
 use crate::runtime_store::RunStoreHandle;
 
-/// Maximum length of a PR title (Unicode scalar values). Single source of
-/// truth — referenced by the structured-output schema, the system prompt,
-/// and [`enforce_title_cap`].
+/// Maximum length of a PR title (Unicode scalar values).
 const PR_TITLE_MAX_CHARS: usize = 72;
 
 /// Structured output schema for the LLM-generated PR title and body.
-///
-/// `title` is required but allows empty strings (the only signal that
-/// triggers the deterministic title fallback in
-/// [`maybe_open_pull_request`]). `body` requires `minLength: 1` because
-/// there is no body fallback — an empty body is fatal.
 static PR_CONTENT_SCHEMA: LazyLock<serde_json::Value> = LazyLock::new(|| {
     serde_json::json!({
         "type": "object",
         "properties": {
-            "title": { "type": "string", "maxLength": PR_TITLE_MAX_CHARS },
-            "body":  { "type": "string", "minLength": 1 }
+            "title": { "type": "string" },
+            "body":  { "type": "string" }
         },
         "required": ["title", "body"],
         "additionalProperties": false
     })
 });
 
+/// Complete pull request content generated for a workflow run.
 #[derive(Debug, serde::Deserialize)]
-struct GeneratedPrContent {
-    title: String,
-    body:  String,
+pub struct PrContent {
+    pub title: String,
+    pub body:  String,
 }
 
 /// System prompt that instructs the LLM how to write a Fabro PR title and
 /// body. The trailing programmatic sections (Plan `<details>`, Retro,
 /// Fabro Details, footer) are appended after the LLM body — the prompt
 /// explicitly forbids the LLM from duplicating them.
-//
-// The "max 72 characters" instruction must stay in sync with
-// `PR_TITLE_MAX_CHARS` and the schema above; the prompt is advisory and
-// `enforce_title_cap` is the actual enforcement.
-const PR_BODY_SYSTEM_PROMPT: &str = "You are writing a pull request title and description for a code change produced by an AI workflow.
+const PR_BODY_SYSTEM_PROMPT: &str = include_str!("prompts/pr_body.md");
 
-OUTPUT FORMAT
-Return a JSON object with exactly two fields:
-- \"title\": a one-line title, max 72 characters, no trailing period.
-- \"body\": the markdown body as described below.
+const DEFAULT_PR_TITLE: &str = "Update workflow output";
+const EMPTY_BODY_NOTICE: &str = "> _The LLM did not produce a description for this change. The diff and the appended details are the source of truth for review._";
 
-DO NOT INCLUDE in the body
-- A `#` or `##` title heading at the top — the title goes in the `title` field.
-- A \"Retro\" section, \"Fabro Details\" section, cost/duration table, or \"Generated with\" footer — those are appended programmatically after your output.
-- The full plan text — the full plan is appended programmatically as a <details> block.
-- Bare `#1`, `#2` list prefixes — GitHub auto-links those as issue references. Use plain `1.`, `2.` instead.
-- A test plan unless the testing approach is non-obvious.
-
-SIZE THE BODY TO THE CHANGE
-First classify along two axes from the diff:
-- Size: how many files changed, how large the diff is.
-- Complexity: trivial (rename / typo / dep bump / config) vs. design decisions / new patterns / cross-cutting concerns.
-
-Then write at the matching depth:
-
-| Profile | Body shape |
-|---|---|
-| Small + simple (typo, config, dep bump) | 1–2 sentences, no headers, total under ~300 characters |
-| Small + non-trivial (targeted bugfix, behavioral change) | Short \"Problem / Fix\" narrative, 3–5 sentences. No headers unless two distinct concerns. |
-| Medium feature or refactor | Summary paragraph, then a section explaining what changed and why. Call out design decisions. |
-| Large or architecturally significant | Full narrative: problem context, approach chosen (and why), key decisions, migration/rollback notes if relevant. |
-| Performance improvement | Include before/after measurements if available. A markdown table works well here. |
-
-Brevity matters for small changes. A 3-line bugfix with a 20-line description signals miscalibration. When in doubt, shorter is better — reviewers can read the diff.
-
-WRITING PRINCIPLES
-- Lead with value: the first sentence tells the reviewer *why this PR exists*, not *what files changed*.
-- Describe the net result, not the journey: skip intermediate failures, debugging steps, and refactors done during development.
-- Trust the final diff: if the goal or plan disagree with the diff, the diff is authoritative.
-- Explain the non-obvious: spend description space on what the diff doesn't show — why this approach, what was rejected, what to look at first.
-- Use structure when it earns its keep: no empty sections, no template headers without content.
-- If the body uses any `##` heading, the opening summary must also be under a heading (e.g. `## Summary`); otherwise a bare paragraph is fine.
-
-PLAN SUMMARY
-The full plan is attached separately as a <details> block, so do not restate it. Include a brief `### Plan Summary` with bullet points only when the change is medium or larger in the sizing matrix above. Skip it for small changes.
-
-VISUAL AIDS
-Include a visual aid only when a reviewer would struggle to reconstruct the mental model from prose alone — based on what changes structurally, not on PR size. Skip for trivial / mechanical changes, or when prose already communicates clearly.
-
-| PR changes... | Visual aid |
-|---|---|
-| 3+ interacting components or services | Mermaid component / interaction diagram |
-| Multi-step workflow or pipeline with non-obvious sequencing | Mermaid flow diagram |
-| 3+ behavioral modes or variants | Markdown comparison table |
-| Before/after data or trade-offs | Markdown table |
-| Data model changes with 3+ related entities | Mermaid ERD |
-
-Mermaid: prefer `TB` direction, ≤10 nodes typical. Place inline at the point of relevance, not in a separate \"Diagrams\" section.";
-
-/// Truncation budget for the LLM prompt's goal / plan / diff sections.
+/// Truncation budget for the LLM prompt's plan / diff sections.
+#[derive(Debug, PartialEq, Eq)]
 struct TruncationCaps {
-    goal: usize,
     plan: usize,
     diff: usize,
 }
 
-/// Generous tier for models with ≥200k context windows.
-const TRUNCATION_LARGE: TruncationCaps = TruncationCaps {
-    goal: 75_000,
-    plan: 75_000,
-    diff: 250_000,
-};
-
-/// Conservative tier (matches the pre-refactor values). Used for smaller
-/// or unknown models.
-const TRUNCATION_SMALL: TruncationCaps = TruncationCaps {
-    goal: 20_000,
-    plan: 20_000,
-    diff: 50_000,
-};
+const DIFF_HARD_CAP: usize = 500_000;
+const PLAN_HARD_CAP: usize = 100_000;
+const DIFF_FRACTION_NUM: usize = 4;
+const PLAN_FRACTION_NUM: usize = 1;
+const FRACTION_DEN: usize = 10;
+const UNKNOWN_MODEL_CTX: usize = 200_000;
 
 /// Resolve truncation caps based on the model's context window. Unknown
-/// models fall through to the conservative tier.
-fn truncation_caps(model: &str) -> &'static TruncationCaps {
-    let large_enough = Catalog::builtin()
+/// models use the baseline 200k context-window assumption.
+fn truncation_caps(model: &str) -> TruncationCaps {
+    let ctx = Catalog::builtin()
         .get(model)
-        .is_some_and(|m| m.context_window() >= 200_000);
-    if large_enough {
-        &TRUNCATION_LARGE
-    } else {
-        &TRUNCATION_SMALL
+        .and_then(|m| usize::try_from(m.context_window()).ok())
+        .unwrap_or(UNKNOWN_MODEL_CTX);
+
+    truncation_caps_for_context_window(ctx)
+}
+
+fn truncation_caps_for_context_window(ctx: usize) -> TruncationCaps {
+    TruncationCaps {
+        diff: ctx
+            .saturating_mul(DIFF_FRACTION_NUM)
+            .checked_div(FRACTION_DEN)
+            .unwrap_or(DIFF_HARD_CAP)
+            .min(DIFF_HARD_CAP),
+        plan: ctx
+            .saturating_mul(PLAN_FRACTION_NUM)
+            .checked_div(FRACTION_DEN)
+            .unwrap_or(PLAN_HARD_CAP)
+            .min(PLAN_HARD_CAP),
     }
 }
 
@@ -172,12 +117,18 @@ fn enforce_title_cap(title: &str) -> String {
 
 /// Derive a PR title from the workflow goal.
 ///
-/// Uses the first line, truncated to 120 characters for readability. The
-/// caller is expected to apply [`enforce_title_cap`] afterwards if a
-/// stricter cap is required (the wider cap here is the legacy behaviour
-/// for the deterministic fallback path).
+/// Uses the first line, truncated to the same cap as LLM-generated titles.
 fn pr_title_from_goal(goal: &str) -> String {
-    truncate_with_ellipsis(strip_goal_decoration(goal), 120)
+    truncate_with_ellipsis(strip_goal_decoration(goal), PR_TITLE_MAX_CHARS)
+}
+
+fn fallback_pr_title(goal: &str) -> String {
+    let title = pr_title_from_goal(goal);
+    if title.trim().is_empty() {
+        DEFAULT_PR_TITLE.to_string()
+    } else {
+        title
+    }
 }
 
 /// Truncate a PR body to fit GitHub's 65,536 character limit.
@@ -435,75 +386,43 @@ async fn load_pull_request_diff(run_store: &RunStoreHandle) -> String {
         .unwrap_or_default()
 }
 
-/// Build a complete PR title and body by combining LLM-generated narrative
-/// with programmatic sections (plan, retro, fabro details).
-///
-/// Returns `(title, body)`. The title may be the empty string when the LLM
-/// returned a usable body but no usable title — callers fall back to
-/// [`pr_title_from_goal`] in that case. Every other generation failure is
-/// surfaced as `Err`.
-pub async fn build_pr_body(
+/// Build complete PR content by combining LLM-generated narrative with
+/// deterministic fallbacks and programmatic sections.
+pub async fn build_pr_content(
     diff: &str,
     goal: &str,
     model: &str,
     run_store: &RunStoreHandle,
     llm_source: &dyn CredentialSource,
     conclusion: Option<&Conclusion>,
-) -> Result<(String, String), String> {
+    run_state: Option<&RunProjection>,
+) -> Result<PrContent, String> {
     let client = Client::from_source(llm_source)
         .await
         .map_err(|e| format!("Failed to create LLM client: {e}"))?;
 
-    build_pr_body_with_client(diff, goal, model, run_store, conclusion, Arc::new(client)).await
-}
-
-async fn build_pr_body_with_client(
-    diff: &str,
-    goal: &str,
-    model: &str,
-    run_store: &RunStoreHandle,
-    conclusion: Option<&Conclusion>,
-    client: Arc<Client>,
-) -> Result<(String, String), String> {
-    build_pr_body_with_client_and_state(diff, goal, model, run_store, conclusion, client, None)
-        .await
-}
-
-async fn build_pr_body_with_source_and_state(
-    diff: &str,
-    goal: &str,
-    model: &str,
-    run_store: &RunStoreHandle,
-    llm_source: &dyn CredentialSource,
-    conclusion: Option<&Conclusion>,
-    run_state: Option<&fabro_store::RunProjection>,
-) -> Result<(String, String), String> {
-    let client = Client::from_source(llm_source)
-        .await
-        .map_err(|e| format!("Failed to create LLM client: {e}"))?;
-
-    build_pr_body_with_client_and_state(
+    build_pr_content_with_client(
         diff,
         goal,
         model,
         run_store,
         conclusion,
-        Arc::new(client),
         run_state,
+        Arc::new(client),
     )
     .await
 }
 
-async fn build_pr_body_with_client_and_state(
+async fn build_pr_content_with_client(
     diff: &str,
     goal: &str,
     model: &str,
     run_store: &RunStoreHandle,
     conclusion: Option<&Conclusion>,
+    run_state: Option<&RunProjection>,
     client: Arc<Client>,
-    run_state: Option<&fabro_store::RunProjection>,
-) -> Result<(String, String), String> {
-    info!("Building PR body");
+) -> Result<PrContent, String> {
+    info!("Building PR content");
 
     let loaded_run_state = if run_state.is_none() {
         run_store
@@ -524,16 +443,15 @@ async fn build_pr_body_with_client_and_state(
     let dot_source = run_state.and_then(|state| state.graph_source.clone());
 
     let caps = truncation_caps(model);
-    let truncated_goal = truncate_chars(goal, caps.goal);
     let truncated_diff = truncate_chars(diff, caps.diff);
 
     let prompt = if let Some(ref plan) = plan_text {
         let truncated_plan = truncate_chars(plan, caps.plan);
         format!(
-            "Goal: {truncated_goal}\n\nPlan:\n```\n{truncated_plan}\n```\n\nDiff:\n```\n{truncated_diff}\n```"
+            "Goal: {goal}\n\nPlan:\n```\n{truncated_plan}\n```\n\nDiff:\n```\n{truncated_diff}\n```"
         )
     } else {
-        format!("Goal: {truncated_goal}\n\nDiff:\n```\n{truncated_diff}\n```")
+        format!("Goal: {goal}\n\nDiff:\n```\n{truncated_diff}\n```")
     };
 
     let params = GenerateParams::new(model, client)
@@ -547,15 +465,22 @@ async fn build_pr_body_with_client_and_state(
     let output = result
         .output
         .ok_or_else(|| "LLM generation returned no structured output".to_string())?;
-    let generated: GeneratedPrContent = serde_json::from_value(output)
+    let generated: PrContent = serde_json::from_value(output)
         .map_err(|e| format!("Failed to deserialize PR content: {e}"))?;
 
-    if generated.body.trim().is_empty() {
-        return Err("LLM generated an empty PR body".to_string());
-    }
+    let title = if generated.title.trim().is_empty() {
+        fallback_pr_title(goal)
+    } else {
+        generated.title.trim().to_string()
+    };
+    let title = enforce_title_cap(&title);
 
-    let title = enforce_title_cap(generated.title.trim());
-    let llm_body = generated.body;
+    let llm_body = if generated.body.trim().is_empty() {
+        warn!(model = %model, "LLM generated empty PR body; using skeleton PR body");
+        EMPTY_BODY_NOTICE.to_string()
+    } else {
+        generated.body
+    };
 
     let retro_section = retro.as_ref().map(format_retro_section).unwrap_or_default();
     let arc_details_section = conclusion
@@ -570,9 +495,9 @@ async fn build_pr_body_with_client_and_state(
         &arc_details_section,
     );
 
-    info!("PR body generated");
+    info!("PR content generated");
 
-    Ok((title, body))
+    Ok(PrContent { title, body })
 }
 
 /// Auto-merge configuration for a pull request.
@@ -594,7 +519,7 @@ pub struct OpenPullRequestRequest<'a> {
     pub run_store:   &'a RunStoreHandle,
     pub llm_source:  &'a dyn CredentialSource,
     pub conclusion:  Option<&'a Conclusion>,
-    pub run_state:   Option<&'a fabro_store::RunProjection>,
+    pub run_state:   Option<&'a RunProjection>,
 }
 
 /// Optionally open a pull request after a successful workflow run.
@@ -613,7 +538,7 @@ pub async fn maybe_open_pull_request(
     let (owner, repo) =
         github_app::parse_github_owner_repo(&https_url).map_err(|err| format!("{err:#}"))?;
 
-    let (llm_title, body) = build_pr_body_with_source_and_state(
+    let content = build_pr_content(
         req.diff,
         req.goal,
         req.model,
@@ -624,14 +549,8 @@ pub async fn maybe_open_pull_request(
     )
     .await
     .map_err(|err| format!("{err:#}"))?;
-    let body = truncate_pr_body(&body);
-
-    let title = if llm_title.is_empty() {
-        pr_title_from_goal(req.goal)
-    } else {
-        llm_title
-    };
-    let title = enforce_title_cap(&title);
+    let body = truncate_pr_body(&content.body);
+    let title = content.title;
 
     let created = github_app::create_pull_request(
         &req.github,
@@ -1286,15 +1205,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn build_pr_body_uses_in_memory_conclusion() {
+    async fn build_pr_content_uses_in_memory_conclusion() {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
-        let (title, body) = build_pr_body_with_client(
+        let PrContent { title, body } = build_pr_content_with_client(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "mock-model",
             &run_store.clone().into(),
             Some(&make_test_conclusion()),
+            None,
             explicit_client(
                 "mock",
                 &pr_content_json("Mock title", "Narrative from mock."),
@@ -1311,7 +1231,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn build_pr_body_uses_store_records_without_legacy_files() {
+    async fn build_pr_content_uses_store_records_without_legacy_files() {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
 
@@ -1363,19 +1283,21 @@ mod tests {
         .await
         .unwrap();
 
-        let (_, body) = build_pr_body_with_client(
+        let body = build_pr_content_with_client(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "mock-model",
             &run_store.clone().into(),
             Some(&make_test_conclusion()),
+            None,
             explicit_client(
                 "mock",
                 &pr_content_json("Mock title", "Narrative from mock."),
             ),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .body;
 
         assert!(body.contains("Narrative from mock."));
         assert!(body.contains("### Retro"));
@@ -1384,7 +1306,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn build_pr_body_uses_plan_text_from_store_without_response_md() {
+    async fn build_pr_content_uses_plan_text_from_store_without_response_md() {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
 
@@ -1453,48 +1375,52 @@ mod tests {
         .await
         .unwrap();
 
-        let (_, body) = build_pr_body_with_client(
+        let body = build_pr_content_with_client(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "mock-model",
             &run_store.clone().into(),
             Some(&make_test_conclusion()),
+            None,
             explicit_client(
                 "mock",
                 &pr_content_json("Mock title", "Narrative from mock."),
             ),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .body;
 
         assert!(body.contains("<summary>Full plan</summary>"));
         assert!(body.contains("Plan from store"));
     }
 
     #[tokio::test]
-    async fn build_pr_body_uses_explicit_llm_client() {
+    async fn build_pr_content_uses_explicit_llm_client() {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
-        let (_, body) = build_pr_body_with_client(
+        let body = build_pr_content_with_client(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "gpt-5.4",
             &run_store.clone().into(),
             Some(&make_test_conclusion()),
+            None,
             explicit_client(
                 "openai",
                 &pr_content_json("Explicit title", "Narrative from explicit client."),
             ),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .body;
 
         assert!(body.contains("Narrative from explicit client."));
         assert!(!body.contains("Narrative from mock."));
     }
 
     #[tokio::test]
-    async fn build_pr_body_uses_vault_only_openai_codex_source() {
+    async fn build_pr_content_uses_vault_only_openai_codex_source() {
         let server = MockServer::start_async().await;
         let response_mock = server
             .mock_async(|when, then| {
@@ -1534,13 +1460,14 @@ mod tests {
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let run_store_handle: RunStoreHandle = run_store.into();
 
-        let (title, body) = build_pr_body(
+        let PrContent { title, body } = build_pr_content(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "gpt-5.4",
             &run_store_handle,
             llm_source.as_ref(),
             Some(&make_test_conclusion()),
+            None,
         )
         .await
         .unwrap();
@@ -1642,7 +1569,7 @@ mod tests {
     fn pr_title_truncates_long_line() {
         let long = "x".repeat(300);
         let title = pr_title_from_goal(&long);
-        assert_eq!(title.chars().count(), 120);
+        assert_eq!(title.chars().count(), 72);
         assert!(title.ends_with('…'));
     }
 
@@ -1663,6 +1590,42 @@ mod tests {
     #[test]
     fn pr_title_short_goal_unchanged() {
         assert_eq!(pr_title_from_goal("Fix bug"), "Fix bug");
+    }
+
+    #[test]
+    fn truncation_caps_scale_with_context_window_and_clamp() {
+        assert_eq!(
+            truncation_caps_for_context_window(100_000),
+            TruncationCaps {
+                diff: 40_000,
+                plan: 10_000,
+            }
+        );
+        assert_eq!(
+            truncation_caps_for_context_window(200_000),
+            TruncationCaps {
+                diff: 80_000,
+                plan: 20_000,
+            }
+        );
+        assert_eq!(
+            truncation_caps_for_context_window(1_000_000),
+            TruncationCaps {
+                diff: 400_000,
+                plan: 100_000,
+            }
+        );
+        assert_eq!(
+            truncation_caps_for_context_window(10_000_000),
+            TruncationCaps {
+                diff: 500_000,
+                plan: 100_000,
+            }
+        );
+        assert_eq!(truncation_caps("unknown-model"), TruncationCaps {
+            diff: 80_000,
+            plan: 20_000,
+        });
     }
 
     #[tokio::test]
@@ -1760,68 +1723,144 @@ mod tests {
 
     /// MockProvider returns an over-long title; builder must cap it at 72
     /// chars and end with `…`. Exercises [`enforce_title_cap`] inside
-    /// [`build_pr_body_with_client_and_state`].
+    /// [`build_pr_content_with_client`].
     #[tokio::test]
-    async fn build_pr_body_truncates_long_title() {
+    async fn build_pr_content_truncates_long_title() {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let long_title = "x".repeat(200);
         let payload = pr_content_json(&long_title, "Body content.");
-        let (title, _) = build_pr_body_with_client(
+        let title = build_pr_content_with_client(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn x() {}\n",
             "Implement feature",
             "mock-model",
             &run_store.clone().into(),
             Some(&make_test_conclusion()),
+            None,
             explicit_client("mock", &payload),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .title;
 
         assert_eq!(title.chars().count(), 72);
         assert!(title.ends_with('\u{2026}'));
     }
 
-    /// Empty bodies are fatal. Real providers may reject this via the
-    /// schema's `minLength`; the Rust-side trim check also catches it for
-    /// local/mock providers.
     #[tokio::test]
-    async fn build_pr_body_returns_err_when_body_empty() {
+    async fn build_pr_content_uses_default_title_when_generated_and_goal_titles_empty() {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
-        let payload = pr_content_json("Mock", "");
-        let result = build_pr_body_with_client(
+        let payload = pr_content_json("", "Body content.");
+        let title = build_pr_content_with_client(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn x() {}\n",
-            "Implement feature",
+            "## Plan:",
             "mock-model",
             &run_store.clone().into(),
             Some(&make_test_conclusion()),
+            None,
             explicit_client("mock", &payload),
         )
-        .await;
+        .await
+        .unwrap()
+        .title;
 
-        assert!(result.is_err(), "expected Err, got {result:?}");
+        assert_eq!(title, DEFAULT_PR_TITLE);
     }
 
-    /// Whitespace-only bodies pass schema validation but fail the
-    /// `body.trim().is_empty()` check inside the builder.
+    /// Empty or whitespace-only bodies use the skeleton fallback instead of
+    /// aborting PR creation.
     #[tokio::test]
-    async fn build_pr_body_returns_err_when_body_whitespace() {
+    async fn build_pr_content_uses_skeleton_when_body_empty() {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+
+        let run_spec = RunSpec {
+            run_id:           fixtures::RUN_1,
+            settings:         fabro_types::WorkflowSettings::default(),
+            graph:            Graph::new("test"),
+            workflow_slug:    Some("test".to_string()),
+            source_directory: Some("/tmp/project".to_string()),
+            git:              None,
+            labels:           HashMap::new(),
+            provenance:       None,
+            manifest_blob:    None,
+            definition_blob:  None,
+            fork_source_ref:  None,
+            in_place:         false,
+        };
+        append_event(&run_store, &fixtures::RUN_1, &Event::RunCreated {
+            run_id:           fixtures::RUN_1,
+            settings:         serde_json::to_value(&run_spec.settings).unwrap(),
+            graph:            serde_json::to_value(&run_spec.graph).unwrap(),
+            workflow_source:  Some("digraph test { plan -> code }".to_string()),
+            workflow_config:  None,
+            labels:           run_spec.labels.clone().into_iter().collect(),
+            run_dir:          "/tmp/project".to_string(),
+            source_directory: run_spec.source_directory.clone(),
+            workflow_slug:    run_spec.workflow_slug.clone(),
+            db_prefix:        None,
+            provenance:       None,
+            manifest_blob:    None,
+            git:              None,
+            fork_source_ref:  None,
+            in_place:         false,
+            web_url:          None,
+        })
+        .await
+        .unwrap();
+        append_event(&run_store, &fixtures::RUN_1, &Event::StageCompleted {
+            node_id: "plan".to_string(),
+            name: "plan".to_string(),
+            index: 0,
+            duration_ms: 1,
+            status: "succeeded".to_string(),
+            preferred_label: None,
+            suggested_next_ids: vec![],
+            billing: None,
+            failure: None,
+            notes: None,
+            files_touched: vec![],
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: None,
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
+            response: Some("Plan from store".to_string()),
+            attempt: 1,
+            max_attempts: 1,
+        })
+        .await
+        .unwrap();
+        append_event(&run_store, &fixtures::RUN_1, &Event::RetroCompleted {
+            duration_ms: 1,
+            response:    Some(String::new()),
+            retro:       Some(serde_json::to_value(make_test_retro()).unwrap()),
+        })
+        .await
+        .unwrap();
+
         let payload = pr_content_json("Mock", "   \n");
-        let result = build_pr_body_with_client(
+        let body = build_pr_content_with_client(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn x() {}\n",
             "Implement feature",
             "mock-model",
             &run_store.clone().into(),
             Some(&make_test_conclusion()),
+            None,
             explicit_client("mock", &payload),
         )
-        .await;
+        .await
+        .unwrap()
+        .body;
 
-        let err = result.expect_err("expected Err for whitespace-only body");
-        assert!(err.contains("empty PR body"), "unexpected error: {err}");
+        assert!(body.contains("The LLM did not produce a description"));
+        assert!(body.contains("<summary>Full plan</summary>"));
+        assert!(body.contains("Plan from store"));
+        assert!(body.contains("### Retro"));
+        assert!(body.contains("### Fabro Details"));
+        assert!(body.contains("Generated with [Fabro](https://fabro.sh)"));
     }
 
     // ── maybe_open_pull_request fallback tests ──────────────────────────
@@ -1978,9 +2017,9 @@ mod tests {
         }
     }
 
-    /// LLM returns a usable body but an empty title; `maybe_open_pull_request`
-    /// must fall back to `pr_title_from_goal` (first line, decoration
-    /// stripped) and the PR creation must succeed with that title.
+    /// LLM returns a usable body but an empty title; the content builder
+    /// falls back to `pr_title_from_goal` (first line, decoration stripped)
+    /// and PR creation succeeds with that title.
     #[tokio::test]
     async fn maybe_open_pull_request_falls_back_to_goal_title_when_llm_returns_empty_title() {
         let payload = pr_content_json("", "Narrative.");
@@ -2012,10 +2051,8 @@ mod tests {
         harness.assert_mocks_called_once().await;
     }
 
-    /// LLM returns an empty title; the fallback path produces a long title
-    /// (close to `pr_title_from_goal`'s 120-char cap), and the unconditional
-    /// `enforce_title_cap` in `maybe_open_pull_request` must still bring it
-    /// down to 72 chars ending with `…`.
+    /// LLM returns an empty title; the content builder fallback still caps
+    /// the deterministic goal title at 72 chars ending with `…`.
     #[tokio::test]
     async fn maybe_open_pull_request_caps_fallback_title_at_72_chars() {
         let payload = pr_content_json("", "Narrative.");

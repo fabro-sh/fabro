@@ -19,7 +19,8 @@ pub use initialize::initialize;
 pub use parse::parse;
 pub(crate) use persist::persist;
 pub use pull_request::{
-    AutoMergeOptions, OpenPullRequestRequest, build_pr_body, maybe_open_pull_request, pull_request,
+    AutoMergeOptions, OpenPullRequestRequest, PrContent, build_pr_content, maybe_open_pull_request,
+    pull_request,
 };
 pub use retro::{retro, run_retro};
 pub use transform::transform;
