@@ -16,7 +16,7 @@ use tokio::time::sleep;
 use crate::artifact::{normalize_durable_updates, offload_large_values, sync_artifacts_to_env};
 use crate::artifact_snapshot::collect_artifacts;
 use crate::artifact_upload::ArtifactSink;
-use crate::event::{Emitter, Event, RunNoticeLevel};
+use crate::event::{Emitter, Event, RunNoticeCode, RunNoticeLevel};
 use crate::graph::{WorkflowGraph, WorkflowNode};
 use crate::lifecycle::event::{stage_scope_for, stage_visit};
 use crate::outcome::BilledModelUsage;
@@ -125,7 +125,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
                 {
                     self.emitter.notice(
                         RunNoticeLevel::Warn,
-                        "artifact_upload_failed",
+                        RunNoticeCode::ArtifactUploadFailed,
                         format!("[node: {node_id}] artifact upload failed: {err}"),
                     );
                     return Ok(());
@@ -151,7 +151,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
             Err(e) => {
                 self.emitter.notice(
                     RunNoticeLevel::Warn,
-                    "artifact_collection_failed",
+                    RunNoticeCode::ArtifactCollectionFailed,
                     format!("[node: {node_id}] artifact collection failed: {e}"),
                 );
             }
@@ -174,7 +174,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         {
             self.emitter.notice(
                 RunNoticeLevel::Warn,
-                "artifact_offload_failed",
+                RunNoticeCode::ArtifactOffloadFailed,
                 format!("[node: {node_id}] artifact offload failed: {e}"),
             );
         }
@@ -187,7 +187,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         {
             self.emitter.notice(
                 RunNoticeLevel::Warn,
-                "artifact_sync_failed",
+                RunNoticeCode::ArtifactSyncFailed,
                 format!("[node: {node_id}] artifact sync failed: {e}"),
             );
         }

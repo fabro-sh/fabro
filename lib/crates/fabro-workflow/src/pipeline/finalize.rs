@@ -10,7 +10,7 @@ use fabro_util::time::elapsed_ms;
 
 use super::types::{Concluded, FinalizeOptions, Retroed};
 use crate::error::Error;
-use crate::event::{Event, RunNoticeLevel};
+use crate::event::{Event, RunNoticeCode, RunNoticeLevel};
 use crate::outcome::{Outcome, OutcomeExt, StageOutcome};
 use crate::records::{Checkpoint, Conclusion, StageSummary};
 use crate::run_metadata::MetadataSnapshot;
@@ -239,7 +239,11 @@ pub async fn write_finalize_commit(
                 None,
                 None,
             );
-            emit_metadata_warning(services, "checkpoint_metadata_write_failed", message);
+            emit_metadata_warning(
+                services,
+                RunNoticeCode::CheckpointMetadataWriteFailed,
+                message,
+            );
             return;
         }
     };
@@ -260,7 +264,11 @@ pub async fn write_finalize_commit(
                 None,
                 None,
             );
-            emit_metadata_warning(services, "checkpoint_metadata_write_failed", message);
+            emit_metadata_warning(
+                services,
+                RunNoticeCode::CheckpointMetadataWriteFailed,
+                message,
+            );
             return;
         }
     };
@@ -281,7 +289,11 @@ pub async fn write_finalize_commit(
                     Some(snapshot.entry_count),
                     Some(snapshot.bytes),
                 );
-                emit_metadata_warning(services, "checkpoint_metadata_push_failed", message);
+                emit_metadata_warning(
+                    services,
+                    RunNoticeCode::CheckpointMetadataPushFailed,
+                    message,
+                );
             } else {
                 emit_metadata_snapshot_completed(services, phase, meta_branch, started, &snapshot);
             }
@@ -300,7 +312,11 @@ pub async fn write_finalize_commit(
                 None,
                 None,
             );
-            emit_metadata_warning(services, "checkpoint_metadata_write_failed", message);
+            emit_metadata_warning(
+                services,
+                RunNoticeCode::CheckpointMetadataWriteFailed,
+                message,
+            );
         }
     }
 }
@@ -363,7 +379,7 @@ fn emit_metadata_snapshot_failed(
     });
 }
 
-fn emit_metadata_warning(services: &RunServices, code: &str, message: String) {
+fn emit_metadata_warning(services: &RunServices, code: RunNoticeCode, message: String) {
     if services.metadata_runtime.mark_metadata_degraded() {
         services.emitter.notice(RunNoticeLevel::Warn, code, message);
     }
@@ -387,7 +403,7 @@ async fn compute_final_patch(
         Err(err) => {
             services.emitter.notice(
                 RunNoticeLevel::Warn,
-                "git_diff_failed",
+                RunNoticeCode::GitDiffFailed,
                 format!("final diff failed: {err}"),
             );
             None
@@ -534,7 +550,7 @@ pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Con
     if services.metadata_runtime.metadata_degraded() {
         services.emitter.notice(
             RunNoticeLevel::Warn,
-            "checkpoint_metadata_degraded",
+            RunNoticeCode::CheckpointMetadataDegraded,
             "checkpoint metadata archive writes were degraded for this run".to_string(),
         );
     }
@@ -556,9 +572,11 @@ pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Con
         } else {
             format!("sandbox preserved: {info}")
         };
-        services
-            .emitter
-            .notice(RunNoticeLevel::Info, "sandbox_preserved", message);
+        services.emitter.notice(
+            RunNoticeLevel::Info,
+            RunNoticeCode::SandboxPreserved,
+            message,
+        );
     }
     if let Err(e) = cleanup_sandbox(
         &services,
@@ -572,7 +590,7 @@ pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Con
         let exec_output_tail = fabro_sandbox::default_redacted_output_tail(&e);
         services.emitter.notice_with_tail(
             RunNoticeLevel::Warn,
-            "sandbox_cleanup_failed",
+            RunNoticeCode::SandboxCleanupFailed,
             format!("sandbox cleanup failed: {}", e.display_with_causes()),
             exec_output_tail,
         );

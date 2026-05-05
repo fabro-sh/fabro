@@ -527,7 +527,7 @@ fn display_value(value: &Value) -> Option<String> {
 mod tests {
     use fabro_agent::AgentEvent;
     use fabro_types::{MetadataSnapshotFailureKind, MetadataSnapshotPhase, fixtures};
-    use fabro_workflow::event::{Event, to_run_event};
+    use fabro_workflow::event::{Event, RunNoticeCode, to_run_event};
 
     use super::*;
 
@@ -804,10 +804,11 @@ mod tests {
     fn round_trip_run_notice() {
         let event = Event::RunNotice {
             level:            RunNoticeLevel::Warn,
-            code:             "sandbox_cleanup_failed".into(),
+            code:             RunNoticeCode::SandboxCleanupFailed.to_string(),
             message:          "sandbox cleanup failed".into(),
             exec_output_tail: None,
         };
+        let expected_code = RunNoticeCode::SandboxCleanupFailed.to_string();
 
         let stored = to_run_event(&fixtures::RUN_1, &event);
         let parsed = from_run_event(&stored).unwrap();
@@ -817,7 +818,7 @@ mod tests {
                 level: RunNoticeLevel::Warn,
                 code,
                 message,
-            } if code == "sandbox_cleanup_failed" && message == "sandbox cleanup failed"
+            } if code == expected_code && message == "sandbox cleanup failed"
         ));
     }
 

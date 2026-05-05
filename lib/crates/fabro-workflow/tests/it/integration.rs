@@ -6221,6 +6221,8 @@ mod real_llm {
             _node: &Node,
             prompt: &str,
             _system_prompt: Option<&str>,
+            _emitter: &Arc<Emitter>,
+            _stage_scope: &fabro_workflow::event::StageScope,
         ) -> Result<CodergenResult, Error> {
             self.complete(prompt).await
         }
