@@ -67,7 +67,7 @@ async fn run_billing_includes_completed_non_llm_stages() {
     assert_eq!(status, "succeeded");
 
     let billing = run_billing(&app, &run_id).await;
-    assert_non_llm_billing(&billing, &["exit", "start"]);
+    assert_non_llm_billing(&billing, &["start"]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -81,7 +81,7 @@ async fn run_billing_includes_completed_command_stages() {
     assert_eq!(status, "succeeded");
 
     let billing = run_billing(&app, &run_id).await;
-    assert_non_llm_billing(&billing, &["echo_task", "exit", "start"]);
+    assert_non_llm_billing(&billing, &["echo_task", "start"]);
 }
 
 async fn run_billing(app: &axum::Router, run_id: &str) -> serde_json::Value {
