@@ -671,6 +671,27 @@ pub(crate) struct WaitArgs {
 }
 
 #[derive(Args)]
+pub(crate) struct SteerArgs {
+    #[command(flatten)]
+    pub(crate) server: ServerTargetArgs,
+
+    /// Run ID prefix to steer
+    pub(crate) run: String,
+
+    /// Steer message text (omit when --text-stdin is used)
+    pub(crate) text: Option<String>,
+
+    /// Read steer text from stdin instead of a positional arg
+    #[arg(long, conflicts_with = "text")]
+    pub(crate) text_stdin: bool,
+
+    /// Cancel the in-flight LLM stream / tool calls and deliver the message
+    /// as the next user turn (default: append to the steering queue).
+    #[arg(long)]
+    pub(crate) interrupt: bool,
+}
+
+#[derive(Args)]
 pub(crate) struct WorkflowListArgs;
 
 #[derive(Args)]
@@ -944,6 +965,8 @@ pub(crate) enum RunCommands {
     Fork(ForkArgs),
     /// Block until a workflow run completes
     Wait(WaitArgs),
+    /// Steer a running agent mid-execution
+    Steer(SteerArgs),
 }
 
 impl RunCommands {
@@ -958,6 +981,7 @@ impl RunCommands {
             Self::Logs(_) => "logs",
             Self::Resume(_) => "resume",
             Self::Rewind(_) => "rewind",
+            Self::Steer(_) => "steer",
             Self::Fork(_) => "fork",
             Self::Wait(_) => "wait",
         }

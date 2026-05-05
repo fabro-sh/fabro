@@ -25,6 +25,7 @@ pub(crate) mod run_progress;
 pub(crate) mod runner;
 pub(crate) mod ssh;
 pub(crate) mod start;
+pub(crate) mod steer;
 pub(crate) mod wait;
 
 pub(crate) async fn dispatch(
@@ -123,5 +124,6 @@ pub(crate) async fn dispatch(
             let styles = Styles::detect_stderr();
             wait::run(&args, &styles, base_ctx).await
         }
+        RunCommands::Steer(args) => steer::run(args, base_ctx).await,
     }
 }

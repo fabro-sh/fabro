@@ -15,7 +15,9 @@ import {
   type SharedEventSubscription,
 } from "./sse";
 
-interface RunEventPayload extends EventPayload {
+export interface RunEventPayload extends EventPayload {
+  id?: string;
+  seq?: number;
   event?: string;
   run_id?: string;
   node_id?: string;
@@ -26,6 +28,7 @@ interface RunEventPayload extends EventPayload {
 interface RunEventOptions {
   debounceMs?: number;
   coordinator?: CrossTabSseCoordinator;
+  onEvent?: (payload: RunEventPayload) => void;
 }
 
 const subscriptions = new Map<string, SharedEventSubscription>();
@@ -73,6 +76,13 @@ const INTERVIEW_EVENTS = new Set([
   "interview.completed",
   "interview.timeout",
   "interview.interrupted",
+]);
+const STEERING_EVENTS = new Set([
+  "agent.steering.injected",
+  "agent.steering.attached",
+  "agent.steering.detached",
+  "agent.steer.buffered",
+  "agent.steer.dropped",
 ]);
 
 export function queryKeysForRunEvent(
@@ -125,6 +135,14 @@ export function queryKeysForRunEvent(
     return stageId ? [queryKeys.runs.stageEvents(runId, stageId)] : [];
   }
 
+  if (STEERING_EVENTS.has(event)) {
+    const keys = [queryKeys.runs.events(runId, 1000)];
+    if (stageId) {
+      keys.push(queryKeys.runs.stageEvents(runId, stageId));
+    }
+    return keys;
+  }
+
   return [];
 }
 
@@ -132,7 +150,7 @@ export function subscribeToRunEvents(
   runId: string,
   mutate: MutateFn,
   eventSourceFactory: (url: string) => EventSourceLike = createBrowserEventSource,
-  { debounceMs = 300, coordinator }: RunEventOptions = {},
+  { debounceMs = 300, coordinator, onEvent }: RunEventOptions = {},
 ): () => void {
   return subscribeToCrossTabSse<RunEventPayload>({
     coordinator,
@@ -142,6 +160,7 @@ export function subscribeToRunEvents(
     resyncKeys: () => resyncKeysForRun(runId),
     resolveInvalidation: (payload) => {
       if (payload.run_id !== runId) return { keys: [] };
+      onEvent?.(payload);
       return runInvalidation(runId, payload);
     },
     fallbackSubscribe: () =>
@@ -153,6 +172,7 @@ export function subscribeToRunEvents(
         eventSourceFactory,
         debounceMs,
         resolveInvalidation: (payload) => {
+          onEvent?.(payload);
           const result = runInvalidation(runId, payload);
           return { ...result, close: result.immediate };
         },

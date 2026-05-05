@@ -38,6 +38,7 @@ use crate::run_options::{GitCheckpointOptions, RunOptions};
 use crate::sandbox_git::GIT_REMOTE;
 use crate::sandbox_git_runtime::SandboxGitRuntime;
 use crate::services::{EngineServices, RunServices};
+use crate::steering_hub::SteeringHub;
 
 struct WorktreePlan {
     branch_name:          String,
@@ -266,6 +267,7 @@ async fn build_sandbox_env(
 async fn build_registry(
     spec: &LlmSpec,
     interviewer: Arc<dyn fabro_interview::Interviewer>,
+    steering_hub: Arc<SteeringHub>,
     sandbox_env: &HashMap<String, String>,
     graph: &graph::Graph,
     llm_source: Arc<dyn CredentialSource>,
@@ -310,12 +312,14 @@ async fn build_registry(
             let fallback_chain = spec.fallback_chain.clone();
             let mcp_servers = spec.mcp_servers.clone();
             let llm_source_for_api = Arc::clone(&llm_source);
+            let steering_hub_for_api = Arc::clone(&steering_hub);
             let registry = Arc::new(default_registry(interviewer, move || {
                 let api = AgentApiBackend::new(
                     model.clone(),
                     provider,
                     fallback_chain.clone(),
                     Arc::clone(&llm_source_for_api),
+                    Arc::clone(&steering_hub_for_api),
                 )
                 .with_env(env.clone())
                 .with_mcp_servers(mcp_servers.clone());
@@ -589,6 +593,7 @@ pub async fn initialize(
         build_registry(
             &options.llm,
             Arc::clone(&options.interviewer),
+            Arc::clone(&options.steering_hub),
             &env,
             &graph,
             Arc::clone(&llm_source),
@@ -929,49 +934,50 @@ mod tests {
         });
 
         let result = initialize(persisted, InitOptions {
-            run_id: test_run_id(),
-            run_store: {
+            run_id:            test_run_id(),
+            run_store:         {
                 let store = memory_store();
                 let inner = store.create_run(&test_run_id()).await.unwrap();
                 inner.into()
             },
-            dry_run: false,
-            emitter,
-            sandbox: SandboxSpec::Local {
+            dry_run:           false,
+            emitter:           emitter.clone(),
+            sandbox:           SandboxSpec::Local {
                 working_directory: std::env::current_dir().unwrap(),
             },
-            llm: LlmSpec {
+            llm:               LlmSpec {
                 model:          "test-model".to_string(),
                 provider:       fabro_llm::Provider::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
                 dry_run:        true,
             },
-            interviewer: Arc::new(AutoApproveInterviewer::engine()),
-            lifecycle: crate::run_options::LifecycleOptions {
+            interviewer:       Arc::new(AutoApproveInterviewer::engine()),
+            steering_hub:      Arc::new(crate::steering_hub::SteeringHub::new(emitter.clone())),
+            lifecycle:         crate::run_options::LifecycleOptions {
                 setup_commands:           vec![command.to_string()],
                 setup_command_timeout_ms: 1_000,
                 devcontainer_phases:      vec![],
             },
-            run_options: test_settings(&run_dir),
-            workflow_path: None,
-            workflow_bundle: None,
-            hooks: fabro_hooks::HookSettings { hooks: vec![] },
-            sandbox_env: SandboxEnvSpec {
+            run_options:       test_settings(&run_dir),
+            workflow_path:     None,
+            workflow_bundle:   None,
+            hooks:             fabro_hooks::HookSettings { hooks: vec![] },
+            sandbox_env:       SandboxEnvSpec {
                 devcontainer_env:   HashMap::new(),
                 toml_env:           HashMap::new(),
                 github_permissions: None,
                 origin_url:         None,
             },
-            vault: None,
-            devcontainer: None,
-            git: None,
-            worktree_mode: None,
-            run_control: None,
+            vault:             None,
+            devcontainer:      None,
+            git:               None,
+            worktree_mode:     None,
+            run_control:       None,
             registry_override: None,
-            artifact_sink: None,
-            checkpoint: None,
-            seed_context: None,
+            artifact_sink:     None,
+            checkpoint:        None,
+            seed_context:      None,
         })
         .await;
         let events = seen.lock().unwrap().clone();
@@ -984,6 +990,7 @@ mod tests {
         let run_dir = temp.path().join("run");
         std::fs::create_dir_all(&run_dir).unwrap();
         let store = memory_store();
+        let emitter = Arc::new(crate::event::Emitter::new(test_run_id()));
         let mut options = InitOptions {
             run_id:            test_run_id(),
             run_store:         {
@@ -991,7 +998,7 @@ mod tests {
                 inner.into()
             },
             dry_run:           false,
-            emitter:           Arc::new(crate::event::Emitter::new(test_run_id())),
+            emitter:           emitter.clone(),
             sandbox:           SandboxSpec::Local {
                 working_directory: std::env::current_dir().unwrap(),
             },
@@ -1003,6 +1010,7 @@ mod tests {
                 dry_run:        true,
             },
             interviewer:       Arc::new(AutoApproveInterviewer::engine()),
+            steering_hub:      Arc::new(crate::steering_hub::SteeringHub::new(emitter.clone())),
             lifecycle:         crate::run_options::LifecycleOptions {
                 setup_commands:           vec![],
                 setup_command_timeout_ms: 1_000,
@@ -1057,49 +1065,50 @@ mod tests {
         let emitter = Arc::new(crate::event::Emitter::new(test_run_id()));
 
         let initialized = initialize(persisted, InitOptions {
-            run_id: test_run_id(),
-            run_store: {
+            run_id:            test_run_id(),
+            run_store:         {
                 let store = memory_store();
                 let inner = store.create_run(&test_run_id()).await.unwrap();
                 inner.into()
             },
-            dry_run: false,
-            emitter,
-            sandbox: SandboxSpec::Local {
+            dry_run:           false,
+            emitter:           emitter.clone(),
+            sandbox:           SandboxSpec::Local {
                 working_directory: std::env::current_dir().unwrap(),
             },
-            llm: LlmSpec {
+            llm:               LlmSpec {
                 model:          "test-model".to_string(),
                 provider:       fabro_llm::Provider::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
                 dry_run:        true,
             },
-            interviewer: Arc::new(AutoApproveInterviewer::engine()),
-            lifecycle: crate::run_options::LifecycleOptions {
+            interviewer:       Arc::new(AutoApproveInterviewer::engine()),
+            steering_hub:      Arc::new(crate::steering_hub::SteeringHub::new(emitter.clone())),
+            lifecycle:         crate::run_options::LifecycleOptions {
                 setup_commands:           vec![],
                 setup_command_timeout_ms: 1_000,
                 devcontainer_phases:      vec![],
             },
-            run_options: test_settings(&run_dir),
-            workflow_path: None,
-            workflow_bundle: None,
-            hooks: fabro_hooks::HookSettings { hooks: vec![] },
-            sandbox_env: SandboxEnvSpec {
+            run_options:       test_settings(&run_dir),
+            workflow_path:     None,
+            workflow_bundle:   None,
+            hooks:             fabro_hooks::HookSettings { hooks: vec![] },
+            sandbox_env:       SandboxEnvSpec {
                 devcontainer_env:   HashMap::new(),
                 toml_env:           HashMap::from([("TEST_KEY".to_string(), "value".to_string())]),
                 github_permissions: None,
                 origin_url:         None,
             },
-            vault: None,
-            devcontainer: None,
-            git: None,
-            worktree_mode: None,
-            run_control: None,
+            vault:             None,
+            devcontainer:      None,
+            git:               None,
+            worktree_mode:     None,
+            run_control:       None,
             registry_override: None,
-            artifact_sink: None,
-            checkpoint: None,
-            seed_context: None,
+            artifact_sink:     None,
+            checkpoint:        None,
+            seed_context:      None,
         })
         .await
         .unwrap();
@@ -1151,6 +1160,7 @@ mod tests {
         let (graph, _) = llm_graph();
         let vault = Arc::new(AsyncRwLock::new(vault));
 
+        let test_emitter = Arc::new(crate::event::Emitter::new(test_run_id()));
         let (_registry, effective_dry_run) = build_registry(
             &LlmSpec {
                 model:          "claude-opus-4-6".to_string(),
@@ -1160,6 +1170,7 @@ mod tests {
                 dry_run:        false,
             },
             Arc::new(AutoApproveInterviewer::engine()),
+            Arc::new(crate::steering_hub::SteeringHub::new(test_emitter)),
             &HashMap::new(),
             &graph,
             Arc::new(VaultCredentialSource::new(Arc::clone(&vault))),
@@ -1190,45 +1201,46 @@ mod tests {
         store_logger.register(&emitter);
 
         let initialized = initialize(persisted, InitOptions {
-            run_id: test_run_id(),
-            run_store: run_store.into(),
-            dry_run: false,
-            emitter,
-            sandbox: SandboxSpec::Local {
+            run_id:            test_run_id(),
+            run_store:         run_store.into(),
+            dry_run:           false,
+            emitter:           emitter.clone(),
+            sandbox:           SandboxSpec::Local {
                 working_directory: std::env::current_dir().unwrap(),
             },
-            llm: LlmSpec {
+            llm:               LlmSpec {
                 model:          "test-model".to_string(),
                 provider:       fabro_llm::Provider::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
                 dry_run:        true,
             },
-            interviewer: Arc::new(AutoApproveInterviewer::engine()),
-            lifecycle: crate::run_options::LifecycleOptions {
+            interviewer:       Arc::new(AutoApproveInterviewer::engine()),
+            steering_hub:      Arc::new(crate::steering_hub::SteeringHub::new(emitter.clone())),
+            lifecycle:         crate::run_options::LifecycleOptions {
                 setup_commands:           vec!["true".to_string()],
                 setup_command_timeout_ms: 1_000,
                 devcontainer_phases:      vec![],
             },
-            run_options: test_settings(&run_dir),
-            workflow_path: None,
-            workflow_bundle: None,
-            hooks: fabro_hooks::HookSettings { hooks: vec![] },
-            sandbox_env: SandboxEnvSpec {
+            run_options:       test_settings(&run_dir),
+            workflow_path:     None,
+            workflow_bundle:   None,
+            hooks:             fabro_hooks::HookSettings { hooks: vec![] },
+            sandbox_env:       SandboxEnvSpec {
                 devcontainer_env:   HashMap::new(),
                 toml_env:           HashMap::new(),
                 github_permissions: None,
                 origin_url:         None,
             },
-            vault: None,
-            devcontainer: None,
-            git: None,
-            worktree_mode: None,
-            run_control: None,
+            vault:             None,
+            devcontainer:      None,
+            git:               None,
+            worktree_mode:     None,
+            run_control:       None,
             registry_override: None,
-            artifact_sink: None,
-            checkpoint: None,
-            seed_context: None,
+            artifact_sink:     None,
+            checkpoint:        None,
+            seed_context:      None,
         })
         .await
         .unwrap();
@@ -1298,6 +1310,7 @@ mod tests {
         let mut run_options = test_settings(&run_dir);
         run_options.cancel_token = cancel_token;
 
+        let emitter = Arc::new(crate::event::Emitter::new(test_run_id()));
         let result = initialize(persisted, InitOptions {
             run_id: test_run_id(),
             run_store: {
@@ -1306,7 +1319,7 @@ mod tests {
                 inner.into()
             },
             dry_run: false,
-            emitter: Arc::new(crate::event::Emitter::new(test_run_id())),
+            emitter: emitter.clone(),
             sandbox: SandboxSpec::Local {
                 working_directory: std::env::current_dir().unwrap(),
             },
@@ -1318,6 +1331,7 @@ mod tests {
                 dry_run:        true,
             },
             interviewer: Arc::new(AutoApproveInterviewer::engine()),
+            steering_hub: Arc::new(crate::steering_hub::SteeringHub::new(emitter.clone())),
             lifecycle: crate::run_options::LifecycleOptions {
                 setup_commands:           vec!["sleep 5".to_string()],
                 setup_command_timeout_ms: 5_000,
@@ -1360,6 +1374,7 @@ mod tests {
         let mut run_options = test_settings(&run_dir);
         run_options.cancel_token = cancel_token;
 
+        let emitter = Arc::new(crate::event::Emitter::new(test_run_id()));
         let result = initialize(persisted, InitOptions {
             run_id: test_run_id(),
             run_store: {
@@ -1368,7 +1383,7 @@ mod tests {
                 inner.into()
             },
             dry_run: false,
-            emitter: Arc::new(crate::event::Emitter::new(test_run_id())),
+            emitter: emitter.clone(),
             sandbox: SandboxSpec::Local {
                 working_directory: std::env::current_dir().unwrap(),
             },
@@ -1380,6 +1395,7 @@ mod tests {
                 dry_run:        true,
             },
             interviewer: Arc::new(AutoApproveInterviewer::engine()),
+            steering_hub: Arc::new(crate::steering_hub::SteeringHub::new(emitter.clone())),
             lifecycle: crate::run_options::LifecycleOptions {
                 setup_commands:           vec![],
                 setup_command_timeout_ms: 5_000,

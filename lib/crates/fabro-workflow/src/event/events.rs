@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use ::fabro_types::{
     BilledTokenCounts, BlockedReason, CommandTermination, FailureReason, ForkSourceRef, GitContext,
     ParallelBranchId, Principal, PullRequestRecord, RunBlobId, RunId, RunNoticeLevel,
-    RunProvenance, StageId, SuccessReason, run_event as fabro_types,
+    RunProvenance, StageId, SteerKind, SuccessReason, run_event as fabro_types,
 };
 use fabro_agent::{AgentEvent, SandboxEvent};
 use serde::{Deserialize, Serialize};
@@ -523,6 +523,36 @@ pub enum Event {
         provider: String,
         model:    String,
         command:  String,
+    },
+    /// A `SteeringHub` registered an active API-mode session for a stage.
+    /// Emitted once per `register` insert (not on replace).
+    AgentSteeringAttached {
+        node_id: String,
+        visit:   u32,
+    },
+    /// The corresponding session was unregistered from the hub.
+    AgentSteeringDetached {
+        node_id: String,
+        visit:   u32,
+    },
+    /// A steer arrived with no active session and was parked in the run-wide
+    /// pending buffer. The actor (steer author) is lifted to top-level.
+    AgentSteerBuffered {
+        kind:  SteerKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<Principal>,
+    },
+    /// One or more buffered/queued steers were dropped because a cap was
+    /// reached or the run ended before they could be delivered.
+    AgentSteerDropped {
+        reason:  fabro_types::AgentSteerDroppedReason,
+        count:   u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor:   Option<Principal>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        visit:   Option<u32>,
     },
     AgentCliCompleted {
         node_id:     String,
@@ -1259,6 +1289,18 @@ impl Event {
                 ..
             } => {
                 debug!(node_id, exit_code, duration_ms, "Agent CLI completed");
+            }
+            Self::AgentSteeringAttached { node_id, visit } => {
+                debug!(node_id, visit, "Steering hub attached to session");
+            }
+            Self::AgentSteeringDetached { node_id, visit } => {
+                debug!(node_id, visit, "Steering hub detached from session");
+            }
+            Self::AgentSteerBuffered { kind, .. } => {
+                debug!(kind = kind.as_str(), "Steer buffered (no active session)");
+            }
+            Self::AgentSteerDropped { reason, count, .. } => {
+                warn!(?reason, count, "Steer dropped");
             }
             Self::AgentCliCancelled {
                 node_id,

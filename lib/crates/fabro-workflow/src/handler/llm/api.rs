@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use fabro_agent::subagent::{SessionFactory, SubAgentManager};
 use fabro_agent::{
-    AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, OpenAiProfile, Sandbox, Session,
-    SessionOptions, Turn,
+    AgentEvent, AgentProfile, AnthropicProfile, CompletionCoordinator, GeminiProfile,
+    OpenAiProfile, Sandbox, Session, SessionControlHandle, SessionOptions, Turn,
 };
 use fabro_auth::{CredentialSource, EnvCredentialSource};
 use fabro_graphviz::graph::Node;
@@ -13,6 +13,7 @@ use fabro_llm::client::Client;
 use fabro_llm::types::{Message, Request, TokenCounts};
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::{FallbackTarget, Provider};
+use fabro_types::StageId;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -23,6 +24,7 @@ use crate::context::{Context, WorkflowContext};
 use crate::error::Error;
 use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::billed_model_usage_from_llm;
+use crate::steering_hub::SteeringHub;
 
 /// Spawn a task that, when the run-level token cancels, sets the agent
 /// `Session`'s interrupt reason to `Cancelled` and cancels the session token.
@@ -216,6 +218,7 @@ pub struct AgentApiBackend {
     env:            HashMap<String, String>,
     mcp_servers:    Vec<McpServerSettings>,
     source:         Arc<dyn CredentialSource>,
+    steering_hub:   Arc<SteeringHub>,
 }
 
 impl AgentApiBackend {
@@ -225,6 +228,7 @@ impl AgentApiBackend {
         provider: Provider,
         fallback_chain: Vec<FallbackTarget>,
         source: Arc<dyn CredentialSource>,
+        steering_hub: Arc<SteeringHub>,
     ) -> Self {
         Self {
             model,
@@ -234,6 +238,7 @@ impl AgentApiBackend {
             env: HashMap::new(),
             mcp_servers: Vec::new(),
             source,
+            steering_hub,
         }
     }
 
@@ -242,12 +247,14 @@ impl AgentApiBackend {
         model: String,
         provider: Provider,
         fallback_chain: Vec<FallbackTarget>,
+        steering_hub: Arc<SteeringHub>,
     ) -> Self {
         Self::new(
             model,
             provider,
             fallback_chain,
             Arc::new(EnvCredentialSource::new()),
+            steering_hub,
         )
     }
 
@@ -369,6 +376,19 @@ impl AgentApiBackend {
             .set_event_callback(session.sub_agent_event_callback());
 
         Ok(session)
+    }
+
+    /// Register `session` with the steering hub under `stage_id` and wire
+    /// up the completion coordinator. Used both at initial setup and on
+    /// failover (re-register replaces silently — no re-drain, no event).
+    fn attach_session_to_hub(&self, session: &mut Session, stage_id: &StageId) {
+        let handle = session.control_handle();
+        self.steering_hub.register(stage_id, &handle);
+        session.set_completion_coordinator(Arc::new(SteeringCompletionCoordinator {
+            hub: Arc::clone(&self.steering_hub),
+            stage_id: stage_id.clone(),
+            handle,
+        }));
     }
 }
 
@@ -595,7 +615,17 @@ impl CodergenBackend for AgentApiBackend {
         );
 
         // Record turn count before processing so we only aggregate new usage.
-        let turns_before = session.history().turns().len();
+        let mut turns_before = session.history().turns().len();
+
+        // Register with the steering hub so HTTP `POST /runs/{id}/steer`
+        // calls reach this session. The RAII guard below unregisters on
+        // every exit path (success, error, failover replace).
+        let stage_id = stage_scope.stage_id();
+        let _hub_guard = {
+            let hub = Arc::clone(&self.steering_hub);
+            let sid = stage_id.clone();
+            scopeguard::guard((), move |()| hub.unregister(&sid))
+        };
 
         let allow_failover_primary = !self.fallback_chain.is_empty();
         let init_result = if is_reused {
@@ -622,7 +652,10 @@ impl CodergenBackend for AgentApiBackend {
         // If initialize failed with a failover-eligible error, treat as a
         // process_input failover trigger; otherwise run process_input.
         let result = match init_result {
-            Ok(()) => session.process_input(prompt).await,
+            Ok(()) => {
+                self.attach_session_to_hub(&mut session, &stage_id);
+                session.process_input(prompt).await
+            }
             Err(err) => Err(err),
         };
 
@@ -693,6 +726,7 @@ impl CodergenBackend for AgentApiBackend {
                         };
                         session = new_session;
                         bridge.replace(cancel_token.clone(), &session);
+                        turns_before = session.history().turns().len();
 
                         // Re-subscribe to forward events + track files from the new session
                         spawn_event_forwarder(
@@ -720,6 +754,7 @@ impl CodergenBackend for AgentApiBackend {
                                 }
                             }
                         }
+                        self.attach_session_to_hub(&mut session, &stage_id);
                         match session.process_input(prompt).await {
                             Ok(()) => {
                                 succeeded = true;
@@ -806,6 +841,29 @@ impl CodergenBackend for AgentApiBackend {
     }
 }
 
+/// Coordinator that lets the agent loop ask the workflow layer whether to
+/// keep iterating after a no-tool natural completion. Implements the
+/// "close-the-door" pattern: unregister, check the queue, then either
+/// break or re-register and report `true` so the loop drains.
+struct SteeringCompletionCoordinator {
+    hub:      Arc<SteeringHub>,
+    stage_id: StageId,
+    handle:   SessionControlHandle,
+}
+
+impl CompletionCoordinator for SteeringCompletionCoordinator {
+    fn on_natural_completion(&self) -> bool {
+        // Atomic close-the-door: under the hub's active write lock, check
+        // the queue. If empty → unregister + emit `detached`, return
+        // `false` (loop breaks). If non-empty → leave registration in
+        // place (no event flap), return `true` (loop iterates once more
+        // and drains).
+        !self
+            .hub
+            .unregister_if_queue_empty(&self.stage_id, &self.handle)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use fabro_agent::subagent::SessionFactory;
@@ -822,6 +880,7 @@ mod tests {
             "claude-opus-4-6".to_string(),
             Provider::OpenAi,
             Vec::new(),
+            SteeringHub::for_tests(),
         );
         assert_eq!(backend.model, "claude-opus-4-6");
         assert_eq!(backend.provider, Provider::OpenAi);
@@ -833,6 +892,7 @@ mod tests {
             "claude-opus-4-6".to_string(),
             Provider::Anthropic,
             Vec::new(),
+            SteeringHub::for_tests(),
         );
         assert!(backend.sessions.lock().unwrap().is_empty());
     }
@@ -985,6 +1045,7 @@ mod tests {
                 Arc::new(AsyncRwLock::new(vault)),
                 |_| None,
             )),
+            SteeringHub::for_tests(),
         );
 
         let client = Client::from_source(backend.source.as_ref()).await.unwrap();

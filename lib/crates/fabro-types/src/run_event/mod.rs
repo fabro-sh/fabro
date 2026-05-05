@@ -170,6 +170,14 @@ pub enum EventBody {
     AgentTurnLimitReached(AgentTurnLimitReachedProps),
     #[serde(rename = "agent.steering.injected")]
     AgentSteeringInjected(AgentSteeringInjectedProps),
+    #[serde(rename = "agent.steering.attached")]
+    AgentSteeringAttached(AgentSteeringAttachedProps),
+    #[serde(rename = "agent.steering.detached")]
+    AgentSteeringDetached(AgentSteeringDetachedProps),
+    #[serde(rename = "agent.steer.buffered")]
+    AgentSteerBuffered(AgentSteerBufferedProps),
+    #[serde(rename = "agent.steer.dropped")]
+    AgentSteerDropped(AgentSteerDroppedProps),
     #[serde(rename = "agent.compaction.started")]
     AgentCompactionStarted(AgentCompactionStartedProps),
     #[serde(rename = "agent.compaction.completed")]
@@ -396,6 +404,10 @@ impl EventBody {
             Self::AgentLoopDetected(_) => "agent.loop.detected",
             Self::AgentTurnLimitReached(_) => "agent.turn.limit",
             Self::AgentSteeringInjected(_) => "agent.steering.injected",
+            Self::AgentSteeringAttached(_) => "agent.steering.attached",
+            Self::AgentSteeringDetached(_) => "agent.steering.detached",
+            Self::AgentSteerBuffered(_) => "agent.steer.buffered",
+            Self::AgentSteerDropped(_) => "agent.steer.dropped",
             Self::AgentCompactionStarted(_) => "agent.compaction.started",
             Self::AgentCompactionCompleted(_) => "agent.compaction.completed",
             Self::AgentLlmRetry(_) => "agent.llm.retry",
@@ -530,6 +542,10 @@ fn is_known_event_name(event: &str) -> bool {
             | "agent.loop.detected"
             | "agent.turn.limit"
             | "agent.steering.injected"
+            | "agent.steering.attached"
+            | "agent.steering.detached"
+            | "agent.steer.buffered"
+            | "agent.steer.dropped"
             | "agent.compaction.started"
             | "agent.compaction.completed"
             | "agent.llm.retry"

@@ -1878,8 +1878,13 @@ async fn subprocess_answer_transport_cancel_run_enqueues_cancel_message() {
 #[tokio::test]
 async fn in_process_answer_transport_cancel_run_cancels_pending_interviews() {
     let interviewer = Arc::new(ControlInterviewer::new());
+    let emitter = Arc::new(fabro_workflow::event::Emitter::new(
+        fabro_types::RunId::new(),
+    ));
+    let steering_hub = Arc::new(fabro_workflow::SteeringHub::new(emitter));
     let transport = RunAnswerTransport::InProcess {
-        interviewer: Arc::clone(&interviewer),
+        interviewer:  Arc::clone(&interviewer),
+        steering_hub: Arc::clone(&steering_hub),
     };
     let mut question = Question::new("Approve?", QuestionType::YesNo);
     question.id = "q-1".to_string();
@@ -6069,6 +6074,50 @@ async fn cancel_nonexistent_run_returns_not_found() {
 
     let response = app.oneshot(req).await.unwrap();
     assert_status!(response, StatusCode::NOT_FOUND).await;
+}
+
+#[tokio::test]
+async fn steer_nonexistent_run_returns_not_found() {
+    let app = test_app_with();
+    let missing_run_id = fixtures::RUN_64;
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api(&format!("/runs/{missing_run_id}/steer")))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"text":"try again"}"#))
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    assert_status!(response, StatusCode::NOT_FOUND).await;
+}
+
+#[tokio::test]
+async fn steer_empty_text_returns_bad_request() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+
+    let run_id = create_and_start_run(&app, MINIMAL_DOT)
+        .await
+        .parse::<RunId>()
+        .unwrap();
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api(&format!("/runs/{run_id}/steer")))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"text":"   "}"#))
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    // 400 (whitespace-only text) or 409 (run not yet `running` when the
+    // handler checks status) are both acceptable; the only outcome we
+    // want to rule out is a successful enqueue.
+    let status = response.status();
+    assert!(
+        matches!(status, StatusCode::BAD_REQUEST | StatusCode::CONFLICT),
+        "expected 400 or 409, got {status}"
+    );
 }
 
 #[tokio::test]

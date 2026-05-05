@@ -607,9 +607,10 @@ fn event_body_from_event(event: &Event) -> EventBody {
                     visit:     *visit,
                 })
             }
-            AgentEvent::SteeringInjected { text } => {
+            AgentEvent::SteeringInjected { text, kind, .. } => {
                 EventBody::AgentSteeringInjected(fabro_types::AgentSteeringInjectedProps {
                     text:  text.clone(),
+                    kind:  *kind,
                     visit: *visit,
                 })
             }
@@ -1008,6 +1009,21 @@ fn event_body_from_event(event: &Event) -> EventBody {
             exit_code:   *exit_code,
             duration_ms: *duration_ms,
         }),
+        Event::AgentSteeringAttached { .. } => {
+            EventBody::AgentSteeringAttached(fabro_types::AgentSteeringAttachedProps {})
+        }
+        Event::AgentSteeringDetached { .. } => {
+            EventBody::AgentSteeringDetached(fabro_types::AgentSteeringDetachedProps {})
+        }
+        Event::AgentSteerBuffered { kind, .. } => {
+            EventBody::AgentSteerBuffered(fabro_types::AgentSteerBufferedProps { kind: *kind })
+        }
+        Event::AgentSteerDropped { reason, count, .. } => {
+            EventBody::AgentSteerDropped(fabro_types::AgentSteerDroppedProps {
+                reason: *reason,
+                count:  *count,
+            })
+        }
         Event::AgentCliCancelled {
             stdout,
             stderr,

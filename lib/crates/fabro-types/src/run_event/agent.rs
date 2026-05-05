@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::BilledTokenCounts;
+use crate::SteerKind;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentSessionStartedProps {
@@ -82,7 +83,32 @@ pub struct AgentTurnLimitReachedProps {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentSteeringInjectedProps {
     pub text:  String,
+    pub kind:  SteerKind,
     pub visit: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AgentSteeringAttachedProps;
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AgentSteeringDetachedProps;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentSteerBufferedProps {
+    pub kind: SteerKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentSteerDroppedReason {
+    QueueFull,
+    RunEnded,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentSteerDroppedProps {
+    pub reason: AgentSteerDroppedReason,
+    pub count:  u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

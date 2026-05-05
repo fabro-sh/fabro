@@ -1,8 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowPathIcon, ChevronRightIcon } from "@heroicons/react/20/solid";
 import { Link, Outlet, useLocation } from "react-router";
 
 import { InterviewDock } from "../components/interview-dock";
+import { SteerComposer } from "../components/steer-composer";
 import { ErrorState } from "../components/state";
 import { useToast } from "../components/toast";
 import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from "../components/ui";
@@ -22,6 +23,7 @@ import {
   type PreviewMutationResult,
 } from "../lib/mutations";
 import { useRunEvents } from "../lib/run-events";
+import { useRunToasts } from "../hooks/use-run-toasts";
 import { useRun, useRunQuestions } from "../lib/queries";
 import {
   canArchive,
@@ -115,8 +117,10 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const { push, dismiss } = useToast();
   const tabs = allTabs.filter((t) => !t.demoOnly || demoMode);
   const lifecycleToastStateRef = useRef<LifecycleToastState>(INITIAL_LIFECYCLE_TOAST_STATE);
+  const [steerOpen, setSteerOpen] = useState(false);
 
   useRunEvents(params.id);
+  useRunToasts(params.id);
 
   useEffect(() => {
     if (previewMutation.data?.intent === "preview") {
@@ -204,6 +208,18 @@ export default function RunDetail({ params }: { params: { id: string } }) {
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          {statusKind === "running" && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setSteerOpen(true)}
+                className={MUTATION_BUTTON_CLASS}
+              >
+                Steer
+              </button>
+            </div>
+          )}
+
           {visibility.showPrimaryCancel && (
             <div>
               <button
@@ -299,6 +315,12 @@ export default function RunDetail({ params }: { params: { id: string } }) {
       <div className="mt-6">
         <Outlet />
       </div>
+
+      <SteerComposer
+        runId={params.id}
+        open={steerOpen}
+        onClose={() => setSteerOpen(false)}
+      />
 
       {isBlocked && pendingQuestions.length > 0 && (
         <>

@@ -3,6 +3,7 @@ import { useSWRConfig } from "swr";
 import type {
   PreviewUrlResponse,
   RunStatusResponse,
+  SteerRunRequest,
   SubmitAnswerRequest,
 } from "@qltysh/fabro-api-client";
 
@@ -110,6 +111,26 @@ export function useSubmitInterviewAnswer(runId: string | undefined) {
       onSuccess: () => {
         if (!runId) return;
         void mutate(queryKeys.runs.questions(runId, 25, 0));
+        void mutate(queryKeys.runs.detail(runId));
+      },
+    },
+  );
+}
+
+export type SteerRunArg = SteerRunRequest;
+
+export function useSteerRun(runId: string | undefined) {
+  const { mutate } = useSWRConfig();
+  return useSWRMutation(
+    runId ? `steer-run:${runId}` : null,
+    async (_key: string, { arg }: { arg: SteerRunArg }) => {
+      if (!runId) throw new Error("runId is required");
+      const path = `/api/v1/runs/${encodeURIComponent(runId)}/steer`;
+      await apiJsonMutation<void, SteerRunRequest>(path, { arg });
+    },
+    {
+      onSuccess: () => {
+        if (!runId) return;
         void mutate(queryKeys.runs.detail(runId));
       },
     },

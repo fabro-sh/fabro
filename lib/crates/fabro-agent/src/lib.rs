@@ -44,7 +44,7 @@ pub use sandbox::{
     SandboxEvent, SandboxEventCallback, WorktreeEvent, WorktreeEventCallback, WorktreeOptions,
     WorktreeSandbox, format_lines_numbered, shell_quote,
 };
-pub use session::Session;
+pub use session::{CompletionCoordinator, Session, SessionControlHandle, SteeringItem};
 pub use skills::Skill;
 pub use subagent::{
     SubAgent, SubAgentEventCallback, SubAgentManager, SubAgentResult, SubAgentStatus,
@@ -55,7 +55,7 @@ pub use tools::{
     make_shell_tool, make_shell_tool_with_config, make_write_file_tool, register_core_tools,
 };
 pub use truncation::{TruncationMode, truncate_lines, truncate_output, truncate_tool_output};
-pub use types::{AgentEvent, SessionEvent, SessionState, Turn};
+pub use types::{AgentEvent, SessionEvent, SessionState, SteerKind, Turn};
 
 #[cfg(test)]
 #[allow(

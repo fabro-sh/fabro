@@ -18,10 +18,13 @@ export interface EventInvalidation {
   immediate?: boolean;
 }
 
+type EventResolver = (payload: EventPayload) => EventInvalidation;
+
 export interface SharedEventSubscription {
   source: EventSourceLike;
   refcount: number;
   mutators: Map<MutateFn, number>;
+  resolvers: Map<symbol, EventResolver>;
   pendingKeys: Set<string>;
   debounceTimer: ReturnType<typeof setTimeout> | null;
 }
@@ -54,6 +57,7 @@ export function subscribeToSharedEventSource<TPayload extends EventPayload>({
       source,
       refcount: 0,
       mutators: new Map(),
+      resolvers: new Map(),
       pendingKeys: new Set(),
       debounceTimer: null,
     };
@@ -70,24 +74,37 @@ export function subscribeToSharedEventSource<TPayload extends EventPayload>({
         return;
       }
 
-      const invalidation = resolveInvalidation(payload);
-      queueInvalidations(current, invalidation.keys, {
-        debounceMs,
-        immediate: invalidation.immediate,
-      });
+      const keys = new Set<string>();
+      let close = false;
+      let immediate = false;
+      for (const resolver of current.resolvers.values()) {
+        const invalidation = resolver(payload);
+        for (const key of invalidation.keys) keys.add(key);
+        close ||= Boolean(invalidation.close);
+        immediate ||= Boolean(invalidation.immediate);
+      }
 
-      if (invalidation.close) {
+      queueInvalidations(current, [...keys], { debounceMs, immediate });
+
+      if (close) {
         closeSharedEventSource(subscriptions, subscriptionKey, { flushPending: true });
       }
     };
   }
 
+  const resolverId = Symbol(subscriptionKey);
+  subscription.resolvers.set(
+    resolverId,
+    resolveInvalidation as EventResolver,
+  );
   subscription.refcount += 1;
   subscription.mutators.set(mutate, (subscription.mutators.get(mutate) ?? 0) + 1);
 
   return () => {
     const current = subscriptions.get(subscriptionKey);
     if (!current) return;
+
+    current.resolvers.delete(resolverId);
 
     const mutateCount = current.mutators.get(mutate) ?? 0;
     if (mutateCount <= 1) {

@@ -61,6 +61,13 @@ describe("queryKeysForRunEvent", () => {
       queryKeys.runs.stageEvents("run-1", "verify@2"),
     ]);
   });
+
+  test("stage-scoped steering events invalidate run events and stage events", () => {
+    expect(queryKeysForRunEvent("run-1", "agent.steering.injected", "agent@1")).toEqual([
+      queryKeys.runs.events("run-1", 1000),
+      queryKeys.runs.stageEvents("run-1", "agent@1"),
+    ]);
+  });
 });
 
 describe("subscribeToRunEvents", () => {
@@ -157,6 +164,41 @@ describe("subscribeToRunEvents", () => {
 
     secondCleanup();
     expect(source.closed).toBe(true);
+    coordinator.close();
+  });
+
+  test("fallback runs payload callbacks for later subscribers on a shared source", () => {
+    const source = new FakeEventSource();
+    const seen: string[] = [];
+    const keys: string[] = [];
+    const coordinator = createFallbackCoordinator();
+    const mutate = (key: string) => {
+      keys.push(key);
+      return Promise.resolve();
+    };
+    const callbackMutate = () => Promise.resolve();
+
+    const firstCleanup = subscribeToRunEvents("run-shared-payload", mutate, () => source, {
+      debounceMs: 0,
+      coordinator,
+    });
+    const secondCleanup = subscribeToRunEvents("run-shared-payload", callbackMutate, () => {
+      throw new Error("source should be reused");
+    }, {
+      debounceMs: 0,
+      coordinator,
+      onEvent: (payload) => {
+        if (payload.event) seen.push(payload.event);
+      },
+    });
+
+    source.emit({ id: "evt-1", event: "agent.steer.buffered", properties: { kind: "append" } });
+
+    expect(seen).toEqual(["agent.steer.buffered"]);
+    expect(keys).toEqual([queryKeys.runs.events("run-shared-payload", 1000)]);
+
+    firstCleanup();
+    secondCleanup();
     coordinator.close();
   });
 

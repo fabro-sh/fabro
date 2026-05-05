@@ -591,8 +591,8 @@ async fn scenario_steering_mid_task(session: &mut Session, dir: &Path) {
     // Setup: create a file the LLM will read (triggering a tool call)
     std::fs::write(dir.join("task.txt"), "read me first").expect("write task.txt");
 
-    // Grab handles before process_input borrows &mut self
-    let steering_queue = session.steering_queue_handle();
+    // Grab handle before process_input borrows &mut self
+    let control = session.control_handle();
     let mut rx = session.subscribe();
 
     // Spawn a task that waits for the first tool call, then injects steering
@@ -602,12 +602,10 @@ async fn scenario_steering_mid_task(session: &mut Session, dir: &Path) {
                 event.event,
                 fabro_agent::AgentEvent::ToolCallCompleted { .. }
             ) {
-                steering_queue
-                    .lock()
-                    .expect("steering queue lock")
-                    .push_back(
-                        "Stop what you are doing. Create a file called steered.txt containing 'steered' and do nothing else.".to_string(),
-                    );
+                control.steer(
+                    "Stop what you are doing. Create a file called steered.txt containing 'steered' and do nothing else.".to_string(),
+                    None,
+                );
                 break;
             }
         }
