@@ -214,7 +214,7 @@
                 "pages": [
                   "GET /api/v1/runs/{id}/checkpoint",
                   "GET /api/v1/runs/{id}/stages",
-                  "GET /api/v1/runs/{id}/stages/{stageId}/turns",
+                  "GET /api/v1/runs/{id}/stages/{stageId}/events",
                   "GET /api/v1/runs/{id}/settings"
                 ]
               }
