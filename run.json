@@ -1,0 +1,521 @@
+{
+  "spec": {
+    "run_id": "01KQW839X61WJ8MYWJB9P9WV66",
+    "settings": {
+      "project": {
+        "name": null,
+        "description": null,
+        "directory": ".",
+        "metadata": {}
+      },
+      "workflow": {
+        "name": null,
+        "description": null,
+        "graph": "workflow.fabro",
+        "metadata": {}
+      },
+      "run": {
+        "goal": {
+          "type": "inline",
+          "value": "# Move GitHub token permissions from `[server.integrations.github]` to `[run.integrations.github]`\n\n## Context\n\nToday `[server.integrations.github.permissions]` controls what scopes Fabro requests on the Installation Access Token it injects into the sandbox as `GITHUB_TOKEN`. This is conceptually wrong:\n\n- Token permissions describe what *this run* is authorized to do, not the server's identity.\n- The current key is server-only. `workflow.toml` and `project.toml` cannot override it (`builders.rs:394` strips `server.*` from per-workflow layers), so projects/workflows can't tighten or relax permissions.\n- The public docs (`integrations/github.mdx:211-220`) already describe a per-run config, which never existed in code. The intent has always been run-level.\n\nGreenfield app — no migration, no backwards compat. Moving permissions to `[run.integrations.github.permissions]` makes the natural layer-merge (workflow > project > user > defaults) Just Work: server admins set defaults in `~/.fabro/settings.toml`, projects and workflows override.\n\n## Security model\n\nRun config is trusted policy input for sandbox token scopes. The upper bound on what Fabro can mint is the GitHub App installation's granted permissions; Fabro does **not** impose a separate server-side cap. Operators must not run untrusted workflow/project/user TOML against a broadly-scoped App installation. Preflight prints requested permissions so reviewers can see them; no enforcement layer beyond GitHub's own.\n\n## Design\n\nNew TOML path: `[run.integrations.github.permissions]`. Creates a fresh `[run.integrations]` namespace for future run-level integration knobs.\n\n**Merge semantics** (presence-aware, hand-rolled). `ReplaceMap` does NOT work here: `maps.rs:76-80` is `if self.0.is_empty() { other } else { self }`, i.e. an empty higher layer falls back to the inherited map. We need empty-wins-as-clear, so we don't reuse `ReplaceMap` (and don't change global semantics for other users).\n\nLayer field: `pub permissions: Option<HashMap<String, InterpString>>`.\n\n| Higher layer | Lower layer | Result |\n|---|---|---|\n| `None` | anything | lower (inherit) |\n| `Some(map)` | anything | `Some(map)` (full replace, including `Some({})` = clear) |\n\nHand-roll `Combine` on `RunIntegrationsGithubLayer`:\n```rust\nimpl Combine for RunIntegrationsGithubLayer {\n    fn combine(self, other: Self) -> Self {\n        Self { permissions: self.permissions.or(other.permissions) }\n    }\n}\n```\nDon't derive — the blanket `Option<T: Combine>` impl recurses into the inner type and would reintroduce the empty-fallback bug.\n\nResolved type collapses the Option: `pub permissions: HashMap<String, InterpString>` where empty = no token requested. The presence distinction only matters during merge.\n\n**Interpolation**: keep `InterpString` in the resolved type. Resolve to `String` at the start-services construction boundary, matching the existing pattern at `server.rs:2763-2772`. No early resolution in `resolve_run`.\n\n## Changes\n\n### 1. Config schema — `lib/crates/fabro-config/src/layers/run.rs`\n\nAdd new layer types. `RunIntegrationsLayer` derives `Combine` normally; `RunIntegrationsGithubLayer` does NOT — hand-roll `Combine` (see Design section) so `Some({})` is honored as a clear sentinel.\n\n```rust\n/// `[run.integrations]` — run-level integration knobs.\n#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]\n#[serde(deny_unknown_fields)]\npub struct RunIntegrationsLayer {\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    pub github: Option<RunIntegrationsGithubLayer>,\n}\n\n/// `[run.integrations.github]` — runtime GitHub token shape.\n#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]\n#[serde(deny_unknown_fields)]\npub struct RunIntegrationsGithubLayer {\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    pub permissions: Option<HashMap<String, InterpString>>,\n}\n\nimpl Combine for RunIntegrationsGithubLayer {\n    fn combine(self, other: Self) -> Self {\n        Self { permissions: self.permissions.or(other.permissions) }\n    }\n}\n```\n\nAdd `pub integrations: Option<RunIntegrationsLayer>` to `RunLayer`.\n\n### 2. Config schema — server side\n\n`lib/crates/fabro-config/src/layers/server.rs:226`: remove `permissions: StickyMap<InterpString>` from `GithubIntegrationLayer`. Server struct keeps only identity/auth/webhook fields.\n\n### 3. Resolved types — `lib/crates/fabro-types/src/settings/run.rs`\n\nResolved types collapse the layer-time `Option` (presence is only meaningful during merge):\n\n```rust\npub struct RunIntegrationsSettings {\n    pub github: RunIntegrationsGithubSettings,\n}\n\npub struct RunIntegrationsGithubSettings {\n    pub permissions: HashMap<String, InterpString>, // empty = no token\n}\n```\n\nAdd `integrations: RunIntegrationsSettings` to `RunNamespace`. Drop `permissions` from the resolved `GithubIntegrationSettings` in fabro-types.\n\n### 4. Resolver — `lib/crates/fabro-config/src/resolve/run.rs`\n\nAdd `fn resolve_integrations(layer: Option<&RunIntegrationsLayer>) -> RunIntegrationsSettings`. Pass through `InterpString`s untouched — do NOT resolve env vars here. Collapse `Option<HashMap<...>>` → `HashMap<...>` (None and Some({}) both become empty).\n\n`lib/crates/fabro-config/src/resolve/server.rs:465`: drop the line that copies `permissions` into the resolved github settings.\n\n### 5. Server consumer — `lib/crates/fabro-server`\n\nFour read sites swap from `server_settings.server.integrations.github.permissions` to `run_spec.settings.run.integrations.github.permissions` (a flat `HashMap<String, InterpString>`; empty = no token):\n\n- `run_manifest.rs:488` — clone-credential gate inside `prepare_manifest`.\n- `run_manifest.rs:1184-1235` — `run_github_token_check`. Change signature to take resolved run permissions; resolve `InterpString`s inside the function for both minting and the report.\n- `server.rs:2727` — forced-credential gate in run launch path.\n- `server.rs:2763-2772` — InterpString → String resolution for `StartServices.github_permissions`. Read from run settings instead of server settings; same resolution logic.\n\n### 5b. Bundled-workflow TOML parsing — `lib/crates/fabro-server/src/run_manifest.rs:290-307`\n\n`root_workflow_run_layer` currently parses the workflow TOML as a raw `toml::Table`, lifts out `run`, and silently discards every other top-level key. That means stale `[server.integrations.github.permissions]` is not caught by `deny_unknown_fields`.\n\nNaive \"reject any non-`run` key\" would break valid workflow TOML (every workflow.toml in the repo has `_version = 1`; `hello/workflow.toml` has `[workflow]`). `SettingsLayer` (`layers/settings.rs:21-37`) is the schema for a settings file: `_version`, `project`, `workflow`, `run`, `cli`, `server`, `features`.\n\nFix: parse the source via `source.parse::<SettingsLayer>()` and take `layer.run.unwrap_or_default()`. That gives:\n- valid top-level domains parse without error;\n- stale `[server.integrations.github.permissions]` fails because `permissions` is no longer a known field on `GithubIntegrationLayer` (section 2) and the layer has `serde(deny_unknown_fields)`;\n- shape-valid `[server.*]` in a workflow.toml is silently ignored downstream by `builders.rs:394`, preserving today's behavior (workflow.toml shouldn't set server config, but doesn't blow up either).\n\n`resolve_manifest_dockerfile(&mut run, &config.path, &workflow.files)` (line 305) still runs on the extracted `RunLayer`.\n\n### 6. CLI worker — `lib/crates/fabro-cli/src/commands/run/runner.rs` (P0, was missing)\n\nTwo reads on the CLI launch path that today still point at the server-side field:\n\n- `runner.rs:120` — `github_permissions: HashMap::new()` is hardcoded. Source from `run_spec.settings.run.integrations.github.permissions`, applying the same `InterpString` → `String` resolution as the server side.\n- `runner.rs:514-555` — `maybe_build_github_credentials`. Line 524 reads `settings.server.integrations.github.permissions.is_empty()` to decide whether credentials are required. Swap to read the run-level permissions. Identity fields (`strategy`, `app_id`, `slug`) at lines 527-538 stay on the server side.\n\nTo make this testable, factor two private helpers in `runner.rs`:\n- `fn resolve_run_github_permissions(run: &RunNamespace) -> HashMap<String, String>` — InterpString resolution loop, same as the server side. Reuse server-side helper if one exists; otherwise extract a shared one in fabro-config or fabro-server.\n- `fn requires_github_credentials(run: &RunNamespace, server: Option<&ServerNamespace>) -> bool` — folds the existing clone/PR/permissions gates.\n\nBoth are pure functions of resolved settings; unit-test them in `#[cfg(test)] mod tests` inside `runner.rs`. Don't try to reach private items from an integration test in `tests/it/`.\n\nWithout this fix, CLI-launched runs silently get no `GITHUB_TOKEN` regardless of TOML.\n\nDownstream is unchanged: `StartServices.github_permissions` → `SandboxEnvSpec.github_permissions` (`fabro-workflow/src/operations/start.rs:99`, `pipeline/types.rs:225`) → `mint_github_token` + `GITHUB_TOKEN` injection at `pipeline/initialize.rs:240`.\n\n### 7. Parse hints — `lib/crates/fabro-config/src/parse.rs:117-118`\n\nUpdate the legacy-`[github]` migration hint to distinguish identity vs. permissions. Suggested wording:\n- `\"github\"` → `\"split into [server.integrations.github] (App identity/auth) and [run.integrations.github.permissions] (sandbox token scopes)\"`.\n\nAlso: ensure `[server.integrations.github]` with a `permissions` subkey produces a `deny_unknown_fields` error pointing at the new path. If automatic, no extra code; if not, add a targeted parse-time check.\n\n### 8. OpenAPI — `docs/public/api-reference/fabro-api.yaml`\n\nWire shape mirrors the resolved Rust types (no `Option`s, no nullability):\n\n- **Remove** `permissions` from `GithubIntegrationSettings` (line 7212): drop the property and remove from `required`.\n- **Add** new schemas:\n  - `RunIntegrationsSettings`: `properties: { github: { $ref: \"#/components/schemas/RunIntegrationsGithubSettings\" } }`, `required: [\"github\"]`.\n  - `RunIntegrationsGithubSettings`: `properties: { permissions: { type: object, additionalProperties: { type: string } } }`, `required: [\"permissions\"]`.\n- **Add** `integrations: { $ref: \"#/components/schemas/RunIntegrationsSettings\" }` to `RunNamespace.properties` and to `RunNamespace.required`.\n\nThe collapsed-Option resolved types (section 3) make this clean: `github` is always present, `permissions` is always an object (possibly empty). No `nullable`, no `oneOf`, no `skip_serializing_if` to debate.\n\nType ownership: progenitor auto-generates new run DTOs (Explore confirmed no `with_replacement` for run types today). No new `with_replacement` entries; do not split into hand-rolled DTOs unless a real semantic divergence emerges. Add a fabro-api JSON parity test asserting OpenAPI's `RunIntegrationsGithubSettings` round-trips through the resolved Rust type, including the empty-permissions case.\n\nRegenerate TS client: `cd lib/packages/fabro-api-client && bun run generate`.\n\n### 9. Repo TOMLs — rewrite\n\n- `.fabro/workflows/gh-triage/workflow.toml`\n- `.fabro/workflows/implement-issue/workflow.toml`\n- `.fabro/workflows/gh-list/workflow.toml`\n\nEach: `[server.integrations.github.permissions]` → `[run.integrations.github.permissions]`.\n\n### 10. User settings (advisory)\n\n`~/.fabro/settings.toml` should be rewritten to put a default at `[run.integrations.github.permissions]`. Don't auto-edit; cover in verification.\n\n### 11. Docs — `docs/public/integrations/github.mdx`\n\n- Line 35 (overview table): rewrite the row to reference `[run.integrations.github.permissions]`.\n- Lines 209-220 (\"GITHUB_TOKEN injection\"): rewrite. Show canonical run-level path. Note `~/.fabro/settings.toml` is the natural place for server defaults because it's the user layer of the same merge stack. Drop the `[github]` shorthand from line 211 (never existed in code).\n- Add the security-model note (boundary = installation grants, no Fabro-side cap).\n\n### 12. Tests\n\n**Layer parsing + merge** (`lib/crates/fabro-config/src/tests/`, parse real TOML at each layer; not just resolver-level fixtures):\n- Parse a workflow.toml with `[run.integrations.github.permissions]` — assert the layer round-trips.\n- Merge user `{ contents = \"read\" }` + workflow `{ issues = \"write\" }` — assert workflow fully replaces: result is `{ issues = \"write\" }`.\n- Merge user `{ contents = \"read\" }` + workflow absent (no `[run.integrations]` block) — assert inheritance: result is `{ contents = \"read\" }`.\n- Merge user `{ contents = \"read\" }` + workflow `permissions = {}` — assert clear: resolved permissions is empty.\n- Negative: `[server.integrations.github.permissions]` in user/project/workflow TOML must error via `deny_unknown_fields`.\n- Negative (bundled workflow path, P2): targeted test exercising `root_workflow_run_layer` (`run_manifest.rs:290`) with a workflow.toml containing a stale `[server.integrations.github.permissions]` block — assert it errors via `deny_unknown_fields` after the rewrite to parse through `SettingsLayer`. Pair with a positive test asserting `_version = 1` and a `[workflow]` block still parse cleanly through this code path.\n\n**Resolver** (`resolve/run.rs` tests): assert `InterpString` is preserved in resolved settings, not flattened to `String`. Assert resolved `permissions` is `HashMap<String, InterpString>` (Option collapsed).\n\n**Preflight** (`run_manifest.rs:1822` and surrounds):\n- Add a case where the run config sets `permissions = { issues = \"read\" }` and the GitHub App is configured — assert `run_github_token_check` reports `Pass`.\n- Update `server_settings_fixture` (`run_manifest.rs:1390`) usage in any test that previously set permissions through it; rewrite to set via run layer.\n\n**CLI worker path** (P0): unit-test the new private helpers in `runner.rs`'s `#[cfg(test)] mod tests`:\n- `resolve_run_github_permissions` — given a `RunNamespace` with `InterpString` permissions referencing env vars, returns the resolved `HashMap<String, String>`.\n- `requires_github_credentials` — exercises each truth-table case (clone needed, PR enabled, permissions non-empty, all-absent).\n- Do not try to assert `StartServices.github_permissions` from an integration test — those internals are private. End-to-end behavior is covered by the smoke runs in Verification.\n\n## Verification\n\n1. `cargo build --workspace` clean.\n2. `cargo nextest run -p fabro-config` — layer/resolve tests pass, including the new override + replace-semantics + deny-unknown tests.\n3. `cargo nextest run -p fabro-server -p fabro-cli` — preflight + run-manifest + worker tests pass.\n4. `cargo nextest run -p fabro-api` — JSON parity test for the new run integrations schema passes.\n5. Smoke run via server (manual):\n   - Update `~/.fabro/settings.toml` to put `[run.integrations.github.permissions]` defaults (`pull_requests = \"read\"`, `issues = \"read\"`).\n   - Restart `fabro server`.\n   - `fabro run gh-list --no-retro`; both stages exit 0 with PR/issue listings on stdout.\n   - `fabro logs <id>` shows `gh pr list` returning data; no \"populate the GH_TOKEN\" error.\n6. Smoke run via CLI worker path (manual): same as above but with a `fabro run` invocation that uses the local-CLI worker path (not HTTP). Confirms P0 fix.\n7. Override test: in `gh-list/workflow.toml`, set `permissions = { issues = \"write\" }` over a server default of `read`. Confirm the minted-token preflight summary shows `issues: write` and not `read`.\n8. Tightening test: in another workflow, set `permissions = {}`. Confirm preflight reports no token requested and the sandbox env has no `GITHUB_TOKEN`.\n9. `cd apps/fabro-web && bun run typecheck && bun test` — generated TS client compiles against the new schema.\n\n## Open questions\n\n1. Anything else worth promoting to `[run.integrations.*]` now (Slack, Discord run-time config)? Recommendation: leave empty until a concrete need lands; don't speculate.\n2. Should preflight surface the *resolved* permission strings in its report, or the raw `InterpString` source? Recommendation: resolved, so reviewers see what the App will actually be asked for; treat unresolved env-var fallbacks as a preflight warning.\n3. `resolve_run_github_permissions` location — should the InterpString-resolution loop live in fabro-config (shared by server + CLI worker), or in each consumer? Recommendation: extract to fabro-config / fabro-types alongside the resolved type, so server (`server.rs:2763-2772`) and CLI (`runner.rs`) both call the same helper. Avoids two copies drifting.\n"
+        },
+        "working_dir": null,
+        "metadata": {},
+        "inputs": {},
+        "model": {
+          "provider": "anthropic",
+          "name": "claude-sonnet-4-6",
+          "fallbacks": []
+        },
+        "git": {
+          "author": null
+        },
+        "prepare": {
+          "commands": [],
+          "timeout_ms": 300000
+        },
+        "execution": {
+          "mode": "normal",
+          "approval": "prompt",
+          "retros": true
+        },
+        "checkpoint": {
+          "exclude_globs": []
+        },
+        "sandbox": {
+          "provider": "daytona",
+          "preserve": false,
+          "devcontainer": false,
+          "env": {},
+          "local": {
+            "worktree_mode": "always"
+          },
+          "docker": {
+            "image": "buildpack-deps:noble",
+            "network_mode": null,
+            "memory_limit": 4000000000,
+            "cpu_quota": 200000,
+            "env_vars": {},
+            "skip_clone": false
+          },
+          "daytona": {
+            "auto_stop_interval": 30,
+            "labels": {
+              "repo": "fabro-sh/fabro"
+            },
+            "snapshot": {
+              "name": "fabro-v8",
+              "cpu": 8,
+              "memory_gb": 16,
+              "disk_gb": 20,
+              "dockerfile": {
+                "type": "inline",
+                "value": "FROM ubuntu:24.04\n\nRUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 && rm -rf /var/lib/apt/lists/*\n\n# GitHub CLI\nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*\n\n# Rust\nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\nENV PATH=\"/root/.cargo/bin:${PATH}\"\nRUN rustup toolchain install nightly-2026-04-14 --profile minimal --component clippy,rustfmt\nRUN cargo install cargo-nextest --locked\nENV CARGO_INCREMENTAL=0\n\n# Bun\nRUN curl -fsSL https://bun.sh/install | bash\nENV PATH=\"/root/.bun/bin:${PATH}\"\n\nWORKDIR /root\n"
+              }
+            },
+            "network": null,
+            "skip_clone": false
+          }
+        },
+        "notifications": {},
+        "interviews": {
+          "provider": null,
+          "slack": null,
+          "discord": null,
+          "teams": null
+        },
+        "agent": {
+          "permissions": null,
+          "mcps": {}
+        },
+        "hooks": [],
+        "scm": {
+          "provider": null,
+          "owner": null,
+          "repository": null,
+          "github": null
+        },
+        "pull_request": {
+          "enabled": true,
+          "draft": false,
+          "auto_merge": false,
+          "merge_strategy": "squash"
+        },
+        "artifacts": {
+          "include": []
+        }
+      }
+    },
+    "graph": {
+      "name": "ImplementPlan",
+      "nodes": {
+        "preflight_lint": {
+          "id": "preflight_lint",
+          "attrs": {
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Preflight Lint"
+            },
+            "shape": {
+              "String": "parallelogram"
+            }
+          }
+        },
+        "fixup": {
+          "id": "fixup",
+          "attrs": {
+            "max_visits": {
+              "Integer": 3
+            },
+            "prompt": {
+              "String": "The verify step failed. Read the build output from context and fix all clippy lint warnings, test failures, and generated docs errors."
+            },
+            "label": {
+              "String": "Fixup"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "implement": {
+          "id": "implement",
+          "attrs": {
+            "label": {
+              "String": "Implement"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "prompt": {
+              "String": "Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD."
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "verify": {
+          "id": "verify",
+          "attrs": {
+            "label": {
+              "String": "Verify"
+            },
+            "retry_target": {
+              "String": "fixup"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "goal_gate": {
+              "Boolean": true
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1 && cargo dev docs refresh 2>&1 && cargo dev docs check 2>&1"
+            },
+            "shape": {
+              "String": "parallelogram"
+            }
+          }
+        },
+        "fix_lints": {
+          "id": "fix_lints",
+          "attrs": {
+            "max_visits": {
+              "Integer": 3
+            },
+            "prompt": {
+              "String": "The preflight lint step failed. Read the build output from context and fix all clippy lint warnings."
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Fix Lints"
+            }
+          }
+        },
+        "toolchain": {
+          "id": "toolchain",
+          "attrs": {
+            "script": {
+              "String": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1"
+            },
+            "label": {
+              "String": "Toolchain"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "start": {
+          "id": "start",
+          "attrs": {
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Start"
+            },
+            "shape": {
+              "String": "Mdiamond"
+            }
+          }
+        },
+        "simplify_opus": {
+          "id": "simplify_opus",
+          "attrs": {
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "label": {
+              "String": "Simplify (Opus)"
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "simplify_gpt": {
+          "id": "simplify_gpt",
+          "attrs": {
+            "provider": {
+              "String": "openai"
+            },
+            "label": {
+              "String": "Simplify (GPT-55)"
+            },
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "model": {
+              "String": "gpt-5.5"
+            }
+          }
+        },
+        "exit": {
+          "id": "exit",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "shape": {
+              "String": "Msquare"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Exit"
+            }
+          }
+        },
+        "preflight_compile": {
+          "id": "preflight_compile",
+          "attrs": {
+            "max_retries": {
+              "Integer": 0
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Preflight Compile"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "script": {
+              "String": "cargo check -q --workspace 2>&1"
+            }
+          }
+        },
+        "fmt": {
+          "id": "fmt",
+          "attrs": {
+            "max_retries": {
+              "Integer": 0
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Format"
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 fmt --all 2>&1"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "start",
+          "to": "toolchain",
+          "attrs": {}
+        },
+        {
+          "from": "toolchain",
+          "to": "preflight_compile",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "toolchain",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_compile",
+          "to": "preflight_lint",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_compile",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_lint",
+          "to": "implement",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_lint",
+          "to": "fix_lints",
+          "attrs": {}
+        },
+        {
+          "from": "fix_lints",
+          "to": "preflight_lint",
+          "attrs": {}
+        },
+        {
+          "from": "implement",
+          "to": "simplify_opus",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_opus",
+          "to": "simplify_gpt",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_gpt",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "verify",
+          "to": "fmt",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "verify",
+          "to": "fixup",
+          "attrs": {}
+        },
+        {
+          "from": "fixup",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "fmt",
+          "to": "exit",
+          "attrs": {}
+        }
+      ],
+      "attrs": {
+        "model_stylesheet": {
+          "String": "\n            * { model: claude-opus-4-7; }\n        "
+        },
+        "goal": {
+          "String": "# Move GitHub token permissions from `[server.integrations.github]` to `[run.integrations.github]`\n\n## Context\n\nToday `[server.integrations.github.permissions]` controls what scopes Fabro requests on the Installation Access Token it injects into the sandbox as `GITHUB_TOKEN`. This is conceptually wrong:\n\n- Token permissions describe what *this run* is authorized to do, not the server's identity.\n- The current key is server-only. `workflow.toml` and `project.toml` cannot override it (`builders.rs:394` strips `server.*` from per-workflow layers), so projects/workflows can't tighten or relax permissions.\n- The public docs (`integrations/github.mdx:211-220`) already describe a per-run config, which never existed in code. The intent has always been run-level.\n\nGreenfield app — no migration, no backwards compat. Moving permissions to `[run.integrations.github.permissions]` makes the natural layer-merge (workflow > project > user > defaults) Just Work: server admins set defaults in `~/.fabro/settings.toml`, projects and workflows override.\n\n## Security model\n\nRun config is trusted policy input for sandbox token scopes. The upper bound on what Fabro can mint is the GitHub App installation's granted permissions; Fabro does **not** impose a separate server-side cap. Operators must not run untrusted workflow/project/user TOML against a broadly-scoped App installation. Preflight prints requested permissions so reviewers can see them; no enforcement layer beyond GitHub's own.\n\n## Design\n\nNew TOML path: `[run.integrations.github.permissions]`. Creates a fresh `[run.integrations]` namespace for future run-level integration knobs.\n\n**Merge semantics** (presence-aware, hand-rolled). `ReplaceMap` does NOT work here: `maps.rs:76-80` is `if self.0.is_empty() { other } else { self }`, i.e. an empty higher layer falls back to the inherited map. We need empty-wins-as-clear, so we don't reuse `ReplaceMap` (and don't change global semantics for other users).\n\nLayer field: `pub permissions: Option<HashMap<String, InterpString>>`.\n\n| Higher layer | Lower layer | Result |\n|---|---|---|\n| `None` | anything | lower (inherit) |\n| `Some(map)` | anything | `Some(map)` (full replace, including `Some({})` = clear) |\n\nHand-roll `Combine` on `RunIntegrationsGithubLayer`:\n```rust\nimpl Combine for RunIntegrationsGithubLayer {\n    fn combine(self, other: Self) -> Self {\n        Self { permissions: self.permissions.or(other.permissions) }\n    }\n}\n```\nDon't derive — the blanket `Option<T: Combine>` impl recurses into the inner type and would reintroduce the empty-fallback bug.\n\nResolved type collapses the Option: `pub permissions: HashMap<String, InterpString>` where empty = no token requested. The presence distinction only matters during merge.\n\n**Interpolation**: keep `InterpString` in the resolved type. Resolve to `String` at the start-services construction boundary, matching the existing pattern at `server.rs:2763-2772`. No early resolution in `resolve_run`.\n\n## Changes\n\n### 1. Config schema — `lib/crates/fabro-config/src/layers/run.rs`\n\nAdd new layer types. `RunIntegrationsLayer` derives `Combine` normally; `RunIntegrationsGithubLayer` does NOT — hand-roll `Combine` (see Design section) so `Some({})` is honored as a clear sentinel.\n\n```rust\n/// `[run.integrations]` — run-level integration knobs.\n#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]\n#[serde(deny_unknown_fields)]\npub struct RunIntegrationsLayer {\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    pub github: Option<RunIntegrationsGithubLayer>,\n}\n\n/// `[run.integrations.github]` — runtime GitHub token shape.\n#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]\n#[serde(deny_unknown_fields)]\npub struct RunIntegrationsGithubLayer {\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    pub permissions: Option<HashMap<String, InterpString>>,\n}\n\nimpl Combine for RunIntegrationsGithubLayer {\n    fn combine(self, other: Self) -> Self {\n        Self { permissions: self.permissions.or(other.permissions) }\n    }\n}\n```\n\nAdd `pub integrations: Option<RunIntegrationsLayer>` to `RunLayer`.\n\n### 2. Config schema — server side\n\n`lib/crates/fabro-config/src/layers/server.rs:226`: remove `permissions: StickyMap<InterpString>` from `GithubIntegrationLayer`. Server struct keeps only identity/auth/webhook fields.\n\n### 3. Resolved types — `lib/crates/fabro-types/src/settings/run.rs`\n\nResolved types collapse the layer-time `Option` (presence is only meaningful during merge):\n\n```rust\npub struct RunIntegrationsSettings {\n    pub github: RunIntegrationsGithubSettings,\n}\n\npub struct RunIntegrationsGithubSettings {\n    pub permissions: HashMap<String, InterpString>, // empty = no token\n}\n```\n\nAdd `integrations: RunIntegrationsSettings` to `RunNamespace`. Drop `permissions` from the resolved `GithubIntegrationSettings` in fabro-types.\n\n### 4. Resolver — `lib/crates/fabro-config/src/resolve/run.rs`\n\nAdd `fn resolve_integrations(layer: Option<&RunIntegrationsLayer>) -> RunIntegrationsSettings`. Pass through `InterpString`s untouched — do NOT resolve env vars here. Collapse `Option<HashMap<...>>` → `HashMap<...>` (None and Some({}) both become empty).\n\n`lib/crates/fabro-config/src/resolve/server.rs:465`: drop the line that copies `permissions` into the resolved github settings.\n\n### 5. Server consumer — `lib/crates/fabro-server`\n\nFour read sites swap from `server_settings.server.integrations.github.permissions` to `run_spec.settings.run.integrations.github.permissions` (a flat `HashMap<String, InterpString>`; empty = no token):\n\n- `run_manifest.rs:488` — clone-credential gate inside `prepare_manifest`.\n- `run_manifest.rs:1184-1235` — `run_github_token_check`. Change signature to take resolved run permissions; resolve `InterpString`s inside the function for both minting and the report.\n- `server.rs:2727` — forced-credential gate in run launch path.\n- `server.rs:2763-2772` — InterpString → String resolution for `StartServices.github_permissions`. Read from run settings instead of server settings; same resolution logic.\n\n### 5b. Bundled-workflow TOML parsing — `lib/crates/fabro-server/src/run_manifest.rs:290-307`\n\n`root_workflow_run_layer` currently parses the workflow TOML as a raw `toml::Table`, lifts out `run`, and silently discards every other top-level key. That means stale `[server.integrations.github.permissions]` is not caught by `deny_unknown_fields`.\n\nNaive \"reject any non-`run` key\" would break valid workflow TOML (every workflow.toml in the repo has `_version = 1`; `hello/workflow.toml` has `[workflow]`). `SettingsLayer` (`layers/settings.rs:21-37`) is the schema for a settings file: `_version`, `project`, `workflow`, `run`, `cli`, `server`, `features`.\n\nFix: parse the source via `source.parse::<SettingsLayer>()` and take `layer.run.unwrap_or_default()`. That gives:\n- valid top-level domains parse without error;\n- stale `[server.integrations.github.permissions]` fails because `permissions` is no longer a known field on `GithubIntegrationLayer` (section 2) and the layer has `serde(deny_unknown_fields)`;\n- shape-valid `[server.*]` in a workflow.toml is silently ignored downstream by `builders.rs:394`, preserving today's behavior (workflow.toml shouldn't set server config, but doesn't blow up either).\n\n`resolve_manifest_dockerfile(&mut run, &config.path, &workflow.files)` (line 305) still runs on the extracted `RunLayer`.\n\n### 6. CLI worker — `lib/crates/fabro-cli/src/commands/run/runner.rs` (P0, was missing)\n\nTwo reads on the CLI launch path that today still point at the server-side field:\n\n- `runner.rs:120` — `github_permissions: HashMap::new()` is hardcoded. Source from `run_spec.settings.run.integrations.github.permissions`, applying the same `InterpString` → `String` resolution as the server side.\n- `runner.rs:514-555` — `maybe_build_github_credentials`. Line 524 reads `settings.server.integrations.github.permissions.is_empty()` to decide whether credentials are required. Swap to read the run-level permissions. Identity fields (`strategy`, `app_id`, `slug`) at lines 527-538 stay on the server side.\n\nTo make this testable, factor two private helpers in `runner.rs`:\n- `fn resolve_run_github_permissions(run: &RunNamespace) -> HashMap<String, String>` — InterpString resolution loop, same as the server side. Reuse server-side helper if one exists; otherwise extract a shared one in fabro-config or fabro-server.\n- `fn requires_github_credentials(run: &RunNamespace, server: Option<&ServerNamespace>) -> bool` — folds the existing clone/PR/permissions gates.\n\nBoth are pure functions of resolved settings; unit-test them in `#[cfg(test)] mod tests` inside `runner.rs`. Don't try to reach private items from an integration test in `tests/it/`.\n\nWithout this fix, CLI-launched runs silently get no `GITHUB_TOKEN` regardless of TOML.\n\nDownstream is unchanged: `StartServices.github_permissions` → `SandboxEnvSpec.github_permissions` (`fabro-workflow/src/operations/start.rs:99`, `pipeline/types.rs:225`) → `mint_github_token` + `GITHUB_TOKEN` injection at `pipeline/initialize.rs:240`.\n\n### 7. Parse hints — `lib/crates/fabro-config/src/parse.rs:117-118`\n\nUpdate the legacy-`[github]` migration hint to distinguish identity vs. permissions. Suggested wording:\n- `\"github\"` → `\"split into [server.integrations.github] (App identity/auth) and [run.integrations.github.permissions] (sandbox token scopes)\"`.\n\nAlso: ensure `[server.integrations.github]` with a `permissions` subkey produces a `deny_unknown_fields` error pointing at the new path. If automatic, no extra code; if not, add a targeted parse-time check.\n\n### 8. OpenAPI — `docs/public/api-reference/fabro-api.yaml`\n\nWire shape mirrors the resolved Rust types (no `Option`s, no nullability):\n\n- **Remove** `permissions` from `GithubIntegrationSettings` (line 7212): drop the property and remove from `required`.\n- **Add** new schemas:\n  - `RunIntegrationsSettings`: `properties: { github: { $ref: \"#/components/schemas/RunIntegrationsGithubSettings\" } }`, `required: [\"github\"]`.\n  - `RunIntegrationsGithubSettings`: `properties: { permissions: { type: object, additionalProperties: { type: string } } }`, `required: [\"permissions\"]`.\n- **Add** `integrations: { $ref: \"#/components/schemas/RunIntegrationsSettings\" }` to `RunNamespace.properties` and to `RunNamespace.required`.\n\nThe collapsed-Option resolved types (section 3) make this clean: `github` is always present, `permissions` is always an object (possibly empty). No `nullable`, no `oneOf`, no `skip_serializing_if` to debate.\n\nType ownership: progenitor auto-generates new run DTOs (Explore confirmed no `with_replacement` for run types today). No new `with_replacement` entries; do not split into hand-rolled DTOs unless a real semantic divergence emerges. Add a fabro-api JSON parity test asserting OpenAPI's `RunIntegrationsGithubSettings` round-trips through the resolved Rust type, including the empty-permissions case.\n\nRegenerate TS client: `cd lib/packages/fabro-api-client && bun run generate`.\n\n### 9. Repo TOMLs — rewrite\n\n- `.fabro/workflows/gh-triage/workflow.toml`\n- `.fabro/workflows/implement-issue/workflow.toml`\n- `.fabro/workflows/gh-list/workflow.toml`\n\nEach: `[server.integrations.github.permissions]` → `[run.integrations.github.permissions]`.\n\n### 10. User settings (advisory)\n\n`~/.fabro/settings.toml` should be rewritten to put a default at `[run.integrations.github.permissions]`. Don't auto-edit; cover in verification.\n\n### 11. Docs — `docs/public/integrations/github.mdx`\n\n- Line 35 (overview table): rewrite the row to reference `[run.integrations.github.permissions]`.\n- Lines 209-220 (\"GITHUB_TOKEN injection\"): rewrite. Show canonical run-level path. Note `~/.fabro/settings.toml` is the natural place for server defaults because it's the user layer of the same merge stack. Drop the `[github]` shorthand from line 211 (never existed in code).\n- Add the security-model note (boundary = installation grants, no Fabro-side cap).\n\n### 12. Tests\n\n**Layer parsing + merge** (`lib/crates/fabro-config/src/tests/`, parse real TOML at each layer; not just resolver-level fixtures):\n- Parse a workflow.toml with `[run.integrations.github.permissions]` — assert the layer round-trips.\n- Merge user `{ contents = \"read\" }` + workflow `{ issues = \"write\" }` — assert workflow fully replaces: result is `{ issues = \"write\" }`.\n- Merge user `{ contents = \"read\" }` + workflow absent (no `[run.integrations]` block) — assert inheritance: result is `{ contents = \"read\" }`.\n- Merge user `{ contents = \"read\" }` + workflow `permissions = {}` — assert clear: resolved permissions is empty.\n- Negative: `[server.integrations.github.permissions]` in user/project/workflow TOML must error via `deny_unknown_fields`.\n- Negative (bundled workflow path, P2): targeted test exercising `root_workflow_run_layer` (`run_manifest.rs:290`) with a workflow.toml containing a stale `[server.integrations.github.permissions]` block — assert it errors via `deny_unknown_fields` after the rewrite to parse through `SettingsLayer`. Pair with a positive test asserting `_version = 1` and a `[workflow]` block still parse cleanly through this code path.\n\n**Resolver** (`resolve/run.rs` tests): assert `InterpString` is preserved in resolved settings, not flattened to `String`. Assert resolved `permissions` is `HashMap<String, InterpString>` (Option collapsed).\n\n**Preflight** (`run_manifest.rs:1822` and surrounds):\n- Add a case where the run config sets `permissions = { issues = \"read\" }` and the GitHub App is configured — assert `run_github_token_check` reports `Pass`.\n- Update `server_settings_fixture` (`run_manifest.rs:1390`) usage in any test that previously set permissions through it; rewrite to set via run layer.\n\n**CLI worker path** (P0): unit-test the new private helpers in `runner.rs`'s `#[cfg(test)] mod tests`:\n- `resolve_run_github_permissions` — given a `RunNamespace` with `InterpString` permissions referencing env vars, returns the resolved `HashMap<String, String>`.\n- `requires_github_credentials` — exercises each truth-table case (clone needed, PR enabled, permissions non-empty, all-absent).\n- Do not try to assert `StartServices.github_permissions` from an integration test — those internals are private. End-to-end behavior is covered by the smoke runs in Verification.\n\n## Verification\n\n1. `cargo build --workspace` clean.\n2. `cargo nextest run -p fabro-config` — layer/resolve tests pass, including the new override + replace-semantics + deny-unknown tests.\n3. `cargo nextest run -p fabro-server -p fabro-cli` — preflight + run-manifest + worker tests pass.\n4. `cargo nextest run -p fabro-api` — JSON parity test for the new run integrations schema passes.\n5. Smoke run via server (manual):\n   - Update `~/.fabro/settings.toml` to put `[run.integrations.github.permissions]` defaults (`pull_requests = \"read\"`, `issues = \"read\"`).\n   - Restart `fabro server`.\n   - `fabro run gh-list --no-retro`; both stages exit 0 with PR/issue listings on stdout.\n   - `fabro logs <id>` shows `gh pr list` returning data; no \"populate the GH_TOKEN\" error.\n6. Smoke run via CLI worker path (manual): same as above but with a `fabro run` invocation that uses the local-CLI worker path (not HTTP). Confirms P0 fix.\n7. Override test: in `gh-list/workflow.toml`, set `permissions = { issues = \"write\" }` over a server default of `read`. Confirm the minted-token preflight summary shows `issues: write` and not `read`.\n8. Tightening test: in another workflow, set `permissions = {}`. Confirm preflight reports no token requested and the sandbox env has no `GITHUB_TOKEN`.\n9. `cd apps/fabro-web && bun run typecheck && bun test` — generated TS client compiles against the new schema.\n\n## Open questions\n\n1. Anything else worth promoting to `[run.integrations.*]` now (Slack, Discord run-time config)? Recommendation: leave empty until a concrete need lands; don't speculate.\n2. Should preflight surface the *resolved* permission strings in its report, or the raw `InterpString` source? Recommendation: resolved, so reviewers see what the App will actually be asked for; treat unresolved env-var fallbacks as a preflight warning.\n3. `resolve_run_github_permissions` location — should the InterpString-resolution loop live in fabro-config (shared by server + CLI worker), or in each consumer? Recommendation: extract to fabro-config / fabro-types alongside the resolved type, so server (`server.rs:2763-2772`) and CLI (`runner.rs`) both call the same helper. Avoids two copies drifting.\n"
+        },
+        "rankdir": {
+          "String": "LR"
+        }
+      }
+    },
+    "workflow_slug": "implement-plan",
+    "source_directory": "/Users/bhelmkamp/p/fabro-sh/fabro",
+    "provenance": {
+      "server": {
+        "version": "0.224.0-nightly.0"
+      },
+      "client": {
+        "user_agent": "fabro-cli/0.224.0-nightly.0",
+        "name": "fabro-cli",
+        "version": "0.224.0-nightly.0"
+      },
+      "subject": {
+        "kind": "user",
+        "identity": {
+          "issuer": "https://github.com",
+          "subject": "19"
+        },
+        "login": "brynary",
+        "auth_method": "github"
+      }
+    },
+    "manifest_blob": "33274d6971fe163f6dbd5ed1ceb62371dca1d7d8f1b2c1c115df0c323450d8e3",
+    "definition_blob": "791b2ce7454b6fff8fa26bea4af48533a25d0e56c4cecc44be1ea071680b4f9d",
+    "git": {
+      "origin_url": "https://github.com/fabro-sh/fabro",
+      "branch": "main",
+      "sha": "7cec7825d9dc5aeb4a194cc6742ae9c228503dad",
+      "dirty": "dirty",
+      "push_outcome": {
+        "type": "not_attempted"
+      }
+    },
+    "in_place": false
+  },
+  "graph_source": "digraph ImplementPlan {\n    graph [\n        goal=\"Implement and simplify\",\n        model_stylesheet=\"\n            * { model: claude-opus-4-7; }\n        \"\n    ]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    toolchain         [label=\"Toolchain\", shape=parallelogram, script=\"command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1\", max_retries=0]\n    preflight_compile [label=\"Preflight Compile\", shape=parallelogram, script=\"cargo check -q --workspace 2>&1\", max_retries=0]\n    preflight_lint    [label=\"Preflight Lint\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1\", max_retries=0]\n    fix_lints         [label=\"Fix Lints\", prompt=\"The preflight lint step failed. Read the build output from context and fix all clippy lint warnings.\", max_visits=3]\n    implement         [label=\"Implement\", prompt=\"Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD.\"]\n    simplify_opus     [label=\"Simplify (Opus)\", prompt=\"@prompts/simplify.md\"]\n    simplify_gpt      [label=\"Simplify (GPT-55)\", prompt=\"@prompts/simplify.md\", model=\"gpt-55\"]\n    verify            [label=\"Verify\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1 && cargo dev docs refresh 2>&1 && cargo dev docs check 2>&1\", goal_gate=true, retry_target=\"fixup\"]\n    fixup             [label=\"Fixup\", prompt=\"The verify step failed. Read the build output from context and fix all clippy lint warnings, test failures, and generated docs errors.\", max_visits=3]\n    fmt               [label=\"Format\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 fmt --all 2>&1\", max_retries=0]\n\n    start -> toolchain\n    toolchain -> preflight_compile [condition=\"outcome=succeeded\"]\n    toolchain -> exit\n    preflight_compile -> preflight_lint [condition=\"outcome=succeeded\"]\n    preflight_compile -> exit\n    preflight_lint -> implement [condition=\"outcome=succeeded\"]\n    preflight_lint -> fix_lints\n    fix_lints -> preflight_lint\n    implement -> simplify_opus -> simplify_gpt -> verify\n    verify -> fmt   [condition=\"outcome=succeeded\"]\n    verify -> fixup\n    fixup -> verify\n    fmt -> exit\n}\n",
+  "start": null,
+  "status": {
+    "kind": "starting"
+  },
+  "status_updated_at": "2026-05-05T14:19:00.002598Z",
+  "pending_control": null,
+  "checkpoint": null,
+  "checkpoints": [],
+  "conclusion": null,
+  "retro": null,
+  "retro_prompt": null,
+  "retro_response": null,
+  "sandbox": {
+    "provider": "daytona",
+    "working_directory": "/home/daytona/workspace",
+    "identifier": "fabro-01KQW839X61WJ8MYWJB9P9WV66",
+    "repo_cloned": true,
+    "clone_origin_url": "https://github.com/fabro-sh/fabro",
+    "clone_branch": "main"
+  },
+  "final_patch": null,
+  "pull_request": null,
+  "superseded_by": null,
+  "pending_interviews": {},
+  "stages": {}
+}
