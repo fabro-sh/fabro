@@ -1838,6 +1838,7 @@ mod tests {
             failure:     failure.clone(),
             will_retry:  false,
             duration_ms: 0,
+            billing:     None,
             actor:       None,
         };
 

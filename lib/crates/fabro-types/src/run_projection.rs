@@ -4,9 +4,9 @@ use std::num::NonZeroU32;
 use chrono::{DateTime, Utc};
 
 use crate::{
-    Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition, PullRequestRecord, Retro,
-    RunControlAction, RunId, RunSpec, RunStatus, SandboxRecord, StageCompletion, StageId,
-    StartRecord,
+    BilledModelUsage, Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition,
+    PullRequestRecord, Retro, RunControlAction, RunId, RunSpec, RunStatus, SandboxRecord,
+    StageCompletion, StageId, StartRecord,
 };
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -44,6 +44,10 @@ pub struct StageProjection {
     pub prompt:            Option<String>,
     pub response:          Option<String>,
     pub completion:        Option<StageCompletion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms:       Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage:             Option<BilledModelUsage>,
     pub provider_used:     Option<serde_json::Value>,
     pub diff:              Option<String>,
     pub script_invocation: Option<serde_json::Value>,
@@ -78,6 +82,8 @@ impl StageProjection {
             prompt: None,
             response: None,
             completion: None,
+            duration_ms: None,
+            usage: None,
             provider_used: None,
             diff: None,
             script_invocation: None,

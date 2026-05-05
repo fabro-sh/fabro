@@ -211,6 +211,7 @@ mod duration_tests {
                 failure: None,
                 will_retry: true,
                 duration_ms,
+                billing: None,
             }),
         };
         EventEnvelope { seq, event }

@@ -2231,6 +2231,7 @@ async fn list_run_stages_projects_retrying_until_completion() {
             failure:     FailureDetail::new("try again", FailureCategory::TransientInfra),
             will_retry:  true,
             duration_ms: 10,
+            billing:     None,
             actor:       None,
         },
     )
@@ -2614,6 +2615,7 @@ async fn list_run_stages_shows_retrying_after_failed_event() {
             failure:     FailureDetail::new("flake", FailureCategory::TransientInfra),
             will_retry:  true,
             duration_ms: 5,
+            billing:     None,
             actor:       None,
         },
     )
@@ -2693,6 +2695,7 @@ async fn list_run_stages_shows_retrying_when_failed_will_retry() {
             failure:     FailureDetail::new("flake", FailureCategory::TransientInfra),
             will_retry:  true,
             duration_ms: 5,
+            billing:     None,
             actor:       None,
         },
     )

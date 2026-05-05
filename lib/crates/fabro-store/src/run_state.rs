@@ -320,6 +320,8 @@ impl RunProjectionReducer for RunProjection {
                 let stage = self.stage_entry(node_id, visit, first_event_seq(event.seq));
                 stage.response = response;
                 stage.completion = Some(completion);
+                stage.duration_ms = Some(props.duration_ms);
+                stage.usage.clone_from(&props.billing);
             }
             EventBody::StageFailed(props) => {
                 let failure_reason = props.failure.as_ref().map(|detail| detail.message.clone());
@@ -334,6 +336,8 @@ impl RunProjectionReducer for RunProjection {
                     failure_reason,
                     timestamp: ts,
                 });
+                stage.duration_ms = Some(props.duration_ms);
+                stage.usage.clone_from(&props.billing);
             }
             EventBody::AgentSessionStarted(props) => {
                 let Some(stage) = stage_at_visit(self, stored, props.visit, event.seq) else {
@@ -613,12 +617,12 @@ mod tests {
     use fabro_types::run_event::run::RunFailedProps;
     use fabro_types::run_event::{
         CheckpointCompletedProps, InterviewCompletedProps, InterviewOption, InterviewStartedProps,
-        RunControlEffectProps, StagePromptProps, StageStartedProps,
+        RunControlEffectProps, StageCompletedProps, StagePromptProps, StageStartedProps,
     };
     use fabro_types::{
-        BlockedReason, Checkpoint, EventBody, FailureReason, Outcome, QuestionType, RunBlobId,
-        RunControlAction, RunEvent, RunStatus, StageOutcome, SuccessReason, TerminalStatus,
-        WorkflowSettings, first_event_seq, fixtures,
+        BilledModelUsage, BlockedReason, Checkpoint, EventBody, FailureReason, Outcome,
+        QuestionType, RunBlobId, RunControlAction, RunEvent, RunStatus, StageOutcome,
+        SuccessReason, TerminalStatus, WorkflowSettings, first_event_seq, fixtures,
     };
     use serde_json::json;
 
@@ -649,6 +653,32 @@ mod tests {
         let mut event = test_event(seq, body, Some(stage_id.node_id()));
         event.event.stage_id = Some(stage_id);
         event
+    }
+
+    fn test_usage(model_id: &str, input_tokens: i64, output_tokens: i64) -> BilledModelUsage {
+        serde_json::from_value(json!({
+            "input": {
+                "usage": {
+                    "model": {
+                        "provider": "openai",
+                        "model_id": model_id
+                    },
+                    "tokens": {
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens
+                    }
+                },
+                "facts": {
+                    "provider": "open_ai"
+                }
+            },
+            "total_usd_micros": input_tokens + output_tokens
+        }))
+        .unwrap()
+    }
+
+    fn usage_json(usage: &BilledModelUsage) -> serde_json::Value {
+        serde_json::to_value(usage).unwrap()
     }
 
     fn test_raw_event(
@@ -859,6 +889,130 @@ mod tests {
         let stage = state.stage(&stage_id).unwrap();
         assert_eq!(stage.first_event_seq, first_event_seq(3));
         assert_eq!(stage.prompt.as_deref(), Some("prompt"));
+    }
+
+    #[test]
+    fn stage_completed_event_captures_duration_and_usage_per_visit() {
+        let mut state = RunProjection::default();
+        let usage = test_usage("gpt-5.2", 123, 45);
+
+        state
+            .apply_event(&test_event(
+                3,
+                EventBody::StageCompleted(StageCompletedProps {
+                    index: 0,
+                    duration_ms: 789,
+                    status: StageOutcome::Succeeded,
+                    preferred_label: None,
+                    suggested_next_ids: Vec::new(),
+                    billing: Some(usage.clone()),
+                    failure: None,
+                    notes: None,
+                    files_touched: Vec::new(),
+                    context_updates: None,
+                    jump_to_node: None,
+                    context_values: None,
+                    node_visits: None,
+                    loop_failure_signatures: None,
+                    restart_failure_signatures: None,
+                    response: Some("done".to_string()),
+                    attempt: 1,
+                    max_attempts: 1,
+                }),
+                Some("build"),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&StageId::new("build", 1)).unwrap();
+        assert_eq!(stage.duration_ms, Some(789));
+        assert_eq!(stage.usage.as_ref(), Some(&usage));
+    }
+
+    #[test]
+    fn stage_failed_event_captures_duration_and_usage_per_visit() {
+        let mut state = RunProjection::default();
+        let stage_id = StageId::new("build", 1);
+        let usage = test_usage("gpt-5.2", 321, 54);
+
+        state
+            .apply_event(&test_stage_event(
+                2,
+                EventBody::StageStarted(StageStartedProps {
+                    index:        0,
+                    handler_type: "agent".to_string(),
+                    attempt:      1,
+                    max_attempts: 1,
+                }),
+                stage_id.clone(),
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_raw_event(
+                3,
+                "stage.failed",
+                &json!({
+                    "index": 0,
+                    "failure": {
+                        "message": "provider failed",
+                        "failure_class": "transient_infra"
+                    },
+                    "will_retry": false,
+                    "duration_ms": 654,
+                    "billing": usage_json(&usage)
+                }),
+                Some("build"),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(stage.duration_ms, Some(654));
+        assert_eq!(stage.usage.as_ref(), Some(&usage));
+    }
+
+    #[test]
+    fn two_visits_of_one_node_retain_distinct_usage() {
+        let mut state = RunProjection::default();
+        let first_usage = test_usage("gpt-5.2", 100, 10);
+        let second_usage = test_usage("gpt-5.2", 200, 20);
+
+        for (seq, visit, duration_ms, usage) in [
+            (3, 1usize, 111, first_usage.clone()),
+            (4, 2usize, 222, second_usage.clone()),
+        ] {
+            state
+                .apply_event(&test_event(
+                    seq,
+                    EventBody::StageCompleted(StageCompletedProps {
+                        index: 0,
+                        duration_ms,
+                        status: StageOutcome::Succeeded,
+                        preferred_label: None,
+                        suggested_next_ids: Vec::new(),
+                        billing: Some(usage),
+                        failure: None,
+                        notes: None,
+                        files_touched: Vec::new(),
+                        context_updates: None,
+                        jump_to_node: None,
+                        context_values: None,
+                        node_visits: Some(BTreeMap::from([("build".to_string(), visit)])),
+                        loop_failure_signatures: None,
+                        restart_failure_signatures: None,
+                        response: None,
+                        attempt: 1,
+                        max_attempts: 1,
+                    }),
+                    Some("build"),
+                ))
+                .unwrap();
+        }
+
+        let first_stage = state.stage(&StageId::new("build", 1)).unwrap();
+        let second_stage = state.stage(&StageId::new("build", 2)).unwrap();
+        assert_eq!(first_stage.duration_ms, Some(111));
+        assert_eq!(first_stage.usage.as_ref(), Some(&first_usage));
+        assert_eq!(second_stage.duration_ms, Some(222));
+        assert_eq!(second_stage.usage.as_ref(), Some(&second_usage));
     }
 
     #[test]
