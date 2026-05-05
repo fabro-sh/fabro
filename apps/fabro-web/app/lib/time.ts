@@ -1,3 +1,21 @@
+import { useEffect, useState } from "react";
+
+/**
+ * Re-renders the calling component every `intervalMs` milliseconds while
+ * `active` is true, returning the current `Date.now()` value at each tick.
+ * Returns the captured value when paused, so renders are stable.
+ */
+export function useTickingNow(active: boolean, intervalMs = 1000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const interval = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(interval);
+  }, [active, intervalMs]);
+  return now;
+}
+
 function relativeTime(seconds: number, past: boolean): string {
   if (seconds < 60) return past ? "just now" : "in <1m";
   const minutes = Math.floor(seconds / 60);
@@ -21,4 +39,3 @@ export function timeAgo(iso: string): string {
 export function timeUntil(iso: string): string {
   return relativeTime(Math.floor((new Date(iso).getTime() - Date.now()) / 1000), false);
 }
-

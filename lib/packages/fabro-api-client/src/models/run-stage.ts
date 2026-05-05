@@ -42,7 +42,8 @@ export interface RunStage {
      * 1-based visit count; bumped each time the workflow re-enters this node.
      */
     'visit': number;
+    /**
+     * Wall-clock time the latest attempt of this stage started, if known.
+     */
+    'started_at'?: string | null;
 }
-
-
-

@@ -10,7 +10,7 @@ use fabro_types::{
     BilledModelUsage, Checkpoint, Conclusion, EventBody, FailureSignature, InterviewQuestionRecord,
     Outcome, PendingInterviewRecord, PullRequestRecord, RunControlAction, RunEvent, RunId,
     RunProjection, RunSpec, RunStatus, RunSummary, SandboxRecord, StageCompletion, StageId,
-    StageOutcome, StageProjection, StartRecord, TerminalStatus, first_event_seq,
+    StageOutcome, StageProjection, StageState, StartRecord, TerminalStatus, first_event_seq,
 };
 use fabro_util::error::render_with_causes;
 use serde_json::Value;
@@ -290,11 +290,18 @@ impl RunProjectionReducer for RunProjection {
                 let Some(stage_id) = stored.stage_id.as_ref() else {
                     return Ok(());
                 };
-                self.stage_entry(
+                let stage = self.stage_entry(
                     stage_id.node_id(),
                     stage_id.visit(),
                     first_event_seq(event.seq),
                 );
+                stage.begin_attempt(ts);
+            }
+            EventBody::StageRetrying(_) => {
+                let Some(stage) = stage_at_stored_or_current_visit(self, stored, event.seq) else {
+                    return Ok(());
+                };
+                stage.state = Some(StageState::Retrying);
             }
             EventBody::StagePrompt(props) => {
                 let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
@@ -323,22 +330,25 @@ impl RunProjectionReducer for RunProjection {
                 stage.completion = Some(completion);
                 stage.duration_ms = Some(props.duration_ms);
                 stage.usage.clone_from(&props.billing);
+                stage.state = Some(StageState::from(outcome.status));
             }
             EventBody::StageFailed(props) => {
                 let failure_reason = props.failure.as_ref().map(|detail| detail.message.clone());
                 let Some(stage) = stage_at_stored_or_current_visit(self, stored, event.seq) else {
                     return Ok(());
                 };
+                let outcome = StageOutcome::Failed {
+                    retry_requested: props.will_retry,
+                };
                 stage.completion = Some(StageCompletion {
-                    outcome: StageOutcome::Failed {
-                        retry_requested: props.will_retry,
-                    },
+                    outcome,
                     notes: None,
                     failure_reason,
                     timestamp: ts,
                 });
                 stage.duration_ms = Some(props.duration_ms);
                 stage.usage.clone_from(&props.billing);
+                stage.state = Some(StageState::from(outcome));
             }
             EventBody::AgentSessionStarted(props) => {
                 let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
@@ -670,12 +680,13 @@ mod tests {
     use fabro_types::run_event::{
         CheckpointCompletedProps, InterviewCompletedProps, InterviewOption, InterviewStartedProps,
         RunControlEffectProps, StageCompletedProps, StageFailedProps, StagePromptProps,
-        StageStartedProps,
+        StageRetryingProps, StageStartedProps,
     };
     use fabro_types::{
-        BilledModelUsage, BlockedReason, Checkpoint, EventBody, FailureReason, Outcome,
-        QuestionType, RunBlobId, RunControlAction, RunEvent, RunStatus, StageOutcome,
-        SuccessReason, TerminalStatus, WorkflowSettings, first_event_seq, fixtures,
+        BilledModelUsage, BlockedReason, Checkpoint, EventBody, FailureCategory, FailureDetail,
+        FailureReason, Outcome, QuestionType, RunBlobId, RunControlAction, RunEvent, RunStatus,
+        StageOutcome, StageState, SuccessReason, TerminalStatus, WorkflowSettings, first_event_seq,
+        fixtures,
     };
     use serde_json::json;
 
@@ -1774,5 +1785,225 @@ mod tests {
             })
         );
         assert_eq!(state.status_updated_at, updated_at);
+    }
+
+    fn started_props() -> StageStartedProps {
+        StageStartedProps {
+            index:        0,
+            handler_type: "agent".to_string(),
+            attempt:      1,
+            max_attempts: 3,
+        }
+    }
+
+    fn failed_props(duration_ms: u64, will_retry: bool) -> StageFailedProps {
+        StageFailedProps {
+            index: 0,
+            failure: Some(FailureDetail::new("boom", FailureCategory::TransientInfra)),
+            will_retry,
+            duration_ms,
+            billing: None,
+        }
+    }
+
+    fn retrying_props() -> StageRetryingProps {
+        StageRetryingProps {
+            index:        0,
+            attempt:      2,
+            max_attempts: 3,
+            delay_ms:     0,
+        }
+    }
+
+    fn completed_props(duration_ms: u64, status: StageOutcome) -> StageCompletedProps {
+        StageCompletedProps {
+            index: 0,
+            duration_ms,
+            status,
+            preferred_label: None,
+            suggested_next_ids: Vec::new(),
+            billing: None,
+            failure: None,
+            notes: None,
+            files_touched: Vec::new(),
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: None,
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
+            response: None,
+            attempt: 1,
+            max_attempts: 3,
+        }
+    }
+
+    fn billed_usage() -> BilledModelUsage {
+        serde_json::from_value(json!({
+            "input": {
+                "usage": {
+                    "model": {
+                        "provider": "openai",
+                        "model_id": "gpt-test"
+                    },
+                    "tokens": {
+                        "input_tokens": 10,
+                        "output_tokens": 5,
+                        "reasoning_tokens": 2,
+                        "cache_read_tokens": 3,
+                        "cache_write_tokens": 4
+                    }
+                },
+                "facts": { "provider": "open_ai" }
+            },
+            "total_usd_micros": 123
+        }))
+        .expect("billing fixture should deserialize")
+    }
+
+    #[test]
+    fn stage_started_records_started_at_and_running_state() {
+        let mut state = RunProjection::default();
+        let stage_id = StageId::new("build", 1);
+
+        state
+            .apply_event(&test_stage_event(
+                3,
+                EventBody::StageStarted(started_props()),
+                stage_id.clone(),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(stage.state, Some(StageState::Running));
+        assert!(stage.started_at.is_some());
+        assert_eq!(stage.effective_state(), StageState::Running);
+    }
+
+    #[test]
+    fn stage_completed_records_duration_usage_and_terminal_state() {
+        let mut state = RunProjection::default();
+        let stage_id = StageId::new("build", 1);
+        let usage = billed_usage();
+
+        state
+            .apply_event(&test_stage_event(
+                1,
+                EventBody::StageStarted(started_props()),
+                stage_id.clone(),
+            ))
+            .unwrap();
+        let mut props = completed_props(42, StageOutcome::Succeeded);
+        props.billing = Some(usage.clone());
+        state
+            .apply_event(&test_event(
+                2,
+                EventBody::StageCompleted(props),
+                Some("build"),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(stage.duration_ms, Some(42));
+        assert_eq!(stage.usage.as_ref(), Some(&usage));
+        assert_eq!(stage.state, Some(StageState::Succeeded));
+        assert_eq!(stage.effective_state(), StageState::Succeeded);
+    }
+
+    #[test]
+    fn stage_failed_records_duration_and_failed_state() {
+        let mut state = RunProjection::default();
+        let stage_id = StageId::new("build", 1);
+
+        state
+            .apply_event(&test_stage_event(
+                1,
+                EventBody::StageStarted(started_props()),
+                stage_id.clone(),
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                2,
+                EventBody::StageFailed(failed_props(10, false)),
+                Some("build"),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(stage.duration_ms, Some(10));
+        assert_eq!(stage.state, Some(StageState::Failed));
+    }
+
+    #[test]
+    fn stage_retrying_sets_retrying_state() {
+        let mut state = RunProjection::default();
+        let stage_id = StageId::new("build", 1);
+
+        state
+            .apply_event(&test_stage_event(
+                1,
+                EventBody::StageStarted(started_props()),
+                stage_id.clone(),
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                2,
+                EventBody::StageFailed(failed_props(10, true)),
+                Some("build"),
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                3,
+                EventBody::StageRetrying(retrying_props()),
+                Some("build"),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(stage.state, Some(StageState::Retrying));
+    }
+
+    #[test]
+    fn stage_started_after_retrying_returns_to_running_and_resets_attempt_data() {
+        let mut state = RunProjection::default();
+        let stage_id = StageId::new("build", 1);
+
+        state
+            .apply_event(&test_stage_event(
+                1,
+                EventBody::StageStarted(started_props()),
+                stage_id.clone(),
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                2,
+                EventBody::StageFailed(failed_props(10, true)),
+                Some("build"),
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                3,
+                EventBody::StageRetrying(retrying_props()),
+                Some("build"),
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_stage_event(
+                4,
+                EventBody::StageStarted(started_props()),
+                stage_id.clone(),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(stage.state, Some(StageState::Running));
+        // Prior attempt's terminal data must not leak into the new attempt.
+        assert!(stage.completion.is_none());
+        assert_eq!(stage.duration_ms, None);
     }
 }

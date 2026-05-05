@@ -570,6 +570,7 @@ pub(crate) fn run_stage_from_stage_id(
     name: impl Into<String>,
     status: StageState,
     duration_secs: Option<f64>,
+    started_at: Option<chrono::DateTime<chrono::Utc>>,
 ) -> RunStage {
     RunStage {
         id: stage_id.to_string(),
@@ -579,6 +580,7 @@ pub(crate) fn run_stage_from_stage_id(
         node_id: stage_id.node_id().to_string(),
         visit: std::num::NonZeroU32::new(stage_id.visit())
             .expect("StageId stores a non-zero visit"),
+        started_at,
     }
 }
 

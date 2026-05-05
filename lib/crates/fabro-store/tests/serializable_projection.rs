@@ -123,6 +123,10 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
 
     let serialized = serde_json::to_value(SerializableProjection(&projection))
         .expect("projection should serialize");
+    assert!(
+        serialized["stages"]["build@2"].get("usage").is_none(),
+        "stage usage is server-internal and should not be serialized"
+    );
     let round_tripped: RunProjection =
         serde_json::from_value(serialized).expect("serialized projection should deserialize");
     let node = round_tripped.stage(&stage_id).expect("node should remain");
@@ -163,7 +167,7 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
         Some(json!([{ "stage": "fanout@1" }]))
     );
     assert_eq!(node.duration_ms, Some(1234));
-    assert_eq!(node.usage, Some(sample_usage()));
+    assert_eq!(node.usage, None);
 }
 
 #[test]

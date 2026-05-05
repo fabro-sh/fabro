@@ -1214,29 +1214,34 @@ mod runs {
                 "Detect Drift",
                 StageState::Succeeded,
                 Some(72.0),
+                None,
             ),
             run_stage_from_stage_id(
                 &StageId::new("propose-changes", 1),
                 "Propose Changes",
                 StageState::Succeeded,
                 Some(154.0),
+                None,
             ),
             run_stage_from_stage_id(
                 &StageId::new("review-changes", 1),
                 "Review Changes",
                 StageState::Succeeded,
                 Some(45.0),
+                None,
             ),
             run_stage_from_stage_id(
                 &StageId::new("apply-changes", 1),
                 "Apply Changes",
                 StageState::Succeeded,
                 Some(118.0),
+                None,
             ),
             run_stage_from_stage_id(
                 &StageId::new("apply-changes", 2),
                 "Apply Changes",
                 StageState::Running,
+                None,
                 None,
             ),
         ]
@@ -1374,6 +1379,8 @@ mod runs {
                         total_usd_micros:   Some(480_000),
                     },
                     runtime_secs: 72.0,
+                    started_at:   None,
+                    state:        Some(StageState::Succeeded),
                 },
                 RunBillingStage {
                     stage:        BillingStageRef {
@@ -1393,6 +1400,8 @@ mod runs {
                         total_usd_micros:   Some(720_000),
                     },
                     runtime_secs: 154.0,
+                    started_at:   None,
+                    state:        Some(StageState::Succeeded),
                 },
                 RunBillingStage {
                     stage:        BillingStageRef {
@@ -1412,6 +1421,8 @@ mod runs {
                         total_usd_micros:   Some(190_000),
                     },
                     runtime_secs: 45.0,
+                    started_at:   None,
+                    state:        Some(StageState::Succeeded),
                 },
                 RunBillingStage {
                     stage:        BillingStageRef {
@@ -1431,6 +1442,8 @@ mod runs {
                         total_usd_micros:   Some(870_000),
                     },
                     runtime_secs: 118.0,
+                    started_at:   None,
+                    state:        Some(StageState::Running),
                 },
             ],
             totals:   RunBillingTotals {

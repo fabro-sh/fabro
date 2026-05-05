@@ -2878,6 +2878,198 @@ async fn list_run_stages_shows_retrying_when_failed_will_retry() {
     assert_eq!(stage_status(&body, "work@1"), "retrying");
 }
 
+#[tokio::test]
+async fn run_billing_retried_node_then_succeeded_emits_one_row_with_final_attempt_duration() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+        workflow_event::Event::StageStarted {
+            node_id:      "work".to_string(),
+            name:         "Work".to_string(),
+            index:        0,
+            handler_type: "command".to_string(),
+            attempt:      1,
+            max_attempts: 3,
+        },
+        workflow_event::Event::StageFailed {
+            node_id:     "work".to_string(),
+            name:        "Work".to_string(),
+            index:       0,
+            failure:     FailureDetail::new("transient", FailureCategory::TransientInfra),
+            will_retry:  true,
+            duration_ms: 10,
+            billing:     None,
+            actor:       None,
+        },
+        workflow_event::Event::StageRetrying {
+            node_id:      "work".to_string(),
+            name:         "Work".to_string(),
+            index:        0,
+            attempt:      2,
+            max_attempts: 3,
+            delay_ms:     0,
+        },
+        workflow_event::Event::StageStarted {
+            node_id:      "work".to_string(),
+            name:         "Work".to_string(),
+            index:        0,
+            handler_type: "command".to_string(),
+            attempt:      2,
+            max_attempts: 3,
+        },
+        workflow_event::Event::StageCompleted {
+            node_id: "work".to_string(),
+            name: "Work".to_string(),
+            index: 0,
+            duration_ms: 25,
+            status: "succeeded".to_string(),
+            preferred_label: None,
+            suggested_next_ids: Vec::new(),
+            billing: None,
+            failure: None,
+            notes: None,
+            files_touched: Vec::new(),
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: None,
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
+            response: None,
+            attempt: 2,
+            max_attempts: 3,
+        },
+    ])
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}/billing")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let stages = body["stages"].as_array().unwrap();
+    assert_eq!(stages.len(), 1, "retry collapses to one row per node_id");
+    let row = &stages[0];
+    assert_eq!(row["stage"]["id"], "work");
+    assert_eq!(
+        row["state"], "succeeded",
+        "final state mirrors the latest StageCompleted"
+    );
+    let runtime = row["runtime_secs"].as_f64().unwrap();
+    assert!(
+        (runtime - 0.025).abs() < f64::EPSILON,
+        "runtime should equal final attempt's 25ms, got {runtime}"
+    );
+}
+
+fn revisit_test_started(node_id: &str) -> workflow_event::Event {
+    workflow_event::Event::StageStarted {
+        node_id:      node_id.to_string(),
+        name:         node_id.to_string(),
+        index:        0,
+        handler_type: "command".to_string(),
+        attempt:      1,
+        max_attempts: 1,
+    }
+}
+
+fn revisit_test_completed_with_visit(
+    node_id: &str,
+    duration_ms: u64,
+    visit: usize,
+) -> workflow_event::Event {
+    let mut node_visits = std::collections::BTreeMap::new();
+    node_visits.insert(node_id.to_string(), visit);
+    workflow_event::Event::StageCompleted {
+        node_id: node_id.to_string(),
+        name: node_id.to_string(),
+        index: 0,
+        duration_ms,
+        status: "succeeded".to_string(),
+        preferred_label: None,
+        suggested_next_ids: Vec::new(),
+        billing: None,
+        failure: None,
+        notes: None,
+        files_touched: Vec::new(),
+        context_updates: None,
+        jump_to_node: None,
+        context_values: None,
+        node_visits: Some(node_visits),
+        loop_failure_signatures: None,
+        restart_failure_signatures: None,
+        response: None,
+        attempt: 1,
+        max_attempts: 1,
+    }
+}
+
+#[tokio::test]
+async fn run_billing_revisited_node_collapses_to_two_rows_with_summed_visit_duration() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+        // A → B → A loop. Per-visit `node_visits` payload steers the reducer
+        // to attribute each StageCompleted to the right visit.
+        revisit_test_started("a"),
+        revisit_test_completed_with_visit("a", 1, 1),
+        revisit_test_started("b"),
+        revisit_test_completed_with_visit("b", 2, 1),
+        revisit_test_started("a"),
+        revisit_test_completed_with_visit("a", 99, 2),
+    ])
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}/billing")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let stages = body["stages"].as_array().unwrap();
+    assert_eq!(stages.len(), 2, "two distinct node_ids → two rows");
+    assert_eq!(
+        stages[0]["stage"]["id"], "a",
+        "A appeared first → A's row first"
+    );
+    assert_eq!(stages[1]["stage"]["id"], "b");
+    let a_runtime = stages[0]["runtime_secs"].as_f64().unwrap();
+    assert!(
+        (a_runtime - 0.1).abs() < f64::EPSILON,
+        "A should sum both visit durations (1ms + 99ms), got {a_runtime}"
+    );
+    let b_runtime = stages[1]["runtime_secs"].as_f64().unwrap();
+    assert!(
+        (b_runtime - 0.002).abs() < f64::EPSILON,
+        "B should carry its single visit's duration (2ms), got {b_runtime}"
+    );
+}
+
 async fn append_raw_run_event(
     state: &Arc<AppState>,
     run_id: RunId,

@@ -50,12 +50,16 @@ describe("queryKeysForRunEvent", () => {
     ]);
   });
 
-  test("stage.retrying invalidates the same keys as other stage events", () => {
-    const keys = queryKeysForRunEvent("run-1", "stage.retrying", "verify@2");
-    expect(keys).toContain(queryKeys.runs.stages("run-1"));
-    expect(keys).toContain(queryKeys.runs.events("run-1", 1000));
-    expect(keys).toContain(queryKeys.runs.detail("run-1"));
-    expect(keys).toContain(queryKeys.runs.stageEvents("run-1", "verify@2"));
+  test("stage.retrying invalidates stages, billing, events, graph, detail, and stage events", () => {
+    expect(queryKeysForRunEvent("run-1", "stage.retrying", "verify@2")).toEqual([
+      queryKeys.runs.stages("run-1"),
+      queryKeys.runs.billing("run-1"),
+      queryKeys.runs.events("run-1", 1000),
+      queryKeys.runs.graph("run-1", "LR"),
+      queryKeys.runs.graph("run-1", "TB"),
+      queryKeys.runs.detail("run-1"),
+      queryKeys.runs.stageEvents("run-1", "verify@2"),
+    ]);
   });
 });
 

@@ -5314,6 +5314,20 @@ components:
           oneOf:
             - $ref: "#/components/schemas/CommandTermination"
             - type: "null"
+        started_at:
+          type: ["string", "null"]
+          format: date-time
+          description: Wall-clock time the latest attempt of this stage started, if known.
+        duration_ms:
+          type: ["integer", "null"]
+          format: uint64
+          minimum: 0
+          description: Wall-clock duration of the stage's latest terminal attempt, if known.
+        state:
+          oneOf:
+            - $ref: "#/components/schemas/StageState"
+            - type: "null"
+          description: Lifecycle state of the stage projection.
 
     InterviewOption:
       description: Option stored with an interview question in the event log.
@@ -6333,6 +6347,11 @@ components:
           minimum: 1
           description: 1-based visit count; bumped each time the workflow re-enters this node.
           example: 2
+        started_at:
+          type: ["string", "null"]
+          format: date-time
+          description: Wall-clock time the latest attempt of this stage started, if known.
+          example: "2026-04-29T12:34:56Z"
 
     # ── File Diff Schemas ──────────────────────────────────────────────
 
@@ -6526,6 +6545,16 @@ components:
           type: number
           description: Wall-clock runtime in seconds, summed across every visit of this node.
           example: 154.0
+        started_at:
+          type: ["string", "null"]
+          format: date-time
+          description: Wall-clock time the latest attempt of this stage started, if known.
+          example: "2026-04-29T12:34:56Z"
+        state:
+          oneOf:
+            - $ref: "#/components/schemas/StageState"
+            - type: "null"
+          description: Lifecycle state of the stage. Use to detect in-flight rows for client-side runtime ticking.
 
     RunBillingTotals:
       description: Aggregate billing totals across all stages of a run.

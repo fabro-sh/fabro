@@ -109,6 +109,7 @@ export function queryKeysForRunEvent(
   if (STAGE_EVENTS.has(event)) {
     const keys = [
       queryKeys.runs.stages(runId),
+      queryKeys.runs.billing(runId),
       queryKeys.runs.events(runId, 1000),
       queryKeys.runs.graph(runId, "LR"),
       queryKeys.runs.graph(runId, "TB"),
