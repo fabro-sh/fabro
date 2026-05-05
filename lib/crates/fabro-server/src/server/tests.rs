@@ -4112,7 +4112,13 @@ async fn create_run_pull_request_creates_and_persists_record() {
                 .header("authorization", "Bearer openai-key");
             then.status(200)
                 .header("content-type", "application/json")
-                .json_body(openai_responses_payload("Narrative from mock."));
+                .json_body(openai_responses_payload(
+                    &serde_json::to_string(&json!({
+                        "title": "Mock title",
+                        "body": "Narrative from mock.",
+                    }))
+                    .unwrap(),
+                ));
         })
         .await;
     let openai_base_url = llm.url("/v1");
