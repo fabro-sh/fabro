@@ -210,6 +210,8 @@ export * from './run-goal';
 export * from './run-goal-file';
 export * from './run-goal-inline';
 export * from './run-interviews-settings';
+export * from './run-integrations-github-settings';
+export * from './run-integrations-settings';
 export * from './run-list-item';
 export * from './run-manifest';
 export * from './run-mode';

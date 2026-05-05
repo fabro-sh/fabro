@@ -26,7 +26,6 @@ export interface GithubIntegrationSettings {
     'app_id': string | null;
     'client_id': string | null;
     'slug': string | null;
-    'permissions': { [key: string]: string; };
     'webhooks': IntegrationWebhooksSettings | null;
 }
 

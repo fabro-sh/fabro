@@ -93,26 +93,7 @@ mod run_integrations_github_permissions {
     use fabro_types::settings::InterpString;
 
     use crate::layers::Combine;
-    use crate::{
-        RunIntegrationsGithubLayer, RunIntegrationsLayer, RunLayer, SettingsLayer,
-        WorkflowSettingsBuilder,
-    };
-
-    fn run_layer_with_permissions(permissions: Option<HashMap<String, InterpString>>) -> RunLayer {
-        RunLayer {
-            integrations: Some(RunIntegrationsLayer {
-                github: Some(RunIntegrationsGithubLayer { permissions }),
-            }),
-            ..RunLayer::default()
-        }
-    }
-
-    fn settings(run: RunLayer) -> SettingsLayer {
-        SettingsLayer {
-            run: Some(run),
-            ..SettingsLayer::default()
-        }
-    }
+    use crate::{SettingsLayer, WorkflowSettingsBuilder};
 
     fn parse_settings(source: &str) -> SettingsLayer {
         source
@@ -153,12 +134,22 @@ issues = "read"
 
     #[test]
     fn workflow_replaces_user_permissions_wholesale() {
-        let workflow = settings(run_layer_with_permissions(Some(one_perm(
-            "issues", "write",
-        ))));
-        let user = settings(run_layer_with_permissions(Some(one_perm(
-            "contents", "read",
-        ))));
+        let workflow = parse_settings(
+            r#"
+_version = 1
+
+[run.integrations.github.permissions]
+issues = "write"
+"#,
+        );
+        let user = parse_settings(
+            r#"
+_version = 1
+
+[run.integrations.github.permissions]
+contents = "read"
+"#,
+        );
         let merged = workflow.combine(user);
 
         let resolved = WorkflowSettingsBuilder::from_layer(&merged)
@@ -173,10 +164,15 @@ issues = "read"
 
     #[test]
     fn absent_higher_layer_inherits_lower_permissions() {
-        let workflow = settings(RunLayer::default());
-        let user = settings(run_layer_with_permissions(Some(one_perm(
-            "contents", "read",
-        ))));
+        let workflow = parse_settings("_version = 1\n");
+        let user = parse_settings(
+            r#"
+_version = 1
+
+[run.integrations.github.permissions]
+contents = "read"
+"#,
+        );
         let merged = workflow.combine(user);
 
         let resolved = WorkflowSettingsBuilder::from_layer(&merged)
@@ -194,10 +190,22 @@ issues = "read"
         // Workflow declares `permissions = {}` -> Some(empty map). The
         // hand-rolled `Combine` keeps Some over fallback, so the resolved
         // map is empty (no token requested) — empty-wins-as-clear.
-        let workflow = settings(run_layer_with_permissions(Some(HashMap::new())));
-        let user = settings(run_layer_with_permissions(Some(one_perm(
-            "contents", "read",
-        ))));
+        let workflow = parse_settings(
+            r"
+_version = 1
+
+[run.integrations.github]
+permissions = {}
+",
+        );
+        let user = parse_settings(
+            r#"
+_version = 1
+
+[run.integrations.github.permissions]
+contents = "read"
+"#,
+        );
         let merged = workflow.combine(user);
 
         let resolved = WorkflowSettingsBuilder::from_layer(&merged)

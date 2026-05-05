@@ -231,6 +231,8 @@ models/run-goal-file.ts
 models/run-goal-inline.ts
 models/run-goal.ts
 models/run-interviews-settings.ts
+models/run-integrations-github-settings.ts
+models/run-integrations-settings.ts
 models/run-list-item.ts
 models/run-manifest.ts
 models/run-mode.ts

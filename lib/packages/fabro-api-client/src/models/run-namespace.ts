@@ -42,6 +42,9 @@ import type { RunGitSettings } from './run-git-settings';
 import type { RunGoal } from './run-goal';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { RunIntegrationsSettings } from './run-integrations-settings';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { RunInterviewsSettings } from './run-interviews-settings';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -77,5 +80,6 @@ export interface RunNamespace {
     'scm': RunScmSettings;
     'pull_request': PullRequestSettings | null;
     'artifacts': ArtifactsSettings;
+    'integrations': RunIntegrationsSettings;
 }
 

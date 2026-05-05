@@ -1223,7 +1223,7 @@ async fn run_github_token_check(
             name:        "GitHub Token".into(),
             status:      CheckStatus::Warning,
             summary:     "skipped".into(),
-            details:     vec![],
+            details:     perm_details,
             remediation: Some("No GitHub credentials or origin URL available".to_string()),
         }),
     }

@@ -27,9 +27,10 @@ pub(crate) fn load_run_config(path: &Path) -> Result<SettingsLayer> {
 
 /// Parse a settings TOML source string and extract its `[run]` layer.
 ///
-/// Goes through the strict `SettingsLayer` `FromStr` impl, so any unknown
-/// top-level domain (`server.*`, `cli.*`, etc.) or unknown nested key
-/// under a known domain trips `deny_unknown_fields`. Bundled
+/// Goes through the strict `SettingsLayer` `FromStr` impl, so valid settings
+/// domains (`_version`, `[workflow]`, `[run]`, `[server]`, etc.) parse cleanly,
+/// while unknown top-level domains or unknown nested keys under a known domain
+/// trip `deny_unknown_fields`. Bundled
 /// `workflow.toml` configurations parse through this path so stale
 /// schema (e.g. `[server.integrations.github.permissions]` after the
 /// move to `[run.integrations.github.permissions]`) is rejected up front
