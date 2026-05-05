@@ -136,7 +136,6 @@ fn discard_session(
     session: &mut Session,
     lease: &mut Option<Arc<ActivationLease>>,
     emitter: &Arc<Emitter>,
-    parent_session_id: Option<String>,
 ) {
     if let Some(lease) = lease.take() {
         lease.release();
@@ -145,7 +144,7 @@ fn discard_session(
     if session.close() {
         emitter.emit(&Event::AgentSessionEnded {
             session_id,
-            parent_session_id,
+            parent_session_id: None,
         });
     }
 }
@@ -710,12 +709,12 @@ impl CodergenBackend for AgentApiBackend {
                 Err(err) => match classify_agent_error(err, allow_failover_primary) {
                     AgentApiErrorDisposition::Cancelled => {
                         bridge.abort();
-                        discard_session(&mut session, &mut lease, emitter, None);
+                        discard_session(&mut session, &mut lease, emitter);
                         return Err(Error::Cancelled);
                     }
                     AgentApiErrorDisposition::Terminal(err) => {
                         bridge.abort();
-                        discard_session(&mut session, &mut lease, emitter, None);
+                        discard_session(&mut session, &mut lease, emitter);
                         return Err(err);
                     }
                     AgentApiErrorDisposition::FailoverEligible(sdk_err) => {
@@ -733,7 +732,7 @@ impl CodergenBackend for AgentApiBackend {
                     Ok(active_lease) => lease = Some(active_lease),
                     Err(err) => {
                         bridge.abort();
-                        discard_session(&mut session, &mut lease, emitter, None);
+                        discard_session(&mut session, &mut lease, emitter);
                         return Err(err);
                     }
                 }
@@ -748,12 +747,12 @@ impl CodergenBackend for AgentApiBackend {
             Err(err) => match classify_agent_error(err, allow_failover_primary) {
                 AgentApiErrorDisposition::Cancelled => {
                     bridge.abort();
-                    discard_session(&mut session, &mut lease, emitter, None);
+                    discard_session(&mut session, &mut lease, emitter);
                     return Err(Error::Cancelled);
                 }
                 AgentApiErrorDisposition::Terminal(err) => {
                     bridge.abort();
-                    discard_session(&mut session, &mut lease, emitter, None);
+                    discard_session(&mut session, &mut lease, emitter);
                     return Err(err);
                 }
                 AgentApiErrorDisposition::FailoverEligible(sdk_err) => {
@@ -765,7 +764,7 @@ impl CodergenBackend for AgentApiBackend {
                     let mut succeeded = false;
 
                     bridge.abort();
-                    discard_session(&mut session, &mut lease, emitter, None);
+                    discard_session(&mut session, &mut lease, emitter);
 
                     for (index, target) in self.fallback_chain.iter().enumerate() {
                         emitter.emit_scoped(
@@ -828,18 +827,18 @@ impl CodergenBackend for AgentApiBackend {
                             match classify_agent_error(err, allow_failover_next) {
                                 AgentApiErrorDisposition::Cancelled => {
                                     bridge.abort();
-                                    discard_session(&mut session, &mut lease, emitter, None);
+                                    discard_session(&mut session, &mut lease, emitter);
                                     return Err(Error::Cancelled);
                                 }
                                 AgentApiErrorDisposition::Terminal(err) => {
                                     bridge.abort();
-                                    discard_session(&mut session, &mut lease, emitter, None);
+                                    discard_session(&mut session, &mut lease, emitter);
                                     return Err(err);
                                 }
                                 AgentApiErrorDisposition::FailoverEligible(sdk_err) => {
                                     last_err = Error::Llm(sdk_err);
                                     bridge.abort();
-                                    discard_session(&mut session, &mut lease, emitter, None);
+                                    discard_session(&mut session, &mut lease, emitter);
                                     continue;
                                 }
                             }
@@ -853,7 +852,7 @@ impl CodergenBackend for AgentApiBackend {
                             Ok(active_lease) => lease = Some(active_lease),
                             Err(err) => {
                                 bridge.abort();
-                                discard_session(&mut session, &mut lease, emitter, None);
+                                discard_session(&mut session, &mut lease, emitter);
                                 return Err(err);
                             }
                         }
@@ -865,18 +864,18 @@ impl CodergenBackend for AgentApiBackend {
                             Err(err) => match classify_agent_error(err, allow_failover_next) {
                                 AgentApiErrorDisposition::Cancelled => {
                                     bridge.abort();
-                                    discard_session(&mut session, &mut lease, emitter, None);
+                                    discard_session(&mut session, &mut lease, emitter);
                                     return Err(Error::Cancelled);
                                 }
                                 AgentApiErrorDisposition::Terminal(err) => {
                                     bridge.abort();
-                                    discard_session(&mut session, &mut lease, emitter, None);
+                                    discard_session(&mut session, &mut lease, emitter);
                                     return Err(err);
                                 }
                                 AgentApiErrorDisposition::FailoverEligible(sdk_err) => {
                                     last_err = Error::Llm(sdk_err);
                                     bridge.abort();
-                                    discard_session(&mut session, &mut lease, emitter, None);
+                                    discard_session(&mut session, &mut lease, emitter);
                                 }
                             },
                         }
@@ -891,7 +890,7 @@ impl CodergenBackend for AgentApiBackend {
         // bridge's `Drop` will abort the spawned task on early return.
         if let Err(err) = result {
             bridge.abort();
-            discard_session(&mut session, &mut lease, emitter, None);
+            discard_session(&mut session, &mut lease, emitter);
             return Err(err);
         }
 

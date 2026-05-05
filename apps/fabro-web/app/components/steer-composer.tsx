@@ -10,24 +10,14 @@ interface SteerComposerProps {
   onClose: () => void;
 }
 
-/**
- * Modal composer for sending a mid-run steering message to a running run.
- *
- * Renders a textarea + two action buttons:
- * - Send: appends to the steering queue (default).
- * - Interrupt: cancels the in-flight LLM stream / tool calls and delivers
- *   the message as the next user turn.
- *
- * Surfaces 409 errors inline so users see the rejection reason (e.g., the
- * `cli_agent_not_steerable` code).
- */
 export function SteerComposer({ runId, open, onClose }: SteerComposerProps) {
   const [text, setText] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const { trigger, isMutating } = useSteerRun(runId);
 
-  // Autofocus when opening; reset state when closing.
   useEffect(() => {
     if (open) {
       requestAnimationFrame(() => textareaRef.current?.focus());
@@ -37,18 +27,17 @@ export function SteerComposer({ runId, open, onClose }: SteerComposerProps) {
     }
   }, [open]);
 
-  // Close on Escape.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

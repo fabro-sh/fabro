@@ -37,17 +37,8 @@ async fn steer_run(
     Path(id): Path<String>,
     Json(req): Json<SteerRunRequest>,
 ) -> Response {
-    let id = match parse_run_id_path(&id) {
-        Ok(id) => id,
-        Err(response) => return response,
-    };
-    if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
-        return response;
-    }
-
-    // Body validation. OpenAPI enforces minLength=1/maxLength=8192 at the
-    // type boundary already, so the only thing left to guard against is a
-    // payload that's whitespace-only.
+    // OpenAPI enforces minLength=1/maxLength=8192 already; only whitespace-only
+    // payloads can slip through.
     let SteerRunRequest { text, interrupt } = req;
     let text: String = text.into();
     if text.trim().is_empty() {
@@ -59,7 +50,7 @@ async fn steer_run(
         RunControlRequest::Steer { text }
     };
 
-    control_run(auth, state, id.to_string(), control).await
+    control_run(auth, state, id, control).await
 }
 
 async fn interrupt_run(

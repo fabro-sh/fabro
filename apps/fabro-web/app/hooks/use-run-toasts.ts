@@ -5,6 +5,7 @@ import { subscribeToRunEvents, type RunEventPayload } from "../lib/run-events";
 import type { MutateFn } from "../lib/sse";
 
 const NOOP_MUTATE = (() => undefined) as MutateFn;
+const DEDUPE_WINDOW = 256;
 
 export function useRunToasts(runId: string | undefined) {
   const { push } = useToast();
@@ -13,13 +14,19 @@ export function useRunToasts(runId: string | undefined) {
   useEffect(() => {
     if (!runId) return;
 
-    seenEventIdsRef.current.clear();
+    const seen = new Set<string>();
+    seenEventIdsRef.current = seen;
     return subscribeToRunEvents(runId, NOOP_MUTATE, undefined, {
       onEvent: (payload) => {
         const dedupeId = eventDedupeId(payload);
         if (dedupeId) {
-          if (seenEventIdsRef.current.has(dedupeId)) return;
-          seenEventIdsRef.current.add(dedupeId);
+          if (seen.has(dedupeId)) return;
+          seen.add(dedupeId);
+          if (seen.size > DEDUPE_WINDOW) {
+            // Set iteration order is insertion order; drop the oldest.
+            const oldest = seen.values().next().value;
+            if (oldest !== undefined) seen.delete(oldest);
+          }
         }
 
         const message = steeringToastMessage(payload);

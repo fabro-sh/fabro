@@ -463,8 +463,6 @@ function SortablePrCard({
 
 function BoardColumn({ column }: { column: Column }) {
   const Icon = iconMap[column.iconType];
-  // Steer button is shown in all modes (no longer demo-gated). The modal/
-  // composer logic lives below in `PrCard`; clicking the button opens it.
   const actions = column.actions;
   return (
     <div className="flex min-w-0 flex-col">
