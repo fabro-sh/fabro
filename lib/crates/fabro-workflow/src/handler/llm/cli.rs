@@ -1,16 +1,37 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use fabro_agent::Sandbox;
-use fabro_agent::sandbox::ExecResult;
+use fabro_agent::{Sandbox, shell_quote};
 use fabro_auth::{CliAgentKind, CredentialResolver, CredentialUsage, ResolvedCredential};
 use fabro_graphviz::graph::Node;
 use fabro_llm::types::TokenCounts;
 use fabro_model::Provider;
-use fabro_types::CommandTermination;
+use fabro_types::{CommandOutputStream, CommandTermination};
 use fabro_util::time::elapsed_ms;
-use tokio::time::sleep;
+use tokio_util::sync::CancellationToken;
+
+/// Returns up to the last `n` characters of `s`, preserving char boundaries.
+fn tail_chars(s: &str, n: usize) -> String {
+    let total = s.chars().count();
+    if total <= n {
+        return s.to_string();
+    }
+    s.chars().skip(total - n).collect()
+}
+
+/// Build a "<stderr-tail>\nstdout: <stdout-tail>" detail string for CLI failure
+/// messages, falling back to the original command when both streams are empty.
+fn cli_failure_detail(stdout: &str, stderr: &str, command: &str) -> String {
+    let stderr_tail = tail_chars(stderr, 500);
+    let stdout_tail = tail_chars(stdout, 500);
+    match (stderr_tail.is_empty(), stdout_tail.is_empty()) {
+        (false, false) => format!("{stderr_tail}\nstdout: {stdout_tail}"),
+        (false, true) => stderr_tail,
+        (true, false) => format!("stdout: {stdout_tail}"),
+        (true, true) => format!("command: {command}"),
+    }
+}
 
 use super::super::agent::{CodergenBackend, CodergenResult};
 use crate::context::Context;
@@ -66,6 +87,7 @@ async fn ensure_cli(
     provider: Provider,
     sandbox: &Arc<dyn Sandbox>,
     emitter: &Arc<Emitter>,
+    cancel_token: &CancellationToken,
 ) -> Result<(), Error> {
     let start = std::time::Instant::now();
     let cli_name = cli.name();
@@ -84,7 +106,7 @@ async fn ensure_cli(
             30_000,
             None,
             None,
-            None,
+            Some(cancel_token.child_token()),
         )
         .await
         .map_err(|e| {
@@ -112,7 +134,13 @@ async fn ensure_cli(
         cli.npm_package()
     );
     let install_result = sandbox
-        .exec_command(&install_cmd, 180_000, None, None, None)
+        .exec_command(
+            &install_cmd,
+            180_000,
+            None,
+            None,
+            Some(cancel_token.child_token()),
+        )
         .await
         .map_err(|e| Error::handler_with_source(format!("Failed to install {cli_name}"), &e))?;
 
@@ -161,9 +189,11 @@ pub fn is_cli_only_model(model: &str) -> bool {
 /// is piped into the command's stdin via `cat`.
 #[must_use]
 pub fn cli_command_for_provider(provider: Provider, model: &str, prompt_file: &str) -> String {
+    let prompt_file = shell_quote(prompt_file);
     let model_flag = if model.is_empty() {
         String::new()
     } else {
+        let model = shell_quote(model);
         match provider {
             Provider::OpenAi
             | Provider::Gemini
@@ -362,14 +392,6 @@ pub fn parse_cli_response(provider: Provider, output: &str) -> Option<CliRespons
     }
 }
 
-/// Escape a value for safe embedding inside single quotes in a shell command.
-fn shell_quote(val: &str) -> String {
-    shlex::try_quote(val).map_or_else(
-        |_| format!("'{}'", val.replace('\'', "'\\''")),
-        std::borrow::Cow::into_owned,
-    )
-}
-
 /// CLI backend that invokes external CLI tools (claude, codex, gemini) via
 /// `exec_command()`.
 pub struct AgentCliBackend {
@@ -477,6 +499,7 @@ impl CodergenBackend for AgentCliBackend {
         emitter: &Arc<Emitter>,
         sandbox: &Arc<dyn Sandbox>,
         _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+        cancel_token: CancellationToken,
     ) -> Result<CodergenResult, Error> {
         // 1. Snapshot git state before the CLI run
         let files_before = self.detect_changed_files(sandbox).await;
@@ -485,9 +508,6 @@ impl CodergenBackend for AgentCliBackend {
         let run_id = uuid::Uuid::new_v4().to_string();
         let tmp_prefix = format!("/tmp/fabro_cli_{run_id}");
         let prompt_path = format!("{tmp_prefix}_prompt.txt");
-        let stdout_path = format!("{tmp_prefix}_stdout.log");
-        let stderr_path = format!("{tmp_prefix}_stderr.log");
-        let exit_code_path = format!("{tmp_prefix}_exit_code");
         let env_path = format!("{tmp_prefix}_env.sh");
 
         sandbox
@@ -504,7 +524,7 @@ impl CodergenBackend for AgentCliBackend {
 
         // Ensure the CLI tool is installed in the sandbox
         let cli = AgentCli::for_provider(provider);
-        ensure_cli(cli, provider, sandbox, emitter).await?;
+        ensure_cli(cli, provider, sandbox, emitter, &cancel_token).await?;
 
         let command = cli_command_for_provider(provider, model, &prompt_path);
         let stage_scope = StageScope::for_handler(context, &node.id);
@@ -521,11 +541,8 @@ impl CodergenBackend for AgentCliBackend {
         );
 
         // Forward provider API key and custom env vars so the CLI tool can
-        // authenticate. Build a HashMap to pass via exec_command's env_vars
-        // parameter — this prepends `export` statements directly into the
-        // base64-encoded command, avoiding filesystem-to-process race
-        // conditions that can occur when writing an env file via the fs API and
-        // sourcing it via the process API.
+        // authenticate. Resolve credentials and run any pre-login command
+        // before the main CLI invocation.
         let cli_agent = match cli {
             AgentCli::Claude => CliAgentKind::Claude,
             AgentCli::Codex => CliAgentKind::Codex,
@@ -541,7 +558,13 @@ impl CodergenBackend for AgentCliBackend {
             };
             if let Some(login_cmd) = &cli_credential.login_command {
                 let login_result = sandbox
-                    .exec_command(login_cmd, 30_000, None, None, None)
+                    .exec_command(
+                        login_cmd,
+                        30_000,
+                        None,
+                        None,
+                        Some(cancel_token.child_token()),
+                    )
                     .await
                     .map_err(|e| Error::handler_with_source("codex login failed", &e))?;
                 if !login_result.is_success() {
@@ -566,127 +589,183 @@ impl CodergenBackend for AgentCliBackend {
             launch_env.insert(name.clone(), val.clone());
         }
 
-        // Also write env file as fallback for commands that source it (e.g. ensure_cli
-        // PATH)
+        // Write env file so the inner shell that runs the CLI command picks up
+        // PATH and provider env vars; we still pass `launch_env` to
+        // `exec_command_streaming` for parity.
         let mut env_lines: Vec<String> = vec!["export PATH=\"$HOME/.local/bin:$PATH\"".to_string()];
         env_lines.extend(
             launch_env
                 .iter()
                 .map(|(k, v)| format!("export {k}={}", shell_quote(v))),
         );
-        {
-            sandbox
-                .write_file(&env_path, &env_lines.join("\n"))
-                .await
-                .map_err(|e| Error::handler_with_source("Failed to write env file", &e))?;
-        }
+        sandbox
+            .write_file(&env_path, &env_lines.join("\n"))
+            .await
+            .map_err(|e| Error::handler_with_source("Failed to write env file", &e))?;
 
-        // 3a. Disable auto-stop so the sandbox stays alive during long CLI runs
+        // Disable auto-stop so the sandbox stays alive during long CLI runs.
         if let Err(e) = sandbox.set_autostop_interval(0).await {
             tracing::warn!("Failed to disable sandbox auto-stop: {e}");
         }
 
-        // 3b. Launch CLI command in background (env file is always written)
-        let inner_command = format!(". {env_path} && {command}");
-        // Use setsid (if available) to create a new session so the child process is
-        // fully detached from the shell. Without this, Daytona's POST /process/execute
-        // blocks until ALL descendant processes exit, causing a 60s HTTP timeout.
-        // $SID is empty on macOS (where setsid doesn't exist but isn't needed since
-        // the local exec implementation doesn't wait for grandchildren).
-        let bg_command = format!(
-            "SID=$(command -v setsid || true)\n$SID sh -c '{inner_command} > {stdout_path} 2>{stderr_path}; echo $? > {exit_code_path}' </dev/null >/dev/null 2>&1 &\necho $!"
-        );
-        let launch_start = std::time::Instant::now();
+        // Stream the CLI command directly: the previous detached `setsid &`
+        // launcher could not be cancelled mid-flight. By running through
+        // `exec_command_streaming` the run-level cancel token (and node
+        // timeout, when set) terminate the CLI and its descendants.
+        let outer_command = format!(". {} && {command}", shell_quote(&env_path));
+        // Use a synchronous Mutex: each callback invocation only does a short
+        // `extend_from_slice` with no awaits while the lock is held, so an
+        // async Mutex would just add per-chunk scheduling overhead.
+        let stdout_buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        let stderr_buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        let stdout_buf_cb = Arc::clone(&stdout_buffer);
+        let stderr_buf_cb = Arc::clone(&stderr_buffer);
+        let emitter_for_callback = Arc::clone(emitter);
+        let output_callback: fabro_agent::CommandOutputCallback = Arc::new(move |stream, bytes| {
+            let stdout_buf = Arc::clone(&stdout_buf_cb);
+            let stderr_buf = Arc::clone(&stderr_buf_cb);
+            let emitter = Arc::clone(&emitter_for_callback);
+            Box::pin(async move {
+                // Touch the stall watchdog whenever the CLI emits output
+                // so long-running invocations don't trip stall timeout.
+                emitter.touch();
+                let buf = match stream {
+                    CommandOutputStream::Stdout => stdout_buf,
+                    CommandOutputStream::Stderr => stderr_buf,
+                };
+                buf.lock()
+                    .expect("CLI output buffer mutex poisoned")
+                    .extend_from_slice(&bytes);
+                Ok(())
+            })
+        });
         let launch_env_ref = if launch_env.is_empty() {
             None
         } else {
             Some(&launch_env)
         };
-        let launch_result = sandbox
-            .exec_command(&bg_command, 30_000, None, launch_env_ref, None)
-            .await
-            .map_err(|e| Error::handler_with_source("Failed to launch CLI command", &e))?;
-        let pid = launch_result.stdout.trim();
-        tracing::info!(pid, "CLI process launched in background");
+        let timeout_ms = node.timeout().map(crate::millis_u64);
+        let invocation_token = cancel_token.child_token();
+        let launch_start = std::time::Instant::now();
+        let streaming_result = sandbox
+            .exec_command_streaming(
+                &outer_command,
+                timeout_ms,
+                None,
+                launch_env_ref,
+                Some(invocation_token.clone()),
+                output_callback,
+            )
+            .await;
 
-        // 3c. Poll for completion
-        let poll_command =
-            format!("[ -f {exit_code_path} ] && cat {exit_code_path} || echo running");
-        let poll_interval = self.poll_interval;
-        let exit_code: i32 = loop {
-            sleep(poll_interval).await;
-            emitter.touch(); // keep the stall watchdog alive while polling
-            let poll_result = sandbox
-                .exec_command(&poll_command, 30_000, None, None, None)
-                .await
-                .map_err(|e| Error::handler_with_source("Failed to poll CLI command", &e))?;
-            let status = poll_result.stdout.trim();
-
-            if status != "running" {
-                break status.parse::<i32>().unwrap_or(-1);
+        let cleanup_temp_files = || {
+            let sandbox = Arc::clone(sandbox);
+            let cleanup_cmd = format!("rm -f {}_*", shell_quote(&tmp_prefix));
+            async move {
+                let _ = sandbox
+                    .exec_command(&cleanup_cmd, 30_000, None, None, None)
+                    .await;
             }
         };
 
-        // 3d. Read results
-        let duration_ms = u64::try_from(launch_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-        let stdout_result = sandbox
-            .exec_command(&format!("cat {stdout_path}"), 60_000, None, None, None)
-            .await
-            .map_err(|e| Error::handler_with_source("Failed to read stdout", &e))?;
-        let stderr_result = sandbox
-            .exec_command(&format!("cat {stderr_path}"), 60_000, None, None, None)
-            .await
-            .map_err(|e| Error::handler_with_source("Failed to read stderr", &e))?;
-
-        let result = ExecResult {
-            stdout: stdout_result.stdout,
-            stderr: stderr_result.stdout,
-            exit_code: Some(exit_code),
-            termination: CommandTermination::Exited,
-            duration_ms,
+        let streaming = match streaming_result {
+            Ok(streaming) => streaming,
+            Err(err) => {
+                cleanup_temp_files().await;
+                return Err(Error::handler_with_source(
+                    "Failed to run CLI command",
+                    &err,
+                ));
+            }
         };
-        emitter.emit_scoped(
-            &Event::AgentCliCompleted {
-                node_id:     node.id.clone(),
-                stdout:      result.stdout.clone(),
-                stderr:      result.stderr.clone(),
-                exit_code:   result.exit_code.unwrap_or(-1),
-                duration_ms: result.duration_ms,
-            },
-            &stage_scope,
-        );
+        let result = streaming.result;
+        // Prefer the buffered streaming output (live chunks); fall back to the
+        // result struct for sandboxes that bundle output at the end.
+        let buffered_stdout = {
+            let buf = stdout_buffer
+                .lock()
+                .expect("CLI stdout buffer mutex poisoned");
+            String::from_utf8_lossy(&buf).into_owned()
+        };
+        let buffered_stderr = {
+            let buf = stderr_buffer
+                .lock()
+                .expect("CLI stderr buffer mutex poisoned");
+            String::from_utf8_lossy(&buf).into_owned()
+        };
+        let stdout = if buffered_stdout.is_empty() {
+            result.stdout.clone()
+        } else {
+            buffered_stdout
+        };
+        let stderr = if buffered_stderr.is_empty() {
+            result.stderr.clone()
+        } else {
+            buffered_stderr
+        };
+        let duration_ms = elapsed_ms(launch_start);
 
-        // 3e. Cleanup temp files
-        let _ = sandbox
-            .exec_command(&format!("rm -f {tmp_prefix}_*"), 30_000, None, None, None)
-            .await;
+        match result.termination {
+            CommandTermination::Cancelled => {
+                emitter.emit_scoped(
+                    &Event::AgentCliCancelled {
+                        node_id: node.id.clone(),
+                        stdout: stdout.clone(),
+                        stderr: stderr.clone(),
+                        duration_ms,
+                    },
+                    &stage_scope,
+                );
+                cleanup_temp_files().await;
+                return Err(Error::Cancelled);
+            }
+            CommandTermination::TimedOut => {
+                emitter.emit_scoped(
+                    &Event::AgentCliTimedOut {
+                        node_id: node.id.clone(),
+                        stdout: stdout.clone(),
+                        stderr: stderr.clone(),
+                        duration_ms,
+                    },
+                    &stage_scope,
+                );
+                cleanup_temp_files().await;
+                let detail = cli_failure_detail(&stdout, &stderr, &command);
+                return Err(Error::handler(format!(
+                    "CLI command timed out after {duration_ms} ms: {detail}"
+                )));
+            }
+            CommandTermination::Exited => {
+                emitter.emit_scoped(
+                    &Event::AgentCliCompleted {
+                        node_id: node.id.clone(),
+                        stdout: stdout.clone(),
+                        stderr: stderr.clone(),
+                        exit_code: result.exit_code.unwrap_or(-1),
+                        duration_ms,
+                    },
+                    &stage_scope,
+                );
+            }
+        }
 
-        if !result.is_success() {
-            let tail = |s: &str, n: usize| -> String {
-                s.chars()
-                    .rev()
-                    .take(n)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect()
-            };
-            let stderr_tail = tail(&result.stderr, 500);
-            let stdout_tail = tail(&result.stdout, 500);
-            let detail = match (stderr_tail.is_empty(), stdout_tail.is_empty()) {
-                (false, false) => format!("{stderr_tail}\nstdout: {stdout_tail}"),
-                (false, true) => stderr_tail,
-                (true, false) => format!("stdout: {stdout_tail}"),
-                (true, true) => format!("command: {command}"),
-            };
+        // Cleanup temp files (Exited path).
+        cleanup_temp_files().await;
+
+        let exited_success =
+            result.termination == CommandTermination::Exited && result.exit_code == Some(0);
+        if !exited_success {
+            let detail = cli_failure_detail(&stdout, &stderr, &command);
             return Err(Error::handler(format!(
                 "CLI command exited with code {}: {detail}",
-                result.display_exit_code(),
+                result
+                    .exit_code
+                    .map_or_else(|| "<unknown>".to_string(), |c| c.to_string()),
             )));
         }
 
         // 4. Parse the CLI output
-        let parsed = parse_cli_response(provider, &result.stdout)
+        let parsed = parse_cli_response(provider, &stdout)
             .ok_or_else(|| Error::handler("Failed to parse CLI output".to_string()))?;
 
         // 5. Detect changed files
@@ -700,10 +779,7 @@ impl CodergenBackend for AgentCliBackend {
         let last_file_touched = if files_touched.is_empty() {
             None
         } else {
-            let quoted_files: Vec<String> = files_touched
-                .iter()
-                .filter_map(|f| shlex::try_quote(f).ok().map(std::borrow::Cow::into_owned))
-                .collect();
+            let quoted_files: Vec<String> = files_touched.iter().map(|f| shell_quote(f)).collect();
             let cmd = format!("ls -t {} | head -1", quoted_files.join(" "));
             if let Ok(result) = sandbox.exec_command(&cmd, 5_000, None, None, None).await {
                 let trimmed = result.stdout.trim().to_string();
@@ -789,17 +865,32 @@ impl CodergenBackend for BackendRouter {
         emitter: &Arc<Emitter>,
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+        cancel_token: CancellationToken,
     ) -> Result<CodergenResult, Error> {
         if self.should_use_cli(node) {
             self.cli_backend
                 .run(
-                    node, prompt, context, thread_id, emitter, sandbox, tool_hooks,
+                    node,
+                    prompt,
+                    context,
+                    thread_id,
+                    emitter,
+                    sandbox,
+                    tool_hooks,
+                    cancel_token,
                 )
                 .await
         } else {
             self.api_backend
                 .run(
-                    node, prompt, context, thread_id, emitter, sandbox, tool_hooks,
+                    node,
+                    prompt,
+                    context,
+                    thread_id,
+                    emitter,
+                    sandbox,
+                    tool_hooks,
+                    cancel_token,
                 )
                 .await
         }
@@ -810,9 +901,13 @@ impl CodergenBackend for BackendRouter {
         node: &Node,
         prompt: &str,
         system_prompt: Option<&str>,
+        emitter: &Arc<Emitter>,
+        stage_scope: &StageScope,
     ) -> Result<CodergenResult, Error> {
         // CLI backend doesn't support one_shot, always route to API
-        self.api_backend.one_shot(node, prompt, system_prompt).await
+        self.api_backend
+            .one_shot(node, prompt, system_prompt, emitter, stage_scope)
+            .await
     }
 }
 
@@ -820,6 +915,7 @@ impl CodergenBackend for BackendRouter {
 mod tests {
     use std::path::Path;
 
+    use fabro_agent::sandbox::ExecResult;
     use fabro_graphviz::graph::AttrValue;
 
     use super::*;
@@ -999,7 +1095,14 @@ mod tests {
         ));
         let emitter = Arc::new(Emitter::default());
 
-        let result = ensure_cli(AgentCli::Claude, Provider::Anthropic, &sandbox, &emitter).await;
+        let result = ensure_cli(
+            AgentCli::Claude,
+            Provider::Anthropic,
+            &sandbox,
+            &emitter,
+            &CancellationToken::new(),
+        )
+        .await;
         assert!(result.is_ok());
 
         let commands = commands.lock().unwrap();
@@ -1020,7 +1123,14 @@ mod tests {
         ));
         let emitter = Arc::new(Emitter::default());
 
-        let result = ensure_cli(AgentCli::Claude, Provider::Anthropic, &sandbox, &emitter).await;
+        let result = ensure_cli(
+            AgentCli::Claude,
+            Provider::Anthropic,
+            &sandbox,
+            &emitter,
+            &CancellationToken::new(),
+        )
+        .await;
         assert!(result.is_ok());
 
         let commands = commands.lock().unwrap();
@@ -1045,7 +1155,14 @@ mod tests {
             move |event| events.lock().unwrap().push(event.clone())
         });
 
-        let result = ensure_cli(AgentCli::Claude, Provider::Anthropic, &sandbox, &emitter).await;
+        let result = ensure_cli(
+            AgentCli::Claude,
+            Provider::Anthropic,
+            &sandbox,
+            &emitter,
+            &CancellationToken::new(),
+        )
+        .await;
         assert!(result.is_err());
         let error = result.unwrap_err().to_string();
         assert!(error.contains("install exited with code 1"));
@@ -1276,6 +1393,7 @@ mod tests {
             _emitter: &Arc<Emitter>,
             _sandbox: &Arc<dyn Sandbox>,
             _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+            _cancel_token: CancellationToken,
         ) -> Result<CodergenResult, Error> {
             Ok(CodergenResult::Text {
                 text:              "stub".to_string(),
@@ -1284,5 +1402,234 @@ mod tests {
                 last_file_touched: None,
             })
         }
+    }
+
+    /// Sandbox stub whose `exec_command_streaming` returns a configurable
+    /// `CommandTermination` so we can exercise the cancel/timeout paths in
+    /// `AgentCliBackend::run` without spawning real processes.
+    struct StreamingCliMock {
+        commands:    Arc<Mutex<Vec<String>>>,
+        termination: CommandTermination,
+        exit_code:   Option<i32>,
+    }
+
+    #[async_trait]
+    impl Sandbox for StreamingCliMock {
+        async fn read_file(
+            &self,
+            _path: &str,
+            _offset: Option<usize>,
+            _limit: Option<usize>,
+        ) -> fabro_sandbox::Result<String> {
+            Ok(String::new())
+        }
+        async fn write_file(&self, _path: &str, _content: &str) -> fabro_sandbox::Result<()> {
+            Ok(())
+        }
+        async fn delete_file(&self, _path: &str) -> fabro_sandbox::Result<()> {
+            Ok(())
+        }
+        async fn file_exists(&self, _path: &str) -> fabro_sandbox::Result<bool> {
+            Ok(false)
+        }
+        async fn list_directory(
+            &self,
+            _path: &str,
+            _depth: Option<usize>,
+        ) -> fabro_sandbox::Result<Vec<fabro_agent::sandbox::DirEntry>> {
+            Ok(vec![])
+        }
+        async fn exec_command(
+            &self,
+            command: &str,
+            _timeout_ms: u64,
+            _working_dir: Option<&str>,
+            _env_vars: Option<&std::collections::HashMap<String, String>>,
+            _cancel_token: Option<CancellationToken>,
+        ) -> fabro_sandbox::Result<ExecResult> {
+            self.commands.lock().unwrap().push(command.to_string());
+            // Default: success for git/version/cat/rm/ls.
+            if command.contains("--version") {
+                return Ok(ok_result());
+            }
+            Ok(ExecResult {
+                stdout:      String::new(),
+                stderr:      String::new(),
+                exit_code:   Some(0),
+                termination: CommandTermination::Exited,
+                duration_ms: 1,
+            })
+        }
+        async fn exec_command_streaming(
+            &self,
+            command: &str,
+            _timeout_ms: Option<u64>,
+            _working_dir: Option<&str>,
+            _env_vars: Option<&std::collections::HashMap<String, String>>,
+            _cancel_token: Option<CancellationToken>,
+            _output_callback: fabro_agent::CommandOutputCallback,
+        ) -> fabro_sandbox::Result<fabro_sandbox::ExecStreamingResult> {
+            self.commands.lock().unwrap().push(command.to_string());
+            Ok(fabro_sandbox::ExecStreamingResult {
+                result:            ExecResult {
+                    stdout:      String::new(),
+                    stderr:      String::new(),
+                    exit_code:   self.exit_code,
+                    termination: self.termination,
+                    duration_ms: 5,
+                },
+                streams_separated: true,
+                live_streaming:    true,
+            })
+        }
+        async fn grep(
+            &self,
+            _pattern: &str,
+            _path: &str,
+            _options: &fabro_agent::sandbox::GrepOptions,
+        ) -> fabro_sandbox::Result<Vec<String>> {
+            Ok(vec![])
+        }
+        async fn glob(
+            &self,
+            _pattern: &str,
+            _path: Option<&str>,
+        ) -> fabro_sandbox::Result<Vec<String>> {
+            Ok(vec![])
+        }
+        async fn download_file_to_local(&self, _: &str, _: &Path) -> fabro_sandbox::Result<()> {
+            Ok(())
+        }
+        async fn upload_file_from_local(&self, _: &Path, _: &str) -> fabro_sandbox::Result<()> {
+            Ok(())
+        }
+        async fn initialize(&self) -> fabro_sandbox::Result<()> {
+            Ok(())
+        }
+        async fn cleanup(&self) -> fabro_sandbox::Result<()> {
+            Ok(())
+        }
+        fn working_directory(&self) -> &str {
+            "/workspace"
+        }
+        fn platform(&self) -> &str {
+            "linux"
+        }
+        fn os_version(&self) -> String {
+            "Ubuntu 22.04".into()
+        }
+        async fn set_autostop_interval(&self, _minutes: i32) -> fabro_sandbox::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn collect_events(emitter: &Arc<Emitter>) -> Arc<Mutex<Vec<fabro_types::RunEvent>>> {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = Arc::clone(&events);
+        emitter.on_event(move |event| events_clone.lock().unwrap().push(event.clone()));
+        events
+    }
+
+    #[tokio::test]
+    async fn agent_cli_backend_run_emits_cancelled_event_and_returns_cancelled() {
+        let commands = Arc::new(Mutex::new(Vec::new()));
+        let sandbox: Arc<dyn Sandbox> = Arc::new(StreamingCliMock {
+            commands:    Arc::clone(&commands),
+            termination: CommandTermination::Cancelled,
+            exit_code:   None,
+        });
+        let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+        let node = Node::new("step");
+        let context = Context::new();
+        let emitter = Arc::new(Emitter::default());
+        let events = collect_events(&emitter);
+
+        let result = backend
+            .run(
+                &node,
+                "Do something",
+                &context,
+                None,
+                &emitter,
+                &sandbox,
+                None,
+                CancellationToken::new(),
+            )
+            .await;
+
+        let Err(err) = result else {
+            panic!("cancelled streaming should bubble Error::Cancelled");
+        };
+        assert!(matches!(err, Error::Cancelled));
+
+        let events = events.lock().unwrap();
+        let names: Vec<String> = events
+            .iter()
+            .map(|e| e.body.event_name().to_string())
+            .collect();
+        assert!(
+            names.iter().any(|n| n == "agent.cli.cancelled"),
+            "expected agent.cli.cancelled, got events: {names:?}"
+        );
+        assert!(
+            !names.iter().any(|n| n == "agent.cli.completed"),
+            "should not emit agent.cli.completed on cancellation"
+        );
+        // Cleanup `rm -f` ran.
+        let cmds = commands.lock().unwrap();
+        assert!(
+            cmds.iter().any(|c| c.starts_with("rm -f /tmp/fabro_cli_")),
+            "expected temp cleanup, got commands: {cmds:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_cli_backend_run_emits_timed_out_event_and_returns_handler_error() {
+        let commands = Arc::new(Mutex::new(Vec::new()));
+        let sandbox: Arc<dyn Sandbox> = Arc::new(StreamingCliMock {
+            commands:    Arc::clone(&commands),
+            termination: CommandTermination::TimedOut,
+            exit_code:   None,
+        });
+        let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+        let node = Node::new("step");
+        let context = Context::new();
+        let emitter = Arc::new(Emitter::default());
+        let events = collect_events(&emitter);
+
+        let result = backend
+            .run(
+                &node,
+                "Do something slow",
+                &context,
+                None,
+                &emitter,
+                &sandbox,
+                None,
+                CancellationToken::new(),
+            )
+            .await;
+
+        let Err(err) = result else {
+            panic!("timeout streaming should produce a handler error");
+        };
+        assert!(
+            matches!(err, Error::Handler { .. }),
+            "expected handler error on timeout, got {err:?}"
+        );
+
+        let events = events.lock().unwrap();
+        let names: Vec<String> = events
+            .iter()
+            .map(|e| e.body.event_name().to_string())
+            .collect();
+        assert!(
+            names.iter().any(|n| n == "agent.cli.timed_out"),
+            "expected agent.cli.timed_out, got events: {names:?}"
+        );
+        assert!(
+            !names.iter().any(|n| n == "agent.cli.completed"),
+            "should not emit agent.cli.completed on timeout"
+        );
     }
 }

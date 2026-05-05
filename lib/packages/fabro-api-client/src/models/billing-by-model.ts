@@ -26,7 +26,7 @@ import type { ModelReference } from './model-reference';
 export interface BillingByModel {
     'model': ModelReference;
     /**
-     * Number of stages that used this model.
+     * Number of usage-bearing stage visits that used this model.
      */
     'stages': number;
     'billing': BilledTokenCounts;

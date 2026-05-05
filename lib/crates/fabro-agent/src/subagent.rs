@@ -111,7 +111,7 @@ impl SubAgentManager {
 
         let task_prompt_for_spawn = task_prompt.clone();
         let task = tokio::spawn(async move {
-            session.initialize().await;
+            session.initialize().await?;
             session.process_input(&task_prompt_for_spawn).await?;
             let turns = session.history().turns();
             let last_text = turns.iter().rev().find_map(|t| match t {

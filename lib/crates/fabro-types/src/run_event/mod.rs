@@ -260,6 +260,10 @@ pub enum EventBody {
     AgentCliStarted(AgentCliStartedProps),
     #[serde(rename = "agent.cli.completed")]
     AgentCliCompleted(AgentCliCompletedProps),
+    #[serde(rename = "agent.cli.cancelled")]
+    AgentCliCancelled(AgentCliCancelledProps),
+    #[serde(rename = "agent.cli.timed_out")]
+    AgentCliTimedOut(AgentCliTimedOutProps),
     #[serde(rename = "pull_request.created")]
     PullRequestCreated(PullRequestCreatedProps),
     #[serde(rename = "pull_request.failed")]
@@ -445,6 +449,8 @@ impl EventBody {
             Self::CommandCompleted(_) => "command.completed",
             Self::AgentCliStarted(_) => "agent.cli.started",
             Self::AgentCliCompleted(_) => "agent.cli.completed",
+            Self::AgentCliCancelled(_) => "agent.cli.cancelled",
+            Self::AgentCliTimedOut(_) => "agent.cli.timed_out",
             Self::PullRequestCreated(_) => "pull_request.created",
             Self::PullRequestFailed(_) => "pull_request.failed",
             Self::DevcontainerResolved(_) => "devcontainer.resolved",
@@ -1382,7 +1388,7 @@ mod tests {
         for body in [
             EventBody::RunNotice(RunNoticeProps {
                 level:            RunNoticeLevel::Warn,
-                code:             "git_diff_failed".to_string(),
+                code:             RunNoticeCode::GitDiffFailed.to_string(),
                 message:          "git diff failed".to_string(),
                 exec_output_tail: Some(tail.clone()),
             }),
@@ -1418,7 +1424,7 @@ mod tests {
         for body in [
             EventBody::RunNotice(RunNoticeProps {
                 level:            RunNoticeLevel::Warn,
-                code:             "git_diff_failed".to_string(),
+                code:             RunNoticeCode::GitDiffFailed.to_string(),
                 message:          "git diff failed".to_string(),
                 exec_output_tail: None,
             }),

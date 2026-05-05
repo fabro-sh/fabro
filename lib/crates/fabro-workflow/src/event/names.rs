@@ -120,6 +120,8 @@ pub fn event_name(event: &Event) -> &'static str {
         Event::AgentSteeringDetached { .. } => "agent.steering.detached",
         Event::AgentSteerBuffered { .. } => "agent.steer.buffered",
         Event::AgentSteerDropped { .. } => "agent.steer.dropped",
+        Event::AgentCliCancelled { .. } => "agent.cli.cancelled",
+        Event::AgentCliTimedOut { .. } => "agent.cli.timed_out",
         Event::PullRequestCreated { .. } => "pull_request.created",
         Event::PullRequestFailed { .. } => "pull_request.failed",
         Event::DevcontainerResolved { .. } => "devcontainer.resolved",

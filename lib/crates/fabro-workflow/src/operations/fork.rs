@@ -250,6 +250,8 @@ fn replay_event_for_fork_projection(body: &EventBody) -> bool {
             | EventBody::InterviewInterrupted(_)
             | EventBody::AgentSessionStarted(_)
             | EventBody::AgentCliStarted(_)
+            | EventBody::AgentCliCancelled(_)
+            | EventBody::AgentCliTimedOut(_)
             | EventBody::CommandStarted(_)
             | EventBody::CommandCompleted(_)
             | EventBody::ParallelCompleted(_)

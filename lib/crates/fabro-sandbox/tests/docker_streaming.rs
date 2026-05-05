@@ -49,7 +49,7 @@ async fn streaming_timeout_terminates_docker_exec_before_returning() {
     let result = sandbox
         .exec_command_streaming(
             &format!("trap '' HUP TERM; echo start; sleep 5 # {marker}"),
-            200,
+            Some(200),
             None,
             None,
             None,

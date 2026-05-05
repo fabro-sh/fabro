@@ -642,7 +642,7 @@ mod tests {
         RunOptions {
             settings:         WorkflowSettings::default(),
             run_dir:          tempfile::tempdir().unwrap().path().to_path_buf(),
-            cancel_token:     None,
+            cancel_token:     tokio_util::sync::CancellationToken::new(),
             run_id:           fabro_types::fixtures::RUN_1,
             labels:           HashMap::new(),
             workflow_slug:    Some("metadata".to_string()),

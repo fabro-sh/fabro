@@ -28,7 +28,10 @@ fn stage_projection_round_trips_representative_json() {
         "parallel_results": [{ "branch": 0, "status": "succeeded" }],
         "stdout": "ok",
         "stderr": "",
-        "termination": "exited"
+        "termination": "exited",
+        "started_at": "2026-04-29T12:34:00Z",
+        "duration_ms": 56000,
+        "state": "succeeded"
     });
 
     let state: StageProjection = serde_json::from_value(value.clone()).unwrap();

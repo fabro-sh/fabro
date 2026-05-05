@@ -12,7 +12,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::blob_store::BlobStore;
 use crate::run_state::{EventProjectionCache, RunProjectionReducer, build_summary};
-use crate::{Error, EventEnvelope, EventPayload, Result, RunProjection, keys};
+use crate::{Error, EventEnvelope, EventPayload, Result, RunProjection, StageId, keys};
 
 const DEFAULT_EVENT_TAIL_LIMIT: usize = 1024;
 #[derive(Clone)]
@@ -213,6 +213,30 @@ impl RunDatabase {
         list_events_from_with_limit(&self.inner.db, &self.inner.run_id, start_seq, limit).await
     }
 
+    /// Returns up to `limit + 1` events for the given stage visit,
+    /// starting at `start_seq`. The `+1` lets callers compute `has_more`.
+    ///
+    /// Implementation note: scans the unbounded run-event prefix and
+    /// filters by stage identity *before* applying `limit`, so a stage with
+    /// matches sparsely scattered late in the event log still returns its
+    /// full slice (no premature truncation from a generic `limit`-bounded
+    /// scan).
+    pub async fn list_events_for_stage_from_with_limit(
+        &self,
+        stage_id: &StageId,
+        start_seq: u32,
+        limit: usize,
+    ) -> Result<Vec<EventEnvelope>> {
+        list_events_for_stage_from_with_limit(
+            &self.inner.db,
+            &self.inner.run_id,
+            stage_id,
+            start_seq,
+            limit,
+        )
+        .await
+    }
+
     pub fn watch_events_from(
         &self,
         seq: u32,
@@ -348,6 +372,74 @@ where
     Ok(events)
 }
 
+async fn list_events_for_stage_from_with_limit<R>(
+    db: &R,
+    run_id: &RunId,
+    stage_id: &StageId,
+    start_seq: u32,
+    limit: usize,
+) -> Result<Vec<EventEnvelope>>
+where
+    R: DbRead + Sync,
+{
+    // Unbounded scan first: filtering by stage identity with a generic
+    // limit-bounded scan would silently drop matches whenever the stage's
+    // events are sparse late in the event log.
+    //
+    // We probe just the stage identity fields with a small partial deserialize and
+    // only run the full `RunEvent` parse on matches. Most events in a run
+    // belong to other nodes, so this avoids deserializing large payloads
+    // (`agent.tool.completed.output`, `agent.message.text`, …) we'd discard.
+    #[derive(serde::Deserialize)]
+    struct StageIdProbe<'a> {
+        #[serde(default, borrow)]
+        stage_id: Option<&'a str>,
+        #[serde(default, borrow)]
+        node_id:  Option<&'a str>,
+    }
+
+    let stage_id_string = stage_id.to_string();
+    let max_events = limit.saturating_add(1);
+    let mut iter = db.scan_prefix(keys::run_events_prefix(run_id)).await?;
+    let mut events: Vec<EventEnvelope> = Vec::new();
+    while let Some(entry) = iter.next().await? {
+        let key = key_to_string(&entry.key)?;
+        let Some(seq) = keys::parse_event_seq(&key) else {
+            continue;
+        };
+        if seq < start_seq {
+            continue;
+        }
+        let probe: StageIdProbe = serde_json::from_slice(&entry.value)?;
+        let matches_stage_id = probe.stage_id == Some(stage_id_string.as_str());
+        let matches_legacy_node_id = probe.stage_id.is_none()
+            && stage_id.visit() == 1
+            && probe.node_id == Some(stage_id.node_id());
+        if !matches_stage_id && !matches_legacy_node_id {
+            continue;
+        }
+        let event: RunEvent = serde_json::from_slice(&entry.value)?;
+        let envelope = EventEnvelope { seq, event };
+        if events.len() < max_events {
+            events.push(envelope);
+            continue;
+        }
+
+        if let Some((max_index, max_seq)) = events
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, existing)| existing.seq)
+            .map(|(index, existing)| (index, existing.seq))
+        {
+            if seq < max_seq {
+                events[max_index] = envelope;
+            }
+        }
+    }
+    events.sort_by_key(|event| event.seq);
+    Ok(events)
+}
+
 async fn list_blobs<R>(db: &R) -> Result<Vec<RunBlobId>>
 where
     R: DbRead + Sync,
@@ -375,9 +467,12 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use fabro_types::{RunId, StageId};
     use object_store::memory::InMemory;
+    use serde_json::json;
 
-    use crate::Database;
+    use crate::{Database, EventPayload};
+
     #[tokio::test]
     async fn list_blobs_reads_global_cas_namespace() {
         let object_store = Arc::new(InMemory::new());
@@ -393,5 +488,191 @@ mod tests {
         blob_ids.sort();
 
         assert_eq!(blob_ids, vec![first_id, second_id]);
+    }
+
+    fn stage_prompt_payload(run_id: &RunId, idx: u32, node_id: Option<&str>) -> EventPayload {
+        stage_prompt_payload_for_stage(run_id, idx, node_id, None)
+    }
+
+    fn stage_prompt_payload_for_stage(
+        run_id: &RunId,
+        idx: u32,
+        node_id: Option<&str>,
+        stage_id: Option<&StageId>,
+    ) -> EventPayload {
+        let mut value = json!({
+            "id": format!("evt-{idx}"),
+            "ts": "2026-04-09T12:00:00Z",
+            "run_id": run_id.to_string(),
+            "event": "stage.prompt",
+            "properties": {
+                "visit": 1,
+                "text": format!("prompt {idx}"),
+            },
+        });
+        if let Some(node_id) = node_id {
+            value
+                .as_object_mut()
+                .unwrap()
+                .insert("node_id".into(), json!(node_id));
+        }
+        if let Some(stage_id) = stage_id {
+            value
+                .as_object_mut()
+                .unwrap()
+                .insert("stage_id".into(), json!(stage_id.to_string()));
+        }
+        EventPayload::new(value, run_id).unwrap()
+    }
+
+    async fn fresh_run() -> super::RunDatabase {
+        let object_store = Arc::new(InMemory::new());
+        let store = Database::new(object_store, "", Duration::from_millis(1), None);
+        let run_id: RunId = "01JT56VE4Z5NZ814GZN2JZD65A".parse().unwrap();
+        store.create_run(&run_id).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn list_events_for_stage_returns_only_matching_events_in_seq_order() {
+        let run = fresh_run().await;
+        let run_id = run.run_id();
+        run.append_event(&stage_prompt_payload(&run_id, 1, Some("alpha")))
+            .await
+            .unwrap();
+        run.append_event(&stage_prompt_payload(&run_id, 2, Some("beta")))
+            .await
+            .unwrap();
+        run.append_event(&stage_prompt_payload(&run_id, 3, Some("alpha")))
+            .await
+            .unwrap();
+
+        let events = run
+            .list_events_for_stage_from_with_limit(&StageId::new("alpha", 1), 1, 100)
+            .await
+            .unwrap();
+
+        let seqs: Vec<u32> = events.iter().map(|e| e.seq).collect();
+        assert_eq!(seqs, vec![1, 3]);
+    }
+
+    #[tokio::test]
+    async fn list_events_for_stage_skips_events_with_no_stage_identity() {
+        let run = fresh_run().await;
+        let run_id = run.run_id();
+        run.append_event(&stage_prompt_payload(&run_id, 1, None))
+            .await
+            .unwrap();
+        run.append_event(&stage_prompt_payload(&run_id, 2, Some("alpha")))
+            .await
+            .unwrap();
+
+        let events = run
+            .list_events_for_stage_from_with_limit(&StageId::new("alpha", 1), 1, 100)
+            .await
+            .unwrap();
+
+        let seqs: Vec<u32> = events.iter().map(|e| e.seq).collect();
+        assert_eq!(seqs, vec![2]);
+    }
+
+    #[tokio::test]
+    async fn list_events_for_stage_paginates_via_start_seq_on_filtered_slice() {
+        let run = fresh_run().await;
+        let run_id = run.run_id();
+        for idx in 1..=5 {
+            let node = if idx % 2 == 0 { "beta" } else { "alpha" };
+            run.append_event(&stage_prompt_payload(&run_id, idx, Some(node)))
+                .await
+                .unwrap();
+        }
+
+        // alpha events live at seqs 1, 3, 5. Start at seq=2 should skip seq=1.
+        let events = run
+            .list_events_for_stage_from_with_limit(&StageId::new("alpha", 1), 2, 100)
+            .await
+            .unwrap();
+
+        let seqs: Vec<u32> = events.iter().map(|e| e.seq).collect();
+        assert_eq!(seqs, vec![3, 5]);
+    }
+
+    #[tokio::test]
+    async fn list_events_for_stage_walks_past_unrelated_events_for_sparse_matches() {
+        let run = fresh_run().await;
+        let run_id = run.run_id();
+        // 200 unrelated events first.
+        for idx in 1..=200 {
+            run.append_event(&stage_prompt_payload(&run_id, idx, Some("noise")))
+                .await
+                .unwrap();
+        }
+        // Then 3 sparse "alpha" events at the tail.
+        for idx in 201..=203 {
+            run.append_event(&stage_prompt_payload(&run_id, idx, Some("alpha")))
+                .await
+                .unwrap();
+        }
+
+        // limit smaller than the number of unrelated events would have
+        // truncated the upstream scan if we had post-filtered.
+        let events = run
+            .list_events_for_stage_from_with_limit(&StageId::new("alpha", 1), 1, 5)
+            .await
+            .unwrap();
+
+        let seqs: Vec<u32> = events.iter().map(|e| e.seq).collect();
+        assert_eq!(seqs, vec![201, 202, 203]);
+    }
+
+    #[tokio::test]
+    async fn list_events_for_stage_returns_limit_plus_one_for_has_more_signal() {
+        let run = fresh_run().await;
+        let run_id = run.run_id();
+        for idx in 1..=5 {
+            run.append_event(&stage_prompt_payload(&run_id, idx, Some("alpha")))
+                .await
+                .unwrap();
+        }
+
+        let events = run
+            .list_events_for_stage_from_with_limit(&StageId::new("alpha", 1), 1, 2)
+            .await
+            .unwrap();
+
+        // With limit=2, we expect up to limit+1 = 3 envelopes so the
+        // caller can compute has_more.
+        assert_eq!(events.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn list_events_for_stage_prefers_stage_id_over_node_id() {
+        let run = fresh_run().await;
+        let run_id = run.run_id();
+        let first_visit = StageId::new("verify", 1);
+        let second_visit = StageId::new("verify", 2);
+        run.append_event(&stage_prompt_payload_for_stage(
+            &run_id,
+            1,
+            Some("verify"),
+            Some(&first_visit),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&stage_prompt_payload_for_stage(
+            &run_id,
+            2,
+            Some("verify"),
+            Some(&second_visit),
+        ))
+        .await
+        .unwrap();
+
+        let events = run
+            .list_events_for_stage_from_with_limit(&second_visit, 1, 100)
+            .await
+            .unwrap();
+
+        let seqs: Vec<u32> = events.iter().map(|e| e.seq).collect();
+        assert_eq!(seqs, vec![2]);
     }
 }

@@ -250,12 +250,23 @@ impl Session {
 
     /// Initialize session by discovering project docs and capturing environment
     /// context. Call before `process_input`.
-    pub async fn initialize(&mut self) {
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::Interrupted(InterruptReason::Cancelled)` if the
+    /// session's cancel token fires during initialization.
+    pub async fn initialize(&mut self) -> Result<(), Error> {
+        let cancel_token = self.cancel_token.clone();
+
         self.event_emitter
             .emit(self.id.clone(), AgentEvent::SessionStarted {
                 provider: Some(self.provider_profile.provider().to_string()),
                 model:    Some(self.provider_profile.model().to_string()),
             });
+
+        if cancel_token.is_cancelled() {
+            return Err(Error::Interrupted(InterruptReason::Cancelled));
+        }
 
         let doc_root = self
             .config
@@ -267,8 +278,9 @@ impl Session {
             &doc_root,
             self.sandbox.working_directory(),
             self.provider_profile.provider(),
+            &cancel_token,
         )
-        .await;
+        .await?;
 
         // Discover skills
         let skill_dirs = if let Some(dirs) = &self.config.skill_dirs {
@@ -278,7 +290,7 @@ impl Session {
             let skills_str = skills_dir.to_string_lossy().to_string();
             default_skill_dirs(Some(&skills_str), self.config.git_root.as_deref())
         };
-        self.skills = discover_skills(self.sandbox.as_ref(), &skill_dirs).await;
+        self.skills = discover_skills(self.sandbox.as_ref(), &skill_dirs, &cancel_token).await?;
         debug!(skill_count = self.skills.len(), "Skills discovered");
 
         // Register use_skill tool when skills are available
@@ -295,7 +307,7 @@ impl Session {
         if !self.config.mcp_servers.is_empty() {
             // Resolve Sandbox transports: start the server inside the sandbox,
             // then rewrite the config to Http using the sandbox's preview URL.
-            let mcp_servers = self.resolve_sandbox_mcp_servers().await;
+            let mcp_servers = self.resolve_sandbox_mcp_servers(&cancel_token).await?;
 
             let mut manager = McpConnectionManager::new();
             let results = manager.start_servers(&mcp_servers).await;
@@ -329,7 +341,7 @@ impl Session {
         }
 
         // Populate environment context
-        self.env_context = self.build_env_context().await;
+        self.env_context = self.build_env_context(&cancel_token).await?;
         debug!(
             is_git_repo = self.env_context.is_git_repo,
             model = %self.env_context.model,
@@ -344,19 +356,30 @@ impl Session {
             self.config.user_instructions.as_deref(),
             &self.skills,
         );
+
+        Ok(())
     }
 
     /// Resolve `McpTransport::Sandbox` configs by starting the MCP server
     /// inside the sandbox and rewriting the transport to `Http` with the
     /// sandbox's preview URL.
-    async fn resolve_sandbox_mcp_servers(&self) -> Vec<McpServerSettings> {
+    async fn resolve_sandbox_mcp_servers(
+        &self,
+        cancel_token: &CancellationToken,
+    ) -> Result<Vec<McpServerSettings>, Error> {
         let mut resolved = Vec::with_capacity(self.config.mcp_servers.len());
 
         for config in &self.config.mcp_servers {
+            if cancel_token.is_cancelled() {
+                return Err(Error::Interrupted(InterruptReason::Cancelled));
+            }
             match &config.transport {
                 McpTransport::Sandbox { command, port, env } => {
                     let port = *port;
-                    match self.start_sandbox_mcp_server(command, port, env).await {
+                    match self
+                        .start_sandbox_mcp_server(command, port, env, cancel_token)
+                        .await?
+                    {
                         Ok((url, headers)) => {
                             info!(
                                 server = %config.name,
@@ -388,17 +411,24 @@ impl Session {
             }
         }
 
-        resolved
+        Ok(resolved)
     }
 
     /// Start an MCP server inside the sandbox and return (url, headers) for
     /// HTTP connection.
+    ///
+    /// The outer `Result` surfaces fatal cancellation as
+    /// `Error::Interrupted(InterruptReason::Cancelled)` (the running MCP
+    /// process group is terminated before returning). The inner `Result`
+    /// captures non-fatal startup failures that the caller logs and turns
+    /// into an `McpServerFailed` event.
     async fn start_sandbox_mcp_server(
         &self,
         command: &[String],
         port: u16,
         env: &std::collections::HashMap<String, String>,
-    ) -> Result<(String, std::collections::HashMap<String, String>), String> {
+        cancel_token: &CancellationToken,
+    ) -> Result<Result<(String, std::collections::HashMap<String, String>), String>, Error> {
         let sandbox = self.sandbox.as_ref();
 
         let cmd_str = command
@@ -416,27 +446,63 @@ impl Session {
             quoted = fabro_sandbox::shell_quote(&inner)
         );
         let env_ref = if env.is_empty() { None } else { Some(env) };
-        let launch_result = sandbox
-            .exec_command(&launch_script, 30_000, None, env_ref, None)
-            .await
-            .map_err(|e| format!("Failed to launch MCP server: {}", e.display_with_causes()))?;
 
-        let pid = launch_result.stdout.trim();
-        info!(pid, port, "MCP server process launched in sandbox");
+        if cancel_token.is_cancelled() {
+            return Err(Error::Interrupted(InterruptReason::Cancelled));
+        }
+        let launch_result = match sandbox
+            .exec_command(
+                &launch_script,
+                30_000,
+                None,
+                env_ref,
+                Some(cancel_token.child_token()),
+            )
+            .await
+        {
+            Ok(result) => result,
+            Err(e) => {
+                if cancel_token.is_cancelled() {
+                    return Err(Error::Interrupted(InterruptReason::Cancelled));
+                }
+                return Ok(Err(format!(
+                    "Failed to launch MCP server: {}",
+                    e.display_with_causes()
+                )));
+            }
+        };
+
+        let pid = launch_result.stdout.trim().to_string();
+        info!(pid = %pid, port, "MCP server process launched in sandbox");
 
         // Wait for the server to start listening on the port
         let poll_cmd = format!(
             "for i in $(seq 1 30); do ss -tln | grep -q ':{port} ' && echo ready && exit 0; sleep 1; done; echo timeout"
         );
         let poll_result = sandbox
-            .exec_command(&poll_cmd, 60_000, None, None, None)
-            .await
-            .map_err(|e| {
-                format!(
+            .exec_command(
+                &poll_cmd,
+                60_000,
+                None,
+                None,
+                Some(cancel_token.child_token()),
+            )
+            .await;
+
+        if cancel_token.is_cancelled() {
+            kill_mcp_pid(sandbox, &pid).await;
+            return Err(Error::Interrupted(InterruptReason::Cancelled));
+        }
+
+        let poll_result = match poll_result {
+            Ok(result) => result,
+            Err(e) => {
+                return Ok(Err(format!(
                     "Failed to poll MCP server readiness: {}",
                     e.display_with_causes()
-                )
-            })?;
+                )));
+            }
+        };
 
         if poll_result.stdout.trim() != "ready" {
             // Grab stderr for debugging
@@ -446,51 +512,80 @@ impl Session {
                     10_000,
                     None,
                     None,
-                    None,
+                    Some(cancel_token.child_token()),
                 )
                 .await
                 .map(|r| r.stdout)
                 .unwrap_or_default();
-            return Err(format!(
+            return Ok(Err(format!(
                 "MCP server did not start listening on port {port} within 30s. stderr:\n{stderr}"
-            ));
+            )));
         }
 
         // Get the preview URL for the port, or fall back to localhost for local
         // sandboxes
-        if let Some(url_and_headers) = sandbox
-            .get_preview_url(port)
-            .await
-            .map_err(|e| e.display_with_causes())?
-        {
-            Ok(url_and_headers)
+        let preview = match sandbox.get_preview_url(port).await {
+            Ok(p) => p,
+            Err(e) => return Ok(Err(e.display_with_causes())),
+        };
+
+        if cancel_token.is_cancelled() {
+            kill_mcp_pid(sandbox, &pid).await;
+            return Err(Error::Interrupted(InterruptReason::Cancelled));
+        }
+
+        if let Some(url_and_headers) = preview {
+            Ok(Ok(url_and_headers))
         } else {
             info!(port, "No preview URL available, using localhost");
-            Ok((
+            Ok(Ok((
                 format!("http://localhost:{port}"),
                 std::collections::HashMap::new(),
-            ))
+            )))
         }
     }
 
-    async fn build_env_context(&self) -> EnvContext {
+    async fn build_env_context(
+        &self,
+        cancel_token: &CancellationToken,
+    ) -> Result<EnvContext, Error> {
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let model_name = self.provider_profile.model().to_string();
+
+        if cancel_token.is_cancelled() {
+            return Err(Error::Interrupted(InterruptReason::Cancelled));
+        }
 
         // Detect git info via sandbox
         let git_branch = self
             .sandbox
-            .exec_command("git rev-parse --abbrev-ref HEAD", 5000, None, None, None)
+            .exec_command(
+                "git rev-parse --abbrev-ref HEAD",
+                5000,
+                None,
+                None,
+                Some(cancel_token.child_token()),
+            )
             .await
             .ok()
             .filter(fabro_sandbox::ExecResult::is_success)
             .map(|r| r.stdout.trim().to_string());
 
+        if cancel_token.is_cancelled() {
+            return Err(Error::Interrupted(InterruptReason::Cancelled));
+        }
+
         let is_git_repo = git_branch.is_some();
 
         let git_status_short = if is_git_repo {
             self.sandbox
-                .exec_command("git status --short", 5000, None, None, None)
+                .exec_command(
+                    "git status --short",
+                    5000,
+                    None,
+                    None,
+                    Some(cancel_token.child_token()),
+                )
                 .await
                 .ok()
                 .filter(fabro_sandbox::ExecResult::is_success)
@@ -499,10 +594,20 @@ impl Session {
         } else {
             None
         };
+
+        if cancel_token.is_cancelled() {
+            return Err(Error::Interrupted(InterruptReason::Cancelled));
+        }
 
         let git_recent_commits = if is_git_repo {
             self.sandbox
-                .exec_command("git log --oneline -10", 5000, None, None, None)
+                .exec_command(
+                    "git log --oneline -10",
+                    5000,
+                    None,
+                    None,
+                    Some(cancel_token.child_token()),
+                )
                 .await
                 .ok()
                 .filter(fabro_sandbox::ExecResult::is_success)
@@ -512,7 +617,11 @@ impl Session {
             None
         };
 
-        EnvContext {
+        if cancel_token.is_cancelled() {
+            return Err(Error::Interrupted(InterruptReason::Cancelled));
+        }
+
+        Ok(EnvContext {
             git_branch,
             is_git_repo,
             current_date: today,
@@ -520,7 +629,7 @@ impl Session {
             knowledge_cutoff: self.provider_profile.knowledge_cutoff().unwrap_or_default(),
             git_status_short,
             git_recent_commits,
-        }
+        })
     }
 
     #[must_use]
@@ -1290,6 +1399,23 @@ const fn is_auth_error(err: &LlmError) -> bool {
     )
 }
 
+/// Best-effort kill of a sandbox MCP server process group. Used when
+/// `start_sandbox_mcp_server` is cancelled after spawning a detached
+/// `setsid` child but before reporting readiness. Errors from the sandbox
+/// are logged and swallowed; the caller is already returning a Cancelled
+/// error.
+async fn kill_mcp_pid(sandbox: &dyn Sandbox, pid: &str) {
+    let pid = pid.trim();
+    if pid.is_empty() {
+        return;
+    }
+    let script =
+        format!("kill -TERM -{pid} 2>/dev/null; sleep 1; kill -KILL -{pid} 2>/dev/null; true");
+    if let Err(err) = sandbox.exec_command(&script, 5_000, None, None, None).await {
+        warn!(pid, error = %err.display_with_causes(), "Failed to kill MCP server process group during cancellation");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -1648,7 +1774,7 @@ mod tests {
         let mut session = make_session(vec![text_response("Hello")]).await;
         let mut rx = session.subscribe();
 
-        session.initialize().await;
+        session.initialize().await.unwrap();
         session.process_input("Hi").await.unwrap();
         session.close();
 
@@ -2176,7 +2302,7 @@ mod tests {
         let mut session = make_session(responses).await;
         let mut rx = session.subscribe();
 
-        session.initialize().await;
+        session.initialize().await.unwrap();
         session.process_input("one").await.unwrap();
         session.process_input("two").await.unwrap();
         session.close();
@@ -2209,7 +2335,7 @@ mod tests {
             ..Default::default()
         };
         let mut session = Session::new(client, profile, env, config, None);
-        session.initialize().await;
+        session.initialize().await.unwrap();
         session.process_input("test").await.unwrap();
 
         // Verify user instructions are included in the system prompt
@@ -2998,7 +3124,7 @@ mod tests {
         let mut rx = session.subscribe();
 
         // Initialize starts the MCP server and registers tools
-        session.initialize().await;
+        session.initialize().await.unwrap();
 
         // Verify McpServerReady event was emitted
         let mut mcp_ready = false;
@@ -3193,7 +3319,7 @@ mod tests {
     #[tokio::test]
     async fn process_input_emits_processing_end_on_idle_transition() {
         let mut session = make_session(vec![text_response("Hello")]).await;
-        session.initialize().await;
+        session.initialize().await.unwrap();
 
         let mut rx = session.subscribe();
         session.process_input("Hi").await.unwrap();

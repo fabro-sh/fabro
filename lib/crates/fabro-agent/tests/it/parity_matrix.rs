@@ -170,7 +170,7 @@ macro_rules! provider_test {
             async fn [<$prefix _ $scenario>]() {
                 let tmp = tempfile::tempdir().expect("failed to create tempdir");
                 let mut session = make_session($provider, $model, tmp.path(), None).await;
-                session.initialize().await;
+                session.initialize().await.unwrap();
                 [<scenario_ $scenario>](&mut session, tmp.path()).await;
             }
         }
@@ -195,7 +195,7 @@ macro_rules! openai_twin_provider_test {
                     tmp.path(),
                     Some(twin),
                 ).await;
-                session.initialize().await;
+                session.initialize().await.unwrap();
                 [<scenario_ $scenario>](&mut session, tmp.path()).await;
             }
         }
@@ -668,7 +668,7 @@ macro_rules! reasoning_effort_tests {
             };
             let mut session =
                 make_session_with_config($provider, $model, tmp.path(), config, None).await;
-            session.initialize().await;
+            session.initialize().await.unwrap();
             session
                 .process_input("Say hello")
                 .await
@@ -747,7 +747,7 @@ macro_rules! loop_detection_tests {
             };
             let mut session =
                 make_session_with_config($provider, $model, tmp.path(), config, None).await;
-            session.initialize().await;
+            session.initialize().await.unwrap();
             session
                 .process_input("Repeatedly read the file /dev/null")
                 .await

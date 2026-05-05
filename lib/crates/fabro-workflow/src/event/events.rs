@@ -206,6 +206,7 @@ pub enum Event {
         failure:     FailureDetail,
         will_retry:  bool,
         duration_ms: u64,
+        billing:     Option<BilledModelUsage>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         actor:       Option<Principal>,
     },
@@ -558,6 +559,18 @@ pub enum Event {
         stdout:      String,
         stderr:      String,
         exit_code:   i32,
+        duration_ms: u64,
+    },
+    AgentCliCancelled {
+        node_id:     String,
+        stdout:      String,
+        stderr:      String,
+        duration_ms: u64,
+    },
+    AgentCliTimedOut {
+        node_id:     String,
+        stdout:      String,
+        stderr:      String,
         duration_ms: u64,
     },
     PullRequestCreated {
@@ -1288,6 +1301,20 @@ impl Event {
             }
             Self::AgentSteerDropped { reason, count, .. } => {
                 warn!(?reason, count, "Steer dropped");
+            }
+            Self::AgentCliCancelled {
+                node_id,
+                duration_ms,
+                ..
+            } => {
+                debug!(node_id, duration_ms, "Agent CLI cancelled");
+            }
+            Self::AgentCliTimedOut {
+                node_id,
+                duration_ms,
+                ..
+            } => {
+                debug!(node_id, duration_ms, "Agent CLI timed out");
             }
             Self::PullRequestCreated {
                 pr_url,

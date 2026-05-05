@@ -27,10 +27,10 @@ use tokio::time::timeout as tokio_timeout;
 use super::types::{InitOptions, Initialized, LlmSpec, Persisted, SandboxEnvSpec};
 use crate::devcontainer_bridge::{devcontainer_to_snapshot_config, run_devcontainer_lifecycle};
 use crate::error::Error;
-use crate::event::{Emitter, Event, RunNoticeLevel};
+use crate::event::{Emitter, Event, RunNoticeCode, RunNoticeLevel};
 use crate::git::RUN_BRANCH_PREFIX;
 use crate::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
-use crate::handler::{HandlerRegistry, default_registry, sandbox_cancel_token};
+use crate::handler::{HandlerRegistry, default_registry};
 use crate::run_metadata::{
     RunMetadataRuntime, build_metadata_writer, metadata_branch_name, mint_token,
 };
@@ -156,7 +156,7 @@ fn resolve_worktree_plan(options: &mut InitOptions) -> Option<WorktreePlan> {
         if let Some(env_name) = env_name {
             options.emitter.notice(
                 RunNoticeLevel::Warn,
-                "dirty_worktree",
+                RunNoticeCode::DirtyWorktree,
                 format!("Uncommitted changes will not be included in the {env_name}."),
             );
         }
@@ -201,6 +201,14 @@ fn resolve_worktree_plan(options: &mut InitOptions) -> Option<WorktreePlan> {
     })
 }
 
+fn worktree_skipped_notice(mode: Option<WorktreeMode>) -> Option<(RunNoticeCode, &'static str)> {
+    matches!(mode, Some(WorktreeMode::Always)).then_some((
+        RunNoticeCode::WorktreeSkippedNoGit,
+        "Worktree mode `always` requested but no Git repository was found; running without a \
+         worktree.",
+    ))
+}
+
 fn git_setup_intent(run_options: &RunOptions) -> GitSetupIntent {
     if let Some(source) = run_options.fork_source_ref.as_ref() {
         GitSetupIntent::ForkFromCheckpoint {
@@ -240,11 +248,14 @@ async fn build_sandbox_env(
                     Ok(token) => {
                         env.insert("GITHUB_TOKEN".to_string(), token);
                     }
-                    Err(e) => emitter.notice(
-                        RunNoticeLevel::Warn,
-                        "github_token_failed",
-                        format!("Failed to mint GitHub token: {e}"),
-                    ),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to mint GitHub token");
+                        emitter.notice(
+                            RunNoticeLevel::Warn,
+                            RunNoticeCode::GithubTokenFailed,
+                            format!("Failed to mint GitHub token: {e}"),
+                        );
+                    }
                 }
             }
         }
@@ -520,6 +531,13 @@ pub async fn initialize(
         ))
     };
     if worktree_plan.is_some() && !worktree_created {
+        if let Some((code, message)) = worktree_skipped_notice(options.worktree_mode) {
+            tracing::warn!(
+                worktree_mode = ?options.worktree_mode,
+                "worktree skipped: cwd is not a git repository"
+            );
+            options.emitter.notice(RunNoticeLevel::Warn, code, message);
+        }
         options.run_options.git = None;
     }
     let cleanup_guard = scopeguard::guard(Arc::clone(&sandbox), |sandbox| {
@@ -598,7 +616,8 @@ pub async fn initialize(
         .is_some();
     if !has_run_branch {
         let intent = git_setup_intent(&options.run_options);
-        if sandbox.origin_url().is_some() {
+        let sandbox_has_origin = sandbox.origin_url().is_some();
+        if sandbox_has_origin {
             sandbox_git
                 .ensure_git_available(&*sandbox)
                 .await
@@ -624,7 +643,16 @@ pub async fn initialize(
                     options.run_options.base_branch = info.base_branch;
                 }
             }
-            Ok(None) => {}
+            Ok(None) => {
+                if sandbox_has_origin {
+                    options.emitter.notice(
+                        RunNoticeLevel::Warn,
+                        RunNoticeCode::SandboxGitUnavailable,
+                        "Sandbox could not set up Git despite a configured origin; running \
+                         without checkpointing or PR support.",
+                    );
+                }
+            }
             Err(e) => {
                 return Err(Error::engine_with_source("Sandbox git setup failed", &e));
             }
@@ -642,23 +670,21 @@ pub async fn initialize(
                 index,
             });
             let cmd_start = Instant::now();
-            let cancel_token = sandbox_cancel_token(options.run_options.cancel_token.clone());
+            let cancel_token = options.run_options.cancel_token.child_token();
             let result = sandbox
                 .exec_command(
                     command,
                     options.lifecycle.setup_command_timeout_ms,
                     None,
                     None,
-                    cancel_token.clone(),
+                    Some(cancel_token.clone()),
                 )
                 .await
                 .map_err(|e| Error::engine_with_source("Setup command failed", &e))?;
-            if let Some(token) = &cancel_token {
-                if token.is_cancelled() {
-                    return Err(Error::Cancelled);
-                }
-                token.cancel();
+            if options.run_options.cancel_token.is_cancelled() {
+                return Err(Error::Cancelled);
             }
+            cancel_token.cancel();
             let duration_ms = crate::millis_u64(cmd_start.elapsed());
             if !result.is_success() {
                 let exit_code = result.display_exit_code();
@@ -707,7 +733,7 @@ pub async fn initialize(
             if metadata_runtime.mark_metadata_degraded() {
                 options.emitter.notice(
                     RunNoticeLevel::Warn,
-                    "checkpoint_metadata_write_failed",
+                    RunNoticeCode::CheckpointMetadataWriteFailed,
                     message,
                 );
             }
@@ -758,7 +784,6 @@ pub async fn initialize(
 mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
     use std::time::Duration;
 
     use fabro_auth::{AuthCredential, AuthDetails};
@@ -851,7 +876,7 @@ mod tests {
         RunOptions {
             settings:         WorkflowSettings::default(),
             run_dir:          run_dir.to_path_buf(),
-            cancel_token:     None,
+            cancel_token:     tokio_util::sync::CancellationToken::new(),
             run_id:           test_run_id(),
             labels:           HashMap::new(),
             workflow_slug:    None,
@@ -1017,6 +1042,17 @@ mod tests {
         assert!(plan.is_some());
         assert!(options.run_options.display_base_sha.is_none());
         assert!(options.run_options.git.is_none());
+    }
+
+    #[test]
+    fn worktree_skipped_notice_only_warns_for_always() {
+        assert!(worktree_skipped_notice(None).is_none());
+        assert!(worktree_skipped_notice(Some(WorktreeMode::Clean)).is_none());
+        assert!(worktree_skipped_notice(Some(WorktreeMode::Dirty)).is_none());
+        assert!(worktree_skipped_notice(Some(WorktreeMode::Never)).is_none());
+
+        let (code, _) = worktree_skipped_notice(Some(WorktreeMode::Always)).unwrap();
+        assert_eq!(code, RunNoticeCode::WorktreeSkippedNoGit);
     }
 
     #[tokio::test]
@@ -1269,9 +1305,10 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
         let (graph, source) = simple_graph();
         let persisted = test_persisted(graph, source, &run_dir);
-        let cancel_token = Arc::new(AtomicBool::new(true));
+        let cancel_token = tokio_util::sync::CancellationToken::new();
+        cancel_token.cancel();
         let mut run_options = test_settings(&run_dir);
-        run_options.cancel_token = Some(cancel_token);
+        run_options.cancel_token = cancel_token;
 
         let emitter = Arc::new(crate::event::Emitter::new(test_run_id()));
         let result = initialize(persisted, InitOptions {
@@ -1332,9 +1369,10 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
         let (graph, source) = simple_graph();
         let persisted = test_persisted(graph, source, &run_dir);
-        let cancel_token = Arc::new(AtomicBool::new(true));
+        let cancel_token = tokio_util::sync::CancellationToken::new();
+        cancel_token.cancel();
         let mut run_options = test_settings(&run_dir);
-        run_options.cancel_token = Some(cancel_token);
+        run_options.cancel_token = cancel_token;
 
         let emitter = Arc::new(crate::event::Emitter::new(test_run_id()));
         let result = initialize(persisted, InitOptions {

@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::clone_source::{self, CloneDecision, EmptyWorkspaceReason};
 use crate::redact::redact_auth_url;
-use crate::sandbox::resolve_path;
+use crate::sandbox::{optional_timeout, resolve_path};
 use crate::{
     CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GrepOptions, Sandbox,
     SandboxEvent, SandboxEventCallback, format_lines_numbered, shell_quote,
@@ -37,6 +37,9 @@ const DEFAULT_SNAPSHOT: &str = "daytona-medium";
 pub const DEFAULT_DAYTONA_API_URL: &str = "https://app.daytona.io/api";
 const FABRO_SANDBOX_USER_AGENT: &str = concat!("fabro-sandbox/", env!("CARGO_PKG_VERSION"));
 const DAYTONA_PROBE_TIMEOUT: Duration = Duration::from_secs(20);
+/// Upper bound on `DaytonaSession::close` so a stalled Daytona REST call cannot
+/// block cancellation/timeout paths from returning.
+const DAYTONA_SESSION_CLOSE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Permissions a Daytona API key needs for Fabro's snapshot and sandbox flow.
 pub const REQUIRED_DAYTONA_PERMISSIONS: &[Permissions] = &[
@@ -1307,7 +1310,7 @@ impl Sandbox for DaytonaSandbox {
     async fn exec_command_streaming(
         &self,
         command: &str,
-        timeout_ms: u64,
+        timeout_ms: Option<u64>,
         working_dir: Option<&str>,
         env_vars: Option<&HashMap<String, String>>,
         cancel_token: Option<CancellationToken>,
@@ -1397,7 +1400,7 @@ impl Sandbox for DaytonaSandbox {
             &session,
             &command_id,
             session_exec.exit_code,
-            Duration::from_millis(timeout_ms),
+            timeout_ms,
             cancel_token.unwrap_or_default(),
             &mut stream_task,
         )
@@ -1673,19 +1676,39 @@ impl DaytonaSession {
     }
 
     /// Idempotent: a second call after `active=false` is a no-op.
+    ///
+    /// `delete_session` is bounded by [`DAYTONA_SESSION_CLOSE_TIMEOUT`] so a
+    /// stalled Daytona REST call cannot block cancellation paths indefinitely.
     async fn close(&mut self, reason: &'static str) {
         if !self.active {
             return;
         }
         self.active = false;
         if let Some(svc) = self.process_svc.take() {
-            if let Err(err) = svc.delete_session(&self.session_id).await {
-                tracing::warn!(
-                    error = %err,
-                    session_id = %self.session_id,
-                    reason,
-                    "failed to delete Daytona session"
-                );
+            match time::timeout(
+                DAYTONA_SESSION_CLOSE_TIMEOUT,
+                svc.delete_session(&self.session_id),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => {
+                    tracing::warn!(
+                        error = %err,
+                        session_id = %self.session_id,
+                        reason,
+                        "failed to delete Daytona session"
+                    );
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        session_id = %self.session_id,
+                        reason,
+                        timeout_ms = u64::try_from(DAYTONA_SESSION_CLOSE_TIMEOUT.as_millis())
+                            .unwrap_or(u64::MAX),
+                        "timed out deleting Daytona session"
+                    );
+                }
             }
         }
     }
@@ -1730,7 +1753,7 @@ async fn wait_for_completion(
     session: &DaytonaSession,
     command_id: &str,
     initial_exit_code: Option<i32>,
-    timeout: Duration,
+    timeout_ms: Option<u64>,
     cancel_token: CancellationToken,
     stream_task: &mut JoinHandle<Result<(), DaytonaError>>,
 ) -> crate::Result<WaitOutcome> {
@@ -1742,8 +1765,8 @@ async fn wait_for_completion(
         });
     }
 
-    let timeout_sleep = time::sleep(timeout);
-    tokio::pin!(timeout_sleep);
+    let timeout_future = optional_timeout(timeout_ms);
+    tokio::pin!(timeout_future);
     loop {
         tokio::select! {
             () = time::sleep(Duration::from_millis(250)) => {
@@ -1765,7 +1788,7 @@ async fn wait_for_completion(
                     });
                 }
             }
-            () = &mut timeout_sleep => {
+            () = &mut timeout_future => {
                 return Ok(WaitOutcome {
                     exit_code:   None,
                     termination: CommandTermination::TimedOut,

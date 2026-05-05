@@ -54,7 +54,7 @@ use fabro_llm::types::{
     ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest, Role, ToolChoice,
     ToolDefinition,
 };
-use fabro_model::{BilledModelUsage, BilledTokenCounts, Catalog, ModelTestMode, Provider};
+use fabro_model::{BilledTokenCounts, Catalog, ModelTestMode, Provider};
 use fabro_redact::redact_jsonl_line;
 use fabro_sandbox::daytona::{self, DaytonaSandbox};
 use fabro_sandbox::reconnect::reconnect;
@@ -111,6 +111,7 @@ use tokio::task::spawn_blocking;
 use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::{BroadcastStream, UnboundedReceiverStream};
+use tokio_util::sync::CancellationToken;
 use tower::{ServiceExt, service_fn};
 use tracing::{Instrument, debug, error, info, warn};
 use ulid::Ulid;
@@ -125,7 +126,7 @@ use crate::ip_allowlist::{IpAllowlistConfig, ip_allowlist_middleware};
 use crate::jwt_auth::{self, AuthMode};
 use crate::principal_middleware::{
     AuthContextSlot, RequestAuth, RequestAuthContext, RequireRunBlob, RequireRunScoped,
-    RequireStageArtifact, RequiredUser, principal_middleware,
+    RequireRunStageScoped, RequireStageArtifact, RequiredUser, principal_middleware,
 };
 use crate::request_id::{self, RequestId};
 use crate::run_files::{FilesInFlight, new_files_in_flight};
@@ -138,6 +139,7 @@ use crate::{
 
 mod handler;
 
+pub(crate) use handler::events::EventListParams;
 #[cfg(test)]
 pub(in crate::server) use handler::events::filtered_global_events;
 pub(crate) use handler::graph::render_graph_bytes;
@@ -205,7 +207,7 @@ struct ManagedRun {
     event_tx:           Option<broadcast::Sender<RunEvent>>,
     checkpoint:         Option<Checkpoint>,
     cancel_tx:          Option<oneshot::Sender<()>>,
-    cancel_token:       Option<Arc<AtomicBool>>,
+    cancel_token:       Option<CancellationToken>,
     worker_pid:         Option<u32>,
     worker_pgid:        Option<u32>,
     run_dir:            Option<std::path::PathBuf>,
@@ -568,17 +570,50 @@ pub(crate) struct ResolvedAppStateSettings {
     pub(crate) manifest_run_settings: std::result::Result<RunNamespace, SharedError>,
 }
 
-fn accumulate_model_billing(entry: &mut ModelBillingTotals, usage: &BilledModelUsage) {
-    let tokens = usage.tokens();
-    entry.stages += 1;
-    entry.billing.input_tokens += tokens.input_tokens;
-    entry.billing.output_tokens += tokens.output_tokens;
-    entry.billing.reasoning_tokens += tokens.reasoning_tokens;
-    entry.billing.cache_read_tokens += tokens.cache_read_tokens;
-    entry.billing.cache_write_tokens += tokens.cache_write_tokens;
-    entry.billing.total_tokens += tokens.total_tokens();
-    if let Some(value) = usage.total_usd_micros {
-        *entry.billing.total_usd_micros.get_or_insert(0) += value;
+fn accumulate_billed_token_counts(target: &mut BilledTokenCounts, source: &BilledTokenCounts) {
+    target.input_tokens += source.input_tokens;
+    target.output_tokens += source.output_tokens;
+    target.reasoning_tokens += source.reasoning_tokens;
+    target.cache_read_tokens += source.cache_read_tokens;
+    target.cache_write_tokens += source.cache_write_tokens;
+    target.total_tokens += source.total_tokens;
+    if let Some(value) = source.total_usd_micros {
+        *target.total_usd_micros.get_or_insert(0) += value;
+    }
+}
+
+fn accumulate_billing_rollup(
+    accumulator: &mut BillingAccumulator,
+    rollup: &fabro_workflow::ProjectionBillingRollup,
+) {
+    accumulator.total_runs += 1;
+    accumulator.total_runtime_secs += rollup.runtime_ms as f64 / 1000.0;
+    for model in &rollup.by_model {
+        let entry = accumulator
+            .by_model
+            .entry(model.model_id.clone())
+            .or_default();
+        entry.stages += model.stages;
+        accumulate_billed_token_counts(&mut entry.billing, &model.billing);
+    }
+}
+
+pub(crate) fn run_stage_from_stage_id(
+    stage_id: &StageId,
+    name: impl Into<String>,
+    status: StageState,
+    duration_secs: Option<f64>,
+    started_at: Option<chrono::DateTime<chrono::Utc>>,
+) -> RunStage {
+    RunStage {
+        id: stage_id.to_string(),
+        name: name.into(),
+        status,
+        duration_secs,
+        node_id: stage_id.node_id().to_string(),
+        visit: std::num::NonZeroU32::new(stage_id.visit())
+            .expect("StageId stores a non-zero visit"),
+        started_at,
     }
 }
 
@@ -1520,7 +1555,7 @@ async fn delete_run_internal(
 
     if let Some(mut managed_run) = managed_run {
         if let Some(token) = &managed_run.cancel_token {
-            token.store(true, Ordering::SeqCst);
+            token.cancel();
         }
         if let Some(answer_transport) = managed_run.answer_transport.clone() {
             let _ = answer_transport.cancel_run().await;
@@ -2656,12 +2691,12 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         };
 
         let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
-        let cancel_token = Arc::new(AtomicBool::new(false));
+        let cancel_token = CancellationToken::new();
         let (event_tx, _) = broadcast::channel(256);
 
         managed_run.status = RunStatus::Starting;
         managed_run.cancel_tx = Some(cancel_tx);
-        managed_run.cancel_token = Some(Arc::clone(&cancel_token));
+        managed_run.cancel_token = Some(cancel_token.clone());
         managed_run.event_tx = Some(event_tx);
 
         (
@@ -2756,7 +2791,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
     };
     let server_settings = state.server_settings();
     let github_settings = &server_settings.server.integrations.github;
-    if cancel_token.load(Ordering::SeqCst) {
+    if cancel_token.is_cancelled() {
         finish_cancelled_run_before_execution(&state, run_id).await;
         return;
     }
@@ -2791,7 +2826,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
     let github_app = match github_app_result {
         Ok(github_app) => github_app,
         Err(e) => {
-            if cancel_token.load(Ordering::SeqCst) {
+            if cancel_token.is_cancelled() {
                 finish_cancelled_run_before_execution(&state, run_id).await;
                 return;
             }
@@ -2818,7 +2853,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         .collect();
     let services = operations::StartServices {
         run_id,
-        cancel_token: Some(Arc::clone(&cancel_token)),
+        cancel_token: cancel_token.clone(),
         emitter: Arc::clone(&emitter),
         interviewer: Arc::clone(&interview_runtime),
         steering_hub: Arc::clone(&steering_hub),
@@ -2843,7 +2878,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
     let result = tokio::select! {
         result = execution => ExecutionResult::Completed(Box::new(result)),
         _ = cancel_rx => {
-            cancel_token.store(true, Ordering::SeqCst);
+            cancel_token.cancel();
             ExecutionResult::CancelledBySignal
         }
     };
@@ -2854,9 +2889,9 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         }
     }
 
-    // Save final checkpoint
-    let checkpoint = match run_store.state().await {
-        Ok(state) => state.checkpoint,
+    // Save final projection
+    let final_projection = match run_store.state().await {
+        Ok(state) => Some(state),
         Err(err) => {
             tracing::warn!(run_id = %run_id, error = %err, "Failed to load run state from store");
             None
@@ -2864,32 +2899,17 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
     };
 
     // Accumulate aggregate usage after execution completes.
-    if let Some(ref cp) = checkpoint {
-        let stage_durations = match run_store.list_events().await {
-            Ok(events) => fabro_workflow::extract_stage_durations_from_events(&events),
-            Err(err) => {
-                tracing::warn!(run_id = %run_id, error = %err, "Failed to load run events from store");
-                HashMap::default()
-            }
-        };
-        let mut agg = state
-            .aggregate_billing
-            .lock()
-            .expect("aggregate_billing lock poisoned");
-        agg.total_runs += 1;
-        let mut run_runtime: f64 = 0.0;
-        for (node_id, outcome) in &cp.node_outcomes {
-            if let Some(usage) = &outcome.usage {
-                let entry = agg
-                    .by_model
-                    .entry(usage.model_id().to_string())
-                    .or_default();
-                accumulate_model_billing(entry, usage);
-            }
-            let duration_ms = stage_durations.get(node_id).copied().unwrap_or(0);
-            run_runtime += duration_ms as f64 / 1000.0;
+    if let Some(ref projection) = final_projection {
+        if projection.checkpoint.is_some() {
+            let mut agg = state
+                .aggregate_billing
+                .lock()
+                .expect("aggregate_billing lock poisoned");
+            accumulate_billing_rollup(
+                &mut agg,
+                &fabro_workflow::billing_rollup_from_projection(projection),
+            );
         }
-        agg.total_runtime_secs += run_runtime;
     }
 
     let mut runs = state.runs.lock().expect("runs lock poisoned");
@@ -2938,7 +2958,9 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
                 };
             }
         }
-        managed_run.checkpoint = checkpoint;
+        managed_run.checkpoint = final_projection
+            .as_ref()
+            .and_then(|projection| projection.checkpoint.clone());
         managed_run.run_dir = Some(run_dir);
         clear_live_run_state(managed_run);
     }
@@ -3181,32 +3203,15 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         }
     };
 
-    if let Some(ref checkpoint) = final_state.checkpoint {
-        let stage_durations = match run_store.list_events().await {
-            Ok(events) => fabro_workflow::extract_stage_durations_from_events(&events),
-            Err(err) => {
-                tracing::warn!(run_id = %run_id, error = %err, "Failed to load run events from store");
-                HashMap::default()
-            }
-        };
+    if final_state.checkpoint.is_some() {
         let mut agg = state
             .aggregate_billing
             .lock()
             .expect("aggregate_billing lock poisoned");
-        agg.total_runs += 1;
-        let mut run_runtime: f64 = 0.0;
-        for (node_id, outcome) in &checkpoint.node_outcomes {
-            if let Some(usage) = &outcome.usage {
-                let entry = agg
-                    .by_model
-                    .entry(usage.model_id().to_string())
-                    .or_default();
-                accumulate_model_billing(entry, usage);
-            }
-            let duration_ms = stage_durations.get(node_id).copied().unwrap_or(0);
-            run_runtime += duration_ms as f64 / 1000.0;
-        }
-        agg.total_runtime_secs += run_runtime;
+        accumulate_billing_rollup(
+            &mut agg,
+            &fabro_workflow::billing_rollup_from_projection(&final_state),
+        );
     }
 
     let mut runs = state.runs.lock().expect("runs lock poisoned");

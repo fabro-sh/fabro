@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use fabro_client::{AuthEntry, AuthStore, OAuthEntry};
 use serde::Serialize;
 
@@ -108,12 +108,12 @@ pub(super) fn status_command(args: &AuthStatusArgs, ctx: &CommandContext) -> Res
                 fabro_util::printerr!(
                     printer,
                     "  Access expires: {}",
-                    access_token_expires_at.to_rfc3339()
+                    access_token_expires_at.to_rfc3339_opts(SecondsFormat::Secs, true)
                 );
                 fabro_util::printerr!(
                     printer,
                     "  Refresh expires: {}",
-                    refresh_token_expires_at.to_rfc3339()
+                    refresh_token_expires_at.to_rfc3339_opts(SecondsFormat::Secs, true)
                 );
             }
             StatusRow::DevToken {
@@ -122,7 +122,11 @@ pub(super) fn status_command(args: &AuthStatusArgs, ctx: &CommandContext) -> Res
             } => {
                 fabro_util::printerr!(printer, "{server}");
                 fabro_util::printerr!(printer, "  Auth: dev-token");
-                fabro_util::printerr!(printer, "  Logged in: {}", logged_in_at.to_rfc3339());
+                fabro_util::printerr!(
+                    printer,
+                    "  Logged in: {}",
+                    logged_in_at.to_rfc3339_opts(SecondsFormat::Secs, true)
+                );
             }
         }
     }

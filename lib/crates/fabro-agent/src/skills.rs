@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use fabro_llm::types::ToolDefinition;
+use tokio_util::sync::CancellationToken;
 
+use crate::error::{Error, InterruptReason};
 use crate::sandbox::Sandbox;
 use crate::tool_registry::RegisteredTool;
 use crate::tools::required_str;
@@ -224,17 +226,35 @@ pub fn default_skill_dirs(fabro_skills_dir: Option<&str>, git_root: Option<&str>
     dirs
 }
 
-pub async fn discover_skills(env: &dyn Sandbox, dirs: &[String]) -> Vec<Skill> {
+pub async fn discover_skills(
+    env: &dyn Sandbox,
+    dirs: &[String],
+    cancel_token: &CancellationToken,
+) -> Result<Vec<Skill>, Error> {
     let mut skills_by_name: std::collections::HashMap<String, Skill> =
         std::collections::HashMap::new();
 
     for dir in dirs {
-        let Ok(paths) = env.glob("*/SKILL.md", Some(dir)).await else {
+        if cancel_token.is_cancelled() {
+            return Err(Error::Interrupted(InterruptReason::Cancelled));
+        }
+        let glob_result = env.glob("*/SKILL.md", Some(dir)).await;
+        if cancel_token.is_cancelled() {
+            return Err(Error::Interrupted(InterruptReason::Cancelled));
+        }
+        let Ok(paths) = glob_result else {
             continue;
         };
 
         for path in paths {
-            let Ok(content) = env.read_file(&path, None, None).await else {
+            if cancel_token.is_cancelled() {
+                return Err(Error::Interrupted(InterruptReason::Cancelled));
+            }
+            let read_result = env.read_file(&path, None, None).await;
+            if cancel_token.is_cancelled() {
+                return Err(Error::Interrupted(InterruptReason::Cancelled));
+            }
+            let Ok(content) = read_result else {
                 continue;
             };
 
@@ -246,7 +266,7 @@ pub async fn discover_skills(env: &dyn Sandbox, dirs: &[String]) -> Vec<Skill> {
 
     let mut skills: Vec<Skill> = skills_by_name.into_values().collect();
     skills.sort_by(|a, b| a.name.cmp(&b.name));
-    skills
+    Ok(skills)
 }
 
 #[cfg(test)]
@@ -454,7 +474,9 @@ name: trimmed
             ..Default::default()
         };
 
-        let skills = discover_skills(&env, &["/skills".into()]).await;
+        let skills = discover_skills(&env, &["/skills".into()], &CancellationToken::new())
+            .await
+            .unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "commit");
         assert_eq!(skills[0].description, "Make a commit");
@@ -477,7 +499,9 @@ name: trimmed
             ..Default::default()
         };
 
-        let skills = discover_skills(&env, &["/skills".into()]).await;
+        let skills = discover_skills(&env, &["/skills".into()], &CancellationToken::new())
+            .await
+            .unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "good");
     }
@@ -485,7 +509,9 @@ name: trimmed
     #[tokio::test]
     async fn discover_empty_dirs() {
         let env = MockSandbox::default();
-        let skills = discover_skills(&env, &[]).await;
+        let skills = discover_skills(&env, &[], &CancellationToken::new())
+            .await
+            .unwrap();
         assert!(skills.is_empty());
     }
 
@@ -514,7 +540,13 @@ name: trimmed
         };
 
         // discover_skills iterates dirs in order; later dirs override earlier names
-        let skills = discover_skills(&env, &["/global".into(), "/project".into()]).await;
+        let skills = discover_skills(
+            &env,
+            &["/global".into(), "/project".into()],
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].description, "Project commit");
     }

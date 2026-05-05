@@ -53,7 +53,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
             return None;
         }
     };
-    let stage_durations = crate::extract_stage_durations_from_events(&events);
+    let stage_durations = crate::latest_stage_duration_by_node(&events);
     let mut retro = derive_retro(
         options.run_id,
         &options.workflow_name,
@@ -304,7 +304,7 @@ mod tests {
         RunOptions {
             settings:         WorkflowSettings::default(),
             run_dir:          run_dir.to_path_buf(),
-            cancel_token:     None,
+            cancel_token:     tokio_util::sync::CancellationToken::new(),
             run_id:           test_run_id(),
             labels:           HashMap::new(),
             workflow_slug:    None,
@@ -340,7 +340,7 @@ mod tests {
             Arc::clone(&emitter),
             Arc::clone(&sandbox),
             None,
-            None,
+            tokio_util::sync::CancellationToken::new(),
             fabro_llm::Provider::Anthropic,
             test_llm_source(),
             Arc::new(crate::sandbox_git_runtime::SandboxGitRuntime::new()),
@@ -395,7 +395,7 @@ mod tests {
                 std::env::current_dir().unwrap(),
             )),
             None,
-            None,
+            tokio_util::sync::CancellationToken::new(),
             fabro_llm::Provider::Anthropic,
             test_llm_source(),
             Arc::new(crate::sandbox_git_runtime::SandboxGitRuntime::new()),

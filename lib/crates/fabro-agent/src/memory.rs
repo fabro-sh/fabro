@@ -1,8 +1,10 @@
 use std::collections::HashSet;
 
 use fabro_model::Provider;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
+use crate::error::{Error, InterruptReason};
 use crate::sandbox::Sandbox;
 
 const BUDGET_BYTES: usize = 32768;
@@ -12,7 +14,8 @@ pub async fn discover_memory(
     git_root: &str,
     working_dir: &str,
     provider: Provider,
-) -> Vec<String> {
+    cancel_token: &CancellationToken,
+) -> Result<Vec<String>, Error> {
     let directories = build_directory_walk(git_root, working_dir);
 
     let candidate_filenames: Vec<&str> = match provider {
@@ -34,8 +37,15 @@ pub async fn discover_memory(
 
     for dir in &directories {
         for filename in &candidate_filenames {
+            if cancel_token.is_cancelled() {
+                return Err(Error::Interrupted(InterruptReason::Cancelled));
+            }
             let path = format!("{dir}/{filename}");
-            if let Ok(content) = env.read_file(&path, None, None).await {
+            let read_result = env.read_file(&path, None, None).await;
+            if cancel_token.is_cancelled() {
+                return Err(Error::Interrupted(InterruptReason::Cancelled));
+            }
+            if let Ok(content) = read_result {
                 if content.is_empty() {
                     warn!(path = %path, "Project doc file empty, skipping");
                     continue;
@@ -68,7 +78,7 @@ pub async fn discover_memory(
     let total_bytes: usize = results.iter().map(std::string::String::len).sum();
     info!(files = results.len(), total_bytes, "Project docs loaded");
 
-    results
+    Ok(results)
 }
 
 fn build_directory_walk(git_root: &str, working_dir: &str) -> Vec<String> {
@@ -117,6 +127,8 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
+    use tokio_util::sync::CancellationToken;
+
     use super::*;
     use crate::sandbox::Sandbox;
     use crate::test_support::MockSandbox;
@@ -129,7 +141,15 @@ mod tests {
             files,
             ..Default::default()
         });
-        let docs = discover_memory(env.as_ref(), "/repo", "/repo", Provider::Anthropic).await;
+        let docs = discover_memory(
+            env.as_ref(),
+            "/repo",
+            "/repo",
+            Provider::Anthropic,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         assert_eq!(docs.len(), 1);
         assert_eq!(docs[0], "Agent instructions");
     }
@@ -146,8 +166,15 @@ mod tests {
             files: files.clone(),
             ..Default::default()
         });
-        let anthropic_docs =
-            discover_memory(env.as_ref(), "/repo", "/repo", Provider::Anthropic).await;
+        let anthropic_docs = discover_memory(
+            env.as_ref(),
+            "/repo",
+            "/repo",
+            Provider::Anthropic,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         assert_eq!(anthropic_docs.len(), 2);
         assert_eq!(anthropic_docs[0], "agents");
         assert_eq!(anthropic_docs[1], "claude");
@@ -156,7 +183,15 @@ mod tests {
             files: files.clone(),
             ..Default::default()
         });
-        let openai_docs = discover_memory(env.as_ref(), "/repo", "/repo", Provider::OpenAi).await;
+        let openai_docs = discover_memory(
+            env.as_ref(),
+            "/repo",
+            "/repo",
+            Provider::OpenAi,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         assert_eq!(openai_docs.len(), 2);
         assert_eq!(openai_docs[0], "agents");
         assert_eq!(openai_docs[1], "copilot");
@@ -165,7 +200,15 @@ mod tests {
             files,
             ..Default::default()
         });
-        let gemini_docs = discover_memory(env.as_ref(), "/repo", "/repo", Provider::Gemini).await;
+        let gemini_docs = discover_memory(
+            env.as_ref(),
+            "/repo",
+            "/repo",
+            Provider::Gemini,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         assert_eq!(gemini_docs.len(), 2);
         assert_eq!(gemini_docs[0], "agents");
         assert_eq!(gemini_docs[1], "gemini");
@@ -184,7 +227,15 @@ mod tests {
             files,
             ..Default::default()
         });
-        let docs = discover_memory(env.as_ref(), "/repo", "/repo", Provider::Anthropic).await;
+        let docs = discover_memory(
+            env.as_ref(),
+            "/repo",
+            "/repo",
+            Provider::Anthropic,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         assert_eq!(docs.len(), 2);
         assert_eq!(docs[0], large_content);
         // Second doc should be truncated to fit remaining budget
@@ -201,7 +252,15 @@ mod tests {
             files,
             ..Default::default()
         });
-        let docs = discover_memory(env.as_ref(), "/repo", "/repo", Provider::Anthropic).await;
+        let docs = discover_memory(
+            env.as_ref(),
+            "/repo",
+            "/repo",
+            Provider::Anthropic,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         assert_eq!(docs.len(), 1);
         assert_eq!(docs[0], "shared instructions");
     }
@@ -215,7 +274,15 @@ mod tests {
             files,
             ..Default::default()
         });
-        let docs = discover_memory(env.as_ref(), "/repo", "/repo/src", Provider::Anthropic).await;
+        let docs = discover_memory(
+            env.as_ref(),
+            "/repo",
+            "/repo/src",
+            Provider::Anthropic,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         assert_eq!(docs.len(), 1);
         assert_eq!(docs[0], "shared instructions");
     }
@@ -231,8 +298,15 @@ mod tests {
             files,
             ..Default::default()
         });
-        let docs =
-            discover_memory(env.as_ref(), "/repo", "/repo/src/app", Provider::Anthropic).await;
+        let docs = discover_memory(
+            env.as_ref(),
+            "/repo",
+            "/repo/src/app",
+            Provider::Anthropic,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         assert_eq!(docs.len(), 3);
         assert_eq!(docs[0], "root agents");
         assert_eq!(docs[1], "src agents");

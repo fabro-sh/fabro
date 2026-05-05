@@ -4,9 +4,9 @@ use std::num::NonZeroU32;
 use chrono::{DateTime, Utc};
 
 use crate::{
-    Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition, PullRequestRecord, Retro,
-    RunControlAction, RunId, RunSpec, RunStatus, SandboxRecord, StageCompletion, StageId,
-    StartRecord,
+    BilledModelUsage, Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition,
+    PullRequestRecord, Retro, RunControlAction, RunId, RunSpec, RunStatus, SandboxRecord,
+    StageCompletion, StageId, StageState, StartRecord,
 };
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -61,6 +61,17 @@ pub struct StageProjection {
     pub live_streaming:    Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub termination:       Option<crate::CommandTermination>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at:        Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms:       Option<u64>,
+    /// Server-internal billing usage for the latest attempt; not part of the
+    /// wire contract because `BilledModelUsage` is not modeled in OpenAPI.
+    /// Read only in-process by the billing handler.
+    #[serde(skip)]
+    pub usage:             Option<BilledModelUsage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state:             Option<StageState>,
 }
 
 /// Convert a 1-based event sequence number into the `NonZeroU32` form used for
@@ -78,6 +89,8 @@ impl StageProjection {
             prompt: None,
             response: None,
             completion: None,
+            duration_ms: None,
+            usage: None,
             provider_used: None,
             diff: None,
             script_invocation: None,
@@ -90,7 +103,54 @@ impl StageProjection {
             streams_separated: None,
             live_streaming: None,
             termination: None,
+            started_at: None,
+            state: None,
         }
+    }
+
+    /// Effective lifecycle state derived from stored event data.
+    ///
+    /// Falls back to deriving from `completion` for projections that predate
+    /// the stored `state` field, so old serialized projections still work
+    /// without a backfill.
+    #[must_use]
+    pub fn effective_state(&self) -> StageState {
+        self.state.unwrap_or_else(|| match &self.completion {
+            Some(completion) => StageState::from(completion.outcome),
+            None => StageState::Running,
+        })
+    }
+
+    /// Live wall-clock runtime in seconds.
+    ///
+    /// While the stage is non-terminal (`Pending`, `Running`, or `Retrying`),
+    /// this returns the elapsed time since `started_at` so the UI can tick
+    /// client-side. Once terminal, the stored `duration_ms` is returned. This
+    /// also handles retries safely: a new `StageStarted` resets the state
+    /// back to `Running` and keeps the live computation correct even if a
+    /// previous attempt left a stale `duration_ms`.
+    #[must_use]
+    pub fn runtime_secs(&self, now: DateTime<Utc>) -> Option<f64> {
+        let state = self.effective_state();
+        if matches!(
+            state,
+            StageState::Running | StageState::Retrying | StageState::Pending
+        ) {
+            return self.started_at.map(|started| {
+                now.signed_duration_since(started).num_milliseconds().max(0) as f64 / 1000.0
+            });
+        }
+        self.duration_ms.map(|ms| ms as f64 / 1000.0)
+    }
+
+    /// Begin a new attempt (or visit) for this stage: clear every
+    /// per-attempt field so prior-attempt data does not leak, then record
+    /// `started_at` and `state = Running`. Preserves `first_event_seq`
+    /// (identity / sort key).
+    pub fn begin_attempt(&mut self, started_at: DateTime<Utc>) {
+        *self = Self::new(self.first_event_seq);
+        self.started_at = Some(started_at);
+        self.state = Some(StageState::Running);
     }
 }
 
@@ -99,12 +159,32 @@ impl RunProjection {
         self.stages.get(stage)
     }
 
+    /// Iterate stages in `first_event_seq` order (the chronological order in
+    /// which each stage's first lifecycle event was recorded). Internal
+    /// storage is a `HashMap`, so iteration would otherwise be
+    /// non-deterministic; every caller wants chronological order, so we sort
+    /// here once instead of asking each caller to remember.
     pub fn iter_stages(&self) -> impl Iterator<Item = (&StageId, &StageProjection)> {
-        self.stages.iter()
+        let mut entries: Vec<(&StageId, &StageProjection)> = self.stages.iter().collect();
+        entries.sort_by(|(left_id, left_stage), (right_id, right_stage)| {
+            left_stage
+                .first_event_seq
+                .cmp(&right_stage.first_event_seq)
+                .then_with(|| left_id.cmp(right_id))
+        });
+        entries.into_iter()
     }
 
+    /// Mutable counterpart of [`iter_stages`]. Same chronological ordering.
     pub fn iter_stages_mut(&mut self) -> impl Iterator<Item = (&StageId, &mut StageProjection)> {
-        self.stages.iter_mut()
+        let mut entries: Vec<(&StageId, &mut StageProjection)> = self.stages.iter_mut().collect();
+        entries.sort_by(|(left_id, left_stage), (right_id, right_stage)| {
+            left_stage
+                .first_event_seq
+                .cmp(&right_stage.first_event_seq)
+                .then_with(|| left_id.cmp(right_id))
+        });
+        entries.into_iter()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -183,6 +263,93 @@ impl RunProjection {
                 self.status_updated_at = Some(ts);
                 Ok(())
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod iter_stages_tests {
+    use std::num::NonZeroU32;
+
+    use super::RunProjection;
+
+    fn seq(n: u32) -> NonZeroU32 {
+        NonZeroU32::new(n).unwrap()
+    }
+
+    #[test]
+    fn iter_stages_yields_chronological_order_across_nodes() {
+        let mut p = RunProjection::default();
+        // Insert in non-monotonic seq order to exercise the sort.
+        p.stage_entry("c", 1, seq(30));
+        p.stage_entry("a", 1, seq(10));
+        p.stage_entry("b", 1, seq(20));
+
+        let order: Vec<&str> = p
+            .iter_stages()
+            .map(|(stage_id, _)| stage_id.node_id())
+            .collect();
+        assert_eq!(order, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn iter_stages_orders_visits_within_a_node() {
+        let mut p = RunProjection::default();
+        // Visit 2 inserted first; visit 1's earlier first_event_seq must still
+        // win the chronological ordering.
+        p.stage_entry("verify", 2, seq(50));
+        p.stage_entry("verify", 1, seq(20));
+
+        let visits: Vec<u32> = p
+            .iter_stages()
+            .map(|(stage_id, _)| stage_id.visit())
+            .collect();
+        assert_eq!(visits, vec![1, 2]);
+    }
+
+    #[test]
+    fn iter_stages_mut_yields_chronological_order() {
+        let mut p = RunProjection::default();
+        p.stage_entry("c", 1, seq(30));
+        p.stage_entry("a", 1, seq(10));
+        p.stage_entry("b", 1, seq(20));
+
+        let order: Vec<String> = p
+            .iter_stages_mut()
+            .map(|(stage_id, _)| stage_id.node_id().to_string())
+            .collect();
+        assert_eq!(order, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn iter_stages_tie_breaks_same_first_event_seq_by_stage_id() {
+        for _ in 0..128 {
+            let mut p = RunProjection::default();
+            p.stage_entry("verify", 2, seq(10));
+            p.stage_entry("build", 1, seq(10));
+            p.stage_entry("verify", 1, seq(10));
+
+            let order: Vec<String> = p
+                .iter_stages()
+                .map(|(stage_id, _)| stage_id.to_string())
+                .collect();
+            assert_eq!(order, vec!["build@1", "verify@1", "verify@2"]);
+        }
+    }
+
+    #[test]
+    fn iter_stages_mut_tie_breaks_same_first_event_seq_by_stage_id() {
+        for _ in 0..128 {
+            let mut p = RunProjection::default();
+            p.stage_entry("verify", 2, seq(10));
+            p.stage_entry("build", 1, seq(10));
+            p.stage_entry("verify", 1, seq(10));
+
+            let order: Vec<String> = p
+                .iter_stages_mut()
+                .map(|(stage_id, _)| stage_id.to_string())
+                .collect();
+            assert_eq!(order, vec!["build@1", "verify@1", "verify@2"]);
         }
     }
 }

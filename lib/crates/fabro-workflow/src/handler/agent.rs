@@ -7,6 +7,7 @@ use fabro_agent::Sandbox;
 use fabro_graphviz::graph::{Graph, Node};
 use fabro_template::{TemplateContext, render as render_template};
 use fabro_types::RunId;
+use tokio_util::sync::CancellationToken;
 
 use super::{EngineServices, Handler};
 use crate::context::{Context, WorkflowContext, keys};
@@ -44,6 +45,7 @@ pub trait CodergenBackend: Send + Sync {
         emitter: &Arc<Emitter>,
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+        cancel_token: CancellationToken,
     ) -> Result<CodergenResult, Error>;
 
     /// Run a single LLM call with no tools (one_shot mode).
@@ -52,6 +54,8 @@ pub trait CodergenBackend: Send + Sync {
         _node: &Node,
         _prompt: &str,
         _system_prompt: Option<&str>,
+        _emitter: &Arc<Emitter>,
+        _stage_scope: &StageScope,
     ) -> Result<CodergenResult, Error> {
         Err(Error::Validation(
             "one_shot mode not supported by this backend".into(),
@@ -297,6 +301,7 @@ impl Handler for AgentHandler {
                         &services.run.emitter,
                         &services.run.sandbox,
                         tool_hooks,
+                        services.run.cancel_token(),
                     )
                     .await;
                 match result {
@@ -307,6 +312,7 @@ impl Handler for AgentHandler {
                         files_touched,
                         last_file_touched,
                     }) => (text, usage, files_touched, last_file_touched),
+                    Err(Error::Cancelled) => return Err(Error::Cancelled),
                     Err(e) if e.is_retryable() => {
                         return Err(e);
                     }
@@ -615,6 +621,7 @@ mod tests {
                 _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn fabro_agent::Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+                _cancel_token: CancellationToken,
             ) -> Result<CodergenResult, Error> {
                 Ok(CodergenResult::Text {
                     text:
@@ -675,6 +682,7 @@ mod tests {
                 _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn fabro_agent::Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+                _cancel_token: CancellationToken,
             ) -> Result<CodergenResult, Error> {
                 Ok(CodergenResult::Text {
                     text:              "Done writing results.".to_string(),
@@ -736,6 +744,7 @@ mod tests {
                 emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn fabro_agent::Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+                _cancel_token: CancellationToken,
             ) -> Result<CodergenResult, Error> {
                 let scope = StageScope::for_handler(context, &node.id);
                 emitter.emit_scoped(
@@ -847,6 +856,7 @@ mod tests {
                 _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+                _cancel_token: CancellationToken,
             ) -> Result<CodergenResult, Error> {
                 *self.captured_thread_id.lock().unwrap() = Some(thread_id.map(String::from));
                 Ok(CodergenResult::Text {
@@ -899,6 +909,7 @@ mod tests {
                 _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+                _cancel_token: CancellationToken,
             ) -> Result<CodergenResult, Error> {
                 *self.captured_thread_id.lock().unwrap() = Some(thread_id.map(String::from));
                 Ok(CodergenResult::Text {
@@ -946,6 +957,7 @@ mod tests {
                 _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+                _cancel_token: CancellationToken,
             ) -> Result<CodergenResult, Error> {
                 Err(Error::handler("Request timed out".to_string()))
             }
@@ -1093,6 +1105,7 @@ Some text in between.
                 _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+                _cancel_token: CancellationToken,
             ) -> Result<CodergenResult, Error> {
                 Err(Error::Validation("bad config".to_string()))
             }
@@ -1133,6 +1146,7 @@ Some text in between.
                 _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+                _cancel_token: CancellationToken,
             ) -> Result<CodergenResult, Error> {
                 *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
                 Ok(CodergenResult::Text {
@@ -1202,6 +1216,7 @@ Some text in between.
                 _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+                _cancel_token: CancellationToken,
             ) -> Result<CodergenResult, Error> {
                 *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
                 Ok(CodergenResult::Text {

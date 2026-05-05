@@ -63,7 +63,7 @@ mod daytona_streaming_live {
             sandbox_for_exec
                 .exec_command_streaming(
                     "printf 'live-out\\n'; printf 'live-err\\n' >&2; sleep 30",
-                    60_000,
+                    Some(60_000),
                     None,
                     None,
                     Some(cancel_for_exec),
@@ -186,7 +186,14 @@ mod daytona_streaming_live {
         let chunks = Arc::new(Mutex::new(Vec::new()));
         let callback = capture_callback(Arc::clone(&chunks));
         let result = sandbox
-            .exec_command_streaming(command, timeout_ms, None, None, cancel_token, callback)
+            .exec_command_streaming(
+                command,
+                Some(timeout_ms),
+                None,
+                None,
+                cancel_token,
+                callback,
+            )
             .await?;
         let chunks = chunks.lock().await.clone();
 

@@ -1466,7 +1466,7 @@ def farewell(name):
             SessionOptions::default(),
             None,
         );
-        session.initialize().await;
+        session.initialize().await.unwrap();
         session
             .process_input("Update the greeting functions")
             .await
