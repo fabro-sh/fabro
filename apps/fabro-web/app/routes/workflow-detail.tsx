@@ -91,6 +91,7 @@ function sampleSettings({
       scm: { provider: null, owner: null, repository: null, github: null },
       pull_request: null,
       artifacts: { include: [] },
+      integrations: { github: { permissions: {} } },
     },
   };
 }
