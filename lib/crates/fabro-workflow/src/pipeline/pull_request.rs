@@ -1,16 +1,17 @@
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use fabro_auth::CredentialSource;
 use fabro_github::{self as github_app, ssh_url_to_https};
 use fabro_graphviz::parser;
 use fabro_llm::client::Client;
-use fabro_llm::generate::{GenerateParams, generate};
+use fabro_llm::generate::{GenerateParams, generate_object};
+use fabro_model::Catalog;
 use fabro_retro::retro::Retro;
 use fabro_store::RunProjection;
 use fabro_types::PullRequestRecord;
 use fabro_types::settings::run::MergeStrategy;
 use fabro_util::text::strip_goal_decoration;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::types::{Concluded, Finalized, PullRequestOptions};
 use crate::event::{Event, RunNoticeLevel};
@@ -18,16 +19,115 @@ use crate::outcome::{StageOutcome, format_cost as outcome_format_cost};
 use crate::records::{Conclusion, RunSpec};
 use crate::runtime_store::RunStoreHandle;
 
+/// Maximum length of a PR title (Unicode scalar values).
+const PR_TITLE_MAX_CHARS: usize = 72;
+
+/// Structured output schema for the LLM-generated PR title and body.
+static PR_CONTENT_SCHEMA: LazyLock<serde_json::Value> = LazyLock::new(|| {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "title": { "type": "string" },
+            "body":  { "type": "string" }
+        },
+        "required": ["title", "body"],
+        "additionalProperties": false
+    })
+});
+
+/// Complete pull request content generated for a workflow run.
+#[derive(Debug, serde::Deserialize)]
+pub struct PrContent {
+    pub title: String,
+    pub body:  String,
+}
+
+/// System prompt that instructs the LLM how to write a Fabro PR title and
+/// body. The trailing programmatic sections (Plan `<details>`, Retro,
+/// Fabro Details, footer) are appended after the LLM body — the prompt
+/// explicitly forbids the LLM from duplicating them.
+const PR_BODY_SYSTEM_PROMPT: &str = include_str!("prompts/pr_body.md");
+
+const DEFAULT_PR_TITLE: &str = "Update workflow output";
+const EMPTY_BODY_NOTICE: &str = "> _The LLM did not produce a description for this change. The diff and the appended details are the source of truth for review._";
+
+/// Truncation budget for the LLM prompt's plan / diff sections.
+#[derive(Debug, PartialEq, Eq)]
+struct TruncationCaps {
+    plan: usize,
+    diff: usize,
+}
+
+const DIFF_HARD_CAP: usize = 500_000;
+const PLAN_HARD_CAP: usize = 100_000;
+const DIFF_FRACTION_NUM: usize = 4;
+const PLAN_FRACTION_NUM: usize = 1;
+const FRACTION_DEN: usize = 10;
+const UNKNOWN_MODEL_CTX: usize = 200_000;
+
+/// Resolve truncation caps based on the model's context window. Unknown
+/// models use the baseline 200k context-window assumption.
+fn truncation_caps(model: &str) -> TruncationCaps {
+    let ctx = Catalog::builtin()
+        .get(model)
+        .and_then(|m| usize::try_from(m.context_window()).ok())
+        .unwrap_or(UNKNOWN_MODEL_CTX);
+
+    truncation_caps_for_context_window(ctx)
+}
+
+fn truncation_caps_for_context_window(ctx: usize) -> TruncationCaps {
+    TruncationCaps {
+        diff: ctx
+            .saturating_mul(DIFF_FRACTION_NUM)
+            .checked_div(FRACTION_DEN)
+            .unwrap_or(DIFF_HARD_CAP)
+            .min(DIFF_HARD_CAP),
+        plan: ctx
+            .saturating_mul(PLAN_FRACTION_NUM)
+            .checked_div(FRACTION_DEN)
+            .unwrap_or(PLAN_HARD_CAP)
+            .min(PLAN_HARD_CAP),
+    }
+}
+
+/// Truncate `s` to at most `max` Unicode scalar values without splitting a
+/// UTF-8 sequence.
+fn truncate_chars(s: &str, max: usize) -> &str {
+    s.char_indices()
+        .nth(max)
+        .map_or(s, |(boundary, _)| &s[..boundary])
+}
+
+/// Truncate `s` to at most `max` Unicode scalar values, replacing the
+/// trailing char with `…` when truncation occurs.
+fn truncate_with_ellipsis(s: &str, max: usize) -> String {
+    if s.chars().count() > max {
+        let truncated: String = s.chars().take(max - 1).collect();
+        format!("{truncated}\u{2026}")
+    } else {
+        s.to_string()
+    }
+}
+
+/// Cap a PR title at [`PR_TITLE_MAX_CHARS`].
+fn enforce_title_cap(title: &str) -> String {
+    truncate_with_ellipsis(title, PR_TITLE_MAX_CHARS)
+}
+
 /// Derive a PR title from the workflow goal.
 ///
-/// Uses the first line, truncated to 120 characters for readability.
+/// Uses the first line, truncated to the same cap as LLM-generated titles.
 fn pr_title_from_goal(goal: &str) -> String {
-    let stripped = strip_goal_decoration(goal);
-    if stripped.chars().count() > 120 {
-        let truncated: String = stripped.chars().take(119).collect();
-        format!("{truncated}…")
+    truncate_with_ellipsis(strip_goal_decoration(goal), PR_TITLE_MAX_CHARS)
+}
+
+fn fallback_pr_title(goal: &str) -> String {
+    let title = pr_title_from_goal(goal);
+    if title.trim().is_empty() {
+        DEFAULT_PR_TITLE.to_string()
     } else {
-        stripped.to_string()
+        title
     }
 }
 
@@ -286,70 +386,43 @@ async fn load_pull_request_diff(run_store: &RunStoreHandle) -> String {
         .unwrap_or_default()
 }
 
-/// Build a complete PR body by combining LLM-generated narrative with
-/// programmatic sections (plan, retro, fabro details).
-pub async fn build_pr_body(
+/// Build complete PR content by combining LLM-generated narrative with
+/// deterministic fallbacks and programmatic sections.
+pub async fn build_pr_content(
     diff: &str,
     goal: &str,
     model: &str,
     run_store: &RunStoreHandle,
     llm_source: &dyn CredentialSource,
     conclusion: Option<&Conclusion>,
-) -> Result<String, String> {
+    run_state: Option<&RunProjection>,
+) -> Result<PrContent, String> {
     let client = Client::from_source(llm_source)
         .await
         .map_err(|e| format!("Failed to create LLM client: {e}"))?;
 
-    build_pr_body_with_client(diff, goal, model, run_store, conclusion, Arc::new(client)).await
-}
-
-async fn build_pr_body_with_client(
-    diff: &str,
-    goal: &str,
-    model: &str,
-    run_store: &RunStoreHandle,
-    conclusion: Option<&Conclusion>,
-    client: Arc<Client>,
-) -> Result<String, String> {
-    build_pr_body_with_client_and_state(diff, goal, model, run_store, conclusion, client, None)
-        .await
-}
-
-async fn build_pr_body_with_source_and_state(
-    diff: &str,
-    goal: &str,
-    model: &str,
-    run_store: &RunStoreHandle,
-    llm_source: &dyn CredentialSource,
-    conclusion: Option<&Conclusion>,
-    run_state: Option<&fabro_store::RunProjection>,
-) -> Result<String, String> {
-    let client = Client::from_source(llm_source)
-        .await
-        .map_err(|e| format!("Failed to create LLM client: {e}"))?;
-
-    build_pr_body_with_client_and_state(
+    build_pr_content_with_client(
         diff,
         goal,
         model,
         run_store,
         conclusion,
-        Arc::new(client),
         run_state,
+        Arc::new(client),
     )
     .await
 }
 
-async fn build_pr_body_with_client_and_state(
+async fn build_pr_content_with_client(
     diff: &str,
     goal: &str,
     model: &str,
     run_store: &RunStoreHandle,
     conclusion: Option<&Conclusion>,
+    run_state: Option<&RunProjection>,
     client: Arc<Client>,
-    run_state: Option<&fabro_store::RunProjection>,
-) -> Result<String, String> {
-    info!("Building PR body");
+) -> Result<PrContent, String> {
+    info!("Building PR content");
 
     let loaded_run_state = if run_state.is_none() {
         run_store
@@ -369,29 +442,11 @@ async fn build_pr_body_with_client_and_state(
     let run_spec = run_state.and_then(|state| state.spec.clone());
     let dot_source = run_state.and_then(|state| state.graph_source.clone());
 
-    // Build LLM prompt
-    let system = if plan_text.is_some() {
-        "Write a PR description with: (1) 2-3 concise paragraphs explaining the change, then (2) a '### Plan Summary' section with bullet points summarizing the plan. Do not include a title. Do not include the full plan.".to_string()
-    } else {
-        "Write a concise PR description in 2-3 paragraphs explaining the change. Do not include a title.".to_string()
-    };
-
-    // Truncate diff to fit context windows (~50k chars)
-    let max_diff_len = 50_000;
-    let truncated_diff = if diff.len() > max_diff_len {
-        &diff[..diff.floor_char_boundary(max_diff_len)]
-    } else {
-        diff
-    };
+    let caps = truncation_caps(model);
+    let truncated_diff = truncate_chars(diff, caps.diff);
 
     let prompt = if let Some(ref plan) = plan_text {
-        // Truncate plan for LLM context (~20k chars)
-        let max_plan_len = 20_000;
-        let truncated_plan = if plan.len() > max_plan_len {
-            &plan[..plan.floor_char_boundary(max_plan_len)]
-        } else {
-            plan.as_str()
-        };
+        let truncated_plan = truncate_chars(plan, caps.plan);
         format!(
             "Goal: {goal}\n\nPlan:\n```\n{truncated_plan}\n```\n\nDiff:\n```\n{truncated_diff}\n```"
         )
@@ -400,14 +455,32 @@ async fn build_pr_body_with_client_and_state(
     };
 
     let params = GenerateParams::new(model, client)
-        .system(system)
+        .system(PR_BODY_SYSTEM_PROMPT)
         .prompt(prompt);
 
-    let result = generate(params)
+    let result = generate_object(params, PR_CONTENT_SCHEMA.clone())
         .await
         .map_err(|e| format!("LLM generation failed: {e}"))?;
 
-    let llm_output = result.response.text();
+    let output = result
+        .output
+        .ok_or_else(|| "LLM generation returned no structured output".to_string())?;
+    let generated: PrContent = serde_json::from_value(output)
+        .map_err(|e| format!("Failed to deserialize PR content: {e}"))?;
+
+    let title = if generated.title.trim().is_empty() {
+        fallback_pr_title(goal)
+    } else {
+        generated.title.trim().to_string()
+    };
+    let title = enforce_title_cap(&title);
+
+    let llm_body = if generated.body.trim().is_empty() {
+        warn!(model = %model, "LLM generated empty PR body; using skeleton PR body");
+        EMPTY_BODY_NOTICE.to_string()
+    } else {
+        generated.body
+    };
 
     let retro_section = retro.as_ref().map(format_retro_section).unwrap_or_default();
     let arc_details_section = conclusion
@@ -416,15 +489,15 @@ async fn build_pr_body_with_client_and_state(
         .unwrap_or_default();
 
     let body = assemble_pr_body(
-        &llm_output,
+        &llm_body,
         plan_text.as_deref(),
         &retro_section,
         &arc_details_section,
     );
 
-    info!("PR body generated");
+    info!("PR content generated");
 
-    Ok(body)
+    Ok(PrContent { title, body })
 }
 
 /// Auto-merge configuration for a pull request.
@@ -446,7 +519,7 @@ pub struct OpenPullRequestRequest<'a> {
     pub run_store:   &'a RunStoreHandle,
     pub llm_source:  &'a dyn CredentialSource,
     pub conclusion:  Option<&'a Conclusion>,
-    pub run_state:   Option<&'a fabro_store::RunProjection>,
+    pub run_state:   Option<&'a RunProjection>,
 }
 
 /// Optionally open a pull request after a successful workflow run.
@@ -465,7 +538,7 @@ pub async fn maybe_open_pull_request(
     let (owner, repo) =
         github_app::parse_github_owner_repo(&https_url).map_err(|err| format!("{err:#}"))?;
 
-    let body = build_pr_body_with_source_and_state(
+    let content = build_pr_content(
         req.diff,
         req.goal,
         req.model,
@@ -476,9 +549,8 @@ pub async fn maybe_open_pull_request(
     )
     .await
     .map_err(|err| format!("{err:#}"))?;
-    let body = truncate_pr_body(&body);
-
-    let title = pr_title_from_goal(req.goal);
+    let body = truncate_pr_body(&content.body);
+    let title = content.title;
 
     let created = github_app::create_pull_request(
         &req.github,
@@ -780,6 +852,16 @@ mod tests {
                 "output_tokens": 20
             }
         })
+    }
+
+    /// JSON string the MockProvider/openai mock returns to simulate the
+    /// structured-output response for `(title, body)`.
+    fn pr_content_json(title: &str, body: &str) -> String {
+        serde_json::to_string(&serde_json::json!({
+            "title": title,
+            "body": body,
+        }))
+        .unwrap()
     }
 
     fn make_test_conclusion() -> Conclusion {
@@ -1123,20 +1205,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn build_pr_body_uses_in_memory_conclusion() {
+    async fn build_pr_content_uses_in_memory_conclusion() {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
-        let body = build_pr_body_with_client(
+        let PrContent { title, body } = build_pr_content_with_client(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "mock-model",
             &run_store.clone().into(),
             Some(&make_test_conclusion()),
-            explicit_client("mock", "Narrative from mock."),
+            None,
+            explicit_client(
+                "mock",
+                &pr_content_json("Mock title", "Narrative from mock."),
+            ),
         )
         .await
         .unwrap();
 
+        assert_eq!(title, "Mock title");
         assert!(body.contains("Narrative from mock."));
         assert!(body.contains("### Fabro Details"));
         assert!(body.contains("Ran 3 stages in 2m 30s for $0.42"));
@@ -1144,7 +1231,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn build_pr_body_uses_store_records_without_legacy_files() {
+    async fn build_pr_content_uses_store_records_without_legacy_files() {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
 
@@ -1196,16 +1283,21 @@ mod tests {
         .await
         .unwrap();
 
-        let body = build_pr_body_with_client(
+        let body = build_pr_content_with_client(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "mock-model",
             &run_store.clone().into(),
             Some(&make_test_conclusion()),
-            explicit_client("mock", "Narrative from mock."),
+            None,
+            explicit_client(
+                "mock",
+                &pr_content_json("Mock title", "Narrative from mock."),
+            ),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .body;
 
         assert!(body.contains("Narrative from mock."));
         assert!(body.contains("### Retro"));
@@ -1214,7 +1306,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn build_pr_body_uses_plan_text_from_store_without_response_md() {
+    async fn build_pr_content_uses_plan_text_from_store_without_response_md() {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
 
@@ -1283,42 +1375,52 @@ mod tests {
         .await
         .unwrap();
 
-        let body = build_pr_body_with_client(
+        let body = build_pr_content_with_client(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "mock-model",
             &run_store.clone().into(),
             Some(&make_test_conclusion()),
-            explicit_client("mock", "Narrative from mock."),
+            None,
+            explicit_client(
+                "mock",
+                &pr_content_json("Mock title", "Narrative from mock."),
+            ),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .body;
 
         assert!(body.contains("<summary>Full plan</summary>"));
         assert!(body.contains("Plan from store"));
     }
 
     #[tokio::test]
-    async fn build_pr_body_uses_explicit_llm_client() {
+    async fn build_pr_content_uses_explicit_llm_client() {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
-        let body = build_pr_body_with_client(
+        let body = build_pr_content_with_client(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "gpt-5.4",
             &run_store.clone().into(),
             Some(&make_test_conclusion()),
-            explicit_client("openai", "Narrative from explicit client."),
+            None,
+            explicit_client(
+                "openai",
+                &pr_content_json("Explicit title", "Narrative from explicit client."),
+            ),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .body;
 
         assert!(body.contains("Narrative from explicit client."));
         assert!(!body.contains("Narrative from mock."));
     }
 
     #[tokio::test]
-    async fn build_pr_body_uses_vault_only_openai_codex_source() {
+    async fn build_pr_content_uses_vault_only_openai_codex_source() {
         let server = MockServer::start_async().await;
         let response_mock = server
             .mock_async(|when, then| {
@@ -1327,7 +1429,10 @@ mod tests {
                     .header("authorization", "Bearer vault-openai-key");
                 then.status(200)
                     .header("content-type", "application/json")
-                    .json_body(openai_responses_payload("Narrative from vault source."));
+                    .json_body(openai_responses_payload(&pr_content_json(
+                        "Vault title",
+                        "Narrative from vault source.",
+                    )));
             })
             .await;
 
@@ -1355,17 +1460,19 @@ mod tests {
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let run_store_handle: RunStoreHandle = run_store.into();
 
-        let body = build_pr_body(
+        let PrContent { title, body } = build_pr_content(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "gpt-5.4",
             &run_store_handle,
             llm_source.as_ref(),
             Some(&make_test_conclusion()),
+            None,
         )
         .await
         .unwrap();
 
+        assert_eq!(title, "Vault title");
         assert!(body.contains("Narrative from vault source."));
         response_mock.assert_async().await;
     }
@@ -1462,7 +1569,7 @@ mod tests {
     fn pr_title_truncates_long_line() {
         let long = "x".repeat(300);
         let title = pr_title_from_goal(&long);
-        assert_eq!(title.chars().count(), 120);
+        assert_eq!(title.chars().count(), 72);
         assert!(title.ends_with('…'));
     }
 
@@ -1483,6 +1590,42 @@ mod tests {
     #[test]
     fn pr_title_short_goal_unchanged() {
         assert_eq!(pr_title_from_goal("Fix bug"), "Fix bug");
+    }
+
+    #[test]
+    fn truncation_caps_scale_with_context_window_and_clamp() {
+        assert_eq!(
+            truncation_caps_for_context_window(100_000),
+            TruncationCaps {
+                diff: 40_000,
+                plan: 10_000,
+            }
+        );
+        assert_eq!(
+            truncation_caps_for_context_window(200_000),
+            TruncationCaps {
+                diff: 80_000,
+                plan: 20_000,
+            }
+        );
+        assert_eq!(
+            truncation_caps_for_context_window(1_000_000),
+            TruncationCaps {
+                diff: 400_000,
+                plan: 100_000,
+            }
+        );
+        assert_eq!(
+            truncation_caps_for_context_window(10_000_000),
+            TruncationCaps {
+                diff: 500_000,
+                plan: 100_000,
+            }
+        );
+        assert_eq!(truncation_caps("unknown-model"), TruncationCaps {
+            diff: 80_000,
+            plan: 20_000,
+        });
     }
 
     #[tokio::test]
@@ -1574,5 +1717,374 @@ mod tests {
         let diff = load_pull_request_diff(&run_store.clone().into()).await;
 
         assert!(diff.contains("from_store"));
+    }
+
+    // ── Structured-output PR content tests ──────────────────────────────
+
+    /// MockProvider returns an over-long title; builder must cap it at 72
+    /// chars and end with `…`. Exercises [`enforce_title_cap`] inside
+    /// [`build_pr_content_with_client`].
+    #[tokio::test]
+    async fn build_pr_content_truncates_long_title() {
+        let store = test_store();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+        let long_title = "x".repeat(200);
+        let payload = pr_content_json(&long_title, "Body content.");
+        let title = build_pr_content_with_client(
+            "diff --git a/src/lib.rs b/src/lib.rs\n+fn x() {}\n",
+            "Implement feature",
+            "mock-model",
+            &run_store.clone().into(),
+            Some(&make_test_conclusion()),
+            None,
+            explicit_client("mock", &payload),
+        )
+        .await
+        .unwrap()
+        .title;
+
+        assert_eq!(title.chars().count(), 72);
+        assert!(title.ends_with('\u{2026}'));
+    }
+
+    #[tokio::test]
+    async fn build_pr_content_uses_default_title_when_generated_and_goal_titles_empty() {
+        let store = test_store();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+        let payload = pr_content_json("", "Body content.");
+        let title = build_pr_content_with_client(
+            "diff --git a/src/lib.rs b/src/lib.rs\n+fn x() {}\n",
+            "## Plan:",
+            "mock-model",
+            &run_store.clone().into(),
+            Some(&make_test_conclusion()),
+            None,
+            explicit_client("mock", &payload),
+        )
+        .await
+        .unwrap()
+        .title;
+
+        assert_eq!(title, DEFAULT_PR_TITLE);
+    }
+
+    /// Empty or whitespace-only bodies use the skeleton fallback instead of
+    /// aborting PR creation.
+    #[tokio::test]
+    async fn build_pr_content_uses_skeleton_when_body_empty() {
+        let store = test_store();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+
+        let run_spec = RunSpec {
+            run_id:           fixtures::RUN_1,
+            settings:         fabro_types::WorkflowSettings::default(),
+            graph:            Graph::new("test"),
+            workflow_slug:    Some("test".to_string()),
+            source_directory: Some("/tmp/project".to_string()),
+            git:              None,
+            labels:           HashMap::new(),
+            provenance:       None,
+            manifest_blob:    None,
+            definition_blob:  None,
+            fork_source_ref:  None,
+            in_place:         false,
+        };
+        append_event(&run_store, &fixtures::RUN_1, &Event::RunCreated {
+            run_id:           fixtures::RUN_1,
+            settings:         serde_json::to_value(&run_spec.settings).unwrap(),
+            graph:            serde_json::to_value(&run_spec.graph).unwrap(),
+            workflow_source:  Some("digraph test { plan -> code }".to_string()),
+            workflow_config:  None,
+            labels:           run_spec.labels.clone().into_iter().collect(),
+            run_dir:          "/tmp/project".to_string(),
+            source_directory: run_spec.source_directory.clone(),
+            workflow_slug:    run_spec.workflow_slug.clone(),
+            db_prefix:        None,
+            provenance:       None,
+            manifest_blob:    None,
+            git:              None,
+            fork_source_ref:  None,
+            in_place:         false,
+            web_url:          None,
+        })
+        .await
+        .unwrap();
+        append_event(&run_store, &fixtures::RUN_1, &Event::StageCompleted {
+            node_id: "plan".to_string(),
+            name: "plan".to_string(),
+            index: 0,
+            duration_ms: 1,
+            status: "succeeded".to_string(),
+            preferred_label: None,
+            suggested_next_ids: vec![],
+            billing: None,
+            failure: None,
+            notes: None,
+            files_touched: vec![],
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: None,
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
+            response: Some("Plan from store".to_string()),
+            attempt: 1,
+            max_attempts: 1,
+        })
+        .await
+        .unwrap();
+        append_event(&run_store, &fixtures::RUN_1, &Event::RetroCompleted {
+            duration_ms: 1,
+            response:    Some(String::new()),
+            retro:       Some(serde_json::to_value(make_test_retro()).unwrap()),
+        })
+        .await
+        .unwrap();
+
+        let payload = pr_content_json("Mock", "   \n");
+        let body = build_pr_content_with_client(
+            "diff --git a/src/lib.rs b/src/lib.rs\n+fn x() {}\n",
+            "Implement feature",
+            "mock-model",
+            &run_store.clone().into(),
+            Some(&make_test_conclusion()),
+            None,
+            explicit_client("mock", &payload),
+        )
+        .await
+        .unwrap()
+        .body;
+
+        assert!(body.contains("The LLM did not produce a description"));
+        assert!(body.contains("<summary>Full plan</summary>"));
+        assert!(body.contains("Plan from store"));
+        assert!(body.contains("### Retro"));
+        assert!(body.contains("### Fabro Details"));
+        assert!(body.contains("Generated with [Fabro](https://fabro.sh)"));
+    }
+
+    // ── maybe_open_pull_request fallback tests ──────────────────────────
+
+    /// Set of mock servers and credentials for the `maybe_open_pull_request`
+    /// fallback path. The builder's `Client::from_source` rebuilds the LLM
+    /// client from the credential source, so the in-process MockProvider
+    /// cannot intercept — we mock the OpenAI HTTP endpoint instead.
+    struct FallbackHarness {
+        _vault_dir:     tempfile::TempDir,
+        // Held to keep the mock listener alive for the duration of the test;
+        // the test interacts with it via `Client::from_source` (which goes
+        // out via HTTP to the mock URL stored in `llm_source`).
+        openai_server:  MockServer,
+        github_server:  MockServer,
+        openai_mock_id: usize,
+        github_mock_id: usize,
+        llm_source:     Arc<dyn CredentialSource>,
+        creds:          fabro_github::GitHubCredentials,
+        run_store:      RunStoreHandle,
+    }
+
+    impl FallbackHarness {
+        async fn assert_mocks_called_once(&self) {
+            httpmock::Mock::new(self.openai_mock_id, &self.openai_server)
+                .assert_async()
+                .await;
+            httpmock::Mock::new(self.github_mock_id, &self.github_server)
+                .assert_async()
+                .await;
+        }
+    }
+
+    /// Stand up an OpenAI mock that returns the given structured-output
+    /// payload, a GitHub mock that accepts a PR creation, a vault-backed
+    /// credential source, and a run store seeded with a non-empty
+    /// `final_patch`.
+    async fn setup_fallback_test_harness(openai_payload_text: &str) -> FallbackHarness {
+        let openai_server = MockServer::start_async().await;
+        let openai_mock = openai_server
+            .mock_async(|when, then| {
+                when.method(POST)
+                    .path("/v1/responses")
+                    .header("authorization", "Bearer vault-openai-key");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(openai_responses_payload(openai_payload_text));
+            })
+            .await;
+
+        let github_server = MockServer::start_async().await;
+        let github_mock = github_server
+            .mock_async(|when, then| {
+                when.method(POST)
+                    .path("/repos/owner/repo/pulls")
+                    .header("authorization", "Bearer test-token");
+                then.status(201)
+                    .header("content-type", "application/json")
+                    .json_body(serde_json::json!({
+                        "number": 1,
+                        "html_url": "https://example.test/owner/repo/pull/1",
+                        "node_id": "PR_kwTest1",
+                    }));
+            })
+            .await;
+
+        let vault_dir = tempfile::tempdir().unwrap();
+        let mut vault = Vault::load(vault_dir.path().join("secrets.json")).unwrap();
+        vault
+            .set(
+                "openai_codex",
+                &serde_json::to_string(&openai_api_key_credential("vault-openai-key")).unwrap(),
+                SecretType::Credential,
+                None,
+            )
+            .unwrap();
+        let base_url = openai_server.url("/v1");
+        let llm_source: Arc<dyn CredentialSource> =
+            Arc::new(VaultCredentialSource::with_env_lookup(
+                Arc::new(AsyncRwLock::new(vault)),
+                move |name| match name {
+                    "OPENAI_BASE_URL" => Some(base_url.clone()),
+                    _ => None,
+                },
+            ));
+
+        let creds = fabro_github::GitHubCredentials::Token("test-token".to_string());
+
+        let store = test_store();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+        // Seed a non-empty `final_patch` so `load_pull_request_diff` returns
+        // diff content and the early-return for empty diffs does not fire.
+        let run_spec = RunSpec {
+            run_id:           fixtures::RUN_1,
+            settings:         fabro_types::WorkflowSettings::default(),
+            graph:            Graph::new("test"),
+            workflow_slug:    None,
+            source_directory: None,
+            git:              None,
+            labels:           HashMap::new(),
+            provenance:       None,
+            manifest_blob:    None,
+            definition_blob:  None,
+            fork_source_ref:  None,
+            in_place:         false,
+        };
+        append_event(&run_store, &fixtures::RUN_1, &Event::RunCreated {
+            run_id:           fixtures::RUN_1,
+            settings:         serde_json::to_value(&run_spec.settings).unwrap(),
+            graph:            serde_json::to_value(&run_spec.graph).unwrap(),
+            workflow_source:  None,
+            workflow_config:  None,
+            labels:           run_spec.labels.clone().into_iter().collect(),
+            run_dir:          "/tmp/x".to_string(),
+            source_directory: None,
+            workflow_slug:    None,
+            db_prefix:        None,
+            provenance:       None,
+            manifest_blob:    None,
+            git:              None,
+            fork_source_ref:  None,
+            in_place:         false,
+            web_url:          None,
+        })
+        .await
+        .unwrap();
+        append_event(&run_store, &fixtures::RUN_1, &Event::WorkflowRunCompleted {
+            duration_ms:          1,
+            artifact_count:       0,
+            status:               "succeeded".to_string(),
+            reason:               SuccessReason::Completed,
+            total_usd_micros:     None,
+            final_git_commit_sha: None,
+            final_patch:          Some(
+                "diff --git a/src/lib.rs b/src/lib.rs\n+fn from_store() {}\n".to_string(),
+            ),
+            billing:              None,
+        })
+        .await
+        .unwrap();
+
+        let openai_mock_id = openai_mock.id;
+        let github_mock_id = github_mock.id;
+
+        FallbackHarness {
+            _vault_dir: vault_dir,
+            openai_server,
+            github_server,
+            openai_mock_id,
+            github_mock_id,
+            llm_source,
+            creds,
+            run_store: run_store.into(),
+        }
+    }
+
+    /// LLM returns a usable body but an empty title; the content builder
+    /// falls back to `pr_title_from_goal` (first line, decoration stripped)
+    /// and PR creation succeeds with that title.
+    #[tokio::test]
+    async fn maybe_open_pull_request_falls_back_to_goal_title_when_llm_returns_empty_title() {
+        let payload = pr_content_json("", "Narrative.");
+        let harness = setup_fallback_test_harness(&payload).await;
+
+        let github_base_url = harness.github_server.url("");
+        let github = github_app::GitHubContext::new(&harness.creds, &github_base_url);
+
+        let result = maybe_open_pull_request(OpenPullRequestRequest {
+            github,
+            origin_url: "https://github.com/owner/repo.git",
+            base_branch: "main",
+            head_branch: "fabro/run/123",
+            goal: "Fix telemetry leak\n\ndetails...",
+            diff: "diff --git a/src/lib.rs b/src/lib.rs\n+fn x() {}\n",
+            model: "gpt-5.4",
+            draft: false,
+            auto_merge: None,
+            run_store: &harness.run_store,
+            llm_source: harness.llm_source.as_ref(),
+            conclusion: None,
+            run_state: None,
+        })
+        .await
+        .expect("PR creation should succeed");
+
+        let record = result.expect("PR record should be Some");
+        assert_eq!(record.title, "Fix telemetry leak");
+        harness.assert_mocks_called_once().await;
+    }
+
+    /// LLM returns an empty title; the content builder fallback still caps
+    /// the deterministic goal title at 72 chars ending with `…`.
+    #[tokio::test]
+    async fn maybe_open_pull_request_caps_fallback_title_at_72_chars() {
+        let payload = pr_content_json("", "Narrative.");
+        let harness = setup_fallback_test_harness(&payload).await;
+
+        let github_base_url = harness.github_server.url("");
+        let github = github_app::GitHubContext::new(&harness.creds, &github_base_url);
+
+        // Single ~200-char line, no `Plan:` / heading prefix, no newlines.
+        let goal = "x".repeat(200);
+
+        let result = maybe_open_pull_request(OpenPullRequestRequest {
+            github,
+            origin_url: "https://github.com/owner/repo.git",
+            base_branch: "main",
+            head_branch: "fabro/run/123",
+            goal: &goal,
+            diff: "diff --git a/src/lib.rs b/src/lib.rs\n+fn x() {}\n",
+            model: "gpt-5.4",
+            draft: false,
+            auto_merge: None,
+            run_store: &harness.run_store,
+            llm_source: harness.llm_source.as_ref(),
+            conclusion: None,
+            run_state: None,
+        })
+        .await
+        .expect("PR creation should succeed");
+
+        let record = result.expect("PR record should be Some");
+        assert_eq!(record.title.chars().count(), 72);
+        assert!(record.title.ends_with('\u{2026}'));
+        harness.assert_mocks_called_once().await;
     }
 }

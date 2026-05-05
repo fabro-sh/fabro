@@ -5,8 +5,8 @@ use fabro_store::{RunProjection, SerializableProjection, StageId};
 use fabro_types::graph::Graph;
 use fabro_types::run::RunSpec;
 use fabro_types::{
-    Checkpoint, RunStatus, SandboxRecord, StageCompletion, StageOutcome, StartRecord,
-    TerminalStatus, WorkflowSettings, first_event_seq, fixtures,
+    BilledModelUsage, Checkpoint, RunStatus, SandboxRecord, StageCompletion, StageOutcome,
+    StartRecord, TerminalStatus, WorkflowSettings, first_event_seq, fixtures,
 };
 use serde_json::json;
 
@@ -52,6 +52,28 @@ fn sample_checkpoint() -> Checkpoint {
     }
 }
 
+fn sample_usage() -> BilledModelUsage {
+    serde_json::from_value(json!({
+        "input": {
+            "usage": {
+                "model": {
+                    "provider": "openai",
+                    "model_id": "gpt-5.2"
+                },
+                "tokens": {
+                    "input_tokens": 123,
+                    "output_tokens": 45
+                }
+            },
+            "facts": {
+                "provider": "open_ai"
+            }
+        },
+        "total_usd_micros": 168
+    }))
+    .expect("sample usage should deserialize")
+}
+
 #[test]
 fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
     let stage_id = StageId::new("build", 2);
@@ -94,11 +116,17 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
     stage.script_invocation = Some(json!({ "command": "cargo test" }));
     stage.script_timing = Some(json!({ "duration_ms": 10 }));
     stage.parallel_results = Some(json!([{ "stage": "fanout@1" }]));
+    stage.duration_ms = Some(1234);
+    stage.usage = Some(sample_usage());
     stage.stdout = Some("stdout".to_string());
     stage.stderr = Some("stderr".to_string());
 
     let serialized = serde_json::to_value(SerializableProjection(&projection))
         .expect("projection should serialize");
+    assert!(
+        serialized["stages"]["build@2"].get("usage").is_none(),
+        "stage usage is server-internal and should not be serialized"
+    );
     let round_tripped: RunProjection =
         serde_json::from_value(serialized).expect("serialized projection should deserialize");
     let node = round_tripped.stage(&stage_id).expect("node should remain");
@@ -138,6 +166,8 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
         node.parallel_results,
         Some(json!([{ "stage": "fanout@1" }]))
     );
+    assert_eq!(node.duration_ms, Some(1234));
+    assert_eq!(node.usage, None);
 }
 
 #[test]

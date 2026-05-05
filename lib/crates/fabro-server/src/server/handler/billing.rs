@@ -1,70 +1,20 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use chrono::Utc;
-use fabro_types::{StageId, StageProjection};
+use chrono::{DateTime, Utc};
+use fabro_types::{RunProjection, StageProjection, StageState};
 
 use super::super::{
-    ApiError, AppState, BilledTokenCounts, BillingByModel, BillingStageRef, HashMap, IntoResponse,
-    Json, ListResponse, ModelBillingTotals, ModelReference, PaginationParams, Path, Query,
-    RequiredUser, Response, Router, RunBilling, RunBillingStage, RunBillingTotals, RunId, RunStage,
-    State, StatusCode, accumulate_model_billing, get, parse_run_id_path,
+    ApiError, AppState, BillingByModel, BillingStageRef, IntoResponse, Json, ListResponse,
+    ModelReference, PaginationParams, Path, Query, RequiredUser, Response, Router, RunBilling,
+    RunBillingStage, RunBillingTotals, RunId, State, StatusCode, get, parse_run_id_path,
+    run_stage_from_stage_id,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/runs/{id}/stages", get(list_run_stages))
         .route("/runs/{id}/billing", get(get_run_billing))
-}
-
-/// One row per `node_id`, latest visit wins.
-///
-/// Mirrors the aggregation rule used in `fabro_workflow::pipeline::finalize`:
-/// the displayed row uses the latest visit's data, but the row's sort key is
-/// the minimum `first_event_seq` across all visits of that node — i.e. the
-/// node's first appearance in the event log. This produces the same A, B
-/// order for an A → B → A loop that finalize produces.
-struct DedupedStage<'a> {
-    node_id:              String,
-    stage:                &'a StageProjection,
-    sort_key_first_event: u32,
-}
-
-fn dedupe_by_node_id<'a>(
-    stages: impl IntoIterator<Item = (&'a StageId, &'a StageProjection)>,
-) -> Vec<DedupedStage<'a>> {
-    let mut by_node: HashMap<&'a str, (u32, u32, &'a StageProjection)> = HashMap::new();
-    for (stage_id, stage) in stages {
-        let node_id = stage_id.node_id();
-        let visit = stage_id.visit();
-        let first_event = stage.first_event_seq.get();
-        by_node
-            .entry(node_id)
-            .and_modify(|entry| {
-                if first_event < entry.0 {
-                    entry.0 = first_event;
-                }
-                if visit >= entry.1 {
-                    entry.1 = visit;
-                    entry.2 = stage;
-                }
-            })
-            .or_insert((first_event, visit, stage));
-    }
-
-    let mut deduped: Vec<DedupedStage<'a>> = by_node
-        .into_iter()
-        .map(|(node_id, (first_event, _visit, stage))| DedupedStage {
-            node_id: node_id.to_string(),
-            stage,
-            sort_key_first_event: first_event,
-        })
-        .collect();
-    deduped.sort_by(|a, b| {
-        a.sort_key_first_event
-            .cmp(&b.sort_key_first_event)
-            .then_with(|| a.node_id.cmp(&b.node_id))
-    });
-    deduped
 }
 
 async fn list_run_stages(
@@ -90,20 +40,18 @@ async fn list_run_stages(
     };
 
     let now = Utc::now();
-    let stages: Vec<RunStage> = dedupe_by_node_id(projection.iter_stages())
-        .into_iter()
-        .map(|entry| {
-            let DedupedStage { node_id, stage, .. } = entry;
-            RunStage {
-                id:            node_id.clone(),
-                name:          node_id.clone(),
-                status:        stage.effective_state(),
-                duration_secs: stage.runtime_secs(now),
-                dot_id:        Some(node_id),
-                started_at:    stage.started_at,
-            }
+    let stages = projection
+        .iter_stages()
+        .map(|(stage_id, stage)| {
+            run_stage_from_stage_id(
+                stage_id,
+                stage_id.node_id().to_string(),
+                stage.effective_state(),
+                stage.runtime_secs(now),
+                stage.started_at,
+            )
         })
-        .collect();
+        .collect::<Vec<_>>();
 
     (StatusCode::OK, Json(ListResponse::new(stages))).into_response()
 }
@@ -128,69 +76,45 @@ async fn get_run_billing(
         }
     };
 
-    let now = Utc::now();
-
-    let mut by_model_totals = HashMap::<String, ModelBillingTotals>::new();
-    let mut runtime_secs = 0.0_f64;
-    let mut stages = Vec::new();
-
-    for entry in dedupe_by_node_id(projection.iter_stages()) {
-        let DedupedStage { node_id, stage, .. } = entry;
-
-        let row_runtime = stage.runtime_secs(now).unwrap_or(0.0);
-        runtime_secs += row_runtime;
-
-        let (billing, model) = if let Some(usage) = stage.usage.as_ref() {
-            let billing = BilledTokenCounts::from_billed_usage(std::slice::from_ref(usage));
-            let model_id = usage.model_id();
-            let model_totals = match by_model_totals.get_mut(model_id) {
-                Some(totals) => totals,
-                None => by_model_totals.entry(model_id.to_string()).or_default(),
-            };
-            accumulate_model_billing(model_totals, usage);
-            (
-                billing,
-                Some(ModelReference {
-                    id: model_id.to_string(),
-                }),
-            )
-        } else {
-            (BilledTokenCounts::default(), None)
-        };
-
-        stages.push(RunBillingStage {
-            billing,
-            model,
-            runtime_secs: row_runtime,
-            stage: BillingStageRef {
-                id:   node_id.clone(),
-                name: node_id,
+    let rollup = fabro_workflow::billing_rollup_from_projection(&projection);
+    let by_model = rollup
+        .by_model
+        .iter()
+        .map(|model| BillingByModel {
+            billing: model.billing.clone(),
+            model:   ModelReference {
+                id: model.model_id.clone(),
             },
-            started_at: stage.started_at,
-            state: Some(stage.effective_state()),
-        });
-    }
+            stages:  model.stages,
+        })
+        .collect::<Vec<_>>();
 
-    // Grand totals are the sum of the per-model totals we already accumulated.
-    let mut totals = BilledTokenCounts::default();
-    for model_totals in by_model_totals.values() {
-        totals.input_tokens += model_totals.billing.input_tokens;
-        totals.output_tokens += model_totals.billing.output_tokens;
-        totals.reasoning_tokens += model_totals.billing.reasoning_tokens;
-        totals.cache_read_tokens += model_totals.billing.cache_read_tokens;
-        totals.cache_write_tokens += model_totals.billing.cache_write_tokens;
-        totals.total_tokens += model_totals.billing.total_tokens;
-        if let Some(value) = model_totals.billing.total_usd_micros {
-            *totals.total_usd_micros.get_or_insert(0) += value;
-        }
-    }
-
-    let by_model = by_model_totals
+    let rollup_by_node = rollup
+        .stages
+        .iter()
+        .map(|stage| (stage.node_id.as_str(), stage))
+        .collect::<HashMap<_, _>>();
+    let live_rows = live_billing_rows(&projection, Utc::now());
+    let runtime_secs = live_rows.iter().map(|row| row.runtime_secs).sum::<f64>();
+    let stages = live_rows
         .into_iter()
-        .map(|(model, totals)| BillingByModel {
-            billing: totals.billing,
-            model:   ModelReference { id: model },
-            stages:  totals.stages,
+        .map(|row| {
+            let rollup_stage = rollup_by_node.get(row.node_id.as_str());
+            RunBillingStage {
+                billing:      rollup_stage
+                    .map(|stage| stage.billing.clone())
+                    .unwrap_or_default(),
+                model:        rollup_stage
+                    .and_then(|stage| stage.model_id.as_ref())
+                    .map(|id| ModelReference { id: id.clone() }),
+                runtime_secs: row.runtime_secs,
+                stage:        BillingStageRef {
+                    id:   row.node_id.clone(),
+                    name: row.node_id,
+                },
+                started_at:   row.started_at,
+                state:        row.state,
+            }
         })
         .collect::<Vec<_>>();
 
@@ -198,16 +122,80 @@ async fn get_run_billing(
         by_model,
         stages,
         totals: RunBillingTotals {
-            cache_read_tokens: totals.cache_read_tokens,
-            cache_write_tokens: totals.cache_write_tokens,
-            input_tokens: totals.input_tokens,
-            output_tokens: totals.output_tokens,
-            reasoning_tokens: totals.reasoning_tokens,
+            cache_read_tokens: rollup.totals.cache_read_tokens,
+            cache_write_tokens: rollup.totals.cache_write_tokens,
+            input_tokens: rollup.totals.input_tokens,
+            output_tokens: rollup.totals.output_tokens,
+            reasoning_tokens: rollup.totals.reasoning_tokens,
             runtime_secs,
-            total_tokens: totals.total_tokens,
-            total_usd_micros: totals.total_usd_micros,
+            total_tokens: rollup.totals.total_tokens,
+            total_usd_micros: rollup.totals.total_usd_micros,
         },
     };
 
     (StatusCode::OK, Json(response)).into_response()
+}
+
+struct LiveBillingRow {
+    node_id:      String,
+    runtime_secs: f64,
+    started_at:   Option<DateTime<Utc>>,
+    state:        Option<StageState>,
+    latest_visit: u32,
+}
+
+fn live_billing_rows(projection: &RunProjection, now: DateTime<Utc>) -> Vec<LiveBillingRow> {
+    let mut row_indices = HashMap::<String, usize>::new();
+    let mut rows = Vec::<LiveBillingRow>::new();
+
+    for (stage_id, stage) in projection.iter_stages() {
+        let node_id = stage_id.node_id();
+        if is_exit_stage(projection, node_id) || !stage_has_billing_row(stage) {
+            continue;
+        }
+
+        let index = *row_indices.entry(node_id.to_string()).or_insert_with(|| {
+            let index = rows.len();
+            rows.push(LiveBillingRow {
+                node_id:      node_id.to_string(),
+                runtime_secs: 0.0,
+                started_at:   None,
+                state:        None,
+                latest_visit: 0,
+            });
+            index
+        });
+        let row = &mut rows[index];
+        row.runtime_secs += billing_runtime_secs(stage, now).unwrap_or(0.0);
+
+        if stage_id.visit() >= row.latest_visit {
+            row.latest_visit = stage_id.visit();
+            row.started_at = stage.started_at;
+            row.state = Some(stage.effective_state());
+        }
+    }
+
+    rows
+}
+
+fn billing_runtime_secs(stage: &StageProjection, now: DateTime<Utc>) -> Option<f64> {
+    stage
+        .duration_ms
+        .map(|ms| ms as f64 / 1000.0)
+        .or_else(|| stage.runtime_secs(now))
+}
+
+fn stage_has_billing_row(stage: &StageProjection) -> bool {
+    stage.completion.is_some()
+        || stage.duration_ms.is_some()
+        || stage.usage.is_some()
+        || stage.started_at.is_some()
+        || stage.state.is_some()
+}
+
+fn is_exit_stage(projection: &RunProjection, node_id: &str) -> bool {
+    projection
+        .spec()
+        .and_then(|spec| spec.graph().nodes.get(node_id))
+        .is_some_and(|node| node.handler_type() == Some("exit"))
 }

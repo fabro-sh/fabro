@@ -27,22 +27,19 @@ import type { ModelReference } from './model-reference';
 import type { StageState } from './stage-state';
 
 /**
- * Token counts and billed totals for a single stage within a run.
+ * Token counts and billed totals for one workflow node within a run. Rows are grouped by node; billing and runtime sum every visit of that node.
  */
 export interface RunBillingStage {
     'stage': BillingStageRef;
     'model': ModelReference | null;
     'billing': BilledTokenCounts;
     /**
-     * Wall-clock runtime in seconds.
+     * Wall-clock runtime in seconds, summed across every visit of this node.
      */
     'runtime_secs': number;
     /**
      * Wall-clock time the latest attempt of this stage started, if known.
      */
     'started_at'?: string | null;
-    /**
-     * Lifecycle state of the stage. Use to detect in-flight rows for client-side runtime ticking.
-     */
     'state'?: StageState | null;
 }

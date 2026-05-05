@@ -22,7 +22,7 @@ import type { StageState } from './stage-state';
  */
 export interface RunStage {
     /**
-     * Unique stage identifier within the run.
+     * StageId in \"node_id@visit\" form, e.g. verify@2.
      */
     'id': string;
     /**
@@ -35,13 +35,15 @@ export interface RunStage {
      */
     'duration_secs'?: number;
     /**
-     * Node identifier in the Graphviz graph source.
+     * Node id in the workflow graph; multiple stages with different visits share the same node_id.
      */
-    'dot_id'?: string;
+    'node_id': string;
+    /**
+     * 1-based visit count; bumped each time the workflow re-enters this node.
+     */
+    'visit': number;
     /**
      * Wall-clock time the latest attempt of this stage started, if known.
      */
     'started_at'?: string | null;
 }
-
-

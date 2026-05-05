@@ -63,9 +63,5 @@ export interface StageProjection {
      * Wall-clock duration of the stage\'s latest terminal attempt, if known.
      */
     'duration_ms'?: number | null;
-    /**
-     * Lifecycle state of the stage projection.
-     */
     'state'?: StageState | null;
 }
-

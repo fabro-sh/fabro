@@ -51,14 +51,14 @@ describe("queryKeysForRunEvent", () => {
   });
 
   test("stage.retrying invalidates stages, billing, events, and stage turns", () => {
-    expect(queryKeysForRunEvent("run-1", "stage.retrying", "stage-7")).toEqual([
+    expect(queryKeysForRunEvent("run-1", "stage.retrying", "verify@2")).toEqual([
       queryKeys.runs.stages("run-1"),
       queryKeys.runs.billing("run-1"),
       queryKeys.runs.events("run-1", 1000),
       queryKeys.runs.graph("run-1", "LR"),
       queryKeys.runs.graph("run-1", "TB"),
       queryKeys.runs.detail("run-1"),
-      queryKeys.runs.stageTurns("run-1", "stage-7"),
+      queryKeys.runs.stageTurns("run-1", "verify@2"),
     ]);
   });
 });
@@ -179,6 +179,63 @@ describe("subscribeToRunEvents", () => {
     expect(source.closed).toBe(true);
     expect(keys).toContain(queryKeys.runs.files("run-terminal"));
     expect(keys).toContain(queryKeys.runs.billing("run-terminal"));
+
+    cleanup();
+    coordinator.close();
+  });
+
+  test("envelope with suffixed stage_id invalidates stageTurns(runId, stageId)", async () => {
+    const source = new FakeEventSource();
+    const keys: string[] = [];
+    const coordinator = createCoordinator(() => source);
+    const cleanup = subscribeToRunEvents(
+      "run-stage",
+      (key) => {
+        keys.push(key);
+        return Promise.resolve();
+      },
+      () => source,
+      { debounceMs: 0, coordinator },
+    );
+
+    await waitFor(() => source.onmessage !== null);
+    source.emit({
+      event: "stage.retrying",
+      run_id: "run-stage",
+      stage_id: "verify@2",
+      node_id: "verify",
+    });
+
+    expect(keys).toContain(queryKeys.runs.stageTurns("run-stage", "verify@2"));
+    expect(keys).toContain(queryKeys.runs.stages("run-stage"));
+    expect(keys).toContain(queryKeys.runs.events("run-stage", 1000));
+    expect(keys).toContain(queryKeys.runs.graph("run-stage", "LR"));
+    expect(keys).toContain(queryKeys.runs.detail("run-stage"));
+    expect(keys).not.toContain(queryKeys.runs.stageTurns("run-stage", "verify"));
+
+    cleanup();
+    coordinator.close();
+  });
+
+  test("falls back to node_id when an event has no stage_id", async () => {
+    const source = new FakeEventSource();
+    const keys: string[] = [];
+    const coordinator = createCoordinator(() => source);
+    const cleanup = subscribeToRunEvents(
+      "run-stage-node",
+      (key) => {
+        keys.push(key);
+        return Promise.resolve();
+      },
+      () => source,
+      { debounceMs: 0, coordinator },
+    );
+
+    await waitFor(() => source.onmessage !== null);
+    source.emit({ event: "stage.started", run_id: "run-stage-node", node_id: "verify" });
+
+    expect(keys).toContain(queryKeys.runs.stageTurns("run-stage-node", "verify"));
+    expect(keys).toContain(queryKeys.runs.stages("run-stage-node"));
 
     cleanup();
     coordinator.close();

@@ -42,7 +42,7 @@ import { CopyButton } from "../components/ui";
 import { formatDurationSecs } from "../lib/format";
 import { useTickingNow } from "../lib/time";
 import { fetchRunCommandLog, useRunEventsList, useRunStageTurns, useRunStages } from "../lib/queries";
-import { mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
+import { ACTIVE_STAGE_STATES, formatStageLabel, mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
 import { getNumber, getString, type UnknownRecord } from "../lib/unknown";
 import {
   CommandOutputStream,
@@ -69,8 +69,8 @@ function readTermination(props: UnknownRecord): CommandTermination {
   return CommandTermination.EXITED;
 }
 
-function turnsFromEvents(events: EventEnvelope[], stageId: string): TurnType[] {
-  const stageEvents = events.filter((e) => e.node_id === stageId);
+export function turnsFromEvents(events: EventEnvelope[], stageId: string): TurnType[] {
+  const stageEvents = events.filter((e) => e.stage_id === stageId);
   const turns: TurnType[] = [];
   // Collect tool pairs: started → completed
   const pendingTools = new Map<string, { toolName: string; input: string }>();
@@ -115,7 +115,7 @@ function turnsFromEvents(events: EventEnvelope[], stageId: string): TurnType[] {
       }
       case "command.started": {
         pendingCommand = {
-          stageId: e.stage_id ?? `${stageId}@1`,
+          stageId,
           script: getString(props, "script") ?? "",
           language: getString(props, "language") ?? "shell",
         };
@@ -124,7 +124,7 @@ function turnsFromEvents(events: EventEnvelope[], stageId: string): TurnType[] {
       case "command.completed": {
         turns.push({
           kind: "command",
-          stageId: pendingCommand?.stageId ?? e.stage_id ?? `${stageId}@1`,
+          stageId: pendingCommand?.stageId ?? stageId,
           script: pendingCommand?.script ?? "",
           language: pendingCommand?.language ?? "shell",
           stdout: getString(props, "stdout") ?? "",
@@ -610,7 +610,7 @@ export default function RunStages() {
     () => mapTurns(turnsQuery.data, eventsQuery.data, selectedStage?.id),
     [eventsQuery.data, selectedStage?.id, turnsQuery.data],
   );
-  const isRunning = selectedStage?.status === "running";
+  const isActive = selectedStage ? ACTIVE_STAGE_STATES.has(selectedStage.status) : false;
 
   if (!id || !stages.length) {
     return (
@@ -632,11 +632,13 @@ export default function RunStages() {
 
       <div className="min-w-0 flex-1 space-y-3">
         <div className="sticky top-0 z-10 -mx-2 flex items-center gap-2 bg-page/85 px-2 py-2 backdrop-blur">
-          <SelectedIcon className={`size-5 ${selectedConfig.color} ${isRunning ? "animate-spin" : ""}`} />
-          <h3 className="text-base font-semibold text-fg">{selectedStage.name}</h3>
+          <SelectedIcon className={`size-5 ${selectedConfig.color} ${isActive ? "animate-spin" : ""}`} />
+          <h3 className="text-base font-semibold text-fg">
+            {formatStageLabel(selectedStage)}
+          </h3>
           <span className="font-mono text-xs tabular-nums text-fg-muted">
             <RunningStageDuration
-              isRunning={isRunning}
+              isRunning={isActive}
               duration={selectedStage.duration}
             />
           </span>

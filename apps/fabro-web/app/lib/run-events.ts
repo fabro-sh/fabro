@@ -19,6 +19,7 @@ interface RunEventPayload extends EventPayload {
   event?: string;
   run_id?: string;
   node_id?: string;
+  stage_id?: string;
   properties?: Record<string, unknown>;
 }
 
@@ -172,6 +173,7 @@ function resyncKeysForRun(runId: string) {
 }
 
 function stageIdFromPayload(payload: RunEventPayload): string | undefined {
+  if (typeof payload.stage_id === "string") return payload.stage_id;
   if (typeof payload.node_id === "string") return payload.node_id;
   const nodeId = payload.properties?.node_id;
   return typeof nodeId === "string" ? nodeId : undefined;
