@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::Cursor;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use bollard::Docker;
@@ -24,7 +24,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::clone_source::{self, CloneDecision, EmptyWorkspaceReason};
 use crate::redact::redact_auth_url;
-use crate::sandbox::resolve_path;
+use crate::sandbox::{optional_timeout, resolve_path};
 use crate::{
     CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GrepOptions, Sandbox,
     SandboxEvent, SandboxEventCallback, format_lines_numbered, shell_quote,
@@ -362,7 +362,7 @@ impl DockerSandbox {
     async fn docker_exec_shell_streaming(
         &self,
         command: &str,
-        timeout_ms: u64,
+        timeout_ms: Option<u64>,
         working_dir: Option<&str>,
         env_vars: Option<&HashMap<String, String>>,
         cancel_token: Option<CancellationToken>,
@@ -380,7 +380,8 @@ impl DockerSandbox {
             controlled_command,
         ];
 
-        let timeout_duration = Duration::from_millis(timeout_ms);
+        let timeout_future = optional_timeout(timeout_ms);
+        tokio::pin!(timeout_future);
         let token = cancel_token.unwrap_or_default();
 
         let container_id = self.container_id()?.to_string();
@@ -399,7 +400,7 @@ impl DockerSandbox {
                 joined
                     .map_err(|e| crate::Error::context("Docker exec stream task failed", e))??
             }
-            () = time::sleep(timeout_duration) => {
+            () = &mut timeout_future => {
                 termination = CommandTermination::TimedOut;
                 self.request_docker_exec_stop(&stop_file).await?;
                 output_task
@@ -1192,7 +1193,7 @@ impl Sandbox for DockerSandbox {
     async fn exec_command_streaming(
         &self,
         command: &str,
-        timeout_ms: u64,
+        timeout_ms: Option<u64>,
         working_dir: Option<&str>,
         env_vars: Option<&HashMap<String, String>>,
         cancel_token: Option<CancellationToken>,
@@ -1539,6 +1540,7 @@ mod tests {
         reason = "unit test reads an in-memory tar entry synchronously"
     )]
     use std::io::Read as _;
+    use std::time::Duration;
 
     use tokio::process::Command;
 

@@ -66,13 +66,21 @@ impl Handler for PromptHandler {
                 .provider()
                 .and_then(|s| s.parse::<Provider>().ok())
                 .unwrap_or(services.run.provider);
-            let docs = fabro_agent::discover_memory(
+            let docs = match fabro_agent::discover_memory(
                 &*services.run.sandbox,
                 working_dir,
                 working_dir,
                 provider,
+                &services.run.cancel_token(),
             )
-            .await;
+            .await
+            {
+                Ok(docs) => docs,
+                Err(fabro_agent::Error::Interrupted(fabro_agent::InterruptReason::Cancelled)) => {
+                    return Err(Error::Cancelled);
+                }
+                Err(_) => Vec::new(),
+            };
 
             if docs.is_empty() {
                 None
@@ -121,6 +129,7 @@ impl Handler for PromptHandler {
                         files_touched,
                         ..
                     }) => (text, usage, files_touched),
+                    Err(Error::Cancelled) => return Err(Error::Cancelled),
                     Err(e) if e.is_retryable() => {
                         return Err(e);
                     }
@@ -191,6 +200,7 @@ mod tests {
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
     use tempfile::TempDir;
+    use tokio_util::sync::CancellationToken;
 
     use super::*;
     use crate::event::Emitter;
@@ -277,6 +287,7 @@ mod tests {
                 _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+                _cancel_token: CancellationToken,
             ) -> Result<CodergenResult, Error> {
                 panic!("run() should not be called for prompt handler");
             }
@@ -339,6 +350,7 @@ mod tests {
                 _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+                _cancel_token: CancellationToken,
             ) -> Result<CodergenResult, Error> {
                 panic!("run() should not be called for prompt handler");
             }
@@ -398,6 +410,7 @@ mod tests {
             _emitter: &Arc<Emitter>,
             _sandbox: &Arc<dyn fabro_agent::Sandbox>,
             _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+            _cancel_token: CancellationToken,
         ) -> Result<CodergenResult, Error> {
             panic!("run() should not be called for prompt handler");
         }

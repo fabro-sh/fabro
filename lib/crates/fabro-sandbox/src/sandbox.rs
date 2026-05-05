@@ -17,6 +17,16 @@ const GIT: &str = "git -c maintenance.auto=0 -c gc.auto=0";
 
 pub const DEFAULT_EXEC_OUTPUT_TAIL_BYTES: usize = 8 * 1024;
 
+/// Sleep for `timeout_ms` if `Some`, otherwise never resolves. Used by
+/// streaming `exec_command` impls to model "no timeout" without scheduling a
+/// `Duration::from_millis(u64::MAX)` sleep.
+pub(crate) async fn optional_timeout(timeout_ms: Option<u64>) {
+    match timeout_ms {
+        Some(ms) => time::sleep(Duration::from_millis(ms)).await,
+        None => std::future::pending::<()>().await,
+    }
+}
+
 /// Information returned when a sandbox sets up git for a workflow run.
 #[derive(Debug, Clone)]
 pub struct GitRunInfo {
@@ -93,7 +103,7 @@ macro_rules! delegate_sandbox {
             async fn exec_command_streaming(
                 &self,
                 command: &str,
-                timeout_ms: u64,
+                timeout_ms: Option<u64>,
                 working_dir: Option<&str>,
                 env_vars: Option<&std::collections::HashMap<String, String>>,
                 cancel_token: Option<tokio_util::sync::CancellationToken>,
@@ -607,14 +617,21 @@ pub trait Sandbox: Send + Sync {
     async fn exec_command_streaming(
         &self,
         command: &str,
-        timeout_ms: u64,
+        timeout_ms: Option<u64>,
         working_dir: Option<&str>,
         env_vars: Option<&std::collections::HashMap<String, String>>,
         cancel_token: Option<CancellationToken>,
         output_callback: CommandOutputCallback,
     ) -> crate::Result<ExecStreamingResult> {
+        let fallback_timeout_ms = timeout_ms.unwrap_or(u64::MAX);
         let result = self
-            .exec_command(command, timeout_ms, working_dir, env_vars, cancel_token)
+            .exec_command(
+                command,
+                fallback_timeout_ms,
+                working_dir,
+                env_vars,
+                cancel_token,
+            )
             .await?;
         if !result.stdout.is_empty() {
             output_callback(

@@ -724,7 +724,7 @@ pub async fn run_with_args_and_client(
     });
 
     // Initialize and run
-    session.initialize().await;
+    session.initialize().await?;
     let result = session.process_input(&args.prompt).await;
 
     if matches!(output_format, OutputFormat::Text) {

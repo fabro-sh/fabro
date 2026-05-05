@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -30,6 +29,7 @@ use fabro_types::settings::run::{
 use fabro_vault::Vault;
 use tokio::runtime::Handle;
 use tokio::sync::RwLock as AsyncRwLock;
+use tokio_util::sync::CancellationToken;
 
 use crate::ManifestPath;
 use crate::artifact_upload::ArtifactSink;
@@ -54,7 +54,7 @@ use crate::runtime_store::RunStoreHandle;
 use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
 
 struct RunSession {
-    cancel_token:      Option<Arc<AtomicBool>>,
+    cancel_token:      CancellationToken,
     emitter:           Arc<Emitter>,
     sandbox:           SandboxSpec,
     llm:               LlmSpec,
@@ -86,7 +86,7 @@ struct RunSession {
 
 pub struct StartServices {
     pub run_id:             RunId,
-    pub cancel_token:       Option<Arc<AtomicBool>>,
+    pub cancel_token:       CancellationToken,
     pub emitter:            Arc<Emitter>,
     pub interviewer:        Arc<dyn Interviewer>,
     pub run_store:          RunStoreHandle,
@@ -831,7 +831,7 @@ impl RunSession {
 struct DetachedRunBootstrapGuard {
     run_id:       RunId,
     event_sink:   RunEventSink,
-    cancel_token: Option<Arc<AtomicBool>>,
+    cancel_token: CancellationToken,
     active:       bool,
 }
 
@@ -840,7 +840,7 @@ impl DetachedRunBootstrapGuard {
         run_id: RunId,
         _run_dir: &Path,
         event_sink: RunEventSink,
-        cancel_token: Option<Arc<AtomicBool>>,
+        cancel_token: CancellationToken,
     ) -> Self {
         Self {
             run_id,
@@ -858,10 +858,7 @@ impl DetachedRunBootstrapGuard {
 impl Drop for DetachedRunBootstrapGuard {
     fn drop(&mut self) {
         if self.active {
-            let cancelled = self
-                .cancel_token
-                .as_ref()
-                .is_some_and(|token| token.load(Ordering::SeqCst));
+            let cancelled = self.cancel_token.is_cancelled();
             let reason = if cancelled {
                 FailureReason::Cancelled
             } else {
@@ -891,12 +888,12 @@ const POSTRUN_CANCELLED_MESSAGE: &str = "Run cancelled before post-run finalizat
 struct DetachedRunCompletionGuard {
     event_sink:   RunEventSink,
     run_id:       RunId,
-    cancel_token: Option<Arc<AtomicBool>>,
+    cancel_token: CancellationToken,
     active:       bool,
 }
 
 impl DetachedRunCompletionGuard {
-    fn arm(run_id: RunId, event_sink: RunEventSink, cancel_token: Option<Arc<AtomicBool>>) -> Self {
+    fn arm(run_id: RunId, event_sink: RunEventSink, cancel_token: CancellationToken) -> Self {
         Self {
             event_sink,
             run_id,
@@ -916,10 +913,7 @@ impl Drop for DetachedRunCompletionGuard {
             return;
         }
 
-        let cancelled = self
-            .cancel_token
-            .as_ref()
-            .is_some_and(|token| token.load(Ordering::SeqCst));
+        let cancelled = self.cancel_token.is_cancelled();
         let reason = if cancelled {
             FailureReason::Cancelled
         } else {
@@ -1108,7 +1102,7 @@ mod tests {
     ) -> StartServices {
         StartServices {
             run_id: fixtures::RUN_1,
-            cancel_token: None,
+            cancel_token: CancellationToken::new(),
             emitter,
             interviewer: Arc::new(fabro_interview::AutoApproveInterviewer::engine()),
             run_store: store.open_run(&fixtures::RUN_1).await.unwrap().into(),

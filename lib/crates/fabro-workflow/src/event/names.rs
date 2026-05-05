@@ -116,6 +116,8 @@ pub fn event_name(event: &Event) -> &'static str {
         Event::CommandCompleted { .. } => "command.completed",
         Event::AgentCliStarted { .. } => "agent.cli.started",
         Event::AgentCliCompleted { .. } => "agent.cli.completed",
+        Event::AgentCliCancelled { .. } => "agent.cli.cancelled",
+        Event::AgentCliTimedOut { .. } => "agent.cli.timed_out",
         Event::PullRequestCreated { .. } => "pull_request.created",
         Event::PullRequestFailed { .. } => "pull_request.failed",
         Event::DevcontainerResolved { .. } => "devcontainer.resolved",

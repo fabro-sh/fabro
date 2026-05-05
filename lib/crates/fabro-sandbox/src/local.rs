@@ -10,6 +10,7 @@ use tokio::task::spawn_blocking;
 use tokio::{fs, time};
 use tokio_util::sync::CancellationToken;
 
+use crate::sandbox::optional_timeout;
 use crate::{
     CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GrepOptions, Sandbox,
     SandboxEvent, SandboxEventCallback, format_lines_numbered,
@@ -330,7 +331,7 @@ impl Sandbox for LocalSandbox {
     async fn exec_command_streaming(
         &self,
         command: &str,
-        timeout_ms: u64,
+        timeout_ms: Option<u64>,
         working_dir: Option<&str>,
         env_vars: Option<&std::collections::HashMap<String, String>>,
         cancel_token: Option<CancellationToken>,
@@ -370,7 +371,8 @@ impl Sandbox for LocalSandbox {
             .spawn()
             .map_err(|e| crate::Error::context("Failed to spawn command", e))?;
 
-        let timeout_duration = std::time::Duration::from_millis(timeout_ms);
+        let timeout_future = optional_timeout(timeout_ms);
+        tokio::pin!(timeout_future);
         let token = cancel_token.unwrap_or_default();
 
         let stdout_pipe = child.stdout.take();
@@ -390,7 +392,7 @@ impl Sandbox for LocalSandbox {
                     .map_err(|e| crate::Error::context("Failed to wait for process", e))?;
                 (CommandTermination::Exited, status.code())
             }
-            () = time::sleep(timeout_duration) => {
+            () = &mut timeout_future => {
                 sigterm_then_kill(&mut child).await;
                 (CommandTermination::TimedOut, None)
             }

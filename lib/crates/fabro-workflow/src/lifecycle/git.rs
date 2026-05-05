@@ -614,7 +614,7 @@ mod tests {
         Arc::new(RunOptions {
             settings:         WorkflowSettings::default(),
             run_dir:          run_dir.to_path_buf(),
-            cancel_token:     None,
+            cancel_token:     tokio_util::sync::CancellationToken::new(),
             run_id:           fixtures::RUN_1,
             labels:           HashMap::new(),
             workflow_slug:    Some("metadata".to_string()),
@@ -1011,7 +1011,7 @@ mod tests {
                 repo_dir.path().to_path_buf(),
             )),
             None,
-            None,
+            tokio_util::sync::CancellationToken::new(),
             fabro_model::Provider::Anthropic,
             Arc::new(fabro_auth::EnvCredentialSource::new()),
             Arc::new(SandboxGitRuntime::new()),

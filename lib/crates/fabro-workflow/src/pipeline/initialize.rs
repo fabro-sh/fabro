@@ -30,7 +30,7 @@ use crate::error::Error;
 use crate::event::{Emitter, Event, RunNoticeCode, RunNoticeLevel};
 use crate::git::RUN_BRANCH_PREFIX;
 use crate::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
-use crate::handler::{HandlerRegistry, default_registry, sandbox_cancel_token};
+use crate::handler::{HandlerRegistry, default_registry};
 use crate::run_metadata::{
     RunMetadataRuntime, build_metadata_writer, metadata_branch_name, mint_token,
 };
@@ -665,23 +665,21 @@ pub async fn initialize(
                 index,
             });
             let cmd_start = Instant::now();
-            let cancel_token = sandbox_cancel_token(options.run_options.cancel_token.clone());
+            let cancel_token = options.run_options.cancel_token.child_token();
             let result = sandbox
                 .exec_command(
                     command,
                     options.lifecycle.setup_command_timeout_ms,
                     None,
                     None,
-                    cancel_token.clone(),
+                    Some(cancel_token.clone()),
                 )
                 .await
                 .map_err(|e| Error::engine_with_source("Setup command failed", &e))?;
-            if let Some(token) = &cancel_token {
-                if token.is_cancelled() {
-                    return Err(Error::Cancelled);
-                }
-                token.cancel();
+            if options.run_options.cancel_token.is_cancelled() {
+                return Err(Error::Cancelled);
             }
+            cancel_token.cancel();
             let duration_ms = crate::millis_u64(cmd_start.elapsed());
             if !result.is_success() {
                 let exit_code = result.display_exit_code();
@@ -781,7 +779,6 @@ pub async fn initialize(
 mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
     use std::time::Duration;
 
     use fabro_auth::{AuthCredential, AuthDetails};
@@ -874,7 +871,7 @@ mod tests {
         RunOptions {
             settings:         WorkflowSettings::default(),
             run_dir:          run_dir.to_path_buf(),
-            cancel_token:     None,
+            cancel_token:     tokio_util::sync::CancellationToken::new(),
             run_id:           test_run_id(),
             labels:           HashMap::new(),
             workflow_slug:    None,
@@ -1296,9 +1293,10 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
         let (graph, source) = simple_graph();
         let persisted = test_persisted(graph, source, &run_dir);
-        let cancel_token = Arc::new(AtomicBool::new(true));
+        let cancel_token = tokio_util::sync::CancellationToken::new();
+        cancel_token.cancel();
         let mut run_options = test_settings(&run_dir);
-        run_options.cancel_token = Some(cancel_token);
+        run_options.cancel_token = cancel_token;
 
         let result = initialize(persisted, InitOptions {
             run_id: test_run_id(),
@@ -1357,9 +1355,10 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
         let (graph, source) = simple_graph();
         let persisted = test_persisted(graph, source, &run_dir);
-        let cancel_token = Arc::new(AtomicBool::new(true));
+        let cancel_token = tokio_util::sync::CancellationToken::new();
+        cancel_token.cancel();
         let mut run_options = test_settings(&run_dir);
-        run_options.cancel_token = Some(cancel_token);
+        run_options.cancel_token = cancel_token;
 
         let result = initialize(persisted, InitOptions {
             run_id: test_run_id(),

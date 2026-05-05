@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 
 use fabro_types::settings::run::RunMode;
 use fabro_types::{ForkSourceRef, GitContext, RunId, WorkflowSettings};
+use tokio_util::sync::CancellationToken;
 
 use crate::git::{GitAuthor, git_author_from_settings};
 
@@ -21,7 +20,10 @@ pub struct GitCheckpointOptions {
 pub struct RunOptions {
     pub settings:         WorkflowSettings,
     pub run_dir:          PathBuf,
-    pub cancel_token:     Option<Arc<AtomicBool>>,
+    /// Cancellation token for this run. Cancelling this token cancels the
+    /// run and propagates to handlers, sandbox commands, and child runs.
+    /// Default constructors should use `CancellationToken::new()`.
+    pub cancel_token:     CancellationToken,
     /// Unique identifier for this workflow run.
     pub run_id:           RunId,
     /// User-defined key-value labels for this run.

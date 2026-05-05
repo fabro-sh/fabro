@@ -1,5 +1,6 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(test)]
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use tokio::time::sleep;
@@ -18,7 +19,7 @@ use crate::state::ExecutionState;
 
 #[derive(Default)]
 pub struct ExecutorOptions {
-    pub cancel_token:    Option<Arc<AtomicBool>>,
+    pub cancel_token:    Option<CancellationToken>,
     pub stall_token:     Option<CancellationToken>,
     pub max_node_visits: Option<usize>,
 }
@@ -58,7 +59,7 @@ impl<G: Graph + 'static> ExecutorBuilder<G> {
     }
 
     #[must_use]
-    pub fn cancel_token(mut self, token: Arc<AtomicBool>) -> Self {
+    pub fn cancel_token(mut self, token: CancellationToken) -> Self {
         self.options.cancel_token = Some(token);
         self
     }
@@ -95,7 +96,7 @@ impl<G: Graph + 'static> Executor<G> {
         loop {
             // Check cancellation
             if let Some(ref token) = self.options.cancel_token {
-                if token.load(Ordering::Relaxed) {
+                if token.is_cancelled() {
                     state.cancelled = true;
                     let outcome = Outcome::fail("run cancelled");
                     self.lifecycle.on_run_end(&outcome, &state).await;
@@ -500,13 +501,46 @@ mod tests {
 
     #[tokio::test]
     async fn executor_builder_sets_cancel_token() {
-        let token = Arc::new(AtomicBool::new(true)); // already cancelled
+        let token = CancellationToken::new();
+        token.cancel(); // already cancelled
         let g = linear_graph(&["start", "end"]);
         let state = ExecutionState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .cancel_token(token)
                 .build();
+        let result = executor.run(&g, state).await;
+        assert!(matches!(result, Err(Error::Cancelled)));
+    }
+
+    #[tokio::test]
+    async fn executor_cancel_token_fired_during_run_returns_cancelled() {
+        // Cancel token fired by a handler during the first node; the executor
+        // checks cancellation at the next node boundary and returns Cancelled.
+        let token = CancellationToken::new();
+        let token_clone = token.clone();
+
+        struct CancellingHandler(CancellationToken);
+        #[async_trait]
+        impl NodeHandler<TestGraph> for CancellingHandler {
+            async fn execute(
+                &self,
+                _node: &TestNode,
+                _context: &Context,
+                _g: &TestGraph,
+            ) -> Result<Outcome> {
+                self.0.cancel();
+                Ok(Outcome::success())
+            }
+        }
+
+        let g = linear_graph(&["start", "work", "end"]);
+        let state = ExecutionState::new(&g).unwrap();
+        let executor = ExecutorBuilder::new(
+            Arc::new(CancellingHandler(token_clone)) as Arc<dyn NodeHandler<TestGraph>>
+        )
+        .cancel_token(token)
+        .build();
         let result = executor.run(&g, state).await;
         assert!(matches!(result, Err(Error::Cancelled)));
     }
@@ -908,10 +942,10 @@ mod tests {
 
     #[tokio::test]
     async fn executor_cancellation_stops_run() {
-        let token = Arc::new(AtomicBool::new(false));
+        let token = CancellationToken::new();
         let token_clone = token.clone();
 
-        struct CancellingHandler(Arc<AtomicBool>);
+        struct CancellingHandler(CancellationToken);
         #[async_trait]
         impl NodeHandler<TestGraph> for CancellingHandler {
             async fn execute(
@@ -921,7 +955,7 @@ mod tests {
                 _g: &TestGraph,
             ) -> Result<Outcome> {
                 // Cancel after first node
-                self.0.store(true, Ordering::Relaxed);
+                self.0.cancel();
                 Ok(Outcome::success())
             }
         }

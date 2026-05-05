@@ -34,6 +34,7 @@ async fn run_real_cli_test(provider: Provider, model: &str) {
             &emitter,
             &env,
             None,
+            tokio_util::sync::CancellationToken::new(),
         )
         .await
         .unwrap_or_else(|_| panic!("CLI backend ({provider}/{model}) should succeed"));

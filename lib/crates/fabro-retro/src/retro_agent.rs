@@ -204,7 +204,10 @@ pub async fn run_retro_agent(
     // Optionally forward agent events via the callback
     let event_forwarder_handle = event_callback.map(|cb| spawn_retro_event_forwarder(&session, cb));
 
-    session.initialize().await;
+    session
+        .initialize()
+        .await
+        .context("Retro agent session initialization failed")?;
 
     let prompt = build_retro_prompt(RETRO_DATA_DIR);
 

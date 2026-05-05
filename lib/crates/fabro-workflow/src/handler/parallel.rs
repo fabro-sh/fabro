@@ -464,10 +464,17 @@ impl Handler for ParallelHandler {
 
         // Collect results
         let mut results: Vec<BranchResult> = Vec::new();
-        for handle in handles {
+        let mut handles = handles.into_iter();
+        while let Some(handle) = handles.next() {
             match handle.await {
                 Ok(Ok(result)) => {
                     results.push(result);
+                }
+                Ok(Err(Error::Cancelled)) => {
+                    for handle in handles {
+                        handle.abort();
+                    }
+                    return Err(Error::Cancelled);
                 }
                 Ok(Err(e)) => {
                     results.push(BranchResult {

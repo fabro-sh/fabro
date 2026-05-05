@@ -531,6 +531,18 @@ pub enum Event {
         exit_code:   i32,
         duration_ms: u64,
     },
+    AgentCliCancelled {
+        node_id:     String,
+        stdout:      String,
+        stderr:      String,
+        duration_ms: u64,
+    },
+    AgentCliTimedOut {
+        node_id:     String,
+        stdout:      String,
+        stderr:      String,
+        duration_ms: u64,
+    },
     PullRequestCreated {
         pr_url:      String,
         pr_number:   u64,
@@ -1247,6 +1259,20 @@ impl Event {
                 ..
             } => {
                 debug!(node_id, exit_code, duration_ms, "Agent CLI completed");
+            }
+            Self::AgentCliCancelled {
+                node_id,
+                duration_ms,
+                ..
+            } => {
+                debug!(node_id, duration_ms, "Agent CLI cancelled");
+            }
+            Self::AgentCliTimedOut {
+                node_id,
+                duration_ms,
+                ..
+            } => {
+                debug!(node_id, duration_ms, "Agent CLI timed out");
             }
             Self::PullRequestCreated {
                 pr_url,

@@ -7,10 +7,11 @@ use fabro_types::run_event::{
     RunFailedProps, StageCompletedProps, StagePromptProps,
 };
 use fabro_types::{
-    BilledModelUsage, Checkpoint, Conclusion, EventBody, FailureSignature, InterviewQuestionRecord,
-    Outcome, PendingInterviewRecord, PullRequestRecord, RunControlAction, RunEvent, RunId,
-    RunProjection, RunSpec, RunStatus, RunSummary, SandboxRecord, StageCompletion, StageId,
-    StageOutcome, StageProjection, StageState, StartRecord, TerminalStatus, first_event_seq,
+    BilledModelUsage, Checkpoint, CommandTermination, Conclusion, EventBody, FailureSignature,
+    InterviewQuestionRecord, Outcome, PendingInterviewRecord, PullRequestRecord, RunControlAction,
+    RunEvent, RunId, RunProjection, RunSpec, RunStatus, RunSummary, SandboxRecord, StageCompletion,
+    StageId, StageOutcome, StageProjection, StageState, StartRecord, TerminalStatus,
+    first_event_seq,
 };
 use fabro_util::error::render_with_causes;
 use serde_json::Value;
@@ -389,6 +390,42 @@ impl RunProjectionReducer for RunProjection {
                 stage.termination = Some(props.termination);
                 stage.script_timing = Some(script_timing);
             }
+            EventBody::AgentCliCompleted(props) => {
+                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
+                    return Ok(());
+                };
+                apply_agent_cli_terminal(
+                    stage,
+                    props,
+                    &props.stdout,
+                    &props.stderr,
+                    CommandTermination::Exited,
+                )?;
+            }
+            EventBody::AgentCliCancelled(props) => {
+                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
+                    return Ok(());
+                };
+                apply_agent_cli_terminal(
+                    stage,
+                    props,
+                    &props.stdout,
+                    &props.stderr,
+                    CommandTermination::Cancelled,
+                )?;
+            }
+            EventBody::AgentCliTimedOut(props) => {
+                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
+                    return Ok(());
+                };
+                apply_agent_cli_terminal(
+                    stage,
+                    props,
+                    &props.stdout,
+                    &props.stderr,
+                    CommandTermination::TimedOut,
+                )?;
+            }
             EventBody::ParallelCompleted(props) => {
                 let parallel_results = serde_json::to_value(&props.results).map_err(|err| {
                     Error::InvalidEvent(format!("invalid parallel.completed payload: {err}"))
@@ -671,6 +708,22 @@ fn provider_used_from_agent_cli_started(props: &AgentCliStartedProps) -> Value {
     Value::Object(provider_used)
 }
 
+fn apply_agent_cli_terminal(
+    stage: &mut StageProjection,
+    props: &impl serde::Serialize,
+    stdout: &str,
+    stderr: &str,
+    termination: CommandTermination,
+) -> Result<()> {
+    let script_timing = serde_json::to_value(props)
+        .map_err(|err| Error::InvalidEvent(format!("invalid agent.cli terminal payload: {err}")))?;
+    stage.stdout = Some(stdout.to_string());
+    stage.stderr = Some(stderr.to_string());
+    stage.termination = Some(termination);
+    stage.script_timing = Some(script_timing);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, HashMap};
@@ -678,15 +731,16 @@ mod tests {
     use chrono::Utc;
     use fabro_types::run_event::run::RunFailedProps;
     use fabro_types::run_event::{
+        AgentCliCancelledProps, AgentCliCompletedProps, AgentCliTimedOutProps,
         CheckpointCompletedProps, InterviewCompletedProps, InterviewOption, InterviewStartedProps,
         RunControlEffectProps, StageCompletedProps, StageFailedProps, StagePromptProps,
         StageRetryingProps, StageStartedProps,
     };
     use fabro_types::{
-        BilledModelUsage, BlockedReason, Checkpoint, EventBody, FailureCategory, FailureDetail,
-        FailureReason, Outcome, QuestionType, RunBlobId, RunControlAction, RunEvent, RunStatus,
-        StageOutcome, StageState, SuccessReason, TerminalStatus, WorkflowSettings, first_event_seq,
-        fixtures,
+        BilledModelUsage, BlockedReason, Checkpoint, CommandTermination, EventBody,
+        FailureCategory, FailureDetail, FailureReason, Outcome, QuestionType, RunBlobId,
+        RunControlAction, RunEvent, RunStatus, StageOutcome, StageState, SuccessReason,
+        TerminalStatus, WorkflowSettings, first_event_seq, fixtures,
     };
     use serde_json::json;
 
@@ -953,6 +1007,106 @@ mod tests {
         let stage = state.stage(&stage_id).unwrap();
         assert_eq!(stage.first_event_seq, first_event_seq(3));
         assert_eq!(stage.prompt.as_deref(), Some("prompt"));
+    }
+
+    fn start_stage(state: &mut RunProjection, stage_id: &StageId) {
+        state
+            .apply_event(&test_stage_event(
+                3,
+                EventBody::StageStarted(StageStartedProps {
+                    index:        0,
+                    handler_type: "agent".to_string(),
+                    attempt:      1,
+                    max_attempts: 1,
+                }),
+                stage_id.clone(),
+            ))
+            .unwrap();
+    }
+
+    #[test]
+    fn agent_cli_completed_updates_stage_output_projection() {
+        let mut state = RunProjection::default();
+        let stage_id = StageId::new("code", 1);
+        start_stage(&mut state, &stage_id);
+
+        state
+            .apply_event(&test_stage_event(
+                4,
+                EventBody::AgentCliCompleted(AgentCliCompletedProps {
+                    stdout:      "done".to_string(),
+                    stderr:      "warn".to_string(),
+                    exit_code:   0,
+                    duration_ms: 42,
+                }),
+                stage_id.clone(),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(stage.stdout.as_deref(), Some("done"));
+        assert_eq!(stage.stderr.as_deref(), Some("warn"));
+        assert_eq!(stage.termination, Some(CommandTermination::Exited));
+        assert_eq!(
+            stage.script_timing.as_ref().unwrap()["duration_ms"],
+            serde_json::json!(42)
+        );
+    }
+
+    #[test]
+    fn agent_cli_cancelled_updates_stage_output_projection() {
+        let mut state = RunProjection::default();
+        let stage_id = StageId::new("code", 1);
+        start_stage(&mut state, &stage_id);
+
+        state
+            .apply_event(&test_stage_event(
+                4,
+                EventBody::AgentCliCancelled(AgentCliCancelledProps {
+                    stdout:      "partial".to_string(),
+                    stderr:      "cancelled".to_string(),
+                    duration_ms: 7,
+                }),
+                stage_id.clone(),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(stage.stdout.as_deref(), Some("partial"));
+        assert_eq!(stage.stderr.as_deref(), Some("cancelled"));
+        assert_eq!(stage.termination, Some(CommandTermination::Cancelled));
+        assert_eq!(
+            stage.script_timing.as_ref().unwrap()["duration_ms"],
+            serde_json::json!(7)
+        );
+    }
+
+    #[test]
+    fn agent_cli_timed_out_updates_stage_output_projection() {
+        let mut state = RunProjection::default();
+        let stage_id = StageId::new("code", 1);
+        start_stage(&mut state, &stage_id);
+
+        state
+            .apply_event(&test_stage_event(
+                4,
+                EventBody::AgentCliTimedOut(AgentCliTimedOutProps {
+                    stdout:      "partial".to_string(),
+                    stderr:      "timeout".to_string(),
+                    duration_ms: 600,
+                }),
+                stage_id.clone(),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(stage.stdout.as_deref(), Some("partial"));
+        assert_eq!(stage.stderr.as_deref(), Some("timeout"));
+        assert_eq!(stage.termination, Some(CommandTermination::TimedOut));
+        assert_eq!(
+            stage.script_timing.as_ref().unwrap()["duration_ms"],
+            serde_json::json!(600)
+        );
     }
 
     #[test]

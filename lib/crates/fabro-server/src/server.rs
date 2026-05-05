@@ -111,6 +111,7 @@ use tokio::task::spawn_blocking;
 use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::{BroadcastStream, UnboundedReceiverStream};
+use tokio_util::sync::CancellationToken;
 use tower::{ServiceExt, service_fn};
 use tracing::{Instrument, debug, error, info, warn};
 use ulid::Ulid;
@@ -198,7 +199,7 @@ struct ManagedRun {
     event_tx:           Option<broadcast::Sender<RunEvent>>,
     checkpoint:         Option<Checkpoint>,
     cancel_tx:          Option<oneshot::Sender<()>>,
-    cancel_token:       Option<Arc<AtomicBool>>,
+    cancel_token:       Option<CancellationToken>,
     worker_pid:         Option<u32>,
     worker_pgid:        Option<u32>,
     run_dir:            Option<std::path::PathBuf>,
@@ -1522,7 +1523,7 @@ async fn delete_run_internal(
 
     if let Some(mut managed_run) = managed_run {
         if let Some(token) = &managed_run.cancel_token {
-            token.store(true, Ordering::SeqCst);
+            token.cancel();
         }
         if let Some(answer_transport) = managed_run.answer_transport.clone() {
             let _ = answer_transport.cancel_run().await;
@@ -2615,12 +2616,12 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         };
 
         let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
-        let cancel_token = Arc::new(AtomicBool::new(false));
+        let cancel_token = CancellationToken::new();
         let (event_tx, _) = broadcast::channel(256);
 
         managed_run.status = RunStatus::Starting;
         managed_run.cancel_tx = Some(cancel_tx);
-        managed_run.cancel_token = Some(Arc::clone(&cancel_token));
+        managed_run.cancel_token = Some(cancel_token.clone());
         managed_run.event_tx = Some(event_tx);
 
         (
@@ -2713,7 +2714,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
     };
     let server_settings = state.server_settings();
     let github_settings = &server_settings.server.integrations.github;
-    if cancel_token.load(Ordering::SeqCst) {
+    if cancel_token.is_cancelled() {
         finish_cancelled_run_before_execution(&state, run_id).await;
         return;
     }
@@ -2748,7 +2749,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
     let github_app = match github_app_result {
         Ok(github_app) => github_app,
         Err(e) => {
-            if cancel_token.load(Ordering::SeqCst) {
+            if cancel_token.is_cancelled() {
                 finish_cancelled_run_before_execution(&state, run_id).await;
                 return;
             }
@@ -2775,7 +2776,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         .collect();
     let services = operations::StartServices {
         run_id,
-        cancel_token: Some(Arc::clone(&cancel_token)),
+        cancel_token: cancel_token.clone(),
         emitter: Arc::clone(&emitter),
         interviewer: Arc::clone(&interview_runtime),
         run_store: run_store.clone().into(),
@@ -2799,7 +2800,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
     let result = tokio::select! {
         result = execution => ExecutionResult::Completed(Box::new(result)),
         _ = cancel_rx => {
-            cancel_token.store(true, Ordering::SeqCst);
+            cancel_token.cancel();
             ExecutionResult::CancelledBySignal
         }
     };
