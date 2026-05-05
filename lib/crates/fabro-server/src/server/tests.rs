@@ -12,14 +12,16 @@ use chrono::{Duration as ChronoDuration, Utc};
 use fabro_auth::{AuthCredential, AuthDetails};
 use fabro_config::ServerSettingsBuilder;
 use fabro_config::bind::Bind;
-use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question};
+use fabro_interview::{
+    AnswerValue, ControlInterviewer, Interviewer, Question, WorkerControlMessage,
+};
 use fabro_llm::types::{Message as LlmMessage, Request as LlmRequest};
 use fabro_model::Provider;
 use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{
     AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
-    InterviewQuestionRecord, Outcome, QuestionType, RunBlobId, RunId, RunSpec, SystemActorKind,
-    fixtures,
+    InterviewQuestionRecord, Outcome, QuestionType, RunBlobId, RunId, RunSpec, SuccessReason,
+    SystemActorKind, fixtures,
 };
 use fabro_util::check_report::CheckStatus;
 use httpmock::Method::{GET, POST};
@@ -1872,6 +1874,63 @@ async fn subprocess_answer_transport_cancel_run_enqueues_cancel_message() {
     assert_eq!(
         control_rx.recv().await,
         Some(WorkerControlEnvelope::cancel_run())
+    );
+}
+
+#[tokio::test]
+async fn subprocess_answer_transport_steer_enqueues_plain_steer_message() {
+    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
+    let transport = RunAnswerTransport::Subprocess { control_tx };
+    let actor = Principal::System {
+        system_kind: SystemActorKind::Engine,
+    };
+
+    transport
+        .steer("try again".to_string(), actor.clone())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        control_rx.recv().await,
+        Some(WorkerControlEnvelope::steer("try again", actor))
+    );
+}
+
+#[tokio::test]
+async fn subprocess_answer_transport_interrupt_enqueues_interrupt_message() {
+    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
+    let transport = RunAnswerTransport::Subprocess { control_tx };
+    let actor = Principal::System {
+        system_kind: SystemActorKind::Engine,
+    };
+
+    transport.interrupt(actor.clone()).await.unwrap();
+
+    assert_eq!(
+        control_rx.recv().await,
+        Some(WorkerControlEnvelope::interrupt(actor))
+    );
+}
+
+#[tokio::test]
+async fn subprocess_answer_transport_interrupt_then_steer_enqueues_single_combined_message() {
+    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
+    let transport = RunAnswerTransport::Subprocess { control_tx };
+    let actor = Principal::System {
+        system_kind: SystemActorKind::Engine,
+    };
+
+    transport
+        .interrupt_then_steer("try again".to_string(), actor.clone())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        control_rx.recv().await,
+        Some(WorkerControlEnvelope::interrupt_then_steer(
+            "try again",
+            actor
+        ))
     );
 }
 
@@ -6118,6 +6177,188 @@ async fn steer_empty_text_returns_bad_request() {
         matches!(status, StatusCode::BAD_REQUEST | StatusCode::CONFLICT),
         "expected 400 or 409, got {status}"
     );
+}
+
+fn insert_running_control_run(
+    state: &Arc<AppState>,
+    run_id: RunId,
+    answer_transport: Option<RunAnswerTransport>,
+) -> tempfile::TempDir {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let mut run = managed_run(
+        String::new(),
+        RunStatus::Running,
+        chrono::Utc::now(),
+        temp_dir.path().join(run_id.to_string()),
+        RunExecutionMode::Start,
+    );
+    run.answer_transport = answer_transport;
+    state
+        .runs
+        .lock()
+        .expect("runs lock poisoned")
+        .insert(run_id, run);
+    temp_dir
+}
+
+#[tokio::test]
+async fn steer_without_active_api_session_forwards_plain_steer_for_buffering() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = fixtures::RUN_1;
+    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
+    let _temp_dir = insert_running_control_run(
+        &state,
+        run_id,
+        Some(RunAnswerTransport::Subprocess { control_tx }),
+    );
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api(&format!("/runs/{run_id}/steer")))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"text":"try again"}"#))
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    assert_status!(response, StatusCode::ACCEPTED).await;
+    let envelope = control_rx.recv().await.unwrap();
+    assert!(matches!(
+        envelope.message,
+        WorkerControlMessage::Steer { ref text, .. } if text == "try again"
+    ));
+}
+
+#[tokio::test]
+async fn steer_interrupt_without_active_api_session_returns_conflict() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = fixtures::RUN_1;
+    let (control_tx, _control_rx) = tokio::sync::mpsc::channel(1);
+    let _temp_dir = insert_running_control_run(
+        &state,
+        run_id,
+        Some(RunAnswerTransport::Subprocess { control_tx }),
+    );
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api(&format!("/runs/{run_id}/steer")))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"text":"try again","interrupt":true}"#))
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = body_json(response.into_body()).await;
+    assert_eq!(body["errors"][0]["code"], "no_active_api_session");
+}
+
+#[tokio::test]
+async fn interrupt_with_active_api_session_forwards_interrupt() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = fixtures::RUN_1;
+    let stage_id = StageId::new("agent", 1);
+    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
+    let _temp_dir = insert_running_control_run(
+        &state,
+        run_id,
+        Some(RunAnswerTransport::Subprocess { control_tx }),
+    );
+    {
+        let mut runs = state.runs.lock().expect("runs lock poisoned");
+        runs.get_mut(&run_id)
+            .unwrap()
+            .active_api_stages
+            .insert(stage_id, "session-a".to_string());
+    }
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api(&format!("/runs/{run_id}/interrupt")))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    assert_status!(response, StatusCode::ACCEPTED).await;
+    let envelope = control_rx.recv().await.unwrap();
+    assert!(matches!(
+        envelope.message,
+        WorkerControlMessage::Interrupt {
+            actor: Principal::User(_),
+        }
+    ));
+}
+
+#[tokio::test]
+async fn steer_interrupt_with_active_api_session_forwards_combined_control_message() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = fixtures::RUN_1;
+    let stage_id = StageId::new("agent", 1);
+    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
+    let _temp_dir = insert_running_control_run(
+        &state,
+        run_id,
+        Some(RunAnswerTransport::Subprocess { control_tx }),
+    );
+    {
+        let mut runs = state.runs.lock().expect("runs lock poisoned");
+        runs.get_mut(&run_id)
+            .unwrap()
+            .active_api_stages
+            .insert(stage_id, "session-a".to_string());
+    }
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api(&format!("/runs/{run_id}/steer")))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"text":"try again","interrupt":true}"#))
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    assert_status!(response, StatusCode::ACCEPTED).await;
+    let envelope = control_rx.recv().await.unwrap();
+    assert!(matches!(
+        envelope.message,
+        WorkerControlMessage::InterruptThenSteer { ref text, .. } if text == "try again"
+    ));
+}
+
+#[tokio::test]
+async fn interrupt_terminal_run_returns_run_not_interruptible() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = fixtures::RUN_1;
+    let temp_dir = tempfile::tempdir().unwrap();
+    {
+        let mut runs = state.runs.lock().expect("runs lock poisoned");
+        runs.insert(
+            run_id,
+            managed_run(
+                String::new(),
+                RunStatus::Succeeded {
+                    reason: SuccessReason::Completed,
+                },
+                chrono::Utc::now(),
+                temp_dir.path().join(run_id.to_string()),
+                RunExecutionMode::Start,
+            ),
+        );
+    }
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api(&format!("/runs/{run_id}/interrupt")))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = body_json(response.into_body()).await;
+    assert_eq!(body["errors"][0]["code"], "run_not_interruptible");
 }
 
 #[test]

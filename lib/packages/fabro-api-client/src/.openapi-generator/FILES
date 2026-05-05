@@ -299,6 +299,7 @@ models/stage-outcome.ts
 models/stage-projection.ts
 models/stage-state.ts
 models/start-run-request.ts
+models/steer-run-request.ts
 models/submit-answer-request.ts
 models/success-reason.ts
 models/system-actor-kind.ts

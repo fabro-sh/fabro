@@ -805,6 +805,14 @@ impl Client {
         Ok(())
     }
 
+    pub async fn interrupt_run(&self, run_id: &RunId) -> Result<()> {
+        self.send_api(|client| async move {
+            client.interrupt_run().id(run_id.to_string()).send().await
+        })
+        .await?;
+        Ok(())
+    }
+
     pub async fn steer_run(&self, run_id: &RunId, text: String, interrupt: bool) -> Result<()> {
         let body: types::SteerRunRequest = types::SteerRunRequest::builder()
             .text(text)

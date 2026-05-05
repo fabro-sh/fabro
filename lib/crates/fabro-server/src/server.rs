@@ -303,22 +303,53 @@ impl RunAnswerTransport {
 
     /// Forward a steer to the worker (subprocess) or directly into the
     /// in-process steering hub.
-    async fn steer(
-        &self,
-        text: String,
-        kind: fabro_types::SteerKind,
-        actor: Principal,
-    ) -> Result<(), AnswerTransportError> {
+    async fn steer(&self, text: String, actor: Principal) -> Result<(), AnswerTransportError> {
         match self {
             Self::Subprocess { control_tx } => {
-                let message = WorkerControlEnvelope::steer(text, kind, actor);
+                let message = WorkerControlEnvelope::steer(text, actor);
                 timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
                     .await
                     .map_err(|_| AnswerTransportError::Timeout)?
                     .map_err(|_| AnswerTransportError::Closed)
             }
             Self::InProcess { steering_hub, .. } => {
-                steering_hub.deliver(text, kind, Some(actor));
+                steering_hub.deliver_steer(text, Some(actor));
+                Ok(())
+            }
+        }
+    }
+
+    async fn interrupt(&self, actor: Principal) -> Result<(), AnswerTransportError> {
+        match self {
+            Self::Subprocess { control_tx } => {
+                let message = WorkerControlEnvelope::interrupt(actor);
+                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
+                    .await
+                    .map_err(|_| AnswerTransportError::Timeout)?
+                    .map_err(|_| AnswerTransportError::Closed)
+            }
+            Self::InProcess { steering_hub, .. } => {
+                steering_hub.interrupt(Some(&actor));
+                Ok(())
+            }
+        }
+    }
+
+    async fn interrupt_then_steer(
+        &self,
+        text: String,
+        actor: Principal,
+    ) -> Result<(), AnswerTransportError> {
+        match self {
+            Self::Subprocess { control_tx } => {
+                let message = WorkerControlEnvelope::interrupt_then_steer(text, actor);
+                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
+                    .await
+                    .map_err(|_| AnswerTransportError::Timeout)?
+                    .map_err(|_| AnswerTransportError::Closed)
+            }
+            Self::InProcess { steering_hub, .. } => {
+                steering_hub.interrupt_then_steer(&text, Some(&actor));
                 Ok(())
             }
         }

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use ::fabro_types::{
     BilledTokenCounts, BlockedReason, CommandTermination, FailureReason, ForkSourceRef, GitContext,
     ParallelBranchId, Principal, PullRequestRecord, RunBlobId, RunId, RunNoticeLevel,
-    RunProvenance, StageId, SteerKind, SuccessReason, run_event as fabro_types,
+    RunProvenance, StageId, SuccessReason, run_event as fabro_types,
 };
 use fabro_agent::{AgentEvent, SandboxEvent};
 use serde::{Deserialize, Serialize};
@@ -68,6 +68,15 @@ pub enum Event {
     RunQueued,
     RunStarting,
     RunRunning,
+    RunInterrupt {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<Principal>,
+    },
+    RunSteer {
+        text:  String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<Principal>,
+    },
     RunBlocked {
         blocked_reason: BlockedReason,
     },
@@ -562,7 +571,6 @@ pub enum Event {
     /// A steer arrived with no active session and was parked in the run-wide
     /// pending buffer. The actor (steer author) is lifted to top-level.
     AgentSteerBuffered {
-        kind:  SteerKind,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         actor: Option<Principal>,
     },
@@ -704,6 +712,12 @@ impl Event {
             }
             Self::RunRunning => {
                 info!("Run running");
+            }
+            Self::RunInterrupt { .. } => {
+                info!("Run interrupt accepted");
+            }
+            Self::RunSteer { text, .. } => {
+                info!(text_len = text.len(), "Run steer accepted");
             }
             Self::RunBlocked { blocked_reason } => {
                 info!(?blocked_reason, "Run blocked");
@@ -1340,8 +1354,8 @@ impl Event {
             Self::AgentSessionEnded { session_id, .. } => {
                 debug!(session_id, "Agent session ended");
             }
-            Self::AgentSteerBuffered { kind, .. } => {
-                debug!(kind = kind.as_str(), "Steer buffered (no active session)");
+            Self::AgentSteerBuffered { .. } => {
+                debug!("Steer buffered (no active session)");
             }
             Self::AgentSteerDropped { reason, count, .. } => {
                 warn!(?reason, count, "Steer dropped");

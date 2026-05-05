@@ -885,10 +885,10 @@ paths:
       summary: Steer Run
       description: |
         Send a mid-run steering message to the live agent session(s) of a
-        running run. Set `interrupt=true` to cancel the in-flight LLM stream
-        and tool calls in the current round and deliver the message as the
-        next user turn; otherwise the message is appended to the steering
-        queue and picked up at the next turn boundary.
+        running run. Set `interrupt=true` to atomically interrupt the active
+        API-mode agent round first, then deliver this message as the next
+        user turn. Without `interrupt=true`, the message is appended to the
+        steering queue and may buffer until the next API-mode agent session.
       parameters:
         - $ref: "#/components/parameters/RunId"
       requestBody:
@@ -923,6 +923,52 @@ paths:
             Run is not currently steerable. Returned when the run is in a
             terminal state, blocked (use the answer endpoint instead), or
             all currently running agent stages are CLI-mode.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Worker control channel unavailable
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/interrupt:
+    post:
+      operationId: interruptRun
+      tags: [Human-in-the-Loop]
+      summary: Interrupt Run
+      description: |
+        Interrupt the active API-mode agent round without sending steering
+        text. The agent keeps its steering lease and waits for a later steer
+        message before starting another LLM round.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "202":
+          description: Interrupt accepted and forwarded to the worker
+        "404":
+          description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: |
+            Run is not currently interruptible. Returned when the run is in a
+            terminal state, blocked (use the answer endpoint instead), has no
+            active API-mode agent session, or all currently running agent
+            stages are CLI-mode.
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -4609,10 +4655,10 @@ components:
         interrupt:
           type: boolean
           description: |
-            When true, cancel the in-flight LLM stream and tool calls in the
-            current round before delivering. When false (default), append to
-            the steering queue and let the agent pick it up at the next
-            turn boundary.
+            When true, apply a worker-control interrupt first, then deliver
+            this text as steering in the same control operation. When false
+            (default), append to the steering queue and let the agent pick it
+            up at the next turn boundary.
           default: false
 
     StartRunRequest:

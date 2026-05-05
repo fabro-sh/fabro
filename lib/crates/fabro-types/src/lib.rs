@@ -31,7 +31,6 @@ pub mod stage_completion;
 pub mod stage_id;
 pub mod start;
 pub mod status;
-pub mod steering;
 
 pub use artifact::ArtifactUpload;
 pub use auth::{IdpIdentity, IdpIdentityError};
@@ -87,4 +86,3 @@ pub use status::{
     BlockedReason, FailureReason, InvalidTransition, ParseFailureReasonError,
     ParseSuccessReasonError, RunControlAction, RunStatus, SuccessReason, TerminalStatus,
 };
-pub use steering::SteerKind;

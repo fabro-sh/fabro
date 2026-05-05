@@ -78,6 +78,8 @@ const INTERVIEW_EVENTS = new Set([
   "interview.interrupted",
 ]);
 const STEERING_EVENTS = new Set([
+  "run.interrupt",
+  "run.steer",
   "agent.steering.injected",
   "agent.session.activated",
   "agent.session.deactivated",

@@ -222,7 +222,7 @@ pub use callback::CallbackInterviewer;
 pub use console::ConsoleInterviewer;
 pub use control::{ControlInterviewer, SubmitError};
 pub use control_protocol::{
-    SteerKind, WORKER_CONTROL_PROTOCOL_VERSION, WorkerControlAnswer, WorkerControlEnvelope,
+    WORKER_CONTROL_PROTOCOL_VERSION, WorkerControlAnswer, WorkerControlEnvelope,
     WorkerControlMessage,
 };
 pub use queue::QueueInterviewer;

@@ -200,6 +200,40 @@ Informational, warning, or error notice emitted during the run.
 | `code` | string | Machine-readable notice code |
 | `message` | string | Human-readable message |
 
+### `run.interrupt`
+
+Emitted after a live worker accepts a run interrupt control operation. The
+actor is stored in the top-level `actor` envelope field. Properties are empty.
+
+```json
+{
+  "id": "...", "ts": "...", "run_id": "...",
+  "event": "run.interrupt",
+  "actor": { "kind": "user", "login": "octocat" },
+  "properties": {}
+}
+```
+
+### `run.steer`
+
+Emitted after a live worker accepts run steering text. The actor is stored in
+the top-level `actor` envelope field.
+
+```json
+{
+  "id": "...", "ts": "...", "run_id": "...",
+  "event": "run.steer",
+  "actor": { "kind": "user", "login": "octocat" },
+  "properties": {
+    "text": "Remember to run tests after changes"
+  }
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `text` | string | Accepted steering text |
+
 ### `metadata.snapshot.started`
 
 Emitted when Fabro begins a durable metadata snapshot operation. These are product events for Fabro metadata snapshots, not tracing spans for the underlying git or filesystem work.

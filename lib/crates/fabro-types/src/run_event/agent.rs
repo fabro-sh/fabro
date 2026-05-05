@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::BilledTokenCounts;
-use crate::SteerKind;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentSessionStartedProps {
@@ -107,14 +106,15 @@ pub struct AgentTurnLimitReachedProps {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentSteeringInjectedProps {
     pub text:  String,
-    pub kind:  SteerKind,
     pub visit: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AgentSteerBufferedProps {
-    pub kind: SteerKind,
-}
+#[allow(
+    clippy::empty_structs_with_brackets,
+    reason = "This type must serialize as {} rather than null."
+)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AgentSteerBufferedProps {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

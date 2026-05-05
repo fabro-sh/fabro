@@ -69,13 +69,13 @@ impl ActivationLease {
         self.hub.detach(&self.stage_id, &self.session_id);
     }
 
-    pub fn release_if_queue_empty(&self, handle: &SessionControlHandle) -> bool {
+    pub fn release_if_no_pending_control_work(&self, handle: &SessionControlHandle) -> bool {
         if self.released.load(Ordering::Acquire) {
             return true;
         }
         if !self
             .hub
-            .detach_if_queue_empty(&self.stage_id, &self.session_id, handle)
+            .detach_if_no_pending_control_work(&self.stage_id, &self.session_id, handle)
         {
             return false;
         }
@@ -111,7 +111,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use fabro_agent::SessionControlHandle;
-    use fabro_types::{RunId, SteerKind};
+    use fabro_types::RunId;
 
     use super::*;
 
@@ -153,7 +153,7 @@ mod tests {
         let stage_id = StageId::new("agent", 1);
         let handle = SessionControlHandle::new();
 
-        hub.deliver("queued".to_string(), SteerKind::Interrupt, None);
+        hub.deliver_steer("queued".to_string(), None);
         let _lease = ActivationLease::activate(
             options(
                 stage_id.clone(),
@@ -167,6 +167,7 @@ mod tests {
 
         assert_eq!(handle.queue_len(), 1);
         assert_eq!(names.lock().unwrap().as_slice(), [
+            "run.steer",
             "agent.steer.buffered",
             "agent.session.activated"
         ]);

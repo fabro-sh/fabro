@@ -13,14 +13,15 @@
 //!   - `pending` is `std::sync::Mutex` taken under the active read lock.
 //!   - All methods are sync — no `.await` while holding any lock — so the
 //!     `CompletionCoordinator::on_natural_completion` close-the-door dance can
-//!     call `detach_if_queue_empty(...)` synchronously from the agent loop.
+//!     call `detach_if_no_pending_control_work(...)` synchronously from the
+//!     agent loop.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
 
 use fabro_agent::{SessionControlHandle, SteeringItem};
 use fabro_types::run_event::AgentSteerDroppedReason;
-use fabro_types::{Principal, StageId, SteerKind};
+use fabro_types::{Principal, StageId};
 
 use crate::event::{Emitter, Event};
 
@@ -111,19 +112,16 @@ impl SteeringHub {
         }
     }
 
-    /// Drain pending run-wide steers into `handle` as `Append` messages.
+    /// Drain pending run-wide steers into `handle`.
     pub fn drain_pending_into(&self, stage_id: &StageId, handle: &SessionControlHandle) {
         let pending: Vec<PendingSteer> = {
             let mut pending = self.pending.lock().expect("pending lock poisoned");
             pending.drain(..).collect()
         };
         for item in pending {
-            // Buffered steers always flush as Append — the original
-            // Interrupt semantics no longer make sense once the round has
-            // rolled over.
             Self::enqueue_into_session_queue(
                 handle,
-                (item.text, SteerKind::Append, item.actor),
+                (item.text, item.actor),
                 &self.emitter,
                 Some(stage_id),
             );
@@ -148,7 +146,7 @@ impl SteeringHub {
     /// is empty and the active session id matches, remove the stage and
     /// return `true`. If the queue is non-empty, leave the registration
     /// intact and return `false`.
-    pub fn detach_if_queue_empty(
+    pub fn detach_if_no_pending_control_work(
         &self,
         stage_id: &StageId,
         session_id: &str,
@@ -158,7 +156,7 @@ impl SteeringHub {
         let Some(entry) = active.get(stage_id) else {
             return false;
         };
-        if entry.session_id != session_id || !handle.queue_is_empty() {
+        if entry.session_id != session_id || handle.has_pending_control_work() {
             return false;
         }
         active.remove(stage_id);
@@ -168,7 +166,12 @@ impl SteeringHub {
     /// Deliver a steer from the HTTP control plane. Broadcasts to every
     /// active session if any are registered, otherwise parks the message
     /// in the run-wide pending buffer.
-    pub fn deliver(&self, text: String, kind: SteerKind, actor: Option<Principal>) {
+    pub fn deliver_steer(&self, text: String, actor: Option<Principal>) {
+        self.emitter.emit(&Event::RunSteer {
+            text:  text.clone(),
+            actor: actor.clone(),
+        });
+
         // Hold the active read lock for the entire decide-and-dispatch
         // step so register/unregister cannot race with this push.
         let active = self.active.read().expect("active lock poisoned");
@@ -196,8 +199,7 @@ impl SteeringHub {
                     visit:   None,
                 });
             }
-            self.emitter
-                .emit(&Event::AgentSteerBuffered { kind, actor });
+            self.emitter.emit(&Event::AgentSteerBuffered { actor });
             drop(active);
             return;
         }
@@ -206,10 +208,59 @@ impl SteeringHub {
         for (stage_id, entry) in active.iter() {
             Self::enqueue_into_session_queue(
                 &entry.handle,
-                (text.clone(), kind, actor.clone()),
+                (text.clone(), actor.clone()),
                 &self.emitter,
                 Some(stage_id),
             );
+        }
+    }
+
+    /// Interrupt every active API-mode session. Does not buffer when no
+    /// active session exists.
+    pub fn interrupt(&self, actor: Option<&Principal>) {
+        let active = self.active.read().expect("active lock poisoned");
+        if active.is_empty() {
+            return;
+        }
+
+        self.emitter.emit(&Event::RunInterrupt {
+            actor: actor.cloned(),
+        });
+        for entry in active.values() {
+            entry.handle.interrupt(actor.cloned());
+        }
+    }
+
+    /// Atomically apply interrupt semantics, then deliver steering text to
+    /// every active API-mode session. Emits persisted run events in the same
+    /// order.
+    pub fn interrupt_then_steer(&self, text: &str, actor: Option<&Principal>) {
+        let active = self.active.read().expect("active lock poisoned");
+        if active.is_empty() {
+            return;
+        }
+
+        self.emitter.emit(&Event::RunInterrupt {
+            actor: actor.cloned(),
+        });
+        self.emitter.emit(&Event::RunSteer {
+            text:  text.to_string(),
+            actor: actor.cloned(),
+        });
+
+        for (stage_id, entry) in active.iter() {
+            if let Some((_, evicted_actor)) = entry.handle.interrupt_then_enqueue_bounded(
+                (text.to_string(), actor.cloned()),
+                PER_SESSION_QUEUE_CAP,
+            ) {
+                self.emitter.emit(&Event::AgentSteerDropped {
+                    reason:  AgentSteerDroppedReason::QueueFull,
+                    count:   1,
+                    actor:   evicted_actor,
+                    node_id: Some(stage_id.node_id().to_string()),
+                    visit:   Some(stage_id.visit()),
+                });
+            }
         }
     }
 
@@ -244,7 +295,7 @@ impl SteeringHub {
         emitter: &Emitter,
         stage_id: Option<&StageId>,
     ) {
-        if let Some((.., evicted_actor)) = handle.enqueue_bounded(item, PER_SESSION_QUEUE_CAP) {
+        if let Some((_, evicted_actor)) = handle.enqueue_bounded(item, PER_SESSION_QUEUE_CAP) {
             emitter.emit(&Event::AgentSteerDropped {
                 reason:  AgentSteerDroppedReason::QueueFull,
                 count:   1,
@@ -258,29 +309,48 @@ impl SteeringHub {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use fabro_agent::SessionControlHandle;
-    use fabro_types::{Principal, StageId, SteerKind, SystemActorKind};
+    use fabro_types::{Principal, RunId, StageId, SystemActorKind};
 
     use super::SteeringHub;
+    use crate::event::Emitter;
+
+    fn hub_with_event_names() -> (Arc<SteeringHub>, Arc<Mutex<Vec<String>>>) {
+        let emitter = Arc::new(Emitter::new(RunId::new()));
+        let names = Arc::new(Mutex::new(Vec::new()));
+        let names_for_listener = Arc::clone(&names);
+        emitter.on_event(move |event| {
+            names_for_listener
+                .lock()
+                .unwrap()
+                .push(event.event_name().to_string());
+        });
+        (Arc::new(SteeringHub::new(emitter)), names)
+    }
 
     #[test]
     fn deliver_with_no_active_buffers_message() {
-        let hub = SteeringHub::for_tests();
-        hub.deliver(
+        let (hub, names) = hub_with_event_names();
+        hub.deliver_steer(
             "hi".into(),
-            SteerKind::Append,
             Some(Principal::System {
                 system_kind: SystemActorKind::Engine,
             }),
         );
         assert_eq!(hub.pending_len(), 1);
+        assert_eq!(names.lock().unwrap().as_slice(), [
+            "run.steer",
+            "agent.steer.buffered"
+        ]);
     }
 
     #[test]
     fn drain_pending_at_run_end_clears_buffer() {
         let hub = SteeringHub::for_tests();
-        hub.deliver("a".into(), SteerKind::Append, None);
-        hub.deliver("b".into(), SteerKind::Append, None);
+        hub.deliver_steer("a".into(), None);
+        hub.deliver_steer("b".into(), None);
         assert_eq!(hub.pending_len(), 2);
         hub.drain_pending_at_run_end();
         assert_eq!(hub.pending_len(), 0);
@@ -290,7 +360,7 @@ mod tests {
     fn pending_buffer_evicts_oldest_at_cap() {
         let hub = SteeringHub::for_tests();
         for i in 0..(super::PER_RUN_PENDING_CAP + 5) {
-            hub.deliver(format!("msg{i}"), SteerKind::Append, None);
+            hub.deliver_steer(format!("msg{i}"), None);
         }
         assert_eq!(hub.pending_len(), super::PER_RUN_PENDING_CAP);
     }
@@ -306,8 +376,8 @@ mod tests {
     #[test]
     fn attach_and_drain_pending_into_first_session() {
         let hub = SteeringHub::for_tests();
-        hub.deliver("queued1".into(), SteerKind::Append, None);
-        hub.deliver("queued2".into(), SteerKind::Interrupt, None);
+        hub.deliver_steer("queued1".into(), None);
+        hub.deliver_steer("queued2".into(), None);
         assert_eq!(hub.pending_len(), 2);
 
         let stage = StageId::new("agent-node", 1);
@@ -330,7 +400,7 @@ mod tests {
         assert!(hub.attach_handle(&stage_a, "session-a", &handle_a));
         assert!(hub.attach_handle(&stage_b, "session-b", &handle_b));
 
-        hub.deliver("hello".into(), SteerKind::Append, None);
+        hub.deliver_steer("hello".into(), None);
 
         assert_eq!(handle_a.queue_len(), 1);
         assert_eq!(handle_b.queue_len(), 1);
@@ -343,7 +413,7 @@ mod tests {
         let stage = StageId::new("a", 1);
         let handle1 = SessionControlHandle::new();
         assert!(hub.attach_handle(&stage, "session-a", &handle1));
-        hub.deliver("x".into(), SteerKind::Append, None);
+        hub.deliver_steer("x".into(), None);
         assert_eq!(handle1.queue_len(), 1);
 
         let handle2 = SessionControlHandle::new();
@@ -359,34 +429,71 @@ mod tests {
         assert!(hub.attach_handle(&stage, "session-a", &handle));
 
         assert!(!hub.detach(&stage, "session-b"));
-        hub.deliver("still-active".into(), SteerKind::Append, None);
+        hub.deliver_steer("still-active".into(), None);
 
         assert_eq!(handle.queue_len(), 1);
         assert_eq!(hub.active_count(), 1);
     }
 
     #[test]
-    fn detach_if_queue_empty_respects_session_id_and_queue_state() {
+    fn detach_if_no_pending_control_work_respects_session_id_and_queue_state() {
         let hub = SteeringHub::for_tests();
         let stage = StageId::new("a", 1);
         let handle = SessionControlHandle::new();
         assert!(hub.attach_handle(&stage, "session-a", &handle));
 
-        assert!(!hub.detach_if_queue_empty(&stage, "session-b", &handle));
-        hub.deliver("queued".into(), SteerKind::Append, None);
-        assert!(!hub.detach_if_queue_empty(&stage, "session-a", &handle));
+        assert!(!hub.detach_if_no_pending_control_work(&stage, "session-b", &handle));
+        hub.deliver_steer("queued".into(), None);
+        assert!(!hub.detach_if_no_pending_control_work(&stage, "session-a", &handle));
         assert_eq!(hub.active_count(), 1);
     }
 
     #[test]
-    fn detach_if_queue_empty_removes_matching_empty_session() {
+    fn detach_if_no_pending_control_work_removes_matching_empty_session() {
         let hub = SteeringHub::for_tests();
         let stage = StageId::new("a", 1);
         let handle = SessionControlHandle::new();
         assert!(hub.attach_handle(&stage, "session-a", &handle));
 
-        assert!(hub.detach_if_queue_empty(&stage, "session-a", &handle));
+        assert!(hub.detach_if_no_pending_control_work(&stage, "session-a", &handle));
         assert_eq!(hub.active_count(), 0);
+    }
+
+    #[test]
+    fn pure_interrupt_marks_active_sessions_waiting_without_queueing_text() {
+        let (hub, names) = hub_with_event_names();
+        let stage = StageId::new("a", 1);
+        let handle = SessionControlHandle::new();
+        assert!(hub.attach_handle(&stage, "session-a", &handle));
+
+        hub.interrupt(None);
+        hub.interrupt(None);
+
+        assert!(handle.is_waiting_for_steer());
+        assert_eq!(handle.queue_len(), 0);
+        assert_eq!(hub.pending_len(), 0);
+        assert_eq!(names.lock().unwrap().as_slice(), [
+            "run.interrupt",
+            "run.interrupt"
+        ]);
+    }
+
+    #[test]
+    fn interrupt_then_steer_cancels_and_queues_text() {
+        let (hub, names) = hub_with_event_names();
+        let stage = StageId::new("a", 1);
+        let handle = SessionControlHandle::new();
+        assert!(hub.attach_handle(&stage, "session-a", &handle));
+
+        hub.interrupt_then_steer("stop", None);
+
+        assert!(!handle.is_waiting_for_steer());
+        assert_eq!(handle.queue_len(), 1);
+        assert_eq!(hub.pending_len(), 0);
+        assert_eq!(names.lock().unwrap().as_slice(), [
+            "run.interrupt",
+            "run.steer"
+        ]);
     }
 
     #[test]
@@ -397,7 +504,7 @@ mod tests {
         assert!(hub.attach_handle(&stage, "session-a", &handle));
 
         for i in 0..(super::PER_SESSION_QUEUE_CAP + 5) {
-            hub.deliver(format!("m{i}"), SteerKind::Append, None);
+            hub.deliver_steer(format!("m{i}"), None);
         }
         assert_eq!(handle.queue_len(), super::PER_SESSION_QUEUE_CAP);
     }

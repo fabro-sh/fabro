@@ -257,8 +257,14 @@ async fn apply_worker_control_line(
             cancel_token.cancel();
             interviewer.interrupt_all().await;
         }
-        WorkerControlMessage::Steer { text, kind, actor } => {
-            steering_hub.deliver(text, kind, Some(actor));
+        WorkerControlMessage::Steer { text, actor } => {
+            steering_hub.deliver_steer(text, Some(actor));
+        }
+        WorkerControlMessage::Interrupt { actor } => {
+            steering_hub.interrupt(Some(&actor));
+        }
+        WorkerControlMessage::InterruptThenSteer { text, actor } => {
+            steering_hub.interrupt_then_steer(&text, Some(&actor));
         }
     }
 }

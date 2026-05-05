@@ -11,6 +11,8 @@ pub fn event_name(event: &Event) -> &'static str {
         Event::RunQueued => "run.queued",
         Event::RunStarting => "run.starting",
         Event::RunRunning => "run.running",
+        Event::RunInterrupt { .. } => "run.interrupt",
+        Event::RunSteer { .. } => "run.steer",
         Event::RunBlocked { .. } => "run.blocked",
         Event::RunUnblocked => "run.unblocked",
         Event::RunRemoving => "run.removing",

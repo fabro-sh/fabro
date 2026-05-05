@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use fabro_api::types::SteerRunRequest;
-use fabro_types::{Principal, SteerKind};
+use fabro_types::Principal;
 use fabro_workflow::run_status::RunStatus;
 
 use super::super::{AnswerTransportError, AppState, parse_run_id_path, reject_if_archived};
@@ -14,7 +14,21 @@ use crate::error::ApiError;
 use crate::principal_middleware::RequiredUser;
 
 pub(super) fn routes() -> axum::Router<Arc<AppState>> {
-    axum::Router::new().route("/runs/{id}/steer", post(steer_run))
+    axum::Router::new()
+        .route("/runs/{id}/steer", post(steer_run))
+        .route("/runs/{id}/interrupt", post(interrupt_run))
+}
+
+enum RunControlRequest {
+    Steer { text: String },
+    Interrupt,
+    InterruptThenSteer { text: String },
+}
+
+impl RunControlRequest {
+    const fn requires_active_api_session(&self) -> bool {
+        matches!(self, Self::Interrupt | Self::InterruptThenSteer { .. })
+    }
 }
 
 async fn steer_run(
@@ -39,11 +53,36 @@ async fn steer_run(
     if text.trim().is_empty() {
         return ApiError::bad_request("Steer text must not be empty.").into_response();
     }
-    let kind = if interrupt {
-        SteerKind::Interrupt
+    let control = if interrupt {
+        RunControlRequest::InterruptThenSteer { text }
     } else {
-        SteerKind::Append
+        RunControlRequest::Steer { text }
     };
+
+    control_run(auth, state, id.to_string(), control).await
+}
+
+async fn interrupt_run(
+    auth: RequiredUser,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    control_run(auth, state, id, RunControlRequest::Interrupt).await
+}
+
+async fn control_run(
+    auth: RequiredUser,
+    state: Arc<AppState>,
+    id: String,
+    control: RunControlRequest,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
+        return response;
+    }
 
     // Status + steerability gate. Take the answer_transport snapshot under
     // the same lock so we can hand it off without further state races.
@@ -65,16 +104,29 @@ async fn steer_run(
             | RunStatus::Queued
             | RunStatus::Starting
             | RunStatus::Paused { .. } => {
-                return ApiError::new(StatusCode::CONFLICT, "Run is not currently running.")
-                    .into_response();
+                return ApiError::with_code(
+                    StatusCode::CONFLICT,
+                    "Run is not currently running.",
+                    "run_not_steerable",
+                )
+                .into_response();
             }
             RunStatus::Failed { .. }
             | RunStatus::Succeeded { .. }
             | RunStatus::Removing
             | RunStatus::Dead
             | RunStatus::Archived { .. } => {
-                return ApiError::new(StatusCode::CONFLICT, "Run is no longer steerable.")
-                    .into_response();
+                let code = if matches!(&control, RunControlRequest::Interrupt) {
+                    "run_not_interruptible"
+                } else {
+                    "run_not_steerable"
+                };
+                return ApiError::with_code(
+                    StatusCode::CONFLICT,
+                    "Run is no longer steerable.",
+                    code,
+                )
+                .into_response();
             }
             RunStatus::Running => {}
         }
@@ -91,28 +143,47 @@ async fn steer_run(
             )
             .into_response();
         }
+        if managed_run.active_api_stages.is_empty() && control.requires_active_api_session() {
+            return ApiError::with_code(
+                StatusCode::CONFLICT,
+                "Run has no active API-mode agent session.",
+                "no_active_api_session",
+            )
+            .into_response();
+        }
         managed_run.answer_transport.clone()
     };
 
     let Some(answer_transport) = answer_transport else {
-        return ApiError::new(
+        return ApiError::with_code(
             StatusCode::SERVICE_UNAVAILABLE,
             "Run has no live worker control channel.",
+            "worker_control_unavailable",
         )
         .into_response();
     };
 
     let actor = Principal::User(auth.0);
-    match answer_transport.steer(text, kind, actor).await {
+    let result = match control {
+        RunControlRequest::Steer { text } => answer_transport.steer(text, actor).await,
+        RunControlRequest::Interrupt => answer_transport.interrupt(actor).await,
+        RunControlRequest::InterruptThenSteer { text } => {
+            answer_transport.interrupt_then_steer(text, actor).await
+        }
+    };
+
+    match result {
         Ok(()) => StatusCode::ACCEPTED.into_response(),
-        Err(AnswerTransportError::Timeout) => ApiError::new(
+        Err(AnswerTransportError::Timeout) => ApiError::with_code(
             StatusCode::SERVICE_UNAVAILABLE,
             "Worker control channel timed out.",
+            "worker_control_unavailable",
         )
         .into_response(),
-        Err(AnswerTransportError::Closed) => ApiError::new(
+        Err(AnswerTransportError::Closed) => ApiError::with_code(
             StatusCode::SERVICE_UNAVAILABLE,
             "Worker control channel is closed.",
+            "worker_control_unavailable",
         )
         .into_response(),
     }

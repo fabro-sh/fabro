@@ -14,9 +14,9 @@ use fabro_llm::{Error as LlmError, retry};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_mcp::connection_manager::McpConnectionManager;
 use fabro_model::Provider;
-use fabro_types::{Principal, SteerKind};
+use fabro_types::Principal;
 use futures::StreamExt;
-use tokio::sync::{Mutex as AsyncMutex, broadcast};
+use tokio::sync::{Mutex as AsyncMutex, Notify, broadcast};
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -40,9 +40,15 @@ use crate::subagent::{SubAgentCallbackEvent, SubAgentEventCallback, SubAgentMana
 use crate::tool_execution::execute_tool_calls;
 use crate::types::{AgentEvent, SessionEvent, SessionState, Turn};
 
-/// One queued steering message: text + delivery kind + the principal that
-/// authored it (None for direct internal callers like loop-detection).
-pub type SteeringItem = (String, SteerKind, Option<Principal>);
+/// One queued steering message: text + the principal that authored it (None
+/// for direct internal callers like loop-detection).
+pub type SteeringItem = (String, Option<Principal>);
+
+#[derive(Default)]
+struct ControlState {
+    queue:             VecDeque<SteeringItem>,
+    waiting_for_steer: bool,
+}
 
 /// Trait that lets the workflow layer keep an agent in `process_input` when a
 /// natural completion (no tool calls) coincides with an unconsumed steering
@@ -62,8 +68,9 @@ pub trait CompletionCoordinator: Send + Sync {
 /// interrupt the current round without holding the session itself.
 #[derive(Clone)]
 pub struct SessionControlHandle {
-    queue:       Arc<Mutex<VecDeque<SteeringItem>>>,
+    control:     Arc<Mutex<ControlState>>,
     round_token: Arc<RwLock<CancellationToken>>,
+    notify:      Arc<Notify>,
 }
 
 impl Default for SessionControlHandle {
@@ -80,37 +87,45 @@ impl SessionControlHandle {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            queue:       Arc::new(Mutex::new(VecDeque::new())),
+            control:     Arc::new(Mutex::new(ControlState::default())),
             round_token: Arc::new(RwLock::new(CancellationToken::new())),
+            notify:      Arc::new(Notify::new()),
         }
     }
 
-    /// Push an `Append`-kind steering message onto the queue.
+    /// Push a steering message onto the queue and wake a session waiting
+    /// after a pure interrupt.
     pub fn steer(&self, text: String, actor: Option<Principal>) {
-        self.enqueue((text, SteerKind::Append, actor));
+        self.enqueue((text, actor));
     }
 
-    /// Push an `Interrupt`-kind steering message onto the queue *and* cancel
-    /// the current round so the agent loop reacts immediately.
-    pub fn interrupt_with(&self, text: String, actor: Option<Principal>) {
-        self.enqueue((text, SteerKind::Interrupt, actor));
-    }
-
-    /// Direct enqueue used by callers that already encoded a kind/actor
-    /// (e.g. the hub flushing buffered steers as Appends). For
-    /// `Interrupt`-kind items, also cancels the current round token.
-    pub fn enqueue(&self, item: SteeringItem) {
-        let cancel_after = matches!(item.1, SteerKind::Interrupt);
-        self.queue
-            .lock()
-            .expect("steering queue lock poisoned")
-            .push_back(item);
-        if cancel_after {
-            self.round_token
-                .read()
-                .expect("round token lock poisoned")
-                .cancel();
+    /// Cancel the current round and, if no steering text is queued, park the
+    /// session at a steerable wait point.
+    pub fn interrupt(&self, _actor: Option<Principal>) {
+        {
+            let mut control = self.control.lock().expect("control state lock poisoned");
+            if control.queue.is_empty() {
+                control.waiting_for_steer = true;
+            }
         }
+        self.cancel_round();
+        self.notify.notify_waiters();
+    }
+
+    /// Atomically apply interrupt semantics, then enqueue steering text.
+    pub fn interrupt_then_steer(&self, text: String, actor: Option<Principal>) {
+        self.interrupt_then_enqueue((text, actor));
+    }
+
+    /// Direct enqueue used by callers such as the hub flushing buffered
+    /// steers.
+    pub fn enqueue(&self, item: SteeringItem) {
+        {
+            let mut control = self.control.lock().expect("control state lock poisoned");
+            control.waiting_for_steer = false;
+            control.queue.push_back(item);
+        }
+        self.notify.notify_waiters();
     }
 
     /// Push `item` while enforcing a FIFO cap: if the queue is at or above
@@ -118,29 +133,86 @@ impl SessionControlHandle {
     /// single lock acquisition.
     #[must_use]
     pub fn enqueue_bounded(&self, item: SteeringItem, cap: usize) -> Option<SteeringItem> {
-        let cancel_after = matches!(item.1, SteerKind::Interrupt);
         let evicted = {
-            let mut q = self.queue.lock().expect("steering queue lock poisoned");
-            let evicted = if q.len() >= cap { q.pop_front() } else { None };
-            q.push_back(item);
+            let mut control = self.control.lock().expect("control state lock poisoned");
+            let evicted = if control.queue.len() >= cap {
+                control.queue.pop_front()
+            } else {
+                None
+            };
+            control.queue.push_back(item);
+            control.waiting_for_steer = false;
             evicted
         };
-        if cancel_after {
-            self.round_token
-                .read()
-                .expect("round token lock poisoned")
-                .cancel();
-        }
+        self.notify.notify_waiters();
         evicted
+    }
+
+    /// Interrupt the current round and push `item` while enforcing a FIFO cap.
+    #[must_use]
+    pub fn interrupt_then_enqueue_bounded(
+        &self,
+        item: SteeringItem,
+        cap: usize,
+    ) -> Option<SteeringItem> {
+        let evicted = {
+            let mut control = self.control.lock().expect("control state lock poisoned");
+            let evicted = if control.queue.len() >= cap {
+                control.queue.pop_front()
+            } else {
+                None
+            };
+            control.waiting_for_steer = true;
+            control.queue.push_back(item);
+            control.waiting_for_steer = false;
+            evicted
+        };
+        self.cancel_round();
+        self.notify.notify_waiters();
+        evicted
+    }
+
+    fn interrupt_then_enqueue(&self, item: SteeringItem) {
+        {
+            let mut control = self.control.lock().expect("control state lock poisoned");
+            control.waiting_for_steer = true;
+            control.queue.push_back(item);
+            control.waiting_for_steer = false;
+        }
+        self.cancel_round();
+        self.notify.notify_waiters();
+    }
+
+    fn cancel_round(&self) {
+        self.round_token
+            .read()
+            .expect("round token lock poisoned")
+            .cancel();
     }
 
     /// Whether the steering queue currently has no unconsumed messages.
     #[must_use]
     pub fn queue_is_empty(&self) -> bool {
-        self.queue
+        self.control
             .lock()
-            .expect("steering queue lock poisoned")
+            .expect("control state lock poisoned")
+            .queue
             .is_empty()
+    }
+
+    /// Whether queue work or an interrupt-induced wait is still pending.
+    #[must_use]
+    pub fn has_pending_control_work(&self) -> bool {
+        let control = self.control.lock().expect("control state lock poisoned");
+        !control.queue.is_empty() || control.waiting_for_steer
+    }
+
+    #[must_use]
+    pub fn is_waiting_for_steer(&self) -> bool {
+        self.control
+            .lock()
+            .expect("control state lock poisoned")
+            .waiting_for_steer
     }
 
     /// Current queue length. Production callers should generally prefer
@@ -148,9 +220,10 @@ impl SessionControlHandle {
     /// kept for tests and diagnostics.
     #[must_use]
     pub fn queue_len(&self) -> usize {
-        self.queue
+        self.control
             .lock()
-            .expect("steering queue lock poisoned")
+            .expect("control state lock poisoned")
+            .queue
             .len()
     }
 }
@@ -164,7 +237,8 @@ pub struct Session {
     llm_client:             Client,
     provider_profile:       Arc<dyn AgentProfile>,
     sandbox:                Arc<dyn Sandbox>,
-    steering_queue:         Arc<Mutex<VecDeque<SteeringItem>>>,
+    control_state:          Arc<Mutex<ControlState>>,
+    control_notify:         Arc<Notify>,
     followup_queue:         Arc<Mutex<VecDeque<String>>>,
     cancel_token:           CancellationToken,
     round_token:            Arc<RwLock<CancellationToken>>,
@@ -197,7 +271,8 @@ impl Session {
             llm_client,
             provider_profile,
             sandbox,
-            steering_queue: Arc::new(Mutex::new(VecDeque::new())),
+            control_state: Arc::new(Mutex::new(ControlState::default())),
+            control_notify: Arc::new(Notify::new()),
             followup_queue: Arc::new(Mutex::new(VecDeque::new())),
             cancel_token: CancellationToken::new(),
             round_token: Arc::new(RwLock::new(CancellationToken::new())),
@@ -653,16 +728,21 @@ impl Session {
         self.event_emitter.subscribe()
     }
 
-    /// Push an `Append`-kind steer onto the queue (no actor — internal
-    /// callers like loop-detection use this).
+    /// Push a steer onto the queue (no actor — internal callers like
+    /// loop-detection use this).
     pub fn steer(&self, message: String) {
         self.control_handle().steer(message, None);
     }
 
-    /// Push an `Interrupt`-kind steer onto the queue and cancel the current
-    /// round token so the agent loop reacts mid-round.
-    pub fn interrupt_with(&self, message: String, actor: Option<Principal>) {
-        self.control_handle().interrupt_with(message, actor);
+    /// Cancel the current round and wait for later steering before starting
+    /// another LLM round.
+    pub fn control_interrupt(&self, actor: Option<Principal>) {
+        self.control_handle().interrupt(actor);
+    }
+
+    /// Cancel the current round and deliver the message as the next steer.
+    pub fn interrupt_then_steer(&self, message: String, actor: Option<Principal>) {
+        self.control_handle().interrupt_then_steer(message, actor);
     }
 
     /// Cheap, cloneable handle that lets external coordinators deliver
@@ -670,8 +750,9 @@ impl Session {
     #[must_use]
     pub fn control_handle(&self) -> SessionControlHandle {
         SessionControlHandle {
-            queue:       self.steering_queue.clone(),
+            control:     self.control_state.clone(),
             round_token: self.round_token.clone(),
+            notify:      self.control_notify.clone(),
         }
     }
 
@@ -969,9 +1050,19 @@ impl Session {
                 }
             }
 
+            // Terminal cancellation wins even when a control interrupt has
+            // parked the session waiting for steering.
+            if self.cancel_token.is_cancelled() {
+                self.close();
+                return Err(self.interrupted_error());
+            }
+
             // Drain pending steering messages at the top of every iteration
-            // so an Interrupt-kind steer pushed mid-round is delivered as the
-            // first turn of the next round.
+            // so steering pushed mid-round is delivered as the first turn of
+            // the next round. A pure interrupt with no queued steer parks the
+            // session here until a later steer arrives.
+            self.drain_steering();
+            self.wait_for_steer_if_needed().await?;
             self.drain_steering();
 
             // Check max_tool_rounds_per_input
@@ -992,12 +1083,6 @@ impl Session {
                         max_turns: self.config.max_turns,
                     });
                 break;
-            }
-
-            // Check cancellation
-            if self.cancel_token.is_cancelled() {
-                self.close();
-                return Err(self.interrupted_error());
             }
 
             // Snapshot the per-round token; it stays stable for this iteration.
@@ -1348,13 +1433,14 @@ impl Session {
     }
 
     fn drain_steering(&mut self) {
-        let messages: Vec<SteeringItem> = self
-            .steering_queue
-            .lock()
-            .expect("steering queue lock poisoned")
-            .drain(..)
-            .collect();
-        for (text, kind, actor) in messages {
+        let messages: Vec<SteeringItem> = {
+            let mut control = self
+                .control_state
+                .lock()
+                .expect("control state lock poisoned");
+            control.queue.drain(..).collect()
+        };
+        for (text, actor) in messages {
             self.history.push(Turn::Steering {
                 content:   text.clone(),
                 timestamp: SystemTime::now(),
@@ -1362,9 +1448,33 @@ impl Session {
             self.event_emitter
                 .emit(self.id.clone(), AgentEvent::SteeringInjected {
                     text,
-                    kind,
                     actor,
                 });
+        }
+    }
+
+    async fn wait_for_steer_if_needed(&mut self) -> Result<(), Error> {
+        loop {
+            let notified = self.control_notify.notified();
+            let should_wait = {
+                let control = self
+                    .control_state
+                    .lock()
+                    .expect("control state lock poisoned");
+                control.waiting_for_steer && control.queue.is_empty()
+            };
+            if !should_wait {
+                return Ok(());
+            }
+
+            tokio::select! {
+                biased;
+                () = self.cancel_token.cancelled() => {
+                    self.close();
+                    return Err(self.interrupted_error());
+                }
+                () = notified => {}
+            }
         }
     }
 
@@ -1433,6 +1543,7 @@ async fn kill_mcp_pid(sandbox: &dyn Sandbox, pid: &str) {
 mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
     use fabro_llm::error::{ProviderErrorDetail, ProviderErrorKind};
     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
@@ -1440,6 +1551,7 @@ mod tests {
         ContentPart, ReasoningEffort, Request, Response, Role, StreamEvent, ToolDefinition,
     };
     use futures::stream;
+    use tokio::time::{sleep, timeout};
 
     use super::*;
     use crate::config::ToolApprovalAdapter;
@@ -1665,45 +1777,73 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn steer_event_carries_append_kind() {
+    async fn steer_event_carries_text() {
         let mut session = make_session(vec![text_response("OK")]).await;
         let mut rx = session.subscribe();
         session.steer("hi there".to_string());
         session.process_input("Do something").await.unwrap();
 
-        // Drain events; find the SteeringInjected one and assert kind=Append
-        let mut found_kind = None;
+        let mut found_text = None;
         while let Ok(ev) = rx.try_recv() {
-            if let AgentEvent::SteeringInjected { kind, .. } = ev.event {
-                found_kind = Some(kind);
+            if let AgentEvent::SteeringInjected { text, .. } = ev.event {
+                found_text = Some(text);
                 break;
             }
         }
-        assert_eq!(found_kind, Some(SteerKind::Append));
+        assert_eq!(found_text.as_deref(), Some("hi there"));
     }
 
     #[tokio::test]
-    async fn interrupt_with_pushes_interrupt_kind_event() {
+    async fn pure_interrupt_enters_waiting_for_steer_without_queueing_text() {
+        let handle = SessionControlHandle::new();
+
+        handle.interrupt(None);
+        handle.interrupt(None);
+
+        assert!(handle.is_waiting_for_steer());
+        assert_eq!(handle.queue_len(), 0);
+        assert!(handle.has_pending_control_work());
+    }
+
+    #[tokio::test]
+    async fn pure_interrupt_waits_until_later_steer() {
+        let mut session = make_session(vec![text_response("OK")]).await;
+        let handle = session.control_handle();
+        handle.interrupt(None);
+
+        let wake_handle = handle.clone();
+        tokio::spawn(async move {
+            sleep(Duration::from_millis(10)).await;
+            wake_handle.steer("resume now".to_string(), None);
+        });
+
+        timeout(Duration::from_secs(1), session.process_input("start"))
+            .await
+            .expect("session should wake when steering arrives")
+            .unwrap();
+
+        let turns = session.history().turns();
+        assert!(matches!(&turns[1], Turn::Steering { content, .. } if content == "resume now"));
+        assert!(!handle.is_waiting_for_steer());
+    }
+
+    #[tokio::test]
+    async fn interrupt_then_steer_injects_steering_text() {
         let mut session = make_session(vec![text_response("OK")]).await;
         let mut rx = session.subscribe();
 
-        // Get a control handle, then push an interrupt steer before any
-        // round runs. Since no LLM call is in flight, the round_token
-        // cancel just makes the first iteration loop once before
-        // proceeding — drain_steering at top-of-loop will pick up the
-        // queued (text, Interrupt) item.
         let handle = session.control_handle();
-        handle.interrupt_with("stop now".to_string(), None);
+        handle.interrupt_then_steer("stop now".to_string(), None);
         session.process_input("start").await.unwrap();
 
-        let mut found_kind = None;
+        let mut found_text = None;
         while let Ok(ev) = rx.try_recv() {
-            if let AgentEvent::SteeringInjected { kind, .. } = ev.event {
-                found_kind = Some(kind);
+            if let AgentEvent::SteeringInjected { text, .. } = ev.event {
+                found_text = Some(text);
                 break;
             }
         }
-        assert_eq!(found_kind, Some(SteerKind::Interrupt));
+        assert_eq!(found_text.as_deref(), Some("stop now"));
     }
 
     #[tokio::test]

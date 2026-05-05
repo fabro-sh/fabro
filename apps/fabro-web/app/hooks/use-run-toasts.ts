@@ -41,14 +41,12 @@ function steeringToastMessage(payload: RunEventPayload): string | null {
   const props = payload.properties ?? {};
 
   switch (payload.event) {
-    case "agent.steering.injected": {
-      const kind = props.kind;
-      if (kind === "append") return "Steer delivered.";
-      if (kind === "interrupt") {
-        return "Agent interrupted — your message is the next turn.";
-      }
-      return null;
-    }
+    case "run.interrupt":
+      return "Agent interrupted.";
+    case "run.steer":
+      return "Steer accepted.";
+    case "agent.steering.injected":
+      return "Steer delivered.";
     case "agent.steer.buffered":
       return "Steer queued — will apply when an agent stage runs.";
     case "agent.steer.dropped": {

@@ -7,7 +7,7 @@ Steering lets you send guidance to an agent while it's working — without waiti
 
 ## How steering works
 
-A steering message is injected into the agent's conversation as a user-role message. The agent sees it on its next LLM turn — after the current tool call finishes — and can adjust its approach immediately.
+A steering message is injected into the agent's conversation as a user-role message. The agent sees it on its next LLM turn and can adjust its approach immediately.
 
 The delivery flow:
 
@@ -16,16 +16,18 @@ The delivery flow:
 3. Before the next LLM call, Fabro drains the queue and injects each message as a `Steering` turn in the conversation history
 4. The LLM sees the guidance alongside its existing context and adjusts accordingly
 
-Steering is **asynchronous** — the agent picks up the message at its next natural pause point (between tool calls), not mid-execution.
+Steering is **asynchronous** — the agent picks up the message at its next natural pause point.
+
+When you send steering with `interrupt=true`, Fabro first cancels the active API-mode agent round, then queues the steering text in the same worker-control operation. The agent resumes with that steering text as the next user turn. A standalone interrupt through the API cancels the active round without text and keeps the session waiting until a later steer arrives.
 
 ## When steering is delivered
 
 Steering messages are drained from the queue at two points during the agent loop:
 
 1. **Before the first LLM call** — any messages queued before the agent starts its first turn
-2. **After each tool execution round** — between tool results being collected and the next LLM call
+2. **After each interrupted or completed round** — before the next LLM call
 
-This means there is a natural latency between sending a steering message and the agent seeing it. If the agent is in the middle of a long-running shell command, the message waits until that command finishes and the next LLM turn begins.
+This means there is a natural latency between sending a plain steering message and the agent seeing it. If the agent is in the middle of a long-running shell command, the message waits until that command finishes and the next LLM turn begins. Use interrupting steering when the current round should stop before the message is delivered.
 
 Multiple steering messages sent in quick succession are all delivered together at the next drain point.
 

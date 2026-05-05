@@ -49,6 +49,36 @@ fn run_event_round_trips_run_created_with_web_url() {
 }
 
 #[test]
+fn run_event_round_trips_run_interrupt() {
+    let value = json!({
+        "id": "evt_run_interrupt",
+        "ts": "2026-04-29T12:00:00Z",
+        "run_id": fixtures::RUN_1,
+        "event": "run.interrupt",
+        "actor": { "kind": "system", "system_kind": "engine" },
+        "properties": {}
+    });
+
+    assert_run_event_round_trip(value);
+}
+
+#[test]
+fn run_event_round_trips_run_steer() {
+    let value = json!({
+        "id": "evt_run_steer",
+        "ts": "2026-04-29T12:00:00Z",
+        "run_id": fixtures::RUN_1,
+        "event": "run.steer",
+        "actor": { "kind": "system", "system_kind": "engine" },
+        "properties": {
+            "text": "try another approach"
+        }
+    });
+
+    assert_run_event_round_trip(value);
+}
+
+#[test]
 fn run_event_round_trips_stage_started() {
     let value = json!({
         "id": "evt_stage_started",

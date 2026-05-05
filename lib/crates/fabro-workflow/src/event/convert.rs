@@ -100,6 +100,12 @@ fn event_body_from_event(event: &Event) -> EventBody {
         Event::RunRunning => {
             EventBody::RunRunning(fabro_types::RunStatusTransitionProps::default())
         }
+        Event::RunInterrupt { .. } => {
+            EventBody::RunInterrupt(fabro_types::RunInterruptProps::default())
+        }
+        Event::RunSteer { text, .. } => {
+            EventBody::RunSteer(fabro_types::RunSteerProps { text: text.clone() })
+        }
         Event::RunBlocked { blocked_reason } => {
             EventBody::RunBlocked(fabro_types::RunBlockedProps {
                 blocked_reason: *blocked_reason,
@@ -597,10 +603,9 @@ fn event_body_from_event(event: &Event) -> EventBody {
                     visit:     *visit,
                 })
             }
-            AgentEvent::SteeringInjected { text, kind, .. } => {
+            AgentEvent::SteeringInjected { text, .. } => {
                 EventBody::AgentSteeringInjected(fabro_types::AgentSteeringInjectedProps {
                     text:  text.clone(),
-                    kind:  *kind,
                     visit: *visit,
                 })
             }
@@ -1029,8 +1034,8 @@ fn event_body_from_event(event: &Event) -> EventBody {
         Event::AgentSessionEnded { .. } => {
             EventBody::AgentSessionEnded(fabro_types::AgentSessionEndedProps {})
         }
-        Event::AgentSteerBuffered { kind, .. } => {
-            EventBody::AgentSteerBuffered(fabro_types::AgentSteerBufferedProps { kind: *kind })
+        Event::AgentSteerBuffered { .. } => {
+            EventBody::AgentSteerBuffered(fabro_types::AgentSteerBufferedProps::default())
         }
         Event::AgentSteerDropped { reason, count, .. } => {
             EventBody::AgentSteerDropped(fabro_types::AgentSteerDroppedProps {

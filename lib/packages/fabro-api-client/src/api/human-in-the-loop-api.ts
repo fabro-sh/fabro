@@ -36,6 +36,8 @@ import type { SshAccessRequest } from '../models';
 // @ts-ignore
 import type { SshAccessResponse } from '../models';
 // @ts-ignore
+import type { SteerRunRequest } from '../models';
+// @ts-ignore
 import type { SubmitAnswerRequest } from '../models';
 /**
  * HumanInTheLoopApi - axios parameter creator
@@ -169,6 +171,46 @@ export const HumanInTheLoopApiAxiosParamCreator = function (configuration?: Conf
             }
 
             localVarHeaderParameter['Accept'] = 'application/octet-stream,application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Interrupt the active API-mode agent round without sending steering text. The agent keeps its steering lease and waits for a later steer message before starting another LLM round.
+         * @summary Interrupt Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        interruptRun: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('interruptRun', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/interrupt`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -334,6 +376,51 @@ export const HumanInTheLoopApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
+         * Send a mid-run steering message to the live agent session(s) of a running run. Set `interrupt=true` to atomically interrupt the active API-mode agent round first, then deliver this message as the next user turn. Without `interrupt=true`, the message is appended to the steering queue and may buffer until the next API-mode agent session.
+         * @summary Steer Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {SteerRunRequest} steerRunRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        steerRun: async (id: string, steerRunRequest: SteerRunRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('steerRun', 'id', id)
+            // verify required parameter 'steerRunRequest' is not null or undefined
+            assertParamExists('steerRun', 'steerRunRequest', steerRunRequest)
+            const localVarPath = `/api/v1/runs/{id}/steer`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(steerRunRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Submits an answer to a pending question. The answer can be freeform text or a selected option key, depending on the question type.
          * @summary Submit Run Answer
          * @param {string} id Unique run identifier (ULID).
@@ -434,6 +521,19 @@ export const HumanInTheLoopApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Interrupt the active API-mode agent round without sending steering text. The agent keeps its steering lease and waits for a later steer message before starting another LLM round.
+         * @summary Interrupt Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async interruptRun(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.interruptRun(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['HumanInTheLoopApi.interruptRun']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Returns pending human-in-the-loop questions for a run. Questions are generated when the workflow needs user input to proceed.
          * @summary List Run Questions
          * @param {string} id Unique run identifier (ULID).
@@ -476,6 +576,20 @@ export const HumanInTheLoopApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.putSandboxFile(id, path, body, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['HumanInTheLoopApi.putSandboxFile']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Send a mid-run steering message to the live agent session(s) of a running run. Set `interrupt=true` to atomically interrupt the active API-mode agent round first, then deliver this message as the next user turn. Without `interrupt=true`, the message is appended to the steering queue and may buffer until the next API-mode agent session.
+         * @summary Steer Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {SteerRunRequest} steerRunRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async steerRun(id: string, steerRunRequest: SteerRunRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.steerRun(id, steerRunRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['HumanInTheLoopApi.steerRun']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -536,6 +650,16 @@ export const HumanInTheLoopApiFactory = function (configuration?: Configuration,
             return localVarFp.getSandboxFile(id, path, options).then((request) => request(axios, basePath));
         },
         /**
+         * Interrupt the active API-mode agent round without sending steering text. The agent keeps its steering lease and waits for a later steer message before starting another LLM round.
+         * @summary Interrupt Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        interruptRun(id: string, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.interruptRun(id, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Returns pending human-in-the-loop questions for a run. Questions are generated when the workflow needs user input to proceed.
          * @summary List Run Questions
          * @param {string} id Unique run identifier (ULID).
@@ -570,6 +694,17 @@ export const HumanInTheLoopApiFactory = function (configuration?: Configuration,
          */
         putSandboxFile(id: string, path: string, body: File, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.putSandboxFile(id, path, body, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Send a mid-run steering message to the live agent session(s) of a running run. Set `interrupt=true` to atomically interrupt the active API-mode agent round first, then deliver this message as the next user turn. Without `interrupt=true`, the message is appended to the steering queue and may buffer until the next API-mode agent session.
+         * @summary Steer Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {SteerRunRequest} steerRunRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        steerRun(id: string, steerRunRequest: SteerRunRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.steerRun(id, steerRunRequest, options).then((request) => request(axios, basePath));
         },
         /**
          * Submits an answer to a pending question. The answer can be freeform text or a selected option key, depending on the question type.
@@ -627,6 +762,17 @@ export class HumanInTheLoopApi extends BaseAPI {
     }
 
     /**
+     * Interrupt the active API-mode agent round without sending steering text. The agent keeps its steering lease and waits for a later steer message before starting another LLM round.
+     * @summary Interrupt Run
+     * @param {string} id Unique run identifier (ULID).
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public interruptRun(id: string, options?: RawAxiosRequestConfig) {
+        return HumanInTheLoopApiFp(this.configuration).interruptRun(id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Returns pending human-in-the-loop questions for a run. Questions are generated when the workflow needs user input to proceed.
      * @summary List Run Questions
      * @param {string} id Unique run identifier (ULID).
@@ -666,6 +812,18 @@ export class HumanInTheLoopApi extends BaseAPI {
     }
 
     /**
+     * Send a mid-run steering message to the live agent session(s) of a running run. Set `interrupt=true` to atomically interrupt the active API-mode agent round first, then deliver this message as the next user turn. Without `interrupt=true`, the message is appended to the steering queue and may buffer until the next API-mode agent session.
+     * @summary Steer Run
+     * @param {string} id Unique run identifier (ULID).
+     * @param {SteerRunRequest} steerRunRequest
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public steerRun(id: string, steerRunRequest: SteerRunRequest, options?: RawAxiosRequestConfig) {
+        return HumanInTheLoopApiFp(this.configuration).steerRun(id, steerRunRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Submits an answer to a pending question. The answer can be freeform text or a selected option key, depending on the question type.
      * @summary Submit Run Answer
      * @param {string} id Unique run identifier (ULID).
@@ -678,4 +836,3 @@ export class HumanInTheLoopApi extends BaseAPI {
         return HumanInTheLoopApiFp(this.configuration).submitRunAnswer(id, qid, submitAnswerRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }
-

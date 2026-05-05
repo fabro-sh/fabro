@@ -1,5 +1,4 @@
 use fabro_types::Principal;
-pub use fabro_types::SteerKind;
 use serde::{Deserialize, Serialize};
 
 use crate::{Answer, AnswerSubmission, AnswerValue};
@@ -35,12 +34,30 @@ impl WorkerControlEnvelope {
     }
 
     #[must_use]
-    pub fn steer(text: impl Into<String>, kind: SteerKind, actor: Principal) -> Self {
+    pub fn steer(text: impl Into<String>, actor: Principal) -> Self {
         Self {
             v:       WORKER_CONTROL_PROTOCOL_VERSION,
             message: WorkerControlMessage::Steer {
                 text: text.into(),
-                kind,
+                actor,
+            },
+        }
+    }
+
+    #[must_use]
+    pub fn interrupt(actor: Principal) -> Self {
+        Self {
+            v:       WORKER_CONTROL_PROTOCOL_VERSION,
+            message: WorkerControlMessage::Interrupt { actor },
+        }
+    }
+
+    #[must_use]
+    pub fn interrupt_then_steer(text: impl Into<String>, actor: Principal) -> Self {
+        Self {
+            v:       WORKER_CONTROL_PROTOCOL_VERSION,
+            message: WorkerControlMessage::InterruptThenSteer {
+                text: text.into(),
                 actor,
             },
         }
@@ -59,11 +76,11 @@ pub enum WorkerControlMessage {
     #[serde(rename = "run.cancel")]
     RunCancel,
     #[serde(rename = "run.steer")]
-    Steer {
-        text:  String,
-        kind:  SteerKind,
-        actor: Principal,
-    },
+    Steer { text: String, actor: Principal },
+    #[serde(rename = "run.interrupt")]
+    Interrupt { actor: Principal },
+    #[serde(rename = "run.interrupt_then_steer")]
+    InterruptThenSteer { text: String, actor: Principal },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,9 +168,36 @@ mod tests {
 
     #[test]
     fn steer_append_round_trips_through_json() {
-        let envelope = WorkerControlEnvelope::steer(
-            "try again",
-            SteerKind::Append,
+        let envelope = WorkerControlEnvelope::steer("try again", fabro_types::Principal::System {
+            system_kind: fabro_types::SystemActorKind::Engine,
+        });
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert_eq!(
+            json,
+            r#"{"v":1,"type":"run.steer","text":"try again","actor":{"kind":"system","system_kind":"engine"}}"#
+        );
+        let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, envelope);
+    }
+
+    #[test]
+    fn interrupt_round_trips_through_json() {
+        let envelope = WorkerControlEnvelope::interrupt(fabro_types::Principal::System {
+            system_kind: fabro_types::SystemActorKind::Engine,
+        });
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert_eq!(
+            json,
+            r#"{"v":1,"type":"run.interrupt","actor":{"kind":"system","system_kind":"engine"}}"#
+        );
+        let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, envelope);
+    }
+
+    #[test]
+    fn interrupt_then_steer_round_trips_through_json() {
+        let envelope = WorkerControlEnvelope::interrupt_then_steer(
+            "stop, do X instead",
             fabro_types::Principal::System {
                 system_kind: fabro_types::SystemActorKind::Engine,
             },
@@ -161,23 +205,8 @@ mod tests {
         let json = serde_json::to_string(&envelope).unwrap();
         assert_eq!(
             json,
-            r#"{"v":1,"type":"run.steer","text":"try again","kind":"append","actor":{"kind":"system","system_kind":"engine"}}"#
+            r#"{"v":1,"type":"run.interrupt_then_steer","text":"stop, do X instead","actor":{"kind":"system","system_kind":"engine"}}"#
         );
-        let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed, envelope);
-    }
-
-    #[test]
-    fn steer_interrupt_round_trips_through_json() {
-        let envelope = WorkerControlEnvelope::steer(
-            "stop, do X instead",
-            SteerKind::Interrupt,
-            fabro_types::Principal::System {
-                system_kind: fabro_types::SystemActorKind::Engine,
-            },
-        );
-        let json = serde_json::to_string(&envelope).unwrap();
-        assert!(json.contains(r#""kind":"interrupt""#));
         let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, envelope);
     }

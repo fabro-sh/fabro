@@ -69,6 +69,18 @@ pub struct RunStatusTransitionProps {}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct RunStatusEffectProps {}
 
+#[allow(
+    clippy::empty_structs_with_brackets,
+    reason = "This type must serialize as {} rather than null."
+)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct RunInterruptProps {}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunSteerProps {
+    pub text: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSubmittedProps {
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -23,7 +23,7 @@ export interface SteerRunRequest {
      */
     'text': string;
     /**
-     * When true, cancel the in-flight LLM stream and tool calls in the current round before delivering. When false (default), append to the steering queue and let the agent pick it up at the next turn boundary.
+     * When true, apply a worker-control interrupt first, then deliver this text as steering in the same control operation. When false (default), append to the steering queue and let the agent pick it up at the next turn boundary.
      */
     'interrupt'?: boolean;
 }

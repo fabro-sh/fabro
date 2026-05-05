@@ -62,6 +62,10 @@ pub enum EventBody {
     RunStarting(RunStatusTransitionProps),
     #[serde(rename = "run.running")]
     RunRunning(RunStatusTransitionProps),
+    #[serde(rename = "run.interrupt")]
+    RunInterrupt(RunInterruptProps),
+    #[serde(rename = "run.steer")]
+    RunSteer(RunSteerProps),
     #[serde(rename = "run.blocked")]
     RunBlocked(RunBlockedProps),
     #[serde(rename = "run.unblocked")]
@@ -350,6 +354,8 @@ impl EventBody {
             Self::RunQueued(_) => "run.queued",
             Self::RunStarting(_) => "run.starting",
             Self::RunRunning(_) => "run.running",
+            Self::RunInterrupt(_) => "run.interrupt",
+            Self::RunSteer(_) => "run.steer",
             Self::RunBlocked(_) => "run.blocked",
             Self::RunUnblocked(_) => "run.unblocked",
             Self::RunRemoving(_) => "run.removing",
@@ -493,6 +499,8 @@ fn is_known_event_name(event: &str) -> bool {
             | "run.queued"
             | "run.starting"
             | "run.running"
+            | "run.interrupt"
+            | "run.steer"
             | "run.blocked"
             | "run.unblocked"
             | "run.removing"
@@ -919,6 +927,58 @@ mod tests {
         });
 
         assert_eq!(body.event_name(), "interview.interrupted");
+    }
+
+    #[test]
+    fn run_interrupt_round_trips_with_empty_properties_and_actor() {
+        let line = json!({
+            "id": "evt_interrupt",
+            "ts": "2026-04-04T12:00:00Z",
+            "run_id": fixtures::RUN_1,
+            "event": "run.interrupt",
+            "actor": { "kind": "system", "system_kind": "engine" },
+            "properties": {}
+        });
+
+        let parsed = RunEvent::from_value(line.clone()).unwrap();
+        assert!(matches!(parsed.body, EventBody::RunInterrupt(_)));
+        assert_eq!(parsed.to_value().unwrap(), line);
+    }
+
+    #[test]
+    fn run_steer_round_trips_with_text_and_actor() {
+        let line = json!({
+            "id": "evt_steer",
+            "ts": "2026-04-04T12:00:00Z",
+            "run_id": fixtures::RUN_1,
+            "event": "run.steer",
+            "actor": { "kind": "system", "system_kind": "engine" },
+            "properties": { "text": "try another approach" }
+        });
+
+        let parsed = RunEvent::from_value(line.clone()).unwrap();
+        assert!(matches!(
+            &parsed.body,
+            EventBody::RunSteer(props) if props.text == "try another approach"
+        ));
+        assert_eq!(parsed.to_value().unwrap(), line);
+    }
+
+    #[test]
+    fn run_interrupt_then_steer_is_not_a_known_persisted_event() {
+        let line = json!({
+            "id": "evt_combined",
+            "ts": "2026-04-04T12:00:00.000Z",
+            "run_id": fixtures::RUN_1,
+            "event": "run.interrupt_then_steer",
+            "properties": { "text": "try another approach" }
+        });
+
+        let parsed = RunEvent::from_value(line).unwrap();
+        assert!(matches!(
+            parsed.body,
+            EventBody::Unknown { ref name, .. } if name == "run.interrupt_then_steer"
+        ));
     }
 
     #[test]

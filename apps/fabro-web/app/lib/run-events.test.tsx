@@ -192,7 +192,7 @@ describe("subscribeToRunEvents", () => {
       },
     });
 
-    source.emit({ id: "evt-1", event: "agent.steer.buffered", properties: { kind: "append" } });
+    source.emit({ id: "evt-1", event: "agent.steer.buffered", properties: {} });
 
     expect(seen).toEqual(["agent.steer.buffered"]);
     expect(keys).toEqual([queryKeys.runs.events("run-shared-payload", 1000)]);
