@@ -80,7 +80,7 @@ pub use run_summary::RunSummary;
 pub use sandbox_record::SandboxRecord;
 pub use secret::{SecretMetadata, SecretType};
 pub use stage_completion::StageCompletion;
-pub use stage_id::{ParallelBranchId, StageId};
+pub use stage_id::{InvalidStageVisit, ParallelBranchId, StageId};
 pub use start::StartRecord;
 pub use status::{
     BlockedReason, FailureReason, InvalidTransition, ParseFailureReasonError,

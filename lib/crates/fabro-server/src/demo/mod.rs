@@ -784,9 +784,10 @@ mod runs {
         RunNamespace, RunPrepareSettings, RunSandboxSettings,
     };
     use fabro_types::settings::{InterpString, ProjectNamespace, WorkflowNamespace};
-    use fabro_types::{RunId, WorkflowSettings};
+    use fabro_types::{RunId, StageId, WorkflowSettings};
 
     use super::ts;
+    use crate::server::run_stage_from_stage_id;
 
     fn labels(entries: &[(&str, &str)]) -> HashMap<String, String> {
         entries
@@ -1181,34 +1182,36 @@ mod runs {
 
     pub(super) fn stages() -> Vec<RunStage> {
         vec![
-            RunStage {
-                id:            "detect-drift".into(),
-                name:          "Detect Drift".into(),
-                status:        StageState::Succeeded,
-                duration_secs: Some(72.0),
-                dot_id:        Some("detect".into()),
-            },
-            RunStage {
-                id:            "propose-changes".into(),
-                name:          "Propose Changes".into(),
-                status:        StageState::Succeeded,
-                duration_secs: Some(154.0),
-                dot_id:        Some("propose".into()),
-            },
-            RunStage {
-                id:            "review-changes".into(),
-                name:          "Review Changes".into(),
-                status:        StageState::Succeeded,
-                duration_secs: Some(45.0),
-                dot_id:        Some("review".into()),
-            },
-            RunStage {
-                id:            "apply-changes".into(),
-                name:          "Apply Changes".into(),
-                status:        StageState::Running,
-                duration_secs: Some(118.0),
-                dot_id:        Some("apply".into()),
-            },
+            run_stage_from_stage_id(
+                &StageId::new("detect-drift", 1),
+                "Detect Drift",
+                StageState::Succeeded,
+                Some(72.0),
+            ),
+            run_stage_from_stage_id(
+                &StageId::new("propose-changes", 1),
+                "Propose Changes",
+                StageState::Succeeded,
+                Some(154.0),
+            ),
+            run_stage_from_stage_id(
+                &StageId::new("review-changes", 1),
+                "Review Changes",
+                StageState::Succeeded,
+                Some(45.0),
+            ),
+            run_stage_from_stage_id(
+                &StageId::new("apply-changes", 1),
+                "Apply Changes",
+                StageState::Succeeded,
+                Some(118.0),
+            ),
+            run_stage_from_stage_id(
+                &StageId::new("apply-changes", 2),
+                "Apply Changes",
+                StageState::Running,
+                None,
+            ),
         ]
     }
 

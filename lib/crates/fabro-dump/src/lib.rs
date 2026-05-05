@@ -66,18 +66,13 @@ impl RunDump {
             entries.push(RunDumpEntry::text("graph.fabro", graph_source.clone()));
         }
 
-        let mut stages: Vec<_> = state.iter_stages().collect();
+        let stages: Vec<_> = state.iter_stages().collect();
         if stages.len() > MAX_STAGES_IN_DUMP {
             bail!(
                 "run dump supports at most {MAX_STAGES_IN_DUMP} stages with the current path prefix width (got {})",
                 stages.len()
             );
         }
-        stages.sort_by(|(left_id, left), (right_id, right)| {
-            left.first_event_seq
-                .cmp(&right.first_event_seq)
-                .then_with(|| left_id.cmp(right_id))
-        });
 
         let mut stage_ranks = HashMap::new();
         for (index, (stage_id, _)) in stages.iter().enumerate() {

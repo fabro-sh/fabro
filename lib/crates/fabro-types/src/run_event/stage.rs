@@ -57,6 +57,8 @@ pub struct StageFailedProps {
     pub will_retry:  bool,
     #[serde(default)]
     pub duration_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub billing:     Option<BilledModelUsage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
