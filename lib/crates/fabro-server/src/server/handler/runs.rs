@@ -10,7 +10,9 @@ use axum::{Json, Router};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use bytes::Bytes;
-use fabro_api::types::{RunManifest, RunStatusResponse, SubmitAnswerRequest};
+use fabro_api::types::{
+    BoardColumn, BoardColumnDefinition, RunManifest, RunStatusResponse, SubmitAnswerRequest,
+};
 use fabro_config::Storage;
 use fabro_interview::AnswerSubmission;
 use fabro_types::{
@@ -82,25 +84,45 @@ impl ListRunsParams {
     }
 }
 
-fn board_column(status: RunStatus) -> Option<&'static str> {
+fn board_column(status: RunStatus) -> Option<BoardColumn> {
     match status {
-        RunStatus::Submitted | RunStatus::Queued | RunStatus::Starting => Some("initializing"),
-        RunStatus::Running | RunStatus::Paused { .. } => Some("running"),
-        RunStatus::Blocked { .. } => Some("blocked"),
-        RunStatus::Succeeded { .. } => Some("succeeded"),
-        RunStatus::Failed { .. } | RunStatus::Dead => Some("failed"),
+        RunStatus::Submitted | RunStatus::Queued => Some(BoardColumn::Queued),
+        RunStatus::Starting => Some(BoardColumn::Initializing),
+        RunStatus::Running | RunStatus::Paused { .. } => Some(BoardColumn::Running),
+        RunStatus::Blocked { .. } => Some(BoardColumn::Blocked),
+        RunStatus::Succeeded { .. } => Some(BoardColumn::Succeeded),
+        RunStatus::Failed { .. } | RunStatus::Dead => Some(BoardColumn::Failed),
         RunStatus::Removing | RunStatus::Archived { .. } => None,
     }
 }
 
-pub(crate) fn board_columns() -> serde_json::Value {
-    serde_json::json!([
-        {"id": "initializing", "name": "Initializing"},
-        {"id": "running", "name": "Running"},
-        {"id": "blocked", "name": "Blocked"},
-        {"id": "succeeded", "name": "Succeeded"},
-        {"id": "failed", "name": "Failed"},
-    ])
+pub(crate) fn board_columns() -> Vec<BoardColumnDefinition> {
+    vec![
+        BoardColumnDefinition {
+            id:   BoardColumn::Queued,
+            name: "Queued".into(),
+        },
+        BoardColumnDefinition {
+            id:   BoardColumn::Initializing,
+            name: "Initializing".into(),
+        },
+        BoardColumnDefinition {
+            id:   BoardColumn::Running,
+            name: "Running".into(),
+        },
+        BoardColumnDefinition {
+            id:   BoardColumn::Blocked,
+            name: "Blocked".into(),
+        },
+        BoardColumnDefinition {
+            id:   BoardColumn::Succeeded,
+            name: "Succeeded".into(),
+        },
+        BoardColumnDefinition {
+            id:   BoardColumn::Failed,
+            name: "Failed".into(),
+        },
+    ]
 }
 
 async fn board_run_metadata(

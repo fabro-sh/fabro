@@ -6572,7 +6572,7 @@ async fn pause_run_sets_pending_control_on_board_response() {
     assert_eq!(body["pending_control"].as_str(), Some("pause"));
 
     // Verify the run appears on the board (store has Submitted status →
-    // "initializing" column)
+    // "queued" column)
     let req = Request::builder()
         .method("GET")
         .uri(api("/boards/runs"))
@@ -6587,7 +6587,7 @@ async fn pause_run_sets_pending_control_on_board_response() {
         .find(|item| item["run_id"].as_str() == Some(run_id_str.as_str()))
         .expect("board item should exist");
     assert!(item["status"].is_object());
-    assert_eq!(item["column"].as_str(), Some("initializing"));
+    assert_eq!(item["column"].as_str(), Some("queued"));
     assert_eq!(item["pending_control"].as_str(), Some("pause"));
 }
 
@@ -7062,8 +7062,8 @@ async fn queue_position_reported_for_queued_runs() {
     let first_run_id = create_and_start_run(&app, MINIMAL_DOT).await;
     let second_run_id = create_and_start_run(&app, MINIMAL_DOT).await;
 
-    // Queued runs are excluded from the board, so verify queue positions
-    // via the in-memory state directly.
+    // Queue position is tracked in memory even when queued runs are also
+    // visible on the board.
     let runs = state.runs.lock().expect("runs lock poisoned");
     let positions = compute_queue_positions(&runs);
     let first_id = first_run_id.parse::<RunId>().unwrap();

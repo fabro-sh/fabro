@@ -795,8 +795,8 @@ mod runs {
             .collect()
     }
 
-    fn demo_run_ids() -> &'static [RunId; 6] {
-        static IDS: OnceLock<[RunId; 6]> = OnceLock::new();
+    fn demo_run_ids() -> &'static [RunId; 7] {
+        static IDS: OnceLock<[RunId; 7]> = OnceLock::new();
         IDS.get_or_init(|| {
             [
                 RunId::with_timestamp(ts("2026-03-06T14:30:00Z"), 1),
@@ -805,6 +805,7 @@ mod runs {
                 RunId::with_timestamp(ts("2026-03-04T10:00:00Z"), 4),
                 RunId::with_timestamp(ts("2026-03-03T16:45:00Z"), 5),
                 RunId::with_timestamp(ts("2026-02-28T14:00:00Z"), 6),
+                RunId::with_timestamp(ts("2026-03-06T14:35:00Z"), 7),
             ]
         })
     }
@@ -974,23 +975,27 @@ mod runs {
     pub(super) fn columns() -> Vec<BoardColumnDefinition> {
         vec![
             BoardColumnDefinition {
-                id:   "initializing".into(),
+                id:   BoardColumn::Queued,
+                name: "Queued".into(),
+            },
+            BoardColumnDefinition {
+                id:   BoardColumn::Initializing,
                 name: "Initializing".into(),
             },
             BoardColumnDefinition {
-                id:   "running".into(),
+                id:   BoardColumn::Running,
                 name: "Running".into(),
             },
             BoardColumnDefinition {
-                id:   "blocked".into(),
+                id:   BoardColumn::Blocked,
                 name: "Blocked".into(),
             },
             BoardColumnDefinition {
-                id:   "succeeded".into(),
+                id:   BoardColumn::Succeeded,
                 name: "Succeeded".into(),
             },
             BoardColumnDefinition {
-                id:   "failed".into(),
+                id:   BoardColumn::Failed,
                 name: "Failed".into(),
             },
         ]
@@ -1082,6 +1087,20 @@ mod runs {
                 Some(720000),
                 &[("release", "preview")],
             ),
+            summary(
+                7,
+                "api-server",
+                "implement",
+                "Implement",
+                "Add audit log retention policy",
+                "queued",
+                "2026-03-06T14:35:00Z",
+                None,
+                None,
+                None,
+                None,
+                &[("owner", "platform")],
+            ),
         ]
     }
 
@@ -1147,6 +1166,13 @@ mod runs {
                     check("integration-tests", CheckRunStatus::Success, Some(334.0)),
                     check("deploy-preview", CheckRunStatus::Success, Some(93.0)),
                 ])),
+                None,
+                None,
+            ),
+            board_item(
+                take_summary(&mut summaries, demo_run_id(7)),
+                BoardColumn::Queued,
+                None,
                 None,
                 None,
             ),

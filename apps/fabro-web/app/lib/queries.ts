@@ -34,6 +34,9 @@ const immutableOptions: SWRConfiguration = {
   revalidateOnReconnect: false,
 };
 
+type BoardRunsEnvelope = PaginatedEnvelope<PaginatedBoardRunList["data"][number]> &
+  Pick<PaginatedBoardRunList, "columns">;
+
 export function useAuthConfig() {
   return useSWR<{ methods: string[] }>(queryKeys.auth.config(), apiFetcher, immutableOptions);
 }
@@ -61,11 +64,7 @@ export function useSystemInfo() {
 }
 
 export function useBoardsRuns() {
-  return useSWR<
-    PaginatedEnvelope<PaginatedBoardRunList["data"][number]> & {
-      columns: { id: string; name: string }[];
-    }
-  >(queryKeys.boards.runs(), apiPaginatedFetcher);
+  return useSWR<BoardRunsEnvelope>(queryKeys.boards.runs(), apiPaginatedFetcher);
 }
 
 export function useRun(id: string | undefined) {

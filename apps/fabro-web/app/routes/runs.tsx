@@ -18,7 +18,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ciConfig, columnStatusDisplay, deriveCiStatus, mapRunListItem } from "../data/runs";
+import { ciConfig, columnStatusDisplay, columnStatuses, deriveCiStatus, mapRunListItem } from "../data/runs";
 import type { CiStatus, CheckRun, CheckStatus, RunItem, RunWithStatus, ColumnStatus } from "../data/runs";
 import { EmptyState } from "../components/state";
 import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
@@ -38,6 +38,7 @@ interface ColumnStyle {
 }
 
 const columnStyles: Record<ColumnStatus, ColumnStyle> = {
+  queued:       { iconType: "branch", actions: [] },
   initializing: { iconType: "branch", actions: [] },
   running:      { iconType: "branch", actions: ["Watch", "Steer"] },
   blocked:      { iconType: "branch", actions: ["Answer Question"] },
@@ -49,7 +50,7 @@ const defaultColumnStyle: ColumnStyle = { iconType: "branch", actions: [] };
 const defaultColumnColors = { dot: "bg-fg-muted", text: "text-fg-muted" };
 
 interface BoardRunsResponse {
-  columns: { id: string; name: string }[];
+  columns: PaginatedBoardRunList["columns"];
   data: PaginatedBoardRunList["data"];
   meta: PaginatedBoardRunList["meta"];
 }
@@ -64,16 +65,8 @@ type Column = {
   items: RunItem[];
 };
 
-const SKELETON_STATUSES: ColumnStatus[] = [
-  "initializing",
-  "running",
-  "blocked",
-  "succeeded",
-  "failed",
-];
-
 function buildSkeletonColumns(): Column[] {
-  return SKELETON_STATUSES.map((id) => {
+  return columnStatuses.map((id) => {
     const colors = columnStatusDisplay[id];
     return {
       id,
@@ -98,7 +91,7 @@ export function buildBoardColumns(response: BoardRunsResponse): Column[] {
   }
 
   return response.columns.map((col) => {
-    const id = col.id as ColumnStatus;
+    const id = col.id;
     const colors = columnStatusDisplay[id] ?? defaultColumnColors;
     return {
       id,
@@ -754,6 +747,9 @@ export default function Runs() {
     (sum, col) => sum + col.items.length,
     0,
   );
+  const visibleColumns = filteredColumns.filter(
+    (col) => col.id !== "queued" || col.items.length > 0,
+  );
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -815,7 +811,7 @@ export default function Runs() {
         {view === "columns" ? (
           <>
             <div className="flex gap-5 overflow-x-auto pb-4">
-              {filteredColumns.map((col) => (
+              {visibleColumns.map((col) => (
                 <div key={col.id} className="w-72 shrink-0">
                   <BoardColumn column={col} />
                 </div>
@@ -838,7 +834,7 @@ export default function Runs() {
         ) : (
           <>
             <div className="space-y-4">
-              {filteredColumns.map((col) => {
+              {visibleColumns.map((col) => {
                 const isCollapsed = collapsed.has(col.id);
                 return (
                   <div key={col.id}>
