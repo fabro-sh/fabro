@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
-use fabro_types::EventBody;
+use fabro_store::RunProjectionReducer;
+use fabro_types::{EventBody, RunProjection, StageId};
 
 use super::super::{
-    ApiError, AppState, BilledTokenCounts, BillingByModel, BillingStageRef, EventEnvelope, HashMap,
-    IntoResponse, Json, ListResponse, ModelBillingTotals, ModelReference, PaginationParams, Path,
-    Query, RequiredUser, Response, Router, RunBilling, RunBillingStage, RunBillingTotals, RunId,
-    RunStage, RunStatus, StageState, State, StatusCode, accumulate_model_billing, get,
-    parse_run_id_path,
+    ApiError, AppState, BillingByModel, BillingStageRef, EventEnvelope, HashMap, IntoResponse,
+    Json, ListResponse, ModelReference, PaginationParams, Path, Query, RequiredUser, Response,
+    Router, RunBilling, RunBillingStage, RunBillingTotals, RunId, StageState, State, StatusCode,
+    get, parse_run_id_path, run_stage_from_stage_id,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -16,23 +16,39 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/billing", get(get_run_billing))
 }
 
-fn active_stage_state_from_events(events: &[EventEnvelope], node_id: &str) -> StageState {
-    let latest = events.iter().rev().find(|envelope| {
-        envelope.event.node_id.as_deref() == Some(node_id)
-            && matches!(
-                &envelope.event.body,
-                EventBody::StageRetrying(_)
-                    | EventBody::StageStarted(_)
-                    | EventBody::StageCompleted(_)
-                    | EventBody::StageFailed(_)
-            )
-    });
-
-    if latest.is_some_and(|e| matches!(&e.event.body, EventBody::StageRetrying(_))) {
-        StageState::Retrying
-    } else {
-        StageState::Running
+/// Map a `stage.*` lifecycle event body to the [`StageState`] it implies.
+/// Returns `None` for any other variant.
+fn stage_state_from_lifecycle(body: &EventBody) -> Option<StageState> {
+    match body {
+        EventBody::StageStarted(_) => Some(StageState::Running),
+        EventBody::StageRetrying(_) => Some(StageState::Retrying),
+        EventBody::StageFailed(props) => Some(if props.will_retry {
+            StageState::Retrying
+        } else {
+            StageState::Failed
+        }),
+        EventBody::StageCompleted(props) => Some(StageState::from(props.status)),
+        _ => None,
     }
+}
+
+/// Single-pass scan over `events` building the latest [`StageState`] for each
+/// [`StageId`] from lifecycle events (started/retrying/completed/failed). Each
+/// later lifecycle event overwrites earlier ones, leaving the latest as the
+/// stored value — equivalent to "scan in reverse, take first match" but in O(E)
+/// for the whole list rather than O(stages × events).
+fn latest_stage_states(events: &[EventEnvelope]) -> HashMap<StageId, StageState> {
+    let mut states = HashMap::new();
+    for envelope in events {
+        let Some(stage_id) = envelope.event.stage_id.as_ref() else {
+            continue;
+        };
+        let Some(state) = stage_state_from_lifecycle(&envelope.event.body) else {
+            continue;
+        };
+        states.insert(stage_id.clone(), state);
+    }
+    states
 }
 
 async fn list_run_stages(
@@ -46,80 +62,41 @@ async fn list_run_stages(
         Err(response) => return response,
     };
 
-    // Try live run first.
-    let (checkpoint, run_is_active) = {
-        let runs = state.runs.lock().expect("runs lock poisoned");
-        match runs.get(&id) {
-            Some(managed_run) => {
-                let active = !matches!(
-                    managed_run.status,
-                    RunStatus::Succeeded { .. } | RunStatus::Failed { .. } | RunStatus::Dead
-                );
-                (managed_run.checkpoint.clone(), active)
-            }
-            None => (None, false),
-        }
-    };
-
-    // Fall back to stored run.
-    let (checkpoint, run_is_active) = if checkpoint.is_some() {
-        (checkpoint, run_is_active)
-    } else {
-        match state.store.open_run_reader(&id).await {
-            Ok(run_store) => match run_store.state().await {
-                Ok(run_state) => {
-                    let active = run_state.status.is_some_and(|status| !status.is_terminal());
-                    (run_state.checkpoint, active)
-                }
-                Err(_) => (None, false),
-            },
-            Err(_) => return ApiError::not_found("Run not found.").into_response(),
-        }
-    };
-
-    let Some(checkpoint) = checkpoint else {
-        return (
-            StatusCode::OK,
-            Json(ListResponse::new(Vec::<RunStage>::new())),
-        )
-            .into_response();
-    };
-
     let events = match state.store.open_run_reader(&id).await {
         Ok(run_store) => run_store.list_events().await.unwrap_or_default(),
-        Err(_) => Vec::new(),
+        Err(_) => return ApiError::not_found("Run not found.").into_response(),
     };
-    let stage_durations = fabro_workflow::extract_stage_durations_from_events(&events);
+
+    let projection = match RunProjection::apply_events(&events) {
+        Ok(projection) => projection,
+        Err(err) => {
+            tracing::warn!(
+                run_id = %id,
+                error = %err,
+                "Failed to build run projection; returning empty stages list",
+            );
+            RunProjection::default()
+        }
+    };
+    let stage_durations = fabro_workflow::extract_stage_durations_by_stage_id(&events);
+    let lifecycle_states = latest_stage_states(&events);
 
     let mut stages = Vec::new();
-    for node_id in &checkpoint.completed_nodes {
-        let duration_ms = stage_durations.get(node_id).copied().unwrap_or(0);
-        let status = match checkpoint.node_outcomes.get(node_id) {
-            Some(outcome) => StageState::from(outcome.status),
-            None => StageState::Succeeded,
-        };
-        stages.push(RunStage {
-            id: node_id.clone(),
-            name: node_id.clone(),
-            status,
-            duration_secs: Some(duration_ms as f64 / 1000.0),
-            dot_id: Some(node_id.clone()),
+    for (stage_id, stage_projection) in projection.iter_stages() {
+        // Prefer the latest lifecycle event; fall back to the projection's
+        // stored completion (e.g. for runs recovered from snapshot only).
+        let status = lifecycle_states.get(stage_id).copied().unwrap_or_else(|| {
+            stage_projection
+                .completion
+                .as_ref()
+                .map_or(StageState::Pending, |c| StageState::from(c.outcome))
         });
-    }
-
-    // Add next node as running if the run is still active.
-    // The checkpoint's current_node is the last *completed* stage; next_node_id
-    // is the stage that is currently executing.
-    if let Some(next_id) = &checkpoint.next_node_id {
-        if run_is_active && next_id != "exit" && !checkpoint.completed_nodes.contains(next_id) {
-            stages.push(RunStage {
-                id:            next_id.clone(),
-                name:          next_id.clone(),
-                status:        active_stage_state_from_events(&events, next_id),
-                duration_secs: None,
-                dot_id:        Some(next_id.clone()),
-            });
-        }
+        stages.push(run_stage_from_stage_id(
+            stage_id,
+            stage_id.node_id().to_string(),
+            status,
+            stage_durations.get(stage_id).map(|ms| *ms as f64 / 1000.0),
+        ));
     }
 
     (StatusCode::OK, Json(ListResponse::new(stages))).into_response()
@@ -137,91 +114,39 @@ async fn get_run_billing(
         }
     };
 
-    let checkpoint = match run_store.state().await {
-        Ok(state) => state.checkpoint,
+    let projection = match run_store.state().await {
+        Ok(state) => state,
         Err(err) => {
             return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
                 .into_response();
         }
     };
-
-    let Some(checkpoint) = checkpoint else {
-        let empty = RunBilling {
-            by_model: Vec::new(),
-            stages:   Vec::new(),
-            totals:   RunBillingTotals {
-                cache_read_tokens:  0,
-                cache_write_tokens: 0,
-                input_tokens:       0,
-                output_tokens:      0,
-                reasoning_tokens:   0,
-                runtime_secs:       0.0,
-                total_tokens:       0,
-                total_usd_micros:   None,
+    let rollup = fabro_workflow::billing_rollup_from_projection(&projection);
+    let by_model = rollup
+        .by_model
+        .iter()
+        .map(|model| BillingByModel {
+            billing: model.billing.clone(),
+            model:   ModelReference {
+                id: model.model_id.clone(),
             },
-        };
-        return (StatusCode::OK, Json(empty)).into_response();
-    };
-
-    let stage_durations = match run_store.list_events().await {
-        Ok(events) => fabro_workflow::extract_stage_durations_from_events(&events),
-        Err(err) => {
-            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response();
-        }
-    };
-
-    let mut by_model_totals = HashMap::<String, ModelBillingTotals>::new();
-    let mut billed_usages = Vec::new();
-    let mut runtime_secs = 0.0_f64;
-    let mut stages = Vec::new();
-
-    for node_id in &checkpoint.completed_nodes {
-        let duration_ms = stage_durations.get(node_id).copied().unwrap_or(0);
-        runtime_secs += duration_ms as f64 / 1000.0;
-
-        let usage = checkpoint
-            .node_outcomes
-            .get(node_id)
-            .and_then(|outcome| outcome.usage.as_ref());
-
-        let (billing, model) = if let Some(usage) = usage {
-            billed_usages.push(usage.clone());
-            let tokens = usage.tokens();
-            let billing = BilledTokenCounts {
-                cache_read_tokens:  tokens.cache_read_tokens,
-                cache_write_tokens: tokens.cache_write_tokens,
-                input_tokens:       tokens.input_tokens,
-                output_tokens:      tokens.output_tokens,
-                reasoning_tokens:   tokens.reasoning_tokens,
-                total_tokens:       tokens.total_tokens(),
-                total_usd_micros:   usage.total_usd_micros,
-            };
-            let model_id = usage.model_id().to_string();
-            accumulate_model_billing(by_model_totals.entry(model_id.clone()).or_default(), usage);
-            (billing, Some(ModelReference { id: model_id }))
-        } else {
-            (BilledTokenCounts::default(), None)
-        };
-
-        stages.push(RunBillingStage {
-            billing,
-            model,
-            runtime_secs: duration_ms as f64 / 1000.0,
-            stage: BillingStageRef {
-                id:   node_id.clone(),
-                name: node_id.clone(),
+            stages:  model.stages,
+        })
+        .collect::<Vec<_>>();
+    let stages = rollup
+        .stages
+        .iter()
+        .map(|stage| RunBillingStage {
+            billing:      stage.billing.clone(),
+            model:        stage
+                .model_id
+                .as_ref()
+                .map(|id| ModelReference { id: id.clone() }),
+            runtime_secs: stage.duration_ms as f64 / 1000.0,
+            stage:        BillingStageRef {
+                id:   stage.node_id.clone(),
+                name: stage.node_id.clone(),
             },
-        });
-    }
-
-    let totals = BilledTokenCounts::from_billed_usage(&billed_usages);
-    let by_model = by_model_totals
-        .into_iter()
-        .map(|(model, totals)| BillingByModel {
-            billing: totals.billing,
-            model:   ModelReference { id: model },
-            stages:  totals.stages,
         })
         .collect::<Vec<_>>();
 
@@ -229,14 +154,14 @@ async fn get_run_billing(
         by_model,
         stages,
         totals: RunBillingTotals {
-            cache_read_tokens: totals.cache_read_tokens,
-            cache_write_tokens: totals.cache_write_tokens,
-            input_tokens: totals.input_tokens,
-            output_tokens: totals.output_tokens,
-            reasoning_tokens: totals.reasoning_tokens,
-            runtime_secs,
-            total_tokens: totals.total_tokens,
-            total_usd_micros: totals.total_usd_micros,
+            cache_read_tokens:  rollup.totals.cache_read_tokens,
+            cache_write_tokens: rollup.totals.cache_write_tokens,
+            input_tokens:       rollup.totals.input_tokens,
+            output_tokens:      rollup.totals.output_tokens,
+            reasoning_tokens:   rollup.totals.reasoning_tokens,
+            runtime_secs:       rollup.runtime_ms as f64 / 1000.0,
+            total_tokens:       rollup.totals.total_tokens,
+            total_usd_micros:   rollup.totals.total_usd_micros,
         },
     };
 

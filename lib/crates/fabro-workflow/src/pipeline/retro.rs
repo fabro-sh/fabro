@@ -53,7 +53,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
             return None;
         }
     };
-    let stage_durations = crate::extract_stage_durations_from_events(&events);
+    let stage_durations = crate::latest_stage_duration_by_node(&events);
     let mut retro = derive_retro(
         options.run_id,
         &options.workflow_name,

@@ -17,7 +17,7 @@ use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
 use crate::pipeline;
 use crate::pipeline::types::{Executed, Initialized};
-use crate::pipeline::{billing_from_checkpoint, build_terminal_event};
+use crate::pipeline::{billing_from_projection, build_terminal_event};
 use crate::records::Checkpoint;
 use crate::run_metadata::RunMetadataRuntime;
 use crate::run_options::RunOptions;
@@ -36,10 +36,7 @@ async fn execute_and_emit_terminal(initialized: InitializedState) -> Executed {
     let executed = Box::pin(pipeline::execute(initialized.initialized)).await;
     initialized.store_logger.flush().await;
     let state = executed.engine.run.run_store.state().await.ok();
-    let billing = state
-        .as_ref()
-        .and_then(|s| s.checkpoint.as_ref())
-        .and_then(billing_from_checkpoint);
+    let billing = state.as_ref().and_then(billing_from_projection);
     let event = build_terminal_event(
         &executed.outcome,
         executed.duration_ms,

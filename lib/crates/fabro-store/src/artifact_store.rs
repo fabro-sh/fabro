@@ -297,8 +297,13 @@ fn decode_artifact_location(
         ))
     })?;
     let (retry, filename) = decode_retry_and_filename(location, &mut parts)?;
+    let stage_id = StageId::try_new(node_id, visit).map_err(|err| {
+        Error::Other(format!(
+            "artifact location {location} has an invalid stage id: {err}"
+        ))
+    })?;
     Ok(NodeArtifact {
-        node: StageId::new(node_id, visit),
+        node: stage_id,
         retry,
         filename,
         size,
