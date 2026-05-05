@@ -1,0 +1,12 @@
+digraph GhList {
+    graph [goal="List open PRs and issues via the gh CLI to verify GITHUB_TOKEN injection"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    list_prs    [label="List PRs",    shape=parallelogram, script="gh pr list --state open --limit 50 2>&1"]
+    list_issues [label="List Issues", shape=parallelogram, script="gh issue list --state open --limit 50 2>&1"]
+
+    start -> list_prs -> list_issues -> exit
+}
