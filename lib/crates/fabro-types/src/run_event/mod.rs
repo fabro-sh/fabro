@@ -1366,7 +1366,7 @@ mod tests {
         for body in [
             EventBody::RunNotice(RunNoticeProps {
                 level:            RunNoticeLevel::Warn,
-                code:             "git_diff_failed".to_string(),
+                code:             RunNoticeCode::GitDiffFailed.to_string(),
                 message:          "git diff failed".to_string(),
                 exec_output_tail: Some(tail.clone()),
             }),
@@ -1402,7 +1402,7 @@ mod tests {
         for body in [
             EventBody::RunNotice(RunNoticeProps {
                 level:            RunNoticeLevel::Warn,
-                code:             "git_diff_failed".to_string(),
+                code:             RunNoticeCode::GitDiffFailed.to_string(),
                 message:          "git diff failed".to_string(),
                 exec_output_tail: None,
             }),

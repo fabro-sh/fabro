@@ -50,7 +50,7 @@ describe("queryKeysForRunEvent", () => {
     ]);
   });
 
-  test("stage.retrying invalidates stages, billing, events, and stage turns", () => {
+  test("stage.retrying invalidates stages, billing, events, graph, detail, and stage events", () => {
     expect(queryKeysForRunEvent("run-1", "stage.retrying", "verify@2")).toEqual([
       queryKeys.runs.stages("run-1"),
       queryKeys.runs.billing("run-1"),
@@ -58,7 +58,7 @@ describe("queryKeysForRunEvent", () => {
       queryKeys.runs.graph("run-1", "LR"),
       queryKeys.runs.graph("run-1", "TB"),
       queryKeys.runs.detail("run-1"),
-      queryKeys.runs.stageTurns("run-1", "verify@2"),
+      queryKeys.runs.stageEvents("run-1", "verify@2"),
     ]);
   });
 });
@@ -184,7 +184,7 @@ describe("subscribeToRunEvents", () => {
     coordinator.close();
   });
 
-  test("envelope with suffixed stage_id invalidates stageTurns(runId, stageId)", async () => {
+  test("envelope with suffixed stage_id invalidates stageEvents(runId, stageId)", async () => {
     const source = new FakeEventSource();
     const keys: string[] = [];
     const coordinator = createCoordinator(() => source);
@@ -206,12 +206,12 @@ describe("subscribeToRunEvents", () => {
       node_id: "verify",
     });
 
-    expect(keys).toContain(queryKeys.runs.stageTurns("run-stage", "verify@2"));
+    expect(keys).toContain(queryKeys.runs.stageEvents("run-stage", "verify@2"));
     expect(keys).toContain(queryKeys.runs.stages("run-stage"));
     expect(keys).toContain(queryKeys.runs.events("run-stage", 1000));
     expect(keys).toContain(queryKeys.runs.graph("run-stage", "LR"));
     expect(keys).toContain(queryKeys.runs.detail("run-stage"));
-    expect(keys).not.toContain(queryKeys.runs.stageTurns("run-stage", "verify"));
+    expect(keys).not.toContain(queryKeys.runs.stageEvents("run-stage", "verify"));
 
     cleanup();
     coordinator.close();
@@ -234,7 +234,7 @@ describe("subscribeToRunEvents", () => {
     await waitFor(() => source.onmessage !== null);
     source.emit({ event: "stage.started", run_id: "run-stage-node", node_id: "verify" });
 
-    expect(keys).toContain(queryKeys.runs.stageTurns("run-stage-node", "verify"));
+    expect(keys).toContain(queryKeys.runs.stageEvents("run-stage-node", "verify"));
     expect(keys).toContain(queryKeys.runs.stages("run-stage-node"));
 
     cleanup();

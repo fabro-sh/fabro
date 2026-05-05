@@ -125,7 +125,7 @@ use crate::ip_allowlist::{IpAllowlistConfig, ip_allowlist_middleware};
 use crate::jwt_auth::{self, AuthMode};
 use crate::principal_middleware::{
     AuthContextSlot, RequestAuth, RequestAuthContext, RequireRunBlob, RequireRunScoped,
-    RequireStageArtifact, RequiredUser, principal_middleware,
+    RequireRunStageScoped, RequireStageArtifact, RequiredUser, principal_middleware,
 };
 use crate::request_id::{self, RequestId};
 use crate::run_files::{FilesInFlight, new_files_in_flight};
@@ -138,6 +138,7 @@ use crate::{
 
 mod handler;
 
+pub(crate) use handler::events::EventListParams;
 #[cfg(test)]
 pub(in crate::server) use handler::events::filtered_global_events;
 pub(crate) use handler::graph::render_graph_bytes;

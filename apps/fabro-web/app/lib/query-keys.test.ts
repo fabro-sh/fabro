@@ -11,6 +11,9 @@ describe("queryKeys", () => {
     expect(queryKeys.runs.stageLog("run 1", "build step@2", "stderr", 12, 34)).toBe(
       "/api/v1/runs/run%201/stages/build%20step%402/logs/stderr?offset=12&limit=34",
     );
+    expect(queryKeys.runs.stageEvents("run 1", "build step", 7, 25)).toBe(
+      "/api/v1/runs/run%201/stages/build%20step/events?since_seq=7&limit=25",
+    );
   });
 
   test("event-mapped keys match query hook resources", () => {
@@ -24,7 +27,26 @@ describe("queryKeys", () => {
       queryKeys.runs.graph("run-1", "LR"),
       queryKeys.runs.graph("run-1", "TB"),
       queryKeys.runs.detail("run-1"),
-      queryKeys.runs.stageTurns("run-1", "stage-1"),
+      queryKeys.runs.stageEvents("run-1", "stage-1"),
     ]);
+  });
+
+  test("agent activity events invalidate the per-stage events key", () => {
+    for (const event of [
+      "stage.prompt",
+      "agent.message",
+      "agent.tool.started",
+      "agent.tool.completed",
+      "command.started",
+      "command.completed",
+    ]) {
+      expect(queryKeysForRunEvent("run-1", event, "stage-1")).toEqual([
+        queryKeys.runs.stageEvents("run-1", "stage-1"),
+      ]);
+    }
+  });
+
+  test("agent activity events without a node_id invalidate nothing", () => {
+    expect(queryKeysForRunEvent("run-1", "agent.message")).toEqual([]);
   });
 });

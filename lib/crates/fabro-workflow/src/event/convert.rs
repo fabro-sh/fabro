@@ -1169,8 +1169,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     use ::fabro_types::{
-        EventBody, FailureReason, ParallelBranchId, Principal, RunNoticeLevel, RunProvenance,
-        StageId, SystemActorKind, fixtures, run_event as fabro_types,
+        EventBody, FailureReason, ParallelBranchId, Principal, RunNoticeCode, RunNoticeLevel,
+        RunProvenance, StageId, SystemActorKind, fixtures, run_event as fabro_types,
     };
     use chrono::Utc;
     use fabro_agent::{AgentEvent, SandboxEvent};
@@ -1643,7 +1643,7 @@ mod tests {
     fn run_notice_maps_exec_output_tail_to_props() {
         let stored = to_run_event(&fixtures::RUN_1, &Event::RunNotice {
             level:            RunNoticeLevel::Warn,
-            code:             "git_diff_failed".to_string(),
+            code:             RunNoticeCode::GitDiffFailed.to_string(),
             message:          "git diff failed".to_string(),
             exec_output_tail: Some(exec_tail()),
         });

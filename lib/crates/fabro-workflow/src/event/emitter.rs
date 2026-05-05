@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
-use ::fabro_types::{ExecOutputTail, RunEvent, RunId, RunNoticeLevel};
+use ::fabro_types::{ExecOutputTail, RunEvent, RunId, RunNoticeCode, RunNoticeLevel};
 use chrono::Utc;
 use fabro_agent::{WorktreeEvent, WorktreeEventCallback};
 
@@ -76,15 +76,10 @@ impl Emitter {
         self.emit_with_scope(event, Some(scope));
     }
 
-    pub fn notice(
-        &self,
-        level: RunNoticeLevel,
-        code: impl Into<String>,
-        message: impl Into<String>,
-    ) {
+    pub fn notice(&self, level: RunNoticeLevel, code: RunNoticeCode, message: impl Into<String>) {
         self.emit(&Event::RunNotice {
             level,
-            code: code.into(),
+            code: code.to_string(),
             message: message.into(),
             exec_output_tail: None,
         });
@@ -93,13 +88,13 @@ impl Emitter {
     pub fn notice_with_tail(
         &self,
         level: RunNoticeLevel,
-        code: impl Into<String>,
+        code: RunNoticeCode,
         message: impl Into<String>,
         exec_output_tail: Option<ExecOutputTail>,
     ) {
         self.emit(&Event::RunNotice {
             level,
-            code: code.into(),
+            code: code.to_string(),
             message: message.into(),
             exec_output_tail,
         });

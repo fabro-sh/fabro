@@ -684,6 +684,7 @@ fn dry_run_simple() {
 
         Run: [ULID]
         Web UI: http://localhost:3000/runs/[ULID]
+        Warning: Worktree mode `always` requested but no Git repository was found; running without a worktree. [worktree_skipped_no_git]
         Sandbox: local (ready in [TIME])
         ✓ Start  [TIME]
         ✓ Run Tests  [TIME]

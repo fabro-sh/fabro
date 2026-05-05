@@ -126,6 +126,19 @@ fn process_env_vars() -> Vec<(String, String)> {
     std::env::vars().collect()
 }
 
+async fn drain_pipe<R>(mut pipe: Option<R>, stream: CommandOutputStream) -> String
+where
+    R: AsyncRead + Unpin,
+{
+    let mut buf = String::new();
+    if let Some(ref mut reader) = pipe {
+        if let Err(err) = reader.read_to_string(&mut buf).await {
+            tracing::warn!(error = %err, ?stream, "Failed to drain child output");
+        }
+    }
+    buf
+}
+
 #[async_trait]
 impl Sandbox for LocalSandbox {
     async fn read_file(
@@ -277,22 +290,12 @@ impl Sandbox for LocalSandbox {
         // it writes more than the OS pipe buffer (~64 KB) the write() syscall
         // blocks until the parent drains the pipe, but the parent is blocked
         // on child.wait().
-        let mut stdout_pipe = child.stdout.take();
-        let mut stderr_pipe = child.stderr.take();
-        let stdout_task = tokio::spawn(async move {
-            let mut buf = String::new();
-            if let Some(ref mut r) = stdout_pipe {
-                let _ = r.read_to_string(&mut buf).await;
-            }
-            buf
-        });
-        let stderr_task = tokio::spawn(async move {
-            let mut buf = String::new();
-            if let Some(ref mut r) = stderr_pipe {
-                let _ = r.read_to_string(&mut buf).await;
-            }
-            buf
-        });
+        let stdout_pipe = child.stdout.take();
+        let stderr_pipe = child.stderr.take();
+        let stdout_task =
+            tokio::spawn(async move { drain_pipe(stdout_pipe, CommandOutputStream::Stdout).await });
+        let stderr_task =
+            tokio::spawn(async move { drain_pipe(stderr_pipe, CommandOutputStream::Stderr).await });
 
         let (termination, exit_code) = tokio::select! {
             status_result = child.wait() => {
@@ -712,7 +715,12 @@ where
 )]
 mod tests {
     use std::collections::HashMap;
+    use std::io;
     use std::path::PathBuf;
+    use std::pin::Pin;
+    use std::task::{Context as TaskContext, Poll};
+
+    use tokio::io::ReadBuf;
 
     use super::*;
 
@@ -720,6 +728,25 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("local_env_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[tokio::test]
+    async fn drain_pipe_returns_empty_buffer_after_read_failure() {
+        struct FailingReader;
+
+        impl AsyncRead for FailingReader {
+            fn poll_read(
+                self: Pin<&mut Self>,
+                _cx: &mut TaskContext<'_>,
+                _buf: &mut ReadBuf<'_>,
+            ) -> Poll<io::Result<()>> {
+                Poll::Ready(Err(io::Error::other("simulated read failure")))
+            }
+        }
+
+        let output = drain_pipe(Some(FailingReader), CommandOutputStream::Stdout).await;
+
+        assert!(output.is_empty());
     }
 
     #[tokio::test]

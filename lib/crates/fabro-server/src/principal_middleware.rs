@@ -52,6 +52,7 @@ pub(crate) struct RequestAuth(pub(crate) AuthContextSlot);
 pub(crate) struct RequiredUser(pub(crate) UserPrincipal);
 pub(crate) struct RequireRunScoped(pub(crate) RunId);
 pub(crate) struct RequireRunBlob(pub(crate) RunId, pub(crate) RunBlobId);
+pub(crate) struct RequireRunStageScoped(pub(crate) RunId, pub(crate) String);
 pub(crate) struct RequireStageArtifact(pub(crate) RunId, pub(crate) StageId);
 pub(crate) struct RequireCommandLog(
     pub(crate) RunId,
@@ -200,6 +201,23 @@ impl FromRequestParts<Arc<AppState>> for RequireRunBlob {
         require_worker_or_user_for_run(&auth_slot_from_parts(parts), &run_id)
             .map_err(IntoResponse::into_response)?;
         Ok(Self(run_id, blob_id))
+    }
+}
+
+impl FromRequestParts<Arc<AppState>> for RequireRunStageScoped {
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &Arc<AppState>,
+    ) -> Result<Self, Self::Rejection> {
+        let Path((id, stage_id)): Path<(String, String)> = Path::from_request_parts(parts, state)
+            .await
+            .map_err(IntoResponse::into_response)?;
+        let run_id = parse_run_id_path(&id)?;
+        require_worker_or_user_for_run(&auth_slot_from_parts(parts), &run_id)
+            .map_err(IntoResponse::into_response)?;
+        Ok(Self(run_id, stage_id))
     }
 }
 
