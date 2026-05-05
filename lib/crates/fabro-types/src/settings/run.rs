@@ -50,6 +50,17 @@ pub struct RunModelSettings {
     pub provider:  Option<InterpString>,
     pub name:      Option<InterpString>,
     pub fallbacks: Vec<ModelRef>,
+    /// Run-level default values for typed model controls
+    /// (`reasoning_effort`, `speed`). Node and style attributes still win
+    /// over these defaults.
+    #[serde(default)]
+    pub controls:  RunModelControls,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct RunModelControls {
+    pub reasoning_effort: Option<String>,
+    pub speed:            Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

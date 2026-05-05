@@ -1,3 +1,4 @@
+pub mod adapter_registry;
 pub mod client;
 pub mod error;
 pub mod generate;

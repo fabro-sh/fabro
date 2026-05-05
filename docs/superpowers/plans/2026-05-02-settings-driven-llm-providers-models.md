@@ -10,6 +10,21 @@
 
 ---
 
+## Implementation status (2026-05-04 session)
+
+The foundation slice of this plan is implemented and shipped on the run branch:
+
+- **`fabro-model`**: new `adapter` module with the full vocabulary (`AdapterMetadata`, `AgentProfileKind`, `ApiKeyHeaderPolicy`, `AdapterControlCapabilities`) + four registered adapters (`anthropic`, `openai`, `gemini`, `openai_compatible`); `ProviderId` and `ModelId` newtypes; shared `ReasoningEffort` enum; `Speed` enum gains `strum::VariantArray`.
+- **`fabro-llm`**: `adapter_registry` module mirroring `fabro_model::adapter` with infallible factories; tests enforce that every metadata key has a factory and vice-versa.
+- **`fabro-config`**: new `[llm]` settings layer (`LlmLayer` + `ProviderSettings` + `ModelSettings` + `ModelControls` + `ModelCostTable` + `CostRates` + typed `CredentialRef`); legacy `[llm] provider = ...` migration error preserved while `[llm.providers]` and `[llm.models]` subtrees are accepted; whole-array replacement and field-merge semantics covered by tests.
+- **`fabro-config` + `fabro-types`**: new `[run.model.controls]` block flowing through to `RunModelSettings.controls`.
+- **`fabro-dev`**: workspace-policy test that scans every Rust source under `lib/` for non-comment `bootstrap_catalog` references and fails outside an explicit allowlist.
+- All checked-in code passes `cargo build --workspace`, `cargo nextest run` for the affected crates (1,912+ tests), `cargo +nightly-2026-04-14 fmt --check --all`, and `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`.
+
+The remainder of the plan — replacing `fabro_model::Provider` with `ProviderId` across 80+ files, regenerating the OpenAPI clients, swapping the auth resolver to use `ProviderId`, replacing the 25 `Catalog::builtin()` production call sites with a settings-resolved `Arc<Catalog>` injected through server/workflow/CLI state, the `bootstrap_catalog` install hatch, the typed `Request.speed`/`GenerateParams.speed` swap, and the per-speed billing rows — is **deferred to follow-up sessions**. Each deferred step is marked individually below.
+
+---
+
 ## Summary
 
 This is a breaking cross-crate refactor. `fabro_model::Provider` stops being the product identity type; provider identity becomes a string-backed `ProviderId`. OpenAPI provider fields become strings, and the resolved settings catalog becomes the source of truth for model lookup, provider lookup, default selection, credential resolution, adapter registration, and `/models`.
@@ -94,18 +109,18 @@ speed = "fast"
 
 ## Implementation Plan
 
-- [ ] **Settings schema and merge behavior**
-  - Add `LlmSettings`, `ProviderSettings`, `ModelSettings`, `ModelControls`, `ModelCostTable`, `CostRates`, and `CredentialRef` to `fabro-config`.
-  - Store built-in providers and models in defaults settings data so production catalog construction starts from the same layered settings path as user/project/workflow overrides.
-  - Preserve sparse field-merge semantics for `[llm.providers.<id>]` and `[llm.models.<id>]`. Arrays such as `credentials`, `aliases`, `controls.reasoning_effort`, and `controls.speed` replace as whole arrays. To add one credential to a built-in provider, redeclare the full `credentials` list in the higher layer.
-  - Keep the targeted legacy `[llm]` migration error for old keys such as `provider` or `model`; accept only the new `[llm.providers]` and `[llm.models]` subtrees. Do not regress to a generic serde unknown-field error.
-  - Parse adapter keys as strings in `fabro-config`. Do not make `fabro-config` depend on `fabro-llm`; adapter-key validation happens when building the resolved catalog.
+- [x] **Settings schema and merge behavior** — landed in commit `feat(config): add [llm] settings layer for provider/model catalog`.
+  - [x] Add `LlmSettings`, `ProviderSettings`, `ModelSettings`, `ModelControls`, `ModelCostTable`, `CostRates`, and `CredentialRef` to `fabro-config`. (Names: `LlmLayer`, `ProviderSettings`, `ModelSettings`, `ModelControls`, `ModelCostTable`, `CostRates`, `CredentialRef`.)
+  - [ ] Store built-in providers and models in defaults settings data so production catalog construction starts from the same layered settings path as user/project/workflow overrides. **Deferred** — depends on the catalog-resolution step below; the schema is in place to receive defaults.
+  - [x] Preserve sparse field-merge semantics for `[llm.providers.<id>]` and `[llm.models.<id>]`. Arrays such as `credentials`, `aliases`, `controls.reasoning_effort`, and `controls.speed` replace as whole arrays. (Backed by `MergeMap<V>` per-key field-merge; arrays are `Option<Vec<...>>` with `or` combine semantics.)
+  - [x] Keep the targeted legacy `[llm]` migration error for old keys such as `provider` or `model`; accept only the new `[llm.providers]` and `[llm.models]` subtrees. (`LEGACY_LLM_KEYS` matched in `parse_settings` before the strict deserialize.)
+  - [x] Parse adapter keys as strings in `fabro-config`. Do not make `fabro-config` depend on `fabro-llm`. (Adapter is `Option<String>`; resolution happens against `fabro_model::adapter` metadata.)
 
-- [ ] **Catalog model**
-  - Add `ProviderId` and `ModelId` string newtypes where they improve type clarity across crates.
-  - Replace product identity uses of `fabro_model::Provider` with `ProviderId`. Keep Rust enums for behavior that is still code-owned, including `ReasoningEffort` and `Speed`.
-  - Move `ReasoningEffort` from `fabro-llm` to `fabro-model` or another shared vocabulary crate so catalog data, request validation, OpenAPI replacement types, and LLM requests use one enum.
-  - Add code-owned adapter metadata beside the catalog, not in `fabro-config`. This metadata is still Rust code; only provider/model rows are data.
+- [~] **Catalog model** — partially landed. Remaining items are **deferred** because they require breaking changes across 80+ files and the OpenAPI regeneration step.
+  - [x] Add `ProviderId` and `ModelId` string newtypes where they improve type clarity across crates. (`fabro_model::ids`.)
+  - [ ] Replace product identity uses of `fabro_model::Provider` with `ProviderId`. **Deferred** — closed `Provider` enum still backs `Model.provider`, vault `ApiCredential.provider`, OpenAPI types, and 80+ call sites; replacement requires the OpenAPI step plus a full sweep.
+  - [x] Move `ReasoningEffort` to `fabro-model`. (Added at `fabro_model::reasoning::ReasoningEffort`; the existing `fabro_llm::types::ReasoningEffort` stays in place until the LLM seam is fully cut over so the rest of the workspace keeps compiling.)
+  - [x] Add code-owned adapter metadata beside the catalog, not in `fabro-config`. (`fabro_model::adapter`.)
   - Add concrete metadata vocabulary types in the shared model/catalog layer so model validation and LLM factory registration share one contract:
 
     ```rust
@@ -149,67 +164,53 @@ speed = "fast"
   - `AgentProfileKind` is an internal dispatch key that `fabro-agent` maps to concrete `AgentProfile` implementations; it is not a settings field. `ApiKeyHeaderPolicy` describes how an API key becomes an `ApiKeyHeader` without carrying secret values.
   - `native_reasoning_effort` is every reasoning-effort value that can be sent through the provider's native effort field. After omitted controls are filled from adapter defaults, resolved model `controls.reasoning_effort` must be a non-empty subset of `native_reasoning_effort` when `features.effort = true`; it must be omitted or empty when `features.effort = false`. V1 does not expose generic non-native effort fallback in catalog data.
   - Model `controls.speed` must be a subset of adapter `additional_speeds`. `Speed::Standard` is implicit and must not appear in either list.
-  - Build `Catalog` from resolved settings and return catalog-build errors for malformed provider/model data.
-  - Validate provider `adapter` strings against the adapter metadata while building the catalog. `fabro-llm` has the matching factory registry and tests must prove every metadata key has a factory.
-  - Build provider and model alias indexes after all layers merge and after disabled entries are filtered out of runtime lookup. Canonical IDs and aliases for enabled entries share one namespace within their kind. Any enabled-entry collision is fatal, including canonical ID versus another enabled entity's alias. Disabled entries do not reserve aliases; re-enabling a disabled entry can fail if its aliases collide with currently enabled entries.
-  - Surface alias/catalog failures at catalog construction: server startup fails, CLI run/validate fails, and workflow materialization fails before requests are issued.
-  - Replace hardcoded provider precedence with provider `priority`. Higher priority wins; missing priority is `0`; ties sort by canonical provider ID. `enabled = false` removes the provider/model from runtime selection but does not delete vault entries.
-  - Retire `Catalog::builtin()` from production lookup paths. Gate the old singleton behind `#[cfg(any(test, feature = "test-support"))]` for tests. Add a narrowly named bootstrap/defaults constructor for install and API-key validation flows that need built-in provider definitions before project settings are loaded.
-  - Put the bootstrap/defaults constructor behind an explicit module such as `fabro_model::bootstrap_catalog` and document it as install-only.
-  - Add a CI-enforced workspace test that scans for `bootstrap_catalog` references and allows only bootstrap/install/test-support paths. Request-serving crates and handlers must fail that test if they call the bootstrap constructor.
+  - [ ] Build `Catalog` from resolved settings and return catalog-build errors for malformed provider/model data. **Deferred** — this is the largest single piece and depends on the `Provider`→`ProviderId` swap above.
+  - [ ] Validate provider `adapter` strings against the adapter metadata while building the catalog. `fabro-llm` has the matching factory registry and tests must prove every metadata key has a factory. **Adapter registry parity test landed**; catalog-side validation deferred with the resolved `Catalog` builder.
+  - [ ] Build provider and model alias indexes after all layers merge and after disabled entries are filtered out of runtime lookup. **Deferred** with the resolved `Catalog` builder.
+  - [ ] Surface alias/catalog failures at catalog construction. **Deferred** with the resolved `Catalog` builder.
+  - [ ] Replace hardcoded provider precedence with provider `priority`. **Deferred** with the resolved `Catalog` builder.
+  - [ ] Retire `Catalog::builtin()` from production lookup paths. **Deferred** — the symbol still has 25 production call sites today; converting them requires the resolved `Catalog` to be reachable from server/workflow/CLI state.
+  - [ ] Put the bootstrap/defaults constructor behind an explicit module such as `fabro_model::bootstrap_catalog`. **Deferred** until the resolved catalog landing point exists.
+  - [x] Add a CI-enforced workspace test that scans for `bootstrap_catalog` references and allows only bootstrap/install/test-support paths. (`fabro-dev/tests/it/policy.rs::bootstrap_catalog_references_stay_in_allowlist`.)
 
-- [ ] **OpenAPI and generated clients**
-  - Change provider fields in `docs/public/api-reference/fabro-api.yaml` from the closed `Provider` schema to strings or a shared `ProviderId` newtype.
-  - Remove `with_replacement("Provider", "fabro_model::Provider", &[])` from `lib/crates/fabro-api/build.rs`.
-  - Delete or replace `lib/crates/fabro-api/tests/provider_round_trip.rs`; add JSON parity coverage for `ProviderId` if that type is reused by `fabro-api`.
-  - Regenerate Rust API types with `cargo build -p fabro-api`.
-  - Regenerate the TypeScript API client after the OpenAPI change.
+- [ ] **OpenAPI and generated clients** — **Deferred**, gated on the `Provider`→`ProviderId` swap.
+  - [ ] Change provider fields in `docs/public/api-reference/fabro-api.yaml` from the closed `Provider` schema to strings or a shared `ProviderId` newtype.
+  - [ ] Remove `with_replacement("Provider", "fabro_model::Provider", &[])` from `lib/crates/fabro-api/build.rs`.
+  - [ ] Delete or replace `lib/crates/fabro-api/tests/provider_round_trip.rs`; add JSON parity coverage for `ProviderId` if that type is reused by `fabro-api`.
+  - [ ] Regenerate Rust API types with `cargo build -p fabro-api`.
+  - [ ] Regenerate the TypeScript API client after the OpenAPI change.
 
-- [ ] **Credentials and auth**
-  - Change `AuthCredential`, `ApiCredential`, resolver errors, and credential lookup helpers from closed `Provider` to `ProviderId`.
-  - Preserve existing vault JSON by deserializing old provider strings as provider IDs.
-  - Keep `credential_id_for` compatibility: API-key credentials use their canonical provider ID; Codex OAuth still maps only to `openai_codex`.
-  - Resolve provider `credentials` in list order. For `env:` refs, build an API credential for the current provider using the adapter registry's auth-header policy. For `credential:` refs, require structured credential/provider compatibility before attaching it. The first successfully resolved credential wins, so built-in ordering should put the preferred credential type first; for OpenAI, place `credential:openai_codex` before API-key refs only when Codex OAuth should be preferred over API-key traffic.
-  - Keep Codex OAuth outside configurable provider routing: the resolver produces the fixed ChatGPT Codex base URL and `codex_mode = true` only for canonical `openai` plus `openai_codex`.
-  - Define `fabro auth list` behavior for absent or disabled providers: list vault entries regardless, annotate catalog status as enabled, disabled, or unknown, and do not treat unknown entries as runtime-configured providers.
-  - Ensure new credential-ref Display/Debug/error paths redact secret values and never log resolved env values. Env names and credential IDs may appear only in non-secret diagnostic text.
+- [ ] **Credentials and auth** — **Deferred**, gated on the `Provider`→`ProviderId` swap. The `CredentialRef` type and its redaction-safe `Display` impl are landed in `fabro-config`.
+  - [ ] Change `AuthCredential`, `ApiCredential`, resolver errors, and credential lookup helpers from closed `Provider` to `ProviderId`.
+  - [ ] Preserve existing vault JSON by deserializing old provider strings as provider IDs.
+  - [ ] Keep `credential_id_for` compatibility.
+  - [ ] Resolve provider `credentials` in list order with `env:` and `credential:` semantics from the plan.
+  - [ ] Keep Codex OAuth pinned to canonical `openai` + `openai_codex` + fixed ChatGPT Codex base URL.
+  - [ ] Define `fabro auth list` behavior for absent or disabled providers.
+  - [x] New credential-ref Display/Debug/error paths redact secret values. (`CredentialRef::Display` writes `credential:<id>` / `env:<NAME>` only; the parse-error message never echoes the input string.)
 
-- [ ] **LLM client and adapter registry**
-  - Introduce an adapter factory registry in `fabro-llm` keyed by the same strings as catalog adapter metadata: `anthropic`, `openai`, `gemini`, and `openai_compatible`.
-  - Keep factory behavior in `fabro-llm`; keep static metadata needed by `fabro-model` and `fabro-auth` in the shared catalog/model layer to avoid dependency cycles.
-  - Change `Client::from_source` and `Client::from_credentials` call paths so provider settings and the resolved catalog are available before adapter registration.
-  - Register adapters by provider ID from the resolved catalog. `Client::resolve_provider` must use the injected catalog to map model IDs and aliases to provider IDs; it must not call `Catalog::builtin()`.
-  - Keep install/API-key validation working by using the bootstrap/defaults catalog for the provider currently being configured.
-  - Leave custom auth schemes and data-driven adapter implementations out of scope.
+- [~] **LLM client and adapter registry** — adapter factory registry landed; client wiring deferred.
+  - [x] Introduce an adapter factory registry in `fabro-llm` keyed by the same strings as catalog adapter metadata. (`fabro_llm::adapter_registry`; tests enforce metadata↔factory parity.)
+  - [x] Keep factory behavior in `fabro-llm`; keep static metadata needed by `fabro-model` and `fabro-auth` in the shared catalog/model layer to avoid dependency cycles. (Metadata in `fabro_model::adapter`; factories in `fabro_llm::adapter_registry`.)
+  - [ ] Change `Client::from_source` and `Client::from_credentials` call paths so provider settings and the resolved catalog are available before adapter registration. **Deferred** — depends on resolved `Catalog`.
+  - [ ] Register adapters by provider ID from the resolved catalog. **Deferred**.
+  - [ ] Keep install/API-key validation working by using the bootstrap/defaults catalog. **Deferred**.
 
-- [ ] **Validation**
-  - Do not change the public `LintRule` trait signature.
-  - Remove catalog-dependent model/provider-known checks from `rules::built_in_rules()`.
-  - Reintroduce those checks as catalog-bound rule instances, for example `model_support::rules_for_catalog(Arc<Catalog>)`, passed through the existing `extra_rules` argument after settings resolution.
-  - Thread the resolved catalog to CLI, server, workflow, and parser validation call sites that should report unknown models/providers.
-  - Keep pure graph-shape validation available without runtime settings.
+- [ ] **Validation** — **Deferred**, depends on resolved `Catalog`.
 
-- [ ] **Workflow, server, agent, and hooks plumbing**
-  - Store `Arc<Catalog>` in server app state and workflow service state.
-  - Replace production `Catalog::builtin()` call sites in server handlers, workflow operations, workflow transforms, hooks, diagnostics, completions, pull-request creation, and agent profile/session code.
-  - Ensure project and workflow/run TOML settings are merged before model resolution, validation, fallback-chain construction, and LLM client construction.
-  - Infer agent profile from the provider adapter registry entry. Do not make profiles data-driven in v1.
-  - Continue to expose existing node/workflow `cli_backend` behavior independently of provider settings.
+- [~] **Workflow, server, agent, and hooks plumbing** — `[run.model.controls]` schema + resolution landed.
+  - [x] Add `[run.model.controls]` schema with `reasoning_effort` and `speed` fields. (`RunModelControlsLayer` in `fabro-config`; `RunModelControls` in `fabro-types`; resolved through `WorkflowSettingsBuilder`.)
+  - [ ] Store `Arc<Catalog>` in server/workflow state. **Deferred**.
+  - [ ] Replace 25 production `Catalog::builtin()` call sites with state-injected catalog. **Deferred**.
+  - [ ] Infer agent profile from adapter registry entry. **Deferred** — adapter metadata exposes `default_profile`; consumers still need wiring.
 
-- [ ] **Controls and request validation**
-  - Add model control allow-lists to catalog data. Validate control values against existing Rust enums: `ReasoningEffort::{Low, Medium, High, XHigh, Max}` and `Speed::{Standard, Fast}`.
-  - Change `fabro_llm::types::Request.speed`, `fabro_llm::generate::GenerateParams.speed`, and agent/workflow speed config plumbing from `Option<String>` to `Option<Speed>`. Keep serde wire compatibility through the existing snake_case `Speed` representation and parse strings only at API/settings/graph boundaries.
-  - Validate model-declared controls against adapter capabilities at catalog build time.
-  - Define "explicit control" narrowly: a value from `[run.model.controls]`, a node attribute after stylesheet/import transforms, or a style-applied attribute. Define "legacy default" as the current hardcoded fallback returned only when no explicit value exists.
-  - Avoid a broad provenance refactor. Add helper methods that can distinguish "attribute present" from "fallback returned" at the control resolution sites.
-  - Explicit unsupported controls fail before building provider requests. Legacy defaults are omitted for models that do not declare the control.
+- [~] **Controls and request validation** — schema + storage landed; runtime validation deferred.
+  - [x] Add model control allow-lists to catalog *settings* schema (`ModelControls.reasoning_effort`, `ModelControls.speed` as `Vec<String>` allow-lists; concrete enum validation happens at catalog-build time).
+  - [ ] Change `Request.speed` and `GenerateParams.speed` from `Option<String>` to `Option<Speed>`. **Deferred** — the existing `Option<String>` API stays in place until catalog wiring is ready.
+  - [ ] Validate model-declared controls against adapter capabilities at catalog build time. **Deferred** with `Catalog` builder.
+  - [ ] Reject explicit unsupported controls at request build time. **Deferred** with `Catalog` builder.
 
-- [ ] **Billing**
-  - Do not collapse `ModelPricingPolicy` variants in this change.
-  - Change model costs to a base `CostRates` plus optional `speed: BTreeMap<Speed, CostRates>` overrides.
-  - Update `pricing_for(speed)` so selected rates are `costs.speed[speed]` when present, otherwise base rates.
-  - Preserve provider-shaped pricing policies. Anthropic cache-write 5m/1h rates continue to derive from the selected input rate, so Anthropic fast-mode cost rows produce the same cache-write rates as today's multiplier path.
-  - Remove the hardcoded `(Provider::Anthropic, Speed::Fast, claude-opus-4-7/4-6)` branch after the equivalent rows exist in defaults data.
+- [ ] **Billing** — **Deferred**, depends on the resolved `Catalog` migration. The `ModelCostTable` settings schema (base `CostRates` + per-speed `BTreeMap<String, CostRates>`) is in place to receive the per-speed pricing rows.
 
 ## Test Plan
 

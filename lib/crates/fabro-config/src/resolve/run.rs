@@ -4,9 +4,9 @@ use fabro_types::settings::run::{
     GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings, LocalSandboxSettings,
     McpServerSettings, McpTransport, MergeStrategy, NotificationProviderSettings,
     NotificationRouteSettings, PullRequestSettings, RunAgentSettings, RunCheckpointSettings,
-    RunExecutionSettings, RunGitSettings, RunGoal, RunInterviewsSettings, RunModelSettings,
-    RunNamespace, RunPrepareSettings, RunSandboxSettings, RunScmSettings, ScmGitHubSettings,
-    TlsMode,
+    RunExecutionSettings, RunGitSettings, RunGoal, RunInterviewsSettings, RunModelControls,
+    RunModelSettings, RunNamespace, RunPrepareSettings, RunSandboxSettings, RunScmSettings,
+    ScmGitHubSettings, TlsMode,
 };
 
 use super::ResolveError;
@@ -72,6 +72,14 @@ fn resolve_model(model: Option<&RunModelLayer>) -> RunModelSettings {
                 ModelRefOrSplice::Splice => None,
             })
             .collect(),
+        controls:  model
+            .controls
+            .as_ref()
+            .map(|c| RunModelControls {
+                reasoning_effort: c.reasoning_effort.clone(),
+                speed:            c.speed.clone(),
+            })
+            .unwrap_or_default(),
     }
 }
 

@@ -107,6 +107,37 @@ pub struct RunModelLayer {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[option(default = "[]", value_type = "array<string>")]
     pub fallbacks: Vec<ModelRefOrSplice>,
+    /// Run-level default values for typed model controls. Node attributes
+    /// and style-applied attributes still win over these defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub controls:  Option<RunModelControlsLayer>,
+}
+
+/// `[run.model.controls]` — run-level default control values.
+///
+/// Stored as plain strings here; concrete enum validation
+/// (`ReasoningEffort`, `Speed`) happens at request-time when the resolved
+/// catalog is available.
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    fabro_macros::Combine,
+    fabro_macros::OptionsMetadata,
+)]
+#[serde(deny_unknown_fields)]
+pub struct RunModelControlsLayer {
+    /// Default reasoning-effort value for nodes that don't override it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(value_type = "string")]
+    pub reasoning_effort: Option<String>,
+    /// Default speed value for nodes that don't override it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(value_type = "string")]
+    pub speed:            Option<String>,
 }
 
 /// A single `fallbacks` entry: either a parsed `ModelRef` or the splice marker.

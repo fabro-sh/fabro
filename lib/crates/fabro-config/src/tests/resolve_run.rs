@@ -4,6 +4,37 @@ use fabro_types::settings::run::{ApprovalMode, RunGoal, RunMode, WorktreeMode};
 use crate::{SettingsLayer, WorkflowSettingsBuilder};
 
 #[test]
+fn run_model_controls_round_trip_through_resolve() {
+    let settings = WorkflowSettingsBuilder::from_toml(
+        r#"
+_version = 1
+
+[run.model.controls]
+reasoning_effort = "high"
+speed = "fast"
+"#,
+    )
+    .expect("[run.model.controls] should resolve")
+    .run;
+
+    assert_eq!(
+        settings.model.controls.reasoning_effort.as_deref(),
+        Some("high")
+    );
+    assert_eq!(settings.model.controls.speed.as_deref(), Some("fast"));
+}
+
+#[test]
+fn run_model_controls_default_to_none() {
+    let settings = WorkflowSettingsBuilder::from_layer(&SettingsLayer::default())
+        .expect("empty settings should resolve")
+        .run;
+
+    assert!(settings.model.controls.reasoning_effort.is_none());
+    assert!(settings.model.controls.speed.is_none());
+}
+
+#[test]
 fn resolves_run_defaults_from_empty_settings() {
     let settings = WorkflowSettingsBuilder::from_layer(&SettingsLayer::default())
         .expect("empty settings should resolve")
