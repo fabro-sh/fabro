@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
 use fabro_types::run_event::{
-    AgentCliStartedProps, AgentSessionStartedProps, CheckpointCompletedProps, RunCompletedProps,
+    AgentCliStartedProps, AgentSessionActivatedProps, CheckpointCompletedProps, RunCompletedProps,
     RunFailedProps, StageCompletedProps, StagePromptProps,
 };
 use fabro_types::{
@@ -351,12 +351,12 @@ impl RunProjectionReducer for RunProjection {
                 stage.usage.clone_from(&props.billing);
                 stage.state = Some(StageState::from(outcome));
             }
-            EventBody::AgentSessionStarted(props) => {
+            EventBody::AgentSessionActivated(props) => {
                 let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
                 else {
                     return Ok(());
                 };
-                stage.provider_used = Some(provider_used_from_agent_session_started(props));
+                stage.provider_used = Some(provider_used_from_agent_session_activated(props));
             }
             EventBody::AgentCliStarted(props) => {
                 let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
@@ -684,7 +684,7 @@ fn provider_used_from_prompt(props: &StagePromptProps) -> Option<Value> {
     (!provider_used.is_empty()).then_some(Value::Object(provider_used))
 }
 
-fn provider_used_from_agent_session_started(props: &AgentSessionStartedProps) -> Value {
+fn provider_used_from_agent_session_activated(props: &AgentSessionActivatedProps) -> Value {
     let mut provider_used = serde_json::Map::new();
     provider_used.insert("mode".to_string(), Value::String("agent".to_string()));
     if let Some(provider) = props.provider.clone() {
@@ -732,6 +732,7 @@ mod tests {
     use fabro_types::run_event::run::RunFailedProps;
     use fabro_types::run_event::{
         AgentCliCancelledProps, AgentCliCompletedProps, AgentCliTimedOutProps,
+        AgentSessionActivatedProps, AgentSessionEndedProps, AgentSessionStartedProps,
         CheckpointCompletedProps, InterviewCompletedProps, InterviewOption, InterviewStartedProps,
         RunControlEffectProps, StageCompletedProps, StageFailedProps, StagePromptProps,
         StageRetryingProps, StageStartedProps,
@@ -1022,6 +1023,65 @@ mod tests {
                 stage_id.clone(),
             ))
             .unwrap();
+    }
+
+    #[test]
+    fn agent_session_activated_updates_stage_provider_used() {
+        let mut state = RunProjection::default();
+        let stage_id = StageId::new("code", 1);
+        start_stage(&mut state, &stage_id);
+
+        state
+            .apply_event(&test_stage_event(
+                4,
+                EventBody::AgentSessionActivated(AgentSessionActivatedProps {
+                    thread_id:    Some("thread-1".to_string()),
+                    provider:     Some("openai".to_string()),
+                    model:        Some("gpt-5.4".to_string()),
+                    capabilities: vec![fabro_types::SessionCapability::Steer],
+                    visit:        1,
+                }),
+                stage_id.clone(),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(
+            stage.provider_used.as_ref().unwrap(),
+            &json!({
+                "mode": "agent",
+                "provider": "openai",
+                "model": "gpt-5.4"
+            })
+        );
+    }
+
+    #[test]
+    fn object_lifecycle_session_events_do_not_update_stage_provider_used() {
+        let mut state = RunProjection::default();
+        let stage_id = StageId::new("code", 1);
+        start_stage(&mut state, &stage_id);
+
+        state
+            .apply_event(&test_event(
+                4,
+                EventBody::AgentSessionStarted(AgentSessionStartedProps {
+                    provider: Some("openai".to_string()),
+                    model:    Some("gpt-5.4".to_string()),
+                }),
+                None,
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                5,
+                EventBody::AgentSessionEnded(AgentSessionEndedProps {}),
+                None,
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert!(stage.provider_used.is_none());
     }
 
     #[test]

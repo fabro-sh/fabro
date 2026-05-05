@@ -2,7 +2,7 @@
 //! `Session`s. The hub owns:
 //!
 //! - A map of currently steerable API-mode sessions, keyed by `StageId` →
-//!   `SessionControlHandle`.
+//!   active `(session_id, SessionControlHandle)` entries.
 //! - A bounded run-wide pending buffer for steers that arrive when no session
 //!   is registered (between stages, before the first agent stage, or after a
 //!   session ends but before the next registers).
@@ -13,7 +13,7 @@
 //!   - `pending` is `std::sync::Mutex` taken under the active read lock.
 //!   - All methods are sync — no `.await` while holding any lock — so the
 //!     `CompletionCoordinator::on_natural_completion` close-the-door dance can
-//!     call `unregister(...)` synchronously from the agent loop.
+//!     call `detach_if_queue_empty(...)` synchronously from the agent loop.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
@@ -38,12 +38,18 @@ struct PendingSteer {
     actor: Option<Principal>,
 }
 
+#[derive(Clone)]
+struct ActiveEntry {
+    handle:     SessionControlHandle,
+    session_id: String,
+}
+
 #[allow(
     clippy::module_name_repetitions,
     reason = "external callers refer to it as SteeringHub"
 )]
 pub struct SteeringHub {
-    active:  RwLock<HashMap<StageId, SessionControlHandle>>,
+    active:  RwLock<HashMap<StageId, ActiveEntry>>,
     pending: Mutex<VecDeque<PendingSteer>>,
     emitter: Arc<Emitter>,
 }
@@ -80,87 +86,83 @@ impl SteeringHub {
         self.active.read().expect("active lock poisoned").len()
     }
 
-    /// Register an API-mode session as steerable for this stage. If no
-    /// entry existed for `stage_id`, emits `agent.steering.attached` and
-    /// drains pending into the new handle as `Append`-kind messages. If
-    /// an entry already existed (e.g. failover replaced the underlying
-    /// session), the handle is overwritten silently — no drain, no event.
-    pub fn register(&self, stage_id: &StageId, handle: &SessionControlHandle) {
-        let was_new = {
-            let mut active = self.active.write().expect("active lock poisoned");
-            let was_new = !active.contains_key(stage_id);
-            active.insert(stage_id.clone(), handle.clone());
-            was_new
-        };
-        if was_new {
-            // Emit attached *before* draining so any `agent.steer.dropped`
-            // events from cap-evictions during the drain follow the
-            // attached event in the stream (UI consumers can attribute
-            // drops to a known session).
-            self.emitter.emit(&Event::AgentSteeringAttached {
-                node_id: stage_id.node_id().to_string(),
-                visit:   stage_id.visit(),
-            });
-            let pending: Vec<PendingSteer> = {
-                let mut pending = self.pending.lock().expect("pending lock poisoned");
-                pending.drain(..).collect()
-            };
-            for item in pending {
-                // Buffered steers always flush as Append — the original
-                // Interrupt semantics no longer make sense once the round
-                // has rolled over.
-                Self::enqueue_into_session_queue(
-                    handle,
-                    (item.text, SteerKind::Append, item.actor),
-                    &self.emitter,
-                    Some(stage_id),
-                );
+    /// Attach an API-mode session as steerable for this stage. Returns
+    /// `false` when a different session is already active for the stage.
+    pub fn attach_handle(
+        &self,
+        stage_id: &StageId,
+        session_id: &str,
+        handle: &SessionControlHandle,
+    ) -> bool {
+        let mut active = self.active.write().expect("active lock poisoned");
+        match active.get_mut(stage_id) {
+            Some(entry) if entry.session_id != session_id => false,
+            Some(entry) => {
+                entry.handle = handle.clone();
+                true
+            }
+            None => {
+                active.insert(stage_id.clone(), ActiveEntry {
+                    handle:     handle.clone(),
+                    session_id: session_id.to_string(),
+                });
+                true
             }
         }
     }
 
-    /// Unregister the session previously registered for this stage. Emits
-    /// `agent.steering.detached` only when an entry was actually removed
-    /// (idempotent — safe to call multiple times from RAII guards).
-    pub fn unregister(&self, stage_id: &StageId) {
-        let removed = {
-            let mut active = self.active.write().expect("active lock poisoned");
-            active.remove(stage_id).is_some()
+    /// Drain pending run-wide steers into `handle` as `Append` messages.
+    pub fn drain_pending_into(&self, stage_id: &StageId, handle: &SessionControlHandle) {
+        let pending: Vec<PendingSteer> = {
+            let mut pending = self.pending.lock().expect("pending lock poisoned");
+            pending.drain(..).collect()
         };
-        if removed {
-            self.emitter.emit(&Event::AgentSteeringDetached {
-                node_id: stage_id.node_id().to_string(),
-                visit:   stage_id.visit(),
-            });
+        for item in pending {
+            // Buffered steers always flush as Append — the original
+            // Interrupt semantics no longer make sense once the round has
+            // rolled over.
+            Self::enqueue_into_session_queue(
+                handle,
+                (item.text, SteerKind::Append, item.actor),
+                &self.emitter,
+                Some(stage_id),
+            );
         }
+    }
+
+    /// Detach the session for this stage. Stale session ids are ignored.
+    pub fn detach(&self, stage_id: &StageId, session_id: &str) -> bool {
+        let mut active = self.active.write().expect("active lock poisoned");
+        let Some(entry) = active.get(stage_id) else {
+            return false;
+        };
+        if entry.session_id != session_id {
+            return false;
+        }
+        active.remove(stage_id);
+        true
     }
 
     /// Atomic close-the-door check used by the agent loop's natural-
-    /// completion path. Under the `active` write lock: if `handle`'s
-    /// queue is empty, remove the stage and return `true` (loop should
-    /// break — emits `detached`). If the queue is non-empty, leave the
-    /// registration intact and return `false` (loop should iterate once
-    /// more — no event emitted, so no detach/attach flap).
-    pub fn unregister_if_queue_empty(
+    /// completion path. Under the `active` write lock: if `handle`'s queue
+    /// is empty and the active session id matches, remove the stage and
+    /// return `true`. If the queue is non-empty, leave the registration
+    /// intact and return `false`.
+    pub fn detach_if_queue_empty(
         &self,
         stage_id: &StageId,
+        session_id: &str,
         handle: &SessionControlHandle,
     ) -> bool {
-        let removed = {
-            let mut active = self.active.write().expect("active lock poisoned");
-            if handle.queue_is_empty() {
-                active.remove(stage_id).is_some()
-            } else {
-                false
-            }
+        let mut active = self.active.write().expect("active lock poisoned");
+        let Some(entry) = active.get(stage_id) else {
+            return false;
         };
-        if removed {
-            self.emitter.emit(&Event::AgentSteeringDetached {
-                node_id: stage_id.node_id().to_string(),
-                visit:   stage_id.visit(),
-            });
+        if entry.session_id != session_id || !handle.queue_is_empty() {
+            return false;
         }
-        removed
+        active.remove(stage_id);
+        true
     }
 
     /// Deliver a steer from the HTTP control plane. Broadcasts to every
@@ -201,9 +203,9 @@ impl SteeringHub {
         }
 
         // Broadcast to every active session.
-        for (stage_id, handle) in active.iter() {
+        for (stage_id, entry) in active.iter() {
             Self::enqueue_into_session_queue(
-                handle,
+                &entry.handle,
                 (text.clone(), kind, actor.clone()),
                 &self.emitter,
                 Some(stage_id),
@@ -297,12 +299,12 @@ mod tests {
     fn unregister_is_idempotent() {
         let hub = SteeringHub::for_tests();
         let stage = StageId::new("agent-node", 1);
-        hub.unregister(&stage);
-        hub.unregister(&stage);
+        hub.detach(&stage, "session-a");
+        hub.detach(&stage, "session-a");
     }
 
     #[test]
-    fn register_drains_pending_into_first_session() {
+    fn attach_and_drain_pending_into_first_session() {
         let hub = SteeringHub::for_tests();
         hub.deliver("queued1".into(), SteerKind::Append, None);
         hub.deliver("queued2".into(), SteerKind::Interrupt, None);
@@ -310,7 +312,8 @@ mod tests {
 
         let stage = StageId::new("agent-node", 1);
         let handle = SessionControlHandle::new();
-        hub.register(&stage, &handle);
+        assert!(hub.attach_handle(&stage, "session-a", &handle));
+        hub.drain_pending_into(&stage, &handle);
 
         assert_eq!(handle.queue_len(), 2);
         assert_eq!(hub.pending_len(), 0);
@@ -324,8 +327,8 @@ mod tests {
         let stage_b = StageId::new("b", 1);
         let handle_a = SessionControlHandle::new();
         let handle_b = SessionControlHandle::new();
-        hub.register(&stage_a, &handle_a);
-        hub.register(&stage_b, &handle_b);
+        assert!(hub.attach_handle(&stage_a, "session-a", &handle_a));
+        assert!(hub.attach_handle(&stage_b, "session-b", &handle_b));
 
         hub.deliver("hello".into(), SteerKind::Append, None);
 
@@ -335,19 +338,55 @@ mod tests {
     }
 
     #[test]
-    fn re_register_same_stage_does_not_redrain() {
+    fn attach_rejects_different_session_for_same_stage() {
         let hub = SteeringHub::for_tests();
         let stage = StageId::new("a", 1);
         let handle1 = SessionControlHandle::new();
-        hub.register(&stage.clone(), &handle1);
+        assert!(hub.attach_handle(&stage, "session-a", &handle1));
         hub.deliver("x".into(), SteerKind::Append, None);
         assert_eq!(handle1.queue_len(), 1);
 
-        // Replace handle (failover) — must not redrain pending or emit
-        // attached again.
         let handle2 = SessionControlHandle::new();
-        hub.register(&stage, &handle2);
+        assert!(!hub.attach_handle(&stage, "session-b", &handle2));
         assert_eq!(handle2.queue_len(), 0);
+    }
+
+    #[test]
+    fn stale_detach_does_not_remove_active_session() {
+        let hub = SteeringHub::for_tests();
+        let stage = StageId::new("a", 1);
+        let handle = SessionControlHandle::new();
+        assert!(hub.attach_handle(&stage, "session-a", &handle));
+
+        assert!(!hub.detach(&stage, "session-b"));
+        hub.deliver("still-active".into(), SteerKind::Append, None);
+
+        assert_eq!(handle.queue_len(), 1);
+        assert_eq!(hub.active_count(), 1);
+    }
+
+    #[test]
+    fn detach_if_queue_empty_respects_session_id_and_queue_state() {
+        let hub = SteeringHub::for_tests();
+        let stage = StageId::new("a", 1);
+        let handle = SessionControlHandle::new();
+        assert!(hub.attach_handle(&stage, "session-a", &handle));
+
+        assert!(!hub.detach_if_queue_empty(&stage, "session-b", &handle));
+        hub.deliver("queued".into(), SteerKind::Append, None);
+        assert!(!hub.detach_if_queue_empty(&stage, "session-a", &handle));
+        assert_eq!(hub.active_count(), 1);
+    }
+
+    #[test]
+    fn detach_if_queue_empty_removes_matching_empty_session() {
+        let hub = SteeringHub::for_tests();
+        let stage = StageId::new("a", 1);
+        let handle = SessionControlHandle::new();
+        assert!(hub.attach_handle(&stage, "session-a", &handle));
+
+        assert!(hub.detach_if_queue_empty(&stage, "session-a", &handle));
+        assert_eq!(hub.active_count(), 0);
     }
 
     #[test]
@@ -355,7 +394,7 @@ mod tests {
         let hub = SteeringHub::for_tests();
         let stage = StageId::new("a", 1);
         let handle = SessionControlHandle::new();
-        hub.register(&stage, &handle);
+        assert!(hub.attach_handle(&stage, "session-a", &handle));
 
         for i in 0..(super::PER_SESSION_QUEUE_CAP + 5) {
             hub.deliver(format!("m{i}"), SteerKind::Append, None);

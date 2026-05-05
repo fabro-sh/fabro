@@ -80,7 +80,7 @@ use fabro_types::settings::server::{
 use fabro_types::settings::{InterpString, RunNamespace};
 use fabro_types::{
     EventBody, InterviewQuestionRecord, Principal, PullRequestRecord, QuestionType, RunBlobId,
-    RunControlAction, RunEvent, RunId, ServerSettings,
+    RunControlAction, RunEvent, RunId, ServerSettings, SessionCapability,
 };
 use fabro_util::error::{SharedError, collect_causes, render_with_causes};
 use fabro_util::version::FABRO_VERSION;
@@ -196,10 +196,10 @@ struct ManagedRun {
     // Populated when running:
     answer_transport:   Option<RunAnswerTransport>,
     accepted_questions: HashSet<String>,
-    /// Stage IDs of currently running API-mode (SDK) agent sessions, as
-    /// observed from the worker's `agent.steering.attached/detached`
-    /// events. Used by the steerability predicate.
-    active_api_stages:  HashSet<StageId>,
+    /// Stage IDs of currently steerable API-mode (SDK) agent sessions,
+    /// keyed to the session id that owns the active lease. Used by the
+    /// steerability predicate.
+    active_api_stages:  HashMap<StageId, String>,
     /// Stage IDs of currently running CLI-mode agent sessions, observed
     /// from `agent.cli.started/completed` plus `stage.completed`/
     /// `stage.failed` backstops.
@@ -2148,7 +2148,7 @@ fn managed_run(
         enqueued_at: Instant::now(),
         answer_transport: None,
         accepted_questions: HashSet::new(),
-        active_api_stages: HashSet::new(),
+        active_api_stages: HashMap::new(),
         active_cli_stages: HashSet::new(),
         event_tx: None,
         checkpoint: None,
@@ -2266,18 +2266,31 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
                 managed_run.status = prior.into();
             }
         }
-        // Track API-mode steerable sessions. attached/detached fire
-        // deterministically inside `AgentApiBackend::run` (register/
-        // unregister), so they're the authoritative window in which a
-        // steer can be delivered to a live session.
-        EventBody::AgentSteeringAttached(_) => {
-            if let Some(stage_id) = event.stage_id.as_ref() {
-                managed_run.active_api_stages.insert(stage_id.clone());
+        // Track API-mode steerable sessions. Activated/deactivated are
+        // leased by session id so stale deactivations cannot clear a newer
+        // binding for the same stage.
+        EventBody::AgentSessionActivated(props)
+            if props.capabilities.contains(&SessionCapability::Steer) =>
+        {
+            if let (Some(stage_id), Some(session_id)) =
+                (event.stage_id.as_ref(), event.session_id.as_ref())
+            {
+                managed_run
+                    .active_api_stages
+                    .insert(stage_id.clone(), session_id.clone());
             }
         }
-        EventBody::AgentSteeringDetached(_) => {
-            if let Some(stage_id) = &event.stage_id {
-                managed_run.active_api_stages.remove(stage_id);
+        EventBody::AgentSessionDeactivated(_) => {
+            if let (Some(stage_id), Some(session_id)) =
+                (event.stage_id.as_ref(), event.session_id.as_ref())
+            {
+                if managed_run
+                    .active_api_stages
+                    .get(stage_id)
+                    .is_some_and(|current| current == session_id)
+                {
+                    managed_run.active_api_stages.remove(stage_id);
+                }
             }
         }
         // Track CLI-mode agent stages. CLI started/completed are coarser

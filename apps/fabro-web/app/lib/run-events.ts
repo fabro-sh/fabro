@@ -79,8 +79,8 @@ const INTERVIEW_EVENTS = new Set([
 ]);
 const STEERING_EVENTS = new Set([
   "agent.steering.injected",
-  "agent.steering.attached",
-  "agent.steering.detached",
+  "agent.session.activated",
+  "agent.session.deactivated",
   "agent.steer.buffered",
   "agent.steer.dropped",
 ]);

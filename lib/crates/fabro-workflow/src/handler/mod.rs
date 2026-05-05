@@ -22,6 +22,7 @@ use fabro_interview::Interviewer;
 
 use crate::context::Context;
 use crate::error::Error;
+use crate::event::Emitter;
 use crate::outcome::{Outcome, OutcomeExt};
 pub use crate::services::{EngineServices, RunServices};
 
@@ -55,6 +56,8 @@ pub trait Handler: Send + Sync {
     fn should_retry(&self, err: &Error) -> bool {
         err.is_retryable()
     }
+
+    async fn shutdown(&self, _emitter: &Arc<Emitter>) {}
 }
 
 /// Extract a human-readable message from a panic payload.
@@ -129,6 +132,13 @@ impl HandlerRegistry {
 
         // 3. Default
         self.default_handler.as_ref()
+    }
+
+    pub async fn shutdown_all(&self, emitter: &Arc<Emitter>) {
+        self.default_handler.shutdown(emitter).await;
+        for handler in self.handlers.values() {
+            handler.shutdown(emitter).await;
+        }
     }
 }
 

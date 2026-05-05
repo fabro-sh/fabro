@@ -863,7 +863,7 @@ Emitted when execution loops back to an earlier node.
 
 ## Agent events
 
-All agent events have `node_id` (the workflow stage), `node_label`, `session_id`, and `parent_session_id` in the envelope. The `properties` contain the inner agent event fields.
+Most agent activity events are stage-scoped and carry `node_id` (the workflow stage), `node_label`, `stage_id`, `session_id`, and `parent_session_id` in the envelope. Session object lifecycle events are the exception: `agent.session.started` and `agent.session.ended` are not stage-scoped and intentionally omit `node_id`, `node_label`, `stage_id`, and `visit`.
 
 ### `agent.session.started`
 
@@ -871,13 +871,49 @@ All agent events have `node_id` (the workflow stage), `node_label`, `session_id`
 {
   "id": "...", "ts": "...", "run_id": "...",
   "event": "agent.session.started",
-  "node_id": "code", "node_label": "code",
   "session_id": "ses_abc", "parent_session_id": null,
-  "properties": {}
+  "properties": {
+    "provider": "openai",
+    "model": "gpt-5.4"
+  }
 }
 ```
 
-No properties.
+Object-lifecycle event. `session_id` and `parent_session_id` are envelope fields. `properties.provider` and `properties.model` are optional.
+
+### `agent.session.activated`
+
+```json
+{
+  "id": "...", "ts": "...", "run_id": "...",
+  "event": "agent.session.activated",
+  "node_id": "code", "node_label": "code", "stage_id": "code@1",
+  "session_id": "ses_abc",
+  "properties": {
+    "thread_id": "main",
+    "provider": "openai",
+    "model": "gpt-5.4",
+    "capabilities": ["steer"],
+    "visit": 1
+  }
+}
+```
+
+Stage-scoped lease event. A stage is steerable while the latest matching `agent.session.activated` lease is active.
+
+### `agent.session.deactivated`
+
+```json
+{
+  "id": "...", "ts": "...", "run_id": "...",
+  "event": "agent.session.deactivated",
+  "node_id": "code", "node_label": "code", "stage_id": "code@1",
+  "session_id": "ses_abc",
+  "properties": { "visit": 1 }
+}
+```
+
+Stage-scoped lease event. Consumers should pair it by `stage_id` and `session_id` so stale deactivations cannot clear a newer active lease.
 
 ### `agent.session.ended`
 
@@ -885,13 +921,12 @@ No properties.
 {
   "id": "...", "ts": "...", "run_id": "...",
   "event": "agent.session.ended",
-  "node_id": "code", "node_label": "code",
   "session_id": "ses_abc",
   "properties": {}
 }
 ```
 
-No properties.
+Object-lifecycle event. `session_id` and `parent_session_id` are envelope fields. No properties.
 
 ### `agent.processing.end`
 

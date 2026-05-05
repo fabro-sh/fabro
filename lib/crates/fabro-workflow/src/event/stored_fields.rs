@@ -120,11 +120,34 @@ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
         | Event::AgentCliCompleted { node_id, .. }
         | Event::AgentCliCancelled { node_id, .. }
         | Event::AgentCliTimedOut { node_id, .. } => node_stored_fields(Some(node_id.clone())),
-        Event::AgentSteeringAttached { node_id, visit }
-        | Event::AgentSteeringDetached { node_id, visit } => {
+        Event::AgentSessionStarted {
+            session_id,
+            parent_session_id,
+            ..
+        }
+        | Event::AgentSessionEnded {
+            session_id,
+            parent_session_id,
+        } => StoredEventFields {
+            session_id: Some(session_id.clone()),
+            parent_session_id: parent_session_id.clone(),
+            ..StoredEventFields::default()
+        },
+        Event::AgentSessionActivated {
+            node_id,
+            visit,
+            session_id,
+            ..
+        }
+        | Event::AgentSessionDeactivated {
+            node_id,
+            visit,
+            session_id,
+        } => {
             let node_id_str = node_id.clone();
             let node_label = default_node_label(Some(&node_id_str), None);
             StoredEventFields {
+                session_id: Some(session_id.clone()),
                 node_id: Some(node_id_str.clone()),
                 node_label,
                 stage_id: Some(StageId::new(node_id_str, *visit)),

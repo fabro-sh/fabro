@@ -291,6 +291,8 @@ pub async fn execute(init: Initialized) -> Executed {
         Err(e) => (Err(Error::engine(e.to_string())), initial_context),
     };
 
+    engine.registry.shutdown_all(&engine.run.emitter).await;
+
     let duration_ms = crate::millis_u64(start.elapsed());
 
     Executed {

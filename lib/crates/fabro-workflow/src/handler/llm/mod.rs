@@ -1,3 +1,4 @@
+pub mod activation_lease;
 pub mod api;
 pub mod cli;
 pub mod preamble;

@@ -61,6 +61,8 @@ pub trait CodergenBackend: Send + Sync {
             "one_shot mode not supported by this backend".into(),
         ))
     }
+
+    async fn shutdown(&self, _emitter: &Arc<Emitter>) {}
 }
 
 /// The default handler for LLM task nodes.
@@ -223,6 +225,12 @@ pub(crate) fn simulate_llm_handler(node: &Node) -> Outcome {
 
 #[async_trait]
 impl Handler for AgentHandler {
+    async fn shutdown(&self, emitter: &Arc<Emitter>) {
+        if let Some(backend) = self.backend.as_ref() {
+            backend.shutdown(emitter).await;
+        }
+    }
+
     async fn simulate(
         &self,
         node: &Node,
@@ -748,15 +756,14 @@ mod tests {
             ) -> Result<CodergenResult, Error> {
                 let scope = StageScope::for_handler(context, &node.id);
                 emitter.emit_scoped(
-                    &crate::event::Event::Agent {
-                        stage:             node.id.clone(),
-                        visit:             scope.visit,
-                        event:             fabro_agent::AgentEvent::SessionStarted {
-                            provider: Some("openai".to_string()),
-                            model:    Some("gpt-5.4".to_string()),
-                        },
-                        session_id:        Some("session_123".to_string()),
-                        parent_session_id: None,
+                    &crate::event::Event::AgentSessionActivated {
+                        node_id:      node.id.clone(),
+                        visit:        scope.visit,
+                        session_id:   "session_123".to_string(),
+                        thread_id:    None,
+                        provider:     Some("openai".to_string()),
+                        model:        Some("gpt-5.4".to_string()),
+                        capabilities: vec![fabro_types::SessionCapability::Steer],
                     },
                     &scope,
                 );

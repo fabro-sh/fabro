@@ -524,16 +524,40 @@ pub enum Event {
         model:    String,
         command:  String,
     },
-    /// A `SteeringHub` registered an active API-mode session for a stage.
-    /// Emitted once per `register` insert (not on replace).
-    AgentSteeringAttached {
-        node_id: String,
-        visit:   u32,
+    /// A top-level agent session object started its lifecycle.
+    AgentSessionStarted {
+        session_id:        String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_session_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider:          Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model:             Option<String>,
     },
-    /// The corresponding session was unregistered from the hub.
-    AgentSteeringDetached {
-        node_id: String,
-        visit:   u32,
+    /// A stage has a currently steerable API-mode session binding.
+    AgentSessionActivated {
+        node_id:      String,
+        visit:        u32,
+        session_id:   String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread_id:    Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider:     Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model:        Option<String>,
+        capabilities: Vec<fabro_types::SessionCapability>,
+    },
+    /// A stage's steerable API-mode session binding ended.
+    AgentSessionDeactivated {
+        node_id:    String,
+        visit:      u32,
+        session_id: String,
+    },
+    /// A top-level agent session object ended its lifecycle.
+    AgentSessionEnded {
+        session_id:        String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_session_id: Option<String>,
     },
     /// A steer arrived with no active session and was parked in the run-wide
     /// pending buffer. The actor (steer author) is lifted to top-level.
@@ -1290,11 +1314,31 @@ impl Event {
             } => {
                 debug!(node_id, exit_code, duration_ms, "Agent CLI completed");
             }
-            Self::AgentSteeringAttached { node_id, visit } => {
-                debug!(node_id, visit, "Steering hub attached to session");
+            Self::AgentSessionStarted {
+                session_id,
+                provider,
+                model,
+                ..
+            } => {
+                debug!(session_id, ?provider, ?model, "Agent session started");
             }
-            Self::AgentSteeringDetached { node_id, visit } => {
-                debug!(node_id, visit, "Steering hub detached from session");
+            Self::AgentSessionActivated {
+                node_id,
+                visit,
+                session_id,
+                ..
+            } => {
+                debug!(node_id, visit, session_id, "Agent session activated");
+            }
+            Self::AgentSessionDeactivated {
+                node_id,
+                visit,
+                session_id,
+            } => {
+                debug!(node_id, visit, session_id, "Agent session deactivated");
+            }
+            Self::AgentSessionEnded { session_id, .. } => {
+                debug!(session_id, "Agent session ended");
             }
             Self::AgentSteerBuffered { kind, .. } => {
                 debug!(kind = kind.as_str(), "Steer buffered (no active session)");

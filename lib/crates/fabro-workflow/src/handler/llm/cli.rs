@@ -909,6 +909,10 @@ impl CodergenBackend for BackendRouter {
             .one_shot(node, prompt, system_prompt, emitter, stage_scope)
             .await
     }
+
+    async fn shutdown(&self, emitter: &Arc<Emitter>) {
+        self.api_backend.shutdown(emitter).await;
+    }
 }
 
 #[cfg(test)]

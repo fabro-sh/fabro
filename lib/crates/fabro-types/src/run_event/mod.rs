@@ -148,6 +148,10 @@ pub enum EventBody {
     PromptCompleted(PromptCompletedProps),
     #[serde(rename = "agent.session.started")]
     AgentSessionStarted(AgentSessionStartedProps),
+    #[serde(rename = "agent.session.activated")]
+    AgentSessionActivated(AgentSessionActivatedProps),
+    #[serde(rename = "agent.session.deactivated")]
+    AgentSessionDeactivated(AgentSessionDeactivatedProps),
     #[serde(rename = "agent.session.ended")]
     AgentSessionEnded(AgentSessionEndedProps),
     #[serde(rename = "agent.processing.end")]
@@ -170,10 +174,6 @@ pub enum EventBody {
     AgentTurnLimitReached(AgentTurnLimitReachedProps),
     #[serde(rename = "agent.steering.injected")]
     AgentSteeringInjected(AgentSteeringInjectedProps),
-    #[serde(rename = "agent.steering.attached")]
-    AgentSteeringAttached(AgentSteeringAttachedProps),
-    #[serde(rename = "agent.steering.detached")]
-    AgentSteeringDetached(AgentSteeringDetachedProps),
     #[serde(rename = "agent.steer.buffered")]
     AgentSteerBuffered(AgentSteerBufferedProps),
     #[serde(rename = "agent.steer.dropped")]
@@ -393,6 +393,8 @@ impl EventBody {
             Self::StagePrompt(_) => "stage.prompt",
             Self::PromptCompleted(_) => "prompt.completed",
             Self::AgentSessionStarted(_) => "agent.session.started",
+            Self::AgentSessionActivated(_) => "agent.session.activated",
+            Self::AgentSessionDeactivated(_) => "agent.session.deactivated",
             Self::AgentSessionEnded(_) => "agent.session.ended",
             Self::AgentProcessingEnd(_) => "agent.processing.end",
             Self::AgentInput(_) => "agent.input",
@@ -404,8 +406,6 @@ impl EventBody {
             Self::AgentLoopDetected(_) => "agent.loop.detected",
             Self::AgentTurnLimitReached(_) => "agent.turn.limit",
             Self::AgentSteeringInjected(_) => "agent.steering.injected",
-            Self::AgentSteeringAttached(_) => "agent.steering.attached",
-            Self::AgentSteeringDetached(_) => "agent.steering.detached",
             Self::AgentSteerBuffered(_) => "agent.steer.buffered",
             Self::AgentSteerDropped(_) => "agent.steer.dropped",
             Self::AgentCompactionStarted(_) => "agent.compaction.started",
@@ -531,6 +531,8 @@ fn is_known_event_name(event: &str) -> bool {
             | "stage.prompt"
             | "prompt.completed"
             | "agent.session.started"
+            | "agent.session.activated"
+            | "agent.session.deactivated"
             | "agent.session.ended"
             | "agent.processing.end"
             | "agent.input"
@@ -542,8 +544,6 @@ fn is_known_event_name(event: &str) -> bool {
             | "agent.loop.detected"
             | "agent.turn.limit"
             | "agent.steering.injected"
-            | "agent.steering.attached"
-            | "agent.steering.detached"
             | "agent.steer.buffered"
             | "agent.steer.dropped"
             | "agent.compaction.started"
@@ -1044,6 +1044,35 @@ mod tests {
         );
         assert_eq!(serialized["tool_call_id"], value["tool_call_id"]);
         assert_eq!(serialized["actor"], value["actor"]);
+    }
+
+    #[test]
+    fn agent_session_ended_serializes_empty_properties() {
+        let event = RunEvent {
+            id:                 "evt_session_ended".to_string(),
+            ts:                 DateTime::parse_from_rfc3339("2026-04-04T12:00:00.000Z")
+                .unwrap()
+                .with_timezone(&Utc),
+            run_id:             fixtures::RUN_1,
+            node_id:            None,
+            node_label:         None,
+            stage_id:           None,
+            parallel_group_id:  None,
+            parallel_branch_id: None,
+            session_id:         Some("ses_abc".to_string()),
+            parent_session_id:  None,
+            tool_call_id:       None,
+            actor:              None,
+            body:               EventBody::AgentSessionEnded(AgentSessionEndedProps {}),
+        };
+
+        let serialized = event.to_value().unwrap();
+
+        assert_eq!(serialized["event"], "agent.session.ended");
+        assert_eq!(serialized["session_id"], "ses_abc");
+        assert_eq!(serialized["properties"], json!({}));
+        assert!(serialized.get("node_id").is_none());
+        assert!(serialized.get("stage_id").is_none());
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
@@ -10,7 +11,7 @@ use super::agent::{
 use super::{EngineServices, Handler};
 use crate::context::{Context, WorkflowContext, keys};
 use crate::error::Error;
-use crate::event::{Event, StageScope};
+use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::Outcome;
 
 /// Handler for single-shot LLM calls (no tools, no agent loop).
@@ -27,6 +28,12 @@ impl PromptHandler {
 
 #[async_trait]
 impl Handler for PromptHandler {
+    async fn shutdown(&self, emitter: &Arc<Emitter>) {
+        if let Some(backend) = self.backend.as_ref() {
+            backend.shutdown(emitter).await;
+        }
+    }
+
     async fn simulate(
         &self,
         node: &Node,

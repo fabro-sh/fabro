@@ -63,7 +63,7 @@ describe("queryKeysForRunEvent", () => {
   });
 
   test("stage-scoped steering events invalidate run events and stage events", () => {
-    expect(queryKeysForRunEvent("run-1", "agent.steering.injected", "agent@1")).toEqual([
+    expect(queryKeysForRunEvent("run-1", "agent.session.activated", "agent@1")).toEqual([
       queryKeys.runs.events("run-1", 1000),
       queryKeys.runs.stageEvents("run-1", "agent@1"),
     ]);

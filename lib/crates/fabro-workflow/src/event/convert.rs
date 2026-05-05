@@ -531,16 +531,6 @@ fn event_body_from_event(event: &Event) -> EventBody {
             billing:  billing.clone(),
         }),
         Event::Agent { visit, event, .. } => match event {
-            AgentEvent::SessionStarted { provider, model } => {
-                EventBody::AgentSessionStarted(fabro_types::AgentSessionStartedProps {
-                    provider: provider.clone(),
-                    model:    model.clone(),
-                    visit:    *visit,
-                })
-            }
-            AgentEvent::SessionEnded => {
-                EventBody::AgentSessionEnded(fabro_types::AgentSessionEndedProps { visit: *visit })
-            }
             AgentEvent::ProcessingEnd => {
                 EventBody::AgentProcessingEnd(fabro_types::AgentProcessingEndProps {
                     visit: *visit,
@@ -707,9 +697,11 @@ fn event_body_from_event(event: &Event) -> EventBody {
             | AgentEvent::TextDelta { .. }
             | AgentEvent::ReasoningDelta { .. }
             | AgentEvent::ToolCallOutputDelta { .. }
-            | AgentEvent::SkillExpanded { .. } => {
-                panic!("streaming-noise agent event should not be converted to RunEvent")
-            }
+            | AgentEvent::SkillExpanded { .. }
+            | AgentEvent::SessionStarted { .. }
+            | AgentEvent::SessionEnded => panic!(
+                "agent event should not be converted through the stage-scoped Event::Agent wrapper"
+            ),
         },
         Event::SubgraphStarted { start_node, .. } => {
             EventBody::SubgraphStarted(fabro_types::SubgraphStartedProps {
@@ -1009,11 +1001,33 @@ fn event_body_from_event(event: &Event) -> EventBody {
             exit_code:   *exit_code,
             duration_ms: *duration_ms,
         }),
-        Event::AgentSteeringAttached { .. } => {
-            EventBody::AgentSteeringAttached(fabro_types::AgentSteeringAttachedProps {})
+        Event::AgentSessionStarted {
+            provider, model, ..
+        } => EventBody::AgentSessionStarted(fabro_types::AgentSessionStartedProps {
+            provider: provider.clone(),
+            model:    model.clone(),
+        }),
+        Event::AgentSessionActivated {
+            thread_id,
+            provider,
+            model,
+            capabilities,
+            visit,
+            ..
+        } => EventBody::AgentSessionActivated(fabro_types::AgentSessionActivatedProps {
+            thread_id:    thread_id.clone(),
+            provider:     provider.clone(),
+            model:        model.clone(),
+            capabilities: capabilities.clone(),
+            visit:        *visit,
+        }),
+        Event::AgentSessionDeactivated { visit, .. } => {
+            EventBody::AgentSessionDeactivated(fabro_types::AgentSessionDeactivatedProps {
+                visit: *visit,
+            })
         }
-        Event::AgentSteeringDetached { .. } => {
-            EventBody::AgentSteeringDetached(fabro_types::AgentSteeringDetachedProps {})
+        Event::AgentSessionEnded { .. } => {
+            EventBody::AgentSessionEnded(fabro_types::AgentSessionEndedProps {})
         }
         Event::AgentSteerBuffered { kind, .. } => {
             EventBody::AgentSteerBuffered(fabro_types::AgentSteerBufferedProps { kind: *kind })

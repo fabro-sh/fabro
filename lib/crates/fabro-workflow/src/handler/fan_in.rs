@@ -29,6 +29,12 @@ impl FanInHandler {
 
 #[async_trait]
 impl Handler for FanInHandler {
+    async fn shutdown(&self, emitter: &Arc<Emitter>) {
+        if let Some(backend) = self.backend.as_ref() {
+            backend.shutdown(emitter).await;
+        }
+    }
+
     async fn simulate(
         &self,
         node: &Node,

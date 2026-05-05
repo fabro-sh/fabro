@@ -6120,6 +6120,67 @@ async fn steer_empty_text_returns_bad_request() {
     );
 }
 
+#[test]
+fn active_api_stage_projection_ignores_stale_deactivation() {
+    let state = test_app_state();
+    let run_id = fixtures::RUN_1;
+    let temp_dir = tempfile::tempdir().unwrap();
+    {
+        let mut runs = state.runs.lock().expect("runs lock poisoned");
+        runs.insert(
+            run_id,
+            managed_run(
+                String::new(),
+                RunStatus::Running,
+                chrono::Utc::now(),
+                temp_dir.path().join(run_id.to_string()),
+                RunExecutionMode::Start,
+            ),
+        );
+    }
+
+    let stage_id = StageId::new("agent", 1);
+    let activated_a =
+        workflow_event::to_run_event(&run_id, &workflow_event::Event::AgentSessionActivated {
+            node_id:      "agent".to_string(),
+            visit:        1,
+            session_id:   "session-a".to_string(),
+            thread_id:    None,
+            provider:     Some("openai".to_string()),
+            model:        Some("gpt-5.4".to_string()),
+            capabilities: vec![SessionCapability::Steer],
+        });
+    update_live_run_from_event(&state, run_id, &activated_a);
+
+    let deactivated_a =
+        workflow_event::to_run_event(&run_id, &workflow_event::Event::AgentSessionDeactivated {
+            node_id:    "agent".to_string(),
+            visit:      1,
+            session_id: "session-a".to_string(),
+        });
+    update_live_run_from_event(&state, run_id, &deactivated_a);
+
+    let activated_b =
+        workflow_event::to_run_event(&run_id, &workflow_event::Event::AgentSessionActivated {
+            node_id:      "agent".to_string(),
+            visit:        1,
+            session_id:   "session-b".to_string(),
+            thread_id:    None,
+            provider:     Some("openai".to_string()),
+            model:        Some("gpt-5.4".to_string()),
+            capabilities: vec![SessionCapability::Steer],
+        });
+    update_live_run_from_event(&state, run_id, &activated_b);
+    update_live_run_from_event(&state, run_id, &deactivated_a);
+
+    let runs = state.runs.lock().expect("runs lock poisoned");
+    let run = runs.get(&run_id).unwrap();
+    assert_eq!(
+        run.active_api_stages.get(&stage_id).map(String::as_str),
+        Some("session-b")
+    );
+}
+
 #[tokio::test]
 async fn get_graph_returns_svg() {
     let state = test_app_state();

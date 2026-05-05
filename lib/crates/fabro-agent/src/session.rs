@@ -13,6 +13,7 @@ use fabro_llm::types::{
 use fabro_llm::{Error as LlmError, retry};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_mcp::connection_manager::McpConnectionManager;
+use fabro_model::Provider;
 use fabro_types::{Principal, SteerKind};
 use futures::StreamExt;
 use tokio::sync::{Mutex as AsyncMutex, broadcast};
@@ -246,6 +247,16 @@ impl Session {
     #[must_use]
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    #[must_use]
+    pub fn provider(&self) -> Provider {
+        self.provider_profile.provider()
+    }
+
+    #[must_use]
+    pub fn model(&self) -> &str {
+        self.provider_profile.model()
     }
 
     /// Initialize session by discovering project docs and capturing environment
@@ -821,8 +832,10 @@ impl Session {
         self.state = to;
     }
 
-    pub fn close(&mut self) {
+    pub fn close(&mut self) -> bool {
+        let was_open = self.state != SessionState::Closed;
         self.transition(SessionState::Closed);
+        was_open
     }
 
     pub fn set_reasoning_effort(&mut self, effort: Option<ReasoningEffort>) {
@@ -2062,6 +2075,24 @@ mod tests {
         let result = session.process_input("Hello").await;
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Error::SessionClosed));
+    }
+
+    #[tokio::test]
+    async fn close_reports_whether_it_transitioned_to_closed() {
+        let mut session = make_session(vec![]).await;
+        let mut rx = session.subscribe();
+
+        assert!(session.close());
+        assert!(!session.close());
+
+        let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event.event, AgentEvent::SessionEnded))
+                .count(),
+            1
+        );
     }
 
     #[tokio::test]

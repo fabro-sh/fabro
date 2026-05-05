@@ -248,7 +248,7 @@ fn replay_event_for_fork_projection(body: &EventBody) -> bool {
             | EventBody::InterviewCompleted(_)
             | EventBody::InterviewTimeout(_)
             | EventBody::InterviewInterrupted(_)
-            | EventBody::AgentSessionStarted(_)
+            | EventBody::AgentSessionActivated(_)
             | EventBody::AgentCliStarted(_)
             | EventBody::AgentCliCancelled(_)
             | EventBody::AgentCliTimedOut(_)
@@ -312,6 +312,28 @@ mod tests {
             Duration::from_millis(1),
             None,
         )
+    }
+
+    #[test]
+    fn fork_replay_keeps_stage_scoped_session_activation_only() {
+        assert!(replay_event_for_fork_projection(
+            &EventBody::AgentSessionActivated(fabro_types::run_event::AgentSessionActivatedProps {
+                thread_id:    None,
+                provider:     Some("openai".to_string()),
+                model:        Some("gpt-5.4".to_string()),
+                capabilities: vec![fabro_types::SessionCapability::Steer],
+                visit:        1,
+            })
+        ));
+        assert!(!replay_event_for_fork_projection(
+            &EventBody::AgentSessionStarted(fabro_types::run_event::AgentSessionStartedProps {
+                provider: Some("openai".to_string()),
+                model:    Some("gpt-5.4".to_string()),
+            })
+        ));
+        assert!(!replay_event_for_fork_projection(
+            &EventBody::AgentSessionEnded(fabro_types::run_event::AgentSessionEndedProps {})
+        ));
     }
 
     #[tokio::test]
