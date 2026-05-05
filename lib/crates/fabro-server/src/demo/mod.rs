@@ -15,15 +15,16 @@ use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use fabro_api::types::{
-    CreateSecretRequest, DeleteSecretRequest, DiffFile, DiffStats, FileDiff, FileDiffChangeKind,
-    PaginatedRunFileList, RunArtifactListResponse, RunFilesMeta,
+    CreateSecretRequest, DeleteSecretRequest, DiffFile, DiffStats, EventEnvelope, FileDiff,
+    FileDiffChangeKind, PaginatedEventList, PaginatedRunFileList, PaginationMeta,
+    RunArtifactListResponse, RunFilesMeta,
 };
 use serde_json::json;
 
 use crate::error::ApiError;
 use crate::principal_middleware::RequiredUser;
 use crate::run_selector::{ResolveRunError, resolve_run_by_selector};
-use crate::server::{AppState, PaginationParams};
+use crate::server::{AppState, EventListParams, PaginationParams, parse_stage_id_path};
 
 fn paginated_response<T: serde::Serialize>(
     items: Vec<T>,
@@ -133,13 +134,39 @@ pub(crate) async fn get_run_stages(
     paginated_response(runs::stages(), &pagination)
 }
 
-pub(crate) async fn get_stage_turns(
+pub(crate) async fn get_stage_events(
     _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
-    Path((_id, _stage_id)): Path<(String, String)>,
-    Query(pagination): Query<PaginationParams>,
+    Path((_id, stage_id)): Path<(String, String)>,
+    Query(params): Query<EventListParams>,
 ) -> Response {
-    paginated_response(runs::turns(), &pagination)
+    let stage_id = match parse_stage_id_path(&stage_id) {
+        Ok(stage_id) => stage_id,
+        Err(response) => return response,
+    };
+    let since_seq = params.since_seq();
+    let limit = params.limit();
+    let mut matches: Vec<EventEnvelope> = runs::stage_events()
+        .into_iter()
+        .filter(|envelope| {
+            envelope.seq >= since_seq
+                && (envelope.event.stage_id.as_ref() == Some(&stage_id)
+                    || (envelope.event.stage_id.is_none()
+                        && stage_id.visit() == 1
+                        && envelope.event.node_id.as_deref() == Some(stage_id.node_id())))
+        })
+        .take(limit + 1)
+        .collect();
+    let has_more = matches.len() > limit;
+    matches.truncate(limit);
+    (
+        StatusCode::OK,
+        Json(PaginatedEventList {
+            data: matches,
+            meta: PaginationMeta { has_more },
+        }),
+    )
+        .into_response()
 }
 
 pub(crate) async fn list_run_artifacts_stub(
@@ -784,9 +811,10 @@ mod runs {
         RunNamespace, RunPrepareSettings, RunSandboxSettings,
     };
     use fabro_types::settings::{InterpString, ProjectNamespace, WorkflowNamespace};
-    use fabro_types::{RunId, WorkflowSettings};
+    use fabro_types::{RunId, StageId, WorkflowSettings};
 
     use super::ts;
+    use crate::server::run_stage_from_stage_id;
 
     fn labels(entries: &[(&str, &str)]) -> HashMap<String, String> {
         entries
@@ -795,8 +823,8 @@ mod runs {
             .collect()
     }
 
-    fn demo_run_ids() -> &'static [RunId; 6] {
-        static IDS: OnceLock<[RunId; 6]> = OnceLock::new();
+    fn demo_run_ids() -> &'static [RunId; 7] {
+        static IDS: OnceLock<[RunId; 7]> = OnceLock::new();
         IDS.get_or_init(|| {
             [
                 RunId::with_timestamp(ts("2026-03-06T14:30:00Z"), 1),
@@ -805,6 +833,7 @@ mod runs {
                 RunId::with_timestamp(ts("2026-03-04T10:00:00Z"), 4),
                 RunId::with_timestamp(ts("2026-03-03T16:45:00Z"), 5),
                 RunId::with_timestamp(ts("2026-02-28T14:00:00Z"), 6),
+                RunId::with_timestamp(ts("2026-03-06T14:35:00Z"), 7),
             ]
         })
     }
@@ -974,23 +1003,27 @@ mod runs {
     pub(super) fn columns() -> Vec<BoardColumnDefinition> {
         vec![
             BoardColumnDefinition {
-                id:   "initializing".into(),
+                id:   BoardColumn::Queued,
+                name: "Queued".into(),
+            },
+            BoardColumnDefinition {
+                id:   BoardColumn::Initializing,
                 name: "Initializing".into(),
             },
             BoardColumnDefinition {
-                id:   "running".into(),
+                id:   BoardColumn::Running,
                 name: "Running".into(),
             },
             BoardColumnDefinition {
-                id:   "blocked".into(),
+                id:   BoardColumn::Blocked,
                 name: "Blocked".into(),
             },
             BoardColumnDefinition {
-                id:   "succeeded".into(),
+                id:   BoardColumn::Succeeded,
                 name: "Succeeded".into(),
             },
             BoardColumnDefinition {
-                id:   "failed".into(),
+                id:   BoardColumn::Failed,
                 name: "Failed".into(),
             },
         ]
@@ -1082,6 +1115,20 @@ mod runs {
                 Some(720000),
                 &[("release", "preview")],
             ),
+            summary(
+                7,
+                "api-server",
+                "implement",
+                "Implement",
+                "Add audit log retention policy",
+                "queued",
+                "2026-03-06T14:35:00Z",
+                None,
+                None,
+                None,
+                None,
+                &[("owner", "platform")],
+            ),
         ]
     }
 
@@ -1150,54 +1197,164 @@ mod runs {
                 None,
                 None,
             ),
+            board_item(
+                take_summary(&mut summaries, demo_run_id(7)),
+                BoardColumn::Queued,
+                None,
+                None,
+                None,
+            ),
         ]
     }
 
     pub(super) fn stages() -> Vec<RunStage> {
         vec![
-            RunStage {
-                id:            "detect-drift".into(),
-                name:          "Detect Drift".into(),
-                status:        StageState::Succeeded,
-                duration_secs: Some(72.0),
-                dot_id:        Some("detect".into()),
-            },
-            RunStage {
-                id:            "propose-changes".into(),
-                name:          "Propose Changes".into(),
-                status:        StageState::Succeeded,
-                duration_secs: Some(154.0),
-                dot_id:        Some("propose".into()),
-            },
-            RunStage {
-                id:            "review-changes".into(),
-                name:          "Review Changes".into(),
-                status:        StageState::Succeeded,
-                duration_secs: Some(45.0),
-                dot_id:        Some("review".into()),
-            },
-            RunStage {
-                id:            "apply-changes".into(),
-                name:          "Apply Changes".into(),
-                status:        StageState::Running,
-                duration_secs: Some(118.0),
-                dot_id:        Some("apply".into()),
-            },
+            run_stage_from_stage_id(
+                &StageId::new("detect-drift", 1),
+                "Detect Drift",
+                StageState::Succeeded,
+                Some(72.0),
+                None,
+            ),
+            run_stage_from_stage_id(
+                &StageId::new("propose-changes", 1),
+                "Propose Changes",
+                StageState::Succeeded,
+                Some(154.0),
+                None,
+            ),
+            run_stage_from_stage_id(
+                &StageId::new("review-changes", 1),
+                "Review Changes",
+                StageState::Succeeded,
+                Some(45.0),
+                None,
+            ),
+            run_stage_from_stage_id(
+                &StageId::new("apply-changes", 1),
+                "Apply Changes",
+                StageState::Succeeded,
+                Some(118.0),
+                None,
+            ),
+            run_stage_from_stage_id(
+                &StageId::new("apply-changes", 2),
+                "Apply Changes",
+                StageState::Running,
+                None,
+                None,
+            ),
         ]
     }
 
-    pub(super) fn turns() -> Vec<StageTurn> {
+    pub(super) fn stage_events() -> Vec<fabro_types::EventEnvelope> {
+        use fabro_model::BilledTokenCounts;
+        use fabro_types::run_event::agent::{
+            AgentMessageProps, AgentToolCompletedProps, AgentToolStartedProps,
+        };
+        use fabro_types::run_event::stage::StagePromptProps;
+        use fabro_types::{EventBody, EventEnvelope, RunEvent};
+
+        let run_id = demo_run_id(1);
+        let node_id = "detect-drift";
+        let stage_id = fabro_types::StageId::new(node_id, 1);
+        let ts = ts("2026-03-06T14:30:00Z");
+
+        let make_envelope = |seq: u32, id: &str, body: EventBody| EventEnvelope {
+            seq,
+            event: RunEvent {
+                id: id.into(),
+                ts,
+                run_id,
+                node_id: Some(node_id.into()),
+                node_label: Some("Detect Drift".into()),
+                stage_id: Some(stage_id.clone()),
+                parallel_group_id: None,
+                parallel_branch_id: None,
+                session_id: None,
+                parent_session_id: None,
+                tool_call_id: None,
+                actor: None,
+                body,
+            },
+        };
+
         vec![
-            StageTurn::SystemStageTurn(SystemStageTurn { kind: SystemStageTurnKind::System, content: "You are a drift detection agent. Compare the production and staging environments and identify any configuration or code drift.".into() }),
-            StageTurn::AssistantStageTurn(AssistantStageTurn { kind: AssistantStageTurnKind::Assistant, content: "I'll start by loading the environment configurations for both production and staging to compare them.".into() }),
-            StageTurn::ToolStageTurn(ToolStageTurn {
-                kind: ToolStageTurnKind::Tool, content: None,
-                tools: vec![
-                    ToolUse { id: "toolu_01".into(), tool_name: "read_file".into(), input: r#"{ "path": "environments/production/config.toml" }"#.into(), result: "[redis]\nhost = \"redis-prod.internal\"\nport = 6379".into(), is_error: false, duration_ms: Some(45) },
-                    ToolUse { id: "toolu_02".into(), tool_name: "read_file".into(), input: r#"{ "path": "environments/staging/config.toml" }"#.into(), result: "[redis]\nhost = \"redis-staging.internal\"\nport = 6379".into(), is_error: false, duration_ms: Some(38) },
-                ],
-            }),
-            StageTurn::AssistantStageTurn(AssistantStageTurn { kind: AssistantStageTurnKind::Assistant, content: "I've detected drift in 3 resources between production and staging:\n\n1. **redis.max_connections** — production has 200, staging has 100\n2. **redis.tls** — enabled in production, disabled in staging\n3. **iam.session_duration** — production uses 3600s, staging uses 1800s".into() }),
+            make_envelope(
+                1,
+                "evt-detect-drift-1",
+                EventBody::StagePrompt(StagePromptProps {
+                    visit:    1,
+                    text:     "You are a drift detection agent. Compare the production and staging environments and identify any configuration or code drift.".into(),
+                    mode:     None,
+                    provider: None,
+                    model:    None,
+                }),
+            ),
+            make_envelope(
+                2,
+                "evt-detect-drift-2",
+                EventBody::AgentMessage(AgentMessageProps {
+                    text:            "I'll start by loading the environment configurations for both production and staging to compare them.".into(),
+                    model:           "Opus 4.6".into(),
+                    billing:         BilledTokenCounts::default(),
+                    tool_call_count: 0,
+                    visit:           1,
+                }),
+            ),
+            make_envelope(
+                3,
+                "evt-detect-drift-3",
+                EventBody::AgentToolStarted(AgentToolStartedProps {
+                    tool_name:    "read_file".into(),
+                    tool_call_id: "toolu_01".into(),
+                    arguments:    serde_json::json!({ "path": "environments/production/config.toml" }),
+                    visit:        1,
+                }),
+            ),
+            make_envelope(
+                4,
+                "evt-detect-drift-4",
+                EventBody::AgentToolCompleted(AgentToolCompletedProps {
+                    tool_name:    "read_file".into(),
+                    tool_call_id: "toolu_01".into(),
+                    output:       serde_json::json!("[redis]\nhost = \"redis-prod.internal\"\nport = 6379"),
+                    is_error:     false,
+                    visit:        1,
+                }),
+            ),
+            make_envelope(
+                5,
+                "evt-detect-drift-5",
+                EventBody::AgentToolStarted(AgentToolStartedProps {
+                    tool_name:    "read_file".into(),
+                    tool_call_id: "toolu_02".into(),
+                    arguments:    serde_json::json!({ "path": "environments/staging/config.toml" }),
+                    visit:        1,
+                }),
+            ),
+            make_envelope(
+                6,
+                "evt-detect-drift-6",
+                EventBody::AgentToolCompleted(AgentToolCompletedProps {
+                    tool_name:    "read_file".into(),
+                    tool_call_id: "toolu_02".into(),
+                    output:       serde_json::json!("[redis]\nhost = \"redis-staging.internal\"\nport = 6379"),
+                    is_error:     false,
+                    visit:        1,
+                }),
+            ),
+            make_envelope(
+                7,
+                "evt-detect-drift-7",
+                EventBody::AgentMessage(AgentMessageProps {
+                    text:            "I've detected drift in 3 resources between production and staging:\n\n1. **redis.max_connections** — production has 200, staging has 100\n2. **redis.tls** — enabled in production, disabled in staging\n3. **iam.session_duration** — production uses 3600s, staging uses 1800s".into(),
+                    model:           "Opus 4.6".into(),
+                    billing:         BilledTokenCounts::default(),
+                    tool_call_count: 0,
+                    visit:           1,
+                }),
+            ),
         ]
     }
 
@@ -1222,6 +1379,8 @@ mod runs {
                         total_usd_micros:   Some(480_000),
                     },
                     runtime_secs: 72.0,
+                    started_at:   None,
+                    state:        Some(StageState::Succeeded),
                 },
                 RunBillingStage {
                     stage:        BillingStageRef {
@@ -1241,6 +1400,8 @@ mod runs {
                         total_usd_micros:   Some(720_000),
                     },
                     runtime_secs: 154.0,
+                    started_at:   None,
+                    state:        Some(StageState::Succeeded),
                 },
                 RunBillingStage {
                     stage:        BillingStageRef {
@@ -1260,6 +1421,8 @@ mod runs {
                         total_usd_micros:   Some(190_000),
                     },
                     runtime_secs: 45.0,
+                    started_at:   None,
+                    state:        Some(StageState::Succeeded),
                 },
                 RunBillingStage {
                     stage:        BillingStageRef {
@@ -1279,6 +1442,8 @@ mod runs {
                         total_usd_micros:   Some(870_000),
                     },
                     runtime_secs: 118.0,
+                    started_at:   None,
+                    state:        Some(StageState::Running),
                 },
             ],
             totals:   RunBillingTotals {

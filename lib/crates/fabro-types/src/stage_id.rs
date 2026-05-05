@@ -1,4 +1,5 @@
 use std::fmt;
+use std::num::NonZeroU32;
 use std::str::FromStr;
 
 use serde::de::Error as _;
@@ -7,16 +8,21 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct StageId {
     node_id: String,
-    visit:   u32,
+    visit:   NonZeroU32,
 }
 
 impl StageId {
     #[must_use]
     pub fn new(node_id: impl Into<String>, visit: u32) -> Self {
-        Self {
+        Self::try_new(node_id, visit).expect("stage id visit must be greater than zero")
+    }
+
+    pub fn try_new(node_id: impl Into<String>, visit: u32) -> Result<Self, InvalidStageVisit> {
+        let visit = NonZeroU32::new(visit).ok_or(InvalidStageVisit)?;
+        Ok(Self {
             node_id: node_id.into(),
             visit,
-        }
+        })
     }
 
     #[must_use]
@@ -26,7 +32,7 @@ impl StageId {
 
     #[must_use]
     pub fn visit(&self) -> u32 {
-        self.visit
+        self.visit.get()
     }
 }
 
@@ -46,6 +52,17 @@ impl fmt::Display for ParseStageIdError {
 }
 
 impl std::error::Error for ParseStageIdError {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidStageVisit;
+
+impl fmt::Display for InvalidStageVisit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("stage id visit must be greater than zero")
+    }
+}
+
+impl std::error::Error for InvalidStageVisit {}
 
 impl FromStr for StageId {
     type Err = ParseStageIdError;
@@ -67,7 +84,7 @@ impl FromStr for StageId {
         let visit = visit
             .parse()
             .map_err(|err| ParseStageIdError(format!("invalid stage id visit: {err}")))?;
-        Ok(Self::new(node_id, visit))
+        Self::try_new(node_id, visit).map_err(|err| ParseStageIdError(err.to_string()))
     }
 }
 
@@ -222,6 +239,18 @@ mod tests {
     fn parse_rejects_non_numeric_visit() {
         let err = "code@two".parse::<StageId>().unwrap_err();
         assert!(err.to_string().starts_with("invalid stage id visit:"));
+    }
+
+    #[test]
+    fn parse_rejects_zero_visit() {
+        let err = "code@0".parse::<StageId>().unwrap_err();
+        assert_eq!(err.to_string(), "stage id visit must be greater than zero");
+    }
+
+    #[test]
+    fn try_new_rejects_zero_visit() {
+        let err = StageId::try_new("code", 0).unwrap_err();
+        assert_eq!(err.to_string(), "stage id visit must be greater than zero");
     }
 
     #[test]

@@ -138,9 +138,29 @@ impl From<StageOutcome> for StageState {
         match outcome {
             StageOutcome::Succeeded => Self::Succeeded,
             StageOutcome::PartiallySucceeded => Self::PartiallySucceeded,
-            StageOutcome::Failed { .. } => Self::Failed,
+            StageOutcome::Failed {
+                retry_requested: true,
+            } => Self::Retrying,
+            StageOutcome::Failed {
+                retry_requested: false,
+            } => Self::Failed,
             StageOutcome::Skipped => Self::Skipped,
         }
+    }
+}
+
+#[cfg(test)]
+mod stage_state_tests {
+    use super::{StageOutcome, StageState};
+
+    #[test]
+    fn retry_requested_failure_projects_as_retrying() {
+        assert_eq!(
+            StageState::from(StageOutcome::Failed {
+                retry_requested: true,
+            }),
+            StageState::Retrying
+        );
     }
 }
 
@@ -340,9 +360,10 @@ mod tests {
             StageState::from(StageOutcome::Failed {
                 retry_requested: true,
             }),
-            StageState::Failed
+            StageState::Retrying
         );
         assert!(StageState::Cancelled.is_terminal());
+        assert!(!StageState::Retrying.is_terminal());
         assert!(!StageState::Running.is_terminal());
     }
 }

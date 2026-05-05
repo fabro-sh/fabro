@@ -1906,26 +1906,26 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /api/v1/runs/{id}/stages/{stageId}/turns:
+  /api/v1/runs/{id}/stages/{stageId}/events:
     get:
-      operationId: listStageTurns
+      operationId: listStageEvents
       tags: [Run Internals]
-      summary: List Stage Turns
-      description: Returns a paginated list of conversation turns within a specific stage, including system prompts, assistant responses, and tool invocations.
+      summary: List Stage Events
+      description: Returns a paginated JSON list of stored run events scoped to a single stage visit.
       parameters:
         - $ref: "#/components/parameters/RunId"
         - $ref: "#/components/parameters/StageId"
-        - $ref: "#/components/parameters/PageLimit"
-        - $ref: "#/components/parameters/PageOffset"
+        - $ref: "#/components/parameters/SinceSeq"
+        - $ref: "#/components/parameters/EventLimit"
       responses:
         "200":
-          description: Paginated list of conversation turns
+          description: Paginated list of stage events
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PaginatedStageTurnList"
+                $ref: "#/components/schemas/PaginatedEventList"
         "404":
-          description: Run or stage not found
+          description: Run not found.
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -3856,20 +3856,6 @@ components:
         meta:
           $ref: "#/components/schemas/PaginationMeta"
 
-    PaginatedStageTurnList:
-      description: Paginated list of stage turns.
-      type: object
-      required:
-        - data
-        - meta
-      properties:
-        data:
-          type: array
-          items:
-            $ref: "#/components/schemas/StageTurn"
-        meta:
-          $ref: "#/components/schemas/PaginationMeta"
-
     PaginatedApiQuestionList:
       description: Paginated list of pending questions.
       type: object
@@ -5328,6 +5314,20 @@ components:
           oneOf:
             - $ref: "#/components/schemas/CommandTermination"
             - type: "null"
+        started_at:
+          type: ["string", "null"]
+          format: date-time
+          description: Wall-clock time the latest attempt of this stage started, if known.
+        duration_ms:
+          type: ["integer", "null"]
+          format: uint64
+          minimum: 0
+          description: Wall-clock duration of the stage's latest terminal attempt, if known.
+        state:
+          oneOf:
+            - $ref: "#/components/schemas/StageState"
+            - type: "null"
+          description: Lifecycle state of the stage projection.
 
     InterviewOption:
       description: Option stored with an interview question in the event log.
@@ -5656,6 +5656,7 @@ components:
       description: Board column status for a run in the list view.
       type: string
       enum:
+        - queued
         - initializing
         - running
         - blocked
@@ -5669,7 +5670,7 @@ components:
         - name
       properties:
         id:
-          type: string
+          $ref: "#/components/schemas/BoardColumn"
         name:
           type: string
 
@@ -6159,7 +6160,7 @@ components:
           example: 3501.0
 
     BillingStageRef:
-      description: Reference to a billing stage.
+      description: Reference to a workflow node in a billing stage row.
       type: object
       required:
         - id
@@ -6319,11 +6320,13 @@ components:
         - id
         - name
         - status
+        - node_id
+        - visit
       properties:
         id:
           type: string
-          description: Unique stage identifier within the run.
-          example: propose-changes
+          description: StageId in "node_id@visit" form, e.g. verify@2.
+          example: verify@2
         name:
           type: string
           description: Human-readable stage name.
@@ -6334,107 +6337,21 @@ components:
           type: number
           description: Time spent in this stage, in seconds.
           example: 154.0
-        dot_id:
+        node_id:
           type: string
-          description: Node identifier in the Graphviz graph source.
-          example: propose
-
-    ToolUse:
-      description: A single tool invocation with its input, result, and execution metadata.
-      type: object
-      required:
-        - id
-        - tool_name
-        - input
-        - result
-        - is_error
-      properties:
-        id:
-          type: string
-          description: Unique identifier for this tool invocation. Enables correlation in parallel tool use.
-          example: toolu_01A09q90qw90lq917835lq9
-        tool_name:
-          type: string
-          description: Name of the tool that was invoked.
-          example: read_file
-        input:
-          type: string
-          description: JSON-encoded input passed to the tool.
-          example: '{ "path": "src/routes/auth.ts" }'
-        result:
-          type: string
-          description: Output returned by the tool. Contains the error message when is_error is true.
-          example: 'import { Router } from "express";'
-        is_error:
-          type: boolean
-          description: Whether the tool invocation failed. When true, the result field contains the error message.
-          example: false
-        duration_ms:
+          description: Node id in the workflow graph; multiple stages with different visits share the same node_id.
+          example: verify
+        visit:
           type: integer
-          description: Wall-clock execution time of the tool invocation in milliseconds.
-          example: 142
-
-    StageTurn:
-      description: A single turn in a stage conversation — a system prompt, assistant response, or tool invocation block.
-      discriminator:
-        propertyName: kind
-        mapping:
-          system: "#/components/schemas/SystemStageTurn"
-          assistant: "#/components/schemas/AssistantStageTurn"
-          tool: "#/components/schemas/ToolStageTurn"
-      oneOf:
-        - $ref: "#/components/schemas/SystemStageTurn"
-        - $ref: "#/components/schemas/AssistantStageTurn"
-        - $ref: "#/components/schemas/ToolStageTurn"
-
-    SystemStageTurn:
-      description: A system prompt turn that sets the stage's instructions.
-      type: object
-      required:
-        - kind
-        - content
-      properties:
-        kind:
-          type: string
-          enum: [system]
-        content:
-          type: string
-          description: System prompt text.
-          example: You are a drift detection agent. Compare the production and staging environments.
-
-    AssistantStageTurn:
-      description: An assistant response turn within a stage.
-      type: object
-      required:
-        - kind
-        - content
-      properties:
-        kind:
-          type: string
-          enum: [assistant]
-        content:
-          type: string
-          description: Assistant response text.
-          example: I'll start by loading the environment configurations for both production and staging.
-
-    ToolStageTurn:
-      description: A tool invocation turn containing one or more tool calls.
-      type: object
-      required:
-        - kind
-        - tools
-      properties:
-        kind:
-          type: string
-          enum: [tool]
-        content:
-          type: string
-          description: Text accompanying the tool invocations, or null when the turn contains only tool calls.
-        tools:
-          type: array
-          description: Tool invocations executed in this turn.
-          items:
-            $ref: "#/components/schemas/ToolUse"
+          format: uint32
+          minimum: 1
+          description: 1-based visit count; bumped each time the workflow re-enters this node.
+          example: 2
+        started_at:
+          type: ["string", "null"]
+          format: date-time
+          description: Wall-clock time the latest attempt of this stage started, if known.
+          example: "2026-04-29T12:34:56Z"
 
     # ── File Diff Schemas ──────────────────────────────────────────────
 
@@ -6607,7 +6524,7 @@ components:
     # ── Billing Schemas ──────────────────────────────────────────────────
 
     RunBillingStage:
-      description: Token counts and billed totals for a single stage within a run.
+      description: Token counts and billed totals for one workflow node within a run. Rows are grouped by node; billing and runtime sum every visit of that node.
       type: object
       required:
         - stage
@@ -6618,7 +6535,7 @@ components:
         stage:
           $ref: "#/components/schemas/BillingStageRef"
         model:
-          description: Model used for this stage; null for non-LLM stages.
+          description: Latest usage-bearing visit model for this node; null when no visit used an LLM model.
           oneOf:
             - $ref: "#/components/schemas/ModelReference"
             - type: "null"
@@ -6626,8 +6543,18 @@ components:
           $ref: "#/components/schemas/BilledTokenCounts"
         runtime_secs:
           type: number
-          description: Wall-clock runtime in seconds.
+          description: Wall-clock runtime in seconds, summed across every visit of this node.
           example: 154.0
+        started_at:
+          type: ["string", "null"]
+          format: date-time
+          description: Wall-clock time the latest attempt of this stage started, if known.
+          example: "2026-04-29T12:34:56Z"
+        state:
+          oneOf:
+            - $ref: "#/components/schemas/StageState"
+            - type: "null"
+          description: Lifecycle state of the stage. Use to detect in-flight rows for client-side runtime ticking.
 
     RunBillingTotals:
       description: Aggregate billing totals across all stages of a run.
@@ -6687,7 +6614,7 @@ components:
           $ref: "#/components/schemas/ModelReference"
         stages:
           type: integer
-          description: Number of stages that used this model.
+          description: Number of usage-bearing stage visits that used this model.
           example: 2
         billing:
           $ref: "#/components/schemas/BilledTokenCounts"
@@ -6702,7 +6629,7 @@ components:
       properties:
         stages:
           type: array
-          description: Per-stage billing breakdown.
+          description: Per-node billing breakdown. Each row sums billing and runtime across all visits of that node.
           items:
             $ref: "#/components/schemas/RunBillingStage"
         totals:

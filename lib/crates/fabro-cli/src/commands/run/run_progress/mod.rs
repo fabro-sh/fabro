@@ -3,8 +3,7 @@
     reason = "sync CLI run-progress renderer: writes to std::io::stderr directly"
 )]
 
-use fabro_types::RunEvent;
-use fabro_types::run_event::is_metadata_snapshot_compat_notice_code;
+use fabro_types::{RunEvent, RunNoticeCode};
 
 mod event;
 mod info_display;
@@ -444,7 +443,10 @@ impl ProgressUI {
                 message,
             } => {
                 if self.saw_metadata_snapshot_failure
-                    && is_metadata_snapshot_compat_notice_code(&code)
+                    && code
+                        .parse::<RunNoticeCode>()
+                        .ok()
+                        .is_some_and(RunNoticeCode::is_metadata_snapshot_compat)
                 {
                     return;
                 }
@@ -1208,7 +1210,7 @@ mod tests {
 
         emit(&mut ui, Event::RunNotice {
             level:            RunNoticeLevel::Warn,
-            code:             "sandbox_cleanup_failed".into(),
+            code:             RunNoticeCode::SandboxCleanupFailed.to_string(),
             message:          "sandbox cleanup failed".into(),
             exec_output_tail: None,
         });
@@ -1279,13 +1281,13 @@ mod tests {
         });
         emit(&mut ui, Event::RunNotice {
             level:            RunNoticeLevel::Warn,
-            code:             "checkpoint_metadata_write_failed".into(),
+            code:             RunNoticeCode::CheckpointMetadataWriteFailed.to_string(),
             message:          "legacy metadata warning".into(),
             exec_output_tail: None,
         });
         emit(&mut ui, Event::RunNotice {
             level:            RunNoticeLevel::Warn,
-            code:             "checkpoint_metadata_degraded".into(),
+            code:             RunNoticeCode::CheckpointMetadataDegraded.to_string(),
             message:          "metadata snapshots are disabled for this run".into(),
             exec_output_tail: None,
         });

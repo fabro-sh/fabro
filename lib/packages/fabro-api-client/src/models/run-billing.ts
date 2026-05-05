@@ -28,7 +28,7 @@ import type { RunBillingTotals } from './run-billing-totals';
  */
 export interface RunBilling {
     /**
-     * Per-stage billing breakdown.
+     * Per-node billing breakdown. Each row sums billing and runtime across all visits of that node.
      */
     'stages': Array<RunBillingStage>;
     'totals': RunBillingTotals;

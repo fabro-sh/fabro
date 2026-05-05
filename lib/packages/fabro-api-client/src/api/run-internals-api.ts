@@ -36,8 +36,6 @@ import type { PaginatedEventList } from '../models';
 // @ts-ignore
 import type { PaginatedRunStageList } from '../models';
 // @ts-ignore
-import type { PaginatedStageTurnList } from '../models';
-// @ts-ignore
 import type { RunArtifactListResponse } from '../models';
 // @ts-ignore
 import type { RunCheckpoint } from '../models';
@@ -527,21 +525,21 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             };
         },
         /**
-         * Returns a paginated list of conversation turns within a specific stage, including system prompts, assistant responses, and tool invocations.
-         * @summary List Stage Turns
+         * Returns a paginated JSON list of stored run events scoped to a single stage visit.
+         * @summary List Stage Events
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
-         * @param {number} [pageLimit] Maximum number of items to return per page.
-         * @param {number} [pageOffset] Number of items to skip before returning results.
+         * @param {number} [sinceSeq] First event sequence number to include.
+         * @param {number} [limit] Maximum number of events to return.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listStageTurns: async (id: string, stageId: string, pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        listStageEvents: async (id: string, stageId: string, sinceSeq?: number, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
-            assertParamExists('listStageTurns', 'id', id)
+            assertParamExists('listStageEvents', 'id', id)
             // verify required parameter 'stageId' is not null or undefined
-            assertParamExists('listStageTurns', 'stageId', stageId)
-            const localVarPath = `/api/v1/runs/{id}/stages/{stageId}/turns`
+            assertParamExists('listStageEvents', 'stageId', stageId)
+            const localVarPath = `/api/v1/runs/{id}/stages/{stageId}/events`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)))
                 .replace(`{${"stageId"}}`, encodeURIComponent(String(stageId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
@@ -561,12 +559,12 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             // http bearer authentication required
             await setBearerAuthToObject(localVarHeaderParameter, configuration)
 
-            if (pageLimit !== undefined) {
-                localVarQueryParameter['page[limit]'] = pageLimit;
+            if (sinceSeq !== undefined) {
+                localVarQueryParameter['since_seq'] = sinceSeq;
             }
 
-            if (pageOffset !== undefined) {
-                localVarQueryParameter['page[offset]'] = pageOffset;
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -964,19 +962,19 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Returns a paginated list of conversation turns within a specific stage, including system prompts, assistant responses, and tool invocations.
-         * @summary List Stage Turns
+         * Returns a paginated JSON list of stored run events scoped to a single stage visit.
+         * @summary List Stage Events
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
-         * @param {number} [pageLimit] Maximum number of items to return per page.
-         * @param {number} [pageOffset] Number of items to skip before returning results.
+         * @param {number} [sinceSeq] First event sequence number to include.
+         * @param {number} [limit] Maximum number of events to return.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async listStageTurns(id: string, stageId: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedStageTurnList>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.listStageTurns(id, stageId, pageLimit, pageOffset, options);
+        async listStageEvents(id: string, stageId: string, sinceSeq?: number, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedEventList>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listStageEvents(id, stageId, sinceSeq, limit, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.listStageTurns']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.listStageEvents']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -1174,17 +1172,17 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
             return localVarFp.listStageArtifacts(id, stageId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Returns a paginated list of conversation turns within a specific stage, including system prompts, assistant responses, and tool invocations.
-         * @summary List Stage Turns
+         * Returns a paginated JSON list of stored run events scoped to a single stage visit.
+         * @summary List Stage Events
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
-         * @param {number} [pageLimit] Maximum number of items to return per page.
-         * @param {number} [pageOffset] Number of items to skip before returning results.
+         * @param {number} [sinceSeq] First event sequence number to include.
+         * @param {number} [limit] Maximum number of events to return.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listStageTurns(id: string, stageId: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedStageTurnList> {
-            return localVarFp.listStageTurns(id, stageId, pageLimit, pageOffset, options).then((request) => request(axios, basePath));
+        listStageEvents(id: string, stageId: string, sinceSeq?: number, limit?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedEventList> {
+            return localVarFp.listStageEvents(id, stageId, sinceSeq, limit, options).then((request) => request(axios, basePath));
         },
         /**
          * Uploads one or more artifacts for a stage. Intended for trusted internal callers.  The server accepts both: - `application/octet-stream` for single-file uploads with the `filename` query parameter - strict manifest-first `multipart/form-data` uploads documented by `ArtifactBatchUploadManifest`  The generated Rust client currently exposes the octet-stream variant because the OpenAPI code generator in this repo does not support multiple request media types on one operation. 
@@ -1374,17 +1372,17 @@ export class RunInternalsApi extends BaseAPI {
     }
 
     /**
-     * Returns a paginated list of conversation turns within a specific stage, including system prompts, assistant responses, and tool invocations.
-     * @summary List Stage Turns
+     * Returns a paginated JSON list of stored run events scoped to a single stage visit.
+     * @summary List Stage Events
      * @param {string} id Unique run identifier (ULID).
      * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
-     * @param {number} [pageLimit] Maximum number of items to return per page.
-     * @param {number} [pageOffset] Number of items to skip before returning results.
+     * @param {number} [sinceSeq] First event sequence number to include.
+     * @param {number} [limit] Maximum number of events to return.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public listStageTurns(id: string, stageId: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig) {
-        return RunInternalsApiFp(this.configuration).listStageTurns(id, stageId, pageLimit, pageOffset, options).then((request) => request(this.axios, this.basePath));
+    public listStageEvents(id: string, stageId: string, sinceSeq?: number, limit?: number, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).listStageEvents(id, stageId, sinceSeq, limit, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

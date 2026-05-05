@@ -901,9 +901,13 @@ impl CodergenBackend for BackendRouter {
         node: &Node,
         prompt: &str,
         system_prompt: Option<&str>,
+        emitter: &Arc<Emitter>,
+        stage_scope: &StageScope,
     ) -> Result<CodergenResult, Error> {
         // CLI backend doesn't support one_shot, always route to API
-        self.api_backend.one_shot(node, prompt, system_prompt).await
+        self.api_backend
+            .one_shot(node, prompt, system_prompt, emitter, stage_scope)
+            .await
     }
 }
 

@@ -25,6 +25,7 @@ describe("runs route board mapping", () => {
   test("keeps blocked runs in the blocked lane and preserves question text", () => {
     const columns = buildBoardColumns({
       columns: [
+        { id: "queued", name: "Queued" },
         { id: "initializing", name: "Initializing" },
         { id: "running", name: "Running" },
         { id: "blocked", name: "Blocked" },

@@ -10,7 +10,7 @@ use fabro_util::time::elapsed_ms;
 
 use super::types::{Concluded, FinalizeOptions, Retroed};
 use crate::error::Error;
-use crate::event::{Event, RunNoticeLevel};
+use crate::event::{Event, RunNoticeCode, RunNoticeLevel};
 use crate::outcome::{Outcome, OutcomeExt, StageOutcome};
 use crate::records::{Checkpoint, Conclusion, StageSummary};
 use crate::run_metadata::MetadataSnapshot;
@@ -19,6 +19,7 @@ use crate::run_status::{FailureReason, RunStatus, SuccessReason};
 use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git::git_diff_with_timeout;
 use crate::services::RunServices;
+use crate::{ProjectionBillingRollup, billing_rollup_from_projection};
 
 pub fn classify_engine_result(
     engine_result: &Result<Outcome, Error>,
@@ -68,22 +69,22 @@ pub(crate) async fn build_conclusion_from_store(
     run_duration_ms: u64,
     final_git_commit_sha: Option<String>,
 ) -> Conclusion {
-    let (state_result, events_result) = tokio::join!(run_store.state(), run_store.list_events());
-    let projection = state_result.ok();
+    let projection = run_store.state().await.ok();
     let projection_order = projection
         .as_ref()
         .map(stage_projection_order)
         .unwrap_or_default();
+    let projection_billing = projection
+        .as_ref()
+        .map(billing_rollup_from_projection)
+        .unwrap_or_default();
     let checkpoint = projection
         .as_ref()
         .and_then(|state| state.checkpoint.as_ref());
-    let stage_durations = events_result
-        .map(|events| crate::extract_stage_durations_from_events(&events))
-        .unwrap_or_default();
 
     build_conclusion_from_parts(
         checkpoint,
-        &stage_durations,
+        &projection_billing,
         &projection_order,
         status,
         failure_reason,
@@ -94,7 +95,7 @@ pub(crate) async fn build_conclusion_from_store(
 
 fn build_conclusion_from_parts(
     checkpoint: Option<&Checkpoint>,
-    stage_durations: &HashMap<String, u64>,
+    projection_billing: &ProjectionBillingRollup,
     projection_order: &HashMap<String, u32>,
     status: StageOutcome,
     failure_reason: Option<String>,
@@ -105,6 +106,11 @@ fn build_conclusion_from_parts(
     // while the other checkpoint maps are keyed by node_id. Dedupe to one row
     // per node so the stages table matches the deduped billing total.
     let (stages, total_retries) = if let Some(cp) = checkpoint {
+        let billing_by_node = projection_billing
+            .stages
+            .iter()
+            .map(|stage| (stage.node_id.as_str(), stage))
+            .collect::<HashMap<_, _>>();
         let mut stage_rows = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let mut retries_sum: u32 = 0;
@@ -130,7 +136,6 @@ fn build_conclusion_from_parts(
         }
 
         for (original_checkpoint_order, node_id) in stage_order {
-            let outcome = cp.node_outcomes.get(node_id);
             let retries = cp
                 .node_retries
                 .get(node_id)
@@ -138,14 +143,13 @@ fn build_conclusion_from_parts(
                 .unwrap_or(1)
                 .saturating_sub(1);
             retries_sum += retries;
+            let billing = billing_by_node.get(node_id);
 
             let summary = StageSummary {
                 stage_id: node_id.to_string(),
                 stage_label: node_id.to_string(),
-                duration_ms: stage_durations.get(node_id).copied().unwrap_or(0),
-                billing_usd_micros: outcome
-                    .and_then(|o| o.usage.as_ref())
-                    .and_then(|usage| usage.total_usd_micros),
+                duration_ms: billing.map_or(0, |stage| stage.duration_ms),
+                billing_usd_micros: billing.and_then(|stage| stage.billing.total_usd_micros),
                 retries,
             };
             stage_rows.push((
@@ -176,7 +180,7 @@ fn build_conclusion_from_parts(
         failure_reason,
         final_git_commit_sha,
         stages,
-        billing: checkpoint.and_then(billing_from_checkpoint),
+        billing: projection_billing.billing_if_present(),
         total_retries,
     }
 }
@@ -235,7 +239,11 @@ pub async fn write_finalize_commit(
                 None,
                 None,
             );
-            emit_metadata_warning(services, "checkpoint_metadata_write_failed", message);
+            emit_metadata_warning(
+                services,
+                RunNoticeCode::CheckpointMetadataWriteFailed,
+                message,
+            );
             return;
         }
     };
@@ -256,7 +264,11 @@ pub async fn write_finalize_commit(
                 None,
                 None,
             );
-            emit_metadata_warning(services, "checkpoint_metadata_write_failed", message);
+            emit_metadata_warning(
+                services,
+                RunNoticeCode::CheckpointMetadataWriteFailed,
+                message,
+            );
             return;
         }
     };
@@ -277,7 +289,11 @@ pub async fn write_finalize_commit(
                     Some(snapshot.entry_count),
                     Some(snapshot.bytes),
                 );
-                emit_metadata_warning(services, "checkpoint_metadata_push_failed", message);
+                emit_metadata_warning(
+                    services,
+                    RunNoticeCode::CheckpointMetadataPushFailed,
+                    message,
+                );
             } else {
                 emit_metadata_snapshot_completed(services, phase, meta_branch, started, &snapshot);
             }
@@ -296,7 +312,11 @@ pub async fn write_finalize_commit(
                 None,
                 None,
             );
-            emit_metadata_warning(services, "checkpoint_metadata_write_failed", message);
+            emit_metadata_warning(
+                services,
+                RunNoticeCode::CheckpointMetadataWriteFailed,
+                message,
+            );
         }
     }
 }
@@ -359,7 +379,7 @@ fn emit_metadata_snapshot_failed(
     });
 }
 
-fn emit_metadata_warning(services: &RunServices, code: &str, message: String) {
+fn emit_metadata_warning(services: &RunServices, code: RunNoticeCode, message: String) {
     if services.metadata_runtime.mark_metadata_degraded() {
         services.emitter.notice(RunNoticeLevel::Warn, code, message);
     }
@@ -383,7 +403,7 @@ async fn compute_final_patch(
         Err(err) => {
             services.emitter.notice(
                 RunNoticeLevel::Warn,
-                "git_diff_failed",
+                RunNoticeCode::GitDiffFailed,
                 format!("final diff failed: {err}"),
             );
             None
@@ -391,15 +411,8 @@ async fn compute_final_patch(
     }
 }
 
-/// Iterates `node_outcomes.values()` rather than `completed_nodes` to avoid
-/// over-counting the last visit's usage on looping workflows.
-pub(crate) fn billing_from_checkpoint(cp: &Checkpoint) -> Option<BilledTokenCounts> {
-    let usage: Vec<_> = cp
-        .node_outcomes
-        .values()
-        .filter_map(|o| o.usage.clone())
-        .collect();
-    (!usage.is_empty()).then(|| BilledTokenCounts::from_billed_usage(&usage))
+pub(crate) fn billing_from_projection(projection: &RunProjection) -> Option<BilledTokenCounts> {
+    billing_rollup_from_projection(projection).billing_if_present()
 }
 
 pub(crate) fn build_terminal_event(
@@ -503,7 +516,6 @@ pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Con
     let (final_status, failure_reason, _run_status) = classify_engine_result(&outcome);
 
     let events = services.run_store.list_events().await.unwrap_or_default();
-    let stage_durations = crate::extract_stage_durations_from_events(&events);
     let artifact_count = events
         .iter()
         .filter(|envelope| matches!(envelope.event.body, EventBody::ArtifactCaptured(_)))
@@ -513,12 +525,16 @@ pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Con
         .as_ref()
         .map(stage_projection_order)
         .unwrap_or_default();
+    let projection_billing = projection
+        .as_ref()
+        .map(billing_rollup_from_projection)
+        .unwrap_or_default();
     let checkpoint = projection
         .as_ref()
         .and_then(|state| state.checkpoint.as_ref());
     let conclusion = build_conclusion_from_parts(
         checkpoint,
-        &stage_durations,
+        &projection_billing,
         &projection_order,
         final_status,
         failure_reason,
@@ -534,7 +550,7 @@ pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Con
     if services.metadata_runtime.metadata_degraded() {
         services.emitter.notice(
             RunNoticeLevel::Warn,
-            "checkpoint_metadata_degraded",
+            RunNoticeCode::CheckpointMetadataDegraded,
             "checkpoint metadata archive writes were degraded for this run".to_string(),
         );
     }
@@ -556,9 +572,11 @@ pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Con
         } else {
             format!("sandbox preserved: {info}")
         };
-        services
-            .emitter
-            .notice(RunNoticeLevel::Info, "sandbox_preserved", message);
+        services.emitter.notice(
+            RunNoticeLevel::Info,
+            RunNoticeCode::SandboxPreserved,
+            message,
+        );
     }
     if let Err(e) = cleanup_sandbox(
         &services,
@@ -572,7 +590,7 @@ pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Con
         let exec_output_tail = fabro_sandbox::default_redacted_output_tail(&e);
         services.emitter.notice_with_tail(
             RunNoticeLevel::Warn,
-            "sandbox_cleanup_failed",
+            RunNoticeCode::SandboxCleanupFailed,
             format!("sandbox cleanup failed: {}", e.display_with_causes()),
             exec_output_tail,
         );
@@ -601,7 +619,8 @@ mod tests {
     use fabro_store::{Database, EventEnvelope, RunDatabase, RunProjection};
     use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
     use fabro_types::{
-        EventBody, RunBlobId, RunEvent, RunId, WorkflowSettings, first_event_seq, fixtures,
+        BilledModelUsage, EventBody, RunBlobId, RunEvent, RunId, StageCompletion, WorkflowSettings,
+        first_event_seq, fixtures,
     };
     use object_store::memory::InMemory;
 
@@ -737,6 +756,28 @@ mod tests {
         }
     }
 
+    fn test_usage(model_id: &str, input_tokens: i64, output_tokens: i64) -> BilledModelUsage {
+        serde_json::from_value(serde_json::json!({
+            "input": {
+                "usage": {
+                    "model": {
+                        "provider": "openai",
+                        "model_id": model_id
+                    },
+                    "tokens": {
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens
+                    }
+                },
+                "facts": {
+                    "provider": "open_ai"
+                }
+            },
+            "total_usd_micros": input_tokens + output_tokens
+        }))
+        .unwrap()
+    }
+
     #[test]
     fn conclusion_stage_order_follows_projection_first_event_order() {
         let mut projection = RunProjection::default();
@@ -753,7 +794,7 @@ mod tests {
 
         let conclusion = build_conclusion_from_parts(
             Some(&checkpoint),
-            &HashMap::new(),
+            &ProjectionBillingRollup::default(),
             &projection_order,
             StageOutcome::Succeeded,
             None,
@@ -788,7 +829,7 @@ mod tests {
 
         let conclusion = build_conclusion_from_parts(
             Some(&checkpoint),
-            &HashMap::new(),
+            &ProjectionBillingRollup::default(),
             &projection_order,
             StageOutcome::Succeeded,
             None,
@@ -802,6 +843,66 @@ mod tests {
             .map(|stage| stage.stage_id.as_str())
             .collect::<Vec<_>>();
         assert_eq!(stage_ids, vec!["skipped", "finished"]);
+    }
+
+    #[test]
+    fn conclusion_billing_sums_retry_visit_usage_from_projection() {
+        let mut projection = RunProjection::default();
+        let failed_usage = test_usage("gpt-old", 100, 10);
+        let success_usage = test_usage("gpt-new", 200, 20);
+        let failed = projection.stage_entry("verify", 1, first_event_seq(1));
+        failed.duration_ms = Some(1200);
+        failed.usage = Some(failed_usage);
+        failed.completion = Some(StageCompletion {
+            outcome:        StageOutcome::Failed {
+                retry_requested: true,
+            },
+            notes:          None,
+            failure_reason: Some("try again".to_string()),
+            timestamp:      chrono::Utc::now(),
+        });
+        let succeeded = projection.stage_entry("verify", 2, first_event_seq(2));
+        succeeded.duration_ms = Some(800);
+        succeeded.usage = Some(success_usage.clone());
+        succeeded.completion = Some(StageCompletion {
+            outcome:        StageOutcome::Succeeded,
+            notes:          None,
+            failure_reason: None,
+            timestamp:      chrono::Utc::now(),
+        });
+
+        let projection_order = stage_projection_order(&projection);
+        let projection_billing = billing_rollup_from_projection(&projection);
+        let mut latest_outcome = Outcome::success();
+        latest_outcome.usage = Some(success_usage);
+        latest_outcome.duration_ms = Some(800);
+        let mut checkpoint = checkpoint_with(
+            vec!["verify", "verify"],
+            HashMap::from([("verify".to_string(), latest_outcome)]),
+        );
+        checkpoint.node_retries.insert("verify".to_string(), 2);
+
+        let conclusion = build_conclusion_from_parts(
+            Some(&checkpoint),
+            &projection_billing,
+            &projection_order,
+            StageOutcome::Succeeded,
+            None,
+            10,
+            None,
+        );
+
+        assert_eq!(conclusion.billing.as_ref().unwrap().input_tokens, 300);
+        assert_eq!(conclusion.billing.as_ref().unwrap().output_tokens, 30);
+        assert_eq!(
+            conclusion.billing.as_ref().unwrap().total_usd_micros,
+            Some(330)
+        );
+        assert_eq!(conclusion.stages.len(), 1);
+        assert_eq!(conclusion.stages[0].stage_id, "verify");
+        assert_eq!(conclusion.stages[0].duration_ms, 2000);
+        assert_eq!(conclusion.stages[0].billing_usd_micros, Some(330));
+        assert_eq!(conclusion.stages[0].retries, 1);
     }
 
     fn test_services(

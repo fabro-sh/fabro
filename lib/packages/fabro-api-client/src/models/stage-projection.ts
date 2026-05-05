@@ -19,6 +19,9 @@ import type { CommandTermination } from './command-termination';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { StageCompletion } from './stage-completion';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { StageState } from './stage-state';
 
 /**
  * Observable projection data for one workflow stage execution.
@@ -52,7 +55,13 @@ export interface StageProjection {
     'streams_separated'?: boolean | null;
     'live_streaming'?: boolean | null;
     'termination'?: CommandTermination | null;
+    /**
+     * Wall-clock time the latest attempt of this stage started, if known.
+     */
+    'started_at'?: string | null;
+    /**
+     * Wall-clock duration of the stage\'s latest terminal attempt, if known.
+     */
+    'duration_ms'?: number | null;
+    'state'?: StageState | null;
 }
-
-
-

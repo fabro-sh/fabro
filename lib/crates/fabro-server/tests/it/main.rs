@@ -4,6 +4,7 @@
 )]
 
 mod api;
+mod event_pagination;
 mod helpers;
 mod openapi_conformance;
 mod pagination;

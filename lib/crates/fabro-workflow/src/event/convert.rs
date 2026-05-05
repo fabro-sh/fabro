@@ -290,12 +290,14 @@ fn event_body_from_event(event: &Event) -> EventBody {
             failure,
             will_retry,
             duration_ms,
+            billing,
             ..
         } => EventBody::StageFailed(fabro_types::StageFailedProps {
             index:       *index,
             failure:     Some(failure.clone()),
             will_retry:  *will_retry,
             duration_ms: *duration_ms,
+            billing:     billing.clone(),
         }),
         Event::StageRetrying {
             index,
@@ -1187,8 +1189,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     use ::fabro_types::{
-        EventBody, FailureReason, ParallelBranchId, Principal, RunNoticeLevel, RunProvenance,
-        StageId, SystemActorKind, fixtures, run_event as fabro_types,
+        EventBody, FailureReason, ParallelBranchId, Principal, RunNoticeCode, RunNoticeLevel,
+        RunProvenance, StageId, SystemActorKind, fixtures, run_event as fabro_types,
     };
     use chrono::Utc;
     use fabro_agent::{AgentEvent, SandboxEvent};
@@ -1198,7 +1200,7 @@ mod tests {
     use crate::error::Error;
     use crate::event::test_support::user_principal;
     use crate::event::{Event, StageScope};
-    use crate::outcome::FailureDetail;
+    use crate::outcome::{BilledModelUsage, FailureDetail};
 
     #[derive(Debug)]
     struct EventTestCause;
@@ -1218,6 +1220,28 @@ mod tests {
             stdout_truncated: false,
             stderr_truncated: true,
         }
+    }
+
+    fn test_usage(model_id: &str, input_tokens: i64, output_tokens: i64) -> BilledModelUsage {
+        serde_json::from_value(serde_json::json!({
+            "input": {
+                "usage": {
+                    "model": {
+                        "provider": "openai",
+                        "model_id": model_id
+                    },
+                    "tokens": {
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens
+                    }
+                },
+                "facts": {
+                    "provider": "open_ai"
+                }
+            },
+            "total_usd_micros": input_tokens + output_tokens
+        }))
+        .unwrap()
     }
 
     #[test]
@@ -1299,6 +1323,7 @@ mod tests {
 
     #[test]
     fn run_event_stage_failure_keeps_failure_detail() {
+        let usage = test_usage("gpt-5.2", 321, 54);
         let stored = to_run_event(&fixtures::RUN_3, &Event::StageFailed {
             node_id:     "code".to_string(),
             name:        "Code".to_string(),
@@ -1309,6 +1334,7 @@ mod tests {
             ),
             will_retry:  true,
             duration_ms: 5000,
+            billing:     Some(usage.clone()),
             actor:       None,
         });
 
@@ -1317,6 +1343,7 @@ mod tests {
         assert_eq!(properties["failure"]["message"], "lint failed");
         assert_eq!(properties["failure"]["failure_class"], "deterministic");
         assert_eq!(properties["will_retry"], true);
+        assert_eq!(properties["billing"], serde_json::to_value(&usage).unwrap());
     }
 
     #[test]
@@ -1636,7 +1663,7 @@ mod tests {
     fn run_notice_maps_exec_output_tail_to_props() {
         let stored = to_run_event(&fixtures::RUN_1, &Event::RunNotice {
             level:            RunNoticeLevel::Warn,
-            code:             "git_diff_failed".to_string(),
+            code:             RunNoticeCode::GitDiffFailed.to_string(),
             message:          "git diff failed".to_string(),
             exec_output_tail: Some(exec_tail()),
         });

@@ -1,6 +1,10 @@
 import { useEffect } from "react";
 import { useSWRConfig } from "swr";
 
+import {
+  subscribeToCrossTabSse,
+  type CrossTabSseCoordinator,
+} from "./cross-tab-sse";
 import { queryKeys } from "./query-keys";
 import {
   createBrowserEventSource,
@@ -10,6 +14,11 @@ import {
   type MutateFn,
   type SharedEventSubscription,
 } from "./sse";
+
+interface BoardEventOptions {
+  debounceMs?: number;
+  coordinator?: CrossTabSseCoordinator;
+}
 
 const BOARD_STATUS_EVENTS = new Set([
   "run.submitted",
@@ -41,21 +50,34 @@ export function shouldRefreshBoardForEvent(event: string) {
 export function subscribeToBoardEvents(
   mutate: MutateFn,
   eventSourceFactory: (url: string) => EventSourceLike = createBrowserEventSource,
-  { debounceMs = 500 }: { debounceMs?: number } = {},
+  { debounceMs = 500, coordinator }: BoardEventOptions = {},
 ): () => void {
-  return subscribeToSharedEventSource<EventPayload>({
-    subscriptions,
+  return subscribeToCrossTabSse<EventPayload>({
+    coordinator,
     subscriptionKey: BOARD_SUBSCRIPTION_KEY,
-    url: queryKeys.system.attach(),
     mutate,
-    eventSourceFactory,
     debounceMs,
-    resolveInvalidation: (payload) => ({
-      keys: payload.event && shouldRefreshBoardForEvent(payload.event)
-        ? [queryKeys.boards.runs()]
-        : [],
-    }),
+    resyncKeys: () => [queryKeys.boards.runs()],
+    resolveInvalidation: boardInvalidation,
+    fallbackSubscribe: () =>
+      subscribeToSharedEventSource<EventPayload>({
+        subscriptions,
+        subscriptionKey: BOARD_SUBSCRIPTION_KEY,
+        url: queryKeys.system.attach(),
+        mutate,
+        eventSourceFactory,
+        debounceMs,
+        resolveInvalidation: boardInvalidation,
+      }),
   });
+}
+
+function boardInvalidation(payload: EventPayload) {
+  return {
+    keys: payload.event && shouldRefreshBoardForEvent(payload.event)
+      ? [queryKeys.boards.runs()]
+      : [],
+  };
 }
 
 export function useBoardEvents() {

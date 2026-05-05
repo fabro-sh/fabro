@@ -113,7 +113,13 @@ impl Handler for PromptHandler {
         let (response_text, stage_usage, backend_files_touched) =
             if let Some(backend) = &self.backend {
                 let result = backend
-                    .one_shot(node, &prompt, system_prompt.as_deref())
+                    .one_shot(
+                        node,
+                        &prompt,
+                        system_prompt.as_deref(),
+                        &services.run.emitter,
+                        &stage_scope,
+                    )
                     .await;
                 match result {
                     Ok(CodergenResult::Full(outcome)) => return Ok(outcome),
@@ -197,6 +203,7 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::*;
+    use crate::event::Emitter;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
@@ -221,7 +228,7 @@ mod tests {
         let mut services = EngineServices::test_default();
         services.run = services
             .run
-            .with_emitter(Arc::new(crate::event::Emitter::new(fixtures::RUN_1)))
+            .with_emitter(Arc::new(Emitter::new(fixtures::RUN_1)))
             .with_run_store(run_store.clone().into());
         let logger = crate::event::StoreProgressLogger::new(run_store.clone());
         logger.register(services.run.emitter.as_ref());
@@ -277,7 +284,7 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<crate::event::Emitter>,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
                 _cancel_token: CancellationToken,
@@ -290,6 +297,8 @@ mod tests {
                 _node: &Node,
                 _prompt: &str,
                 _system_prompt: Option<&str>,
+                _emitter: &Arc<Emitter>,
+                _stage_scope: &StageScope,
             ) -> Result<CodergenResult, Error> {
                 Ok(CodergenResult::Text {
                     text:              "one-shot response".to_string(),
@@ -338,7 +347,7 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<crate::event::Emitter>,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
                 _cancel_token: CancellationToken,
@@ -351,6 +360,8 @@ mod tests {
                 _node: &Node,
                 _prompt: &str,
                 _system_prompt: Option<&str>,
+                _emitter: &Arc<Emitter>,
+                _stage_scope: &StageScope,
             ) -> Result<CodergenResult, Error> {
                 Ok(CodergenResult::Text {
                     text:              "one-shot response".to_string(),
@@ -396,7 +407,7 @@ mod tests {
             _prompt: &str,
             _context: &Context,
             _thread_id: Option<&str>,
-            _emitter: &Arc<crate::event::Emitter>,
+            _emitter: &Arc<Emitter>,
             _sandbox: &Arc<dyn fabro_agent::Sandbox>,
             _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             _cancel_token: CancellationToken,
@@ -409,6 +420,8 @@ mod tests {
             _node: &Node,
             prompt: &str,
             system_prompt: Option<&str>,
+            _emitter: &Arc<Emitter>,
+            _stage_scope: &StageScope,
         ) -> Result<CodergenResult, Error> {
             *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
             *self.captured_system_prompt.lock().unwrap() = Some(system_prompt.map(String::from));

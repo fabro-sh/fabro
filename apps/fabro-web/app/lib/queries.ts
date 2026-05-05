@@ -1,12 +1,11 @@
 import useSWR, { type SWRConfiguration } from "swr";
 import type {
   ApiQuestion,
+  EventEnvelope,
   PaginatedBoardRunList,
-  PaginatedEventList,
   PaginatedRunFileList,
   PaginatedRunList,
   PaginatedRunStageList,
-  PaginatedStageTurnList,
   CommandLogResponse,
   CommandOutputStream,
   RunBilling,
@@ -24,6 +23,7 @@ import {
   apiNullableTextFetcher,
   apiPaginatedFetcher,
   apiTextFetcher,
+  fetchAllStageEvents,
   type PaginatedEnvelope,
 } from "./api-client";
 import { queryKeys } from "./query-keys";
@@ -33,6 +33,9 @@ const immutableOptions: SWRConfiguration = {
   revalidateOnFocus: false,
   revalidateOnReconnect: false,
 };
+
+type BoardRunsEnvelope = PaginatedEnvelope<PaginatedBoardRunList["data"][number]> &
+  Pick<PaginatedBoardRunList, "columns">;
 
 export function useAuthConfig() {
   return useSWR<{ methods: string[] }>(queryKeys.auth.config(), apiFetcher, immutableOptions);
@@ -61,11 +64,7 @@ export function useSystemInfo() {
 }
 
 export function useBoardsRuns() {
-  return useSWR<
-    PaginatedEnvelope<PaginatedBoardRunList["data"][number]> & {
-      columns: { id: string; name: string }[];
-    }
-  >(queryKeys.boards.runs(), apiPaginatedFetcher);
+  return useSWR<BoardRunsEnvelope>(queryKeys.boards.runs(), apiPaginatedFetcher);
 }
 
 export function useRun(id: string | undefined) {
@@ -141,21 +140,10 @@ export function useRunQuestions(id: string | undefined, enabled: boolean) {
   );
 }
 
-export function useRunStageTurns(
-  id: string | undefined,
-  stageId: string | undefined,
-  enabled = true,
-) {
-  return useSWR<PaginatedStageTurnList | null>(
-    id && stageId && enabled ? queryKeys.runs.stageTurns(id, stageId) : null,
-    apiNullableFetcher,
-  );
-}
-
-export function useRunEventsList(id: string | undefined, enabled = true) {
-  return useSWR<PaginatedEventList | null>(
-    id && enabled ? queryKeys.runs.events(id, 1000) : null,
-    apiNullableFetcher,
+export function useRunStageEvents(id: string | undefined, stageId: string | undefined) {
+  return useSWR<EventEnvelope[]>(
+    id && stageId ? queryKeys.runs.stageEvents(id, stageId) : null,
+    fetchAllStageEvents<EventEnvelope>,
   );
 }
 

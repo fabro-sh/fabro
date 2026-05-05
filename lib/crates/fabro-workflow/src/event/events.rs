@@ -206,6 +206,7 @@ pub enum Event {
         failure:     FailureDetail,
         will_retry:  bool,
         duration_ms: u64,
+        billing:     Option<BilledModelUsage>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         actor:       Option<Principal>,
     },
