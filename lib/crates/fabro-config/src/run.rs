@@ -25,6 +25,19 @@ pub(crate) fn load_run_config(path: &Path) -> Result<SettingsLayer> {
     load_settings_path(path)
 }
 
+/// Parse a settings TOML source and extract its `[run]` layer.
+///
+/// The full source goes through `SettingsLayer::from_str`, so any unknown
+/// top-level domain (`server.*`, `cli.*`, etc.) or unknown nested key under
+/// a known domain trips the strict `deny_unknown_fields` validation. This
+/// is the parsing path bundled workflow.toml configurations use.
+pub fn parse_run_layer_from_settings_toml(source: &str) -> Result<RunLayer> {
+    let layer = source
+        .parse::<SettingsLayer>()
+        .map_err(|err| crate::Error::parse("Failed to parse run config TOML", err))?;
+    Ok(layer.run.unwrap_or_default())
+}
+
 /// Resolve a graph path relative to a workflow.toml.
 #[must_use]
 pub fn resolve_graph_path(workflow_toml: &Path, graph_relative: &str) -> PathBuf {

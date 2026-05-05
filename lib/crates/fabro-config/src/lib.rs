@@ -44,12 +44,13 @@ pub use layers::{
     LogFilter, McpEntryLayer, MergeMap, ModelRefOrSplice, NotificationProviderLayer,
     NotificationRouteLayer, ObjectStoreLocalLayer, ObjectStoreS3Layer, PrepareStep, ProjectLayer,
     ReplaceMap, RunAgentLayer, RunArtifactsLayer, RunCheckpointLayer, RunExecutionLayer,
-    RunGitLayer, RunGoalLayer, RunLayer, RunModelLayer, RunPrepareLayer, RunPullRequestLayer,
-    RunSandboxLayer, RunScmLayer, ScmGitHubLayer, ServerApiLayer, ServerArtifactsLayer,
-    ServerAuthGithubLayer, ServerAuthLayer, ServerIntegrationsLayer, ServerIpAllowlistLayer,
-    ServerIpAllowlistOverrideLayer, ServerLayer, ServerListenLayer, ServerLoggingLayer,
-    ServerSchedulerLayer, ServerSlateDbLayer, ServerStorageLayer, ServerWebLayer,
-    SlackIntegrationLayer, StickyMap, StringOrSplice, TeamsIntegrationLayer, WorkflowLayer,
+    RunGitLayer, RunGoalLayer, RunIntegrationsGithubLayer, RunIntegrationsLayer, RunLayer,
+    RunModelLayer, RunPrepareLayer, RunPullRequestLayer, RunSandboxLayer, RunScmLayer,
+    ScmGitHubLayer, ServerApiLayer, ServerArtifactsLayer, ServerAuthGithubLayer, ServerAuthLayer,
+    ServerIntegrationsLayer, ServerIpAllowlistLayer, ServerIpAllowlistOverrideLayer, ServerLayer,
+    ServerListenLayer, ServerLoggingLayer, ServerSchedulerLayer, ServerSlateDbLayer,
+    ServerStorageLayer, ServerWebLayer, SlackIntegrationLayer, StickyMap, StringOrSplice,
+    TeamsIntegrationLayer, WorkflowLayer,
 };
 pub(crate) use layers::{Combine, SettingsLayer};
 pub use logging::{resolve_log_destination, resolve_log_destination_with_env};

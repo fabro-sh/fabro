@@ -1,7 +1,5 @@
 _version = 1
 
-[server.integrations.github]
-
-[server.integrations.github.permissions]
+[run.integrations.github.permissions]
+pull_requests = "read"
 issues = "read"
-pull_requests = "write"

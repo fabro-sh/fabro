@@ -7135,7 +7135,6 @@ components:
         - app_id
         - client_id
         - slug
-        - permissions
         - webhooks
       properties:
         enabled:
@@ -7148,10 +7147,6 @@ components:
           type: ["string", "null"]
         slug:
           type: ["string", "null"]
-        permissions:
-          type: object
-          additionalProperties:
-            type: string
         webhooks:
           oneOf:
             - $ref: "#/components/schemas/IntegrationWebhooksSettings"
@@ -7276,6 +7271,7 @@ components:
         - scm
         - pull_request
         - artifacts
+        - integrations
       properties:
         goal:
           oneOf:
@@ -7323,6 +7319,24 @@ components:
             - type: "null"
         artifacts:
           $ref: "#/components/schemas/ArtifactsSettings"
+        integrations:
+          $ref: "#/components/schemas/RunIntegrationsSettings"
+
+    RunIntegrationsSettings:
+      type: object
+      required: [github]
+      properties:
+        github:
+          $ref: "#/components/schemas/RunIntegrationsGithubSettings"
+
+    RunIntegrationsGithubSettings:
+      type: object
+      required: [permissions]
+      properties:
+        permissions:
+          type: object
+          additionalProperties:
+            type: string
 
     RunGoal:
       oneOf:

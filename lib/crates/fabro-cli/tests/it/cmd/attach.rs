@@ -615,6 +615,11 @@ fn attach_json_errors_without_prompting_for_human_input() {
               },
               "hooks": [],
               "inputs": {},
+              "integrations": {
+                "github": {
+                  "permissions": {}
+                }
+              },
               "interviews": {
                 "discord": null,
                 "provider": null,

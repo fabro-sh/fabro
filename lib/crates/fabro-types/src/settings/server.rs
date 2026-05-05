@@ -5,7 +5,6 @@
 //! scheduler, logging, integrations). Same-host and split-host deployments
 //! use the same schema.
 
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Duration as StdDuration;
 
@@ -267,13 +266,12 @@ pub struct ServerIntegrationsSettings {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GithubIntegrationSettings {
-    pub enabled:     bool,
-    pub strategy:    GithubIntegrationStrategy,
-    pub app_id:      Option<InterpString>,
-    pub client_id:   Option<InterpString>,
-    pub slug:        Option<InterpString>,
-    pub permissions: HashMap<String, InterpString>,
-    pub webhooks:    Option<IntegrationWebhooksSettings>,
+    pub enabled:   bool,
+    pub strategy:  GithubIntegrationStrategy,
+    pub app_id:    Option<InterpString>,
+    pub client_id: Option<InterpString>,
+    pub slug:      Option<InterpString>,
+    pub webhooks:  Option<IntegrationWebhooksSettings>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

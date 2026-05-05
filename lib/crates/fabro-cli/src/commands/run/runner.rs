@@ -18,7 +18,7 @@ use fabro_interview::{
 };
 use fabro_store::{EventEnvelope, RunProjection, RunProjectionReducer};
 use fabro_types::settings::InterpString;
-use fabro_types::settings::run::RunMode;
+use fabro_types::settings::run::{RunMode, RunNamespace};
 use fabro_types::{
     ArtifactUpload, EventBody, FailureReason, Principal, RunBlobId, RunEvent, RunId,
     WorkflowSettings,
@@ -117,7 +117,7 @@ pub(crate) async fn execute(
         artifact_sink,
         run_control: Some(run_control),
         github_app,
-        github_permissions: HashMap::new(),
+        github_permissions: resolve_run_github_permissions(&run_spec.settings.run),
         vault,
         on_node: None,
         registry_override: None,
@@ -517,30 +517,23 @@ fn maybe_build_github_credentials(
 ) -> Result<Option<fabro_github::GitHubCredentials>> {
     let resolved_run = &settings.run;
     let resolved_server = ServerSettingsBuilder::load_default().ok();
-    let required_github_credentials = (resolved_run.execution.mode != RunMode::DryRun
-        && clone_sandbox_requires_github_credentials(&resolved_run.sandbox.provider))
-        || resolved_server
-            .as_ref()
-            .is_some_and(|settings| !settings.server.integrations.github.permissions.is_empty());
-    let pull_request_enabled =
-        resolved_run.execution.mode != RunMode::DryRun && resolved_run.pull_request.is_some();
-    let strategy = resolved_server
-        .as_ref()
-        .map(|settings| settings.server.integrations.github.strategy)
+    let server_ns = resolved_server.as_ref().map(|s| &s.server);
+    let strategy = server_ns
+        .map(|server| server.integrations.github.strategy)
         .unwrap_or_default();
-    let app_id = resolved_server
-        .as_ref()
-        .and_then(|settings| settings.server.integrations.github.app_id.as_ref())
+    let app_id = server_ns
+        .and_then(|server| server.integrations.github.app_id.as_ref())
         .map(InterpString::as_source);
-    let app_slug = resolved_server
-        .as_ref()
-        .and_then(|settings| settings.server.integrations.github.slug.as_ref())
+    let app_slug = server_ns
+        .and_then(|server| server.integrations.github.slug.as_ref())
         .map(InterpString::as_source);
 
-    if required_github_credentials {
+    if requires_github_credentials(resolved_run) {
         return build_github_credentials(strategy, app_id.as_deref(), app_slug.as_deref(), vault);
     }
 
+    let pull_request_enabled =
+        resolved_run.execution.mode != RunMode::DryRun && resolved_run.pull_request.is_some();
     if pull_request_enabled {
         return Ok(build_github_credentials(
             strategy,
@@ -553,6 +546,55 @@ fn maybe_build_github_credentials(
     }
 
     Ok(None)
+}
+
+/// Resolve `[run.integrations.github.permissions]` `InterpString` values to
+/// concrete strings against the live process environment, preserving the
+/// same fallback as the server side: if resolution fails the source form is
+/// used. Thin wrapper over [`resolve_run_github_permissions_with`] so the
+/// loop is testable against a stub lookup.
+fn resolve_run_github_permissions(run: &RunNamespace) -> HashMap<String, String> {
+    resolve_run_github_permissions_with(run, process_env_var)
+}
+
+fn resolve_run_github_permissions_with<F>(
+    run: &RunNamespace,
+    mut lookup: F,
+) -> HashMap<String, String>
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    run.integrations
+        .github
+        .permissions
+        .iter()
+        .map(|(name, value)| {
+            let resolved = value
+                .resolve(&mut lookup)
+                .map_or_else(|_| value.as_source(), |resolved| resolved.value);
+            (name.clone(), resolved)
+        })
+        .collect()
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "CLI worker InterpString resolution facade for {{ env.* }} values."
+)]
+fn process_env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
+/// Truth table for whether a CLI-launched run needs GitHub credentials to
+/// proceed. Mirrors the gates checked on the server launch path: a
+/// non-empty run-level `permissions` map (any execution mode), or
+/// clone-based sandbox in non-dry-run mode.
+fn requires_github_credentials(run: &RunNamespace) -> bool {
+    if !run.integrations.github.permissions.is_empty() {
+        return true;
+    }
+    run.execution.mode != RunMode::DryRun
+        && clone_sandbox_requires_github_credentials(&run.sandbox.provider)
 }
 
 fn clone_sandbox_requires_github_credentials(provider: &str) -> bool {
@@ -940,5 +982,111 @@ mod tests {
         let credential = guard.get("anthropic").unwrap();
 
         assert!(credential.contains("vault-key"));
+    }
+
+    mod run_github_permissions_helpers {
+        //! Unit tests for the worker's run-level GitHub helpers.
+        //!
+        //! These cover the two private functions called from the CLI worker
+        //! launch path:
+        //!   - `resolve_run_github_permissions` — `InterpString` → `String`
+        //!   - `requires_github_credentials` — boolean gate truth table
+
+        use std::collections::HashMap;
+
+        use fabro_types::settings::InterpString;
+        use fabro_types::settings::run::{
+            RunIntegrationsGithubSettings, RunIntegrationsSettings, RunMode, RunNamespace,
+            RunSandboxSettings,
+        };
+
+        use super::super::{requires_github_credentials, resolve_run_github_permissions_with};
+
+        fn run_with(
+            permissions: HashMap<String, InterpString>,
+            provider: &str,
+            mode: RunMode,
+        ) -> RunNamespace {
+            let mut run = RunNamespace::default();
+            run.execution.mode = mode;
+            run.sandbox = RunSandboxSettings {
+                provider: provider.to_string(),
+                ..RunSandboxSettings::default()
+            };
+            run.integrations = RunIntegrationsSettings {
+                github: RunIntegrationsGithubSettings { permissions },
+            };
+            run
+        }
+
+        #[test]
+        fn resolve_run_github_permissions_resolves_env_tokens_via_lookup() {
+            let permissions = HashMap::from([
+                (
+                    "issues".to_string(),
+                    InterpString::parse("{{ env.GH_PERM_LEVEL }}"),
+                ),
+                ("contents".to_string(), InterpString::parse("read")),
+            ]);
+            let run = run_with(permissions, "local", RunMode::Normal);
+
+            let lookup = |name: &str| match name {
+                "GH_PERM_LEVEL" => Some("write".to_string()),
+                _ => None,
+            };
+            let resolved = resolve_run_github_permissions_with(&run, lookup);
+
+            assert_eq!(resolved.get("issues"), Some(&"write".to_string()));
+            assert_eq!(resolved.get("contents"), Some(&"read".to_string()));
+        }
+
+        #[test]
+        fn resolve_run_github_permissions_falls_back_to_source_when_lookup_fails() {
+            let permissions = HashMap::from([(
+                "issues".to_string(),
+                InterpString::parse("{{ env.GH_PERM_MISSING }}"),
+            )]);
+            let run = run_with(permissions, "local", RunMode::Normal);
+
+            // Lookup that always returns `None` simulates an unset env var.
+            let resolved = resolve_run_github_permissions_with(&run, |_| None);
+
+            // Fallback preserves the source form so callers can surface a
+            // useful diagnostic instead of silently dropping the entry.
+            assert_eq!(
+                resolved.get("issues"),
+                Some(&"{{ env.GH_PERM_MISSING }}".to_string())
+            );
+        }
+
+        #[test]
+        fn requires_github_credentials_when_permissions_non_empty() {
+            let permissions = HashMap::from([("issues".to_string(), InterpString::parse("read"))]);
+            // Even with local sandbox + dry-run, non-empty permissions
+            // force credential acquisition.
+            let run = run_with(permissions, "local", RunMode::DryRun);
+            assert!(requires_github_credentials(&run));
+        }
+
+        #[test]
+        fn requires_github_credentials_for_clone_based_provider() {
+            let run = run_with(HashMap::new(), "docker", RunMode::Normal);
+            assert!(requires_github_credentials(&run));
+
+            let daytona = run_with(HashMap::new(), "daytona", RunMode::Normal);
+            assert!(requires_github_credentials(&daytona));
+        }
+
+        #[test]
+        fn does_not_require_github_credentials_for_local_clean_run() {
+            let run = run_with(HashMap::new(), "local", RunMode::Normal);
+            assert!(!requires_github_credentials(&run));
+        }
+
+        #[test]
+        fn does_not_require_github_credentials_for_clone_provider_in_dry_run() {
+            let run = run_with(HashMap::new(), "docker", RunMode::DryRun);
+            assert!(!requires_github_credentials(&run));
+        }
     }
 }

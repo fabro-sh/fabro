@@ -4,9 +4,9 @@ use fabro_types::settings::run::{
     GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings, LocalSandboxSettings,
     McpServerSettings, McpTransport, MergeStrategy, NotificationProviderSettings,
     NotificationRouteSettings, PullRequestSettings, RunAgentSettings, RunCheckpointSettings,
-    RunExecutionSettings, RunGitSettings, RunGoal, RunInterviewsSettings, RunModelSettings,
-    RunNamespace, RunPrepareSettings, RunSandboxSettings, RunScmSettings, ScmGitHubSettings,
-    TlsMode,
+    RunExecutionSettings, RunGitSettings, RunGoal, RunIntegrationsGithubSettings,
+    RunIntegrationsSettings, RunInterviewsSettings, RunModelSettings, RunNamespace,
+    RunPrepareSettings, RunSandboxSettings, RunScmSettings, ScmGitHubSettings, TlsMode,
 };
 
 use super::ResolveError;
@@ -14,8 +14,9 @@ use crate::{
     DaytonaDockerfileLayer, DaytonaSandboxLayer, HookAgentMarker, HookEntry, HookTlsMode,
     InterviewProviderLayer, InterviewsLayer, McpEntryLayer, ModelRefOrSplice,
     NotificationProviderLayer, NotificationRouteLayer, RunAgentLayer, RunArtifactsLayer,
-    RunCheckpointLayer, RunExecutionLayer, RunGitLayer, RunGoalLayer, RunLayer, RunModelLayer,
-    RunPrepareLayer, RunPullRequestLayer, RunSandboxLayer, RunScmLayer, StringOrSplice,
+    RunCheckpointLayer, RunExecutionLayer, RunGitLayer, RunGoalLayer, RunIntegrationsLayer,
+    RunLayer, RunModelLayer, RunPrepareLayer, RunPullRequestLayer, RunSandboxLayer, RunScmLayer,
+    StringOrSplice,
 };
 
 pub fn resolve_run(layer: &RunLayer, errors: &mut Vec<ResolveError>) -> RunNamespace {
@@ -46,7 +47,21 @@ pub fn resolve_run(layer: &RunLayer, errors: &mut Vec<ResolveError>) -> RunNames
         scm:           resolve_scm(layer.scm.as_ref()),
         pull_request:  resolve_pull_request(layer.pull_request.as_ref()),
         artifacts:     resolve_artifacts(layer.artifacts.as_ref()),
+        integrations:  resolve_integrations(layer.integrations.as_ref()),
     }
+}
+
+fn resolve_integrations(layer: Option<&RunIntegrationsLayer>) -> RunIntegrationsSettings {
+    let github = layer
+        .and_then(|integrations| integrations.github.as_ref())
+        .map(|github| RunIntegrationsGithubSettings {
+            // Collapse `Option<HashMap<...>>` -> `HashMap<...>`: both `None`
+            // and `Some({})` resolve to an empty map (no token requested).
+            // The presence distinction is only meaningful at merge time.
+            permissions: github.permissions.clone().unwrap_or_default(),
+        })
+        .unwrap_or_default();
+    RunIntegrationsSettings { github }
 }
 
 fn resolve_goal(goal: Option<&RunGoalLayer>) -> Option<RunGoal> {

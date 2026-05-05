@@ -40,8 +40,9 @@ pub use run::{
     GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings, McpServerSettings,
     McpTransport, NotificationProviderSettings, NotificationRouteSettings, PullRequestSettings,
     RunAgentSettings, RunCheckpointSettings, RunExecutionSettings, RunGitSettings, RunGoal,
-    RunInterviewsSettings, RunModelSettings, RunNamespace, RunPrepareSettings, RunSandboxSettings,
-    RunScmSettings, ScmGitHubSettings, TlsMode,
+    RunIntegrationsGithubSettings, RunIntegrationsSettings, RunInterviewsSettings,
+    RunModelSettings, RunNamespace, RunPrepareSettings, RunSandboxSettings, RunScmSettings,
+    ScmGitHubSettings, TlsMode,
 };
 pub use server::{
     DiscordIntegrationSettings, GithubIntegrationSettings, IntegrationWebhooksSettings,

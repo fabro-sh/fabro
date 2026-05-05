@@ -457,13 +457,12 @@ fn resolve_integrations(
         github:  layer
             .and_then(|integrations| integrations.github.as_ref())
             .map(|github| GithubIntegrationSettings {
-                enabled:     github.enabled.unwrap_or(true),
-                strategy:    github.strategy.unwrap_or_default(),
-                app_id:      github.app_id.clone(),
-                client_id:   github.client_id.clone(),
-                slug:        github.slug.clone(),
-                permissions: github.permissions.clone().into_inner(),
-                webhooks:    github.webhooks.as_ref().map(|webhooks| {
+                enabled:   github.enabled.unwrap_or(true),
+                strategy:  github.strategy.unwrap_or_default(),
+                app_id:    github.app_id.clone(),
+                client_id: github.client_id.clone(),
+                slug:      github.slug.clone(),
+                webhooks:  github.webhooks.as_ref().map(|webhooks| {
                     resolve_github_webhooks(webhooks, "server.integrations.github.webhooks", errors)
                 }),
             })

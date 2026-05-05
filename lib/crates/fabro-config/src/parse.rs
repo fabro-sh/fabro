@@ -115,7 +115,10 @@ fn rename_hint(key: &str) -> Option<String> {
         "max_concurrent_runs" => "rename to `[server.scheduler]` field",
         "fabro" => "rename to `[project]`; `fabro.root` becomes `project.directory`",
         "git" => "split into `[run.git]` (local git behavior) and `[server.integrations.github]`",
-        "github" => "rename to `[server.integrations.github]`",
+        "github" => {
+            "split into `[server.integrations.github]` (App identity/auth) and \
+             `[run.integrations.github.permissions]` (sandbox token scopes)"
+        }
         "slack" => "move under `[server.integrations.slack]`",
         "log" => "rename to `[server.logging]` or `[cli.logging]` depending on owner",
         "prevent_idle_sleep" => "rename to `[cli.exec] prevent_idle_sleep`",

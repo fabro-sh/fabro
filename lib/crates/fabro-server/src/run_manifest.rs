@@ -7,6 +7,7 @@ use std::time::Duration;
 use anyhow::{Context as _, Result, anyhow, bail};
 use fabro_api::types;
 use fabro_auth::auth_issue_message;
+use fabro_config::run::parse_run_layer_from_settings_toml;
 use fabro_config::{
     CliLayer, CliOutputLayer, DaytonaDockerfileLayer, DockerSandboxLayer, LocalSandboxLayer,
     ReplaceMap, RunExecutionLayer, RunLayer, RunModelLayer, RunSandboxLayer,
@@ -24,7 +25,6 @@ use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::redact::redact_auth_url;
 use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec};
 use fabro_static::EnvVars;
-use fabro_types::settings::ServerNamespace;
 use fabro_types::settings::cli::OutputVerbosity;
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{
@@ -292,16 +292,14 @@ fn root_workflow_run_layer(workflow: &BundledWorkflow) -> Result<RunLayer> {
         return Ok(RunLayer::default());
     };
 
-    let mut document: toml::Table = config
-        .source
-        .parse()
+    // Parse via `SettingsLayer` so unknown nested keys (like a stale
+    // `[server.integrations.github.permissions]` after the move to
+    // `[run.integrations.github.permissions]`) trip
+    // `deny_unknown_fields`. Other valid top-level domains
+    // (`_version`, `[workflow]`, `[server.*]`) parse cleanly and the
+    // builder ignores everything outside `[run]` for this code path.
+    let mut run = parse_run_layer_from_settings_toml(&config.source)
         .context("Failed to parse run config TOML")?;
-    let mut run = document
-        .remove("run")
-        .map(toml::Value::try_into::<RunLayer>)
-        .transpose()
-        .context("Failed to parse run config TOML")?
-        .unwrap_or_default();
     resolve_manifest_dockerfile(&mut run, &config.path, &workflow.files)?;
     Ok(run)
 }
@@ -493,8 +491,8 @@ async fn build_preflight_report(
         } else {
             sandbox_provider
         };
-    let needs_github_credentials =
-        sandbox_provider.is_clone_based() || !github_integration.permissions.is_empty();
+    let needs_github_credentials = sandbox_provider.is_clone_based()
+        || !resolved_run.integrations.github.permissions.is_empty();
     let github_app = if needs_github_credentials {
         state
             .github_credentials(github_integration)
@@ -529,7 +527,7 @@ async fn build_preflight_report(
         &configured_providers,
     )
     .await;
-    run_github_token_check(&mut checks, prepared, &server_settings.server, github_app).await;
+    run_github_token_check(&mut checks, prepared, &resolved_run, github_app).await;
 
     let checks_ok = sandbox_ok && repository_access_ok && llm_ok;
 
@@ -1184,21 +1182,21 @@ fn runtime_docker_config(settings: &DockerSettings) -> DockerSandboxOptions {
 async fn run_github_token_check(
     checks: &mut Vec<CheckResult>,
     prepared: &PreparedManifest,
-    settings: &ServerNamespace,
+    run: &RunNamespace,
     github_app: Option<fabro_github::GitHubCredentials>,
 ) {
-    if settings.integrations.github.permissions.is_empty() {
+    if run.integrations.github.permissions.is_empty() {
         return;
     }
 
     // Resolve InterpString permission values eagerly for token minting and
     // for display in the preflight report.
-    let github_permissions: HashMap<String, String> = settings
+    let github_permissions: HashMap<String, String> = run
         .integrations
         .github
         .permissions
         .iter()
-        .map(|(k, v)| (k.clone(), v.as_source()))
+        .map(|(k, v)| (k.clone(), resolve_interp(v)))
         .collect();
 
     let perm_details = github_permissions
@@ -1819,6 +1817,57 @@ app_id = "fixture-app-id"
     }
 
     #[tokio::test]
+    async fn preflight_runs_github_token_check_when_run_level_permissions_declared() {
+        // When a workflow declares `[run.integrations.github.permissions]`,
+        // `run_github_token_check` is invoked and surfaces a "GitHub Token"
+        // entry in the preflight report. With no configured GitHub App
+        // credentials in the test fixture, the check status is
+        // Warning/skipped — the important assertion is that the entry
+        // *exists*, proving the gate now reads from run-level config.
+        let state = crate::test_support::test_app_state();
+        let mut manifest = minimal_manifest();
+        manifest.workflows.get_mut("workflow.fabro").unwrap().config =
+            Some(types::ManifestWorkflowConfig {
+                path:   "workflow.toml".to_string(),
+                source: r#"_version = 1
+
+[run.sandbox]
+provider = "local"
+
+[run.integrations.github.permissions]
+issues = "read"
+"#
+                .to_string(),
+            });
+
+        let prepared = prepare_manifest(
+            &manifest_run_defaults(Some(&default_settings_fixture())),
+            &manifest,
+        )
+        .unwrap();
+        let validated = validate_prepared_manifest(&prepared).unwrap();
+        assert!(!validated.has_errors());
+
+        let (response, _ok) = run_preflight(state.as_ref(), &prepared, &validated)
+            .await
+            .unwrap();
+
+        assert!(
+            response.checks.sections[0]
+                .checks
+                .iter()
+                .any(|check| check.name == "GitHub Token"),
+            "expected GitHub Token check to run when run-level permissions are set; \
+             checks were {:?}",
+            response.checks.sections[0]
+                .checks
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
     async fn preflight_allows_pull_request_enabled_without_github_credentials() {
         let state = crate::test_support::test_app_state();
         let mut manifest = minimal_manifest();
@@ -1979,5 +2028,90 @@ digraph Demo {
                 .contains("Rate limited by openai: quota limited")
         );
         assert!(response_mock.calls_async().await >= 1);
+    }
+
+    mod root_workflow_run_layer_tests {
+        //! `root_workflow_run_layer` parses bundled workflow.toml through
+        //! the strict `SettingsLayer` schema, so unknown fields anywhere in
+        //! the document trip `deny_unknown_fields`.
+
+        use fabro_workflow::ManifestPath;
+        use fabro_workflow::workflow_bundle::{BundledWorkflow, ParsedWorkflowConfig};
+
+        use super::super::root_workflow_run_layer;
+
+        fn workflow_with_config(source: &str) -> BundledWorkflow {
+            BundledWorkflow {
+                path:   ManifestPath::from_wire("workflow.fabro").expect("path should be valid"),
+                source: "digraph G {}".to_string(),
+                config: Some(ParsedWorkflowConfig {
+                    path:   ManifestPath::from_wire("workflow.toml")
+                        .expect("config path should be valid"),
+                    source: source.to_string(),
+                }),
+                files:  std::collections::HashMap::new(),
+            }
+        }
+
+        #[test]
+        fn parses_run_integrations_github_permissions() {
+            let workflow = workflow_with_config(
+                r#"_version = 1
+
+[run.integrations.github.permissions]
+issues = "read"
+"#,
+            );
+
+            let run = root_workflow_run_layer(&workflow).expect("workflow.toml should parse");
+            let github = run
+                .integrations
+                .as_ref()
+                .and_then(|integrations| integrations.github.as_ref())
+                .expect("integrations.github should be present");
+            let permissions = github
+                .permissions
+                .as_ref()
+                .expect("permissions should be present");
+            assert_eq!(permissions.len(), 1);
+            assert!(permissions.contains_key("issues"));
+        }
+
+        #[test]
+        fn rejects_stale_server_integrations_github_permissions() {
+            let workflow = workflow_with_config(
+                r#"_version = 1
+
+[server.integrations.github.permissions]
+issues = "read"
+"#,
+            );
+
+            let err = root_workflow_run_layer(&workflow)
+                .expect_err("stale [server.integrations.github.permissions] should be rejected");
+            let message = format!("{err:#}");
+            assert!(
+                message.contains("permissions") || message.contains("unknown field"),
+                "expected unknown-field error, got: {message}"
+            );
+        }
+
+        #[test]
+        fn accepts_workflow_block_and_version() {
+            let workflow = workflow_with_config(
+                r#"_version = 1
+
+[workflow]
+name = "demo"
+
+[run.integrations.github.permissions]
+contents = "read"
+"#,
+            );
+
+            let run =
+                root_workflow_run_layer(&workflow).expect("workflow + run blocks should parse");
+            assert!(run.integrations.is_some());
+        }
     }
 }

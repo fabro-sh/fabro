@@ -2728,7 +2728,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
                 .is_some_and(|origin| !origin.trim().is_empty());
         let pull_request_can_use_github_credentials =
             settings.execution.mode != RunMode::DryRun && settings.pull_request.is_some();
-        if !github_settings.permissions.is_empty() {
+        if !settings.integrations.github.permissions.is_empty() {
             state.github_credentials(github_settings)
         } else if clone_can_use_github_credentials || pull_request_can_use_github_credentials {
             match state.github_credentials(github_settings) {
@@ -2764,7 +2764,12 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
             return;
         }
     };
-    let github_permissions = github_settings
+    let github_permissions = persisted
+        .run_spec()
+        .settings
+        .run
+        .integrations
+        .github
         .permissions
         .iter()
         .map(|(name, value)| {

@@ -32,7 +32,7 @@ The rest of this page describes the `app` strategy, which is required for browse
 | **Checkpoint pushing** | After each workflow stage, Fabro pushes the run branch and metadata branch back to origin from inside the sandbox |
 | **Auto-PR** | When `[run.pull_request] enabled = true` in the [run config](/execution/run-configuration#runpull_request), Fabro opens a PR from the agent's working branch after a successful run |
 | **Auto-merge** | When `[run.pull_request] auto_merge = true`, Fabro enables GitHub's auto-merge on created PRs so they merge automatically once required checks pass |
-| **Sandbox GITHUB_TOKEN** | When `[server.integrations.github.permissions]` are declared in the server config, Fabro mints a scoped Installation Access Token and injects it as `GITHUB_TOKEN` in the sandbox |
+| **Sandbox GITHUB_TOKEN** | When `[run.integrations.github.permissions]` are declared at any layer (workflow, project, or user settings), Fabro mints a scoped Installation Access Token and injects it as `GITHUB_TOKEN` in the sandbox |
 
 ## Setup
 
@@ -208,16 +208,21 @@ For public repositories, the clone works without credentials. The token is still
 
 ### GITHUB_TOKEN injection
 
-When a run config declares `[github] permissions`, Fabro mints a scoped Installation Access Token at startup and injects it into the sandbox as the `GITHUB_TOKEN` environment variable. Agents running inside the sandbox can use this token for GitHub API calls, cloning additional private repos, or pushing to branches.
+When any settings layer declares `[run.integrations.github.permissions]`, Fabro mints a scoped Installation Access Token at startup and injects it into the sandbox as the `GITHUB_TOKEN` environment variable. Agents running inside the sandbox can use this token for GitHub API calls, cloning additional private repos, or pushing to branches.
 
-```toml title="run.toml"
-[github]
-permissions = { contents = "write", pull_requests = "write" }
+```toml title="workflow.toml"
+[run.integrations.github.permissions]
+contents = "write"
+pull_requests = "write"
 ```
 
 Only the listed permissions are requested — the token is scoped to the minimum access needed. If the GitHub App isn't configured or the repository lacks an installation, the run logs a warning and continues without the token.
 
-This also works in `.fabro/project.toml` as a project-level default, so all workflows in the project automatically get a `GITHUB_TOKEN` without repeating the config in each run TOML.
+The permissions table follows the standard layer-merge order (workflow > project > user > defaults). Set defaults at `[run.integrations.github.permissions]` in `~/.fabro/settings.toml` so every run inherits a baseline; tighten or override per-workflow as needed. A higher layer that defines `permissions = {}` clears the inherited map (no token requested).
+
+#### Security model
+
+The upper bound on what Fabro will mint is whatever permissions the GitHub App installation has been granted. Fabro does **not** impose a separate server-side cap on the run-level `permissions` map: any value the App has been granted can be requested by run config. Operators must not run untrusted workflow, project, or user TOML against a broadly-scoped GitHub App installation. Preflight prints the resolved permission set so reviewers can see what each run will request.
 
 ### Checkpoint pushing
 

@@ -35,6 +35,24 @@ pub struct RunNamespace {
     pub scm:           RunScmSettings,
     pub pull_request:  Option<PullRequestSettings>,
     pub artifacts:     ArtifactsSettings,
+    pub integrations:  RunIntegrationsSettings,
+}
+
+/// `[run.integrations]` — run-level integration knobs.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct RunIntegrationsSettings {
+    pub github: RunIntegrationsGithubSettings,
+}
+
+/// `[run.integrations.github]` — runtime GitHub token shape.
+///
+/// `permissions` is empty when no token should be requested. The
+/// presence-vs-clear distinction is only meaningful at the layer-merge
+/// stage; the resolved form collapses both `None` and `Some({})` into an
+/// empty map.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct RunIntegrationsGithubSettings {
+    pub permissions: HashMap<String, InterpString>,
 }
 
 /// The resolved source of a run goal.

@@ -8,7 +8,6 @@ use fabro_types::settings::{Duration, InterpString};
 use serde::{Deserialize, Serialize};
 
 use super::LogFilter;
-use super::maps::StickyMap;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
@@ -213,19 +212,17 @@ pub struct ServerIntegrationsLayer {
 #[serde(deny_unknown_fields)]
 pub struct GithubIntegrationLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enabled:     Option<bool>,
+    pub enabled:   Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub strategy:    Option<GithubIntegrationStrategy>,
+    pub strategy:  Option<GithubIntegrationStrategy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub app_id:      Option<InterpString>,
+    pub app_id:    Option<InterpString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_id:   Option<InterpString>,
+    pub client_id: Option<InterpString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slug:        Option<InterpString>,
-    #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
-    pub permissions: StickyMap<InterpString>,
+    pub slug:      Option<InterpString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub webhooks:    Option<IntegrationWebhooksLayer>,
+    pub webhooks:  Option<IntegrationWebhooksLayer>,
 }
 
 /// `[server.integrations.slack]` — Slack workspace credentials and defaults.
