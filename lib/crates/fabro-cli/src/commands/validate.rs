@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::bail;
 use fabro_config::RunLayer;
 use fabro_config::user::active_settings_path;
@@ -21,6 +23,7 @@ pub(crate) fn run(
         cwd:                base_ctx.cwd().to_path_buf(),
         run_overrides:      None,
         cli_overrides:      None,
+        input_overrides:    HashMap::new(),
         args:               None,
         run_id:             None,
         user_settings_path: Some(active_settings_path(None)),

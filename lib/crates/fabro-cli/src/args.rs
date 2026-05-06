@@ -168,6 +168,13 @@ pub(crate) struct ServerConnectionArgs {
     pub(crate) target: ServerTargetArgs,
 }
 
+#[derive(Args, Debug, Clone, Default)]
+pub(crate) struct InputOverrideArgs {
+    /// Override a workflow input value (repeatable, format: KEY=VALUE)
+    #[arg(short = 'I', long = "input", value_name = "KEY=VALUE")]
+    pub(crate) values: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub(crate) enum CliSandboxProvider {
     Local,
@@ -199,6 +206,9 @@ impl From<fabro_sandbox::SandboxProvider> for CliSandboxProvider {
 pub(crate) struct RunArgs {
     #[command(flatten)]
     pub(crate) target: ServerTargetArgs,
+
+    #[command(flatten)]
+    pub(crate) inputs: InputOverrideArgs,
 
     /// Path to a .fabro workflow file or .toml task config
     #[arg(required = true)]
@@ -265,6 +275,9 @@ pub(crate) struct RunArgs {
 pub(crate) struct PreflightArgs {
     #[command(flatten)]
     pub(crate) target: ServerTargetArgs,
+
+    #[command(flatten)]
+    pub(crate) inputs: InputOverrideArgs,
 
     /// Path to a .fabro workflow file or .toml task config
     pub(crate) workflow: PathBuf,

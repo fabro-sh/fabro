@@ -50,6 +50,7 @@ fabro-redact.workspace = true
 fabro-util = { path = "../fabro-util" }
 fabro-http.workspace = true
 fabro-static.workspace = true
+fabro-template = { path = "../fabro-template" }
 clap.workspace = true
 clap_complete.workspace = true
 cli-table.workspace = true

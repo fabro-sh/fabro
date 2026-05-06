@@ -43,6 +43,7 @@ pub(crate) async fn create_run(
         cwd,
         run_overrides: cli_args_config.run,
         cli_overrides: cli_args_config.cli,
+        input_overrides: cli_args_config.input_overrides,
         args: run_manifest_args(args),
         run_id,
         user_settings_path: Some(active_settings_path(None)),

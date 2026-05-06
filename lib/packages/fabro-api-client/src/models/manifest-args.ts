@@ -35,5 +35,9 @@ export interface ManifestArgs {
      */
     'worktree_mode'?: string;
     'label'?: Array<string>;
+    /**
+     * Raw repeated CLI input overrides, each in `KEY=VALUE` form.
+     */
+    'input'?: Array<string>;
 }
 

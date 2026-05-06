@@ -7,6 +7,7 @@
     reason = "sync CLI `graph` command: blocking std::io::stdout is the intended output mechanism"
 )]
 
+use std::collections::HashMap;
 use std::io::Write;
 
 use anyhow::{Context, bail};
@@ -37,6 +38,7 @@ pub(crate) async fn run(
         cwd:                ctx.cwd().to_path_buf(),
         run_overrides:      None,
         cli_overrides:      None,
+        input_overrides:    HashMap::new(),
         args:               None,
         run_id:             None,
         user_settings_path: Some(active_settings_path(None)),

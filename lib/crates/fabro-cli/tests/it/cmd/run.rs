@@ -141,11 +141,12 @@ fn help() {
           --json                   Output as JSON [env: FABRO_JSON=]
           --server <SERVER>        Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
           --debug                  Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+      -I, --input <KEY=VALUE>      Override a workflow input value (repeatable, format: KEY=VALUE)
           --dry-run                Execute with simulated LLM backend
-          --auto-approve           Auto-approve all human gates
           --no-upgrade-check       Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --goal <GOAL>            Override the workflow goal (available as {{ goal }} in prompts)
+          --auto-approve           Auto-approve all human gates
           --quiet                  Suppress non-essential output [env: FABRO_QUIET=]
+          --goal <GOAL>            Override the workflow goal (available as {{ goal }} in prompts)
           --goal-file <GOAL_FILE>  Read the workflow goal from a file
           --model <MODEL>          Override default LLM model
           --provider <PROVIDER>    Override default LLM provider

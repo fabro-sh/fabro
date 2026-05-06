@@ -4405,6 +4405,11 @@ components:
           type: array
           items:
             type: string
+        input:
+          type: array
+          description: Raw repeated CLI input overrides, each in `KEY=VALUE` form.
+          items:
+            type: string
 
     ManifestTarget:
       type: object

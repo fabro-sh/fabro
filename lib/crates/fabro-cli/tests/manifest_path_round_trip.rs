@@ -3,6 +3,7 @@
     reason = "Sync temp fixture writes keep this manifest round-trip test simple and isolated."
 )]
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use fabro_cli::{ManifestBuildInput, build_run_manifest};
@@ -33,6 +34,7 @@ fn cli_built_manifest_resolves_user_global_at_path() {
         cwd:                project,
         run_overrides:      None,
         cli_overrides:      None,
+        input_overrides:    HashMap::new(),
         args:               None,
         run_id:             None,
         user_settings_path: None,

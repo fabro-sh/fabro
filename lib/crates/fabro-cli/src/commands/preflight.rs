@@ -26,6 +26,7 @@ pub(crate) async fn execute(
         cwd:                ctx.cwd().to_path_buf(),
         run_overrides:      cli_args_config.run,
         cli_overrides:      cli_args_config.cli,
+        input_overrides:    cli_args_config.input_overrides,
         args:               preflight_manifest_args(&args),
         run_id:             None,
         user_settings_path: Some(active_settings_path(None)),

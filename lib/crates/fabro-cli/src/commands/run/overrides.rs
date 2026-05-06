@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
 use fabro_config::{
     CliLayer, CliOutputLayer, ReplaceMap, RunExecutionLayer, RunGoalLayer, RunLayer, RunModelLayer,
-    RunSandboxLayer,
+    RunSandboxLayer, parse_input_overrides,
 };
 use fabro_sandbox::SandboxProvider;
 use fabro_types::settings::cli::OutputVerbosity;
@@ -15,8 +15,9 @@ use crate::args::{PreflightArgs, RunArgs};
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ManifestSettingsOverrides {
-    pub(crate) run: Option<RunLayer>,
-    pub(crate) cli: Option<CliLayer>,
+    pub(crate) run:             Option<RunLayer>,
+    pub(crate) cli:             Option<CliLayer>,
+    pub(crate) input_overrides: HashMap<String, toml::Value>,
 }
 
 fn sparse_flag(value: bool) -> Option<bool> {
@@ -147,8 +148,9 @@ pub(crate) fn run_args_overrides(args: &RunArgs) -> Result<ManifestSettingsOverr
     };
 
     Ok(ManifestSettingsOverrides {
-        run: Some(run),
-        cli: cli_layer_for_verbose(args.verbose),
+        run:             Some(run),
+        cli:             cli_layer_for_verbose(args.verbose),
+        input_overrides: parse_input_overrides(&args.inputs.values)?,
     })
 }
 
@@ -170,8 +172,9 @@ pub(crate) fn preflight_args_overrides(args: &PreflightArgs) -> Result<ManifestS
     };
 
     Ok(ManifestSettingsOverrides {
-        run: Some(run),
-        cli: cli_layer_for_verbose(args.verbose),
+        run:             Some(run),
+        cli:             cli_layer_for_verbose(args.verbose),
+        input_overrides: parse_input_overrides(&args.inputs.values)?,
     })
 }
 

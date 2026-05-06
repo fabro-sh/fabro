@@ -12,7 +12,7 @@ Workflow and prompt templates can reference:
 | Expression | Resolves to |
 |---|---|
 | `{{ goal }}` | The workflow goal |
-| `{{ inputs.name }}` | A value from `[run.inputs]` |
+| `{{ inputs.name }}` | A value from `[run.inputs]`, optionally overridden by CLI input flags |
 
 Environment variables are **not** available in workflow or prompt templates. Use `{{ env.NAME }}` only in config strings and HTTP hook headers.
 
@@ -50,6 +50,14 @@ digraph Check {
     start -> clone -> test -> exit
 }
 ```
+
+Override individual inputs at run time with repeatable `-I` / `--input` flags:
+
+```bash
+fabro run .fabro/workflows/check/workflow.toml -I repo_name=fabro-2 --input language=rust
+```
+
+CLI input values use TOML scalar parsing when possible. Quoted strings, booleans, integers, and floats keep their typed values; unquoted bare text falls back to a string. Empty values such as `foo=` are accepted as empty strings. Arrays, inline tables, and datetimes are rejected.
 
 ## `goal`
 
@@ -91,13 +99,13 @@ You can also emit literal braces with expressions such as `{{ '{{' }}` when need
 
 ## Input merging
 
-`[run.inputs]` intentionally replaces the inherited map wholesale rather than merging by key. Whichever layer has the highest precedence and sets `[run.inputs]` wins its entire map.
+TOML `[run.inputs]` tables intentionally replace the inherited map wholesale rather than merging by key. Whichever TOML layer has the highest precedence and sets `[run.inputs]` wins its entire map.
+
+CLI input flags are different: they are sparse per-key overrides applied after config resolution, so unrelated inherited inputs remain available. If a key is repeated on the CLI, the last value wins.
 
 | Source | Priority |
 |---|---|
-| CLI flags (`-V key=value`, repeated) | Highest |
+| CLI flags (`-I key=value` / `--input key=value`, repeated; per-key merge) | Highest |
 | `workflow.toml` `[run.inputs]` | |
 | `.fabro/project.toml` `[run.inputs]` | |
 | `~/.fabro/settings.toml` `[run.inputs]` | Lowest |
-
-If you need per-key overrides on top of inherited defaults, set each input explicitly in the winning layer.

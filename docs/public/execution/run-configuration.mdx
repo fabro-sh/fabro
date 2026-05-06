@@ -317,7 +317,15 @@ digraph CI {
 
 If a workflow template references an undefined input like `{{ inputs.langauge }}`, Fabro raises an error immediately.
 
-`[run.inputs]` replaces wholesale across layers. Unlike labels, inputs do not merge by key — the highest-precedence layer that sets `inputs` wins its entire map.
+TOML `[run.inputs]` tables replace wholesale across layers. Unlike labels, TOML input tables do not merge by key — the highest-precedence config layer that sets `inputs` wins its entire map.
+
+CLI input flags are sparse overrides on top of the resolved config inputs:
+
+```bash
+fabro run .fabro/workflows/ci/workflow.toml -I repo_name=fabro-2 --input language=rust
+```
+
+Repeat `-I` / `--input` to override multiple keys. CLI input flags have the highest precedence, merge per key, and preserve unrelated inherited inputs. Duplicate CLI keys are accepted; the last value wins.
 
 ### `[run.artifacts]`
 
@@ -460,7 +468,7 @@ provider = "daytona"
 name = "my-project-snapshot"
 ```
 
-Project defaults and workflow config values merge per the normative merge matrix: most fields merge by field (higher-precedence wins per key), `run.inputs` replaces wholesale, `run.sandbox.env` sticky-merges by key, and `run.prepare.steps` replaces whole-list.
+Project defaults and workflow config values merge per the normative merge matrix: most fields merge by field (higher-precedence wins per key), TOML `run.inputs` tables replace wholesale, CLI input flags merge per key at highest precedence, `run.sandbox.env` sticky-merges by key, and `run.prepare.steps` replaces whole-list.
 
 ### Machine defaults
 
