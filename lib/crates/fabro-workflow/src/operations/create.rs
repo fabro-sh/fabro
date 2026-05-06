@@ -304,13 +304,8 @@ pub(super) fn preprocess_and_validate(
     goal_override: Option<&str>,
 ) -> Result<Validated, Error> {
     let inputs = run_inputs(settings);
-    let source = render_template(
-        dot_source,
-        &TemplateContext::new()
-            .with_goal("{{ goal }}")
-            .with_inputs(inputs.clone()),
-    )
-    .map_err(|error| Error::Parse(format!("template expansion failed: {error}")))?;
+    let source = render_template(dot_source, &TemplateContext::for_input_scan(inputs.clone()))
+        .map_err(|error| Error::Parse(format!("template expansion failed: {error}")))?;
 
     let mut parsed = pipeline::parse(&source)?;
     apply_goal_override(&mut parsed.graph, goal_override);

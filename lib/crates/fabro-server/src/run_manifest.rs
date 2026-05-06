@@ -11,7 +11,7 @@ use fabro_config::run::parse_run_layer_from_settings_toml;
 use fabro_config::{
     CliLayer, CliOutputLayer, DaytonaDockerfileLayer, DockerSandboxLayer, LocalSandboxLayer,
     ReplaceMap, RunExecutionLayer, RunLayer, RunModelLayer, RunSandboxLayer,
-    WorkflowSettingsBuilder, apply_input_overrides, parse_input_overrides,
+    WorkflowSettingsBuilder, parse_input_overrides,
 };
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_graphviz::render::apply_direction;
@@ -125,7 +125,7 @@ pub(crate) fn prepare_manifest(
     let mut settings = workflow_settings_builder
         .build()
         .context("failed to resolve manifest settings")?;
-    apply_input_overrides(&mut settings, args_overrides.input_overrides);
+    settings.run.inputs.extend(args_overrides.input_overrides);
     if let Some(goal) = manifest.goal.as_ref() {
         settings.run.goal = Some(RunGoal::Inline(InterpString::parse(&goal.text)));
     }

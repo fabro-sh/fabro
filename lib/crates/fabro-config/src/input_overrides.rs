@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use fabro_types::WorkflowSettings;
 use thiserror::Error;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -32,22 +31,19 @@ fn parse_input_value(key: &str, raw_value: &str) -> Result<toml::Value, InputOve
     }
 
     let document = format!("value = {raw_value}");
-    match document.parse::<toml::Value>() {
-        Ok(value) => {
-            let value = value
-                .get("value")
-                .cloned()
-                .unwrap_or_else(|| toml::Value::String(raw_value.to_string()));
-            if let Some(kind) = unsupported_kind(&value) {
-                return Err(InputOverrideParseError::UnsupportedValue {
-                    key: key.to_string(),
-                    kind,
-                });
-            }
-            Ok(value)
-        }
-        Err(_) => Ok(toml::Value::String(raw_value.to_string())),
+    let Ok(mut table) = document.parse::<toml::Table>() else {
+        return Ok(toml::Value::String(raw_value.to_string()));
+    };
+    let value = table
+        .remove("value")
+        .expect("`value` key was just written to the document");
+    if let Some(kind) = unsupported_kind(&value) {
+        return Err(InputOverrideParseError::UnsupportedValue {
+            key: key.to_string(),
+            kind,
+        });
     }
+    Ok(value)
 }
 
 pub fn parse_input_overrides(
@@ -66,30 +62,19 @@ pub fn parse_input_overrides(
     Ok(parsed)
 }
 
-pub fn apply_input_overrides(
-    settings: &mut WorkflowSettings,
-    input_overrides: HashMap<String, toml::Value>,
-) {
-    settings.run.inputs.extend(input_overrides);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::WorkflowSettingsBuilder;
 
-    fn parse_one(raw: &str) -> Result<toml::Value, InputOverrideParseError> {
-        parse_input_overrides(&[raw.to_string()]).map(|mut parsed| {
-            parsed
-                .remove(raw.split_once('=').map_or("", |(key, _)| key))
-                .expect("input should be present")
-        })
+    fn parse_one(key: &str, raw_value: &str) -> Result<toml::Value, InputOverrideParseError> {
+        parse_input_overrides(&[format!("{key}={raw_value}")])
+            .map(|mut parsed| parsed.remove(key).expect("input should be present"))
     }
 
     #[test]
     fn empty_value_is_empty_string() {
         assert_eq!(
-            parse_one("foo=").unwrap(),
+            parse_one("foo", "").unwrap(),
             toml::Value::String(String::new())
         );
     }
@@ -97,7 +82,7 @@ mod tests {
     #[test]
     fn bare_value_falls_back_to_string() {
         assert_eq!(
-            parse_one("foo=bar").unwrap(),
+            parse_one("foo", "bar").unwrap(),
             toml::Value::String("bar".to_string())
         );
     }
@@ -105,29 +90,32 @@ mod tests {
     #[test]
     fn quoted_toml_string_is_accepted() {
         assert_eq!(
-            parse_one("foo=\"bar\"").unwrap(),
+            parse_one("foo", "\"bar\"").unwrap(),
             toml::Value::String("bar".to_string())
         );
     }
 
     #[test]
     fn boolean_is_accepted() {
-        assert_eq!(parse_one("foo=false").unwrap(), toml::Value::Boolean(false));
+        assert_eq!(
+            parse_one("foo", "false").unwrap(),
+            toml::Value::Boolean(false)
+        );
     }
 
     #[test]
     fn integer_is_accepted() {
-        assert_eq!(parse_one("foo=3").unwrap(), toml::Value::Integer(3));
+        assert_eq!(parse_one("foo", "3").unwrap(), toml::Value::Integer(3));
     }
 
     #[test]
     fn float_is_accepted() {
-        assert_eq!(parse_one("foo=0.75").unwrap(), toml::Value::Float(0.75));
+        assert_eq!(parse_one("foo", "0.75").unwrap(), toml::Value::Float(0.75));
     }
 
     #[test]
     fn datetime_is_rejected() {
-        let err = parse_one("foo=2026-05-06").unwrap_err();
+        let err = parse_one("foo", "2026-05-06").unwrap_err();
         assert_eq!(err, InputOverrideParseError::UnsupportedValue {
             key:  "foo".to_string(),
             kind: "datetime",
@@ -138,7 +126,7 @@ mod tests {
 
     #[test]
     fn array_is_rejected() {
-        let err = parse_one("foo=[1]").unwrap_err();
+        let err = parse_one("foo", "[1]").unwrap_err();
         assert_eq!(err, InputOverrideParseError::UnsupportedValue {
             key:  "foo".to_string(),
             kind: "array",
@@ -148,7 +136,7 @@ mod tests {
 
     #[test]
     fn inline_table_is_rejected() {
-        let err = parse_one("foo={a=1}").unwrap_err();
+        let err = parse_one("foo", "{a=1}").unwrap_err();
         assert_eq!(err, InputOverrideParseError::UnsupportedValue {
             key:  "foo".to_string(),
             kind: "inline table",
@@ -178,35 +166,6 @@ mod tests {
         assert_eq!(
             parsed.get("foo"),
             Some(&toml::Value::String("second".to_string()))
-        );
-    }
-
-    #[test]
-    fn apply_preserves_unrelated_existing_inputs() {
-        let mut settings = WorkflowSettingsBuilder::from_toml(
-            r#"
-_version = 1
-
-[run.inputs]
-keep = "project"
-override = "project"
-"#,
-        )
-        .unwrap();
-        let input_overrides = HashMap::from([(
-            "override".to_string(),
-            toml::Value::String("cli".to_string()),
-        )]);
-
-        apply_input_overrides(&mut settings, input_overrides);
-
-        assert_eq!(
-            settings.run.inputs.get("keep"),
-            Some(&toml::Value::String("project".to_string()))
-        );
-        assert_eq!(
-            settings.run.inputs.get("override"),
-            Some(&toml::Value::String("cli".to_string()))
         );
     }
 }

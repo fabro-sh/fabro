@@ -25,9 +25,7 @@ impl TemplateTransform {
     }
 
     fn resolved_goal(&self, graph: &Graph) -> Result<String, Error> {
-        let ctx = TemplateContext::new()
-            .with_goal("{{ goal }}")
-            .with_inputs(self.inputs.clone());
+        let ctx = TemplateContext::for_input_scan(self.inputs.clone());
         Ok(render_template(graph.goal(), &ctx)?)
     }
 }

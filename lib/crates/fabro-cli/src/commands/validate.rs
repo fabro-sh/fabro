@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use anyhow::bail;
 use fabro_config::RunLayer;
 use fabro_config::user::active_settings_path;
@@ -19,14 +17,10 @@ pub(crate) fn run(
 ) -> anyhow::Result<()> {
     let printer = base_ctx.printer();
     let built = build_run_manifest(ManifestBuildInput {
-        workflow:           args.workflow.clone(),
-        cwd:                base_ctx.cwd().to_path_buf(),
-        run_overrides:      None,
-        cli_overrides:      None,
-        input_overrides:    HashMap::new(),
-        args:               None,
-        run_id:             None,
+        workflow: args.workflow.clone(),
+        cwd: base_ctx.cwd().to_path_buf(),
         user_settings_path: Some(active_settings_path(None)),
+        ..Default::default()
     })?;
     let response = manifest_validation::validate_manifest(&RunLayer::default(), &built.manifest)?;
     let diagnostics = api_diagnostics_to_local(&response.workflow.diagnostics);

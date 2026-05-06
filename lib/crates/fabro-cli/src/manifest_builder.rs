@@ -10,9 +10,7 @@ use anyhow::{Context, Result, anyhow};
 use fabro_api::types;
 use fabro_config::project::{self, discover_project_config, resolve_workflow_path};
 use fabro_config::run::{resolve_run_goal_from_layer, resolve_run_goal_from_namespace};
-use fabro_config::{
-    CliLayer, DaytonaDockerfileLayer, RunLayer, WorkflowSettingsBuilder, apply_input_overrides,
-};
+use fabro_config::{CliLayer, DaytonaDockerfileLayer, RunLayer, WorkflowSettingsBuilder};
 use fabro_graphviz::graph::AttrValue;
 use fabro_graphviz::parser;
 use fabro_template::{TemplateContext, render as render_template};
@@ -25,7 +23,7 @@ use fabro_workflow::git::{
 
 use crate::args::{PreflightArgs, RunArgs};
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ManifestBuildInput {
     pub workflow:           PathBuf,
     pub cwd:                PathBuf,
@@ -97,7 +95,7 @@ pub fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
     let mut workflow_settings = workflow_settings_builder
         .build()
         .context("failed to resolve manifest settings")?;
-    apply_input_overrides(&mut workflow_settings, input.input_overrides.clone());
+    workflow_settings.run.inputs.extend(input.input_overrides);
     let target_path = root_resolution.dot_path.clone();
     let target_manifest_path = manifest_path_from_absolute(&target_path, &input.cwd)?;
     let target_key = target_manifest_path.to_string();
@@ -375,13 +373,8 @@ fn render_workflow_scan_source(
     path: &Path,
     inputs: &HashMap<String, toml::Value>,
 ) -> Result<String> {
-    render_template(
-        source,
-        &TemplateContext::new()
-            .with_goal("{{ goal }}")
-            .with_inputs(inputs.clone()),
-    )
-    .with_context(|| format!("Failed to render {} for manifest scanning", path.display()))
+    render_template(source, &TemplateContext::for_input_scan(inputs.clone()))
+        .with_context(|| format!("Failed to render {} for manifest scanning", path.display()))
 }
 
 fn collect_workflow_config_files(
@@ -731,14 +724,9 @@ mod tests {
         .unwrap();
 
         let built = build_run_manifest(ManifestBuildInput {
-            workflow:           PathBuf::from(".fabro/workflows/demo/workflow.toml"),
-            cwd:                project.to_path_buf(),
-            run_overrides:      None,
-            cli_overrides:      None,
-            input_overrides:    HashMap::new(),
-            args:               None,
-            run_id:             None,
-            user_settings_path: None,
+            workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
+            cwd: project.to_path_buf(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -814,11 +802,9 @@ mod tests {
         .unwrap();
 
         let built = build_run_manifest(ManifestBuildInput {
-            workflow:           PathBuf::from(".fabro/workflows/demo/workflow.toml"),
-            cwd:                project.to_path_buf(),
-            run_overrides:      None,
-            cli_overrides:      None,
-            input_overrides:    HashMap::from([
+            workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
+            cwd: project.to_path_buf(),
+            input_overrides: HashMap::from([
                 (
                     "prompt_file".to_string(),
                     toml::Value::String("plan.md".to_string()),
@@ -832,9 +818,7 @@ mod tests {
                     toml::Value::String("child".to_string()),
                 ),
             ]),
-            args:               None,
-            run_id:             None,
-            user_settings_path: None,
+            ..Default::default()
         })
         .unwrap();
 
@@ -884,17 +868,13 @@ mod tests {
         std::fs::write(workflow_dir.join("prompts/goal.md"), "ship it").unwrap();
 
         let built = build_run_manifest(ManifestBuildInput {
-            workflow:           PathBuf::from(".fabro/workflows/demo/workflow.toml"),
-            cwd:                project.to_path_buf(),
-            run_overrides:      None,
-            cli_overrides:      None,
-            input_overrides:    HashMap::from([(
+            workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
+            cwd: project.to_path_buf(),
+            input_overrides: HashMap::from([(
                 "goal_file".to_string(),
                 toml::Value::String("goal.md".to_string()),
             )]),
-            args:               None,
-            run_id:             None,
-            user_settings_path: None,
+            ..Default::default()
         })
         .unwrap();
 
@@ -948,14 +928,9 @@ file = "prompts/goal.md"
         .unwrap();
 
         let built = build_run_manifest(ManifestBuildInput {
-            workflow:           PathBuf::from(".fabro/workflows/demo/workflow.toml"),
-            cwd:                project.to_path_buf(),
-            run_overrides:      None,
-            cli_overrides:      None,
-            input_overrides:    HashMap::new(),
-            args:               None,
-            run_id:             None,
-            user_settings_path: None,
+            workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
+            cwd: project.to_path_buf(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -1002,14 +977,9 @@ file = "prompts/goal.md"
         .unwrap();
 
         let built = build_run_manifest(ManifestBuildInput {
-            workflow:           PathBuf::from(".fabro/workflows/demo/workflow.toml"),
-            cwd:                project.to_path_buf(),
-            run_overrides:      None,
-            cli_overrides:      None,
-            input_overrides:    HashMap::new(),
-            args:               None,
-            run_id:             None,
-            user_settings_path: None,
+            workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
+            cwd: project.to_path_buf(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -1068,14 +1038,9 @@ working_dir = "repos/target"
         .unwrap();
 
         let built = build_run_manifest(ManifestBuildInput {
-            workflow:           PathBuf::from(".fabro/workflows/demo/workflow.toml"),
-            cwd:                workspace.to_path_buf(),
-            run_overrides:      None,
-            cli_overrides:      None,
-            input_overrides:    HashMap::new(),
-            args:               None,
-            run_id:             None,
-            user_settings_path: None,
+            workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
+            cwd: workspace.to_path_buf(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -1124,14 +1089,9 @@ repository = "target"
         .unwrap();
 
         let built = build_run_manifest(ManifestBuildInput {
-            workflow:           PathBuf::from(".fabro/workflows/demo/workflow.toml"),
-            cwd:                workspace.to_path_buf(),
-            run_overrides:      None,
-            cli_overrides:      None,
-            input_overrides:    HashMap::new(),
-            args:               None,
-            run_id:             None,
-            user_settings_path: None,
+            workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
+            cwd: workspace.to_path_buf(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -1195,14 +1155,9 @@ exit 1
         temp_env::with_var("PATH", Some(path), || {
             temp_env::with_var("FABRO_PROMPT_ENV_LOG", Some(helper_log.as_os_str()), || {
                 let built = build_run_manifest(ManifestBuildInput {
-                    workflow:           PathBuf::from(".fabro/workflows/demo/workflow.toml"),
-                    cwd:                workspace.clone(),
-                    run_overrides:      None,
-                    cli_overrides:      None,
-                    input_overrides:    HashMap::new(),
-                    args:               None,
-                    run_id:             None,
-                    user_settings_path: None,
+                    workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
+                    cwd: workspace.clone(),
+                    ..Default::default()
                 })
                 .unwrap();
 

@@ -7,7 +7,6 @@
     reason = "sync CLI `graph` command: blocking std::io::stdout is the intended output mechanism"
 )]
 
-use std::collections::HashMap;
 use std::io::Write;
 
 use anyhow::{Context, bail};
@@ -34,14 +33,10 @@ pub(crate) async fn run(
     let printer = base_ctx.printer();
     let ctx = base_ctx.with_target(&args.target)?;
     let built = build_run_manifest(ManifestBuildInput {
-        workflow:           args.workflow.clone(),
-        cwd:                ctx.cwd().to_path_buf(),
-        run_overrides:      None,
-        cli_overrides:      None,
-        input_overrides:    HashMap::new(),
-        args:               None,
-        run_id:             None,
+        workflow: args.workflow.clone(),
+        cwd: ctx.cwd().to_path_buf(),
         user_settings_path: Some(active_settings_path(None)),
+        ..Default::default()
     })?;
     let client = ctx.server().await?;
     let preflight = client.run_preflight(built.manifest.clone()).await?;

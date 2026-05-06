@@ -155,9 +155,7 @@ impl ImportTransform {
         Self::with_import_stack(import_stack, resolved_file.path.clone(), |import_stack| {
             let rendered_source = render_template(
                 &resolved_file.content,
-                &TemplateContext::new()
-                    .with_goal("{{ goal }}")
-                    .with_inputs(self.inputs.clone()),
+                &TemplateContext::for_input_scan(self.inputs.clone()),
             )
             .map_err(|error| ImportPrepareError::Hard(Error::Validation(error.to_string())))?;
 
