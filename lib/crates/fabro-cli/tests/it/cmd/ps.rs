@@ -282,25 +282,13 @@ fn ps_filters_by_workflow_and_label() {
 
     context
         .run_cmd()
-        .args([
-            "--dry-run",
-            "--auto-approve",
-            "--no-retro",
-            "--label",
-            "suite=alpha",
-        ])
+        .args(["--dry-run", "--auto-approve", "--label", "suite=alpha"])
         .arg(&simple)
         .assert()
         .success();
     context
         .create_cmd()
-        .args([
-            "--dry-run",
-            "--auto-approve",
-            "--no-retro",
-            "--label",
-            "suite=beta",
-        ])
+        .args(["--dry-run", "--auto-approve", "--label", "suite=beta"])
         .arg(&branching)
         .assert()
         .success();

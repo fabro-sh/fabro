@@ -19,7 +19,6 @@ fn scenario_command_agent_mixed(sandbox: &str) {
         .run_cmd()
         .args([
             "--auto-approve",
-            "--no-retro",
             "--sandbox",
             sandbox,
             "--model",

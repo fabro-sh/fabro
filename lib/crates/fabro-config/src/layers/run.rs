@@ -238,9 +238,6 @@ pub struct RunExecutionLayer {
     pub mode:     Option<RunMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval: Option<ApprovalMode>,
-    /// Positive-form: `true` runs retros, `false` skips them.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub retros:   Option<bool>,
 }
 
 /// `[run.checkpoint]` — checkpoint policy.

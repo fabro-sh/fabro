@@ -126,7 +126,6 @@ fn rename_hint(key: &str) -> Option<String> {
         "upgrade_check" => "rename to `[cli.updates] check`",
         "dry_run" => "rename to `[run.execution] mode = \"dry_run\"`",
         "auto_approve" => "rename to `[run.execution] approval = \"auto\"`",
-        "no_retro" => "rename to `[run.execution] retros = false`",
         _ => return None,
     };
     Some(target.to_owned())

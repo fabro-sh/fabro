@@ -284,12 +284,6 @@ pub enum EventBody {
     DevcontainerLifecycleCompleted(DevcontainerLifecycleCompletedProps),
     #[serde(rename = "devcontainer.lifecycle.failed")]
     DevcontainerLifecycleFailed(DevcontainerLifecycleFailedProps),
-    #[serde(rename = "retro.started")]
-    RetroStarted(RetroStartedProps),
-    #[serde(rename = "retro.completed")]
-    RetroCompleted(RetroCompletedProps),
-    #[serde(rename = "retro.failed")]
-    RetroFailed(RetroFailedProps),
     Unknown {
         name:       String,
         properties: Value,
@@ -469,9 +463,6 @@ impl EventBody {
             }
             Self::DevcontainerLifecycleCompleted(_) => "devcontainer.lifecycle.completed",
             Self::DevcontainerLifecycleFailed(_) => "devcontainer.lifecycle.failed",
-            Self::RetroStarted(_) => "retro.started",
-            Self::RetroCompleted(_) => "retro.completed",
-            Self::RetroFailed(_) => "retro.failed",
             Self::Unknown { name, .. } => name.as_str(),
         }
     }
@@ -603,9 +594,6 @@ fn is_known_event_name(event: &str) -> bool {
             | "devcontainer.lifecycle.command.completed"
             | "devcontainer.lifecycle.completed"
             | "devcontainer.lifecycle.failed"
-            | "retro.started"
-            | "retro.completed"
-            | "retro.failed"
     )
 }
 
@@ -1374,6 +1362,41 @@ mod tests {
     }
 
     #[test]
+    fn retired_retro_events_deserialize_as_unknown() {
+        for (event_name, expected_properties) in [
+            (
+                "retro.started",
+                json!({"prompt": "Analyze the run", "provider": "openai", "model": "gpt-5"}),
+            ),
+            (
+                "retro.completed",
+                json!({"duration_ms": 1200, "response": "done", "retro": {"smoothness": "smooth"}}),
+            ),
+            (
+                "retro.failed",
+                json!({"duration_ms": 1200, "error": "state unavailable"}),
+            ),
+        ] {
+            let value = json!({
+                "id": "evt_retired_retro",
+                "ts": "2026-05-08T12:00:00.000Z",
+                "run_id": fixtures::RUN_1,
+                "event": event_name,
+                "properties": expected_properties
+            });
+
+            let parsed = RunEvent::from_value(value).unwrap();
+            match parsed.body {
+                EventBody::Unknown { name, properties } => {
+                    assert_eq!(name, event_name);
+                    assert_eq!(properties, expected_properties);
+                }
+                other => panic!("expected Unknown body, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn metadata_snapshot_failed_omits_empty_optional_fields() {
         let body = EventBody::MetadataSnapshotFailed(MetadataSnapshotFailedProps {
             phase:            MetadataSnapshotPhase::Init,
@@ -1490,11 +1513,6 @@ mod tests {
                 success:          false,
                 exec_output_tail: Some(tail.clone()),
             }),
-            EventBody::RetroFailed(RetroFailedProps {
-                error:            "state unavailable".to_string(),
-                duration_ms:      10,
-                exec_output_tail: Some(tail.clone()),
-            }),
         ] {
             let value = serde_json::to_value(&body).unwrap();
             assert_eq!(
@@ -1524,11 +1542,6 @@ mod tests {
             EventBody::GitPush(GitPushProps {
                 branch:           "refs/heads/run:refs/heads/run".to_string(),
                 success:          false,
-                exec_output_tail: None,
-            }),
-            EventBody::RetroFailed(RetroFailedProps {
-                error:            "state unavailable".to_string(),
-                duration_ms:      10,
                 exec_output_tail: None,
             }),
         ] {

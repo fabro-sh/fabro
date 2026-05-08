@@ -7,7 +7,6 @@ use fabro_interview::Interviewer;
 use fabro_llm::Provider;
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::FallbackTarget;
-use fabro_retro::retro::Retro;
 use fabro_sandbox::SandboxSpec;
 use fabro_sandbox::config::WorktreeMode;
 use fabro_types::RunId;
@@ -286,17 +285,6 @@ pub struct Executed {
     pub model:         String,
 }
 
-/// Output of the RETRO phase.
-#[non_exhaustive]
-pub struct Retroed {
-    pub graph:       Graph,
-    pub outcome:     Result<Outcome, Error>,
-    pub run_options: RunOptions,
-    pub duration_ms: u64,
-    pub services:    Arc<RunServices>,
-    pub retro:       Option<Retro>,
-}
-
 /// Output of the FINALIZE phase.
 #[non_exhaustive]
 pub struct Concluded {
@@ -323,18 +311,6 @@ pub struct TransformOptions {
     pub file_resolver:     Option<Arc<dyn FileResolver>>,
     pub inputs:            HashMap<String, toml::Value>,
     pub custom_transforms: Vec<Box<dyn Transform>>,
-}
-
-/// Options for the RETRO phase.
-pub struct RetroOptions {
-    pub run_id:          RunId,
-    pub services:        Arc<RunServices>,
-    pub workflow_name:   String,
-    pub goal:            String,
-    pub failed:          bool,
-    pub run_duration_ms: u64,
-    pub enabled:         bool,
-    pub model:           String,
 }
 
 /// Options for the FINALIZE phase.

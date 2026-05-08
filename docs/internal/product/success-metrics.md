@@ -7,7 +7,6 @@ For product work, measure trust and useful outcomes, not just command execution.
 - CLI telemetry for command success and failure
 - per-run event streams in `progress.jsonl`
 - run artifacts such as `checkpoint.json`, `conclusion.json`, and verification data
-- `retro.json` when retros are enabled
 - API and web data for runs, workflows, usage, verifications, and insights
 
 ## Metrics that matter most

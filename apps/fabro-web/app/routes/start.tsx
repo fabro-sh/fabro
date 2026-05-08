@@ -48,7 +48,6 @@ export default function Start() {
   const systemInfo = useSystemInfo();
   const features = systemInfo.data?.features ?? {
     session_sandboxes: false,
-    retros: false,
   };
   const [prompt, setPrompt] = useState("");
   const [project, setProject] = useState(projects[0]);

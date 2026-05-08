@@ -28,7 +28,6 @@ export interface ManifestArgs {
     'verbose'?: boolean;
     'dry_run'?: boolean;
     'auto_approve'?: boolean;
-    'no_retro'?: boolean;
     'preserve_sandbox'?: boolean;
     /**
      * Override `run.sandbox.local.worktree_mode` (e.g. `never` for `--in-place`). 

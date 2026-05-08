@@ -19,7 +19,7 @@ Fabro currently presents as:
 - Git checkpointing for resume, rewind, fork, and auditability
 - structured run artifacts and event streams for observability
 - verifications and insights in the broader product surface
-- retrospectives, documented as experimental
+- observability surfaces for event streams, run state, and verification data
 
 ## Current positioning
 

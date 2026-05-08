@@ -10,7 +10,7 @@ This note captures stable constraints that product changes should respect.
 - Model routing is per-stage and provider-agnostic through stylesheets and config.
 - Execution happens through sandbox providers rather than assuming direct host access.
 - Git checkpointing is central to resume, rewind, fork, and auditability.
-- Runs produce structured artifacts such as `progress.jsonl`, `live.json`, `checkpoint.json`, and optional `retro.json`.
+- Runs produce structured artifacts such as `progress.jsonl`, `live.json`, `checkpoint.json`, and `conclusion.json`.
 - The HTTP API is OpenAPI-based, and the web app depends on that contract.
 
 ## Operational constraints

@@ -11,7 +11,6 @@ graph = "workflow.fabro"
 [run.execution]
 mode = "normal"
 approval = "prompt"
-retros = true
 
 [run.prepare]
 timeout = "5m"

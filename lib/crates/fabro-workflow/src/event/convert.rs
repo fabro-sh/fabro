@@ -1158,33 +1158,6 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 exec_output_tail: exec_output_tail.clone(),
             })
         }
-        Event::RetroStarted {
-            prompt,
-            provider,
-            model,
-        } => EventBody::RetroStarted(fabro_types::RetroStartedProps {
-            prompt:   prompt.clone(),
-            provider: provider.clone(),
-            model:    model.clone(),
-        }),
-        Event::RetroCompleted {
-            duration_ms,
-            response,
-            retro,
-        } => EventBody::RetroCompleted(fabro_types::RetroCompletedProps {
-            duration_ms: *duration_ms,
-            response:    response.clone(),
-            retro:       retro.clone(),
-        }),
-        Event::RetroFailed {
-            error,
-            duration_ms,
-            exec_output_tail,
-        } => EventBody::RetroFailed(fabro_types::RetroFailedProps {
-            error:            error.clone(),
-            duration_ms:      *duration_ms,
-            exec_output_tail: exec_output_tail.clone(),
-        }),
     }
 }
 
@@ -1746,24 +1719,6 @@ mod tests {
                 assert_eq!(tail.stderr.as_deref(), Some("last stderr line"));
             }
             other => panic!("expected GitPush body, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn retro_failed_maps_exec_output_tail_to_props() {
-        let stored = to_run_event(&fixtures::RUN_1, &Event::RetroFailed {
-            error:            "state load failed".to_string(),
-            duration_ms:      12,
-            exec_output_tail: Some(exec_tail()),
-        });
-
-        match stored.body {
-            EventBody::RetroFailed(props) => {
-                assert_eq!(props.duration_ms, 12);
-                let tail = props.exec_output_tail.expect("exec output tail");
-                assert_eq!(tail.stdout.as_deref(), Some("last stdout line"));
-            }
-            other => panic!("expected RetroFailed body, got {other:?}"),
         }
     }
 

@@ -23,7 +23,7 @@ fn scenario_command_pipeline(sandbox: &str) {
 
     context
         .run_cmd()
-        .args(["--auto-approve", "--no-retro", "--sandbox", sandbox])
+        .args(["--auto-approve", "--sandbox", sandbox])
         .arg(fixture("command_pipeline.fabro"))
         .timeout(timeout_for(sandbox))
         .assert()

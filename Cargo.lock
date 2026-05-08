@@ -1675,7 +1675,6 @@ dependencies = [
  "fabro-oauth",
  "fabro-proc",
  "fabro-redact",
- "fabro-retro",
  "fabro-sandbox",
  "fabro-server",
  "fabro-static",
@@ -2077,25 +2076,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fabro-retro"
-version = "0.225.0-nightly.0"
-dependencies = [
- "anyhow",
- "chrono",
- "fabro-agent",
- "fabro-dump",
- "fabro-llm",
- "fabro-store",
- "fabro-types",
- "fabro-util",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "fabro-sandbox"
 version = "0.225.0-nightly.0"
 dependencies = [
@@ -2164,7 +2144,6 @@ dependencies = [
  "fabro-model",
  "fabro-proc",
  "fabro-redact",
- "fabro-retro",
  "fabro-sandbox",
  "fabro-slack",
  "fabro-spa",
@@ -2441,7 +2420,6 @@ dependencies = [
  "fabro-mcp",
  "fabro-model",
  "fabro-redact",
- "fabro-retro",
  "fabro-sandbox",
  "fabro-static",
  "fabro-store",

@@ -200,7 +200,6 @@ fn run_completed_dry_run(context: &TestContext, workflow: &Path) -> RunSetup {
         run_id.as_str(),
         "--dry-run",
         "--auto-approve",
-        "--no-retro",
         "--sandbox",
         "local",
     ]);
@@ -208,7 +207,7 @@ fn run_completed_dry_run(context: &TestContext, workflow: &Path) -> RunSetup {
     let output = cmd.output().expect("command should execute");
     if !output.status.success() {
         panic!(
-            "command failed: fabro run --dry-run --auto-approve --no-retro --sandbox local {}\nstdout:\n{}\nstderr:\n{}",
+            "command failed: fabro run --dry-run --auto-approve --sandbox local {}\nstdout:\n{}\nstderr:\n{}",
             workflow.display(),
             stdout(&output),
             stderr(&output)
@@ -264,7 +263,6 @@ pub(crate) fn setup_detached_dry_run(context: &TestContext) -> RunSetup {
         "--detach",
         "--dry-run",
         "--auto-approve",
-        "--no-retro",
         "--sandbox",
         "local",
     ]);
@@ -272,7 +270,7 @@ pub(crate) fn setup_detached_dry_run(context: &TestContext) -> RunSetup {
     let output = cmd.output().expect("command should execute");
     if !output.status.success() {
         panic!(
-            "command failed: fabro run --detach --dry-run --auto-approve --no-retro --sandbox local {}\nstdout:\n{}\nstderr:\n{}",
+            "command failed: fabro run --detach --dry-run --auto-approve --sandbox local {}\nstdout:\n{}\nstderr:\n{}",
             fixture("simple.fabro").display(),
             stdout(&output),
             stderr(&output)
@@ -372,7 +370,6 @@ fn run_local_workflow(context: &TestContext, workspace_dir: &Path, workflow: &st
         "--run-id",
         run_id.as_str(),
         "--auto-approve",
-        "--no-retro",
         "--sandbox",
         "local",
         "--provider",
@@ -382,7 +379,7 @@ fn run_local_workflow(context: &TestContext, workspace_dir: &Path, workflow: &st
     let output = cmd.output().expect("command should execute");
     if !output.status.success() {
         panic!(
-            "command failed: fabro run --auto-approve --no-retro --sandbox local --provider openai {workflow}\nstdout:\n{}\nstderr:\n{}",
+            "command failed: fabro run --auto-approve --sandbox local --provider openai {workflow}\nstdout:\n{}\nstderr:\n{}",
             stdout(&output),
             stderr(&output)
         );
@@ -756,7 +753,6 @@ async fn seed_dry_run(context: &TestContext, state: SeededRunState) -> RunSetup 
         serde_json::json!({
             "dry_run": true,
             "auto_approve": true,
-            "no_retro": true,
             "sandbox": "local",
             "label": test_labels(context),
         }),
@@ -784,7 +780,6 @@ async fn seed_git_backed_changed_run(context: &TestContext) -> SeededGitRunSetup
         serde_json::json!({
             "provider": "openai",
             "sandbox": "local",
-            "no_retro": true,
             "label": test_labels(context),
         }),
         Some(serde_json::json!({
@@ -829,7 +824,6 @@ async fn seed_git_backed_noop_run(context: &TestContext) -> RunSetup {
         serde_json::json!({
             "provider": "openai",
             "sandbox": "local",
-            "no_retro": true,
             "label": test_labels(context),
         }),
         Some(serde_json::json!({
@@ -859,7 +853,6 @@ async fn seed_artifact_run(context: &TestContext) -> RunSetup {
         artifact_workflow_source(),
         serde_json::json!({
             "sandbox": "local",
-            "no_retro": true,
             "label": test_labels(context),
         }),
         None,

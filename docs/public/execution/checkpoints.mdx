@@ -45,14 +45,13 @@ Fabro disables Git commit and tag signing for checkpoint commits created inside 
 
 The metadata branch (`fabro/meta/{run_id}`) is an orphan branch that stores structured run data using Git's object storage directly. Fabro writes it from inside the sandbox with Git plumbing commands, without checking out a metadata worktree. It is initialized at run start with:
 
-- **`run.json`** — Current projection snapshot: run spec, start/status records, current checkpoint, conclusion, sandbox, retro state, and other run-level metadata
+- **`run.json`** — Current projection snapshot: run spec, start/status records, current checkpoint, conclusion, sandbox, and other run-level metadata
 - **`graph.fabro`** — Workflow source for the run
 
 After each node, the metadata branch is updated with:
 
 - **`run.json`** — Refreshed projection snapshot with the new current checkpoint
 - **`stages/{rank:03}-{node_id}@{visit}/...`** — Execution-order-prefixed per-stage trace files (prompts, responses, status, diffs, stdout/stderr, and tool metadata)
-- **`stages/retro/*.md`** — Retro prompt/response text when present
 
 ## What's in a checkpoint
 

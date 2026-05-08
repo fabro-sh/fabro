@@ -420,15 +420,6 @@ impl ProgressUI {
             ProgressEvent::LoopRestart { from_node, to_node } => {
                 self.info.on_loop_restart(renderer, &from_node, &to_node);
             }
-            ProgressEvent::RetroStarted => {
-                self.stage.on_retro_started(renderer);
-            }
-            ProgressEvent::RetroCompleted { duration_ms } => {
-                self.stage.on_retro_completed(renderer, duration_ms);
-            }
-            ProgressEvent::RetroFailed { duration_ms } => {
-                self.stage.on_retro_failed(renderer, duration_ms);
-            }
             ProgressEvent::MetadataSnapshotFailed {
                 phase,
                 failure_kind,

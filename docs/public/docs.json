@@ -55,7 +55,6 @@
               "execution/checkpoints",
               "execution/outcomes",
               "execution/failures",
-              "execution/retros",
               "execution/observability",
               "execution/devcontainers"
             ]

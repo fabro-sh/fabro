@@ -41,7 +41,7 @@ fabro run docs/internal/demo/01-hello.fabro
 
 - `shape=tab` makes this a **prompt node** — a single LLM call with no tool access. Good for generation, summarization, and classification.
 - `reasoning_effort="low"` tells the model to think less. This is a simple task that doesn't need deep reasoning.
-- `graph [goal="..."]` describes the workflow's purpose. Fabro uses it in preambles and retrospectives.
+- `graph [goal="..."]` describes the workflow's purpose. Fabro uses it in preambles and agent context.
 
 Every workflow needs exactly one `start` node (`shape=Mdiamond`) and one `exit` node (`shape=Msquare`).
 

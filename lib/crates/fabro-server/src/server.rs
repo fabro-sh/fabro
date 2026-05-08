@@ -1280,15 +1280,11 @@ async fn github_webhook(
 
 fn system_features(
     server_settings: &ServerSettings,
-    manifest_run_settings: &std::result::Result<RunNamespace, SharedError>,
+    _manifest_run_settings: &std::result::Result<RunNamespace, SharedError>,
 ) -> SystemFeatures {
     let session_sandboxes = server_settings.features.session_sandboxes;
-    let retros = manifest_run_settings
-        .as_ref()
-        .is_ok_and(|settings| settings.execution.retros);
     SystemFeatures {
         session_sandboxes: Some(session_sandboxes),
-        retros:            Some(retros),
     }
 }
 

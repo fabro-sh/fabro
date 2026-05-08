@@ -653,27 +653,6 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         exec_output_tail: Option<fabro_types::ExecOutputTail>,
     },
-    RetroStarted {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        prompt:   Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        provider: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        model:    Option<String>,
-    },
-    RetroCompleted {
-        duration_ms: u64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        response:    Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        retro:       Option<serde_json::Value>,
-    },
-    RetroFailed {
-        error:            String,
-        duration_ms:      u64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        exec_output_tail: Option<fabro_types::ExecOutputTail>,
-    },
 }
 
 impl Event {
@@ -1456,37 +1435,6 @@ impl Event {
                     exec_stdout_truncated = tail.stdout_truncated,
                     exec_stderr_truncated = tail.stderr_truncated,
                     "Devcontainer lifecycle command failed"
-                );
-            }
-            Self::RetroStarted {
-                prompt: _,
-                provider,
-                model,
-            } => {
-                info!(
-                    provider = provider.as_deref().unwrap_or(""),
-                    model = model.as_deref().unwrap_or(""),
-                    "Retro started"
-                );
-            }
-            Self::RetroCompleted { duration_ms, .. } => {
-                info!(duration_ms, "Retro completed");
-            }
-            Self::RetroFailed {
-                error,
-                duration_ms,
-                exec_output_tail,
-            } => {
-                let tail = fabro_types::ExecOutputTail::trace_summary(exec_output_tail.as_ref());
-                error!(
-                    error = %error,
-                    duration_ms,
-                    exec_output_tail_present = tail.present,
-                    exec_stdout_tail_bytes = tail.stdout_bytes,
-                    exec_stderr_tail_bytes = tail.stderr_bytes,
-                    exec_stdout_truncated = tail.stdout_truncated,
-                    exec_stderr_truncated = tail.stderr_truncated,
-                    "Retro failed"
                 );
             }
         }

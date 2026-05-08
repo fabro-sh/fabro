@@ -269,30 +269,3 @@ pub struct PullRequestCreatedProps {
 pub struct PullRequestFailedProps {
     pub error: String,
 }
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RetroStartedProps {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prompt:   Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model:    Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RetroCompletedProps {
-    pub duration_ms: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub response:    Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub retro:       Option<Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RetroFailedProps {
-    pub error:            String,
-    pub duration_ms:      u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exec_output_tail: Option<ExecOutputTail>,
-}

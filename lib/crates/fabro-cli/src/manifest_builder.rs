@@ -169,7 +169,6 @@ pub(crate) fn run_manifest_args(args: &RunArgs) -> Option<types::ManifestArgs> {
         dry_run:          args.dry_run.then_some(true),
         label:            args.label.clone(),
         model:            args.model.clone(),
-        no_retro:         args.no_retro.then_some(true),
         preserve_sandbox: args.preserve_sandbox.then_some(true),
         provider:         args.provider.clone(),
         sandbox:          args
@@ -192,7 +191,6 @@ pub(crate) fn preflight_manifest_args(args: &PreflightArgs) -> Option<types::Man
         dry_run:          None,
         label:            Vec::new(),
         model:            args.model.clone(),
-        no_retro:         None,
         preserve_sandbox: None,
         provider:         args.provider.clone(),
         sandbox:          args
@@ -638,7 +636,6 @@ fn manifest_args_is_empty(args: &types::ManifestArgs) -> bool {
         && args.dry_run.is_none()
         && args.label.is_empty()
         && args.model.is_none()
-        && args.no_retro.is_none()
         && args.preserve_sandbox.is_none()
         && args.provider.is_none()
         && args.sandbox.is_none()

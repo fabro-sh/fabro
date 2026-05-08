@@ -1,4 +1,4 @@
 title: Web app
-description: React dashboard for managing workflows, viewing runs, approving human gates, and browsing retrospectives.
+description: React dashboard for managing workflows, viewing runs, approving human gates, and inspecting execution traces.
 status: next
 date: 2026-06-03

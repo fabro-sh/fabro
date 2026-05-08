@@ -61,7 +61,7 @@ function sampleSettings({
       model: { provider: null, name: "claude-sonnet", fallbacks: [] },
       git: { author: null },
       prepare: { commands: prepareCommands, timeout_ms: 120_000 },
-      execution: { mode: "normal", approval: "prompt", retros: true },
+      execution: { mode: "normal", approval: "prompt" },
       checkpoint: { exclude_globs: [] },
       sandbox: {
         provider: "daytona",

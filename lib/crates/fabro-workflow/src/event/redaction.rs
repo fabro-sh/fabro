@@ -37,18 +37,12 @@ mod tests {
 
     #[test]
     fn build_redacted_event_payload_requires_id() {
-        let stored = to_run_event(&fixtures::RUN_8, &Event::RetroStarted {
-            prompt:   Some("Analyze the run".to_string()),
-            provider: None,
-            model:    None,
+        let stored = to_run_event(&fixtures::RUN_8, &Event::RunSubmitted {
+            definition_blob: None,
         });
         let payload = build_redacted_event_payload(&stored, &fixtures::RUN_8).unwrap();
         assert_eq!(payload.as_value()["id"], stored.id);
-        assert_eq!(payload.as_value()["event"], "retro.started");
-        assert_eq!(
-            payload.as_value()["properties"]["prompt"],
-            "Analyze the run"
-        );
+        assert_eq!(payload.as_value()["event"], "run.submitted");
     }
 
     #[test]

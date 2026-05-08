@@ -84,9 +84,6 @@ pub async fn fork_run(
     projection.start = None;
     projection.sandbox = None;
     projection.conclusion = None;
-    projection.retro = None;
-    projection.retro_prompt = None;
-    projection.retro_response = None;
     projection.final_patch = None;
     projection.pull_request = None;
     projection.superseded_by = None;

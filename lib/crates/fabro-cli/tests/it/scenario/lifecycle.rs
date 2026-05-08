@@ -29,7 +29,6 @@ fn local_run_lifecycle() {
     cmd(&[
         "run",
         "--auto-approve",
-        "--no-retro",
         "--sandbox",
         "local",
         fixture("command_pipeline.fabro").to_str().unwrap(),

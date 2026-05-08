@@ -64,7 +64,6 @@ fn configure_hook_env(cmd: &mut assert_cmd::Command, hook_model: &str) {
         cmd.env_remove("ANTHROPIC_API_KEY");
     }
     cmd.arg("--sandbox").arg("local");
-    cmd.arg("--no-retro");
     cmd.arg("--auto-approve");
     cmd.arg("--provider").arg(stage_provider());
     cmd.arg("--model").arg(hook_model);

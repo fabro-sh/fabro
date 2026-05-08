@@ -90,4 +90,4 @@ curl -fsSL https://fabro.sh/install.sh | bash
 fabro run implement
 ```
 
-Check the [roadmap](/roadmap) to see what we're building — including automatic retrospectives, a REST API server, and analytics — and join us on [Discord](/discord) to shape what comes next.
+Check the [roadmap](/roadmap) to see what we're building — including the REST API server, analytics, and web workflows — and join us on [Discord](/discord) to shape what comes next.

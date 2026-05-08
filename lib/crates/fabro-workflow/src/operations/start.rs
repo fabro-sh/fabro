@@ -4,11 +4,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use fabro_auth::configured_providers_from_process_env;
-use fabro_config::project as project_config;
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_model::{Catalog, FallbackTarget, Provider};
-use fabro_retro::retro::Retro;
 use fabro_sandbox::config::{
     self as sandbox_config, DaytonaNetwork, DaytonaSnapshotSettings,
     DockerfileSource as SandboxDockerfileSource, WorktreeMode, bridge_worktree_mode,
@@ -42,8 +40,7 @@ use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
 use crate::pipeline::{
     self, DevcontainerSpec, FinalizeOptions, Finalized, InitOptions, LlmSpec, Persisted,
-    PullRequestOptions, RetroOptions, SandboxEnvSpec, build_conclusion_from_store,
-    classify_engine_result,
+    PullRequestOptions, SandboxEnvSpec, build_conclusion_from_store, classify_engine_result,
 };
 use crate::records::Checkpoint;
 use crate::run_control::RunControlState;
@@ -74,7 +71,6 @@ struct RunSession {
     github_app:        Option<fabro_github::GitHubCredentials>,
     worktree_mode:     Option<WorktreeMode>,
     registry_override: Option<Arc<HandlerRegistry>>,
-    retro_enabled:     bool,
     preserve_sandbox:  bool,
     pr_config:         Option<PullRequestSettings>,
     pr_github_app:     Option<fabro_github::GitHubCredentials>,
@@ -106,10 +102,8 @@ pub struct StartServices {
 }
 
 pub struct Started {
-    pub finalized:      Finalized,
-    pub final_context:  Option<Context>,
-    pub retro:          Option<Retro>,
-    pub retro_duration: Duration,
+    pub finalized:     Finalized,
+    pub final_context: Option<Context>,
 }
 
 /// Start a fresh workflow run. Errors if a checkpoint already exists (use
@@ -448,7 +442,6 @@ impl RunSession {
             github_app: services.github_app.clone(),
             worktree_mode: Some(resolve_worktree_mode(resolved)),
             registry_override: services.registry_override,
-            retro_enabled: resolved.execution.retros && project_config::is_retro_enabled(),
             preserve_sandbox: resolved.sandbox.preserve,
             pr_config,
             pr_github_app: services.github_app,
@@ -685,7 +678,7 @@ fn runtime_hook_type(hook_type: &ResolvedHookType) -> fabro_hooks::HookType {
 }
 
 impl RunSession {
-    /// Shared engine: initialize, execute, retro, finalize, pull_request.
+    /// Shared engine: initialize, execute, finalize, pull_request.
     async fn run(
         self,
         persisted: Persisted,
@@ -791,30 +784,11 @@ impl RunSession {
         let executed = pipeline::execute(initialized).await;
         store_progress_logger.flush().await;
         let final_context = Some(executed.final_context.clone());
-        let failed = !executed
-            .outcome
-            .as_ref()
-            .is_ok_and(|outcome| outcome.status.is_successful());
-
-        let retro_opts = RetroOptions {
-            run_id: executed.run_options.run_id,
-            services: Arc::clone(&executed.engine.run),
-            workflow_name: executed.graph.name.clone(),
-            goal: executed.graph.goal().to_string(),
-            failed,
-            run_duration_ms: executed.duration_ms,
-            enabled: self.retro_enabled,
-            model: executed.model.clone(),
-        };
-
-        let retro_start = Instant::now();
-        let retroed = Box::pin(pipeline::retro(executed, &retro_opts)).await;
-        let retro_duration = retro_start.elapsed();
 
         let finalize_opts = FinalizeOptions {
-            run_dir:          retroed.run_options.run_dir.clone(),
-            run_id:           retroed.run_options.run_id,
-            workflow_name:    retroed.graph.name.clone(),
+            run_dir:          executed.run_options.run_dir.clone(),
+            run_id:           executed.run_options.run_id,
+            workflow_name:    executed.graph.name.clone(),
             preserve_sandbox: self.preserve_sandbox,
             last_git_sha:     last_git_sha.lock().unwrap().clone(),
         };
@@ -825,8 +799,7 @@ impl RunSession {
             model:      self.pr_model,
         };
 
-        let retro = retroed.retro.clone();
-        let concluded = match Box::pin(pipeline::finalize(retroed, &finalize_opts)).await {
+        let concluded = match Box::pin(pipeline::finalize(executed, &finalize_opts)).await {
             Ok(concluded) => concluded,
             Err(err) => {
                 self.steering_hub.drain_pending_at_run_end();
@@ -847,8 +820,6 @@ impl RunSession {
         Ok(Started {
             finalized,
             final_context,
-            retro,
-            retro_duration,
         })
     }
 }
@@ -1195,7 +1166,6 @@ mod tests {
             Some("sha-test")
         );
         assert_eq!(started.finalized.conclusion.status, StageOutcome::Succeeded);
-        assert!(started.retro.is_none());
     }
 
     #[tokio::test]

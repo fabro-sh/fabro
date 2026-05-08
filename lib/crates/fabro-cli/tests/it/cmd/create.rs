@@ -54,7 +54,6 @@ fn help() {
           --sandbox <SANDBOX>      Sandbox for agent tools [possible values: local, docker, daytona]
           --in-place               Run directly in the source checkout without git checkpoints
           --label <KEY=VALUE>      Attach a label to this run (repeatable, format: KEY=VALUE)
-          --no-retro               Skip retro generation after the run
           --preserve-sandbox       Keep the sandbox alive after the run finishes (for debugging)
       -d, --detach                 Run the workflow in the background and print the run ID
       -h, --help                   Print help
@@ -324,7 +323,6 @@ fn create_persists_requested_overrides_into_store() {
         "--label",
         "team=cli",
         "--verbose",
-        "--no-retro",
         "--preserve-sandbox",
         workflow.to_str().unwrap(),
     ]);
@@ -361,7 +359,6 @@ fn create_persists_requested_overrides_into_store() {
             },
             "dry_run": resolved_run.execution.mode == fabro_types::settings::run::RunMode::DryRun,
             "auto_approve": resolved_run.execution.approval == fabro_types::settings::run::ApprovalMode::Auto,
-            "no_retro": !resolved_run.execution.retros,
             "llm": {
                 "model": resolved_run.model.name.as_ref().map(fabro_types::settings::InterpString::as_source),
                 "provider": resolved_run.model.provider.as_ref().map(fabro_types::settings::InterpString::as_source),
@@ -381,7 +378,6 @@ fn create_persists_requested_overrides_into_store() {
         "goal": "Ship the release",
         "dry_run": true,
         "auto_approve": true,
-        "no_retro": true,
         "llm": {
           "model": "gpt-5",
           "provider": "openai"

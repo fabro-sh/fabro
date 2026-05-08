@@ -1,6 +1,6 @@
 # Fabro Events Strategy
 
-Fabro emits structured **workflow run events** during execution for observability. Events are the durable audit trail for a run: they drive the run store, SSE streaming, CLI progress rendering, retro analysis, and optional JSONL sinks.
+Fabro emits structured **workflow run events** during execution for observability. Events are the durable audit trail for a run: they drive the run store, SSE streaming, CLI progress rendering, and optional JSONL sinks.
 
 Events are distinct from tracing logs. Tracing is developer diagnostics; events are product-facing state transitions and activity records that other systems consume.
 
@@ -159,7 +159,6 @@ Check:
 
 - CLI progress parsing
 - `fabro events`
-- retro duration extraction
 - store validation
 - tests or fixtures that inspect event names or fields
 

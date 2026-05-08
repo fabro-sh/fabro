@@ -145,7 +145,6 @@ fn start_rejects_already_active_or_completed_run() {
         "openai",
         "--sandbox",
         "local",
-        "--no-retro",
         "slow.fabro",
     ]);
     let create_output = create_cmd.output().expect("command should execute");
@@ -207,7 +206,6 @@ fn start_runs_under_server_ownership_without_launcher_record() {
             "openai",
             "--sandbox",
             "local",
-            "--no-retro",
             "owned-by-server.fabro",
         ])
         .env("OPENAI_API_KEY", "test")

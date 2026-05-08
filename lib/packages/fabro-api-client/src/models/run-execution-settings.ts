@@ -23,7 +23,6 @@ import type { RunMode } from './run-mode';
 export interface RunExecutionSettings {
     'mode': RunMode;
     'approval': ApprovalMode;
-    'retros': boolean;
 }
 
 

@@ -481,7 +481,6 @@ methods = ["dev-token"]
             run_id.as_str(),
             "--detach",
             "--auto-approve",
-            "--no-retro",
             "--sandbox",
             "local",
             workflow_path
@@ -566,7 +565,6 @@ digraph Test {
             "run",
             "--dry-run",
             "--auto-approve",
-            "--no-retro",
             "--detach",
             context.temp_dir.join("workflow.fabro").to_str().unwrap(),
         ])
@@ -667,9 +665,6 @@ fn runner_reports_missing_run_spec_without_prefetching_events() {
                     "checkpoint": null,
                     "checkpoints": [],
                     "conclusion": null,
-                    "retro": null,
-                    "retro_prompt": null,
-                    "retro_response": null,
                     "sandbox": null,
                     "final_patch": null,
                     "pull_request": null,
@@ -749,7 +744,6 @@ fn detached_run_answers_pending_question_without_interview_scratch_files() {
             "--detach",
             "--run-id",
             run_id.as_str(),
-            "--no-retro",
             "--sandbox",
             "local",
             workflow_path.to_str().unwrap(),
@@ -810,77 +804,6 @@ fn detached_run_answers_pending_question_without_interview_scratch_files() {
     )));
 }
 
-#[test]
-fn worker_exits_with_retro_enabled_even_when_stdin_stays_open() {
-    let context = auth_context();
-    let run_id = unique_run_id();
-    let workflow_path = context.temp_dir.join("retro-success.fabro");
-
-    context.write_temp(
-        ".fabro/project.toml",
-        r"_version = 1
-
-[run.execution]
-retros = true
-",
-    );
-    context.write_temp(
-        "retro-success.fabro",
-        r#"digraph RetroSuccess {
-  graph [goal="Finish successfully with retro enabled"]
-  start [shape=Mdiamond, label="Start"]
-  exit  [shape=Msquare, label="Exit"]
-  work  [shape=parallelogram, label="Work", script="true"]
-  start -> work -> exit
-}
-"#,
-    );
-
-    context
-        .command()
-        .args([
-            "create",
-            "--dry-run",
-            "--auto-approve",
-            "--run-id",
-            run_id.as_str(),
-            workflow_path.to_str().unwrap(),
-        ])
-        .assert()
-        .success();
-
-    let run_dir = context.find_run_dir(&run_id);
-    let server = server_target(&context.storage_dir);
-    let mut child = spawn_worker_process(&context, &server, &run_dir, &run_id, "start");
-    let stdin = child.stdin.take().expect("worker stdin should be piped");
-
-    wait_for_event_names(&run_dir, &["run.completed", "retro.completed"]);
-    let status = wait_for_child_exit(&mut child, SHARED_DAEMON_TIMEOUT);
-    drop(stdin);
-    let output = child_output(child, status);
-
-    assert!(
-        output.status.success(),
-        "worker should exit successfully after retro even with stdin open:\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let events = stored_worker_events(&run_dir);
-    let run_completed_index = events
-        .iter()
-        .position(|event| matches!(&event.body, EventBody::RunCompleted(_)))
-        .expect("run.completed should be present");
-    let retro_completed_index = events
-        .iter()
-        .position(|event| matches!(&event.body, EventBody::RetroCompleted(_)))
-        .expect("retro.completed should be present");
-    assert!(
-        retro_completed_index < run_completed_index,
-        "retro.completed must precede run.completed"
-    );
-}
-
 #[cfg(unix)]
 #[test]
 fn worker_exits_after_sigterm_cancel_even_when_stdin_stays_open() {
@@ -894,7 +817,6 @@ fn worker_exits_after_sigterm_cancel_even_when_stdin_stays_open() {
         .args([
             "create",
             "--auto-approve",
-            "--no-retro",
             "--sandbox",
             "local",
             "--run-id",

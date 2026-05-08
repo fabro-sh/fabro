@@ -11,7 +11,6 @@ fn scenario_human_gate(sandbox: &str) {
         .run_cmd()
         .args([
             "--auto-approve",
-            "--no-retro",
             "--sandbox",
             sandbox,
             "--model",

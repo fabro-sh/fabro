@@ -247,7 +247,6 @@ def run_instance(
             "--model", model,
             "--provider", provider,
             "--goal-file", str(goal_file),
-            "--no-retro",
             "--label", f"swe-bench={instance_id}",
         ]
 

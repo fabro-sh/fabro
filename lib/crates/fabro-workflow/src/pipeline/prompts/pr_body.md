@@ -7,7 +7,7 @@ Return a JSON object with exactly two fields:
 
 DO NOT INCLUDE in the body
 - A `#` or `##` title heading at the top -- the title goes in the `title` field.
-- A "Retro" section, "Fabro Details" section, cost/duration table, or "Generated with" footer -- those are appended programmatically after your output.
+- A "Fabro Details" section, cost/duration table, or "Generated with" footer -- those are appended programmatically after your output.
 - The full plan text -- the full plan is appended programmatically as a <details> block.
 - Bare `#1`, `#2` list prefixes -- GitHub auto-links those as issue references. Use plain `1.`, `2.` instead.
 - A test plan unless the testing approach is non-obvious.

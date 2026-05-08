@@ -143,16 +143,6 @@ impl RunDump {
             }
         }
 
-        if let Some(prompt) = state.retro_prompt.as_ref() {
-            entries.push(RunDumpEntry::text("stages/retro/prompt.md", prompt.clone()));
-        }
-        if let Some(response) = state.retro_response.as_ref() {
-            entries.push(RunDumpEntry::text(
-                "stages/retro/response.md",
-                response.clone(),
-            ));
-        }
-
         Ok(Self {
             entries,
             stage_ranks,
@@ -577,8 +567,6 @@ mod tests {
             clone_origin_url:  None,
             clone_branch:      None,
         });
-        projection.retro_prompt = Some("retro prompt".to_string());
-        projection.retro_response = Some("retro response".to_string());
         let stage =
             projection.stage_entry(stage_id.node_id(), stage_id.visit(), first_event_seq(2));
         stage.prompt = Some("plan".to_string());
@@ -609,8 +597,6 @@ mod tests {
 
         assert!(paths.contains(&"run.json"));
         assert!(paths.contains(&"graph.fabro"));
-        assert!(paths.contains(&"stages/retro/prompt.md"));
-        assert!(paths.contains(&"stages/retro/response.md"));
         assert!(paths.contains(&"stages/001-build@2/prompt.md"));
         assert!(paths.contains(&"stages/001-build@2/response.md"));
         assert!(paths.contains(&"stages/001-build@2/status.json"));
@@ -625,7 +611,6 @@ mod tests {
         assert!(!paths.contains(&"status.json"));
         assert!(!paths.contains(&"checkpoint.json"));
         assert!(!paths.contains(&"sandbox.json"));
-        assert!(!paths.contains(&"retro.json"));
         assert!(!paths.contains(&"conclusion.json"));
 
         let run_json = dump

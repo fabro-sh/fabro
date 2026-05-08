@@ -217,13 +217,6 @@ pub(super) enum ProgressEvent {
         from_node: String,
         to_node:   String,
     },
-    RetroStarted,
-    RetroCompleted {
-        duration_ms: u64,
-    },
-    RetroFailed {
-        duration_ms: u64,
-    },
     MetadataSnapshotFailed {
         phase:        String,
         failure_kind: String,
@@ -461,13 +454,6 @@ pub(super) fn from_run_event(stored: &RunEvent) -> Option<ProgressEvent> {
         EventBody::LoopRestart(props) => Some(ProgressEvent::LoopRestart {
             from_node: props.from_node.clone(),
             to_node:   props.to_node.clone(),
-        }),
-        EventBody::RetroStarted(_) => Some(ProgressEvent::RetroStarted),
-        EventBody::RetroCompleted(props) => Some(ProgressEvent::RetroCompleted {
-            duration_ms: props.duration_ms,
-        }),
-        EventBody::RetroFailed(props) => Some(ProgressEvent::RetroFailed {
-            duration_ms: props.duration_ms,
         }),
         EventBody::MetadataSnapshotFailed(props) => Some(ProgressEvent::MetadataSnapshotFailed {
             phase:        props.phase.to_string(),

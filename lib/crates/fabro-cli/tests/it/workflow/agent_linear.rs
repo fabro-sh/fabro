@@ -13,7 +13,6 @@ fn scenario_agent_linear(sandbox: &str) {
         .run_cmd()
         .args([
             "--auto-approve",
-            "--no-retro",
             "--sandbox",
             sandbox,
             "--model",

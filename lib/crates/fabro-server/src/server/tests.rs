@@ -819,9 +819,6 @@ methods = ["dev-token"]
 
 [features]
 session_sandboxes = true
-
-[run.execution]
-retros = false
 "#;
     let server_settings = server_settings_from_toml(source);
     let manifest_run_settings = resolve_manifest_run_settings(
@@ -830,11 +827,10 @@ retros = false
     let features = system_features(&server_settings, &manifest_run_settings);
 
     assert_eq!(features.session_sandboxes, Some(true));
-    assert_eq!(features.retros, Some(false));
 }
 
 #[test]
-fn system_features_default_retros_when_manifest_run_settings_do_not_resolve() {
+fn system_features_ignore_manifest_run_settings_resolution() {
     let source = r#"
 _version = 1
 
@@ -854,7 +850,6 @@ provider = "invalid-provider"
     let features = system_features(&server_settings, &manifest_run_settings);
 
     assert_eq!(features.session_sandboxes, Some(true));
-    assert_eq!(features.retros, Some(false));
 }
 
 #[test]

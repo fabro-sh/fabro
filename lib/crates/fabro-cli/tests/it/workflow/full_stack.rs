@@ -19,7 +19,6 @@ fn scenario_full_stack(sandbox: &str) {
         .run_cmd()
         .args([
             "--auto-approve",
-            "--no-retro",
             "--sandbox",
             sandbox,
             "--model",

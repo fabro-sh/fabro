@@ -41,7 +41,7 @@ Then run `fabro server start` to finish setup in your browser. The server opens 
 - **Run agents 24/7** — Fabro's API server queues and executes runs continuously. Close your laptop — workflows keep running and results are waiting when you return.
 - **Scale infinitely** — Move execution off your laptop and into cloud sandboxes. Run as many concurrent workflows as your infrastructure allows.
 - **Guarantee code quality** — Layer deterministic verifications — test suites, linters, type checkers, LLM-as-judge — into your workflow graph. Failures trigger fix loops automatically.
-- **Achieve compounding engineering** — Automatic retrospectives after every run feed a continuous improvement loop. Your workflows get better over time, not just your code.
+- **Inspect every run** — Query durable event streams, checkpoints, conclusions, and stage outputs to understand what happened and improve the workflow.
 - **Specify in natural language** — Define requirements as natural-language specs and let Fabro generate — and regenerate — implementations that conform to them.
 
 ---
@@ -56,7 +56,7 @@ Then run `fabro server start` to finish setup in your browser. The server opens 
 | ☁️  | Cloud sandboxes                | Run agents in isolated Daytona cloud VMs with snapshot-based setup, network controls, and automatic cleanup |
 | 🔌  | SSH access and preview links   | Shell into running sandboxes with `fabro sandbox ssh` and expose ports with `fabro sandbox preview` for live debugging    |
 | 🌲  | Git checkpointing              | Every stage commits code changes and execution metadata to Git branches. Resume, revert, or trace any change |
-| 📊  | Automatic retros               | Each run generates a retrospective with cost, duration, files touched, and an LLM-written narrative   |
+| 📊  | Run observability              | Durable events, checkpoints, conclusions, and stage outputs make every run inspectable and exportable |
 | ⚡  | Comprehensive API              | REST API with SSE event streaming and a React web UI. Run workflows programmatically or as a service  |
 | 🦀  | Single binary, no runtime      | One compiled Rust executable with zero dependencies. No Python, no Node, no Docker required           |
 | ⚖️  | Open source (MIT)              | Full source code, no vendor lock-in. Self-host, fork, or extend to fit your workflow                  |
@@ -104,7 +104,7 @@ Fabro ships with [comprehensive documentation](https://docs.fabro.sh) covering e
 
 - [**Getting Started**](https://docs.fabro.sh/getting-started/introduction) -- Installation, first workflow, and why Fabro exists
 - [**Defining Workflows**](https://docs.fabro.sh/workflows/stages-and-nodes) -- Node types, transitions, variables, stylesheets, and human gates
-- [**Executing Workflows**](https://docs.fabro.sh/execution/run-configuration) -- Run configuration, sandboxes, checkpoints, retros, and failure handling
+- [**Executing Workflows**](https://docs.fabro.sh/execution/run-configuration) -- Run configuration, sandboxes, checkpoints, observability, and failure handling
 - [**Tutorials**](https://docs.fabro.sh/tutorials/hello-world) -- Step-by-step guides from hello world to parallel multi-model ensembles
 - [**API Reference**](https://docs.fabro.sh/api-reference/overview) -- Full OpenAPI spec with authentication, SSE events, and client SDKs
 

@@ -57,9 +57,7 @@ Screenshots live in `docs/public/images/web/`. Each screenshot maps to a specifi
 | `run-overview.png` | `/runs/run-1` |
 | `run-stages.png` | `/runs/run-1/stages/detect-drift` |
 | `run-files-changed.png` | `/runs/run-1/compare` |
-| `run-retro.png` | `/runs/run-1/retro` |
 | `run-usage.png` | `/runs/run-1/usage` |
-| `retros-list.png` | `/retros` |
 
 ### Verification checklist
 
@@ -96,8 +94,6 @@ Current placements:
 | `workflow-runs.png` | `core-concepts/workflows.mdx` |
 | `run-stages.png` | `execution/observability.mdx` |
 | `run-usage.png` | `execution/observability.mdx` |
-| `retros-list.png` | `execution/retros.mdx` |
-| `run-retro.png` | `execution/retros.mdx` |
 | `run-files-changed.png` | `human-tools/steering.mdx` |
 
 ## Cleanup

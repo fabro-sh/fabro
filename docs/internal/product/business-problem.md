@@ -18,7 +18,7 @@ Fabro treats the process itself as code:
 - Workflow graphs define stages, branching, loops, parallelism, and human gates.
 - Model stylesheets route different stages to different models and providers.
 - Sandboxes and Git checkpoints make runs isolated, resumable, and inspectable.
-- Event logs, verifications, and retros create a feedback loop after execution.
+- Event logs, verifications, and run state create a feedback loop after execution.
 
 ## Product direction
 

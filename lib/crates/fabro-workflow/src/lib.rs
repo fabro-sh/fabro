@@ -18,7 +18,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use fabro_retro::retro::CompletedStage;
 use fabro_store::EventEnvelope;
 use fabro_types::{EventBody, StageId};
 
@@ -28,63 +27,6 @@ pub type OnNodeCallback = Option<Arc<dyn Fn(&str) + Send + Sync>>;
 /// Convert a Duration's milliseconds to u64, saturating on overflow.
 pub(crate) fn millis_u64(d: std::time::Duration) -> u64 {
     u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
-}
-
-/// Build `Vec<CompletedStage>` from a `Checkpoint`, mapping workflow-engine
-/// types into the flat struct expected by `fabro_retro::retro::derive_retro`.
-pub fn build_completed_stages(cp: &records::Checkpoint, run_failed: bool) -> Vec<CompletedStage> {
-    use outcome::OutcomeExt;
-
-    let mut stages = Vec::new();
-    let mut any_stage_failed = false;
-
-    for node_id in &cp.completed_nodes {
-        let outcome = cp.node_outcomes.get(node_id);
-        let retries = cp.node_retries.get(node_id).copied().unwrap_or(0);
-
-        let status = outcome.map_or_else(|| "unknown".to_string(), |o| o.status.to_string());
-
-        let succeeded = outcome.is_some_and(|o| o.status.is_successful());
-        let failed = outcome.is_some_and(|o| o.status.is_failure());
-        if failed {
-            any_stage_failed = true;
-        }
-
-        stages.push(CompletedStage {
-            node_id: node_id.clone(),
-            status,
-            succeeded,
-            failed,
-            retries,
-            billing_usd_micros: outcome
-                .and_then(|o| o.usage.as_ref())
-                .and_then(|usage| usage.total_usd_micros),
-            notes: outcome.and_then(|o| o.notes.clone()),
-            failure_reason: outcome.and_then(|o| o.failure_reason().map(String::from)),
-            files_touched: outcome.map(|o| o.files_touched.clone()).unwrap_or_default(),
-        });
-    }
-
-    // If run failed with an error not captured in stages, mark the last stage
-    if run_failed && !any_stage_failed {
-        if let Some(last) = stages.last_mut() {
-            last.failed = true;
-        } else {
-            stages.push(CompletedStage {
-                node_id:            "unknown".to_string(),
-                status:             "failed".to_string(),
-                succeeded:          false,
-                failed:             true,
-                retries:            0,
-                billing_usd_micros: None,
-                notes:              None,
-                failure_reason:     None,
-                files_touched:      vec![],
-            });
-        }
-    }
-
-    stages
 }
 
 /// Extract the `duration_ms` from a `stage.completed` / `stage.failed`
@@ -128,8 +70,8 @@ pub fn total_stage_duration_by_node(events: &[EventEnvelope]) -> HashMap<String,
 }
 
 /// Duration of each node's most recent visit (the highest visit number). Use
-/// for run summaries and retros where the table shows one row per node and
-/// "the last attempt" is the right representative.
+/// for run summaries where the table shows one row per node and "the last
+/// attempt" is the right representative.
 pub fn latest_stage_duration_by_node(events: &[EventEnvelope]) -> HashMap<String, u64> {
     let mut entries: Vec<(StageId, u64)> = extract_stage_durations_by_stage_id(events)
         .into_iter()

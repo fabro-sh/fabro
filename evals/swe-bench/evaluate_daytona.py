@@ -350,7 +350,6 @@ def evaluate_instance(
         cmd = [
             "fabro", "run", str(toml_file),
             "--auto-approve",
-            "--no-retro",
             "--label", f"swe-eval={instance_id}",
         ]
 

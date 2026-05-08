@@ -121,7 +121,6 @@ The tracked paths are stored as `files_touched` on the stage outcome:
 |---|---|
 | `StageCompleted` event | Emitted with `files_touched` in the event stream and surfaced by `fabro events` / exported event streams |
 | Preambles | Listed under each completed stage so downstream agents know what changed |
-| Retros | Included per-stage and aggregated across the full run |
 | `status.json` | Written to the stage's logs directory after each node completes |
 
 ### How tracking works
@@ -239,6 +238,5 @@ Outputs and artifacts appear in several observability surfaces:
 |---|---|
 | `StageCompleted` event | `files_touched` list for the stage |
 | `WorkflowRunCompleted` event | `artifact_count` -- total number of offloaded artifacts across the run |
-| [Retros](/execution/retros) | Per-stage `files_touched` and aggregate `files_touched` across all stages |
 | [Preambles](/execution/context#preamble-construction) | File list and artifact pointer references for completed stages |
 | Stage logs | `status.json` in each stage's run directory contains the full outcome including `files_touched` |

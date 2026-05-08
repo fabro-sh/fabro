@@ -142,9 +142,6 @@ fn resolve_execution(execution: Option<&RunExecutionLayer>) -> RunExecutionSetti
         approval: execution
             .approval
             .expect("defaults.toml should provide run.execution.approval"),
-        retros:   execution
-            .retros
-            .expect("defaults.toml should provide run.execution.retros"),
     }
 }
 

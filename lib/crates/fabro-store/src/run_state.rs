@@ -238,18 +238,6 @@ impl RunProjectionReducer for RunProjection {
                     clone_branch:      props.clone_branch.clone(),
                 });
             }
-            EventBody::RetroStarted(props) => {
-                self.retro_prompt.clone_from(&props.prompt);
-            }
-            EventBody::RetroCompleted(props) => {
-                self.retro_response.clone_from(&props.response);
-                self.retro = props
-                    .retro
-                    .clone()
-                    .map(serde_json::from_value)
-                    .transpose()
-                    .map_err(|err| Error::InvalidEvent(format!("invalid retro payload: {err}")))?;
-            }
             EventBody::PullRequestCreated(props) => {
                 self.pull_request = Some(PullRequestRecord {
                     html_url:    props.pr_url.clone(),

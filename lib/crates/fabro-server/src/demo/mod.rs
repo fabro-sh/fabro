@@ -708,7 +708,7 @@ pub(crate) async fn get_system_info(
             "uptime_secs": 42,
             "runs": { "total": 3, "active": 1 },
             "sandbox_provider": "local",
-            "features": { "session_sandboxes": false, "retros": false }
+            "features": { "session_sandboxes": false }
         })),
     )
         .into_response()

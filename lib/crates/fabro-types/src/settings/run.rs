@@ -177,7 +177,6 @@ impl Default for RunPrepareSettings {
 pub struct RunExecutionSettings {
     pub mode:     RunMode,
     pub approval: ApprovalMode,
-    pub retros:   bool,
 }
 
 impl Default for RunExecutionSettings {
@@ -185,7 +184,6 @@ impl Default for RunExecutionSettings {
         Self {
             mode:     RunMode::Normal,
             approval: ApprovalMode::Prompt,
-            retros:   true,
         }
     }
 }

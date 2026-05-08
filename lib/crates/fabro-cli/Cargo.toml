@@ -32,7 +32,6 @@ fabro-install = { path = "../fabro-install" }
 fabro-interview = { path = "../fabro-interview" }
 fabro-mcp = { path = "../fabro-mcp" }
 fabro-proc = { path = "../fabro-proc" }
-fabro-retro = { path = "../fabro-retro" }
 fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona"] }
 fabro-checkpoint = { path = "../fabro-checkpoint" }
 fabro-graphviz = { path = "../fabro-graphviz" }

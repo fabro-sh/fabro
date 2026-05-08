@@ -57,9 +57,6 @@ fn remote_run_state_response() -> serde_json::Value {
             "billing": null,
             "total_retries": 0,
         },
-        "retro": null,
-        "retro_prompt": null,
-        "retro_response": null,
         "sandbox": null,
         "final_patch": null,
         "pull_request": null,
@@ -153,7 +150,6 @@ fn help() {
           --sandbox <SANDBOX>      Sandbox for agent tools [possible values: local, docker, daytona]
           --in-place               Run directly in the source checkout without git checkpoints
           --label <KEY=VALUE>      Attach a label to this run (repeatable, format: KEY=VALUE)
-          --no-retro               Skip retro generation after the run
           --preserve-sandbox       Keep the sandbox alive after the run finishes (for debugging)
       -d, --detach                 Run the workflow in the background and print the run ID
       -h, --help                   Print help
@@ -372,7 +368,6 @@ digraph VaultWorkerLlm {
             "--run-id",
             run_id.as_str(),
             "--auto-approve",
-            "--no-retro",
             "--sandbox",
             "local",
             "--provider",
@@ -411,7 +406,6 @@ fn detach_rejects_storage_dir_flag() {
             "--detach",
             "--dry-run",
             "--auto-approve",
-            "--no-retro",
             workflow.to_str().unwrap(),
         ])
         .output()
@@ -690,7 +684,6 @@ include = ["assets/**"]
             "--run-id",
             run_id.as_str(),
             "--auto-approve",
-            "--no-retro",
             "--sandbox",
             "local",
             "--provider",
@@ -965,7 +958,6 @@ fn json_run_requires_manual_input_for_human_gates_without_auto_approve() {
             "run",
             "--sandbox",
             "local",
-            "--no-retro",
             workflow.to_str().unwrap(),
         ])
         .output()

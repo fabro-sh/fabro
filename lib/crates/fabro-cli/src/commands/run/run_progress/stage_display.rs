@@ -547,30 +547,6 @@ impl StageDisplay {
         );
     }
 
-    pub(super) fn on_retro_started(&mut self, renderer: &ProgressRenderer) {
-        self.on_stage_started(renderer, "retro", "Retro", None);
-    }
-
-    pub(super) fn on_retro_completed(&mut self, renderer: &ProgressRenderer, duration_ms: u64) {
-        self.finish_stage(
-            renderer,
-            "retro",
-            "Retro",
-            &styles::green_check(renderer.styles()),
-            &format_duration_ms(duration_ms),
-        );
-    }
-
-    pub(super) fn on_retro_failed(&mut self, renderer: &ProgressRenderer, duration_ms: u64) {
-        self.finish_stage(
-            renderer,
-            "retro",
-            "Retro",
-            &styles::red_cross(renderer.styles()),
-            &format_duration_ms(duration_ms),
-        );
-    }
-
     fn finish_stage(
         &mut self,
         renderer: &ProgressRenderer,

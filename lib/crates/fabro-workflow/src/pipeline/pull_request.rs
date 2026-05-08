@@ -6,7 +6,6 @@ use fabro_graphviz::parser;
 use fabro_llm::client::Client;
 use fabro_llm::generate::{GenerateParams, generate_object};
 use fabro_model::Catalog;
-use fabro_retro::retro::Retro;
 use fabro_store::RunProjection;
 use fabro_types::PullRequestRecord;
 use fabro_types::settings::run::MergeStrategy;
@@ -43,8 +42,8 @@ pub struct PrContent {
 }
 
 /// System prompt that instructs the LLM how to write a Fabro PR title and
-/// body. The trailing programmatic sections (Plan `<details>`, Retro,
-/// Fabro Details, footer) are appended after the LLM body — the prompt
+/// body. The trailing programmatic sections (Plan `<details>`, Fabro Details,
+/// footer) are appended after the LLM body — the prompt
 /// explicitly forbids the LLM from duplicating them.
 const PR_BODY_SYSTEM_PROMPT: &str = include_str!("prompts/pr_body.md");
 
@@ -157,52 +156,6 @@ fn format_duration_ms(ms: u64) -> String {
     } else {
         format!("{secs}s")
     }
-}
-
-/// Format the Retro section of the PR body.
-///
-/// Renders stats, friction points, and open items. Omits sub-sections when
-/// empty.
-fn format_retro_section(retro: &Retro) -> String {
-    let mut parts = Vec::new();
-    parts.push("### Retro".to_string());
-    parts.push(String::new());
-
-    // Stats summary
-    parts.push(format!(
-        "*   {} stages completed, {} failed, {} retries",
-        retro.stats.stages_completed, retro.stats.stages_failed, retro.stats.total_retries
-    ));
-    parts.push(format!(
-        "*   {} files modified",
-        retro.stats.files_touched.len()
-    ));
-
-    // Friction points
-    if let Some(ref fps) = retro.friction_points {
-        if !fps.is_empty() {
-            parts.push(String::new());
-            parts.push("**Friction points:**".to_string());
-            parts.push(String::new());
-            for fp in fps {
-                parts.push(format!("*   {}", fp.description));
-            }
-        }
-    }
-
-    // Open items
-    if let Some(ref items) = retro.open_items {
-        if !items.is_empty() {
-            parts.push(String::new());
-            parts.push("**Open items:**".to_string());
-            parts.push(String::new());
-            for item in items {
-                parts.push(format!("*   {}", item.description));
-            }
-        }
-    }
-
-    parts.join("\n")
 }
 
 /// Format the Fabro Details section of the PR body.
@@ -339,7 +292,6 @@ fn read_plan_text(state: &RunProjection) -> Option<String> {
 fn assemble_pr_body(
     llm_output: &str,
     plan_text: Option<&str>,
-    retro_section: &str,
     arc_details_section: &str,
 ) -> String {
     let mut parts = Vec::new();
@@ -356,11 +308,6 @@ fn assemble_pr_body(
         parts.push("````".to_string());
         parts.push(String::new());
         parts.push("</details>".to_string());
-    }
-
-    if !retro_section.is_empty() {
-        parts.push(String::new());
-        parts.push(retro_section.to_string());
     }
 
     if !arc_details_section.is_empty() {
@@ -438,7 +385,6 @@ async fn build_pr_content_with_client(
     let run_state = run_state.or(loaded_run_state.as_ref());
     let conclusion = conclusion.or_else(|| run_state.and_then(|state| state.conclusion.as_ref()));
     let plan_text = run_state.and_then(read_plan_text);
-    let retro = run_state.and_then(|state| state.retro.clone());
     let run_spec = run_state.and_then(|state| state.spec.clone());
     let dot_source = run_state.and_then(|state| state.graph_source.clone());
 
@@ -482,18 +428,12 @@ async fn build_pr_content_with_client(
         generated.body
     };
 
-    let retro_section = retro.as_ref().map(format_retro_section).unwrap_or_default();
     let arc_details_section = conclusion
         .as_ref()
         .map(|c| format_arc_details_section(c, run_spec.as_ref(), dot_source.as_deref()))
         .unwrap_or_default();
 
-    let body = assemble_pr_body(
-        &llm_body,
-        plan_text.as_deref(),
-        &retro_section,
-        &arc_details_section,
-    );
+    let body = assemble_pr_body(&llm_body, plan_text.as_deref(), &arc_details_section);
 
     info!("PR content generated");
 
@@ -709,9 +649,6 @@ mod tests {
     use fabro_llm::client::Client;
     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
     use fabro_llm::types::{FinishReason, Message, Request, Response, StreamEvent, TokenCounts};
-    use fabro_retro::retro::{
-        AggregateStats, FrictionKind, FrictionPoint, OpenItem, OpenItemKind, StageRetro,
-    };
     use fabro_store::Database;
     use fabro_types::{BilledTokenCounts, RunSpec, SuccessReason, first_event_seq, fixtures};
     use fabro_vault::{SecretType, Vault};
@@ -902,137 +839,6 @@ mod tests {
         }
     }
 
-    fn make_test_retro() -> Retro {
-        Retro {
-            run_id:          fixtures::RUN_1,
-            workflow_name:   "implement".to_string(),
-            goal:            "Fix the bug".to_string(),
-            timestamp:       Utc::now(),
-            smoothness:      None,
-            stages:          vec![
-                StageRetro {
-                    stage_id:           "plan".to_string(),
-                    stage_label:        "plan".to_string(),
-                    status:             "succeeded".to_string(),
-                    duration_ms:        45_000,
-                    retries:            0,
-                    billing_usd_micros: Some(120_000),
-                    notes:              None,
-                    failure_reason:     None,
-                    files_touched:      vec![],
-                },
-                StageRetro {
-                    stage_id:           "implement".to_string(),
-                    stage_label:        "implement".to_string(),
-                    status:             "succeeded".to_string(),
-                    duration_ms:        90_000,
-                    retries:            0,
-                    billing_usd_micros: Some(250_000),
-                    notes:              None,
-                    failure_reason:     None,
-                    files_touched:      vec!["src/main.rs".to_string(), "src/lib.rs".to_string()],
-                },
-                StageRetro {
-                    stage_id:           "simplify".to_string(),
-                    stage_label:        "simplify".to_string(),
-                    status:             "succeeded".to_string(),
-                    duration_ms:        15_000,
-                    retries:            0,
-                    billing_usd_micros: Some(50_000),
-                    notes:              None,
-                    failure_reason:     None,
-                    files_touched:      vec![],
-                },
-            ],
-            stats:           AggregateStats {
-                total_duration_ms:        150_000,
-                total_billing_usd_micros: Some(420_000),
-                total_retries:            0,
-                files_touched:            vec!["src/lib.rs".to_string(), "src/main.rs".to_string()],
-                stages_completed:         3,
-                stages_failed:            0,
-            },
-            intent:          None,
-            outcome:         None,
-            learnings:       None,
-            friction_points: Some(vec![
-                FrictionPoint {
-                    kind:        FrictionKind::ToolFailure,
-                    description: "Daytona sandbox didn't have cargo on PATH".to_string(),
-                    stage_id:    None,
-                },
-                FrictionPoint {
-                    kind:        FrictionKind::Timeout,
-                    description: "Proxy timeouts during cold compilations".to_string(),
-                    stage_id:    None,
-                },
-            ]),
-            open_items:      Some(vec![OpenItem {
-                kind:        OpenItemKind::TechDebt,
-                description: "`ToolApprovalFn` type alias still exists".to_string(),
-            }]),
-        }
-    }
-
-    // ── format_retro_section tests ──────────────────────────────────────
-
-    #[test]
-    fn format_retro_section_full() {
-        let retro = make_test_retro();
-        let section = format_retro_section(&retro);
-
-        assert!(section.contains("### Retro"));
-        assert!(section.contains("3 stages completed, 0 failed, 0 retries"));
-        assert!(section.contains("2 files modified"));
-        assert!(section.contains("**Friction points:**"));
-        assert!(section.contains("Daytona sandbox didn't have cargo on PATH"));
-        assert!(section.contains("Proxy timeouts during cold compilations"));
-        assert!(section.contains("**Open items:**"));
-        assert!(section.contains("`ToolApprovalFn` type alias still exists"));
-    }
-
-    #[test]
-    fn format_retro_section_no_friction_no_open() {
-        let mut retro = make_test_retro();
-        retro.friction_points = None;
-        retro.open_items = None;
-        let section = format_retro_section(&retro);
-
-        assert!(section.contains("### Retro"));
-        assert!(section.contains("3 stages completed"));
-        assert!(!section.contains("**Friction points:**"));
-        assert!(!section.contains("**Open items:**"));
-    }
-
-    #[test]
-    fn format_retro_section_empty_stats() {
-        let retro = Retro {
-            run_id:          fixtures::RUN_2,
-            workflow_name:   "test".to_string(),
-            goal:            "test".to_string(),
-            timestamp:       Utc::now(),
-            smoothness:      None,
-            stages:          vec![],
-            stats:           AggregateStats {
-                total_duration_ms:        0,
-                total_billing_usd_micros: None,
-                total_retries:            0,
-                files_touched:            vec![],
-                stages_completed:         0,
-                stages_failed:            0,
-            },
-            intent:          None,
-            outcome:         None,
-            learnings:       None,
-            friction_points: None,
-            open_items:      None,
-        };
-        let section = format_retro_section(&retro);
-
-        assert!(section.contains("0 stages completed, 0 failed, 0 retries"));
-        assert!(section.contains("0 files modified"));
-    }
-
     // ── format_arc_details_section tests ────────────────────────────────
 
     #[test]
@@ -1133,7 +939,6 @@ mod tests {
         let body = assemble_pr_body(
             "This is the narrative.\n\n### Plan Summary\n\n* Step 1\n* Step 2",
             Some("Full plan text here"),
-            "### Retro\n\n* 3 stages completed",
             "### Fabro Details\n\n<details>...</details>",
         );
 
@@ -1141,7 +946,6 @@ mod tests {
         assert!(body.contains("### Plan Summary"));
         assert!(body.contains("<details>\n<summary>Full plan</summary>"));
         assert!(body.contains("````md\nFull plan text here\n````"));
-        assert!(body.contains("### Retro"));
         assert!(body.contains("### Fabro Details"));
     }
 
@@ -1150,30 +954,26 @@ mod tests {
         let body = assemble_pr_body(
             "Narrative only.",
             None,
-            "### Retro\n\n* stats",
             "### Fabro Details\n\n<details>...</details>",
         );
 
         assert!(body.contains("Narrative only."));
         assert!(!body.contains("Full plan"));
-        assert!(body.contains("### Retro"));
         assert!(body.contains("### Fabro Details"));
     }
 
     #[test]
-    fn assemble_no_retro() {
-        let body = assemble_pr_body("Narrative only.", Some("Plan"), "", "");
+    fn assemble_no_details() {
+        let body = assemble_pr_body("Narrative only.", Some("Plan"), "");
 
         assert!(body.contains("Narrative only."));
         assert!(body.contains("Full plan"));
-        // Empty sections should not produce extra headers
-        assert!(!body.contains("### Retro"));
         assert!(!body.contains("### Fabro Details"));
     }
 
     #[test]
     fn assemble_narrative_only() {
-        let body = assemble_pr_body("Just the narrative.", None, "", "");
+        let body = assemble_pr_body("Just the narrative.", None, "");
 
         assert_eq!(
             body,
@@ -1182,26 +982,13 @@ mod tests {
     }
 
     #[test]
-    fn assemble_conclusion_without_retro() {
+    fn assemble_conclusion() {
         let conclusion = make_test_conclusion();
         let arc_details = format_arc_details_section(&conclusion, None, None);
-        let body = assemble_pr_body("Narrative.", None, "", &arc_details);
+        let body = assemble_pr_body("Narrative.", None, &arc_details);
 
         assert!(body.contains("### Fabro Details"));
         assert!(body.contains("Ran 3 stages"));
-        assert!(!body.contains("### Retro"));
-    }
-
-    #[test]
-    fn assemble_both_conclusion_and_retro() {
-        let conclusion = make_test_conclusion();
-        let retro = make_test_retro();
-        let retro_section = format_retro_section(&retro);
-        let arc_details = format_arc_details_section(&conclusion, None, None);
-        let body = assemble_pr_body("Narrative.", None, &retro_section, &arc_details);
-
-        assert!(body.contains("### Retro"));
-        assert!(body.contains("### Fabro Details"));
     }
 
     #[tokio::test]
@@ -1275,14 +1062,6 @@ mod tests {
         })
         .await
         .unwrap();
-        append_event(&run_store, &fixtures::RUN_1, &Event::RetroCompleted {
-            duration_ms: 1,
-            response:    Some(String::new()),
-            retro:       Some(serde_json::to_value(make_test_retro()).unwrap()),
-        })
-        .await
-        .unwrap();
-
         let body = build_pr_content_with_client(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
@@ -1300,7 +1079,6 @@ mod tests {
         .body;
 
         assert!(body.contains("Narrative from mock."));
-        assert!(body.contains("### Retro"));
         assert!(body.contains("### Fabro Details"));
         assert!(body.contains("test.fabro"));
     }
@@ -1833,14 +1611,6 @@ mod tests {
         })
         .await
         .unwrap();
-        append_event(&run_store, &fixtures::RUN_1, &Event::RetroCompleted {
-            duration_ms: 1,
-            response:    Some(String::new()),
-            retro:       Some(serde_json::to_value(make_test_retro()).unwrap()),
-        })
-        .await
-        .unwrap();
-
         let payload = pr_content_json("Mock", "   \n");
         let body = build_pr_content_with_client(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn x() {}\n",
@@ -1858,7 +1628,6 @@ mod tests {
         assert!(body.contains("The LLM did not produce a description"));
         assert!(body.contains("<summary>Full plan</summary>"));
         assert!(body.contains("Plan from store"));
-        assert!(body.contains("### Retro"));
         assert!(body.contains("### Fabro Details"));
         assert!(body.contains("Generated with [Fabro](https://fabro.sh)"));
     }

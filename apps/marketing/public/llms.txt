@@ -57,7 +57,6 @@ Fabro replaces the prompt-wait-review loop with version-controlled workflow grap
 - [Environments](https://docs.fabro.sh/execution/environments): Sandbox providers for workflow execution
 - [Run Configuration](https://docs.fabro.sh/execution/run-configuration): Configure runs with TOML files
 - [Checkpoints](https://docs.fabro.sh/execution/checkpoints): Git-based checkpoint and resume
-- [Retros](https://docs.fabro.sh/execution/retros): Automatic retrospectives for every run
 - [Observability](https://docs.fabro.sh/execution/observability): Monitor, inspect, and analyze runs
 
 ## Integrations

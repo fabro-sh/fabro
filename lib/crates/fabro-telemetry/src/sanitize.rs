@@ -81,10 +81,10 @@ mod tests {
     #[test]
     fn simple_command_with_flag() {
         let result = sanitize_command(
-            &args(&["fabro", "run", "my-workflow.toml", "--no-retro"]),
+            &args(&["fabro", "run", "my-workflow.toml", "--preserve-sandbox"]),
             "run",
         );
-        insta::assert_snapshot!(result, @"fabro run VALUE --no-retro");
+        insta::assert_snapshot!(result, @"fabro run VALUE --preserve-sandbox");
     }
 
     #[test]

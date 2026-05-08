@@ -336,8 +336,7 @@ fn manifest_args_overrides(args: Option<&types::ManifestArgs>) -> ManifestSettin
         ..RunSandboxLayer::default()
     });
 
-    let execution_has_any =
-        args.dry_run.is_some() || args.auto_approve.is_some() || args.no_retro.is_some();
+    let execution_has_any = args.dry_run.is_some() || args.auto_approve.is_some();
     let execution = execution_has_any.then(|| RunExecutionLayer {
         mode:     args
             .dry_run
@@ -349,7 +348,6 @@ fn manifest_args_overrides(args: Option<&types::ManifestArgs>) -> ManifestSettin
                 ApprovalMode::Prompt
             }
         }),
-        retros:   args.no_retro.map(|nr| !nr),
     });
 
     let run_has_any =
@@ -1702,7 +1700,6 @@ root = "/srv/fabro"
             dry_run:          Some(true),
             label:            Vec::new(),
             model:            None,
-            no_retro:         None,
             preserve_sandbox: None,
             provider:         None,
             sandbox:          None,

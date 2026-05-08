@@ -244,10 +244,6 @@ pub(crate) struct RunArgs {
     #[arg(long = "label", value_name = "KEY=VALUE")]
     pub(crate) label: Vec<String>,
 
-    /// Skip retro generation after the run
-    #[arg(long)]
-    pub(crate) no_retro: bool,
-
     /// Keep the sandbox alive after the run finishes (for debugging)
     #[arg(long)]
     pub(crate) preserve_sandbox: bool,

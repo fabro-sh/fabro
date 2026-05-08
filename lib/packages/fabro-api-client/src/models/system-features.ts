@@ -22,9 +22,5 @@ export interface SystemFeatures {
      * Whether session sandboxes are enabled.
      */
     'session_sandboxes'?: boolean;
-    /**
-     * Whether workflow retros are enabled.
-     */
-    'retros'?: boolean;
 }
 

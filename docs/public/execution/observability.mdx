@@ -3,7 +3,7 @@ title: "Observability"
 description: "How to monitor, inspect, and analyze workflow runs"
 ---
 
-Fabro captures a structured event for every significant action during a workflow run. These events cover stage execution, agent tool calls, retries, routing, sandbox lifecycle, git checkpoints, retro generation, and more.
+Fabro captures a structured event for every significant action during a workflow run. These events cover stage execution, agent tool calls, retries, routing, sandbox lifecycle, git checkpoints, and more.
 
 ## Event stream
 
@@ -11,7 +11,7 @@ Every workflow run emits a sequence of canonical **run event envelopes** that ar
 
 - Stored durably in the run store
 - Broadcast over SSE to connected API clients
-- Stored for later analysis and retro generation
+- Stored for later analysis
 - Rendered by CLI progress and log tooling
 - Optionally materialized into JSONL by export/debug paths
 
@@ -95,7 +95,6 @@ Common categories include:
 | Routing | `edge.selected`, `loop.restart`, `parallel.started` |
 | Git and checkpoints | `checkpoint.completed`, `git.commit`, `git.push` |
 | Setup and sandbox | `sandbox.initializing`, `sandbox.ready`, `setup.started` |
-| Retro | `retro.started`, `retro.completed`, `retro.failed` |
 
 ## Sub-agent visibility
 
@@ -135,4 +134,4 @@ Post-run analysis surfaces include:
 | `fabro inspect <RUN>` | Current durable run state, including run/start/checkpoint/conclusion records |
 | `fabro dump --output <DIR> <RUN>` | Exported `events.jsonl` plus reconstructed JSON and node files |
 
-See [retros](/execution/retros), [stages](/api-reference/run-internals/list-run-stages), and [turns](/api-reference/run-internals/list-stage-turns) for higher-level analysis views built on top of this event stream.
+See [stages](/api-reference/run-internals/list-run-stages) and [turns](/api-reference/run-internals/list-stage-turns) for higher-level analysis views built on top of this event stream.

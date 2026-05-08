@@ -82,7 +82,7 @@ The sandbox is configured per-run via CLI flags (`--sandbox docker`) or the run 
 Every significant action — stage starts, LLM calls, tool invocations, edge selections, stage completions — is emitted as a structured event. These events power:
 
 - The **web UI** for real-time run monitoring
-- **Retrospectives** generated automatically after each run
+- **Run summaries** built from durable events, checkpoints, conclusions, and stage outputs
 - **DuckDB queries** via `fabro insights` for SQL-based analysis across runs
 
 See [Observability](/execution/observability) for more on querying run data.

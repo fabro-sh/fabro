@@ -775,31 +775,6 @@ fn format_event_pretty_value(envelope: &serde_json::Value, styles: &Styles) -> O
                 styles.red.apply_to(error),
             ))
         }
-        "retro.completed" => {
-            let duration = format_duration_ms(prop_field(envelope, "duration_ms"));
-            Some(format!(
-                "{} {} Retro  {}",
-                styles.dim.apply_to(&ts),
-                styles.green.apply_to("\u{2713}"),
-                duration,
-            ))
-        }
-        "retro.failed" => {
-            let error = prop_str_field(envelope, "error").unwrap_or("unknown error");
-            let duration = format_duration_ms(prop_field(envelope, "duration_ms"));
-            Some(format!(
-                "{} {} Retro  {}  {}",
-                styles.dim.apply_to(&ts),
-                styles.bold_red.apply_to("\u{2717}"),
-                duration,
-                styles.red.apply_to(error),
-            ))
-        }
-        "retro.started" => Some(format!(
-            "{} {} Retro",
-            styles.dim.apply_to(&ts),
-            styles.bold_cyan.apply_to("\u{25b6}"),
-        )),
         _ => None,
     }
 }

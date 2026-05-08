@@ -501,7 +501,6 @@ command = ["demo-mcp"]
                 execution: Some(RunExecutionLayer {
                     mode:     Some(RunMode::DryRun),
                     approval: Some(ApprovalMode::Auto),
-                    retros:   Some(false),
                 }),
                 ..RunLayer::default()
             })
@@ -539,6 +538,5 @@ command = ["demo-mcp"]
         );
         assert_eq!(settings.run.execution.mode, RunMode::DryRun);
         assert_eq!(settings.run.execution.approval, ApprovalMode::Auto);
-        assert!(!settings.run.execution.retros);
     }
 }

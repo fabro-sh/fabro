@@ -18,7 +18,7 @@ A workflow can combine:
 - model stylesheets choose models and providers per stage
 - sandboxes isolate execution from the host
 - Git checkpoints make runs resumable and auditable
-- event logs, verifications, and optional retros help teams inspect outcomes
+- event logs, verifications, and run state help teams inspect outcomes
 
 ## Interfaces
 

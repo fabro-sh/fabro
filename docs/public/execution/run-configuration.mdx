@@ -27,7 +27,7 @@ goal = "Implement the login feature"
 |---|---|---|
 | `_version` | No (defaults to `1`) | Schema version. Must be `1` in the first pass. |
 | `[workflow].graph` | No | Path to the Graphviz workflow file, relative to the TOML file's directory. Defaults to `workflow.fabro`. |
-| `[run].goal` | No | What the workflow should accomplish. Passed to agents and used in retrospectives. Can also be provided via `--goal` CLI flag or Graphviz graph `goal` attribute. |
+| `[run].goal` | No | What the workflow should accomplish. Passed to agents and available via `--goal` CLI flag or Graphviz graph `goal` attribute. |
 
 Goal precedence: CLI `--goal` > `[run].goal` > Graphviz graph attribute.
 

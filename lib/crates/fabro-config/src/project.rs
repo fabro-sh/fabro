@@ -334,25 +334,6 @@ pub fn resolve_workflow(arg: &Path) -> Result<PathBuf> {
     Ok(resolution.dot_path)
 }
 
-/// Check whether retros are enabled in the project config.
-/// Retros are now expressed as `[run.execution] retros = true` in v2.
-pub fn is_retro_enabled() -> bool {
-    let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    match discover_project_config(&start) {
-        Ok(Some(path)) => load_project_config(&path)
-            .ok()
-            .and_then(|config| {
-                config
-                    .run
-                    .as_ref()
-                    .and_then(|r| r.execution.as_ref())
-                    .and_then(|e| e.retros)
-            })
-            .unwrap_or(false),
-        _ => false,
-    }
-}
-
 fn normalize_joined_path(base_dir: &Path, reference: &Path) -> PathBuf {
     if reference.is_absolute() {
         return reference.to_path_buf();
@@ -417,26 +398,6 @@ directory = "custom/"
             .project
             .directory,
             "custom/"
-        );
-    }
-
-    #[test]
-    fn parse_with_run_execution_retros() {
-        let config = "
-_version = 1
-
-[run.execution]
-retros = true
-"
-        .parse::<crate::SettingsLayer>()
-        .unwrap();
-        assert_eq!(
-            config
-                .run
-                .as_ref()
-                .and_then(|r| r.execution.as_ref())
-                .and_then(|e| e.retros),
-            Some(true)
         );
     }
 
