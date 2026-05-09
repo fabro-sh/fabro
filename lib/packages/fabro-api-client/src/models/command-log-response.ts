@@ -13,15 +13,11 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { CommandOutputStream } from './command-output-stream';
 
 /**
  * Byte-offset command log slice.
  */
 export interface CommandLogResponse {
-    'stream': CommandOutputStream;
     /**
      * Actual byte offset used for this slice.
      */
@@ -31,7 +27,7 @@ export interface CommandLogResponse {
      */
     'next_offset': number;
     /**
-     * Total bytes currently available for the stream.
+     * Total bytes currently available for the output log.
      */
     'total_bytes': number;
     /**
@@ -39,7 +35,7 @@ export interface CommandLogResponse {
      */
     'bytes_base64': string;
     /**
-     * Whether the stream is finalized.
+     * Whether the output log is finalized.
      */
     'eof': boolean;
     'cas_ref': string | null;
@@ -48,6 +44,4 @@ export interface CommandLogResponse {
      */
     'live_streaming': boolean;
 }
-
-
 

@@ -195,25 +195,32 @@ pub struct RunCheckpointSettings {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSandboxSettings {
-    pub provider:     String,
-    pub preserve:     bool,
-    pub devcontainer: bool,
-    pub env:          HashMap<String, InterpString>,
-    pub local:        LocalSandboxSettings,
-    pub docker:       Option<DockerSettings>,
-    pub daytona:      Option<DaytonaSettings>,
+    pub provider:         String,
+    pub preserve:         bool,
+    #[serde(default = "default_stop_on_terminal")]
+    pub stop_on_terminal: bool,
+    pub devcontainer:     bool,
+    pub env:              HashMap<String, InterpString>,
+    pub local:            LocalSandboxSettings,
+    pub docker:           Option<DockerSettings>,
+    pub daytona:          Option<DaytonaSettings>,
+}
+
+fn default_stop_on_terminal() -> bool {
+    true
 }
 
 impl Default for RunSandboxSettings {
     fn default() -> Self {
         Self {
-            provider:     "local".to_string(),
-            preserve:     false,
-            devcontainer: false,
-            env:          HashMap::new(),
-            local:        LocalSandboxSettings::default(),
-            docker:       None,
-            daytona:      None,
+            provider:         "local".to_string(),
+            preserve:         false,
+            stop_on_terminal: true,
+            devcontainer:     false,
+            env:              HashMap::new(),
+            local:            LocalSandboxSettings::default(),
+            docker:           None,
+            daytona:          None,
         }
     }
 }

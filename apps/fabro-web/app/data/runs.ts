@@ -26,6 +26,7 @@ export interface RunItem {
   lifecycleStatus?: RunStatus | null;
   lifecycleStatusLabel?: string;
   number?: number;
+  pullRequestUrl?: string;
   additions?: number;
   deletions?: number;
   checks?: CheckRun[];
@@ -72,6 +73,11 @@ function displayRunTitle(title: string | null | undefined): string {
   return title?.trim() ? title : "Untitled run";
 }
 
+function displayRepoName(name: string): string {
+  const slash = name.lastIndexOf("/");
+  return slash >= 0 ? name.slice(slash + 1) : name;
+}
+
 function runStatusKind(status: ApiRunStatus | null | undefined): RunStatus | null {
   return status?.kind ?? null;
 }
@@ -80,13 +86,14 @@ export function mapRunListItem(item: RunListItem): RunItem {
   const lifecycleStatus = runStatusKind(item.status);
   return {
     id: item.run_id,
-    repo: item.repository.name,
+    repo: displayRepoName(item.repository.name),
     title: displayRunTitle(item.title),
     workflow: item.workflow_slug ?? item.workflow_name ?? "unknown",
     column: item.column,
     lifecycleStatus,
     lifecycleStatusLabel: lifecycleStatusLabel(item.status),
     number: item.pull_request?.number,
+    pullRequestUrl: item.pull_request?.html_url,
     additions: item.pull_request?.additions,
     deletions: item.pull_request?.deletions,
     checks: item.pull_request?.checks?.map((c) => ({
@@ -112,11 +119,13 @@ export function mapRunSummaryToRunItem(summary: RunSummary): RunItem {
   const lifecycleStatus = runStatusKind(summary.status);
   return {
     id: summary.run_id,
-    repo: summary.repository.name,
+    repo: displayRepoName(summary.repository.name),
     title: displayRunTitle(summary.title),
     workflow: summary.workflow_slug ?? summary.workflow_name ?? "unknown",
     lifecycleStatus,
     lifecycleStatusLabel: lifecycleStatusLabel(summary.status),
+    number: summary.pull_request?.number,
+    pullRequestUrl: summary.pull_request?.html_url,
     sourceDirectory: summary.source_directory ?? undefined,
     elapsed:
       summary.elapsed_secs != null

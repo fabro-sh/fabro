@@ -18,6 +18,7 @@ timeout = "5m"
 [run.sandbox]
 provider = "docker"
 preserve = false
+stop_on_terminal = true
 devcontainer = false
 
 [run.sandbox.local]

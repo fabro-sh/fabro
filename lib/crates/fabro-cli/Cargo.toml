@@ -95,6 +95,7 @@ object_store.workspace = true
 bytes.workspace = true
 tokio-util.workspace = true
 libc = "0.2"
+nix = { version = "0.30", features = ["fs"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = { version = "0.9", optional = true }

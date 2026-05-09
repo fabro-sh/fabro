@@ -15,15 +15,9 @@
 
 
 /**
- * Command output stream name.
+ * Browser development-token login result.
  */
-
-export const CommandOutputStream = {
-    STDOUT: 'stdout',
-    STDERR: 'stderr'
-} as const;
-
-export type CommandOutputStream = typeof CommandOutputStream[keyof typeof CommandOutputStream];
-
-
+export interface DevTokenLoginResponse {
+    'ok': boolean;
+}
 

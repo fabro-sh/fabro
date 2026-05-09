@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { PaginatedRunStageList, StageState } from "@qltysh/fabro-api-client";
+import type { PaginatedRunStageList, StageHandler, StageState } from "@qltysh/fabro-api-client";
 
 import type { Stage } from "../components/stage-sidebar";
 import { aggregateGraphNodeStatus, formatStageLabel, mapRunStagesToSidebarStages } from "./stage-sidebar";
@@ -8,6 +8,7 @@ function makeStage(nodeId: string, visit: number, status: StageState): Stage {
   return {
     id: `${nodeId}@${visit}`,
     name: nodeId,
+    handler: "agent",
     nodeId,
     visit,
     status,
@@ -23,6 +24,7 @@ describe("mapRunStagesToSidebarStages", () => {
         {
           id: "apply-changes@1",
           name: "Apply Changes",
+          handler: "command",
           status: "succeeded",
           duration_secs: 12.5,
           node_id: "apply",
@@ -31,6 +33,7 @@ describe("mapRunStagesToSidebarStages", () => {
         {
           id: "apply-changes@2",
           name: "Apply Changes",
+          handler: "agent",
           status: "running",
           node_id: "apply",
           visit: 2,
@@ -43,11 +46,13 @@ describe("mapRunStagesToSidebarStages", () => {
     expect(result).toHaveLength(2);
 
     expect(result[0].id).toBe("apply-changes@1");
+    expect(result[0].handler).toBe("command");
     expect(result[0].nodeId).toBe("apply");
     expect(result[0].visit).toBe(1);
     expect(formatStageLabel(result[0])).toBe("Apply Changes");
 
     expect(result[1].id).toBe("apply-changes@2");
+    expect(result[1].handler).toBe("agent");
     expect(result[1].nodeId).toBe("apply");
     expect(result[1].visit).toBe(2);
     expect(formatStageLabel(result[1])).toBe("Apply Changes (2)");
@@ -59,6 +64,7 @@ describe("mapRunStagesToSidebarStages", () => {
         {
           id: "start@1",
           name: "start",
+          handler: "start",
           status: "succeeded",
           node_id: "start",
           visit: 1,
@@ -66,6 +72,7 @@ describe("mapRunStagesToSidebarStages", () => {
         {
           id: "verify@1",
           name: "verify",
+          handler: "human",
           status: "succeeded",
           node_id: "verify",
           visit: 1,
@@ -73,6 +80,7 @@ describe("mapRunStagesToSidebarStages", () => {
         {
           id: "exit@1",
           name: "exit",
+          handler: "exit",
           status: "succeeded",
           node_id: "exit",
           visit: 1,
@@ -91,6 +99,7 @@ describe("mapRunStagesToSidebarStages", () => {
         {
           id: "verify@1",
           name: "verify",
+          handler: "wait",
           status: "running",
           node_id: "verify",
           visit: 1,
@@ -100,6 +109,24 @@ describe("mapRunStagesToSidebarStages", () => {
     };
 
     expect(mapRunStagesToSidebarStages(stages)[0].duration).toBe("--");
+  });
+
+  test("preserves the authoritative handler for renderer dispatch", () => {
+    const stages: PaginatedRunStageList = {
+      data: [
+        {
+          id: "approval@1",
+          name: "approval",
+          handler: "human" satisfies StageHandler,
+          status: "pending",
+          node_id: "approval",
+          visit: 1,
+        },
+      ],
+      meta: { has_more: false },
+    };
+
+    expect(mapRunStagesToSidebarStages(stages)[0].handler).toBe("human");
   });
 });
 

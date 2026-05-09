@@ -65,8 +65,7 @@ fn run_projection_round_trips_populated_projection() {
                 "script_invocation": null,
                 "script_timing": null,
                 "parallel_results": null,
-                "stdout": "done",
-                "stderr": null
+                "output": "done"
             }
         }
     });

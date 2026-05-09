@@ -1159,20 +1159,14 @@ impl Client {
         &self,
         run_id: &RunId,
         qid: &str,
-        value: Option<String>,
-        selected_option_key: Option<String>,
-        selected_option_keys: Vec<String>,
+        body: types::SubmitAnswerRequest,
     ) -> Result<()> {
         self.send_api(|client| async move {
             client
                 .submit_run_answer()
                 .id(run_id.to_string())
                 .qid(qid)
-                .body(types::SubmitAnswerRequest {
-                    value:                value.clone(),
-                    selected_option_key:  selected_option_key.clone(),
-                    selected_option_keys: selected_option_keys.clone(),
-                })
+                .body(body.clone())
                 .send()
                 .await
         })

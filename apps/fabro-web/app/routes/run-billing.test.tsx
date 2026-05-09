@@ -66,7 +66,7 @@ describe("RunBilling", () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  test("renders non-LLM-only stage rows without the by-model section", () => {
+  test("hides completed non-billable stages but still renders the totals row", () => {
     const renderer = renderBilling(
       billing({
         stages: [
@@ -93,8 +93,8 @@ describe("RunBilling", () => {
     );
 
     const text = textFromNode(renderer.toJSON());
-    expect(text).toContain("start");
-    expect(text).toContain("command");
+    expect(text).not.toContain("start");
+    expect(text).not.toContain("command");
     expect(text).toMatch(/—\s*\/\s*—/);
     expect(text).toContain("1m 1s");
     expect(text).not.toContain("By model");
@@ -150,7 +150,7 @@ describe("RunBilling", () => {
     );
 
     const text = textFromNode(renderer.toJSON());
-    expect(text).toContain("start");
+    expect(text).not.toContain("start");
     expect(text).toContain("agent");
     expect(text).toContain("By model");
 

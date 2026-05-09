@@ -109,6 +109,11 @@ pub struct AgentSteeringInjectedProps {
     pub visit: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentInterruptInjectedProps {
+    pub visit: u32,
+}
+
 #[allow(
     clippy::empty_structs_with_brackets,
     reason = "This type must serialize as {} rather than null."

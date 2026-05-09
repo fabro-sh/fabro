@@ -645,6 +645,60 @@ pub(crate) async fn list_query_history(
     paginated_response(insights::history(), &pagination)
 }
 
+// ── Workflows ─────────────────────────────────────────────────────────
+
+pub(crate) async fn list_workflows(
+    _auth: RequiredUser,
+    State(_state): State<Arc<AppState>>,
+    Query(pagination): Query<PaginationParams>,
+) -> Response {
+    let limit = pagination.limit.clamp(1, 100) as usize;
+    let offset = pagination.offset as usize;
+    let mut data: Vec<_> = workflows::list_items()
+        .into_iter()
+        .skip(offset)
+        .take(limit + 1)
+        .collect();
+    let has_more = data.len() > limit;
+    data.truncate(limit);
+    (
+        StatusCode::OK,
+        Json(json!({
+            "data": data,
+            "pagination": { "has_more": has_more }
+        })),
+    )
+        .into_response()
+}
+
+pub(crate) async fn get_workflow(
+    _auth: RequiredUser,
+    State(_state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Response {
+    match workflows::detail(&name) {
+        Some(workflow) => (StatusCode::OK, Json(workflow)).into_response(),
+        None => ApiError::not_found("Workflow not found.").into_response(),
+    }
+}
+
+pub(crate) async fn list_workflow_runs(
+    _auth: RequiredUser,
+    State(_state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    Query(pagination): Query<PaginationParams>,
+) -> Response {
+    if workflows::detail(&name).is_none() {
+        return ApiError::not_found("Workflow not found.").into_response();
+    }
+
+    let runs = runs::summaries()
+        .into_iter()
+        .filter(|run| run.workflow_slug.as_deref() == Some(&name))
+        .collect();
+    paginated_response(runs, &pagination)
+}
+
 // ── Settings ───────────────────────────────────────────────────────────
 
 pub(crate) async fn get_server_settings(
@@ -889,6 +943,8 @@ mod runs {
             elapsed_secs.and_then(duration_ms_from_secs),
             total_usd_micros,
             None,
+            None,
+            None,
         )
     }
 
@@ -1009,6 +1065,7 @@ mod runs {
     ) -> RunPullRequest {
         RunPullRequest {
             number,
+            html_url: Some(format!("https://github.com/demo/fabro/pull/{number}")),
             additions: Some(additions),
             deletions: Some(deletions),
             comments: Some(comments),
@@ -1231,6 +1288,7 @@ mod runs {
                 StageState::Succeeded,
                 Some(72.0),
                 None,
+                StageHandler::Command,
             ),
             run_stage_from_stage_id(
                 &StageId::new("propose-changes", 1),
@@ -1238,6 +1296,7 @@ mod runs {
                 StageState::Succeeded,
                 Some(154.0),
                 None,
+                StageHandler::Agent,
             ),
             run_stage_from_stage_id(
                 &StageId::new("review-changes", 1),
@@ -1245,6 +1304,7 @@ mod runs {
                 StageState::Succeeded,
                 Some(45.0),
                 None,
+                StageHandler::Agent,
             ),
             run_stage_from_stage_id(
                 &StageId::new("apply-changes", 1),
@@ -1252,6 +1312,7 @@ mod runs {
                 StageState::Succeeded,
                 Some(118.0),
                 None,
+                StageHandler::Command,
             ),
             run_stage_from_stage_id(
                 &StageId::new("apply-changes", 2),
@@ -1259,6 +1320,7 @@ mod runs {
                 StageState::Running,
                 None,
                 None,
+                StageHandler::Command,
             ),
         ]
     }
@@ -1590,13 +1652,14 @@ mod runs {
                     timeout_ms: 120_000,
                 },
                 sandbox: RunSandboxSettings {
-                    provider:     "daytona".into(),
-                    preserve:     false,
-                    devcontainer: false,
-                    env:          HashMap::new(),
-                    local:        LocalSandboxSettings::default(),
-                    docker:       None,
-                    daytona:      Some(DaytonaSettings {
+                    provider:         "daytona".into(),
+                    preserve:         false,
+                    stop_on_terminal: true,
+                    devcontainer:     false,
+                    env:              HashMap::new(),
+                    local:            LocalSandboxSettings::default(),
+                    docker:           None,
+                    daytona:          Some(DaytonaSettings {
                         auto_stop_interval: Some(60),
                         labels:             HashMap::from([(
                             "project".to_string(),
@@ -1688,6 +1751,150 @@ mod runs {
 
             assert_eq!(summary.title, format!("{}...", "a".repeat(97)));
         }
+    }
+}
+
+mod workflows {
+    use serde_json::{Value, json};
+
+    use super::runs;
+
+    const FIX_BUILD_GRAPH: &str = r#"digraph fix_build {
+    graph [goal="Diagnose and fix CI build failures", label="Fix Build"]
+    rankdir=LR
+    start [shape=Mdiamond, label="Start"]
+    exit [shape=Msquare, label="Exit"]
+    diagnose [label="Diagnose Failure"]
+    fix [label="Apply Fix"]
+    validate [label="Run Build"]
+    gate [shape=diamond, label="Build passing?"]
+    start -> diagnose -> fix -> validate -> gate
+    gate -> exit [label="Yes"]
+    gate -> diagnose [label="No"]
+}"#;
+
+    const IMPLEMENT_GRAPH: &str = r#"digraph implement {
+    graph [goal="Implement feature from technical blueprint", label="Implement"]
+    rankdir=LR
+    start [shape=Mdiamond, label="Start"]
+    exit [shape=Msquare, label="Exit"]
+    plan [label="Plan Implementation"]
+    implement [label="Implement"]
+    review [label="Review"]
+    validate [label="Validate"]
+    fix [label="Fix Failures"]
+    start -> plan -> implement -> review -> validate
+    validate -> exit [label="Pass"]
+    validate -> fix [label="Fix"]
+    fix -> validate
+}"#;
+
+    const SYNC_DRIFT_GRAPH: &str = r#"digraph sync_drift {
+    graph [goal="Detect and reconcile configuration drift", label="Sync Drift"]
+    rankdir=LR
+    start [shape=Mdiamond, label="Start"]
+    exit [shape=Msquare, label="Exit"]
+    detect [label="Detect Drift"]
+    propose [label="Propose Changes"]
+    review [shape=hexagon, label="Review Changes"]
+    apply [label="Apply Changes"]
+    start -> detect
+    detect -> exit [label="No drift"]
+    detect -> propose [label="Drift found"]
+    propose -> review
+    review -> apply [label="Accept"]
+    review -> propose [label="Revise"]
+    apply -> exit
+}"#;
+
+    const EXPAND_GRAPH: &str = r#"digraph expand {
+    graph [goal="Propose and implement incremental product improvements", label="Expand"]
+    rankdir=LR
+    start [shape=Mdiamond, label="Start"]
+    exit [shape=Msquare, label="Exit"]
+    propose [label="Propose Changes"]
+    approve [shape=hexagon, label="Approve Changes"]
+    execute [label="Execute Changes"]
+    start -> propose -> approve
+    approve -> execute [label="Accept"]
+    approve -> propose [label="Revise"]
+    execute -> exit
+}"#;
+
+    fn definitions() -> Vec<Value> {
+        vec![
+            json!({
+                "name": "Fix Build",
+                "slug": "fix_build",
+                "filename": "fix_build.fabro",
+                "description": "Automatically diagnoses and fixes CI build failures by analyzing error logs and applying targeted code changes.",
+                "last_run": { "ran_at": "2026-03-06T12:00:00Z" },
+                "schedule": null,
+                "settings": runs::settings(),
+                "graph": FIX_BUILD_GRAPH,
+            }),
+            json!({
+                "name": "Implement Feature",
+                "slug": "implement",
+                "filename": "implement.fabro",
+                "description": "Generates production-ready code from a technical blueprint, including tests and a pull request ready for review.",
+                "last_run": { "ran_at": "2026-03-06T14:30:00Z" },
+                "schedule": null,
+                "settings": runs::settings(),
+                "graph": IMPLEMENT_GRAPH,
+            }),
+            json!({
+                "name": "Sync Drift",
+                "slug": "sync_drift",
+                "filename": "sync_drift.fabro",
+                "description": "Detects configuration and code drift between environments, then generates reconciliation patches.",
+                "last_run": { "ran_at": "2026-03-04T15:00:00Z" },
+                "schedule": { "expression": "0 9 * * 1", "next_run": "2026-03-09T09:00:00Z" },
+                "settings": runs::settings(),
+                "graph": SYNC_DRIFT_GRAPH,
+            }),
+            json!({
+                "name": "Expand Product",
+                "slug": "expand",
+                "filename": "expand.fabro",
+                "description": "Evolves the product by analyzing usage patterns and implementing incremental improvements.",
+                "last_run": null,
+                "schedule": null,
+                "settings": runs::settings(),
+                "graph": EXPAND_GRAPH,
+            }),
+        ]
+    }
+
+    pub(super) fn list_items() -> Vec<Value> {
+        definitions()
+            .into_iter()
+            .map(|workflow| {
+                json!({
+                    "name": workflow["name"],
+                    "slug": workflow["slug"],
+                    "filename": workflow["filename"],
+                    "last_run": workflow["last_run"],
+                    "schedule": workflow["schedule"],
+                })
+            })
+            .collect()
+    }
+
+    pub(super) fn detail(name: &str) -> Option<Value> {
+        definitions()
+            .into_iter()
+            .find(|workflow| workflow["slug"].as_str() == Some(name))
+            .map(|workflow| {
+                json!({
+                    "name": workflow["name"],
+                    "slug": workflow["slug"],
+                    "description": workflow["description"],
+                    "filename": workflow["filename"],
+                    "settings": workflow["settings"],
+                    "graph": workflow["graph"],
+                })
+            })
     }
 }
 

@@ -178,6 +178,8 @@ pub enum EventBody {
     AgentTurnLimitReached(AgentTurnLimitReachedProps),
     #[serde(rename = "agent.steering.injected")]
     AgentSteeringInjected(AgentSteeringInjectedProps),
+    #[serde(rename = "agent.interrupt.injected")]
+    AgentInterruptInjected(AgentInterruptInjectedProps),
     #[serde(rename = "agent.steer.buffered")]
     AgentSteerBuffered(AgentSteerBufferedProps),
     #[serde(rename = "agent.steer.dropped")]
@@ -216,6 +218,24 @@ pub enum EventBody {
     SandboxCleanupCompleted(SandboxCleanupCompletedProps),
     #[serde(rename = "sandbox.cleanup.failed")]
     SandboxCleanupFailed(SandboxCleanupFailedProps),
+    #[serde(rename = "sandbox.start.started")]
+    SandboxStartStarted(SandboxStartStartedProps),
+    #[serde(rename = "sandbox.start.completed")]
+    SandboxStartCompleted(SandboxStartCompletedProps),
+    #[serde(rename = "sandbox.start.failed")]
+    SandboxStartFailed(SandboxStartFailedProps),
+    #[serde(rename = "sandbox.stop.started")]
+    SandboxStopStarted(SandboxStopStartedProps),
+    #[serde(rename = "sandbox.stop.completed")]
+    SandboxStopCompleted(SandboxStopCompletedProps),
+    #[serde(rename = "sandbox.stop.failed")]
+    SandboxStopFailed(SandboxStopFailedProps),
+    #[serde(rename = "sandbox.delete.started")]
+    SandboxDeleteStarted(SandboxDeleteStartedProps),
+    #[serde(rename = "sandbox.delete.completed")]
+    SandboxDeleteCompleted(SandboxDeleteCompletedProps),
+    #[serde(rename = "sandbox.delete.failed")]
+    SandboxDeleteFailed(SandboxDeleteFailedProps),
     #[serde(rename = "sandbox.snapshot.pulling")]
     SnapshotPulling(SnapshotNameProps),
     #[serde(rename = "sandbox.snapshot.creating")]
@@ -406,6 +426,7 @@ impl EventBody {
             Self::AgentLoopDetected(_) => "agent.loop.detected",
             Self::AgentTurnLimitReached(_) => "agent.turn.limit",
             Self::AgentSteeringInjected(_) => "agent.steering.injected",
+            Self::AgentInterruptInjected(_) => "agent.interrupt.injected",
             Self::AgentSteerBuffered(_) => "agent.steer.buffered",
             Self::AgentSteerDropped(_) => "agent.steer.dropped",
             Self::AgentCompactionStarted(_) => "agent.compaction.started",
@@ -425,6 +446,15 @@ impl EventBody {
             Self::SandboxCleanupStarted(_) => "sandbox.cleanup.started",
             Self::SandboxCleanupCompleted(_) => "sandbox.cleanup.completed",
             Self::SandboxCleanupFailed(_) => "sandbox.cleanup.failed",
+            Self::SandboxStartStarted(_) => "sandbox.start.started",
+            Self::SandboxStartCompleted(_) => "sandbox.start.completed",
+            Self::SandboxStartFailed(_) => "sandbox.start.failed",
+            Self::SandboxStopStarted(_) => "sandbox.stop.started",
+            Self::SandboxStopCompleted(_) => "sandbox.stop.completed",
+            Self::SandboxStopFailed(_) => "sandbox.stop.failed",
+            Self::SandboxDeleteStarted(_) => "sandbox.delete.started",
+            Self::SandboxDeleteCompleted(_) => "sandbox.delete.completed",
+            Self::SandboxDeleteFailed(_) => "sandbox.delete.failed",
             Self::SnapshotPulling(_) => "sandbox.snapshot.pulling",
             Self::SnapshotCreating(_) => "sandbox.snapshot.creating",
             Self::SnapshotReady(_) => "sandbox.snapshot.ready",
@@ -543,6 +573,7 @@ fn is_known_event_name(event: &str) -> bool {
             | "agent.loop.detected"
             | "agent.turn.limit"
             | "agent.steering.injected"
+            | "agent.interrupt.injected"
             | "agent.steer.buffered"
             | "agent.steer.dropped"
             | "agent.compaction.started"
@@ -562,6 +593,15 @@ fn is_known_event_name(event: &str) -> bool {
             | "sandbox.cleanup.started"
             | "sandbox.cleanup.completed"
             | "sandbox.cleanup.failed"
+            | "sandbox.start.started"
+            | "sandbox.start.completed"
+            | "sandbox.start.failed"
+            | "sandbox.stop.started"
+            | "sandbox.stop.completed"
+            | "sandbox.stop.failed"
+            | "sandbox.delete.started"
+            | "sandbox.delete.completed"
+            | "sandbox.delete.failed"
             | "sandbox.snapshot.pulling"
             | "sandbox.snapshot.creating"
             | "sandbox.snapshot.ready"
@@ -953,6 +993,29 @@ mod tests {
     }
 
     #[test]
+    fn agent_interrupt_injected_round_trips_with_stage_session_and_actor() {
+        let line = json!({
+            "id": "evt_interrupt_injected",
+            "ts": "2026-04-04T12:00:00Z",
+            "run_id": fixtures::RUN_1,
+            "event": "agent.interrupt.injected",
+            "node_id": "code",
+            "node_label": "code",
+            "stage_id": "code@2",
+            "session_id": "ses_1",
+            "actor": { "kind": "system", "system_kind": "engine" },
+            "properties": { "visit": 2 }
+        });
+
+        let parsed = RunEvent::from_value(line.clone()).unwrap();
+        assert!(matches!(
+            &parsed.body,
+            EventBody::AgentInterruptInjected(props) if props.visit == 2
+        ));
+        assert_eq!(parsed.to_value().unwrap(), line);
+    }
+
+    #[test]
     fn run_interrupt_then_steer_is_not_a_known_persisted_event() {
         let line = json!({
             "id": "evt_combined",
@@ -967,6 +1030,74 @@ mod tests {
             parsed.body,
             EventBody::Unknown { ref name, .. } if name == "run.interrupt_then_steer"
         ));
+    }
+
+    #[test]
+    fn patch_bearing_events_round_trip_diff_summary() {
+        for (event_name, properties) in [
+            (
+                "checkpoint.completed",
+                json!({
+                    "status": "running",
+                    "current_node": "build",
+                    "completed_nodes": ["build"],
+                    "diff_summary": {
+                        "files_changed": 2,
+                        "additions": 10,
+                        "deletions": 3
+                    }
+                }),
+            ),
+            (
+                "run.completed",
+                json!({
+                    "duration_ms": 42,
+                    "artifact_count": 0,
+                    "status": "succeeded",
+                    "reason": "completed",
+                    "diff_summary": {
+                        "files_changed": 2,
+                        "additions": 10,
+                        "deletions": 3
+                    }
+                }),
+            ),
+            (
+                "run.failed",
+                json!({
+                    "error": "boom",
+                    "duration_ms": 42,
+                    "reason": "workflow_error",
+                    "diff_summary": {
+                        "files_changed": 2,
+                        "additions": 10,
+                        "deletions": 3
+                    }
+                }),
+            ),
+        ] {
+            let line = json!({
+                "id": format!("evt_{event_name}"),
+                "ts": "2026-04-04T12:00:00Z",
+                "run_id": fixtures::RUN_1,
+                "event": event_name,
+                "node_id": "build",
+                "properties": properties
+            });
+
+            let parsed = RunEvent::from_value(line).unwrap();
+            let serialized = parsed.to_value().unwrap();
+
+            assert_eq!(
+                serialized["properties"]["diff_summary"],
+                json!({
+                    "files_changed": 2,
+                    "additions": 10,
+                    "deletions": 3
+                }),
+                "{event_name} should preserve diff_summary"
+            );
+        }
     }
 
     #[test]

@@ -824,7 +824,7 @@ fn dry_run_persists_event_history_in_store() {
         .success();
 
     let run_dir = context.find_run_dir(&run_id);
-    wait_for_event_names(&run_dir, &["run.completed", "sandbox.cleanup.completed"]);
+    wait_for_event_names(&run_dir, &["run.completed", "sandbox.stop.completed"]);
     let output = context
         .command()
         .args(["events", &run_id])
@@ -865,7 +865,7 @@ fn dry_run_persists_event_history_in_store() {
     );
     assert_eq!(
         progress.last().and_then(|event| event["event"].as_str()),
-        Some("sandbox.cleanup.completed")
+        Some("sandbox.stop.completed")
     );
 
     let tail_output = context
@@ -891,7 +891,7 @@ fn dry_run_persists_event_history_in_store() {
         "kind": "worker",
         "run_id": "[ULID]"
       },
-      "event": "sandbox.cleanup.completed",
+      "event": "sandbox.stop.completed",
       "id": "[EVENT_ID]",
       "properties": {
         "duration_ms": "[DURATION_MS]",

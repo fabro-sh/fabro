@@ -7,7 +7,11 @@ import type {
   SubmitAnswerRequest,
 } from "@qltysh/fabro-api-client";
 
-import { apiJsonMutation } from "./api-client";
+import {
+  apiData,
+  authApi,
+  humanInTheLoopApi,
+} from "./api-client";
 import { queryKeys } from "./query-keys";
 import type { LifecycleAction, LifecycleActionError } from "./run-actions";
 import {
@@ -42,8 +46,10 @@ export type LifecycleMutationResult =
 export function usePreviewRun(id: string | undefined) {
   return useSWRMutation(
     id ? queryKeys.runs.preview(id) : null,
-    async (key: string, { arg }: { arg: PreviewRunArg }): Promise<PreviewMutationResult> => {
-      const result = await apiJsonMutation<PreviewUrlResponse, PreviewRunArg>(key, { arg });
+    async (_key, { arg }: { arg: PreviewRunArg }): Promise<PreviewMutationResult> => {
+      const result = await apiData<PreviewUrlResponse>(() =>
+        humanInTheLoopApi.generatePreviewUrl(id!, arg),
+      );
       return { intent: "preview", url: result.url };
     },
   );
@@ -95,7 +101,10 @@ function useLifecycleMutation(
   );
 }
 
-export type SubmitInterviewAnswerArg = SubmitAnswerRequest & { questionId: string };
+export type SubmitInterviewAnswerArg = {
+  questionId: string;
+  answer: SubmitAnswerRequest;
+};
 
 export function useSubmitInterviewAnswer(runId: string | undefined) {
   const { mutate } = useSWRConfig();
@@ -103,9 +112,9 @@ export function useSubmitInterviewAnswer(runId: string | undefined) {
     runId ? `interview-answer:${runId}` : null,
     async (_key: string, { arg }: { arg: SubmitInterviewAnswerArg }) => {
       if (!runId) throw new Error("runId is required");
-      const { questionId, ...body } = arg;
-      const path = `/api/v1/runs/${encodeURIComponent(runId)}/questions/${encodeURIComponent(questionId)}/answer`;
-      await apiJsonMutation<void, SubmitAnswerRequest>(path, { arg: body });
+      await apiData(() =>
+        humanInTheLoopApi.submitRunAnswer(runId, arg.questionId, arg.answer),
+      );
     },
     {
       onSuccess: () => {
@@ -125,8 +134,7 @@ export function useInterruptRun(runId: string | undefined) {
     runId ? `interrupt-run:${runId}` : null,
     async (_key: string) => {
       if (!runId) throw new Error("runId is required");
-      const path = `/api/v1/runs/${encodeURIComponent(runId)}/interrupt`;
-      await apiJsonMutation<void, undefined>(path, { arg: undefined });
+      await apiData(() => humanInTheLoopApi.interruptRun(runId));
     },
     {
       onSuccess: () => {
@@ -143,8 +151,7 @@ export function useSteerRun(runId: string | undefined) {
     runId ? `steer-run:${runId}` : null,
     async (_key: string, { arg }: { arg: SteerRunArg }) => {
       if (!runId) throw new Error("runId is required");
-      const path = `/api/v1/runs/${encodeURIComponent(runId)}/steer`;
-      await apiJsonMutation<void, SteerRunRequest>(path, { arg });
+      await apiData(() => humanInTheLoopApi.steerRun(runId, arg));
     },
     {
       onSuccess: () => {
@@ -159,8 +166,8 @@ export function useToggleDemoMode() {
   const { mutate } = useSWRConfig();
   return useSWRMutation(
     queryKeys.demo.toggle(),
-    async (key: string, { arg }: { arg: { enabled: boolean } }) => {
-      await apiJsonMutation<void, { enabled: boolean }>(key, { arg });
+    async (_key, { arg }: { arg: { enabled: boolean } }) => {
+      await apiData(() => authApi.toggleDemo(arg));
     },
     {
       onSuccess: () => {
@@ -172,18 +179,11 @@ export function useToggleDemoMode() {
 
 export function useLoginDevToken() {
   return useSWRMutation(
-    "/auth/login/dev-token",
-    async (key: string, { arg }: { arg: { token: string } }) => {
-      const response = await fetch(key, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(arg),
+    queryKeys.auth.loginDevToken(),
+    async (_key, { arg }: { arg: { token: string } }) => {
+      return apiData(() => authApi.loginDevToken(arg), {
+        redirectOnUnauthorized: false,
       });
-      if (!response.ok) {
-        throw new Error(response.statusText || `HTTP ${response.status}`);
-      }
-      return response.json() as Promise<{ ok: boolean }>;
     },
   );
 }

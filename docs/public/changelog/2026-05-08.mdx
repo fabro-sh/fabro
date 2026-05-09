@@ -1,0 +1,64 @@
+---
+title: "Run Events, artifacts, and typed interviews"
+date: "2026-05-08"
+---
+
+<Warning>
+**Interview answer submissions now use typed request bodies.** `POST /api/v1/runs/{id}/questions/{qid}/answer` requires a `kind` discriminator instead of the previous loose answer fields.
+
+To migrate:
+1. Send `{ "kind": "yes" }` or `{ "kind": "no" }` for yes/no answers.
+2. Send `{ "kind": "selected", "option_key": "..." }` for single-choice answers.
+3. Send `{ "kind": "multi_selected", "option_keys": ["..."] }` or `{ "kind": "text", "text": "..." }` for multi-choice and freeform answers.
+</Warning>
+
+## Run Events and Artifacts pages
+
+Run detail sidebars now include dedicated `Run Events` and `Artifacts` pages. `Run Events` shows the full event stream with category filters, search, and an event detail panel, while `Artifacts` groups downloadable files by stage and retry.
+
+This gives you a direct path to the two things users usually need after a run: the complete audit trail and the files produced by stages.
+
+## Typed interview answers
+
+Human-in-the-loop answers now have explicit API shapes for yes/no, single-select, multi-select, and text responses. The web UI and CLI attach flow use those shapes consistently, which removes ambiguity around which field should be present for each question type.
+
+`fabro attach` also handles interview edge cases better. Invalid input re-prompts instead of dropping the interaction, and attach no longer blocks when a question was already answered from another client.
+
+## API client coverage for the web app
+
+The web app now uses the generated TypeScript API client for the auth, workflow, run, artifact, settings, and human-in-the-loop calls that can be generated from OpenAPI. The API reference now documents the browser auth and workflow routes the app relies on, which keeps the UI and public contract aligned as routes evolve.
+
+## More
+
+<Accordion title="API">
+- `RunStage` now includes a canonical `handler` field so clients can choose agent, command, or debug renderers without guessing from names
+- Run summaries now include stored pull request records with `html_url`
+- OpenAPI now documents browser auth config, current user, demo toggle, and development-token login endpoints
+- OpenAPI now documents workflow list, workflow detail, and workflow runs endpoints
+- `GET /api/v1/runs/{id}/graph` now documents the optional `direction` query parameter
+</Accordion>
+
+<Accordion title="CLI">
+- `fabro attach` now re-prompts after invalid interview input
+- `fabro attach` now unblocks when an interview question is answered from another client
+</Accordion>
+
+<Accordion title="Workflows">
+- Added bundled `interview` and `sleeper` workflows for exercising human answers and interrupt handling
+</Accordion>
+
+<Accordion title="Improvements">
+- Added a Profile page to the user menu
+- Run cards now show a pull request icon and number only when a stored pull request exists
+- Run cards now show repository names without repeating the owner prefix
+- Archived runs now have a Delete action in the web app
+- Unknown stage handler types now open in the Debug renderer by default
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed prompt-only stages missing completed responses in the Thread view
+- Fixed stage interrupt events missing from the Thread view
+- Fixed OpenAI reasoning metadata being lost across stateless round trips
+- Fixed duplicate action dividers in run menus
+- Fixed the steer bar not receiving focus from the actions menu
+</Accordion>

@@ -30,7 +30,7 @@ use fabro_api::types::{
     DiffFile, DiffStats, FileDiff, FileDiffChangeKind, FileDiffTruncationReason,
     PaginatedRunFileList, RunFilesMeta, RunFilesMetaDegradedReason, RunFilesMetaToSha,
 };
-use fabro_sandbox::reconnect::reconnect;
+use fabro_sandbox::reconnect::reconnect_for_run;
 use fabro_static::EnvVars;
 use fabro_types::RunId;
 use fabro_workflow::sandbox_git::{
@@ -177,9 +177,9 @@ where
 ///    serves the full run diff).
 /// 2. Load the run projection. 404 covers both missing run and missing access —
 ///    IDOR-safe.
-/// 3. Try to reconnect the sandbox; on success, build a structured diff.
-/// 4. On reconnect failure or garbage-collected base, fall through to a
-///    degraded response built from `RunProjection.final_patch`.
+/// 3. Reconnect and start the sandbox, then build a structured diff.
+/// 4. On garbage-collected base commits, fall through to a degraded response
+///    built from `RunProjection.final_patch`.
 ///
 /// All logging emits a single `tracing::info!` with an allowlisted field
 /// set enforced by [`RunFilesMetrics::emit`] — no paths, contents, or raw
@@ -244,8 +244,8 @@ fn validate_one_sha(value: Option<&str>, param_name: &str) -> std::result::Resul
 
 /// Materialize the response for `GET /runs/{id}/files`. Prefers the live
 /// sandbox path; falls through to a `final_patch`-based degraded response
-/// when the sandbox is unreachable or gone; falls through to an empty
-/// envelope when neither is available.
+/// when the base objects are gone; falls through to an empty envelope when
+/// neither is available.
 async fn materialize_sandbox_path(state: &Arc<AppState>, run_id: &RunId) -> ListRunFilesResult {
     let start = Instant::now();
 
@@ -256,14 +256,17 @@ async fn materialize_sandbox_path(state: &Arc<AppState>, run_id: &RunId) -> List
         return Ok(empty_envelope());
     };
 
-    // Try to reconnect; on failure fall through to the final-patch fallback.
-    let Some(sandbox) = try_reconnect_run_sandbox(state, &projection).await? else {
-        return Ok(build_fallback_response(
-            &projection,
-            reason_for_fallback(&projection),
-            run_id,
-            start,
-        ));
+    let sandbox = match reconnect_run_sandbox(state, run_id, &projection).await {
+        Ok(sandbox) => sandbox,
+        Err(err) if err.status() == StatusCode::CONFLICT => {
+            return Ok(build_fallback_response(
+                &projection,
+                RunFilesMetaDegradedReason::SandboxGone,
+                run_id,
+                start,
+            ));
+        }
+        Err(err) => return Err(err),
     };
 
     // Resolve HEAD (sha + commit time) in one round-trip.
@@ -374,28 +377,6 @@ async fn materialize_sandbox_path(state: &Arc<AppState>, run_id: &RunId) -> List
             degraded_reason: None,
         },
     })
-}
-
-/// Choose a degraded reason given the current projection. Docker-provider
-/// runs aren't supported by the deployed server; completed runs are "gone";
-/// everything else is a transient "unreachable" (sandbox may come back).
-fn reason_for_fallback(projection: &fabro_store::RunProjection) -> RunFilesMetaDegradedReason {
-    let provider = projection
-        .sandbox
-        .as_ref()
-        .map(|s| s.provider.to_ascii_lowercase());
-    if matches!(provider.as_deref(), Some("docker")) {
-        return RunFilesMetaDegradedReason::ProviderUnsupported;
-    }
-    let is_terminal = projection
-        .status
-        .as_ref()
-        .is_some_and(|status| status.is_terminal());
-    if is_terminal {
-        RunFilesMetaDegradedReason::SandboxGone
-    } else {
-        RunFilesMetaDegradedReason::SandboxUnreachable
-    }
 }
 
 /// Build the degraded response from the stored `final_patch`.
@@ -768,24 +749,24 @@ async fn load_projection(
         .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
 }
 
-/// Reconnect semantics tailored to the Files endpoint:
-/// - `Ok(Some(sandbox))`: reconnected, caller proceeds on the sandbox path.
-/// - `Ok(None)`: no sandbox record, reconnect failed, or the provider isn't
-///   supported by this build — caller falls through to the degraded fallback
-///   instead of returning 409.
-/// - `Err(ApiError)`: unrecoverable error loading run state.
-async fn try_reconnect_run_sandbox(
+async fn reconnect_run_sandbox(
     state: &Arc<AppState>,
+    run_id: &RunId,
     projection: &fabro_store::RunProjection,
-) -> std::result::Result<Option<Box<dyn Sandbox>>, ApiError> {
-    let Some(record) = projection.sandbox.clone() else {
-        return Ok(None);
-    };
+) -> std::result::Result<Box<dyn Sandbox>, ApiError> {
+    let record = projection
+        .sandbox
+        .clone()
+        .ok_or_else(|| ApiError::new(StatusCode::CONFLICT, "Run has no active sandbox."))?;
     let daytona_api_key = state.vault_or_env_pub(EnvVars::DAYTONA_API_KEY);
-    match reconnect(&record, daytona_api_key).await {
-        Ok(sandbox) => Ok(Some(sandbox)),
-        Err(_) => Ok(None),
-    }
+    let sandbox = reconnect_for_run(&record, daytona_api_key, Some(*run_id))
+        .await
+        .map_err(|err| ApiError::new(StatusCode::CONFLICT, err.to_string()))?;
+    sandbox
+        .start()
+        .await
+        .map_err(|err| ApiError::new(StatusCode::CONFLICT, err.display_with_causes()))?;
+    Ok(sandbox)
 }
 
 /// Resolve HEAD's SHA and its commit time in a single sandbox round-trip.

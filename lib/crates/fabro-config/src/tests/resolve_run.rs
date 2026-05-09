@@ -13,6 +13,7 @@ fn resolves_run_defaults_from_empty_settings() {
     assert_eq!(settings.execution.approval, ApprovalMode::Prompt);
     assert_eq!(settings.prepare.timeout_ms, 300_000);
     assert_eq!(settings.sandbox.provider, "docker");
+    assert!(settings.sandbox.stop_on_terminal);
     assert_eq!(settings.sandbox.local.worktree_mode, WorktreeMode::Always);
     let docker = settings
         .sandbox
@@ -24,6 +25,22 @@ fn resolves_run_defaults_from_empty_settings() {
     assert_eq!(docker.cpu_quota, Some(200_000));
     assert!(!docker.skip_clone);
     assert!(settings.pull_request.is_none());
+}
+
+#[test]
+fn resolves_explicit_stop_on_terminal_false() {
+    let settings = WorkflowSettingsBuilder::from_toml(
+        r"
+_version = 1
+
+[run.sandbox]
+stop_on_terminal = false
+",
+    )
+    .expect("sandbox stop_on_terminal setting should resolve")
+    .run;
+
+    assert!(!settings.sandbox.stop_on_terminal);
 }
 
 #[test]

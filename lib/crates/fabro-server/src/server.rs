@@ -26,15 +26,16 @@ pub use fabro_api::types::{
     ArtifactEntry, ArtifactListResponse, BillingByModel, BillingStageRef,
     CloseRunPullRequestResponse, CompletionContentPart, CompletionMessage, CompletionMessageRole,
     CompletionResponse, CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
-    CreateRunPullRequestRequest, CreateSecretRequest, DeleteSecretRequest, DiskUsageResponse,
-    DiskUsageRunRow, DiskUsageSummaryRow, ForkRequest, ForkResponse, MergeRunPullRequestRequest,
-    MergeRunPullRequestResponse, ModelReference, PaginatedEventList, PaginatedRunList,
-    PaginationMeta, PreflightResponse, PreviewUrlRequest, PreviewUrlResponse, PruneRunEntry,
-    PruneRunsRequest, PruneRunsResponse, RenderWorkflowGraphDirection, RenderWorkflowGraphRequest,
-    RewindRequest, RewindResponse, RunArtifactEntry, RunArtifactListResponse, RunBilling,
-    RunBillingStage, RunBillingTotals, RunError, RunManifest, RunStage, RunStatusResponse,
-    SandboxFileEntry, SandboxFileListResponse, SshAccessRequest, SshAccessResponse, StageState,
-    StartRunRequest, SubmitAnswerRequest, SystemFeatures, SystemInfoResponse, SystemRepairRunIssue,
+    CreateRunPullRequestRequest, CreateSecretRequest, DeleteRunResponse, DeleteRunSandbox,
+    DeleteSecretRequest, DiskUsageResponse, DiskUsageRunRow, DiskUsageSummaryRow, ForkRequest,
+    ForkResponse, MergeRunPullRequestRequest, MergeRunPullRequestResponse, ModelReference,
+    PaginatedEventList, PaginatedRunList, PaginationMeta, PreflightResponse, PreviewUrlRequest,
+    PreviewUrlResponse, PruneRunEntry, PruneRunsRequest, PruneRunsResponse,
+    RenderWorkflowGraphDirection, RenderWorkflowGraphRequest, RewindRequest, RewindResponse,
+    RunArtifactEntry, RunArtifactListResponse, RunBilling, RunBillingStage, RunBillingTotals,
+    RunError, RunManifest, RunStage, RunStatusResponse, SandboxFileEntry, SandboxFileListResponse,
+    SshAccessRequest, SshAccessResponse, StageHandler, StageState, StartRunRequest,
+    SubmitAnswerRequest, SystemFeatures, SystemInfoResponse, SystemRepairRunIssue,
     SystemRepairRunsResponse, SystemRunCounts, TimelineEntryResponse, WriteBlobResponse,
 };
 use fabro_auth::{
@@ -57,7 +58,7 @@ use fabro_llm::types::{
 use fabro_model::{BilledTokenCounts, Catalog, ModelTestMode, Provider};
 use fabro_redact::redact_jsonl_line;
 use fabro_sandbox::daytona::{self, DaytonaSandbox};
-use fabro_sandbox::reconnect::reconnect;
+use fabro_sandbox::reconnect::reconnect_for_run;
 use fabro_sandbox::{Sandbox, SandboxProvider};
 use fabro_slack::client::{PostedMessage as SlackPostedMessage, SlackClient};
 use fabro_slack::config::resolve_credentials as resolve_slack_credentials;
@@ -71,8 +72,6 @@ use fabro_store::{
 };
 #[cfg(test)]
 use fabro_types::BlockedReason;
-#[cfg(test)]
-use fabro_types::CommandOutputStream;
 use fabro_types::settings::run::RunMode;
 use fabro_types::settings::server::{
     GithubIntegrationSettings, GithubIntegrationStrategy, LogDestination,
@@ -637,10 +636,12 @@ pub(crate) fn run_stage_from_stage_id(
     status: StageState,
     duration_secs: Option<f64>,
     started_at: Option<chrono::DateTime<chrono::Utc>>,
+    handler: StageHandler,
 ) -> RunStage {
     RunStage {
         id: stage_id.to_string(),
         name: name.into(),
+        handler,
         status,
         duration_secs,
         node_id: stage_id.node_id().to_string(),
@@ -1585,22 +1586,27 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
 
 const MAX_PAGE_OFFSET: u32 = 1_000_000;
 
+enum DeleteRunOutcome {
+    NoContent,
+    Preserved(DeleteRunResponse),
+}
+
 async fn delete_run_internal(
     state: &Arc<AppState>,
     id: RunId,
     force: bool,
-) -> Result<(), Response> {
+) -> Result<DeleteRunOutcome, Response> {
     if !force {
         reject_active_delete_without_force(state.as_ref(), &id).await?;
     }
 
-    let managed_run = if let Ok(mut runs) = state.runs.lock() {
+    let mut managed_run = if let Ok(mut runs) = state.runs.lock() {
         runs.remove(&id)
     } else {
         None
     };
 
-    if let Some(mut managed_run) = managed_run {
+    if let Some(managed_run) = managed_run.as_mut() {
         if let Some(token) = &managed_run.cancel_token {
             token.cancel();
         }
@@ -1631,6 +1637,11 @@ async fn delete_run_internal(
             delete_grace,
         )
         .await;
+    }
+
+    let delete_outcome = delete_run_sandbox_resource(state, id, force).await?;
+
+    if let Some(mut managed_run) = managed_run {
         if let Some(run_dir) = managed_run.run_dir.take() {
             remove_run_dir(&run_dir).map_err(|err| {
                 ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
@@ -1654,7 +1665,82 @@ async fn delete_run_internal(
         .map_err(|err| {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         })?;
-    Ok(())
+    Ok(delete_outcome)
+}
+
+async fn delete_run_sandbox_resource(
+    state: &Arc<AppState>,
+    id: RunId,
+    force: bool,
+) -> Result<DeleteRunOutcome, Response> {
+    let Ok(run_store) = state.store.open_run(&id).await else {
+        return Ok(DeleteRunOutcome::NoContent);
+    };
+    let projection = run_store.state().await.map_err(|err| {
+        ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+    })?;
+    let delete_started = matches!(projection.status, Some(RunStatus::Removing));
+    let can_mark_removing = projection
+        .status
+        .is_some_and(|status| status.can_transition_to(RunStatus::Removing));
+    if !delete_started && can_mark_removing {
+        workflow_event::append_event(&run_store, &id, &workflow_event::Event::RunRemoving)
+            .await
+            .map_err(|err| {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            })?;
+    }
+
+    let preserve = projection
+        .spec()
+        .is_some_and(|spec| spec.settings.run.sandbox.preserve);
+    let Some(record) = projection.sandbox else {
+        return Ok(DeleteRunOutcome::NoContent);
+    };
+    if preserve {
+        let identifier = record
+            .identifier
+            .clone()
+            .unwrap_or_else(|| record.working_directory.clone());
+        return Ok(DeleteRunOutcome::Preserved(DeleteRunResponse {
+            deleted:           true,
+            sandbox_preserved: true,
+            sandbox:           DeleteRunSandbox {
+                provider: record.provider,
+                identifier,
+            },
+        }));
+    }
+
+    let daytona_api_key = state.vault_or_env(EnvVars::DAYTONA_API_KEY);
+    let sandbox = match reconnect_for_run(&record, daytona_api_key, Some(id)).await {
+        Ok(sandbox) => sandbox,
+        Err(err) if force || delete_started => {
+            tracing::warn!(
+                run_id = %id,
+                error = %render_with_causes(&err.to_string(), &collect_causes(err.as_ref())),
+                "Skipping sandbox provider delete during run deletion"
+            );
+            return Ok(DeleteRunOutcome::NoContent);
+        }
+        Err(err) => {
+            let detail = render_with_causes(&err.to_string(), &collect_causes(err.as_ref()));
+            return Err(ApiError::new(StatusCode::CONFLICT, detail).into_response());
+        }
+    };
+    if let Err(err) = sandbox.delete().await {
+        if force || delete_started {
+            tracing::warn!(
+                run_id = %id,
+                error = %err.display_with_causes(),
+                "Skipping failed sandbox provider delete during run deletion"
+            );
+            return Ok(DeleteRunOutcome::NoContent);
+        }
+        return Err(ApiError::new(StatusCode::CONFLICT, err.display_with_causes()).into_response());
+    }
+
+    Ok(DeleteRunOutcome::NoContent)
 }
 
 async fn reject_active_delete_without_force(
@@ -1667,15 +1753,7 @@ async fn reject_active_delete_without_force(
         .ok()
         .and_then(|runs| runs.get(run_id).map(|managed_run| managed_run.status));
     if let Some(status) = managed_status {
-        if matches!(
-            status,
-            RunStatus::Submitted
-                | RunStatus::Queued
-                | RunStatus::Starting
-                | RunStatus::Running
-                | RunStatus::Blocked { .. }
-                | RunStatus::Paused { .. }
-        ) {
+        if status.requires_force_to_delete() {
             return Err(ApiError::new(
                 StatusCode::CONFLICT,
                 active_run_delete_message(*run_id, status),
@@ -1686,7 +1764,7 @@ async fn reject_active_delete_without_force(
     }
 
     match state.store.runs().find(run_id).await {
-        Ok(Some(summary)) if summary.status.is_active() => Err(ApiError::new(
+        Ok(Some(summary)) if summary.status.requires_force_to_delete() => Err(ApiError::new(
             StatusCode::CONFLICT,
             active_run_delete_message(*run_id, summary.status),
         )
@@ -1979,6 +2057,7 @@ pub(crate) async fn reconcile_incomplete_runs_on_startup(
                 reason,
                 git_commit_sha: None,
                 final_patch: None,
+                diff_summary: None,
             },
         )
         .await?;
@@ -2032,6 +2111,7 @@ async fn persist_shutdown_run_failures(
                 reason,
                 git_commit_sha: None,
                 final_patch: None,
+                diff_summary: None,
             },
         )
         .await?;
@@ -2106,6 +2186,7 @@ async fn persist_cancelled_run_status(state: &AppState, run_id: RunId) -> anyhow
             reason:         FailureReason::Cancelled,
             git_commit_sha: None,
             final_patch:    None,
+            diff_summary:   None,
         },
     )
     .await
@@ -2144,6 +2225,7 @@ async fn fail_run_before_execution(
                     reason,
                     git_commit_sha: None,
                     final_patch: None,
+                    diff_summary: None,
                 },
             )
             .await
@@ -2421,6 +2503,7 @@ async fn append_worker_exit_failure(
             reason,
             git_commit_sha: None,
             final_patch: None,
+            diff_summary: None,
         },
     )
     .await
@@ -2685,31 +2768,31 @@ fn answer_from_request(
     req: SubmitAnswerRequest,
     question: &InterviewQuestionRecord,
 ) -> Result<Answer, Response> {
-    if let Some(key) = req.selected_option_key {
-        let option = question
-            .options
-            .iter()
-            .find(|option| option.key == key)
-            .cloned();
-        match option {
-            Some(option) => Ok(Answer::selected(key, option)),
-            None => Err(ApiError::bad_request("Invalid option key.").into_response()),
-        }
-    } else if !req.selected_option_keys.is_empty() {
-        for key in &req.selected_option_keys {
-            let valid = question.options.iter().any(|option| option.key == *key);
-            if !valid {
-                return Err(ApiError::bad_request("Invalid option key.").into_response());
+    match req {
+        SubmitAnswerRequest::YesRequest(_) => Ok(Answer::yes()),
+        SubmitAnswerRequest::NoRequest(_) => Ok(Answer::no()),
+        SubmitAnswerRequest::SelectedRequest(req) => {
+            let key = req.option_key;
+            let option = question
+                .options
+                .iter()
+                .find(|option| option.key == key)
+                .cloned();
+            match option {
+                Some(option) => Ok(Answer::selected(key, option)),
+                None => Err(ApiError::bad_request("Invalid option key.").into_response()),
             }
         }
-        Ok(Answer::multi_selected(req.selected_option_keys))
-    } else if let Some(value) = req.value {
-        Ok(Answer::text(value))
-    } else {
-        Err(ApiError::bad_request(
-            "One of value, selected_option_key, or selected_option_keys is required.",
-        )
-        .into_response())
+        SubmitAnswerRequest::MultiSelectedRequest(req) => {
+            for key in &req.option_keys {
+                let valid = question.options.iter().any(|option| option.key == *key);
+                if !valid {
+                    return Err(ApiError::bad_request("Invalid option key.").into_response());
+                }
+            }
+            Ok(Answer::multi_selected(req.option_keys))
+        }
+        SubmitAnswerRequest::TextRequest(req) => Ok(Answer::text(req.text)),
     }
 }
 
@@ -3081,6 +3164,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                     reason:         FailureReason::LaunchFailed,
                     git_commit_sha: None,
                     final_patch:    None,
+                    diff_summary:   None,
                 },
             )
             .await;
@@ -3108,6 +3192,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                 reason:         FailureReason::LaunchFailed,
                 git_commit_sha: None,
                 final_patch:    None,
+                diff_summary:   None,
             },
         )
         .await;
@@ -3138,6 +3223,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                 reason:         FailureReason::LaunchFailed,
                 git_commit_sha: None,
                 final_patch:    None,
+                diff_summary:   None,
             },
         )
         .await;
@@ -3159,6 +3245,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                 reason:         FailureReason::LaunchFailed,
                 git_commit_sha: None,
                 final_patch:    None,
+                diff_summary:   None,
             },
         )
         .await;
@@ -3192,6 +3279,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                     reason:         FailureReason::Terminated,
                     git_commit_sha: None,
                     final_patch:    None,
+                    diff_summary:   None,
                 },
             )
             .await;

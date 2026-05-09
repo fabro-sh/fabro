@@ -134,6 +134,23 @@ fn patch_codegen_request_body_media_types(value: &mut serde_json::Value) {
     }
 }
 
+/// Progenitor currently panics when an operation advertises a typed success
+/// response alongside a no-content success response. Keep the source spec
+/// accurate for docs and other generators, but preserve the existing Rust
+/// client shape for `DELETE /runs/{id}`: success with no body.
+fn patch_codegen_delete_run_responses(value: &mut serde_json::Value) {
+    let Some(responses) = value
+        .get_mut("paths")
+        .and_then(|paths| paths.get_mut("/api/v1/runs/{id}"))
+        .and_then(|path| path.get_mut("delete"))
+        .and_then(|operation| operation.get_mut("responses"))
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    responses.remove("200");
+}
+
 fn spec_path_from_manifest_dir(manifest_dir: &Path) -> PathBuf {
     manifest_dir
         .ancestors()
@@ -161,6 +178,7 @@ fn main() {
     spec_value["openapi"] = serde_json::Value::String("3.0.3".to_string());
     patch_nullable(&mut spec_value);
     patch_codegen_request_body_media_types(&mut spec_value);
+    patch_codegen_delete_run_responses(&mut spec_value);
 
     let spec: openapiv3::OpenAPI =
         serde_json::from_value(spec_value).expect("failed to deserialize OpenAPI spec");
@@ -179,6 +197,7 @@ fn main() {
             &[],
         ),
         ("RunSummary", "fabro_types::RunSummary", &[]),
+        ("DiffSummary", "fabro_types::DiffSummary", &[]),
         (
             "RepositoryReference",
             "fabro_types::RepositoryReference",
@@ -335,12 +354,8 @@ fn main() {
         ("QuestionType", "fabro_types::QuestionType", &[]),
         ("StageCompletion", "fabro_types::StageCompletion", &[]),
         ("StageOutcome", "fabro_types::StageOutcome", &[]),
+        ("StageHandler", "fabro_types::StageHandler", &[]),
         ("StageState", "fabro_types::StageState", &[]),
-        (
-            "CommandOutputStream",
-            "fabro_types::CommandOutputStream",
-            &[],
-        ),
         ("CommandTermination", "fabro_types::CommandTermination", &[]),
         ("StageProjection", "fabro_types::StageProjection", &[]),
         ("SecretMetadata", "fabro_types::SecretMetadata", &[]),

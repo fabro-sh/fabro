@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import type { AxiosAdapter } from "axios";
 
 import {
   archiveRun,
@@ -10,27 +11,38 @@ import {
   mapError,
   unarchiveRun,
 } from "./run-actions";
+import { generatedAxios } from "./api-client";
 
 type StubResponseInit = {
   status: number;
-  body?: string;
+  body?: unknown;
   statusText?: string;
 };
 
-function stubFetchOnce(init: StubResponseInit) {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (() =>
-    Promise.resolve(
-      new Response(init.body ?? "", {
-        status: init.status,
-        statusText: init.statusText ?? "",
-        headers: { "Content-Type": "application/json" },
-      }),
-    )) as typeof fetch;
+const originalAdapter = generatedAxios.defaults.adapter;
 
-  return () => {
-    globalThis.fetch = originalFetch;
-  };
+function stubGeneratedAxiosOnce(init: StubResponseInit) {
+  generatedAxios.defaults.adapter = (async (config) => {
+    if (init.status >= 400) {
+      throw {
+        isAxiosError: true,
+        message: init.statusText ?? `HTTP ${init.status}`,
+        response: {
+          status: init.status,
+          statusText: init.statusText ?? "",
+          data: init.body ?? null,
+          headers: {},
+        },
+      };
+    }
+    return {
+      data: init.body,
+      status: init.status,
+      statusText: init.statusText ?? "",
+      headers: {},
+      config,
+    };
+  }) as AxiosAdapter;
 }
 
 async function expectLifecycleError(
@@ -45,22 +57,19 @@ async function expectLifecycleError(
 }
 
 describe("run lifecycle actions", () => {
-  let restoreFetch: (() => void) | undefined;
-
   afterEach(() => {
-    restoreFetch?.();
-    restoreFetch = undefined;
+    generatedAxios.defaults.adapter = originalAdapter;
     delete (globalThis as { window?: unknown }).window;
   });
 
   test("cancelRun parses a 200 response", async () => {
-    restoreFetch = stubFetchOnce({
+    stubGeneratedAxiosOnce({
       status: 200,
-      body: JSON.stringify({
+      body: {
         id: "run-1",
         status: { kind: "failed", reason: "cancelled" },
         created_at: "2026-04-20T12:00:00Z",
-      }),
+      },
     });
 
     const result = await cancelRun("run-1");
@@ -71,16 +80,16 @@ describe("run lifecycle actions", () => {
   });
 
   test("archiveRun parses a 200 response", async () => {
-    restoreFetch = stubFetchOnce({
+    stubGeneratedAxiosOnce({
       status: 200,
-      body: JSON.stringify({
+      body: {
         id: "run-1",
         status: {
           kind: "archived",
           prior: { kind: "succeeded", reason: "completed" },
         },
         created_at: "2026-04-20T12:00:00Z",
-      }),
+      },
     });
 
     const result = await archiveRun("run-1");
@@ -88,13 +97,13 @@ describe("run lifecycle actions", () => {
   });
 
   test("unarchiveRun parses a 200 response", async () => {
-    restoreFetch = stubFetchOnce({
+    stubGeneratedAxiosOnce({
       status: 200,
-      body: JSON.stringify({
+      body: {
         id: "run-1",
         status: { kind: "succeeded", reason: "completed" },
         created_at: "2026-04-20T12:00:00Z",
-      }),
+      },
     });
 
     const result = await unarchiveRun("run-1");
@@ -102,11 +111,11 @@ describe("run lifecycle actions", () => {
   });
 
   test("404 and 409 preserve the parsed error envelope", async () => {
-    restoreFetch = stubFetchOnce({
+    stubGeneratedAxiosOnce({
       status: 404,
-      body: JSON.stringify({
+      body: {
         errors: [{ status: "404", title: "Not Found", detail: "Run not found." }],
-      }),
+      },
     });
     const notFound = await expectLifecycleError(cancelRun("missing-run"));
     expect(notFound).toEqual({
@@ -114,11 +123,11 @@ describe("run lifecycle actions", () => {
       errors: [{ status: "404", title: "Not Found", detail: "Run not found." }],
     });
 
-    restoreFetch = stubFetchOnce({
+    stubGeneratedAxiosOnce({
       status: 409,
-      body: JSON.stringify({
+      body: {
         errors: [{ status: "409", title: "Conflict", detail: "Run is not terminal." }],
-      }),
+      },
     });
     const conflict = await expectLifecycleError(archiveRun("run-1"));
     expect(conflict).toEqual({
@@ -128,7 +137,7 @@ describe("run lifecycle actions", () => {
   });
 
   test("non-JSON error bodies fall back to an empty error list", async () => {
-    restoreFetch = stubFetchOnce({
+    stubGeneratedAxiosOnce({
       status: 409,
       body: "<html>conflict</html>",
       statusText: "Conflict",

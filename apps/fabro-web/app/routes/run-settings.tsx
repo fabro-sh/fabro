@@ -163,6 +163,9 @@ function SandboxPanel({ snapshot }: { snapshot: Snapshot }) {
       <Row title="Preserve" help="Keep the sandbox after the run completes.">
         <Toggle on={getBool(sandbox, "preserve") ?? false} />
       </Row>
+      <Row title="Stop on terminal" help="Stop the sandbox when the run reaches a terminal state.">
+        <Toggle on={getBool(sandbox, "stop_on_terminal") ?? false} />
+      </Row>
       <Row title="Env" help="Environment variables injected into the sandbox.">
         <Count n={objectKeyCount(sandbox, "env")} singular="var" plural="vars" />
       </Row>

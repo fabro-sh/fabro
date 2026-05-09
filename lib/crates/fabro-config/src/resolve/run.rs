@@ -176,6 +176,9 @@ fn resolve_sandbox(
         preserve: sandbox
             .preserve
             .expect("defaults.toml should provide run.sandbox.preserve"),
+        stop_on_terminal: sandbox
+            .stop_on_terminal
+            .expect("defaults.toml should provide run.sandbox.stop_on_terminal"),
         devcontainer: sandbox
             .devcontainer
             .expect("defaults.toml should provide run.sandbox.devcontainer"),

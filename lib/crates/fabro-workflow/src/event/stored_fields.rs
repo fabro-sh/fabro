@@ -156,6 +156,23 @@ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
                 ..StoredEventFields::default()
             }
         }
+        Event::AgentInterruptInjected {
+            node_id,
+            visit,
+            session_id,
+            actor,
+        } => {
+            let node_id_str = node_id.clone();
+            let node_label = default_node_label(Some(&node_id_str), None);
+            StoredEventFields {
+                session_id: Some(session_id.clone()),
+                node_id: Some(node_id_str.clone()),
+                node_label,
+                stage_id: Some(StageId::new(node_id_str, *visit)),
+                actor: actor.clone(),
+                ..StoredEventFields::default()
+            }
+        }
         Event::AgentSteerDropped {
             actor,
             node_id,

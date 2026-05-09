@@ -16,8 +16,8 @@ use fabro_api::types::{
 use fabro_config::Storage;
 use fabro_interview::AnswerSubmission;
 use fabro_types::{
-    CommandOutputStream, Principal, RunClientProvenance, RunId, RunProvenance, RunServerProvenance,
-    UserPrincipal, parse_blob_ref,
+    Principal, RunClientProvenance, RunId, RunProvenance, RunServerProvenance, UserPrincipal,
+    parse_blob_ref,
 };
 use fabro_util::version::FABRO_VERSION;
 use fabro_workflow::command_log::{command_log_path, read_json_string_blob, read_log_slice};
@@ -57,7 +57,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/state", get(get_run_state))
         .route("/runs/{id}/logs", get(get_run_logs))
         .route(
-            "/runs/{id}/stages/{stageId}/logs/{stream}",
+            "/runs/{id}/stages/{stageId}/logs/output",
             get(get_run_stage_command_log),
         )
         .route("/runs/{id}/settings", get(get_run_settings))
@@ -143,6 +143,7 @@ fn board_run_metadata_from_projection(
             "pull_request".to_string(),
             serde_json::json!({
                 "number": pull_request.number,
+                "html_url": pull_request.html_url,
             }),
         );
     }
@@ -181,6 +182,37 @@ fn board_run_metadata_from_projection(
     }
 
     metadata
+}
+
+#[cfg(test)]
+mod tests {
+    use fabro_types::PullRequestRecord;
+
+    use super::board_run_metadata_from_projection;
+
+    #[test]
+    fn board_run_metadata_includes_pull_request_url() {
+        let mut projection = fabro_store::RunProjection::default();
+        projection.pull_request = Some(PullRequestRecord {
+            html_url:    "https://github.com/fabro-sh/fabro/pull/123".to_string(),
+            number:      123,
+            owner:       "fabro-sh".to_string(),
+            repo:        "fabro".to_string(),
+            base_branch: "main".to_string(),
+            head_branch: "fabro/run/demo".to_string(),
+            title:       "Add run PR chip".to_string(),
+        });
+
+        let metadata = board_run_metadata_from_projection(&projection);
+
+        assert_eq!(
+            metadata.get("pull_request"),
+            Some(&serde_json::json!({
+                "number": 123,
+                "html_url": "https://github.com/fabro-sh/fabro/pull/123"
+            }))
+        );
+    }
 }
 
 fn paginate_items<T>(items: Vec<T>, pagination: &PaginationParams) -> (Vec<T>, bool) {
@@ -302,7 +334,6 @@ struct CommandLogQuery {
 
 #[derive(Debug, serde::Serialize)]
 struct CommandLogResponseBody {
-    stream:         CommandOutputStream,
     offset:         u64,
     next_offset:    u64,
     total_bytes:    u64,
@@ -361,7 +392,10 @@ async fn delete_run(
     };
 
     match delete_run_internal(&state, id, query.force).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Ok(super::super::DeleteRunOutcome::NoContent) => StatusCode::NO_CONTENT.into_response(),
+        Ok(super::super::DeleteRunOutcome::Preserved(response)) => {
+            (StatusCode::OK, Json(response)).into_response()
+        }
         Err(response) => response,
     }
 }
@@ -677,7 +711,7 @@ async fn get_run_logs(
 }
 
 async fn get_run_stage_command_log(
-    RequireCommandLog(id, stage_id, stream): RequireCommandLog,
+    RequireCommandLog(id, stage_id): RequireCommandLog,
     State(state): State<Arc<AppState>>,
     Query(query): Query<CommandLogQuery>,
 ) -> Response {
@@ -701,10 +735,7 @@ async fn get_run_stage_command_log(
         return ApiError::not_found("Stage not found.").into_response();
     };
 
-    let stream_value = match stream {
-        CommandOutputStream::Stdout => node.stdout.as_deref(),
-        CommandOutputStream::Stderr => node.stderr.as_deref(),
-    };
+    let stream_value = node.output.as_deref();
     let cas_ref = stream_value
         .filter(|value| parse_blob_ref(value).is_some())
         .map(str::to_string);
@@ -715,12 +746,11 @@ async fn get_run_stage_command_log(
         .run_scratch(&id)
         .root()
         .to_path_buf();
-    let scratch_path = command_log_path(&run_dir, &stage_id, stream);
+    let scratch_path = command_log_path(&run_dir, &stage_id);
 
     match read_log_slice(&scratch_path, query.offset, limit).await {
         Ok((bytes, total_bytes)) => {
             return build_command_log_response(
-                stream,
                 query.offset,
                 limit,
                 LogSource::Sliced { bytes, total_bytes },
@@ -746,7 +776,6 @@ async fn get_run_stage_command_log(
             }
         };
         return build_command_log_response(
-            stream,
             query.offset,
             limit,
             LogSource::Full(text.as_bytes()),
@@ -758,7 +787,6 @@ async fn get_run_stage_command_log(
 
     if let Some(inline_text) = stream_value {
         return build_command_log_response(
-            stream,
             query.offset,
             limit,
             LogSource::Full(inline_text.as_bytes()),
@@ -769,7 +797,6 @@ async fn get_run_stage_command_log(
     }
 
     build_command_log_response(
-        stream,
         query.offset,
         limit,
         LogSource::Full(&[]),
@@ -788,7 +815,6 @@ enum LogSource<'a> {
 }
 
 fn build_command_log_response(
-    stream: CommandOutputStream,
     requested_offset: u64,
     limit: u64,
     source: LogSource<'_>,
@@ -812,7 +838,6 @@ fn build_command_log_response(
         }
     };
     Json(CommandLogResponseBody {
-        stream,
         offset,
         next_offset: offset + u64::try_from(body_bytes.len()).unwrap_or(u64::MAX),
         total_bytes,

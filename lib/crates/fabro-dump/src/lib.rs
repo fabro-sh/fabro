@@ -129,16 +129,10 @@ impl RunDump {
                     parallel_results.clone(),
                 ));
             }
-            if let Some(stdout) = stage.stdout.as_ref() {
+            if let Some(output) = stage.output.as_ref() {
                 entries.push(RunDumpEntry::text_path(
-                    &base.join("stdout.log"),
-                    stdout.clone(),
-                ));
-            }
-            if let Some(stderr) = stage.stderr.as_ref() {
-                entries.push(RunDumpEntry::text_path(
-                    &base.join("stderr.log"),
-                    stderr.clone(),
+                    &base.join("output.log"),
+                    output.clone(),
                 ));
             }
         }
@@ -585,8 +579,7 @@ mod tests {
         stage.script_invocation = Some(serde_json::json!({ "command": "cargo test" }));
         stage.script_timing = Some(serde_json::json!({ "duration_ms": 10 }));
         stage.parallel_results = Some(serde_json::json!([{ "stage": "fanout@1" }]));
-        stage.stdout = Some("stdout".to_string());
-        stage.stderr = Some("stderr".to_string());
+        stage.output = Some("output".to_string());
 
         let dump = RunDump::from_projection(&projection).unwrap();
         let paths: Vec<&str> = dump
@@ -605,8 +598,7 @@ mod tests {
         assert!(paths.contains(&"stages/001-build@2/script_invocation.json"));
         assert!(paths.contains(&"stages/001-build@2/script_timing.json"));
         assert!(paths.contains(&"stages/001-build@2/parallel_results.json"));
-        assert!(paths.contains(&"stages/001-build@2/stdout.log"));
-        assert!(paths.contains(&"stages/001-build@2/stderr.log"));
+        assert!(paths.contains(&"stages/001-build@2/output.log"));
         assert!(!paths.contains(&"start.json"));
         assert!(!paths.contains(&"status.json"));
         assert!(!paths.contains(&"checkpoint.json"));
@@ -633,8 +625,7 @@ mod tests {
         assert_eq!(node.prompt, None);
         assert_eq!(node.response, None);
         assert_eq!(node.diff, None);
-        assert_eq!(node.stdout, None);
-        assert_eq!(node.stderr, None);
+        assert_eq!(node.output, None);
         assert_eq!(
             node.provider_used,
             Some(serde_json::json!({ "provider": "openai" }))

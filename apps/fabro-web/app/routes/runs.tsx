@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { ArchiveBoxIcon, ChevronDownIcon, CommandLineIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { EllipsisVerticalIcon } from "@heroicons/react/20/solid";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
@@ -25,7 +25,8 @@ import { ciConfig, columnStatusDisplay, columnStatuses, deriveCiStatus, mapRunLi
 import type { CiStatus, CheckRun, CheckStatus, RunItem, RunWithStatus, ColumnStatus } from "../data/runs";
 import { formatRelativeTime } from "../lib/format";
 import { EmptyState } from "../components/state";
-import { SteerComposer } from "../components/steer-composer";
+import { InlineMarkdown } from "../components/inline-markdown";
+import { PullRequestChip } from "../components/pull-request-chip";
 import { useToast } from "../components/toast";
 import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
 import { useAuthConfig, useBoardsRuns, useSystemInfo } from "../lib/queries";
@@ -40,21 +41,20 @@ export function meta({}: any) {
 }
 
 interface ColumnStyle {
-  iconType: "branch" | "pr";
   actions: string[];
 }
 
 const columnStyles: Record<ColumnStatus, ColumnStyle> = {
-  queued:       { iconType: "branch", actions: [] },
-  initializing: { iconType: "branch", actions: [] },
-  running:      { iconType: "branch", actions: ["Watch", "Steer"] },
-  blocked:      { iconType: "branch", actions: ["Answer Question"] },
-  succeeded:    { iconType: "pr",     actions: [] },
-  failed:       { iconType: "branch", actions: [] },
-  archived:     { iconType: "branch", actions: [] },
+  queued:       { actions: [] },
+  initializing: { actions: [] },
+  running:      { actions: [] },
+  blocked:      { actions: ["Answer Question"] },
+  succeeded:    { actions: [] },
+  failed:       { actions: [] },
+  archived:     { actions: [] },
 };
 
-const defaultColumnStyle: ColumnStyle = { iconType: "branch", actions: [] };
+const defaultColumnStyle: ColumnStyle = { actions: [] };
 const defaultColumnColors = { dot: "bg-fg-muted", text: "text-fg-muted" };
 
 interface BoardRunsResponse {
@@ -68,7 +68,6 @@ type Column = {
   name: string;
   dot: string;
   text: string;
-  iconType: "branch" | "pr";
   actions: string[];
   items: RunItem[];
 };
@@ -130,37 +129,6 @@ function listLifecycleStatusLabel(run: Pick<RunWithStatus, "statusLabel" | "life
   return run.lifecycleStatusLabel;
 }
 
-
-function GitBranchIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="currentColor"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.5 2.5 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z" />
-    </svg>
-  );
-}
-
-function GitPullRequestIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="currentColor"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z" />
-    </svg>
-  );
-}
-
-const iconMap = {
-  branch: GitBranchIcon,
-  pr: GitPullRequestIcon,
-};
 
 function CheckStatusIcon({ status }: { status: CheckStatus }) {
   switch (status) {
@@ -298,59 +266,44 @@ export const handle = {
 
 function PrCard({
   pr,
-  icon: Icon,
   iconColor,
   actions,
 }: {
   pr: RunItem;
-  icon: React.ComponentType<{ className?: string }>;
   iconColor: string;
   actions?: string[];
 }) {
   const lifecycleLabel = boardLifecycleStatusLabel(pr);
-  const [steerOpen, setSteerOpen] = useState(false);
 
   return (
-    <>
-    <SteerComposer
-      runId={pr.id}
-      open={steerOpen}
-      onClose={() => setSteerOpen(false)}
-    />
-    <Link to={`/runs/${pr.id}`} className="group block rounded-md border border-line bg-panel p-4 transition-all duration-200 hover:border-line-strong hover:shadow-lg hover:shadow-black/20">
+    <div className="group rounded-md border border-line bg-panel p-4 transition-all duration-200 hover:border-line-strong hover:shadow-lg hover:shadow-black/20">
       <div className="mb-2 flex items-center gap-1.5">
-        <Icon className={`size-3.5 shrink-0 ${iconColor}`} />
-        <span className="font-mono text-xs font-medium text-teal-500">
+        <Link to={`/runs/${pr.id}`} className="font-mono text-xs font-medium text-teal-500">
           {pr.repo}
-        </span>
-        {pr.number != null && (
-          <span className="font-mono text-xs text-fg-muted">
-            #{pr.number}
-          </span>
-        )}
+        </Link>
         {lifecycleLabel != null && (
           <span className="rounded-full border border-line px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wide text-fg-muted">
             {lifecycleLabel}
           </span>
         )}
+        {pr.number != null && (
+          <PullRequestChip
+            number={pr.number}
+            url={pr.pullRequestUrl}
+            className={`ml-auto inline-flex items-center gap-1 font-mono text-xs ${iconColor}`}
+            iconClassName="size-3.5 shrink-0"
+          />
+        )}
       </div>
 
-      <p className="text-sm leading-snug text-fg-2">{pr.title}</p>
+      <Link to={`/runs/${pr.id}`} className="block">
+        <p className="text-sm leading-snug text-fg-2">{pr.title}</p>
+      </Link>
 
-      {(pr.additions != null || pr.resources != null || pr.elapsed != null) && (
+      {(pr.resources != null || pr.comments != null || pr.elapsed != null) && (
         <div className="mt-3 flex items-center gap-3 font-mono text-xs">
           {pr.resources != null && (
             <span className="text-fg-3">{pr.resources}</span>
-          )}
-          {pr.additions != null && pr.deletions != null && (
-            <>
-              <span className="tabular-nums text-mint">
-                +{pr.additions.toLocaleString()}
-              </span>
-              <span className="tabular-nums text-coral">
-                -{pr.deletions.toLocaleString()}
-              </span>
-            </>
           )}
           {pr.comments != null && (
             <span className="inline-flex items-center gap-1 text-fg-muted">
@@ -379,13 +332,6 @@ function PrCard({
               key={label}
               type="button"
               disabled={pr.actionDisabled}
-              onClick={(e) => {
-                if (label === "Steer") {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setSteerOpen(true);
-                }
-              }}
               className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:text-fg-muted disabled:border-line ${
                 label === "Merge"
                   ? "border-mint/20 text-mint hover:border-mint/50 hover:text-fg"
@@ -396,16 +342,6 @@ function PrCard({
                       : "border-line-strong text-fg-3 hover:border-teal-500/40 hover:text-fg"
               }`}
             >
-              {label === "Watch" && (
-                <svg viewBox="0 0 16 16" fill="currentColor" className="size-3" aria-hidden="true">
-                  <path d="M8 2c1.981 0 3.671.992 4.933 2.078 1.27 1.091 2.187 2.345 2.637 3.023a1.62 1.62 0 0 1 0 1.798c-.45.678-1.367 1.932-2.637 3.023C11.67 13.008 9.981 14 8 14c-1.981 0-3.671-.992-4.933-2.078C1.797 10.831.88 9.577.43 8.899a1.62 1.62 0 0 1 0-1.798c.45-.678 1.367-1.932 2.637-3.023C4.33 2.992 6.019 2 8 2ZM1.679 7.932a.12.12 0 0 0 0 .136c.411.622 1.241 1.75 2.366 2.717C5.176 11.758 6.527 12.5 8 12.5c1.473 0 2.825-.742 3.955-1.715 1.124-.967 1.954-2.096 2.366-2.717a.12.12 0 0 0 0-.136c-.412-.621-1.242-1.75-2.366-2.717C10.824 4.242 9.473 3.5 8 3.5c-1.473 0-2.824.742-3.955 1.715-1.124.967-1.954 2.096-2.366 2.717ZM8 10a2 2 0 1 1-.001-3.999A2 2 0 0 1 8 10Z" />
-                </svg>
-              )}
-              {label === "Steer" && (
-                <svg viewBox="0 0 16 16" fill="currentColor" className="size-3" aria-hidden="true">
-                  <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Zm7.25-4.5a.75.75 0 0 0-1.5 0v.582a2.75 2.75 0 0 0-2.168 2.168H4.5a.75.75 0 0 0 0 1.5h.582a2.75 2.75 0 0 0 2.168 2.168v.582a.75.75 0 0 0 1.5 0v-.582a2.75 2.75 0 0 0 2.168-2.168h.582a.75.75 0 0 0 0-1.5h-.582A2.75 2.75 0 0 0 8.75 4.082ZM8 6.75a1.25 1.25 0 1 0 0 2.5 1.25 1.25 0 0 0 0-2.5Z" />
-                </svg>
-              )}
               {label === "Answer Question" && (
                 <svg viewBox="0 0 16 16" fill="currentColor" className="size-3" aria-hidden="true">
                   <path d="M1 2.75C1 1.784 1.784 1 2.75 1h10.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 13.25 12H9.06l-2.573 2.573A1.458 1.458 0 0 1 4 13.543V12H2.75A1.75 1.75 0 0 1 1 10.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h4.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z" />
@@ -426,19 +362,32 @@ function PrCard({
           ))}
         </div>
       )}
-    </Link>
-    </>
+
+      {((pr.additions != null && pr.additions !== 0) ||
+        (pr.deletions != null && pr.deletions !== 0)) && (
+        <div className="mt-3 flex items-center gap-3 font-mono text-xs">
+          {pr.additions != null && (
+            <span className="tabular-nums text-mint">
+              +{pr.additions.toLocaleString()}
+            </span>
+          )}
+          {pr.deletions != null && (
+            <span className="tabular-nums text-coral">
+              -{pr.deletions.toLocaleString()}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
 function SortablePrCard({
   pr,
-  icon,
   iconColor,
   actions,
 }: {
   pr: RunItem;
-  icon: React.ComponentType<{ className?: string }>;
   iconColor: string;
   actions?: string[];
 }) {
@@ -466,7 +415,7 @@ function SortablePrCard({
         }
       }}
     >
-      <PrCard pr={pr} icon={icon} iconColor={iconColor} actions={actions} />
+      <PrCard pr={pr} iconColor={iconColor} actions={actions} />
     </div>
   );
 }
@@ -550,7 +499,6 @@ function ColumnActionsMenu({ column }: { column: Column }) {
 }
 
 function BoardColumn({ column }: { column: Column }) {
-  const Icon = iconMap[column.iconType];
   const actions = column.actions;
   return (
     <div className="flex min-w-0 flex-col">
@@ -571,7 +519,6 @@ function BoardColumn({ column }: { column: Column }) {
             <SortablePrCard
               key={pr.id}
               pr={pr}
-              icon={Icon}
               iconColor={column.text}
               actions={actions}
             />
@@ -594,6 +541,23 @@ const createdFilterOptions: { value: CreatedFilter; label: string }[] = [
   { value: "7d", label: "Last 7 days" },
   { value: "30d", label: "Last 30 days" },
 ];
+
+function parseCreatedFilter(raw: string | null): CreatedFilter {
+  switch (raw) {
+    case "today":
+    case "1h":
+    case "1d":
+    case "7d":
+    case "30d":
+      return raw;
+    default:
+      return "all";
+  }
+}
+
+function parseView(raw: string | null): ViewMode {
+  return raw === "list" ? "list" : "columns";
+}
 
 function createdCutoffMsFor(filter: CreatedFilter): number | null {
   const now = Date.now();
@@ -621,7 +585,8 @@ function RunRow({ run }: { run: RunWithStatus }) {
   const statusDisplay = columnStatusDisplay[run.status];
 
   return (
-    <Link to={`/runs/${run.id}`} className="grid items-center rounded-md border border-line bg-panel/80 px-4 py-3 transition-all duration-200 hover:border-line-strong hover:bg-panel" style={{ gridColumn: "1 / -1", gridTemplateColumns: "subgrid" }}>
+    <div className="grid items-center rounded-md border border-line bg-panel/80 px-4 py-3 transition-all duration-200 hover:border-line-strong hover:bg-panel" style={{ gridColumn: "1 / -1", gridTemplateColumns: "subgrid" }}>
+      <Link to={`/runs/${run.id}`} className="contents">
       <span className="flex items-center gap-2 pr-2">
         <span className={`size-1.5 shrink-0 rounded-full ${statusDisplay.dot}`} aria-hidden="true" />
         <span className={`font-mono text-xs ${statusDisplay.text}`}>{run.statusLabel}</span>
@@ -634,7 +599,7 @@ function RunRow({ run }: { run: RunWithStatus }) {
       <span className="truncate font-mono text-xs font-medium text-teal-500 pr-2">{run.repo}</span>
 
       <span className="flex items-center gap-2 min-w-0">
-        <span className="truncate text-sm text-fg-2">{run.title}</span>
+        <InlineMarkdown content={run.title} className="truncate text-sm text-fg-2" />
         {lifecycleLabel != null && (
           <span className="rounded-full border border-line px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wide text-fg-muted">
             {lifecycleLabel}
@@ -663,17 +628,16 @@ function RunRow({ run }: { run: RunWithStatus }) {
         {run.additions != null && <span className="text-mint">+{run.additions.toLocaleString()}</span>}
         {run.deletions != null && <span className="text-coral">-{run.deletions.toLocaleString()}</span>}
       </span>
+      </Link>
 
       <span className="inline-flex items-center justify-end gap-1.5 font-mono text-xs text-fg-muted">
         {run.number != null && (
-          <>
-            <GitPullRequestIcon className="size-3" />
-            #{run.number}
+          <PullRequestChip number={run.number} url={run.pullRequestUrl}>
             {run.checks != null && <span className={`size-1.5 rounded-full ${ciConfig[deriveCiStatus(run.checks)].dot}`} />}
-          </>
+          </PullRequestChip>
         )}
       </span>
-    </Link>
+    </div>
   );
 }
 
@@ -796,7 +760,39 @@ function RunsLandingEmpty({
 }
 
 export default function Runs() {
-  const [includeArchived, setIncludeArchived] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const query = searchParams.get("search") ?? "";
+  const repoFilter = searchParams.get("repo") ?? "all";
+  const workflowFilter = searchParams.get("workflow") ?? "all";
+  const createdFilter = parseCreatedFilter(searchParams.get("created"));
+  const includeArchived = searchParams.get("archived") === "1";
+  const view = parseView(searchParams.get("view"));
+
+  const updateParam = useCallback(
+    (key: string, value: string | null) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (value == null || value === "") {
+            next.delete(key);
+          } else {
+            next.set(key, value);
+          }
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const setQuery = (value: string) => updateParam("search", value || null);
+  const setRepoFilter = (value: string) => updateParam("repo", value === "all" ? null : value);
+  const setWorkflowFilter = (value: string) => updateParam("workflow", value === "all" ? null : value);
+  const setCreatedFilter = (value: CreatedFilter) => updateParam("created", value === "all" ? null : value);
+  const setIncludeArchived = (value: boolean) => updateParam("archived", value ? "1" : null);
+  const setView = (value: ViewMode) => updateParam("view", value === "columns" ? null : value);
+
   const boardRuns = useBoardsRuns(includeArchived);
   const authConfig = useAuthConfig();
   const systemInfo = useSystemInfo();
@@ -823,11 +819,6 @@ export default function Runs() {
       initialColumns.flatMap((col: Column) => col.items.map((item: RunItem) => String(item.workflow))),
     ),
   ].sort();
-  const [query, setQuery] = useState("");
-  const [repoFilter, setRepoFilter] = useState("all");
-  const [workflowFilter, setWorkflowFilter] = useState("all");
-  const [createdFilter, setCreatedFilter] = useState<CreatedFilter>("all");
-  const [view, setView] = useState<ViewMode>("columns");
   const [columns, setColumns] = useState(initialColumns);
   const lowerQuery = query.toLowerCase();
   useBoardEvents();
@@ -943,7 +934,7 @@ export default function Runs() {
           </div>
           <button
             type="button"
-            onClick={() => setIncludeArchived((v) => !v)}
+            onClick={() => setIncludeArchived(!includeArchived)}
             aria-pressed={includeArchived}
             title={includeArchived ? "Hide archived runs" : "Show archived runs"}
             className={`inline-flex items-center gap-1.5 rounded-md border border-line bg-panel/80 px-3 py-2 text-xs font-medium transition-colors ${includeArchived ? "text-teal-500" : "text-fg-muted hover:text-fg-3"}`}

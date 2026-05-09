@@ -139,10 +139,11 @@ struct CandidateContent {
     reason = "Field names mirror the provider API payload."
 )]
 struct UsageMetadata {
-    prompt_token_count:         Option<i64>,
-    candidates_token_count:     Option<i64>,
-    thoughts_token_count:       Option<i64>,
-    cached_content_token_count: Option<i64>,
+    prompt_token_count:          Option<i64>,
+    candidates_token_count:      Option<i64>,
+    thoughts_token_count:        Option<i64>,
+    cached_content_token_count:  Option<i64>,
+    tool_use_prompt_token_count: Option<i64>,
 }
 
 /// Map Gemini's finish reason, inferring `ToolCalls` from content when needed.
@@ -496,17 +497,18 @@ fn apply_default_safety_settings(body: &mut serde_json::Value) {
 /// Convert `UsageMetadata` from the Gemini API into a unified `TokenCounts`.
 fn parse_usage(metadata: Option<&UsageMetadata>) -> TokenCounts {
     metadata.map_or_else(TokenCounts::default, |u| {
-        let input = u.prompt_token_count.unwrap_or(0);
+        let cache_read_tokens = u.cached_content_token_count.unwrap_or(0);
         let reasoning_tokens = u.thoughts_token_count.unwrap_or(0);
-        let output = u
-            .candidates_token_count
-            .unwrap_or(0)
-            .saturating_sub(reasoning_tokens);
+        let tool_use_prompt_tokens = u.tool_use_prompt_token_count.unwrap_or(0);
         TokenCounts {
-            input_tokens: input,
-            output_tokens: output,
+            input_tokens: u
+                .prompt_token_count
+                .unwrap_or(0)
+                .saturating_sub(cache_read_tokens)
+                + tool_use_prompt_tokens,
+            output_tokens: u.candidates_token_count.unwrap_or(0),
             reasoning_tokens,
-            cache_read_tokens: u.cached_content_token_count.unwrap_or(0),
+            cache_read_tokens,
             ..TokenCounts::default()
         }
     })
@@ -1019,6 +1021,26 @@ mod tests {
             metadata:         None,
             provider_options: None,
         }
+    }
+
+    #[test]
+    fn token_counts_disjoint_with_cache_thoughts_and_tool_use() {
+        let body = serde_json::json!({
+            "promptTokenCount": 200,
+            "cachedContentTokenCount": 180,
+            "candidatesTokenCount": 200,
+            "thoughtsTokenCount": 300,
+            "toolUsePromptTokenCount": 400
+        });
+        let meta: UsageMetadata = serde_json::from_value(body).unwrap();
+        let usage = parse_usage(Some(&meta));
+
+        assert_eq!(usage.input_tokens, 420);
+        assert_eq!(usage.cache_read_tokens, 180);
+        assert_eq!(usage.output_tokens, 200);
+        assert_eq!(usage.reasoning_tokens, 300);
+        assert_eq!(usage.cache_write_tokens, 0);
+        assert_eq!(usage.total_tokens(), 1100);
     }
 
     #[tokio::test]

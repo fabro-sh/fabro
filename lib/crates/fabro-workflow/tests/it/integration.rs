@@ -8762,8 +8762,8 @@ async fn fidelity_prompt_compact() {
         "compact: should show script sub-item for run_tests"
     );
     assert!(
-        prompt.contains("Stdout:"),
-        "compact: should show stdout sub-item for run_tests"
+        prompt.contains("Output:"),
+        "compact: should show output sub-item for run_tests"
     );
 
     // Original prompt at the end
@@ -8833,8 +8833,8 @@ async fn fidelity_prompt_summary_medium() {
         "summary:medium: should show script sub-item for run_tests"
     );
     assert!(
-        prompt.contains("Stdout:"),
-        "summary:medium: should show stdout sub-item for run_tests"
+        prompt.contains("Output:"),
+        "summary:medium: should show output sub-item for run_tests"
     );
 
     // Original prompt at the end

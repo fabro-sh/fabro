@@ -235,6 +235,7 @@ pub fn make_shell_tool_with_config(config: &SessionOptions) -> RegisteredTool {
         executor:   Arc::new(move |args, ctx| {
             Box::pin(async move {
                 let command = required_str(&args, "command")?;
+                let command = format!("exec 2>&1\n{command}");
                 let timeout_ms = args
                     .get("timeout_ms")
                     .and_then(serde_json::Value::as_u64)
@@ -249,7 +250,7 @@ pub fn make_shell_tool_with_config(config: &SessionOptions) -> RegisteredTool {
                 let result = ctx
                     .env
                     .exec_command(
-                        command,
+                        &command,
                         timeout_ms,
                         None,
                         tool_env.as_ref(),
@@ -266,12 +267,11 @@ pub fn make_shell_tool_with_config(config: &SessionOptions) -> RegisteredTool {
                 }
                 let _ = write!(
                     output,
-                    "Exit code: {}\nstdout:\n{}\nstderr:\n{}",
+                    "Exit code: {}\noutput:\n{}",
                     result
                         .exit_code
                         .map_or_else(|| "none".to_string(), |code| code.to_string()),
-                    result.stdout,
-                    result.stderr
+                    result.stdout
                 );
                 Ok(output)
             })
@@ -916,8 +916,8 @@ mod tests {
         let tool = make_shell_tool();
         let env: Arc<dyn Sandbox> = Arc::new(MockSandbox {
             exec_result: ExecResult {
-                stdout:      String::new(),
-                stderr:      "error".into(),
+                stdout:      "error".into(),
+                stderr:      String::new(),
                 exit_code:   Some(1),
                 termination: CommandTermination::Exited,
                 duration_ms: 10,

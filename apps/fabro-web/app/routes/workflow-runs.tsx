@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { ChevronDownIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { Link, useParams } from "react-router";
+import { InlineMarkdown } from "../components/inline-markdown";
+import { PullRequestChip } from "../components/pull-request-chip";
 import { ciConfig, columnForStatus, columnStatusDisplay, deriveCiStatus, mapRunSummaryToRunItem } from "../data/runs";
 import type { ColumnStatus, RunWithStatus } from "../data/runs";
 import { useWorkflowRuns } from "../lib/queries";
@@ -21,18 +23,11 @@ function mapWorkflowRuns(result: PaginatedRunList | null | undefined): RunWithSt
     .filter((run): run is RunWithStatus => run != null);
 }
 
-function GitPullRequestIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 16 16" fill="currentColor" className={className} aria-hidden="true">
-      <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z" />
-    </svg>
-  );
-}
-
 function RunRow({ run }: { run: RunWithStatus }) {
   const colors = columnStatusDisplay[run.status];
   return (
-    <Link to={`/runs/${run.id}`} className="grid items-center rounded-md border border-line bg-panel/80 px-4 py-3 transition-all duration-200 hover:border-line-strong hover:bg-panel" style={{ gridColumn: "1 / -1", gridTemplateColumns: "subgrid" }}>
+    <div className="grid items-center rounded-md border border-line bg-panel/80 px-4 py-3 transition-all duration-200 hover:border-line-strong hover:bg-panel" style={{ gridColumn: "1 / -1", gridTemplateColumns: "subgrid" }}>
+      <Link to={`/runs/${run.id}`} className="contents">
       <span className="flex items-center gap-2 pr-2">
         <span className={`size-2 shrink-0 rounded-full ${colors.dot}`} />
         <span className={`text-xs font-medium ${colors.text}`}>{run.statusLabel}</span>
@@ -43,7 +38,7 @@ function RunRow({ run }: { run: RunWithStatus }) {
       </span>
 
       <span className="flex items-center gap-2 min-w-0">
-        <span className="truncate text-sm text-fg-2">{run.title}</span>
+        <InlineMarkdown content={run.title} className="truncate text-sm text-fg-2" />
         {run.comments != null && run.comments > 0 && (
           <span className="inline-flex shrink-0 items-center gap-1 font-mono text-xs text-fg-muted">
             <svg viewBox="0 0 16 16" fill="currentColor" className="size-3" aria-hidden="true">
@@ -58,17 +53,16 @@ function RunRow({ run }: { run: RunWithStatus }) {
         {run.additions != null && <span className="text-mint">+{run.additions.toLocaleString()}</span>}
         {run.deletions != null && <span className="text-coral">-{run.deletions.toLocaleString()}</span>}
       </span>
+      </Link>
 
       <span className="inline-flex items-center justify-end gap-1.5 font-mono text-xs text-fg-muted">
         {run.number != null && (
-          <>
-            <GitPullRequestIcon className="size-3" />
-            #{run.number}
+          <PullRequestChip number={run.number} url={run.pullRequestUrl}>
             {run.checks != null && <span className={`size-1.5 rounded-full ${ciConfig[deriveCiStatus(run.checks)].dot}`} />}
-          </>
+          </PullRequestChip>
         )}
       </span>
-    </Link>
+    </div>
   );
 }
 

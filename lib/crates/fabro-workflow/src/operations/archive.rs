@@ -159,6 +159,7 @@ mod tests {
             total_usd_micros:     None,
             final_git_commit_sha: None,
             final_patch:          None,
+            diff_summary:         None,
             billing:              None,
         })
         .await
@@ -173,6 +174,7 @@ mod tests {
             reason:         FailureReason::WorkflowError,
             git_commit_sha: None,
             final_patch:    None,
+            diff_summary:   None,
         })
         .await
         .unwrap();

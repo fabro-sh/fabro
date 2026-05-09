@@ -17,6 +17,7 @@
         "@qltysh/fabro-api-client": "workspace:*",
         "@tailwindcss/typography": "^0.5.19",
         "@viz-js/viz": "^3.24.0",
+        "axios": "^1.7.0",
         "marked": "^18.0.0",
         "react": "^19.2.4",
         "react-dom": "^19.2.4",

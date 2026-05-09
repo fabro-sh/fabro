@@ -15,15 +15,6 @@ let currentRunSummary: any = null;
 let currentQuestions: any[] = [];
 const mountedRenderers: TestRenderer.ReactTestRenderer[] = [];
 
-function noopMutation() {
-  return {
-    data:       undefined,
-    isMutating: false,
-    trigger:    mock(() => Promise.resolve()),
-    reset:      mock(() => undefined),
-  };
-}
-
 mock.module("../lib/queries", () => ({
   useRun: () => ({
     data:      currentRunSummary,
@@ -41,16 +32,6 @@ mock.module("../lib/queries", () => ({
   }),
 }));
 
-mock.module("../lib/mutations", () => ({
-  useArchiveRun:           () => noopMutation(),
-  useCancelRun:            () => noopMutation(),
-  useInterruptRun:         () => noopMutation(),
-  usePreviewRun:           () => noopMutation(),
-  useSteerRun:             () => noopMutation(),
-  useSubmitInterviewAnswer: () => noopMutation(),
-  useUnarchiveRun:         () => noopMutation(),
-}));
-
 mock.module("../lib/run-events", () => ({
   useRunEvents: () => undefined,
 }));
@@ -60,19 +41,27 @@ mock.module("../hooks/use-run-toasts", () => ({
 }));
 
 const {
+  actionMenuSeparatorVisibility,
   default: RunDetail,
+  focusSteerAfterMenuClose,
   handleLifecycleToastResult,
   lifecycleActionVisibility,
 } = await import("./run-detail");
+mock.restore();
 type LifecycleToastState = import("./run-detail").LifecycleToastState;
 type RunDetailActionResult = import("./run-detail").RunDetailActionResult;
 
 const h = createElement;
 
-function makeRunSummary(status = "succeeded") {
+function makeRunSummary(
+  status = "succeeded",
+  diffSummary: any = null,
+  pullRequest: any = null,
+  title = "Run 1",
+) {
   return {
     run_id:          "run_1",
-    title:           "Run 1",
+    title,
     repository:      { name: "fabro" },
     status:          { kind: status },
     workflow_slug:   "default",
@@ -80,6 +69,8 @@ function makeRunSummary(status = "succeeded") {
     duration_ms:     null,
     elapsed_secs:    null,
     source_directory: null,
+    diff_summary:    diffSummary,
+    pull_request:    pullRequest,
   };
 }
 
@@ -105,12 +96,18 @@ async function renderRunDetail({
   initialEntry,
   status = "succeeded",
   questions = [],
+  diffSummary = null,
+  pullRequest = null,
+  title,
 }: {
   initialEntry: string;
   status?: string;
   questions?: any[];
+  diffSummary?: any;
+  pullRequest?: any;
+  title?: string;
 }) {
-  currentRunSummary = makeRunSummary(status);
+  currentRunSummary = makeRunSummary(status, diffSummary, pullRequest, title);
   currentQuestions = questions;
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -154,6 +151,12 @@ function hasClasses(value: unknown, classes: string[]) {
   return classes.every((className) => tokens.includes(className));
 }
 
+function tabCountBadges(renderer: TestRenderer.ReactTestRenderer) {
+  return renderer.root.findAll(
+    (node) => node.type === "span" && hasClasses(node.props.className, ["tabular-nums"]),
+  );
+}
+
 describe("lifecycleActionVisibility", () => {
   test("shows cancel for active cancellable states and hides it elsewhere", () => {
     expect(lifecycleActionVisibility("submitted").showPrimaryCancel).toBe(true);
@@ -175,6 +178,32 @@ describe("lifecycleActionVisibility", () => {
     expect(lifecycleActionVisibility("archived").showArchive).toBe(false);
     expect(lifecycleActionVisibility("archived").showUnarchive).toBe(true);
     expect(lifecycleActionVisibility("running").showUnarchive).toBe(false);
+  });
+});
+
+describe("actionMenuSeparatorVisibility", () => {
+  test("does not render adjacent dividers when destructive actions follow ops directly", () => {
+    expect(
+      actionMenuSeparatorVisibility({
+        hasLifecycle:  false,
+        hasDestructive: true,
+      }),
+    ).toEqual({
+      afterOperations:   true,
+      beforeDestructive: false,
+    });
+  });
+
+  test("renders both dividers when lifecycle actions sit between ops and destructive actions", () => {
+    expect(
+      actionMenuSeparatorVisibility({
+        hasLifecycle:  true,
+        hasDestructive: true,
+      }),
+    ).toEqual({
+      afterOperations:   true,
+      beforeDestructive: true,
+    });
   });
 });
 
@@ -330,6 +359,63 @@ describe("RunDetail full-height child routes", () => {
     expect(outletWrappers).toHaveLength(1);
   });
 
+  test("shows the Files Changed tab badge from run summary diff stats", async () => {
+    const renderer = await renderRunDetail({
+      initialEntry: "/runs/run_1/files",
+      diffSummary:  {
+        files_changed: 7,
+        additions:     30,
+        deletions:     11,
+      },
+    });
+
+    const badges = tabCountBadges(renderer);
+    expect(badges.map((badge) => badge.children.join(""))).toContain("7");
+  });
+
+  test("defers steer bar focus until after the Actions menu item click settles", async () => {
+    const focusCalls: string[] = [];
+
+    focusSteerAfterMenuClose(() => focusCalls.push("focus"));
+
+    expect(focusCalls).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(focusCalls).toEqual(["focus"]);
+  });
+
+  test("hides the Files Changed tab badge when diff stats are absent", async () => {
+    const renderer = await renderRunDetail({
+      initialEntry: "/runs/run_1/files",
+    });
+
+    expect(tabCountBadges(renderer)).toHaveLength(0);
+  });
+
+  test("shows a linked pull request chip in the run header", async () => {
+    const renderer = await renderRunDetail({
+      initialEntry: "/runs/run_1",
+      pullRequest: {
+        html_url: "https://github.com/fabro-sh/fabro/pull/123",
+        number: 123,
+        owner: "fabro-sh",
+        repo: "fabro",
+        base_branch: "main",
+        head_branch: "fabro/run/demo",
+        title: "Add run PR chip",
+      },
+    });
+
+    const links = renderer.root.findAll(
+      (node) =>
+        node.type === "a" &&
+        node.props.href === "https://github.com/fabro-sh/fabro/pull/123",
+    );
+
+    expect(links).toHaveLength(1);
+    expect(links[0].props.target).toBe("_blank");
+    expect(links[0].children.filter((child) => typeof child !== "object").join("")).toBe("#123");
+  });
+
   test("keeps blocked full-height children clear of the interview dock without an h-72 sibling", async () => {
     const renderer = await renderRunDetail({
       initialEntry: "/runs/run_1/files",
@@ -356,6 +442,32 @@ describe("RunDetail full-height child routes", () => {
     expect(clearanceOwners.length).toBeGreaterThan(0);
   });
 
+  test("renders inline <code> in the run title heading for Markdown-formatted titles", async () => {
+    const renderer = await renderRunDetail({
+      initialEntry: "/runs/run_1",
+      title:        "Move from `[server.integrations.github]` to `[run.integrations.github]`",
+    });
+
+    const headings = renderer.root.findAll(
+      (node) =>
+        node.type === "h2" &&
+        hasClasses(node.props.className, ["text-xl", "font-semibold", "text-fg"]),
+    );
+    expect(headings).toHaveLength(1);
+
+    const codes = headings[0]!.findAllByType("code");
+    expect(codes).toHaveLength(2);
+    expect(
+      codes
+        .map((code) =>
+          code.children.filter((child) => typeof child === "string").join(""),
+        ),
+    ).toEqual([
+      "[server.integrations.github]",
+      "[run.integrations.github]",
+    ]);
+  });
+
   test("preserves document-flow layout for child routes without fullHeight", async () => {
     const renderer = await renderRunDetail({
       initialEntry: "/runs/run_1",
@@ -369,7 +481,12 @@ describe("RunDetail full-height child routes", () => {
     expect(fullHeightRoot).toHaveLength(0);
 
     const outletWrappers = renderer.root.findAll(
-      (node) => node.type === "div" && node.props.className === "mt-6",
+      (node) =>
+        node.type === "div" &&
+        hasClasses(node.props.className, [
+          "mt-6",
+          "pb-[var(--fabro-interview-dock-clearance)]",
+        ]),
     );
     expect(outletWrappers).toHaveLength(1);
   });

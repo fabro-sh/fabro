@@ -93,13 +93,14 @@ describe("pickPlaceholder priority", () => {
 });
 
 describe("bannerCopyForReason", () => {
-  test("each known reason gets distinct copy", () => {
-    const a = bannerCopyForReason("sandbox_gone");
+  test("sandbox_gone is suppressed", () => {
+    expect(bannerCopyForReason("sandbox_gone")).toBeNull();
+  });
+
+  test("provider_unsupported and sandbox_unreachable get distinct copy", () => {
     const b = bannerCopyForReason("provider_unsupported");
     const c = bannerCopyForReason("sandbox_unreachable");
-    expect(a).not.toBe(b);
     expect(b).not.toBe(c);
-    expect(a).toContain("cleaned up");
     expect(b).toContain("provider");
     expect(c).toContain("refresh");
   });
@@ -146,9 +147,13 @@ describe("placeholder rendering", () => {
     ).toContain("submodule");
   });
 
+  test("DegradedBanner renders nothing for sandbox_gone", () => {
+    expect(renderedText(<DegradedBanner reason="sandbox_gone" />)).toBe("");
+  });
+
   test("DegradedBanner picks copy based on reason", () => {
-    expect(renderedText(<DegradedBanner reason="sandbox_gone" />)).toContain(
-      "cleaned up",
-    );
+    expect(
+      renderedText(<DegradedBanner reason="provider_unsupported" />),
+    ).toContain("provider");
   });
 });

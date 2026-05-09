@@ -319,6 +319,7 @@ pub struct FinalizeOptions {
     pub run_id:           RunId,
     pub workflow_name:    String,
     pub preserve_sandbox: bool,
+    pub stop_on_terminal: bool,
     pub last_git_sha:     Option<String>,
 }
 

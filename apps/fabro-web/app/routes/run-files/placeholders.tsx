@@ -103,19 +103,21 @@ export function DegradedBanner({
 }: {
   reason?: RunFilesMetaDegradedReasonEnum;
 }) {
+  const copy = bannerCopyForReason(reason);
+  if (copy === null) return null;
   return (
     <div className="rounded-md border border-amber-500/30 bg-amber-950/20 px-4 py-3 text-sm text-amber-100">
-      {bannerCopyForReason(reason)}
+      {copy}
     </div>
   );
 }
 
 export function bannerCopyForReason(
   reason: RunFilesMetaDegradedReasonEnum | undefined | string,
-): string {
+): string | null {
   switch (reason) {
     case "sandbox_gone":
-      return "Showing final patch only. This run's sandbox has been cleaned up, so individual file contents are no longer available.";
+      return null;
     case "provider_unsupported":
       return "Live diff isn't supported for this sandbox provider. Showing the patch captured at the last checkpoint.";
     case "sandbox_unreachable":

@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
@@ -21,6 +22,12 @@ struct Choice {
     key:   String,
     label: String,
     to:    String,
+}
+
+struct ChoiceMatch<'a> {
+    route:          &'a Choice,
+    selected_key:   String,
+    selected_label: String,
 }
 
 /// Parse an accelerator key from a label.
@@ -233,10 +240,9 @@ impl Handler for HumanHandler {
             })
             .collect();
 
-        let question_type = if choices.is_empty() {
-            QuestionType::Freeform
-        } else {
-            QuestionType::MultipleChoice
+        let question_type = match question_type_for_node(node, choices.is_empty()) {
+            Ok(question_type) => question_type,
+            Err(reason) => return Ok(Outcome::fail_deterministic(reason)),
         };
         let mut question = Question::new(node.label(), question_type);
         question.id = Ulid::new().to_string();
@@ -297,7 +303,7 @@ impl Handler for HumanHandler {
                         system_kind: SystemActorKind::Timeout,
                     }),
                     question_id: question_id.clone(),
-                    question:    question_text,
+                    question:    question_text.clone(),
                     stage:       node.id.clone(),
                     duration_ms: millis_u64(interview_start.elapsed()),
                 },
@@ -310,11 +316,16 @@ impl Handler for HumanHandler {
                 .get("human.default_choice")
                 .and_then(|v| v.as_str());
             if let Some(default_target) = default_choice {
-                return Ok(make_choice_outcome(
-                    default_target,
-                    default_target,
-                    default_target,
-                ));
+                let mut outcome =
+                    make_choice_outcome(default_target, default_target, default_target);
+                add_answer_context(
+                    &mut outcome,
+                    &node.id,
+                    &question_text,
+                    "timeout",
+                    Some(default_target),
+                );
+                return Ok(outcome);
             }
             return Ok(Outcome::retry_classify("human gate timeout, no default"));
         }
@@ -335,7 +346,7 @@ impl Handler for HumanHandler {
                         system_kind: SystemActorKind::Engine,
                     }),
                     question_id: question_id.clone(),
-                    question:    question_text,
+                    question:    question_text.clone(),
                     stage:       node.id.clone(),
                     reason:      "interrupted".to_string(),
                     duration_ms: millis_u64(interview_start.elapsed()),
@@ -354,7 +365,7 @@ impl Handler for HumanHandler {
                 &Event::InterviewCompleted {
                     actor: Some(answer_actor),
                     question_id,
-                    question: question_text,
+                    question: question_text.clone(),
                     answer: answer_text(&answer),
                     duration_ms: millis_u64(interview_start.elapsed()),
                 },
@@ -371,7 +382,7 @@ impl Handler for HumanHandler {
             &Event::InterviewCompleted {
                 actor: Some(answer_actor),
                 question_id,
-                question: question_text,
+                question: question_text.clone(),
                 answer: answer_text(&answer),
                 duration_ms: millis_u64(interview_start.elapsed()),
             },
@@ -382,11 +393,19 @@ impl Handler for HumanHandler {
 
         // 6. Try fixed-choice match
         if let Some(selected) = find_choice_match(&answer, &choices) {
-            return Ok(make_choice_outcome(
-                &selected.key,
-                &selected.label,
-                &selected.to,
-            ));
+            let mut outcome = make_choice_outcome(
+                &selected.selected_key,
+                &selected.selected_label,
+                &selected.route.to,
+            );
+            add_answer_context(
+                &mut outcome,
+                &node.id,
+                &question_text,
+                &answer_text(&answer),
+                Some(&selected.selected_label),
+            );
+            return Ok(outcome);
         }
 
         // 7. Freeform fallback
@@ -404,12 +423,27 @@ impl Handler for HumanHandler {
             outcome
                 .context_updates
                 .insert(keys::HUMAN_GATE_TEXT.to_string(), serde_json::json!(text));
+            add_answer_context(
+                &mut outcome,
+                &node.id,
+                &question_text,
+                &answer_text(&answer),
+                None,
+            );
             return Ok(outcome);
         }
 
         // 8. Fallback to first choice
         if let Some(first) = choices.first() {
-            return Ok(make_choice_outcome(&first.key, &first.label, &first.to));
+            let mut outcome = make_choice_outcome(&first.key, &first.label, &first.to);
+            add_answer_context(
+                &mut outcome,
+                &node.id,
+                &question_text,
+                &answer_text(&answer),
+                Some(&first.label),
+            );
+            return Ok(outcome);
         }
 
         Ok(Outcome::fail_deterministic("No matching choice"))
@@ -434,16 +468,115 @@ fn unanswered_human_gate(reason: impl Into<String>) -> Outcome {
     Outcome::fail_deterministic(reason)
 }
 
-fn find_choice_match<'a>(answer: &Answer, choices: &'a [Choice]) -> Option<&'a Choice> {
+fn question_type_for_node(node: &Node, default_freeform: bool) -> Result<QuestionType, String> {
+    if let Some(value) = node
+        .attrs
+        .get("question_type")
+        .and_then(|value| value.as_str())
+    {
+        return QuestionType::from_str(value)
+            .map_err(|_| format!("invalid human question_type: {value}"));
+    }
+
+    if default_freeform {
+        Ok(QuestionType::Freeform)
+    } else {
+        Ok(QuestionType::MultipleChoice)
+    }
+}
+
+fn find_choice_match<'a>(answer: &Answer, choices: &'a [Choice]) -> Option<ChoiceMatch<'a>> {
     match &answer.value {
-        AnswerValue::Selected(key) => choices.iter().find(|c| c.key == *key),
+        AnswerValue::Selected(key) => {
+            choices
+                .iter()
+                .find(|choice| choice.key == *key)
+                .map(|choice| ChoiceMatch {
+                    route:          choice,
+                    selected_key:   choice.key.clone(),
+                    selected_label: choice.label.clone(),
+                })
+        }
+        AnswerValue::MultiSelected(keys) => {
+            let selected: Vec<&Choice> = keys
+                .iter()
+                .filter_map(|key| choices.iter().find(|choice| choice.key == *key))
+                .collect();
+            selected.first().map(|first| ChoiceMatch {
+                route:          first,
+                selected_key:   selected
+                    .iter()
+                    .map(|choice| choice.key.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
+                selected_label: selected
+                    .iter()
+                    .map(|choice| choice.label.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            })
+        }
+        AnswerValue::Yes => find_yes_no_choice(choices, true).map(|choice| ChoiceMatch {
+            route:          choice,
+            selected_key:   choice.key.clone(),
+            selected_label: choice.label.clone(),
+        }),
+        AnswerValue::No => find_yes_no_choice(choices, false).map(|choice| ChoiceMatch {
+            route:          choice,
+            selected_key:   choice.key.clone(),
+            selected_label: choice.label.clone(),
+        }),
         AnswerValue::Text(text) => {
             // Try matching by key or label
             choices
                 .iter()
                 .find(|c| c.key.eq_ignore_ascii_case(text) || c.label.eq_ignore_ascii_case(text))
+                .map(|choice| ChoiceMatch {
+                    route:          choice,
+                    selected_key:   choice.key.clone(),
+                    selected_label: choice.label.clone(),
+                })
         }
         _ => None,
+    }
+}
+
+fn find_yes_no_choice(choices: &[Choice], yes: bool) -> Option<&Choice> {
+    let expected_keys = if yes {
+        &["Y", "YES"][..]
+    } else {
+        &["N", "NO"][..]
+    };
+    let expected_word = if yes { "yes" } else { "no" };
+
+    choices.iter().find(|choice| {
+        expected_keys
+            .iter()
+            .any(|expected| choice.key.eq_ignore_ascii_case(expected))
+            || choice.label.eq_ignore_ascii_case(expected_word)
+    })
+}
+
+fn add_answer_context(
+    outcome: &mut Outcome,
+    node_id: &str,
+    question: &str,
+    answer: &str,
+    selected_label: Option<&str>,
+) {
+    outcome.context_updates.insert(
+        format!("human.gate.{node_id}.question"),
+        serde_json::json!(question),
+    );
+    outcome.context_updates.insert(
+        format!("human.gate.{node_id}.answer"),
+        serde_json::json!(answer),
+    );
+    if let Some(label) = selected_label {
+        outcome.context_updates.insert(
+            format!("human.gate.{node_id}.label"),
+            serde_json::json!(label),
+        );
     }
 }
 
@@ -522,6 +655,15 @@ mod tests {
         );
         graph.edges.push(e1);
         graph.edges.push(e2);
+        graph
+    }
+
+    fn build_graph_with_typed_gate(question_type: &str) -> Graph {
+        let mut graph = build_graph_with_human_gate();
+        graph.nodes.get_mut("gate").unwrap().attrs.insert(
+            "question_type".to_string(),
+            AttrValue::String(question_type.to_string()),
+        );
         graph
     }
 
@@ -839,6 +981,59 @@ mod tests {
         let recordings = recorder.recordings();
         assert_eq!(recordings.len(), 1);
         assert_eq!(recordings[0].0.question_type, QuestionType::Freeform);
+    }
+
+    #[tokio::test]
+    async fn explicit_yes_no_gate_uses_yes_no_question_type() {
+        let inner = Box::new(AutoApproveInterviewer::engine());
+        let recorder = Arc::new(RecordingInterviewer::new(inner));
+        let handler = HumanHandler::new(recorder.clone());
+        let graph = build_graph_with_typed_gate("yes_no");
+        let node = graph.nodes.get("gate").unwrap();
+        let context = Context::new();
+        let run_dir = Path::new("/tmp/test");
+
+        let outcome = handler
+            .execute(node, &context, &graph, run_dir, &make_services())
+            .await
+            .unwrap();
+
+        let recordings = recorder.recordings();
+        assert_eq!(recordings.len(), 1);
+        assert_eq!(recordings[0].0.question_type, QuestionType::YesNo);
+        assert_eq!(outcome.suggested_next_ids, vec!["approve"]);
+        assert_eq!(
+            outcome.context_updates.get("human.gate.gate.answer"),
+            Some(&serde_json::json!("yes"))
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_multi_select_gate_records_all_selected_keys() {
+        let interviewer = Arc::new(CallbackInterviewer::new(|_| {
+            Answer::multi_selected(vec!["A".to_string(), "R".to_string()])
+        }));
+        let handler = HumanHandler::new(interviewer);
+        let graph = build_graph_with_typed_gate("multi_select");
+        let node = graph.nodes.get("gate").unwrap();
+        let context = Context::new();
+        let run_dir = Path::new("/tmp/test");
+
+        let outcome = handler
+            .execute(node, &context, &graph, run_dir, &make_services())
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Succeeded);
+        assert_eq!(outcome.suggested_next_ids, vec!["approve"]);
+        assert_eq!(
+            outcome.context_updates.get(keys::HUMAN_GATE_SELECTED),
+            Some(&serde_json::json!("A,R"))
+        );
+        assert_eq!(
+            outcome.context_updates.get("human.gate.gate.answer"),
+            Some(&serde_json::json!("A, R"))
+        );
     }
 
     #[tokio::test]

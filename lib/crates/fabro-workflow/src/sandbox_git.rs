@@ -564,7 +564,7 @@ fn classify_entry(
     })
 }
 
-pub use fabro_types::DiffStats;
+pub use fabro_types::{DiffStats, DiffSummary};
 
 /// Output of `git diff --numstat`: which paths are binary, plus per-path
 /// `+/-` line totals for text files in the range. Both pieces come from a
@@ -575,6 +575,27 @@ pub struct DiffNumstat {
     pub binary_paths:       HashSet<String>,
     /// Repo-relative paths (post-rename) to line stats for text files.
     pub line_stats_by_path: HashMap<String, DiffStats>,
+}
+
+pub fn summarize_diff_numstat(numstat: &DiffNumstat) -> DiffSummary {
+    let text_files = i64::try_from(numstat.line_stats_by_path.len()).unwrap_or(i64::MAX);
+    let binary_files = i64::try_from(numstat.binary_paths.len()).unwrap_or(i64::MAX);
+    let (additions, deletions) =
+        numstat
+            .line_stats_by_path
+            .values()
+            .fold((0_i64, 0_i64), |(adds, dels), stats| {
+                (
+                    adds.saturating_add(stats.additions),
+                    dels.saturating_add(stats.deletions),
+                )
+            });
+
+    DiffSummary {
+        files_changed: text_files.saturating_add(binary_files),
+        additions,
+        deletions,
+    }
 }
 
 /// Run `git diff --numstat` once and return both the set of binary paths and

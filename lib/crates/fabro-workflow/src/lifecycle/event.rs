@@ -369,6 +369,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
 
         let git_sha = git_result.as_ref().and_then(|r| r.commit_sha.clone());
         let diff = git_result.as_ref().and_then(|r| r.diff.clone());
+        let diff_summary = git_result.as_ref().and_then(|r| r.diff_summary);
         let (loop_failure_signatures, restart_failure_signatures) =
             snapshot_failure_signatures(&self.circuit_breaker);
         let context_values = artifact::durable_context_snapshot(&state.context);
@@ -400,6 +401,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                     .into_iter()
                     .collect::<BTreeMap<_, _>>(),
                 diff,
+                diff_summary,
             },
             &scope,
         );

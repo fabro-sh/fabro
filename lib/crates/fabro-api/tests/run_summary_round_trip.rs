@@ -6,7 +6,7 @@ use fabro_api::types::{
     RepositoryReference as ApiRepositoryReference, RunSummary as ApiRunSummary,
 };
 use fabro_types::status::{RunStatus, SuccessReason, TerminalStatus};
-use fabro_types::{RepositoryReference, RunId, RunSummary};
+use fabro_types::{DiffSummary, PullRequestRecord, RepositoryReference, RunId, RunSummary};
 use serde_json::json;
 
 #[test]
@@ -41,6 +41,20 @@ fn run_summary_json_matches_openapi_shape() {
         Some(42_000),
         Some(123),
         Some(superseded_by),
+        Some(DiffSummary {
+            files_changed: 3,
+            additions:     12,
+            deletions:     4,
+        }),
+        Some(PullRequestRecord {
+            html_url:    "https://github.com/fabro-sh/fabro/pull/123".to_string(),
+            number:      123,
+            owner:       "fabro-sh".to_string(),
+            repo:        "fabro".to_string(),
+            base_branch: "main".to_string(),
+            head_branch: "fabro/run/demo".to_string(),
+            title:       "Add run PR chip".to_string(),
+        }),
     );
 
     assert_eq!(
@@ -74,7 +88,21 @@ fn run_summary_json_matches_openapi_shape() {
             "duration_ms": 42000,
             "elapsed_secs": 42.0,
             "total_usd_micros": 123,
-            "superseded_by": superseded_by.to_string()
+            "superseded_by": superseded_by.to_string(),
+            "diff_summary": {
+                "files_changed": 3,
+                "additions": 12,
+                "deletions": 4
+            },
+            "pull_request": {
+                "html_url": "https://github.com/fabro-sh/fabro/pull/123",
+                "number": 123,
+                "owner": "fabro-sh",
+                "repo": "fabro",
+                "base_branch": "main",
+                "head_branch": "fabro/run/demo",
+                "title": "Add run PR chip"
+            }
         })
     );
 }
@@ -117,6 +145,8 @@ fn run_summary_deserializes_when_optional_fields_are_absent() {
     assert_eq!(summary.elapsed_secs, None);
     assert_eq!(summary.total_usd_micros, None);
     assert_eq!(summary.superseded_by, None);
+    assert_eq!(summary.diff_summary, None);
+    assert_eq!(summary.pull_request, None);
 }
 
 fn assert_same_type<T: 'static, U: 'static>() {

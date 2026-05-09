@@ -4,16 +4,26 @@ import { queryKeys } from "./query-keys";
 import { queryKeysForRunEvent } from "./run-events";
 
 describe("queryKeys", () => {
-  test("uses API path strings as stable SWR keys", () => {
-    expect(queryKeys.auth.me()).toBe("/api/v1/auth/me");
-    expect(queryKeys.runs.files("run 1")).toBe("/api/v1/runs/run%201/files");
-    expect(queryKeys.runs.graph("run-1", "TB")).toBe("/api/v1/runs/run-1/graph?direction=TB");
-    expect(queryKeys.runs.stageLog("run 1", "build step@2", "stderr", 12, 34)).toBe(
-      "/api/v1/runs/run%201/stages/build%20step%402/logs/stderr?offset=12&limit=34",
-    );
-    expect(queryKeys.runs.stageEvents("run 1", "build step", 7, 25)).toBe(
-      "/api/v1/runs/run%201/stages/build%20step/events?since_seq=7&limit=25",
-    );
+  test("uses semantic tuples as stable SWR keys and keeps SSE URLs explicit", () => {
+    expect(queryKeys.auth.me()).toEqual(["auth", "me"]);
+    expect(queryKeys.runs.files("run 1")).toEqual(["runs", "files", "run 1"]);
+    expect(queryKeys.runs.graph("run-1", "TB")).toEqual(["runs", "graph", "run-1", "TB"]);
+    expect(queryKeys.runs.stageLog("run 1", "build step@2", 12, 34)).toEqual([
+      "runs",
+      "stage-log",
+      "run 1",
+      "build step@2",
+      12,
+      34,
+    ]);
+    expect(queryKeys.runs.stageEvents("run 1", "build step")).toEqual([
+      "runs",
+      "stage-events",
+      "run 1",
+      "build step",
+    ]);
+    expect(queryKeys.system.attachUrl()).toBe("/api/v1/attach");
+    expect(queryKeys.runs.attachUrl("run 1")).toBe("/api/v1/runs/run%201/attach");
   });
 
   test("event-mapped keys match query hook resources", () => {

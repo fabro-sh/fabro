@@ -14,8 +14,9 @@ use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 use fabro_sandbox::config::WorktreeMode;
 use fabro_sandbox::{
     GitSetupIntent, ReadBeforeWriteSandbox, SandboxEventCallback, SandboxSpec, WorktreeOptions,
-    WorktreeSandbox,
+    WorktreeSandbox, reconnect_for_run_with_callback,
 };
+use fabro_static::EnvVars;
 use fabro_vault::Vault;
 use futures::future::try_join_all;
 use shlex::try_quote;
@@ -487,7 +488,12 @@ pub async fn initialize(
 
     resolve_devcontainer(&mut options).await?;
 
-    let worktree_plan = resolve_worktree_plan(&mut options);
+    let attach_existing = options.checkpoint.is_some();
+    let worktree_plan = if attach_existing {
+        None
+    } else {
+        resolve_worktree_plan(&mut options)
+    };
 
     let sandbox_event_callback: SandboxEventCallback = {
         let emitter = Arc::clone(&options.emitter);
@@ -496,7 +502,35 @@ pub async fn initialize(
         })
     };
     let mut worktree_created = false;
-    let sandbox: Arc<dyn Sandbox> = if let Some(plan) = worktree_plan.as_ref() {
+    let mut sandbox_initialized = true;
+    let sandbox: Arc<dyn Sandbox> = if attach_existing {
+        let run_state = options
+            .run_store
+            .state()
+            .await
+            .map_err(|err| Error::engine(err.to_string()))?;
+        let record = run_state.sandbox.ok_or_else(|| {
+            Error::Precondition("cannot resume run: sandbox record is missing".to_string())
+        })?;
+        let daytona_api_key = match &options.vault {
+            Some(vault) => vault
+                .read()
+                .await
+                .get(EnvVars::DAYTONA_API_KEY)
+                .map(str::to_string),
+            None => None,
+        };
+        let sandbox = reconnect_for_run_with_callback(
+            &record,
+            daytona_api_key,
+            Some(options.run_id),
+            Some(Arc::clone(&sandbox_event_callback)),
+        )
+        .await
+        .map_err(|err| Error::engine_with_anyhow("Failed to reconnect sandbox for resume", &err))?;
+        sandbox_initialized = false;
+        Arc::new(ReadBeforeWriteSandbox::new(Arc::from(sandbox)))
+    } else if let Some(plan) = worktree_plan.as_ref() {
         let inner = options
             .sandbox
             .build(Some(Arc::clone(&sandbox_event_callback)))
@@ -552,18 +586,27 @@ pub async fn initialize(
         }
         options.run_options.git = None;
     }
-    let cleanup_guard = scopeguard::guard(Arc::clone(&sandbox), |sandbox| {
-        if let Ok(handle) = Handle::try_current() {
-            handle.spawn(async move {
-                let _ = sandbox.cleanup().await;
-            });
-        }
+    let cleanup_guard = (!attach_existing).then(|| {
+        scopeguard::guard(Arc::clone(&sandbox), |sandbox| {
+            if let Ok(handle) = Handle::try_current() {
+                handle.spawn(async move {
+                    let _ = sandbox.delete().await;
+                });
+            }
+        })
     });
 
-    sandbox
-        .initialize()
-        .await
-        .map_err(|e| Error::engine_with_source("Failed to initialize sandbox", &e))?;
+    if attach_existing {
+        sandbox
+            .start()
+            .await
+            .map_err(|e| Error::engine_with_source("Failed to start sandbox", &e))?;
+    } else {
+        sandbox
+            .initialize()
+            .await
+            .map_err(|e| Error::engine_with_source("Failed to initialize sandbox", &e))?;
+    }
 
     let hook_ctx = HookContext::new(
         HookEvent::SandboxReady,
@@ -582,15 +625,17 @@ pub async fn initialize(
         return Err(Error::engine(msg));
     }
 
-    let sandbox_record = options.sandbox.to_sandbox_record(&*sandbox);
-    options.emitter.emit(&Event::SandboxInitialized {
-        working_directory: sandbox_record.working_directory.clone(),
-        provider:          sandbox_record.provider.clone(),
-        identifier:        sandbox_record.identifier.clone(),
-        repo_cloned:       sandbox_record.repo_cloned,
-        clone_origin_url:  sandbox_record.clone_origin_url.clone(),
-        clone_branch:      sandbox_record.clone_branch.clone(),
-    });
+    if sandbox_initialized {
+        let sandbox_record = options.sandbox.to_sandbox_record(&*sandbox);
+        options.emitter.emit(&Event::SandboxInitialized {
+            working_directory: sandbox_record.working_directory.clone(),
+            provider:          sandbox_record.provider.clone(),
+            identifier:        sandbox_record.identifier.clone(),
+            repo_cloned:       sandbox_record.repo_cloned,
+            clone_origin_url:  sandbox_record.clone_origin_url.clone(),
+            clone_branch:      sandbox_record.clone_branch.clone(),
+        });
+    }
 
     let (base_env, github_token) = build_sandbox_env(
         &options.sandbox_env,
@@ -783,7 +828,9 @@ pub async fn initialize(
         workflow_bundle: options.workflow_bundle.clone(),
     });
 
-    scopeguard::ScopeGuard::into_inner(cleanup_guard);
+    if let Some(cleanup_guard) = cleanup_guard {
+        scopeguard::ScopeGuard::into_inner(cleanup_guard);
+    }
 
     Ok(Initialized {
         graph,

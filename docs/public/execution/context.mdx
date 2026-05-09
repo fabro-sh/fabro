@@ -12,7 +12,7 @@ The context starts empty at the beginning of a run. As each stage completes, its
 ```
 Start → Plan → Implement → Test → Exit
          │         │          │
-         │         │          └─ sets command.output, command.stderr
+         │         │          └─ sets command.output
          │         └─ sets response.implement, last_response
          └─ sets response.plan, last_response
 ```
@@ -44,8 +44,7 @@ Agents can also emit arbitrary context updates by including a JSON object with a
 
 | Key | Value |
 |---|---|
-| `command.output` | The command's stdout. Durable context stores this as a `blob://sha256/...` ref after the command completes; downstream prompts resolve it back to text. |
-| `command.stderr` | The command's stderr. Durable context stores this as a `blob://sha256/...` ref after the command completes; downstream prompts resolve it back to text. |
+| `command.output` | The command's ordered output stream. Durable context stores this as a `blob://sha256/...` ref after the command completes; downstream prompts resolve it back to text. |
 
 ### Human gates
 
@@ -54,6 +53,9 @@ Agents can also emit arbitrary context updates by including a JSON object with a
 | `human.gate.selected` | The accelerator key (e.g. `"A"`) or `"freeform"` |
 | `human.gate.label` | The full label of the selected edge |
 | `human.gate.text` | The user's freeform text (if applicable) |
+| `human.gate.<node>.question` | The question text for a specific human gate node |
+| `human.gate.<node>.answer` | The answer text for a specific human gate node |
+| `human.gate.<node>.label` | The selected label for a specific human gate node, when applicable |
 
 ### Parallel merge (fan-in)
 
@@ -172,11 +174,10 @@ Goal: Add a /health endpoint to the API server
   - Files: docs/plan.md
 - **test**: success
   - Script: `cargo test 2>&1 || true`
-  - Stdout:
+  - Output:
     ```
     running 42 tests ... 41 passed, 1 failed
     ```
-  - Stderr: (empty)
 
 ## Context
 - tests_passed: false
@@ -188,7 +189,7 @@ The preamble includes:
 - The workflow goal
 - A summary of completed stages (format depends on fidelity level)
 - Handler-specific details:
-  - **Command nodes** — the script that ran, stdout, and stderr
+  - **Command nodes** — the script that ran and the ordered output
   - **Agent/prompt nodes** — the model used, token counts, and files touched
 - Non-internal context values that weren't already rendered inline
 
@@ -196,7 +197,7 @@ Internal keys (prefixed with `internal.`, `current`, `graph.`, `thread.`, `respo
 
 ## Artifact offloading
 
-When a stage produces a large output (over 100KB of serialized JSON), Fabro stores the serialized bytes in a global content-addressed blob store and replaces the context value with a durable blob ref. Command stdout and stderr are always finalized into blob refs after command completion, even when they are small or empty:
+When a stage produces a large output (over 100KB of serialized JSON), Fabro stores the serialized bytes in a global content-addressed blob store and replaces the context value with a durable blob ref. Command output is always finalized into a blob ref after command completion, even when it is small or empty:
 
 ```
 response.plan → blob://sha256/2cf24dba5fb0...

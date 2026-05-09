@@ -151,7 +151,6 @@ fn tail_lines(text: &str, max_lines: usize, indent: &str) -> String {
 fn stage_rendered_keys(node_id: &str, outcome: &Outcome) -> HashSet<String> {
     let candidates = [
         keys::COMMAND_OUTPUT.to_string(),
-        keys::COMMAND_STDERR.to_string(),
         keys::LAST_STAGE.to_string(),
         keys::LAST_RESPONSE.to_string(),
         keys::response_key(node_id),
@@ -182,25 +181,14 @@ fn render_compact_stage_details(
                     lines.push(format!("  - Script: `{cmd}`"));
                 }
             }
-            if let Some(stdout_val) = outcome.context_updates.get(keys::COMMAND_OUTPUT) {
-                let stdout = format_value(stdout_val);
-                if stdout.trim().is_empty() {
-                    lines.push("  - Stdout: (empty)".to_string());
+            if let Some(output_val) = outcome.context_updates.get(keys::COMMAND_OUTPUT) {
+                let output = format_value(output_val);
+                if output.trim().is_empty() {
+                    lines.push("  - Output: (empty)".to_string());
                 } else {
-                    lines.push("  - Stdout:".to_string());
+                    lines.push("  - Output:".to_string());
                     lines.push("    ```".to_string());
-                    lines.push(tail_lines(stdout.trim(), COMPACT_OUTPUT_MAX_LINES, "    "));
-                    lines.push("    ```".to_string());
-                }
-            }
-            if let Some(stderr_val) = outcome.context_updates.get(keys::COMMAND_STDERR) {
-                let stderr = format_value(stderr_val);
-                if stderr.trim().is_empty() {
-                    lines.push("  - Stderr: (empty)".to_string());
-                } else {
-                    lines.push("  - Stderr:".to_string());
-                    lines.push("    ```".to_string());
-                    lines.push(tail_lines(stderr.trim(), COMPACT_OUTPUT_MAX_LINES, "    "));
+                    lines.push(tail_lines(output.trim(), COMPACT_OUTPUT_MAX_LINES, "    "));
                     lines.push("    ```".to_string());
                 }
             }
@@ -254,37 +242,18 @@ fn render_summary_high_stage_section(
                     lines.push(format!("- Script: `{cmd}`"));
                 }
             }
-            if let Some(stdout_val) = outcome.context_updates.get(keys::COMMAND_OUTPUT) {
-                if let Some(path) = artifact_path(stdout_val) {
-                    lines.push(format!("- Stdout: {}", format_artifact_reference(path)));
+            if let Some(output_val) = outcome.context_updates.get(keys::COMMAND_OUTPUT) {
+                if let Some(path) = artifact_path(output_val) {
+                    lines.push(format!("- Output: {}", format_artifact_reference(path)));
                 } else {
-                    let stdout = format_value(stdout_val);
-                    if stdout.trim().is_empty() {
-                        lines.push("- Stdout: (empty)".to_string());
+                    let output = format_value(output_val);
+                    if output.trim().is_empty() {
+                        lines.push("- Output: (empty)".to_string());
                     } else {
-                        lines.push("- Stdout:".to_string());
+                        lines.push("- Output:".to_string());
                         lines.push("  ```".to_string());
                         lines.push(tail_lines(
-                            stdout.trim(),
-                            SUMMARY_HIGH_OUTPUT_MAX_LINES,
-                            "  ",
-                        ));
-                        lines.push("  ```".to_string());
-                    }
-                }
-            }
-            if let Some(stderr_val) = outcome.context_updates.get(keys::COMMAND_STDERR) {
-                if let Some(path) = artifact_path(stderr_val) {
-                    lines.push(format!("- Stderr: {}", format_artifact_reference(path)));
-                } else {
-                    let stderr = format_value(stderr_val);
-                    if stderr.trim().is_empty() {
-                        lines.push("- Stderr: (empty)".to_string());
-                    } else {
-                        lines.push("- Stderr:".to_string());
-                        lines.push("  ```".to_string());
-                        lines.push(tail_lines(
-                            stderr.trim(),
+                            output.trim(),
                             SUMMARY_HIGH_OUTPUT_MAX_LINES,
                             "  ",
                         ));
@@ -877,7 +846,7 @@ mod tests {
     // --- compact handler-specific details ---
 
     #[test]
-    fn compact_command_stage_shows_command_stdout_stderr() {
+    fn compact_command_stage_shows_command_output() {
         let mut graph = Graph::new("test");
         let mut run_tests = Node::new("run_tests");
         run_tests.attrs.insert(
@@ -898,9 +867,6 @@ mod tests {
             keys::COMMAND_OUTPUT.to_string(),
             serde_json::json!("10 passed\n"),
         );
-        outcome
-            .context_updates
-            .insert(keys::COMMAND_STDERR.to_string(), serde_json::json!(""));
         node_outcomes.insert("run_tests".to_string(), outcome);
 
         let preamble = build_preamble(
@@ -915,11 +881,11 @@ mod tests {
             preamble.contains("Script: `echo '10 passed'`"),
             "should show script command"
         );
-        assert!(preamble.contains("Stdout:"), "should show stdout label");
-        assert!(preamble.contains("10 passed"), "should show stdout content");
+        assert!(preamble.contains("Output:"), "should show output label");
+        assert!(preamble.contains("10 passed"), "should show output content");
         assert!(
-            preamble.contains("Stderr: (empty)"),
-            "should show empty stderr"
+            !preamble.contains("Stderr:"),
+            "should not show stderr label"
         );
     }
 
@@ -1028,16 +994,12 @@ mod tests {
         // command.output is set in context (the engine copies context_updates to
         // context)
         context.set(keys::COMMAND_OUTPUT, serde_json::json!("hi\n"));
-        context.set(keys::COMMAND_STDERR, serde_json::json!(""));
         let completed_nodes = vec!["step".to_string()];
         let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
         let mut outcome = Outcome::success();
         outcome
             .context_updates
             .insert(keys::COMMAND_OUTPUT.to_string(), serde_json::json!("hi\n"));
-        outcome
-            .context_updates
-            .insert(keys::COMMAND_STDERR.to_string(), serde_json::json!(""));
         node_outcomes.insert("step".to_string(), outcome);
 
         let preamble = build_preamble(
@@ -1175,10 +1137,10 @@ mod tests {
             preamble.contains("Script: `cargo test`"),
             "should show script command"
         );
-        // Low mode should NOT include stdout/stderr
+        // Low mode should NOT include output
         assert!(
-            !preamble.contains("Stdout:"),
-            "should not show stdout in low mode"
+            !preamble.contains("Output:"),
+            "should not show output in low mode"
         );
     }
 
@@ -1326,9 +1288,6 @@ mod tests {
             keys::COMMAND_OUTPUT.to_string(),
             serde_json::json!("All tests passed\n"),
         );
-        outcome
-            .context_updates
-            .insert(keys::COMMAND_STDERR.to_string(), serde_json::json!(""));
         node_outcomes.insert("run_tests".to_string(), outcome);
 
         let preamble = build_preamble(
@@ -1345,7 +1304,7 @@ mod tests {
         );
         assert!(
             preamble.contains("All tests passed"),
-            "should show stdout via compact renderer"
+            "should show output via compact renderer"
         );
         assert!(
             !preamble.contains("set command.output"),
@@ -1529,11 +1488,7 @@ mod tests {
         let mut outcome = Outcome::success();
         outcome.context_updates.insert(
             keys::COMMAND_OUTPUT.to_string(),
-            serde_json::json!("All tests passed\n"),
-        );
-        outcome.context_updates.insert(
-            keys::COMMAND_STDERR.to_string(),
-            serde_json::json!("warning: unused var\n"),
+            serde_json::json!("All tests passed\nwarning: unused var\n"),
         );
         node_outcomes.insert("run_tests".to_string(), outcome);
 
@@ -1556,11 +1511,11 @@ mod tests {
         );
         assert!(
             preamble.contains("All tests passed"),
-            "should include stdout"
+            "should include output"
         );
         assert!(
             preamble.contains("warning: unused var"),
-            "should include stderr"
+            "should include merged stderr"
         );
     }
 
@@ -2136,7 +2091,7 @@ mod tests {
     }
 
     #[test]
-    fn compact_command_stage_truncates_long_stdout() {
+    fn compact_command_stage_truncates_long_output() {
         let mut graph = Graph::new("test");
         let mut build = Node::new("build");
         build.attrs.insert(
@@ -2153,14 +2108,14 @@ mod tests {
         let completed_nodes = vec!["build".to_string()];
         let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
         let mut outcome = Outcome::success();
-        // Generate >25 lines of stdout
-        let long_stdout: String = (1..=30)
+        // Generate >25 lines of output
+        let long_output: String = (1..=30)
             .map(|i| format!("output line {i}"))
             .collect::<Vec<_>>()
             .join("\n");
         outcome.context_updates.insert(
             keys::COMMAND_OUTPUT.to_string(),
-            serde_json::json!(long_stdout),
+            serde_json::json!(long_output),
         );
         node_outcomes.insert("build".to_string(), outcome);
 
@@ -2174,7 +2129,7 @@ mod tests {
 
         assert!(
             preamble.contains("(5 lines omitted)"),
-            "should show omission indicator for long stdout, got:\n{preamble}"
+            "should show omission indicator for long output, got:\n{preamble}"
         );
         assert!(
             preamble.contains("output line 30"),
@@ -2187,7 +2142,7 @@ mod tests {
     }
 
     #[test]
-    fn summary_high_command_stage_truncates_long_stdout() {
+    fn summary_high_command_stage_truncates_long_output() {
         let mut graph = Graph::new("test");
         let mut build = Node::new("build");
         build.attrs.insert(
@@ -2204,14 +2159,14 @@ mod tests {
         let completed_nodes = vec!["build".to_string()];
         let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
         let mut outcome = Outcome::success();
-        // Generate >50 lines of stdout
-        let long_stdout: String = (1..=60)
+        // Generate >50 lines of output
+        let long_output: String = (1..=60)
             .map(|i| format!("output line {i}"))
             .collect::<Vec<_>>()
             .join("\n");
         outcome.context_updates.insert(
             keys::COMMAND_OUTPUT.to_string(),
-            serde_json::json!(long_stdout),
+            serde_json::json!(long_output),
         );
         node_outcomes.insert("build".to_string(), outcome);
 
@@ -2225,7 +2180,7 @@ mod tests {
 
         assert!(
             preamble.contains("(10 lines omitted)"),
-            "should show omission indicator for long stdout, got:\n{preamble}"
+            "should show omission indicator for long output, got:\n{preamble}"
         );
         assert!(
             preamble.contains("output line 60"),
@@ -2238,7 +2193,7 @@ mod tests {
     }
 
     #[test]
-    fn summary_high_artifact_stdout_not_truncated() {
+    fn summary_high_artifact_output_not_truncated() {
         let mut graph = Graph::new("test");
         let mut build = Node::new("build");
         build.attrs.insert(
@@ -2251,10 +2206,10 @@ mod tests {
         let completed_nodes = vec!["build".to_string()];
         let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
         let mut outcome = Outcome::success();
-        // Artifact pointer — should NOT be truncated
+        // Artifact pointer should not be truncated.
         outcome.context_updates.insert(
             keys::COMMAND_OUTPUT.to_string(),
-            serde_json::json!("file:///tmp/artifacts/stdout.txt"),
+            serde_json::json!("file:///tmp/artifacts/output.txt"),
         );
         node_outcomes.insert("build".to_string(), outcome);
 
@@ -2271,7 +2226,7 @@ mod tests {
             "artifact pointers should not be truncated, got:\n{preamble}"
         );
         assert!(
-            preamble.contains("/tmp/artifacts/stdout.txt"),
+            preamble.contains("/tmp/artifacts/output.txt"),
             "should show artifact path"
         );
     }

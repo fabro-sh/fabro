@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use fabro_config::RunScratch;
 use fabro_store::stage_storage_segment;
-use fabro_types::{CommandOutputStream, StageId, format_blob_ref};
+use fabro_types::{StageId, format_blob_ref};
 use serde_json::Value;
 use tokio::fs::{self, File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
@@ -14,26 +14,20 @@ use crate::runtime_store::RunStoreHandle;
 
 #[derive(Debug, Clone)]
 pub struct FinalizedCommandLogs {
-    pub stdout_ref:   String,
-    pub stderr_ref:   String,
-    pub stdout_bytes: u64,
-    pub stderr_bytes: u64,
-    pub stdout_text:  String,
-    pub stderr_text:  String,
+    pub output_ref:   String,
+    pub output_bytes: u64,
+    pub output_text:  String,
 }
 
 pub struct CommandLogRecorder {
-    stdout:      Mutex<File>,
-    stderr:      Mutex<File>,
-    stdout_path: PathBuf,
-    stderr_path: PathBuf,
+    output:      Mutex<File>,
+    output_path: PathBuf,
 }
 
 impl CommandLogRecorder {
     pub async fn create(run_dir: &Path, stage_id: &StageId) -> Result<Arc<Self>> {
-        let stdout_path = command_log_path(run_dir, stage_id, CommandOutputStream::Stdout);
-        let stderr_path = command_log_path(run_dir, stage_id, CommandOutputStream::Stderr);
-        if let Some(parent) = stdout_path.parent() {
+        let output_path = command_log_path(run_dir, stage_id);
+        if let Some(parent) = output_path.parent() {
             fs::create_dir_all(parent).await.map_err(|err| {
                 Error::Io(format!(
                     "creating command log directory {}: {err}",
@@ -41,82 +35,59 @@ impl CommandLogRecorder {
                 ))
             })?;
         }
-        let stdout = open_truncated(&stdout_path).await?;
-        let stderr = open_truncated(&stderr_path).await?;
+        let output = open_truncated(&output_path).await?;
         Ok(Arc::new(Self {
-            stdout: Mutex::new(stdout),
-            stderr: Mutex::new(stderr),
-            stdout_path,
-            stderr_path,
+            output: Mutex::new(output),
+            output_path,
         }))
     }
 
-    pub async fn append(&self, stream: CommandOutputStream, bytes: &[u8]) -> Result<()> {
+    pub async fn append(&self, bytes: &[u8]) -> Result<()> {
         if bytes.is_empty() {
             return Ok(());
         }
-        let mut file = match stream {
-            CommandOutputStream::Stdout => self.stdout.lock().await,
-            CommandOutputStream::Stderr => self.stderr.lock().await,
-        };
+        let mut file = self.output.lock().await;
         file.write_all(bytes)
             .await
-            .map_err(|err| Error::Io(format!("writing command {stream} log failed: {err}")))?;
+            .map_err(|err| Error::Io(format!("writing command output log failed: {err}")))?;
         Ok(())
     }
 
     pub async fn finalize(&self, run_store: &RunStoreHandle) -> Result<FinalizedCommandLogs> {
         self.flush_all().await?;
-        let (stdout_text, stdout_bytes) = read_lossy_text(&self.stdout_path).await?;
-        let (stderr_text, stderr_bytes) = read_lossy_text(&self.stderr_path).await?;
-        let stdout_ref = write_json_string_blob(run_store, &stdout_text).await?;
-        let stderr_ref = write_json_string_blob(run_store, &stderr_text).await?;
+        let (output_text, output_bytes) = read_lossy_text(&self.output_path).await?;
+        let output_ref = write_json_string_blob(run_store, &output_text).await?;
         Ok(FinalizedCommandLogs {
-            stdout_ref,
-            stderr_ref,
-            stdout_bytes,
-            stderr_bytes,
-            stdout_text,
-            stderr_text,
+            output_ref,
+            output_bytes,
+            output_text,
         })
     }
 
     pub async fn discard(self: Arc<Self>) -> Result<()> {
         self.flush_all().await?;
-        let stdout_path = self.stdout_path.clone();
-        let stderr_path = self.stderr_path.clone();
+        let output_path = self.output_path.clone();
         drop(self);
-        remove_if_exists(&stdout_path).await?;
-        remove_if_exists(&stderr_path).await
+        remove_if_exists(&output_path).await
     }
 
     async fn flush_all(&self) -> Result<()> {
-        self.stdout
+        self.output
             .lock()
             .await
             .flush()
             .await
-            .map_err(|err| Error::Io(format!("flushing stdout command log failed: {err}")))?;
-        self.stderr
-            .lock()
-            .await
-            .flush()
-            .await
-            .map_err(|err| Error::Io(format!("flushing stderr command log failed: {err}")))?;
+            .map_err(|err| Error::Io(format!("flushing command output log failed: {err}")))?;
         Ok(())
     }
 }
 
-pub fn command_log_path(
-    run_dir: &Path,
-    stage_id: &StageId,
-    stream: CommandOutputStream,
-) -> PathBuf {
+pub fn command_log_path(run_dir: &Path, stage_id: &StageId) -> PathBuf {
     RunScratch::new(run_dir)
         .runtime_dir()
         .join("stages")
         .join(stage_storage_segment(stage_id))
-        .join(stream.command_log_relative_path())
+        .join("output.log")
 }
 
 pub async fn read_log_slice(

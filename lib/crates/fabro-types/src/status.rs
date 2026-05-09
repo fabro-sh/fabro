@@ -31,9 +31,10 @@ impl RunStatus {
     }
 
     /// Whether the run's status is frozen and cannot transition outbound
-    /// (except via the `* -> Dead` escape hatch). `Archived` is intentionally
-    /// NOT immutable — it can transition back to its prior terminal status
-    /// via `unarchive`.
+    /// through normal lifecycle events. Deletion and the `* -> Dead` escape
+    /// hatch are allowed separately. `Archived` is intentionally NOT
+    /// immutable — it can transition back to its prior terminal status via
+    /// `unarchive`.
     pub fn is_immutable(self) -> bool {
         matches!(
             self,
@@ -52,6 +53,10 @@ impl RunStatus {
                 | Self::Paused { .. }
                 | Self::Removing
         )
+    }
+
+    pub fn requires_force_to_delete(self) -> bool {
+        self.is_active() && !matches!(self, Self::Removing)
     }
 
     pub fn blocked_reason(self) -> Option<BlockedReason> {
@@ -74,6 +79,9 @@ impl RunStatus {
     pub fn can_transition_to(self, to: Self) -> bool {
         if matches!(to, Self::Dead) {
             return true;
+        }
+        if matches!(to, Self::Removing) {
+            return !matches!(self, Self::Removing);
         }
         if matches!((self, to), (Self::Failed { .. }, Self::Submitted)) {
             return true;
@@ -448,6 +456,37 @@ mod tests {
         assert!(!RunStatus::Queued.can_transition_to(archived));
         assert!(!RunStatus::Submitted.can_transition_to(archived));
         assert!(!RunStatus::Paused { prior_block: None }.can_transition_to(archived));
+    }
+
+    #[test]
+    fn run_statuses_can_transition_to_removing_for_deletion() {
+        let removing = RunStatus::Removing;
+        for status in [
+            RunStatus::Submitted,
+            RunStatus::Queued,
+            RunStatus::Starting,
+            RunStatus::Running,
+            RunStatus::Blocked {
+                blocked_reason: BlockedReason::HumanInputRequired,
+            },
+            RunStatus::Paused { prior_block: None },
+            RunStatus::Succeeded {
+                reason: SuccessReason::Completed,
+            },
+            RunStatus::Failed {
+                reason: FailureReason::Cancelled,
+            },
+            RunStatus::Dead,
+            RunStatus::Archived {
+                prior: TerminalStatus::Dead,
+            },
+        ] {
+            assert!(
+                status.can_transition_to(removing),
+                "{status} should transition to removing"
+            );
+        }
+        assert!(!removing.can_transition_to(removing));
     }
 
     #[test]

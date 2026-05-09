@@ -123,6 +123,13 @@ pub struct ModelRef {
     pub speed:    Option<Speed>,
 }
 
+/// Token counts for one LLM call.
+///
+/// All five fields are disjoint: each token is counted in exactly one bucket,
+/// and `total_tokens()` is their sum. Provider mappings normalize their wire
+/// formats into this shape. For example, OpenAI's nested cached tokens are
+/// subtracted out of `input_tokens`, while Anthropic thinking tokens remain in
+/// `output_tokens` because Anthropic does not expose a separate billed count.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct TokenCounts {
     pub input_tokens:       i64,

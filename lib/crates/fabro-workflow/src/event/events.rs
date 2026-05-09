@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
 use ::fabro_types::{
-    BilledTokenCounts, BlockedReason, CommandTermination, FailureReason, ForkSourceRef, GitContext,
-    ParallelBranchId, Principal, PullRequestRecord, RunBlobId, RunId, RunNoticeLevel,
-    RunProvenance, StageId, SuccessReason, run_event as fabro_types,
+    BilledTokenCounts, BlockedReason, CommandTermination, DiffSummary, FailureReason,
+    ForkSourceRef, GitContext, ParallelBranchId, Principal, PullRequestRecord, RunBlobId, RunId,
+    RunNoticeLevel, RunProvenance, StageId, SuccessReason, run_event as fabro_types,
 };
 use fabro_agent::{AgentEvent, SandboxEvent};
 use serde::{Deserialize, Serialize};
@@ -123,6 +123,8 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         final_patch:          Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        diff_summary:         Option<DiffSummary>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         billing:              Option<BilledTokenCounts>,
     },
     WorkflowRunFailed {
@@ -133,6 +135,8 @@ pub enum Event {
         git_commit_sha: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         final_patch:    Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        diff_summary:   Option<DiffSummary>,
     },
     RunNotice {
         level:            RunNoticeLevel,
@@ -321,6 +325,8 @@ pub enum Event {
         node_visits: BTreeMap<String, usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         diff: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        diff_summary: Option<DiffSummary>,
     },
     CheckpointFailed {
         node_id:          String,
@@ -513,17 +519,14 @@ pub enum Event {
         timeout_ms: Option<u64>,
     },
     CommandCompleted {
-        node_id:           String,
-        stdout:            String,
-        stderr:            String,
+        node_id:        String,
+        output:         String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        exit_code:         Option<i32>,
-        duration_ms:       u64,
-        termination:       CommandTermination,
-        stdout_bytes:      u64,
-        stderr_bytes:      u64,
-        streams_separated: bool,
-        live_streaming:    bool,
+        exit_code:      Option<i32>,
+        duration_ms:    u64,
+        termination:    CommandTermination,
+        output_bytes:   u64,
+        live_streaming: bool,
     },
     AgentCliStarted {
         node_id:  String,
@@ -567,6 +570,15 @@ pub enum Event {
         session_id:        String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_session_id: Option<String>,
+    },
+    /// A run-level interrupt was delivered to a concrete API-mode agent
+    /// session/stage.
+    AgentInterruptInjected {
+        node_id:    String,
+        visit:      u32,
+        session_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor:      Option<Principal>,
     },
     /// A steer arrived with no active session and was parked in the run-wide
     /// pending buffer. The actor (steer author) is lifted to top-level.
@@ -1277,8 +1289,7 @@ impl Event {
                 exit_code,
                 duration_ms,
                 termination,
-                stdout_bytes,
-                stderr_bytes,
+                output_bytes,
                 ..
             } => {
                 debug!(
@@ -1286,8 +1297,7 @@ impl Event {
                     exit_code,
                     duration_ms,
                     termination = %termination,
-                    stdout_bytes,
-                    stderr_bytes,
+                    output_bytes,
                     "Command completed"
                 );
             }
@@ -1332,6 +1342,14 @@ impl Event {
             }
             Self::AgentSessionEnded { session_id, .. } => {
                 debug!(session_id, "Agent session ended");
+            }
+            Self::AgentInterruptInjected {
+                node_id,
+                visit,
+                session_id,
+                ..
+            } => {
+                debug!(node_id, visit, session_id, "Agent interrupt injected");
             }
             Self::AgentSteerBuffered { .. } => {
                 debug!("Steer buffered (no active session)");

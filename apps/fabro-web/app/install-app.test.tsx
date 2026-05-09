@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
+import type { AxiosAdapter } from "axios";
 import { MemoryRouter, Route, Routes } from "react-router";
 import TestRenderer, { act } from "react-test-renderer";
 
 import InstallApp from "./install-app";
+import { generatedAxios } from "./lib/api-client";
 
 const INSTALL_ERROR_MESSAGE =
   "GitHub App setup failed before Fabro could save the app credentials. Continue again to retry the callback.";
@@ -19,6 +21,8 @@ const SESSION_RESPONSE = {
   github: null,
   prefill: INSTALL_PREFILL,
 };
+
+const originalAdapter = generatedAxios.defaults.adapter;
 
 type TestWindow = {
   history: {
@@ -121,6 +125,34 @@ function findOptionButton(
   return button;
 }
 
+function useInstallFetchMock(fetchMock: typeof fetch) {
+  generatedAxios.defaults.adapter = (async (config) => {
+    const response = await fetchMock(config.url ?? "", {
+      method: config.method?.toUpperCase(),
+      headers: config.headers as HeadersInit,
+      body: config.data as BodyInit | undefined,
+      signal: config.signal,
+    });
+    const text = response.status === 204 ? "" : await response.text();
+    const data = text ? JSON.parse(text) : undefined;
+    const axiosResponse = {
+      data,
+      status: response.status,
+      statusText: response.statusText,
+      headers: Object.fromEntries(response.headers.entries()),
+      config,
+    };
+    if (response.status >= 400) {
+      throw {
+        isAxiosError: true,
+        message: response.statusText || `HTTP ${response.status}`,
+        response: axiosResponse,
+      };
+    }
+    return axiosResponse;
+  }) as AxiosAdapter;
+}
+
 async function waitFor(assertion: () => void, timeoutMs = 1000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown;
@@ -138,6 +170,7 @@ async function waitFor(assertion: () => void, timeoutMs = 1000): Promise<void> {
 
 describe("InstallApp", () => {
   afterEach(() => {
+    generatedAxios.defaults.adapter = originalAdapter;
     delete (globalThis as { window?: unknown }).window;
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
     mock.restore();
@@ -165,7 +198,7 @@ describe("InstallApp", () => {
           }),
         );
       });
-      globalThis.fetch = fetchMock as typeof fetch;
+      useInstallFetchMock(fetchMock as typeof fetch);
 
       const testWindow = createTestWindow(
         "https://fabro.example.com/install/github?error=github-app-manifest-conversion-failed",
@@ -235,7 +268,7 @@ describe("InstallApp", () => {
           }),
         );
       });
-      globalThis.fetch = fetchMock as typeof fetch;
+      useInstallFetchMock(fetchMock as typeof fetch);
 
       const testWindow = createTestWindow(
         "https://fabro.example.com/install/github/done?token=test-install-token",
@@ -325,7 +358,7 @@ describe("InstallApp", () => {
         }
         throw new Error(`unexpected fetch: ${String(input)}`);
       });
-      globalThis.fetch = fetchMock as typeof fetch;
+      useInstallFetchMock(fetchMock as typeof fetch);
 
       const testWindow = createTestWindow("https://fabro.example.com/install/object-store");
       testWindow.sessionStorage.setItem("fabro-install-token", "test-install-token");
@@ -421,7 +454,7 @@ describe("InstallApp", () => {
           ),
         );
       });
-      globalThis.fetch = fetchMock as typeof fetch;
+      useInstallFetchMock(fetchMock as typeof fetch);
 
       const testWindow = createTestWindow("https://fabro.example.com/install/object-store");
       testWindow.sessionStorage.setItem("fabro-install-token", "test-install-token");
@@ -496,7 +529,7 @@ describe("InstallApp", () => {
           ),
         );
       });
-      globalThis.fetch = fetchMock as typeof fetch;
+      useInstallFetchMock(fetchMock as typeof fetch);
 
       const testWindow = createTestWindow("https://fabro.example.com/install/review");
       testWindow.sessionStorage.setItem("fabro-install-token", "test-install-token");
@@ -562,7 +595,7 @@ describe("InstallApp", () => {
           ),
         ),
       );
-      globalThis.fetch = fetchMock as typeof fetch;
+      useInstallFetchMock(fetchMock as typeof fetch);
 
       const testWindow = createTestWindow("https://fabro.example.com/install/review");
       testWindow.sessionStorage.setItem("fabro-install-token", "test-install-token");
@@ -659,7 +692,7 @@ describe("InstallApp", () => {
         }
         throw new Error(`unexpected fetch: ${String(input)}`);
       });
-      globalThis.fetch = fetchMock as typeof fetch;
+      useInstallFetchMock(fetchMock as typeof fetch);
 
       const testWindow = createTestWindow("https://fabro.example.com/install/sandbox");
       testWindow.sessionStorage.setItem("fabro-install-token", "test-install-token");
@@ -753,7 +786,7 @@ describe("InstallApp", () => {
         }
         throw new Error(`unexpected fetch: ${String(input)}`);
       });
-      globalThis.fetch = fetchMock as typeof fetch;
+      useInstallFetchMock(fetchMock as typeof fetch);
 
       const testWindow = createTestWindow("https://fabro.example.com/install/sandbox");
       testWindow.sessionStorage.setItem("fabro-install-token", "test-install-token");
@@ -841,7 +874,7 @@ describe("InstallApp", () => {
           ),
         );
       });
-      globalThis.fetch = fetchMock as typeof fetch;
+      useInstallFetchMock(fetchMock as typeof fetch);
 
       const testWindow = createTestWindow("https://fabro.example.com/install/review");
       testWindow.sessionStorage.setItem("fabro-install-token", "test-install-token");

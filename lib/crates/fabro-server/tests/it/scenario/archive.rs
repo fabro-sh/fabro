@@ -88,7 +88,7 @@ async fn archived_runs_reject_mutations_with_actionable_body() {
         (
             "POST",
             format!("/runs/{run_id}/questions/q-fake/answer"),
-            r#"{"value":"x"}"#,
+            r#"{"kind":"text","text":"x"}"#,
             "application/json",
         ),
         (

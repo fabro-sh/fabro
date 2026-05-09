@@ -773,6 +773,7 @@ mod tests {
                 total_usd_micros:     None,
                 final_git_commit_sha: None,
                 final_patch:          None,
+                diff_summary:         None,
                 billing:              None,
             })),
             Some(WorkerTitlePhase::Succeeded)
@@ -785,6 +786,7 @@ mod tests {
                 reason:         FailureReason::Cancelled,
                 git_commit_sha: None,
                 final_patch:    None,
+                diff_summary:   None,
             })),
             Some(WorkerTitlePhase::Cancelled)
         );
@@ -796,6 +798,7 @@ mod tests {
                 reason:         FailureReason::Terminated,
                 git_commit_sha: None,
                 final_patch:    None,
+                diff_summary:   None,
             })),
             Some(WorkerTitlePhase::Failed)
         );

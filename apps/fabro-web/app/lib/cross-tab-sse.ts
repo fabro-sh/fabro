@@ -5,6 +5,8 @@ import {
   type EventPayload,
   type EventSourceLike,
   type MutateFn,
+  type SseKey,
+  sseKeyDedupeId,
 } from "./sse";
 import { getNumber, getString, isRecord, type UnknownRecord } from "./unknown";
 
@@ -111,7 +113,7 @@ interface SubscribeOptions<TPayload extends EventPayload> {
   subscriptionKey: string;
   mutate: MutateFn;
   resolveInvalidation: (payload: TPayload) => EventInvalidation;
-  resyncKeys: () => string[];
+  resyncKeys: () => SseKey[];
   fallbackSubscribe: () => () => void;
   debounceMs?: number;
 }
@@ -131,11 +133,11 @@ interface LocalSubscription {
   refcount: number;
   mutators: Map<MutateFn, number>;
   fallbacks: Map<MutateFn, FallbackEntry>;
-  pendingKeys: Set<string>;
+  pendingKeys: Map<string, SseKey>;
   debounceTimer: ReturnType<typeof setTimeout> | null;
   debounceMs: number;
   resolveInvalidation: (payload: EventPayload) => EventInvalidation;
-  resyncKeys: () => string[];
+  resyncKeys: () => SseKey[];
 }
 
 interface LeaderState {
@@ -290,7 +292,7 @@ export class CrossTabSseCoordinator {
         refcount: 0,
         mutators: new Map(),
         fallbacks: new Map(),
-        pendingKeys: new Set(),
+        pendingKeys: new Map(),
         debounceTimer: null,
         debounceMs: options.debounceMs ?? 300,
         resolveInvalidation: options.resolveInvalidation as (payload: EventPayload) => EventInvalidation,
@@ -633,7 +635,7 @@ export class CrossTabSseCoordinator {
       lastSeen: this.now(),
     };
 
-    const source = this.sourceFactory(queryKeys.system.attach());
+    const source = this.sourceFactory(queryKeys.system.attachUrl());
     this.source = source;
     source.onmessage = (message) => {
       this.handleLeaderEventSourceMessage(message.data);
@@ -687,12 +689,12 @@ export class CrossTabSseCoordinator {
 
   private queueInvalidations(
     subscription: LocalSubscription,
-    keys: string[],
+    keys: SseKey[],
     { immediate = false }: { immediate?: boolean } = {},
   ) {
     if (keys.length === 0) return;
     for (const key of keys) {
-      subscription.pendingKeys.add(key);
+      subscription.pendingKeys.set(sseKeyDedupeId(key), key);
     }
 
     if (immediate || subscription.debounceMs <= 0) {
@@ -711,7 +713,7 @@ export class CrossTabSseCoordinator {
 
   private flushInvalidations(subscription: LocalSubscription) {
     if (subscription.pendingKeys.size === 0) return;
-    const keys = [...subscription.pendingKeys];
+    const keys = [...subscription.pendingKeys.values()];
     subscription.pendingKeys.clear();
 
     for (const mutator of subscription.mutators.keys()) {

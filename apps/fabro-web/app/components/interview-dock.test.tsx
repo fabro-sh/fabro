@@ -7,6 +7,7 @@ import {
 } from "@qltysh/fabro-api-client";
 
 import { InterviewDock, displayLabel } from "./interview-dock";
+import { generatedAxios } from "../lib/api-client";
 
 function render(node: React.ReactNode): TestRenderer.ReactTestRenderer {
   let tree: TestRenderer.ReactTestRenderer | undefined;
@@ -79,6 +80,41 @@ describe("InterviewDock", () => {
     const buttons = buttonsByText(tree);
     expect(buttons.Yes).toBeDefined();
     expect(buttons.No).toBeDefined();
+  });
+
+  test("yes/no question submits typed yes and no answers", async () => {
+    const submitted: unknown[] = [];
+    const originalAdapter = generatedAxios.defaults.adapter;
+    generatedAxios.defaults.adapter = async (config) => {
+      submitted.push(JSON.parse(String(config.data)));
+      return {
+        data: undefined,
+        status: 204,
+        statusText: "No Content",
+        headers: {},
+        config,
+      };
+    };
+
+    try {
+      const tree = render(
+        <InterviewDock runId="run-1" questions={[makeQuestion()]} />,
+      );
+      const buttons = buttonsByText(tree);
+
+      await act(async () => {
+        buttons.Yes.props.onClick();
+        await Promise.resolve();
+      });
+      await act(async () => {
+        buttons.No.props.onClick();
+        await Promise.resolve();
+      });
+
+      expect(submitted).toEqual([{ kind: "yes" }, { kind: "no" }]);
+    } finally {
+      generatedAxios.defaults.adapter = originalAdapter;
+    }
   });
 
   test("multiple choice question renders option buttons with stripped accelerator prefixes", () => {

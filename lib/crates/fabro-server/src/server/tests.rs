@@ -20,7 +20,7 @@ use fabro_model::Provider;
 use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{
     AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
-    InterviewQuestionRecord, Outcome, QuestionType, RunBlobId, RunId, RunSpec, SuccessReason,
+    InterviewQuestionRecord, Node, Outcome, QuestionType, RunBlobId, RunId, RunSpec, SuccessReason,
     SystemActorKind, fixtures,
 };
 use fabro_util::check_report::CheckStatus;
@@ -2455,10 +2455,31 @@ async fn list_run_stages_distinguishes_visits() {
     let state = test_app_state_with_isolated_storage();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = RunId::new();
+    let mut graph = Graph::new("test");
+    let mut verify = Node::new("verify");
+    verify
+        .attrs
+        .insert("type".to_string(), AttrValue::String("command".to_string()));
+    graph.nodes.insert("verify".to_string(), verify);
 
     create_durable_run_with_events(&state, run_id, &[
-        workflow_event::Event::RunSubmitted {
-            definition_blob: None,
+        workflow_event::Event::RunCreated {
+            run_id,
+            settings: serde_json::to_value(fabro_types::WorkflowSettings::default()).unwrap(),
+            graph: serde_json::to_value(&graph).unwrap(),
+            workflow_source: None,
+            workflow_config: None,
+            labels: std::collections::BTreeMap::default(),
+            run_dir: String::new(),
+            source_directory: None,
+            workflow_slug: Some("test".to_string()),
+            db_prefix: None,
+            provenance: None,
+            manifest_blob: None,
+            git: None,
+            fork_source_ref: None,
+            in_place: false,
+            web_url: None,
         },
         workflow_event::Event::RunStarting,
         workflow_event::Event::RunRunning,
@@ -2548,12 +2569,14 @@ async fn list_run_stages_distinguishes_visits() {
     let first = stage_entry(&body, "verify@1");
     assert_eq!(first["node_id"], "verify");
     assert_eq!(first["visit"], 1);
+    assert_eq!(first["handler"], "command");
     assert_eq!(first["status"], "failed");
     assert_eq!(first["duration_secs"], 1.5);
 
     let second = stage_entry(&body, "verify@2");
     assert_eq!(second["node_id"], "verify");
     assert_eq!(second["visit"], 2);
+    assert_eq!(second["handler"], "command");
     assert_eq!(second["status"], "running");
 
     // Old `dot_id` field must be gone.
@@ -2663,6 +2686,7 @@ async fn run_billing_dedups_retried_nodes_and_sums_their_durations() {
             restart_failure_signatures: std::collections::BTreeMap::new(),
             node_visits: std::collections::BTreeMap::from([("verify".to_string(), 2usize)]),
             diff: None,
+            diff_summary: None,
         },
     )
     .await
@@ -2791,6 +2815,7 @@ async fn run_billing_sums_usage_across_retry_visits_and_uses_latest_model() {
             restart_failure_signatures: std::collections::BTreeMap::new(),
             node_visits: std::collections::BTreeMap::from([("verify".to_string(), 2usize)]),
             diff: None,
+            diff_summary: None,
         },
     )
     .await
@@ -3402,6 +3427,7 @@ async fn create_completed_run_ready_for_pull_request(
             total_usd_micros:     None,
             final_git_commit_sha: None,
             final_patch:          Some(final_patch.to_string()),
+            diff_summary:         None,
             billing:              None,
         },
     ])
@@ -3975,7 +4001,7 @@ async fn submit_answer_not_found_run() {
         .uri(api(&format!("/runs/{missing_run_id}/questions/q1/answer")))
         .header("content-type", "application/json")
         .body(Body::from(
-            serde_json::to_string(&serde_json::json!({"value": "yes"})).unwrap(),
+            serde_json::to_string(&serde_json::json!({"kind": "yes"})).unwrap(),
         ))
         .unwrap();
 
@@ -4016,6 +4042,127 @@ async fn submit_pending_interview_answer_rejects_invalid_answer_shape() {
     .unwrap_err();
 
     assert_status!(response, StatusCode::BAD_REQUEST).await;
+}
+
+#[test]
+fn validate_answer_for_question_accepts_no_for_confirmation() {
+    let question = InterviewQuestionRecord {
+        id:              "q-1".to_string(),
+        text:            "Continue?".to_string(),
+        stage:           "gate".to_string(),
+        question_type:   QuestionType::Confirmation,
+        options:         vec![],
+        allow_freeform:  false,
+        timeout_seconds: None,
+        context_display: None,
+    };
+
+    let result = validate_answer_for_question(&question, &Answer::no());
+
+    assert!(result.is_ok());
+}
+
+#[test]
+fn answer_from_typed_yes_request_maps_to_yes_answer() {
+    let question = InterviewQuestionRecord {
+        id:              "q-1".to_string(),
+        text:            "Continue?".to_string(),
+        stage:           "gate".to_string(),
+        question_type:   QuestionType::YesNo,
+        options:         vec![],
+        allow_freeform:  false,
+        timeout_seconds: None,
+        context_display: None,
+    };
+    let req: SubmitAnswerRequest = serde_json::from_value(json!({ "kind": "yes" })).unwrap();
+
+    let answer = answer_from_request(req, &question).unwrap();
+
+    assert_eq!(answer.value, AnswerValue::Yes);
+}
+
+#[test]
+fn answer_from_typed_no_request_maps_to_no_answer() {
+    let question = InterviewQuestionRecord {
+        id:              "q-1".to_string(),
+        text:            "Continue?".to_string(),
+        stage:           "gate".to_string(),
+        question_type:   QuestionType::YesNo,
+        options:         vec![],
+        allow_freeform:  false,
+        timeout_seconds: None,
+        context_display: None,
+    };
+    let req: SubmitAnswerRequest = serde_json::from_value(json!({ "kind": "no" })).unwrap();
+
+    let answer = answer_from_request(req, &question).unwrap();
+
+    assert_eq!(answer.value, AnswerValue::No);
+}
+
+#[test]
+fn answer_from_typed_selected_request_validates_and_attaches_option() {
+    let question = InterviewQuestionRecord {
+        id:              "q-1".to_string(),
+        text:            "Choose one.".to_string(),
+        stage:           "gate".to_string(),
+        question_type:   QuestionType::MultipleChoice,
+        options:         vec![fabro_types::run_event::InterviewOption {
+            key:   "approve".to_string(),
+            label: "Approve".to_string(),
+        }],
+        allow_freeform:  false,
+        timeout_seconds: None,
+        context_display: None,
+    };
+    let req: SubmitAnswerRequest =
+        serde_json::from_value(json!({ "kind": "selected", "option_key": "approve" })).unwrap();
+
+    let answer = answer_from_request(req, &question).unwrap();
+
+    assert_eq!(answer.value, AnswerValue::Selected("approve".to_string()));
+    assert_eq!(
+        answer
+            .selected_option
+            .as_ref()
+            .map(|option| option.label.as_str()),
+        Some("Approve")
+    );
+}
+
+#[test]
+fn answer_from_typed_multi_selected_request_validates_option_keys() {
+    let question = InterviewQuestionRecord {
+        id:              "q-1".to_string(),
+        text:            "Choose many.".to_string(),
+        stage:           "gate".to_string(),
+        question_type:   QuestionType::MultiSelect,
+        options:         vec![
+            fabro_types::run_event::InterviewOption {
+                key:   "approve".to_string(),
+                label: "Approve".to_string(),
+            },
+            fabro_types::run_event::InterviewOption {
+                key:   "notify".to_string(),
+                label: "Notify".to_string(),
+            },
+        ],
+        allow_freeform:  false,
+        timeout_seconds: None,
+        context_display: None,
+    };
+    let req: SubmitAnswerRequest = serde_json::from_value(json!({
+        "kind": "multi_selected",
+        "option_keys": ["approve", "notify"],
+    }))
+    .unwrap();
+
+    let answer = answer_from_request(req, &question).unwrap();
+
+    assert_eq!(
+        answer.value,
+        AnswerValue::MultiSelected(vec!["approve".to_string(), "notify".to_string()])
+    );
 }
 
 #[tokio::test]
@@ -4165,7 +4312,7 @@ async fn get_run_stage_command_log_returns_scratch_slice() {
         .run_scratch(&run_id)
         .root()
         .to_path_buf();
-    let log_path = command_log_path(&run_dir, &stage_id, CommandOutputStream::Stdout);
+    let log_path = command_log_path(&run_dir, &stage_id);
     tokio::fs::create_dir_all(log_path.parent().unwrap())
         .await
         .unwrap();
@@ -4174,7 +4321,7 @@ async fn get_run_stage_command_log_returns_scratch_slice() {
     let req = Request::builder()
         .method("GET")
         .uri(api(&format!(
-            "/runs/{run_id}/stages/{stage_id}/logs/stdout?offset=6&limit=5"
+            "/runs/{run_id}/stages/{stage_id}/logs/output?offset=6&limit=5"
         )))
         .body(Body::empty())
         .unwrap();
@@ -4185,7 +4332,7 @@ async fn get_run_stage_command_log_returns_scratch_slice() {
         .decode(body["bytes_base64"].as_str().unwrap())
         .unwrap();
 
-    assert_eq!(body["stream"], "stdout");
+    assert!(body.get("stream").is_none());
     assert_eq!(body["offset"], 6);
     assert_eq!(body["next_offset"], 11);
     assert_eq!(body["total_bytes"], 11);
@@ -4201,16 +4348,11 @@ async fn get_run_stage_command_log_returns_cas_slice() {
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = RunId::new();
     let run_store = state.store.create_run(&run_id).await.unwrap();
-    let stdout_blob = run_store
+    let output_blob = run_store
         .write_blob(&serde_json::to_vec("hello world").unwrap())
         .await
         .unwrap();
-    let stderr_blob = run_store
-        .write_blob(&serde_json::to_vec("").unwrap())
-        .await
-        .unwrap();
-    let stdout_ref = format!("blob://sha256/{stdout_blob}");
-    let stderr_ref = format!("blob://sha256/{stderr_blob}");
+    let output_ref = format!("blob://sha256/{output_blob}");
     for event in [
         workflow_event::Event::RunSubmitted {
             definition_blob: None,
@@ -4224,16 +4366,13 @@ async fn get_run_stage_command_log_returns_cas_slice() {
             max_attempts: 1,
         },
         workflow_event::Event::CommandCompleted {
-            node_id:           "script_node".to_string(),
-            stdout:            stdout_ref.clone(),
-            stderr:            stderr_ref,
-            exit_code:         Some(0),
-            duration_ms:       5,
-            termination:       CommandTermination::Exited,
-            stdout_bytes:      11,
-            stderr_bytes:      0,
-            streams_separated: true,
-            live_streaming:    false,
+            node_id:        "script_node".to_string(),
+            output:         output_ref.clone(),
+            exit_code:      Some(0),
+            duration_ms:    5,
+            termination:    CommandTermination::Exited,
+            output_bytes:   11,
+            live_streaming: false,
         },
     ] {
         workflow_event::append_event(&run_store, &run_id, &event)
@@ -4244,7 +4383,7 @@ async fn get_run_stage_command_log_returns_cas_slice() {
     let req = Request::builder()
         .method("GET")
         .uri(api(&format!(
-            "/runs/{run_id}/stages/script_node@1/logs/stdout?offset=6&limit=5"
+            "/runs/{run_id}/stages/script_node@1/logs/output?offset=6&limit=5"
         )))
         .body(Body::empty())
         .unwrap();
@@ -4255,13 +4394,13 @@ async fn get_run_stage_command_log_returns_cas_slice() {
         .decode(body["bytes_base64"].as_str().unwrap())
         .unwrap();
 
-    assert_eq!(body["stream"], "stdout");
+    assert!(body.get("stream").is_none());
     assert_eq!(body["offset"], 6);
     assert_eq!(body["next_offset"], 11);
     assert_eq!(body["total_bytes"], 11);
     assert_eq!(bytes, b"world");
     assert_eq!(body["eof"], true);
-    assert_eq!(body["cas_ref"], stdout_ref);
+    assert_eq!(body["cas_ref"], output_ref);
     assert_eq!(body["live_streaming"], false);
 }
 
@@ -4272,16 +4411,11 @@ async fn get_run_stage_command_log_prefers_scratch_when_cas_ref_exists() {
     let run_id = RunId::new();
     let stage_id = StageId::new("script_node", 1);
     let run_store = state.store.create_run(&run_id).await.unwrap();
-    let stdout_blob = run_store
+    let output_blob = run_store
         .write_blob(&serde_json::to_vec("cas log").unwrap())
         .await
         .unwrap();
-    let stderr_blob = run_store
-        .write_blob(&serde_json::to_vec("").unwrap())
-        .await
-        .unwrap();
-    let stdout_ref = format!("blob://sha256/{stdout_blob}");
-    let stderr_ref = format!("blob://sha256/{stderr_blob}");
+    let output_ref = format!("blob://sha256/{output_blob}");
     for event in [
         workflow_event::Event::RunSubmitted {
             definition_blob: None,
@@ -4295,16 +4429,13 @@ async fn get_run_stage_command_log_prefers_scratch_when_cas_ref_exists() {
             max_attempts: 1,
         },
         workflow_event::Event::CommandCompleted {
-            node_id:           "script_node".to_string(),
-            stdout:            stdout_ref.clone(),
-            stderr:            stderr_ref,
-            exit_code:         Some(0),
-            duration_ms:       5,
-            termination:       CommandTermination::Exited,
-            stdout_bytes:      7,
-            stderr_bytes:      0,
-            streams_separated: true,
-            live_streaming:    false,
+            node_id:        "script_node".to_string(),
+            output:         output_ref.clone(),
+            exit_code:      Some(0),
+            duration_ms:    5,
+            termination:    CommandTermination::Exited,
+            output_bytes:   7,
+            live_streaming: false,
         },
     ] {
         workflow_event::append_event(&run_store, &run_id, &event)
@@ -4316,7 +4447,7 @@ async fn get_run_stage_command_log_prefers_scratch_when_cas_ref_exists() {
         .run_scratch(&run_id)
         .root()
         .to_path_buf();
-    let log_path = command_log_path(&run_dir, &stage_id, CommandOutputStream::Stdout);
+    let log_path = command_log_path(&run_dir, &stage_id);
     tokio::fs::create_dir_all(log_path.parent().unwrap())
         .await
         .unwrap();
@@ -4325,7 +4456,7 @@ async fn get_run_stage_command_log_prefers_scratch_when_cas_ref_exists() {
     let req = Request::builder()
         .method("GET")
         .uri(api(&format!(
-            "/runs/{run_id}/stages/{stage_id}/logs/stdout?offset=0&limit=64"
+            "/runs/{run_id}/stages/{stage_id}/logs/output?offset=0&limit=64"
         )))
         .body(Body::empty())
         .unwrap();
@@ -4336,13 +4467,13 @@ async fn get_run_stage_command_log_prefers_scratch_when_cas_ref_exists() {
         .decode(body["bytes_base64"].as_str().unwrap())
         .unwrap();
 
-    assert_eq!(body["stream"], "stdout");
+    assert!(body.get("stream").is_none());
     assert_eq!(body["offset"], 0);
     assert_eq!(body["next_offset"], 11);
     assert_eq!(body["total_bytes"], 11);
     assert_eq!(bytes, b"scratch log");
     assert_eq!(body["eof"], true);
-    assert_eq!(body["cas_ref"], stdout_ref);
+    assert_eq!(body["cas_ref"], output_ref);
     assert_eq!(body["live_streaming"], false);
 }
 
@@ -4358,7 +4489,7 @@ async fn get_run_stage_command_log_returns_not_found_for_missing_stage() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(api(&format!("/runs/{run_id}/stages/missing@1/logs/stdout")))
+        .uri(api(&format!("/runs/{run_id}/stages/missing@1/logs/output")))
         .body(Body::empty())
         .unwrap();
 
@@ -5996,7 +6127,7 @@ async fn worker_token_controls_command_log_route() {
         .clone()
         .oneshot(bearer_request(
             Method::GET,
-            &format!("/runs/{run_id}/stages/code@1/logs/stdout"),
+            &format!("/runs/{run_id}/stages/code@1/logs/output"),
             &worker_token,
             Body::empty(),
         ))
@@ -6008,7 +6139,7 @@ async fn worker_token_controls_command_log_route() {
         .clone()
         .oneshot(bearer_request(
             Method::GET,
-            &format!("/runs/{run_id}/stages/code@1/logs/stdout"),
+            &format!("/runs/{run_id}/stages/code@1/logs/output"),
             &user_jwt,
             Body::empty(),
         ))
@@ -6020,7 +6151,7 @@ async fn worker_token_controls_command_log_route() {
         .clone()
         .oneshot(bearer_request(
             Method::GET,
-            &format!("/runs/{run_id}/stages/code@1/logs/stdout"),
+            &format!("/runs/{run_id}/stages/code@1/logs/output"),
             &mismatched_worker_token,
             Body::empty(),
         ))
@@ -6032,7 +6163,7 @@ async fn worker_token_controls_command_log_route() {
         .oneshot(
             Request::builder()
                 .method(Method::GET)
-                .uri(api(&format!("/runs/{run_id}/stages/code@1/logs/stdout")))
+                .uri(api(&format!("/runs/{run_id}/stages/code@1/logs/output")))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -6959,6 +7090,7 @@ async fn archive_and_unarchive_updates_listing_visibility() {
             total_usd_micros:     None,
             final_git_commit_sha: None,
             final_patch:          None,
+            diff_summary:         None,
             billing:              None,
         },
     ])
@@ -7097,6 +7229,150 @@ async fn delete_run_removes_durable_run() {
     let req = Request::builder()
         .method("DELETE")
         .uri(api(&format!("/runs/{run_id}?force=true")))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    assert_status!(response, StatusCode::NO_CONTENT).await;
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(api(&format!("/runs/{run_id}")))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    assert_status!(response, StatusCode::NOT_FOUND).await;
+}
+
+#[tokio::test]
+async fn delete_run_with_preserved_sandbox_returns_handoff() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+    let mut settings = fabro_types::WorkflowSettings::default();
+    settings.run.sandbox.preserve = true;
+    let graph = Graph::new("test");
+
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunCreated {
+            run_id,
+            settings: serde_json::to_value(settings).unwrap(),
+            graph: serde_json::to_value(graph).unwrap(),
+            workflow_source: None,
+            workflow_config: None,
+            labels: std::collections::BTreeMap::default(),
+            run_dir: "/tmp/fabro-run".to_string(),
+            source_directory: Some("/tmp/fabro-run".to_string()),
+            workflow_slug: Some("test".to_string()),
+            db_prefix: None,
+            provenance: None,
+            manifest_blob: None,
+            git: None,
+            fork_source_ref: None,
+            in_place: false,
+            web_url: None,
+        },
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::SandboxInitialized {
+            provider:          "local".to_string(),
+            working_directory: "/tmp/fabro-preserved-sandbox".to_string(),
+            identifier:        Some("sandbox-preserve-1".to_string()),
+            repo_cloned:       None,
+            clone_origin_url:  None,
+            clone_branch:      None,
+        },
+    ])
+    .await;
+
+    let req = Request::builder()
+        .method("DELETE")
+        .uri(api(&format!("/runs/{run_id}?force=true")))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(body["deleted"].as_bool(), Some(true));
+    assert_eq!(body["sandbox_preserved"].as_bool(), Some(true));
+    assert_eq!(body["sandbox"]["provider"].as_str(), Some("local"));
+    assert_eq!(
+        body["sandbox"]["identifier"].as_str(),
+        Some("sandbox-preserve-1")
+    );
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(api(&format!("/runs/{run_id}")))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    assert_status!(response, StatusCode::NOT_FOUND).await;
+}
+
+#[tokio::test]
+async fn delete_run_retry_after_missing_provider_resource_removes_metadata() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+    let graph = Graph::new("test");
+
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunCreated {
+            run_id,
+            settings: serde_json::to_value(fabro_types::WorkflowSettings::default()).unwrap(),
+            graph: serde_json::to_value(graph).unwrap(),
+            workflow_source: None,
+            workflow_config: None,
+            labels: std::collections::BTreeMap::default(),
+            run_dir: "/tmp/fabro-run".to_string(),
+            source_directory: Some("/tmp/fabro-run".to_string()),
+            workflow_slug: Some("test".to_string()),
+            db_prefix: None,
+            provenance: None,
+            manifest_blob: None,
+            git: None,
+            fork_source_ref: None,
+            in_place: false,
+            web_url: None,
+        },
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+        workflow_event::Event::SandboxInitialized {
+            provider:          "missing-provider".to_string(),
+            working_directory: "/tmp/fabro-missing-sandbox".to_string(),
+            identifier:        Some("missing-sandbox".to_string()),
+            repo_cloned:       None,
+            clone_origin_url:  None,
+            clone_branch:      None,
+        },
+        workflow_event::Event::WorkflowRunCompleted {
+            duration_ms:          1,
+            artifact_count:       0,
+            status:               "succeeded".to_string(),
+            reason:               SuccessReason::Completed,
+            total_usd_micros:     None,
+            final_git_commit_sha: None,
+            final_patch:          None,
+            diff_summary:         None,
+            billing:              None,
+        },
+    ])
+    .await;
+
+    let req = Request::builder()
+        .method("DELETE")
+        .uri(api(&format!("/runs/{run_id}")))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    response_json!(response, StatusCode::CONFLICT).await;
+
+    let req = Request::builder()
+        .method("DELETE")
+        .uri(api(&format!("/runs/{run_id}")))
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
@@ -8113,7 +8389,7 @@ async fn submit_answer_to_queued_run_returns_conflict() {
         .uri(api(&format!("/runs/{run_id}/questions/q1/answer")))
         .header("content-type", "application/json")
         .body(Body::from(
-            serde_json::to_string(&serde_json::json!({"value": "yes"})).unwrap(),
+            serde_json::to_string(&serde_json::json!({"kind": "yes"})).unwrap(),
         ))
         .unwrap();
 
@@ -8209,6 +8485,64 @@ async fn demo_get_run_returns_404_for_unknown_run() {
 }
 
 #[tokio::test]
+async fn demo_workflows_return_list_detail_and_runs() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(state);
+
+    let list_req = Request::builder()
+        .method("GET")
+        .uri(api("/workflows"))
+        .header("X-Fabro-Demo", "1")
+        .body(Body::empty())
+        .unwrap();
+    let list_response = app.clone().oneshot(list_req).await.unwrap();
+    let list_body = response_json!(list_response, StatusCode::OK).await;
+    let workflows = list_body["data"]
+        .as_array()
+        .expect("workflow list data should be an array");
+    assert!(!workflows.is_empty(), "demo should return workflows");
+    let first = &workflows[0];
+    assert!(first["name"].is_string());
+    assert!(first["slug"].is_string());
+    assert!(first["filename"].is_string());
+    assert!(first["last_run"].is_object() || first["last_run"].is_null());
+    assert!(first["schedule"].is_object() || first["schedule"].is_null());
+
+    let detail_req = Request::builder()
+        .method("GET")
+        .uri(api("/workflows/implement"))
+        .header("X-Fabro-Demo", "1")
+        .body(Body::empty())
+        .unwrap();
+    let detail_response = app.clone().oneshot(detail_req).await.unwrap();
+    let detail_body = response_json!(detail_response, StatusCode::OK).await;
+    assert_eq!(detail_body["slug"], "implement");
+    assert!(detail_body["settings"].is_object());
+    assert!(
+        detail_body["graph"]
+            .as_str()
+            .is_some_and(|graph| graph.contains("digraph"))
+    );
+
+    let runs_req = Request::builder()
+        .method("GET")
+        .uri(api("/workflows/implement/runs"))
+        .header("X-Fabro-Demo", "1")
+        .body(Body::empty())
+        .unwrap();
+    let runs_response = app.oneshot(runs_req).await.unwrap();
+    let runs_body = response_json!(runs_response, StatusCode::OK).await;
+    let runs = runs_body["data"]
+        .as_array()
+        .expect("workflow runs data should be an array");
+    assert!(
+        runs.iter()
+            .all(|run| run["workflow_slug"].as_str() == Some("implement")),
+        "workflow run list should be scoped to the requested workflow"
+    );
+}
+
+#[tokio::test]
 async fn boards_runs_returns_run_list_items_with_board_columns() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
@@ -8299,6 +8633,7 @@ async fn boards_runs_excludes_archived_by_default() {
             total_usd_micros:     None,
             final_git_commit_sha: None,
             final_patch:          None,
+            diff_summary:         None,
             billing:              None,
         },
         workflow_event::Event::RunArchived { actor: None },
@@ -8347,6 +8682,7 @@ async fn boards_runs_includes_archived_when_flag_set() {
             total_usd_micros:     None,
             final_git_commit_sha: None,
             final_patch:          None,
+            diff_summary:         None,
             billing:              None,
         },
         workflow_event::Event::RunArchived { actor: None },
@@ -8366,6 +8702,7 @@ async fn boards_runs_includes_archived_when_flag_set() {
             total_usd_micros:     None,
             final_git_commit_sha: None,
             final_patch:          None,
+            diff_summary:         None,
             billing:              None,
         },
     ])
@@ -8435,6 +8772,7 @@ async fn get_run_exposes_canonical_operator_statuses() {
             total_usd_micros:     None,
             final_git_commit_sha: None,
             final_patch:          None,
+            diff_summary:         None,
             billing:              None,
         },
     ])
@@ -8516,6 +8854,7 @@ async fn boards_runs_maps_statuses_to_columns() {
             total_usd_micros:     None,
             final_git_commit_sha: None,
             final_patch:          None,
+            diff_summary:         None,
             billing:              None,
         },
     ])

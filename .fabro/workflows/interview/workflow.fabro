@@ -1,0 +1,60 @@
+digraph Interview {
+    graph [goal="Run a progressive human interview and summarize the answers"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    yes_no [
+        shape=hexagon,
+        label="Is this interview workflow easy to follow so far?",
+        question_type="yes_no"
+    ]
+    confirmation [
+        shape=hexagon,
+        label="Confirm that you want to continue into more structured questions.",
+        question_type="confirmation"
+    ]
+    multiple_choice [
+        shape=hexagon,
+        label="Which theme should be the center of the final summary?",
+        question_type="multiple_choice"
+    ]
+    multi_select [
+        shape=hexagon,
+        label="Which supporting areas should the final summary emphasize?",
+        question_type="multi_select"
+    ]
+    freeform [
+        shape=hexagon,
+        label="Add any final context, constraints, or nuance for the summary.",
+        question_type="freeform"
+    ]
+    summarize [
+        shape=tab,
+        label="Summarize Interview",
+        fidelity="summary:high",
+        prompt="Summarize the full human interview. Include each question and answer in order, then synthesize the user's priorities, constraints, and open questions. Use the human.gate.<node>.question and human.gate.<node>.answer context keys when present. Do not invent missing answers."
+    ]
+
+    start -> yes_no
+
+    yes_no -> confirmation [label="[Y] Yes"]
+    yes_no -> confirmation [label="[N] No"]
+
+    confirmation -> multiple_choice [label="[Y] Continue"]
+    confirmation -> multiple_choice [label="[N] Stop after this, but still summarize"]
+
+    multiple_choice -> multi_select [label="[G] Goals"]
+    multiple_choice -> multi_select [label="[R] Risks"]
+    multiple_choice -> multi_select [label="[T] Tradeoffs"]
+    multiple_choice -> multi_select [label="[Q] Open questions"]
+
+    multi_select -> freeform [label="[S] Success criteria"]
+    multi_select -> freeform [label="[B] Blockers"]
+    multi_select -> freeform [label="[D] Decisions needed"]
+    multi_select -> freeform [label="[N] Next steps"]
+
+    freeform -> summarize [freeform=true]
+    summarize -> exit
+}

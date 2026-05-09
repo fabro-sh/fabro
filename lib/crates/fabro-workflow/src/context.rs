@@ -31,7 +31,6 @@ pub mod keys {
 
     // --- command.* keys ---
     pub const COMMAND_OUTPUT: &str = "command.output";
-    pub const COMMAND_STDERR: &str = "command.stderr";
 
     // --- human.gate.* keys ---
     pub const HUMAN_GATE_SELECTED: &str = "human.gate.selected";

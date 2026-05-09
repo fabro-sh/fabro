@@ -11,6 +11,8 @@ import type {
   InstallSessionResponse,
 } from "@qltysh/fabro-api-client";
 
+import { ApiError, apiData, installApi } from "./lib/api-client";
+
 export type {
   InstallFinishResponse,
   InstallGithubAppManifestInput,
@@ -62,139 +64,133 @@ export async function readInstallError(
   return `${fallback} (${response.status})`;
 }
 
-type InstallRequestOptions = {
-  path:          string;
-  method:        "GET" | "POST" | "PUT";
-  body?:         unknown;
-  errorFallback: string;
-};
-
-async function installRequest(
-  token: string,
-  opts: InstallRequestOptions,
-): Promise<Response> {
-  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
-  if (opts.body !== undefined) {
-    headers["Content-Type"] = "application/json";
+export function readInstallApiError(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    const detail = installErrorDetail(error.body);
+    if (detail) return detail;
+    return `${fallback} (${error.status})`;
   }
-  const response = await fetch(opts.path, {
-    method: opts.method,
-    headers,
-    body:   opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-  });
-  if (!response.ok) {
-    throw new Error(await readInstallError(response, opts.errorFallback));
-  }
-  return response;
+  return error instanceof Error ? error.message : fallback;
 }
 
-async function installJsonRequest<T>(
-  token: string,
-  opts: InstallRequestOptions,
+function installErrorDetail(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  const errors = (body as { errors?: unknown }).errors;
+  if (!Array.isArray(errors)) return null;
+  const first = errors[0];
+  if (!first || typeof first !== "object") return null;
+  const detail = (first as { detail?: unknown }).detail;
+  return typeof detail === "string" && detail.trim() ? detail : null;
+}
+
+function installOptions(token: string) {
+  return {
+    headers: { Authorization: `Bearer ${token}` },
+  };
+}
+
+async function installCall<T>(
+  fallback: string,
+  call: () => Promise<T>,
 ): Promise<T> {
-  const response = await installRequest(token, opts);
-  return response.json() as Promise<T>;
+  try {
+    return await call();
+  } catch (error) {
+    throw new Error(readInstallApiError(error, fallback));
+  }
 }
 
 export async function getInstallSession(token: string): Promise<InstallSessionResponse> {
-  return installJsonRequest<InstallSessionResponse>(token, {
-    path:          "/install/session",
-    method:        "GET",
-    errorFallback: "install session request failed",
-  });
+  return installCall("install session request failed", () =>
+    apiData(() => installApi.getInstallSession(installOptions(token)), {
+      redirectOnUnauthorized: false,
+    }),
+  );
 }
 
 export async function testInstallLlm(
   token: string,
   provider: InstallLlmProviderInput,
 ): Promise<void> {
-  await installRequest(token, {
-    path:          "/install/llm/test",
-    method:        "POST",
-    body:          provider,
-    errorFallback: "install llm validation failed",
-  });
+  await installCall("install llm validation failed", () =>
+    apiData(() => installApi.testInstallLlmCredentials(provider, installOptions(token)), {
+      redirectOnUnauthorized: false,
+    }),
+  );
 }
 
 export async function putInstallLlm(
   token: string,
   providers: InstallLlmProviderInput[],
 ): Promise<void> {
-  await installRequest(token, {
-    path:          "/install/llm",
-    method:        "PUT",
-    body:          { providers },
-    errorFallback: "install llm request failed",
-  });
+  await installCall("install llm request failed", () =>
+    apiData(() => installApi.putInstallLlm({ providers }, installOptions(token)), {
+      redirectOnUnauthorized: false,
+    }),
+  );
 }
 
 export async function putInstallServer(token: string, canonicalUrl: string): Promise<void> {
-  await installRequest(token, {
-    path:          "/install/server",
-    method:        "PUT",
-    body:          { canonical_url: canonicalUrl },
-    errorFallback: "install server request failed",
-  });
+  await installCall("install server request failed", () =>
+    apiData(() => installApi.putInstallServer({ canonical_url: canonicalUrl }, installOptions(token)), {
+      redirectOnUnauthorized: false,
+    }),
+  );
 }
 
 export async function testInstallObjectStore(
   token: string,
   input: InstallObjectStoreInput,
 ): Promise<void> {
-  await installRequest(token, {
-    path:          "/install/object-store/test",
-    method:        "POST",
-    body:          input,
-    errorFallback: "install object store validation failed",
-  });
+  await installCall("install object store validation failed", () =>
+    apiData(() => installApi.testInstallObjectStore(input, installOptions(token)), {
+      redirectOnUnauthorized: false,
+    }),
+  );
 }
 
 export async function putInstallObjectStore(
   token: string,
   input: InstallObjectStoreInput,
 ): Promise<void> {
-  await installRequest(token, {
-    path:          "/install/object-store",
-    method:        "PUT",
-    body:          input,
-    errorFallback: "install object store request failed",
-  });
+  await installCall("install object store request failed", () =>
+    apiData(() => installApi.putInstallObjectStore(input, installOptions(token)), {
+      redirectOnUnauthorized: false,
+    }),
+  );
 }
 
 export async function testInstallSandbox(
   token: string,
   input: InstallSandboxInput,
 ): Promise<void> {
-  await installRequest(token, {
-    path:          "/install/sandbox/test",
-    method:        "POST",
-    body:          input,
-    errorFallback: "install sandbox validation failed",
-  });
+  await installCall("install sandbox validation failed", () =>
+    apiData(() => installApi.testInstallSandbox(input, installOptions(token)), {
+      redirectOnUnauthorized: false,
+    }),
+  );
 }
 
 export async function putInstallSandbox(
   token: string,
   input: InstallSandboxInput,
 ): Promise<void> {
-  await installRequest(token, {
-    path:          "/install/sandbox",
-    method:        "PUT",
-    body:          input,
-    errorFallback: "install sandbox request failed",
-  });
+  await installCall("install sandbox request failed", () =>
+    apiData(() => installApi.putInstallSandbox(input, installOptions(token)), {
+      redirectOnUnauthorized: false,
+    }),
+  );
 }
 
 export async function testInstallGithubToken(
   token: string,
   githubToken: string,
 ): Promise<string> {
-  const body = await installJsonRequest<{ username: string }>(token, {
-    path:          "/install/github/token/test",
-    method:        "POST",
-    body:          { token: githubToken },
-    errorFallback: "install github token validation failed",
-  });
+  const body = await installCall("install github token validation failed", () =>
+    apiData(() => installApi.testInstallGithubToken({ token: githubToken }, installOptions(token)), {
+      redirectOnUnauthorized: false,
+    }),
+  );
   return body.username;
 }
 
@@ -203,30 +199,31 @@ export async function putInstallGithubToken(
   githubToken: string,
   username: string,
 ): Promise<void> {
-  await installRequest(token, {
-    path:          "/install/github/token",
-    method:        "PUT",
-    body:          { token: githubToken, username },
-    errorFallback: "install github token request failed",
-  });
+  await installCall("install github token request failed", () =>
+    apiData(() => installApi.putInstallGithubToken(
+      { token: githubToken, username },
+      installOptions(token),
+    ), {
+      redirectOnUnauthorized: false,
+    }),
+  );
 }
 
 export async function createInstallGithubAppManifest(
   token: string,
   input: InstallGithubAppManifestInput,
 ): Promise<InstallGithubAppManifestResponse> {
-  return installJsonRequest<InstallGithubAppManifestResponse>(token, {
-    path:          "/install/github/app/manifest",
-    method:        "POST",
-    body:          input,
-    errorFallback: "install github app manifest request failed",
-  });
+  return installCall("install github app manifest request failed", () =>
+    apiData(() => installApi.createInstallGithubAppManifest(input, installOptions(token)), {
+      redirectOnUnauthorized: false,
+    }),
+  );
 }
 
 export async function finishInstall(token: string): Promise<InstallFinishResponse> {
-  return installJsonRequest<InstallFinishResponse>(token, {
-    path:          "/install/finish",
-    method:        "POST",
-    errorFallback: "install finish request failed",
-  });
+  return installCall("install finish request failed", () =>
+    apiData(() => installApi.finishInstall(installOptions(token)), {
+      redirectOnUnauthorized: false,
+    }),
+  );
 }

@@ -152,6 +152,14 @@ export default function AppShell() {
                     className="absolute right-0 z-10 mt-2 w-48 origin-top-right rounded-md bg-panel py-1 outline-1 -outline-offset-1 outline-line-strong transition data-closed:scale-95 data-closed:transform data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in"
                   >
                     <MenuItem>
+                      <Link
+                        to="/profile"
+                        className="block w-full px-4 py-2 text-left text-sm text-fg-3 data-focus:bg-overlay data-focus:outline-hidden"
+                      >
+                        Profile
+                      </Link>
+                    </MenuItem>
+                    <MenuItem>
                       <form method="POST" action="/auth/logout">
                         <button
                           type="submit"
@@ -237,8 +245,15 @@ export default function AppShell() {
                 </button>
               </div>
             </div>
-            {provider !== "tailscale" && (
-              <div className="mt-3 space-y-1 px-2">
+            <div className="mt-3 space-y-1 px-2">
+              <DisclosureButton
+                as={Link}
+                to="/profile"
+                className="block w-full rounded-md px-3 py-2 text-left text-base font-medium text-fg-muted hover:bg-overlay hover:text-fg"
+              >
+                Profile
+              </DisclosureButton>
+              {provider !== "tailscale" && (
                 <form method="POST" action="/auth/logout">
                   <DisclosureButton
                     as="button"
@@ -248,8 +263,8 @@ export default function AppShell() {
                     Sign out
                   </DisclosureButton>
                 </form>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </DisclosurePanel>
       </Disclosure>

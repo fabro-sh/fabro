@@ -13,22 +13,26 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { SubmitAnswerMultiSelectedRequest } from './submit-answer-multi-selected-request';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { SubmitAnswerNoRequest } from './submit-answer-no-request';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { SubmitAnswerSelectedRequest } from './submit-answer-selected-request';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { SubmitAnswerTextRequest } from './submit-answer-text-request';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { SubmitAnswerYesRequest } from './submit-answer-yes-request';
 
 /**
- * Request body for submitting an answer to a pending question. At least one of `value`, `selected_option_key`, or `selected_option_keys` must be provided. 
+ * @type SubmitAnswerRequest
+ * Request body for submitting an answer to a pending question. The `kind` discriminator determines which answer shape is submitted. 
  */
-export interface SubmitAnswerRequest {
-    /**
-     * Freeform answer text.
-     */
-    'value'?: string;
-    /**
-     * Key of the selected option (for single-select multiple-choice questions).
-     */
-    'selected_option_key'?: string;
-    /**
-     * Keys of selected options (for multi-select questions).
-     */
-    'selected_option_keys'?: Array<string>;
-}
+export type SubmitAnswerRequest = { kind: 'multi_selected' } & SubmitAnswerMultiSelectedRequest | { kind: 'no' } & SubmitAnswerNoRequest | { kind: 'selected' } & SubmitAnswerSelectedRequest | { kind: 'text' } & SubmitAnswerTextRequest | { kind: 'yes' } & SubmitAnswerYesRequest;
+
 

@@ -8,8 +8,8 @@ use fabro_core::lifecycle::RunLifecycle;
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
 use fabro_dump::RunDump;
-use fabro_types::RunId;
 use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
+use fabro_types::{DiffSummary, RunId};
 use fabro_util::error::collect_causes;
 use fabro_util::time::elapsed_ms;
 
@@ -21,7 +21,9 @@ use crate::outcome::BilledModelUsage;
 use crate::run_metadata::{MetadataSnapshot, RunMetadataRuntime, RunMetadataWriterHandle};
 use crate::run_options::RunOptions;
 use crate::runtime_store::RunStoreHandle;
-use crate::sandbox_git::{checked_git_checkpoint, git_diff};
+use crate::sandbox_git::{
+    checked_git_checkpoint, git_diff, list_diff_numstat, summarize_diff_numstat,
+};
 use crate::sandbox_git_runtime::SandboxGitRuntime;
 
 type WfRunState = ExecutionState<Option<BilledModelUsage>>;
@@ -61,6 +63,7 @@ pub(crate) struct GitCheckpointResult {
     pub commit_sha:   Option<String>,
     pub push_results: Vec<PushResult>,
     pub diff:         Option<String>,
+    pub diff_summary: Option<DiffSummary>,
 }
 
 #[derive(Debug, Clone)]
@@ -279,6 +282,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                     commit_sha:   Some(sha.clone()),
                     push_results: Vec::new(),
                     diff:         None,
+                    diff_summary: None,
                 };
 
                 // Push run branch (skip in dry-run mode)
@@ -326,7 +330,21 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                         .and_then(|g| g.base_sha.clone())
                 });
                 if let Some(prev) = prev.filter(|p| p != &sha) {
-                    match git_diff(&*self.sandbox, &prev).await {
+                    let summary_base = self
+                        .run_options
+                        .git
+                        .as_ref()
+                        .and_then(|git| git.base_sha.clone());
+                    let (patch_result, numstat_result) =
+                        tokio::join!(git_diff(&*self.sandbox, &prev), async {
+                            match summary_base.as_deref() {
+                                Some(base) if base != sha => {
+                                    Some(list_diff_numstat(&*self.sandbox, base, &sha).await)
+                                }
+                                _ => None,
+                            }
+                        },);
+                    match patch_result {
                         Ok(patch) if !patch.is_empty() => {
                             git_result.diff = Some(patch);
                         }
@@ -341,6 +359,22 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                                 exec_output_tail,
                             );
                         }
+                    }
+                    match numstat_result {
+                        Some(Ok(numstat)) => {
+                            git_result.diff_summary = Some(summarize_diff_numstat(&numstat));
+                        }
+                        Some(Err(err)) => {
+                            let exec_output_tail =
+                                fabro_sandbox::default_redacted_output_tail(&err);
+                            self.emitter.notice_with_tail(
+                                RunNoticeLevel::Warn,
+                                RunNoticeCode::GitDiffFailed,
+                                format!("[node: {node_id}] git diff stats failed: {err}"),
+                                exec_output_tail,
+                            );
+                        }
+                        None => {}
                     }
                 }
 
@@ -584,6 +618,39 @@ mod tests {
             .output()
             .unwrap();
         assert!(commit.status.success());
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "metadata event tests use synchronous git commands to set up temporary repositories"
+    )]
+    fn git_commit_all(repo: &Path, msg: &str) -> String {
+        let add = std::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert!(add.status.success());
+        let commit = std::process::Command::new("git")
+            .args(["commit", "-m", msg])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert!(
+            commit.status.success(),
+            "git commit failed: {}",
+            String::from_utf8_lossy(&commit.stderr)
+        );
+        let rev_parse = std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert!(rev_parse.status.success());
+        String::from_utf8(rev_parse.stdout)
+            .unwrap()
+            .trim()
+            .to_string()
     }
 
     fn workflow_graph() -> WorkflowGraph {
@@ -952,6 +1019,76 @@ mod tests {
                 .as_deref(),
             Some("build@1")
         );
+    }
+
+    #[tokio::test]
+    async fn checkpoint_git_result_includes_diff_summary() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        let repo = repo_dir.path();
+        init_git_repo(repo);
+        tokio::fs::write(repo.join("notes.txt"), "one\n")
+            .await
+            .unwrap();
+        let base = git_commit_all(repo, "base");
+        tokio::fs::write(repo.join("notes.txt"), "one\ntwo\n")
+            .await
+            .unwrap();
+
+        let mut options = run_options(repo, "fabro/metadata/run").as_ref().clone();
+        options.git = Some(GitCheckpointOptions {
+            base_sha:    Some(base),
+            run_branch:  None,
+            meta_branch: None,
+        });
+        let lifecycle = git_lifecycle_with_writer(
+            repo,
+            Arc::new(Emitter::new(fixtures::RUN_1)),
+            RunStoreHandle::local(run_store(fixtures::RUN_1).await),
+            Arc::new(options),
+            Arc::new(RunMetadataRuntime::new()),
+            None,
+        );
+        let graph = workflow_graph();
+        let node = graph.get_node("build").unwrap();
+        let mut state = ExecutionState::new(&graph).unwrap();
+        state.increment_visits("build");
+        let result = WfNodeResult::new(Outcome::success(), Duration::from_millis(10), 1, 1);
+
+        lifecycle
+            .on_checkpoint(&node, &result, Some("exit"), &state)
+            .await
+            .unwrap();
+
+        let git_result = lifecycle
+            .checkpoint_git_result
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap();
+        let diff_summary = git_result.diff_summary.expect("diff summary");
+        assert_eq!(diff_summary.files_changed, 1);
+        assert_eq!(diff_summary.additions, 1);
+        assert_eq!(diff_summary.deletions, 0);
+
+        tokio::fs::write(repo.join("notes.txt"), "one\ntwo\nthree\n")
+            .await
+            .unwrap();
+        state.increment_visits("build");
+        lifecycle
+            .on_checkpoint(&node, &result, Some("exit"), &state)
+            .await
+            .unwrap();
+
+        let git_result = lifecycle
+            .checkpoint_git_result
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap();
+        let diff_summary = git_result.diff_summary.expect("diff summary");
+        assert_eq!(diff_summary.files_changed, 1);
+        assert_eq!(diff_summary.additions, 2);
+        assert_eq!(diff_summary.deletions, 0);
     }
 
     #[tokio::test]

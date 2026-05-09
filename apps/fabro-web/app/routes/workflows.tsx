@@ -12,10 +12,10 @@ import {
   ShieldCheckIcon,
   WrenchIcon,
 } from "@heroicons/react/24/outline";
+import type { PaginatedWorkflowListResponse } from "@qltysh/fabro-api-client";
 import { Link } from "react-router";
 import { useWorkflows } from "../lib/queries";
 import { timeAgo, timeUntil } from "../lib/time";
-import type { PaginatedWorkflowListResponse } from "../lib/workflow-api";
 
 export function meta({}: any) {
   return [{ title: "Workflows — Fabro" }];

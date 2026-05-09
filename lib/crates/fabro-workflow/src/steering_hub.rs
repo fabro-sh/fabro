@@ -226,8 +226,14 @@ impl SteeringHub {
         self.emitter.emit(&Event::RunInterrupt {
             actor: actor.cloned(),
         });
-        for entry in active.values() {
+        for (stage_id, entry) in active.iter() {
             entry.handle.interrupt(actor.cloned());
+            self.emitter.emit(&Event::AgentInterruptInjected {
+                node_id:    stage_id.node_id().to_string(),
+                visit:      stage_id.visit(),
+                session_id: entry.session_id.clone(),
+                actor:      actor.cloned(),
+            });
         }
     }
 
@@ -261,6 +267,12 @@ impl SteeringHub {
                     visit:   Some(stage_id.visit()),
                 });
             }
+            self.emitter.emit(&Event::AgentInterruptInjected {
+                node_id:    stage_id.node_id().to_string(),
+                visit:      stage_id.visit(),
+                session_id: entry.session_id.clone(),
+                actor:      actor.cloned(),
+            });
         }
     }
 
@@ -312,7 +324,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use fabro_agent::SessionControlHandle;
-    use fabro_types::{Principal, RunId, StageId, SystemActorKind};
+    use fabro_types::{Principal, RunEvent, RunId, StageId, SystemActorKind};
 
     use super::SteeringHub;
     use crate::event::Emitter;
@@ -328,6 +340,16 @@ mod tests {
                 .push(event.event_name().to_string());
         });
         (Arc::new(SteeringHub::new(emitter)), names)
+    }
+
+    fn hub_with_events() -> (Arc<SteeringHub>, Arc<Mutex<Vec<RunEvent>>>) {
+        let emitter = Arc::new(Emitter::new(RunId::new()));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_for_listener = Arc::clone(&events);
+        emitter.on_event(move |event| {
+            events_for_listener.lock().unwrap().push(event.clone());
+        });
+        (Arc::new(SteeringHub::new(emitter)), events)
     }
 
     #[test]
@@ -461,7 +483,7 @@ mod tests {
 
     #[test]
     fn pure_interrupt_marks_active_sessions_waiting_without_queueing_text() {
-        let (hub, names) = hub_with_event_names();
+        let (hub, events) = hub_with_events();
         let stage = StageId::new("a", 1);
         let handle = SessionControlHandle::new();
         assert!(hub.attach_handle(&stage, "session-a", &handle));
@@ -472,15 +494,23 @@ mod tests {
         assert!(handle.is_waiting_for_steer());
         assert_eq!(handle.queue_len(), 0);
         assert_eq!(hub.pending_len(), 0);
-        assert_eq!(names.lock().unwrap().as_slice(), [
+        let events = events.lock().unwrap();
+        let names = events.iter().map(RunEvent::event_name).collect::<Vec<_>>();
+        assert_eq!(names, [
             "run.interrupt",
-            "run.interrupt"
+            "agent.interrupt.injected",
+            "run.interrupt",
+            "agent.interrupt.injected",
         ]);
+        assert_eq!(events[1].stage_id, Some(stage.clone()));
+        assert_eq!(events[1].session_id.as_deref(), Some("session-a"));
+        assert_eq!(events[3].stage_id, Some(stage));
+        assert_eq!(events[3].session_id.as_deref(), Some("session-a"));
     }
 
     #[test]
     fn interrupt_then_steer_cancels_and_queues_text() {
-        let (hub, names) = hub_with_event_names();
+        let (hub, events) = hub_with_events();
         let stage = StageId::new("a", 1);
         let handle = SessionControlHandle::new();
         assert!(hub.attach_handle(&stage, "session-a", &handle));
@@ -490,10 +520,15 @@ mod tests {
         assert!(!handle.is_waiting_for_steer());
         assert_eq!(handle.queue_len(), 1);
         assert_eq!(hub.pending_len(), 0);
-        assert_eq!(names.lock().unwrap().as_slice(), [
+        let events = events.lock().unwrap();
+        let names = events.iter().map(RunEvent::event_name).collect::<Vec<_>>();
+        assert_eq!(names, [
             "run.interrupt",
-            "run.steer"
+            "run.steer",
+            "agent.interrupt.injected",
         ]);
+        assert_eq!(events[2].stage_id, Some(stage));
+        assert_eq!(events[2].session_id.as_deref(), Some("session-a"));
     }
 
     #[test]

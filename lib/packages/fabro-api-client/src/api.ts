@@ -14,6 +14,7 @@
 
 
 
+export * from './api/auth-api';
 export * from './api/billing-api';
 export * from './api/completions-api';
 export * from './api/discovery-api';
@@ -29,4 +30,5 @@ export * from './api/runs-api';
 export * from './api/secrets-api';
 export * from './api/settings-api';
 export * from './api/system-api';
+export * from './api/workflows-api';
 

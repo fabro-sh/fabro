@@ -48,6 +48,24 @@ export function formatRelativeTime(iso: string, now: number = Date.now()): strin
 }
 
 /**
+ * Format an ISO 8601 timestamp as an absolute, human-readable datetime
+ * (e.g., "04/24/2026, 1:23:40 PM"). Falls back to the input if unparseable.
+ */
+export function formatAbsoluteTs(iso: string): string {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return iso;
+  return new Date(ms).toLocaleString("en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  });
+}
+
+/**
  * Format seconds into a duration string for display (e.g., "1m 12s", "23s").
  */
 export function formatDurationSecs(secs: number): string {

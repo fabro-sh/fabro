@@ -57,6 +57,7 @@ When the engine reaches a human gate node (`shape=hexagon`), the [human handler]
 1. Each edge becomes an option, with the accelerator key parsed from the label (e.g. `[A] Approve` → key `A`, label `[A] Approve`)
 2. Edges with `freeform=true` are excluded from the option list and enable free-text fallback
 3. The question text comes from the node's `label` attribute
+4. The question type defaults to `multiple_choice` when fixed options exist and `freeform` when only a freeform edge exists. Set `question_type="yes_no"`, `question_type="confirmation"`, `question_type="multi_select"`, or another supported value to override it.
 
 The handler then passes the question to the interviewer, waits for an answer, and maps it back to an edge for [transition](/workflows/transitions#human-gate-transitions).
 

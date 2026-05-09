@@ -16,7 +16,7 @@ use fabro_store::EventEnvelope;
 use fabro_test::{
     assert_reqwest_status, expect_reqwest_json, fabro_json_snapshot, fabro_snapshot, test_context,
 };
-use fabro_types::{CommandOutputStream, EventBody, FailureReason, RunEvent, StageId};
+use fabro_types::{EventBody, FailureReason, RunEvent, StageId};
 use httpmock::MockServer;
 
 use super::support::{
@@ -504,7 +504,7 @@ methods = ["dev-token"]
     let _probe = state
         .stage(&probe_stage_id)
         .expect("probe node state should exist");
-    let stdout = command_log_text(&run_dir, &probe_stage_id, CommandOutputStream::Stdout);
+    let stdout = command_log_text(&run_dir, &probe_stage_id);
     assert!(
         stdout.contains("probe-ran"),
         "probe stage should have executed, got stdout:\n{stdout}"
@@ -775,7 +775,7 @@ fn detached_run_answers_pending_question_without_interview_scratch_files() {
             .post(format!(
                 "{base_url}/api/v1/runs/{run_id}/questions/{question_id}/answer"
             ))
-            .json(&serde_json::json!({ "selected_option_key": "A" }))
+            .json(&serde_json::json!({ "kind": "selected", "option_key": "A" }))
             .send()
             .await
             .expect("answer submission should succeed");

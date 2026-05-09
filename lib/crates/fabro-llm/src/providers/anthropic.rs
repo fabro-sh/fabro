@@ -178,21 +178,17 @@ struct ApiUsage {
     cache_creation_input_tokens: Option<i64>,
 }
 
-/// Estimate reasoning tokens from thinking content blocks.
-/// Anthropic does not provide a separate reasoning token count,
-/// so we estimate by dividing the character count of thinking text by 4.
-fn estimate_reasoning_tokens(content_parts: &[ContentPart]) -> Option<i64> {
-    let total_chars: usize = content_parts
-        .iter()
-        .filter_map(|part| match part {
-            ContentPart::Thinking(td) => Some(td.text.len()),
-            _ => None,
-        })
-        .sum();
-    if total_chars > 0 {
-        Some(i64::try_from((total_chars / 4).max(1)).unwrap_or(i64::MAX))
-    } else {
-        None
+fn token_counts_from_api_usage(usage: &ApiUsage) -> TokenCounts {
+    // Anthropic does not expose a separate billed thinking/reasoning token
+    // count. Thinking tokens are billed as part of `output_tokens`. When
+    // Anthropic adds a real thinking token field, wire it through and subtract
+    // it here.
+    TokenCounts {
+        input_tokens:       usage.input_tokens,
+        output_tokens:      usage.output_tokens,
+        reasoning_tokens:   0,
+        cache_read_tokens:  usage.cache_read_input_tokens.unwrap_or(0),
+        cache_write_tokens: usage.cache_creation_input_tokens.unwrap_or(0),
     }
 }
 
@@ -951,9 +947,9 @@ impl StreamAccumulator {
     }
 
     fn handle_message_stop(&mut self) -> Vec<StreamEvent> {
-        let reasoning_tokens = estimate_reasoning_tokens(&self.content_parts).unwrap_or(0);
-        self.usage.reasoning_tokens = reasoning_tokens;
-        self.usage.output_tokens = self.usage.output_tokens.saturating_sub(reasoning_tokens);
+        // Anthropic does not expose a separate billed thinking/reasoning token
+        // count. Streaming usage reports the full billed output count, so keep
+        // reasoning_tokens at 0 and leave output_tokens unchanged.
         let response = self.take_response();
         vec![StreamEvent::Finish {
             finish_reason: response.finish_reason.clone(),
@@ -1299,8 +1295,6 @@ impl ProviderAdapter for Adapter {
         } else {
             map_finish_reason(api_resp.stop_reason.as_deref())
         };
-        let reasoning_tokens = estimate_reasoning_tokens(&content_parts).unwrap_or(0);
-
         Ok(Response {
             id: api_resp.id,
             model: api_resp.model,
@@ -1312,16 +1306,7 @@ impl ProviderAdapter for Adapter {
                 tool_call_id: None,
             },
             finish_reason,
-            usage: TokenCounts {
-                input_tokens: api_resp.usage.input_tokens,
-                output_tokens: api_resp
-                    .usage
-                    .output_tokens
-                    .saturating_sub(reasoning_tokens),
-                reasoning_tokens,
-                cache_read_tokens: api_resp.usage.cache_read_input_tokens.unwrap_or(0),
-                cache_write_tokens: api_resp.usage.cache_creation_input_tokens.unwrap_or(0),
-            },
+            usage: token_counts_from_api_usage(&api_resp.usage),
             raw: serde_json::from_str(&body).ok(),
             warnings: vec![],
             rate_limit: parse_rate_limit_headers(&headers),
@@ -1506,6 +1491,68 @@ mod tests {
         }];
         apply_cache_control_to_last_tool(&mut tools);
         assert!(tools[0].cache_control.is_some());
+    }
+
+    #[test]
+    fn api_token_counts_leaves_reasoning_zero_and_output_full() {
+        let body = serde_json::json!({
+            "id": "msg_test",
+            "model": "claude-sonnet-4-5",
+            "content": [
+                { "type": "thinking", "thinking": "summary text", "signature": "" },
+                { "type": "text", "text": "answer" }
+            ],
+            "stop_reason": "end_turn",
+            "usage": {
+                "input_tokens": 50,
+                "output_tokens": 1200,
+                "cache_read_input_tokens": 9000,
+                "cache_creation_input_tokens": 1000
+            }
+        });
+        let api: ApiResponse = serde_json::from_value(body).unwrap();
+        let usage = token_counts_from_api_usage(&api.usage);
+
+        assert_eq!(usage.input_tokens, 50);
+        assert_eq!(usage.cache_read_tokens, 9000);
+        assert_eq!(usage.cache_write_tokens, 1000);
+        assert_eq!(usage.output_tokens, 1200);
+        assert_eq!(usage.reasoning_tokens, 0);
+        assert_eq!(usage.total_tokens(), 11_250);
+    }
+
+    #[test]
+    fn stream_token_counts_leaves_reasoning_zero_and_output_full() {
+        let mut acc = StreamAccumulator::new(None);
+        acc.content_parts.push(ContentPart::Thinking(ThinkingData {
+            text:      "summary text".to_string(),
+            signature: Some(String::new()),
+            redacted:  false,
+        }));
+        acc.content_parts.push(ContentPart::text("answer"));
+        acc.usage = TokenCounts {
+            input_tokens:       50,
+            output_tokens:      1200,
+            reasoning_tokens:   0,
+            cache_read_tokens:  9000,
+            cache_write_tokens: 1000,
+        };
+
+        let events = acc.handle_message_stop();
+        let StreamEvent::Finish {
+            usage, response, ..
+        } = &events[0]
+        else {
+            panic!("expected finish event");
+        };
+
+        assert_eq!(usage.input_tokens, 50);
+        assert_eq!(usage.cache_read_tokens, 9000);
+        assert_eq!(usage.cache_write_tokens, 1000);
+        assert_eq!(usage.output_tokens, 1200);
+        assert_eq!(usage.reasoning_tokens, 0);
+        assert_eq!(usage.total_tokens(), 11_250);
+        assert_eq!(response.usage, *usage);
     }
 
     #[test]

@@ -15,6 +15,9 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { StageHandler } from './stage-handler';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { StageState } from './stage-state';
 
 /**
@@ -29,6 +32,7 @@ export interface RunStage {
      * Human-readable stage name.
      */
     'name': string;
+    'handler': StageHandler;
     'status': StageState;
     /**
      * Time spent in this stage, in seconds.

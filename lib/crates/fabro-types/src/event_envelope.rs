@@ -42,6 +42,7 @@ mod tests {
                 total_usd_micros:     None,
                 final_git_commit_sha: None,
                 final_patch:          None,
+                diff_summary:         None,
                 billing:              None,
             }),
         };
@@ -85,6 +86,7 @@ mod tests {
                 total_usd_micros:     None,
                 final_git_commit_sha: None,
                 final_patch:          None,
+                diff_summary:         None,
                 billing:              None,
             }),
         };

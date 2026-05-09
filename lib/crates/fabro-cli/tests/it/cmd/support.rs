@@ -21,7 +21,7 @@ use fabro_config::daemon::ServerDaemon;
 use fabro_config::{Storage, envfile};
 use fabro_store::EventEnvelope;
 use fabro_test::{TestContext, expect_reqwest_status};
-use fabro_types::{CommandOutputStream, RunId, StageId};
+use fabro_types::{RunId, StageId};
 use httpmock::{Mock, MockServer};
 use serde_json::Value;
 use shlex::try_quote;
@@ -219,7 +219,7 @@ fn run_completed_dry_run(context: &TestContext, workflow: &Path) -> RunSetup {
     };
     wait_for_event_names(&run_setup.run_dir, &[
         "run.completed",
-        "sandbox.cleanup.completed",
+        "sandbox.stop.completed",
     ]);
     run_setup
 }
@@ -701,15 +701,11 @@ pub(crate) fn run_events(run_dir: &Path) -> Vec<EventEnvelope> {
     crate::support::parse_event_envelopes(&response)
 }
 
-pub(crate) fn command_log_text(
-    run_dir: &Path,
-    stage_id: &StageId,
-    stream: CommandOutputStream,
-) -> String {
+pub(crate) fn command_log_text(run_dir: &Path, stage_id: &StageId) -> String {
     let run_id = infer_run_id(run_dir);
     let response: CommandLogResponseRecord = block_on(get_server_json(
         run_dir,
-        &format!("/api/v1/runs/{run_id}/stages/{stage_id}/logs/{stream}?offset=0&limit=1048576"),
+        &format!("/api/v1/runs/{run_id}/stages/{stage_id}/logs/output?offset=0&limit=1048576"),
     ));
     let bytes = BASE64_STANDARD
         .decode(&response.bytes_base64)
@@ -1081,7 +1077,7 @@ async fn append_seeded_simple_completion_events(
         base_url,
         &run.run_id,
         None,
-        "sandbox.cleanup.started",
+        "sandbox.stop.started",
         serde_json::json!({
             "provider": "local",
         }),
@@ -1092,7 +1088,7 @@ async fn append_seeded_simple_completion_events(
         base_url,
         &run.run_id,
         None,
-        "sandbox.cleanup.completed",
+        "sandbox.stop.completed",
         serde_json::json!({
             "provider": "local",
             "duration_ms": 1,

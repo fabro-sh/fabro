@@ -2,8 +2,6 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState,
-  type ChangeEvent,
   type CSSProperties,
 } from "react";
 import {
@@ -80,25 +78,16 @@ export function FileTreeSidebar({
   selectedPath,
   onSelect,
 }: FileTreeSidebarProps) {
-  const [filterText, setFilterText] = useState("");
-  const normalizedFilter = filterText.trim().toLowerCase();
-  const filteredFiles = useMemo(
-    () =>
-      normalizedFilter
-        ? files.filter((file) => filePath(file).toLowerCase().includes(normalizedFilter))
-        : files,
-    [files, normalizedFilter],
-  );
-  const paths = useMemo(() => filteredFiles.map(filePath), [filteredFiles]);
+  const paths = useMemo(() => files.map(filePath), [files]);
   const changedPaths = useMemo(() => new Set(paths), [paths]);
 
   const gitStatus = useMemo<GitStatusEntry[]>(
     () =>
-      filteredFiles.map((file) => ({
+      files.map((file) => ({
         path:   filePath(file),
         status: gitStatusFor(file),
       })),
-    [filteredFiles],
+    [files],
   );
 
   const onSelectRef = useRef(onSelect);
@@ -161,11 +150,13 @@ export function FileTreeSidebar({
     );
   }, [changedPaths, model, selectedPath, selection]);
 
-  const handleSearchChange = (event: ChangeEvent<HTMLInputElement>) =>
-    setFilterText(event.target.value);
-
-  const themeStyles = useMemo(
-    () => themeToTreeStyles(pierreDark) as TreeThemeStyle,
+  const themeStyles = useMemo<TreeThemeStyle>(
+    () => ({
+      ...(themeToTreeStyles(pierreDark) as TreeThemeStyle),
+      backgroundColor:                   "transparent",
+      "--trees-bg-override":             "transparent",
+      "--trees-padding-inline-override": "0px",
+    }),
     [],
   );
 
@@ -173,21 +164,13 @@ export function FileTreeSidebar({
     <aside
       aria-label="Changed files"
       style={themeStyles}
-      className="flex min-h-0 w-72 shrink-0 flex-col gap-2 self-stretch"
+      className="-ml-0.5 flex min-h-0 w-72 shrink-0 flex-col self-stretch"
     >
-      <input
-        type="search"
-        value={filterText}
-        onChange={handleSearchChange}
-        placeholder="Filter changed files…"
-        aria-label="Filter changed files"
-        className="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm text-fg placeholder:text-fg-muted focus:outline-2 focus:outline-focus focus:outline-offset-2"
-      />
       {paths.length > 0 ? (
         <FileTree model={model} className="min-h-0 flex-1 overflow-hidden" />
       ) : (
         <div role="status" className="min-h-0 flex-1 px-3 py-2 text-sm text-fg-muted">
-          No matching files
+          No changed files
         </div>
       )}
     </aside>

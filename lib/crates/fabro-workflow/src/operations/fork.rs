@@ -286,6 +286,7 @@ fn checkpoint_completed_event(checkpoint: &Checkpoint) -> Event {
             .collect(),
         node_visits: checkpoint.node_visits.clone().into_iter().collect(),
         diff: None,
+        diff_summary: None,
     }
 }
 
@@ -409,6 +410,7 @@ mod tests {
             restart_failure_signatures: BTreeMap::new(),
             node_visits,
             diff: None,
+            diff_summary: None,
         })
         .await
         .unwrap();

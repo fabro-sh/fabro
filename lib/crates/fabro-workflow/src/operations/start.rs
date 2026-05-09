@@ -72,6 +72,7 @@ struct RunSession {
     worktree_mode:     Option<WorktreeMode>,
     registry_override: Option<Arc<HandlerRegistry>>,
     preserve_sandbox:  bool,
+    stop_on_terminal:  bool,
     pr_config:         Option<PullRequestSettings>,
     pr_github_app:     Option<fabro_github::GitHubCredentials>,
     pr_origin_url:     Option<String>,
@@ -268,6 +269,7 @@ async fn persist_terminal_engine_failure(
         reason,
         git_commit_sha: None,
         final_patch: None,
+        diff_summary: None,
     })
     .await
     {
@@ -443,6 +445,7 @@ impl RunSession {
             worktree_mode: Some(resolve_worktree_mode(resolved)),
             registry_override: services.registry_override,
             preserve_sandbox: resolved.sandbox.preserve,
+            stop_on_terminal: resolved.sandbox.stop_on_terminal,
             pr_config,
             pr_github_app: services.github_app,
             pr_origin_url: record.repo_origin_url().map(str::to_string),
@@ -684,7 +687,6 @@ impl RunSession {
         persisted: Persisted,
         checkpoint: Option<Checkpoint>,
     ) -> Result<Started, Error> {
-        let preserve_sandbox = self.preserve_sandbox;
         let on_node = self.on_node.clone();
 
         let record = persisted.run_spec();
@@ -762,13 +764,14 @@ impl RunSession {
         initialized.on_node = on_node;
 
         let sandbox_for_cleanup = Arc::clone(&initialized.engine.run.sandbox);
+        let stop_on_terminal = self.stop_on_terminal;
         let cleanup_guard = scopeguard::guard((), move |()| {
-            if preserve_sandbox {
+            if !stop_on_terminal {
                 return;
             }
             if let Ok(handle) = Handle::try_current() {
                 handle.spawn(async move {
-                    let _ = sandbox_for_cleanup.cleanup().await;
+                    let _ = sandbox_for_cleanup.stop().await;
                 });
             }
         });
@@ -790,6 +793,7 @@ impl RunSession {
             run_id:           executed.run_options.run_id,
             workflow_name:    executed.graph.name.clone(),
             preserve_sandbox: self.preserve_sandbox,
+            stop_on_terminal: self.stop_on_terminal,
             last_git_sha:     last_git_sha.lock().unwrap().clone(),
         };
         let pr_opts = PullRequestOptions {
@@ -870,6 +874,7 @@ impl Drop for DetachedRunBootstrapGuard {
                         reason,
                         git_commit_sha: None,
                         final_patch: None,
+                        diff_summary: None,
                     })
                     .await;
                 });
@@ -935,6 +940,7 @@ impl Drop for DetachedRunCompletionGuard {
                     reason,
                     git_commit_sha: None,
                     final_patch: None,
+                    diff_summary: None,
                 })
                 .await;
                 let _ = append_event_to_sink(&event_sink, &run_id, &Event::RunNotice {
@@ -965,6 +971,7 @@ async fn persist_detached_failure(
         reason,
         git_commit_sha: None,
         final_patch: None,
+        diff_summary: None,
     })
     .await
     {
@@ -1148,6 +1155,7 @@ mod tests {
                         restart_failure_signatures: HashMap::new().into_iter().collect(),
                         node_visits: HashMap::new().into_iter().collect(),
                         diff: None,
+                        diff_summary: None,
                     });
                 }
             });
@@ -1359,6 +1367,7 @@ mod tests {
                     .collect(),
                 node_visits: checkpoint.node_visits.clone().into_iter().collect(),
                 diff: None,
+                diff_summary: None,
             },
         )
         .await
@@ -1449,6 +1458,7 @@ mod tests {
                 .collect(),
             node_visits: checkpoint.node_visits.clone().into_iter().collect(),
             diff: None,
+            diff_summary: None,
         })
         .await
         .unwrap();
@@ -1466,6 +1476,7 @@ mod tests {
             total_usd_micros:     None,
             final_git_commit_sha: None,
             final_patch:          None,
+            diff_summary:         None,
             billing:              None,
         })
         .await

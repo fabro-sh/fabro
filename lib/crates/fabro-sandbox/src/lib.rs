@@ -35,6 +35,7 @@ pub use docker::{DockerSandbox, DockerSandboxOptions};
 pub use error::{Error, Result, default_redacted_output_tail, display_for_log};
 pub use local::LocalSandbox;
 pub use read_guard::ReadBeforeWriteSandbox;
+pub use reconnect::{reconnect, reconnect_for_run, reconnect_for_run_with_callback};
 pub use sandbox::{
     CommandOutputCallback, DEFAULT_EXEC_OUTPUT_TAIL_BYTES, DirEntry, ExecResult,
     ExecStreamingResult, GitRunInfo, GitSetupIntent, GrepOptions, Sandbox, SandboxEvent,

@@ -4,6 +4,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use fabro_static::EnvVars;
 use fabro_types::{CommandOutputStream, CommandTermination};
+use fabro_util::time::elapsed_ms;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::{Child, Command};
 use tokio::task::spawn_blocking;
@@ -314,7 +315,7 @@ impl Sandbox for LocalSandbox {
             }
         };
 
-        let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let duration_ms = elapsed_ms(start);
 
         let stdout_str = stdout_task.await.unwrap_or_default();
         let stderr_str = stderr_task.await.unwrap_or_default();
@@ -402,7 +403,7 @@ impl Sandbox for LocalSandbox {
             }
         };
 
-        let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let duration_ms = elapsed_ms(start);
         let stdout_bytes = stdout_task
             .await
             .map_err(|e| crate::Error::context("stdout stream task failed", e))??;
@@ -617,6 +618,23 @@ impl Sandbox for LocalSandbox {
             provider: "local".into(),
             duration_ms,
         });
+        Ok(())
+    }
+
+    async fn stop(&self) -> crate::Result<()> {
+        self.emit(SandboxEvent::StopStarted {
+            provider: "local".into(),
+        });
+        let start = Instant::now();
+        let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+        self.emit(SandboxEvent::StopCompleted {
+            provider: "local".into(),
+            duration_ms,
+        });
+        Ok(())
+    }
+
+    async fn delete(&self) -> crate::Result<()> {
         Ok(())
     }
 
@@ -1041,6 +1059,35 @@ mod tests {
         );
         assert!(
             matches!(&captured[1], SandboxEvent::CleanupCompleted { provider, .. } if provider == "local")
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn stop_emits_events() {
+        use std::sync::{Arc, Mutex};
+
+        use crate::SandboxEvent;
+
+        let dir = temp_dir();
+        let events: Arc<Mutex<Vec<SandboxEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = Arc::clone(&events);
+
+        let mut env = LocalSandbox::new(dir.clone());
+        env.set_event_callback(Arc::new(move |e| {
+            events_clone.lock().unwrap().push(e);
+        }));
+
+        env.stop().await.unwrap();
+
+        let captured = events.lock().unwrap();
+        assert_eq!(captured.len(), 2);
+        assert!(
+            matches!(&captured[0], SandboxEvent::StopStarted { provider } if provider == "local")
+        );
+        assert!(
+            matches!(&captured[1], SandboxEvent::StopCompleted { provider, .. } if provider == "local")
         );
 
         std::fs::remove_dir_all(&dir).unwrap();

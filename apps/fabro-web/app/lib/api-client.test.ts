@@ -2,11 +2,11 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 
 import {
   ApiError,
-  apiFetcher,
-  apiNullableFetcher,
-  apiPaginatedFetcher,
-  apiRequest,
+  apiData,
   extractRequestId,
+  fetchAllPages,
+  generatedAxios,
+  stageArtifactDownloadUrl,
 } from "./api-client";
 
 afterEach(() => {
@@ -14,105 +14,116 @@ afterEach(() => {
   delete (globalThis as { window?: unknown }).window;
 });
 
-describe("apiRequest", () => {
-  test("includes credentials on API requests", async () => {
-    const fetchMock = mock(() => Promise.resolve(new Response("{}", { status: 200 })));
-    globalThis.fetch = fetchMock as typeof fetch;
+function axiosFailure({
+  status,
+  statusText,
+  data,
+  headers = {},
+}: {
+  status: number;
+  statusText?: string;
+  data?: unknown;
+  headers?: Record<string, string>;
+}) {
+  return {
+    isAxiosError: true,
+    message: statusText ?? `HTTP ${status}`,
+    response: {
+      status,
+      statusText: statusText ?? "",
+      data,
+      headers,
+    },
+  };
+}
 
-    await apiRequest("/api/v1/runs/run-1");
-
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/runs/run-1", {
-      credentials: "include",
-      headers: undefined,
-    });
+describe("generated Axios adapter", () => {
+  test("uses same-origin requests with browser credentials", () => {
+    expect(generatedAxios.defaults.baseURL).toBe("");
+    expect(generatedAxios.defaults.withCredentials).toBe(true);
   });
 
-  test("401 responses throw a typed ApiError", async () => {
-    const fetchMock = mock(() =>
-      Promise.resolve(
-        new Response(JSON.stringify({ errors: [{ detail: "Request ID: req_401" }] }), {
-          status: 401,
-          statusText: "Unauthorized",
-          headers: { "Content-Type": "application/json" },
-        }),
-      ),
-    );
-    globalThis.fetch = fetchMock as typeof fetch;
-
-    await expect(apiRequest("/api/v1/auth/me")).rejects.toMatchObject({
-      status: 401,
-      requestId: "req_401",
-    });
-  });
-});
-
-describe("apiFetcher", () => {
-  test("throws ApiError with status, body, and request id on non-2xx responses", async () => {
+  test("normalizes generated client failures into ApiError", async () => {
     const body = {
-      errors: [{ status: "500", title: "Internal", request_id: "req_500" }],
+      errors: [{
+        status: "500",
+        title: "Internal",
+        detail: "Database is unavailable.",
+        request_id: "body-req",
+      }],
     };
-    const fetchMock = mock(() =>
-      Promise.resolve(
-        new Response(JSON.stringify(body), {
-          status: 500,
-          statusText: "Internal Server Error",
-          headers: { "Content-Type": "application/json" },
-        }),
-      ),
-    );
-    globalThis.fetch = fetchMock as typeof fetch;
 
     try {
-      await apiFetcher("/api/v1/runs/run-1/files");
-      throw new Error("expected apiFetcher to reject");
+      await apiData(() =>
+        Promise.reject(
+          axiosFailure({
+            status: 500,
+            statusText: "Internal Server Error",
+            data: body,
+            headers: { "x-request-id": "header-req" },
+          }),
+        ),
+      );
+      throw new Error("expected apiData to reject");
     } catch (error) {
       expect(error).toBeInstanceOf(ApiError);
       expect(error).toMatchObject({
         status: 500,
-        message: "Internal Server Error",
-        requestId: "req_500",
+        message: "Database is unavailable.",
+        requestId: "header-req",
         body,
       });
     }
   });
-});
 
-describe("apiNullableFetcher", () => {
-  test("returns null only for explicit availability statuses", async () => {
-    const fetchMock = mock(() => Promise.resolve(new Response("", { status: 501 })));
-    globalThis.fetch = fetchMock as typeof fetch;
+  test("redirects normal authenticated 401 responses to login", async () => {
+    const location = { href: "" };
+    (globalThis as unknown as { window: { location: typeof location } }).window = {
+      location,
+    };
 
-    await expect(apiNullableFetcher("/api/v1/runs/run-1/files")).resolves.toBeNull();
+    await expect(() =>
+      apiData(() => Promise.reject(axiosFailure({ status: 401 }))),
+    ).toThrow(ApiError);
+
+    expect(location.href).toBe("/login");
+  });
+
+  test("can suppress login redirects for login and install calls", async () => {
+    const location = { href: "" };
+    (globalThis as unknown as { window: { location: typeof location } }).window = {
+      location,
+    };
+
+    await expect(() =>
+      apiData(
+        () => Promise.reject(axiosFailure({ status: 401 })),
+        { redirectOnUnauthorized: false },
+      ),
+    ).toThrow(ApiError);
+
+    expect(location.href).toBe("");
   });
 });
 
-describe("apiPaginatedFetcher", () => {
+describe("fetchAllPages", () => {
   test("preserves first-page extras and stops at the page cap", async () => {
     const warnMock = mock(() => {});
     const originalWarn = console.warn;
     console.warn = warnMock;
     let calls = 0;
-    const fetchMock = mock(() => {
-      calls += 1;
-      return Promise.resolve(
-        new Response(
-          JSON.stringify({
+
+    try {
+      const result = await fetchAllPages<{ id: string }, { columns: { id: string; name: string }[] }>(
+        "board runs",
+        async () => {
+          calls += 1;
+          return {
             columns: [{ id: "running", name: "Running" }],
             data: [{ id: `run-${calls}` }],
             meta: { has_more: true },
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          },
-        ),
-      );
-    });
-    globalThis.fetch = fetchMock as typeof fetch;
-
-    try {
-      const result = await apiPaginatedFetcher<{ id: string }, { columns: { id: string; name: string }[] }>(
-        "/api/v1/boards/runs",
+          };
+        },
       );
 
       expect(result.columns).toEqual([{ id: "running", name: "Running" }]);
@@ -122,6 +133,16 @@ describe("apiPaginatedFetcher", () => {
     } finally {
       console.warn = originalWarn;
     }
+  });
+});
+
+describe("stageArtifactDownloadUrl", () => {
+  test("builds the download href through generated client metadata", async () => {
+    await expect(
+      stageArtifactDownloadUrl("run 1", "stage@1", "logs/output.txt", 2),
+    ).resolves.toBe(
+      "/api/v1/runs/run%201/stages/stage%401/artifacts/download?filename=logs%2Foutput.txt&retry=2",
+    );
   });
 });
 

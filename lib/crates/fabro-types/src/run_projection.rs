@@ -4,9 +4,9 @@ use std::num::NonZeroU32;
 use chrono::{DateTime, Utc};
 
 use crate::{
-    BilledModelUsage, Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition,
-    PullRequestRecord, RunControlAction, RunId, RunSpec, RunStatus, SandboxRecord, StageCompletion,
-    StageId, StageState, StartRecord,
+    BilledModelUsage, Checkpoint, Conclusion, DiffSummary, InterviewQuestionRecord,
+    InvalidTransition, PullRequestRecord, RunControlAction, RunId, RunSpec, RunStatus,
+    SandboxRecord, StageCompletion, StageHandler, StageId, StageState, StartRecord,
 };
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -24,6 +24,8 @@ pub struct RunProjection {
     pub conclusion:         Option<Conclusion>,
     pub sandbox:            Option<SandboxRecord>,
     pub final_patch:        Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_summary:       Option<DiffSummary>,
     pub pull_request:       Option<PullRequestRecord>,
     pub superseded_by:      Option<RunId>,
     pub pending_interviews: BTreeMap<String, PendingInterviewRecord>,
@@ -47,20 +49,17 @@ pub struct StageProjection {
     pub script_invocation: Option<serde_json::Value>,
     pub script_timing:     Option<serde_json::Value>,
     pub parallel_results:  Option<serde_json::Value>,
-    pub stdout:            Option<String>,
-    pub stderr:            Option<String>,
+    pub output:            Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stdout_bytes:      Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stderr_bytes:      Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub streams_separated: Option<bool>,
+    pub output_bytes:      Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub live_streaming:    Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub termination:       Option<crate::CommandTermination>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_at:        Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handler:           Option<StageHandler>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms:       Option<u64>,
     /// Server-internal billing usage for the latest attempt; not part of the
@@ -94,14 +93,12 @@ impl StageProjection {
             script_invocation: None,
             script_timing: None,
             parallel_results: None,
-            stdout: None,
-            stderr: None,
-            stdout_bytes: None,
-            stderr_bytes: None,
-            streams_separated: None,
+            output: None,
+            output_bytes: None,
             live_streaming: None,
             termination: None,
             started_at: None,
+            handler: None,
             state: None,
         }
     }
@@ -145,9 +142,10 @@ impl StageProjection {
     /// per-attempt field so prior-attempt data does not leak, then record
     /// `started_at` and `state = Running`. Preserves `first_event_seq`
     /// (identity / sort key).
-    pub fn begin_attempt(&mut self, started_at: DateTime<Utc>) {
+    pub fn begin_attempt(&mut self, started_at: DateTime<Utc>, handler: StageHandler) {
         *self = Self::new(self.first_event_seq);
         self.started_at = Some(started_at);
+        self.handler = Some(handler);
         self.state = Some(StageState::Running);
     }
 }

@@ -1,5 +1,5 @@
 ---
-title: "Refreshable GitHub workflow tokens"
+title: "Run events, raw logs, and refreshable GitHub tokens"
 date: "2026-05-06"
 ---
 
@@ -11,6 +11,21 @@ To migrate:
 2. In GitHub App mode, request scoped run tokens with `[run.integrations.github.permissions]`.
 </Warning>
 
+## Separate run events and raw logs
+
+`fabro events` now focuses on structured workflow events, while `fabro logs` prints the raw worker tracing output for a run. Use events when you want the run timeline, assistant messages, tool activity, or follow-mode output; use logs when you need low-level worker diagnostics.
+
+```bash
+fabro events <run> --pretty --follow
+fabro logs <run> --tail 200
+```
+
+The split makes the CLI match the product model more closely: events are the durable run history, and logs are the debugging stream.
+
+## Better foreground server logs
+
+`fabro server start --foreground` now writes server logs to stdout by default, and interactive terminals get a compact colored one-line format with date-bearing timestamps. Piped stdout and file logs keep the plain tracing format, so scripts and saved logs do not need to change.
+
 ## Refreshable GitHub tokens during workflows
 
 Long-running workflows that used GitHub App installation tokens could outlive the first token minted for the run. Fabro now keeps GitHub credentials as a refreshable token source and resolves `GITHUB_TOKEN` lazily before command and API agent stages, so GitHub operations can continue after token rollover.
@@ -19,6 +34,14 @@ Tokens refresh when they are close to expiry. If a refresh fails while the cache
 
 ## More
 
+<Accordion title="CLI">
+- Added `fabro events` for structured run event history with `--follow`, `--pretty`, `--since`, and `--tail`
+- `fabro logs` now prints raw worker tracing output with `--tail`
+- Foreground logs now show the run ID on run-scoped log lines
+- Failed API commands now preserve server response details instead of collapsing to a status-only error
+- CLI help output now wraps angle-bracket placeholders in backticks
+</Accordion>
+
 <Accordion title="Workflows">
 - Command stages and API agent stages resolve `GITHUB_TOKEN` from a refreshable source before use
 - GitHub App installation tokens refresh when they are within 15 minutes of expiry
@@ -26,10 +49,15 @@ Tokens refresh when they are close to expiry. If a refresh fails while the cache
 </Accordion>
 
 <Accordion title="Improvements">
+- Interactive foreground server logs now use a compact colored TTY format
+- Worker processes preserve the terminal color environment passed by the foreground server
+- `--watch-web` now ignores non-source watcher events and responds faster during local development
 - Agent file reads now parallelize `read_many_files` work
 </Accordion>
 
 <Accordion title="Fixes">
 - Fixed long-running GitHub App workflows losing GitHub access after the initial installation token expired
 - Fixed static configuration accepting short-lived `ghs_*` installation tokens
+- Fixed foreground server logs defaulting away from stdout
+- Fixed repeated `cargo dev` rebuilds during generated CLI reference refreshes
 </Accordion>

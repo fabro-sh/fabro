@@ -26,6 +26,10 @@ export interface RunPullRequest {
      */
     'number': number;
     /**
+     * Stored GitHub pull request URL.
+     */
+    'html_url'?: string;
+    /**
      * Lines added.
      */
     'additions'?: number;

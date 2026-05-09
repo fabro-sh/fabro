@@ -5,7 +5,7 @@ use std::time::Instant;
 use fabro_dump::RunDump;
 use fabro_hooks::{HookContext, HookEvent};
 use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
-use fabro_types::{BilledTokenCounts, EventBody, RunProjection};
+use fabro_types::{BilledTokenCounts, DiffSummary, EventBody, RunProjection};
 use fabro_util::error::collect_causes;
 use fabro_util::time::elapsed_ms;
 
@@ -18,7 +18,7 @@ use crate::run_metadata::MetadataSnapshot;
 use crate::run_options::RunOptions;
 use crate::run_status::{FailureReason, RunStatus, SuccessReason};
 use crate::runtime_store::RunStoreHandle;
-use crate::sandbox_git::git_diff_with_timeout;
+use crate::sandbox_git::{git_diff_with_timeout, list_diff_numstat, summarize_diff_numstat};
 use crate::services::RunServices;
 use crate::{ProjectionBillingRollup, billing_rollup_from_projection};
 
@@ -392,13 +392,20 @@ async fn compute_final_patch(
     run_options: &RunOptions,
     services: &RunServices,
     status: StageOutcome,
-) -> Option<String> {
-    let base_sha = run_options.git.as_ref().and_then(|g| g.base_sha.clone())?;
+) -> (Option<String>, Option<DiffSummary>) {
+    let Some(base_sha) = run_options.git.as_ref().and_then(|g| g.base_sha.clone()) else {
+        return (None, None);
+    };
     let timeout_ms = match status {
         StageOutcome::Succeeded | StageOutcome::PartiallySucceeded => 30_000,
         _ => 10_000,
     };
-    match git_diff_with_timeout(&*services.sandbox, &base_sha, timeout_ms).await {
+    let to_sha = "HEAD";
+    let (patch_result, numstat_result) = tokio::join!(
+        git_diff_with_timeout(&*services.sandbox, &base_sha, timeout_ms),
+        list_diff_numstat(&*services.sandbox, &base_sha, to_sha),
+    );
+    let final_patch = match patch_result {
         Ok(patch) if !patch.is_empty() => Some(patch),
         Ok(_) => None,
         Err(err) => {
@@ -409,7 +416,19 @@ async fn compute_final_patch(
             );
             None
         }
-    }
+    };
+    let diff_summary = match numstat_result {
+        Ok(numstat) => Some(summarize_diff_numstat(&numstat)),
+        Err(err) => {
+            services.emitter.notice(
+                RunNoticeLevel::Warn,
+                RunNoticeCode::GitDiffFailed,
+                format!("final diff stats failed: {err}"),
+            );
+            None
+        }
+    };
+    (final_patch, diff_summary)
 }
 
 pub(crate) fn billing_from_projection(projection: &RunProjection) -> Option<BilledTokenCounts> {
@@ -422,6 +441,7 @@ pub(crate) fn build_terminal_event(
     artifact_count: usize,
     final_git_commit_sha: Option<String>,
     final_patch: Option<String>,
+    diff_summary: Option<DiffSummary>,
     billing: Option<BilledTokenCounts>,
 ) -> Event {
     if matches!(outcome, Err(Error::Cancelled)) {
@@ -431,6 +451,7 @@ pub(crate) fn build_terminal_event(
             reason: FailureReason::Cancelled,
             git_commit_sha: final_git_commit_sha,
             final_patch,
+            diff_summary,
         };
     }
 
@@ -456,6 +477,7 @@ pub(crate) fn build_terminal_event(
             total_usd_micros,
             final_git_commit_sha,
             final_patch,
+            diff_summary,
             billing,
         };
     }
@@ -474,14 +496,15 @@ pub(crate) fn build_terminal_event(
         reason: FailureReason::WorkflowError,
         git_commit_sha: final_git_commit_sha,
         final_patch,
+        diff_summary,
     }
 }
 
-async fn cleanup_sandbox(
+async fn stop_sandbox_on_terminal(
     services: &RunServices,
     run_id: &fabro_types::RunId,
     workflow_name: &str,
-    preserve: bool,
+    stop_on_terminal: bool,
 ) -> fabro_sandbox::Result<()> {
     let hook_ctx = HookContext::new(
         HookEvent::SandboxCleanup,
@@ -489,8 +512,8 @@ async fn cleanup_sandbox(
         workflow_name.to_string(),
     );
     let _ = services.run_hooks(&hook_ctx).await;
-    if !preserve {
-        services.sandbox.cleanup().await?;
+    if stop_on_terminal {
+        services.sandbox.stop().await?;
     }
     Ok(())
 }
@@ -545,7 +568,7 @@ pub async fn finalize(executed: Executed, options: &FinalizeOptions) -> Result<C
         options.last_git_sha.clone(),
     );
 
-    let (final_patch, ()) = tokio::join!(
+    let ((final_patch, diff_summary), ()) = tokio::join!(
         compute_final_patch(&run_options, &services, final_status),
         write_finalize_commit(&run_options, &services, &conclusion),
     );
@@ -564,6 +587,7 @@ pub async fn finalize(executed: Executed, options: &FinalizeOptions) -> Result<C
         artifact_count,
         options.last_git_sha.clone(),
         final_patch,
+        diff_summary,
         conclusion.billing.clone(),
     );
     services.emitter.emit(&terminal_event);
@@ -581,20 +605,20 @@ pub async fn finalize(executed: Executed, options: &FinalizeOptions) -> Result<C
             message,
         );
     }
-    if let Err(e) = cleanup_sandbox(
+    if let Err(e) = stop_sandbox_on_terminal(
         &services,
         &options.run_id,
         &options.workflow_name,
-        options.preserve_sandbox,
+        options.stop_on_terminal,
     )
     .await
     {
-        tracing::warn!(error = %fabro_sandbox::display_for_log(&e), "Sandbox cleanup failed");
+        tracing::warn!(error = %fabro_sandbox::display_for_log(&e), "Sandbox stop failed");
         let exec_output_tail = fabro_sandbox::default_redacted_output_tail(&e);
         services.emitter.notice_with_tail(
             RunNoticeLevel::Warn,
             RunNoticeCode::SandboxCleanupFailed,
-            format!("sandbox cleanup failed: {}", e.display_with_causes()),
+            format!("sandbox stop failed: {}", e.display_with_causes()),
             exec_output_tail,
         );
     }
@@ -619,6 +643,7 @@ mod tests {
     use async_trait::async_trait;
     use bytes::Bytes;
     use fabro_graphviz::graph::Graph;
+    use fabro_sandbox::test_support::MockSandbox;
     use fabro_store::{Database, EventEnvelope, RunDatabase, RunProjection};
     use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
     use fabro_types::{
@@ -746,6 +771,39 @@ mod tests {
             .output()
             .unwrap();
         assert!(commit.status.success());
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "metadata event tests use synchronous git commands to set up temporary repositories"
+    )]
+    fn git_commit_all(repo: &Path, msg: &str) -> String {
+        let add = std::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert!(add.status.success());
+        let commit = std::process::Command::new("git")
+            .args(["commit", "-m", msg])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert!(
+            commit.status.success(),
+            "git commit failed: {}",
+            String::from_utf8_lossy(&commit.stderr)
+        );
+        let rev_parse = std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert!(rev_parse.status.success());
+        String::from_utf8(rev_parse.stdout)
+            .unwrap()
+            .trim()
+            .to_string()
     }
 
     fn record_events(emitter: &Arc<Emitter>) -> Arc<std::sync::Mutex<Vec<RunEvent>>> {
@@ -987,6 +1045,7 @@ mod tests {
             run_id:           test_run_id(),
             workflow_name:    "test".to_string(),
             preserve_sandbox: true,
+            stop_on_terminal: true,
             last_git_sha:     None,
         })
         .await
@@ -1164,6 +1223,7 @@ mod tests {
             run_id:           test_run_id(),
             workflow_name:    "test".to_string(),
             preserve_sandbox: false,
+            stop_on_terminal: true,
             last_git_sha:     None,
         })
         .await
@@ -1180,6 +1240,139 @@ mod tests {
             "metadata.snapshot.completed",
             "run.completed",
         ]);
+    }
+
+    #[tokio::test]
+    async fn finalize_stops_sandbox_on_terminal_without_deleting() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        let sandbox = Arc::new(MockSandbox::linux());
+        let services = test_services(
+            RunStoreHandle::local(seeded_run_store().await),
+            Arc::new(Emitter::new(test_run_id())),
+            sandbox.clone(),
+            Arc::new(RunMetadataRuntime::new()),
+            None,
+        );
+        let executed = test_executed(
+            Graph::new("test"),
+            Ok(Outcome::success()),
+            test_run_options(repo_dir.path()),
+            5,
+            services,
+        );
+
+        finalize(executed, &FinalizeOptions {
+            run_dir:          repo_dir.path().to_path_buf(),
+            run_id:           test_run_id(),
+            workflow_name:    "test".to_string(),
+            preserve_sandbox: false,
+            stop_on_terminal: true,
+            last_git_sha:     None,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(sandbox.stop_count(), 1);
+        assert_eq!(sandbox.delete_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn finalize_leaves_sandbox_running_when_stop_on_terminal_is_false() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        let sandbox = Arc::new(MockSandbox::linux());
+        let services = test_services(
+            RunStoreHandle::local(seeded_run_store().await),
+            Arc::new(Emitter::new(test_run_id())),
+            sandbox.clone(),
+            Arc::new(RunMetadataRuntime::new()),
+            None,
+        );
+        let executed = test_executed(
+            Graph::new("test"),
+            Ok(Outcome::success()),
+            test_run_options(repo_dir.path()),
+            5,
+            services,
+        );
+
+        finalize(executed, &FinalizeOptions {
+            run_dir:          repo_dir.path().to_path_buf(),
+            run_id:           test_run_id(),
+            workflow_name:    "test".to_string(),
+            preserve_sandbox: false,
+            stop_on_terminal: false,
+            last_git_sha:     None,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(sandbox.stop_count(), 0);
+        assert_eq!(sandbox.delete_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn finalize_terminal_event_includes_diff_summary() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        let repo = repo_dir.path();
+        init_git_repo(repo);
+        tokio::fs::write(repo.join("notes.txt"), "one\n")
+            .await
+            .unwrap();
+        let base = git_commit_all(repo, "base");
+        tokio::fs::write(repo.join("notes.txt"), "one\ntwo\nthree\n")
+            .await
+            .unwrap();
+        let head = git_commit_all(repo, "head");
+
+        let run_store = seeded_run_store().await;
+        let emitter = Arc::new(Emitter::new(test_run_id()));
+        let events = record_events(&emitter);
+        let services = test_services(
+            RunStoreHandle::local(run_store),
+            Arc::clone(&emitter),
+            Arc::new(fabro_agent::LocalSandbox::new(repo.to_path_buf())),
+            Arc::new(RunMetadataRuntime::new()),
+            None,
+        );
+        let mut run_options = test_git_run_options(repo, "fabro/metadata/run");
+        run_options.git = Some(GitCheckpointOptions {
+            base_sha:    Some(base),
+            run_branch:  None,
+            meta_branch: None,
+        });
+        let executed = test_executed(
+            Graph::new("test"),
+            Ok(Outcome::success()),
+            run_options,
+            5,
+            services,
+        );
+
+        finalize(executed, &FinalizeOptions {
+            run_dir:          repo.to_path_buf(),
+            run_id:           test_run_id(),
+            workflow_name:    "test".to_string(),
+            preserve_sandbox: true,
+            stop_on_terminal: true,
+            last_git_sha:     Some(head),
+        })
+        .await
+        .unwrap();
+
+        let events = events.lock().unwrap();
+        let run_completed = events
+            .iter()
+            .find(|event| event.event_name() == "run.completed")
+            .expect("run.completed event");
+        let properties = run_completed.properties().unwrap();
+        assert_eq!(
+            properties["diff_summary"],
+            serde_json::json!({
+                "files_changed": 1,
+                "additions": 2,
+                "deletions": 0
+            })
+        );
     }
 
     struct FailingStateStore;

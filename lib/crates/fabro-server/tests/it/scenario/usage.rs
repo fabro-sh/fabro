@@ -17,6 +17,14 @@ const COMMAND_DOT: &str = r#"digraph Test {
     start -> echo_task -> exit
 }"#;
 
+const WAIT_DOT: &str = r#"digraph Test {
+    graph [goal="Test"]
+    start [shape=Mdiamond]
+    wait_task [shape=insulator, duration="1ms"]
+    exit  [shape=Msquare]
+    start -> wait_task -> exit
+}"#;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn aggregate_billing_increments_after_run_completes() {
     let state = test_app_state_with_options(test_settings(), 5);
@@ -59,15 +67,13 @@ async fn run_billing_includes_completed_non_llm_stages() {
     let state = test_app_state_with_options(test_settings(), 5);
     let app = test_app_with_scheduler(state);
 
-    let run_id =
-        create_and_start_run_from_manifest(&app, minimal_manifest_json_with_dry_run(MINIMAL_DOT))
-            .await;
+    let run_id = create_and_start_run_from_manifest(&app, minimal_manifest_json(WAIT_DOT)).await;
 
     let status = wait_for_run_status(&app, &run_id, &["succeeded", "failed"]).await;
     assert_eq!(status, "succeeded");
 
     let billing = run_billing(&app, &run_id).await;
-    assert_non_llm_billing(&billing, &["start"]);
+    assert_non_llm_billing(&billing, &["wait_task"]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -81,7 +87,7 @@ async fn run_billing_includes_completed_command_stages() {
     assert_eq!(status, "succeeded");
 
     let billing = run_billing(&app, &run_id).await;
-    assert_non_llm_billing(&billing, &["echo_task", "start"]);
+    assert_non_llm_billing(&billing, &["echo_task"]);
 }
 
 async fn run_billing(app: &axum::Router, run_id: &str) -> serde_json::Value {

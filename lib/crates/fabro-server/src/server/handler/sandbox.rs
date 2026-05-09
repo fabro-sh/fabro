@@ -5,7 +5,7 @@ use super::super::{
     PreviewUrlRequest, PreviewUrlResponse, Query, RequiredUser, Response, Router, RunId, Sandbox,
     SandboxFileEntry, SandboxFileListResponse, SandboxProvider, SshAccessRequest,
     SshAccessResponse, State, StatusCode, collect_causes, fs, get, octet_stream_response,
-    parse_run_id_path, post, reconnect, reject_if_archived, render_with_causes,
+    parse_run_id_path, post, reconnect_for_run, reject_if_archived, render_with_causes,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -212,10 +212,16 @@ async fn reconnect_run_sandbox(
 ) -> Result<Box<dyn Sandbox>, Response> {
     let record = load_run_sandbox_record(state, run_id).await?;
     let daytona_api_key = state.vault_or_env(EnvVars::DAYTONA_API_KEY);
-    reconnect(&record, daytona_api_key).await.map_err(|err| {
-        let detail = render_with_causes(&err.to_string(), &collect_causes(err.as_ref()));
-        ApiError::new(StatusCode::CONFLICT, detail).into_response()
-    })
+    let sandbox = reconnect_for_run(&record, daytona_api_key, Some(*run_id))
+        .await
+        .map_err(|err| {
+            let detail = render_with_causes(&err.to_string(), &collect_causes(err.as_ref()));
+            ApiError::new(StatusCode::CONFLICT, detail).into_response()
+        })?;
+    sandbox.start().await.map_err(|err| {
+        ApiError::new(StatusCode::CONFLICT, err.display_with_causes()).into_response()
+    })?;
+    Ok(sandbox)
 }
 
 async fn reconnect_daytona_sandbox(
@@ -245,7 +251,7 @@ async fn reconnect_daytona_sandbox(
         .into_response());
     };
     let daytona_api_key = state.vault_or_env(EnvVars::DAYTONA_API_KEY);
-    DaytonaSandbox::reconnect(
+    let sandbox = DaytonaSandbox::reconnect(
         name,
         daytona_api_key,
         repo_cloned,
@@ -253,7 +259,13 @@ async fn reconnect_daytona_sandbox(
         record.clone_branch.clone(),
     )
     .await
-    .map_err(|err| ApiError::new(StatusCode::CONFLICT, err.display_with_causes()).into_response())
+    .map_err(|err| {
+        ApiError::new(StatusCode::CONFLICT, err.display_with_causes()).into_response()
+    })?;
+    sandbox.start().await.map_err(|err| {
+        ApiError::new(StatusCode::CONFLICT, err.display_with_causes()).into_response()
+    })?;
+    Ok(sandbox)
 }
 
 async fn load_run_sandbox_record(

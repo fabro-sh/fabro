@@ -253,20 +253,22 @@ pub struct RunCheckpointLayer {
 #[serde(deny_unknown_fields)]
 pub struct RunSandboxLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider:     Option<String>,
+    pub provider:         Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub preserve:     Option<bool>,
+    pub preserve:         Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub devcontainer: Option<bool>,
+    pub stop_on_terminal: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub devcontainer:     Option<bool>,
     /// Sticky merge-by-key across layers.
     #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
-    pub env:          StickyMap<InterpString>,
+    pub env:              StickyMap<InterpString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub local:        Option<LocalSandboxLayer>,
+    pub local:            Option<LocalSandboxLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub docker:       Option<DockerSandboxLayer>,
+    pub docker:           Option<DockerSandboxLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub daytona:      Option<DaytonaSandboxLayer>,
+    pub daytona:          Option<DaytonaSandboxLayer>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

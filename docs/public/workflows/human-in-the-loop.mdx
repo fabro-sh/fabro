@@ -47,6 +47,19 @@ If the user types something that doesn't match any fixed option, their input rou
 
 When a gate has only a freeform edge and no fixed choices, the user goes directly to a text input prompt — skipping the multiple-choice menu entirely. This is useful for conversational loops like REPL workflows where the user provides open-ended instructions each iteration.
 
+### Question types
+
+Human gates infer their interview type from their edges: fixed choices become `multiple_choice`, and a gate with only a freeform edge becomes `freeform`. To force another interviewer presentation, set `question_type` on the node:
+
+```dot
+confirm [shape=hexagon, label="Continue?", question_type="confirmation"]
+
+confirm -> next [label="[Y] Yes"]
+confirm -> exit [label="[N] No"]
+```
+
+Supported values are `yes_no`, `confirmation`, `multiple_choice`, `multi_select`, and `freeform`.
+
 ### Default choice on timeout
 
 If a human gate has a timeout configured, you can specify a default choice using the `human.default_choice` attribute:
@@ -97,5 +110,8 @@ When a user makes a selection, the human gate sets several context values for do
 | `human.gate.selected` | The accelerator key (e.g. `"A"`) or `"freeform"` |
 | `human.gate.label` | The full label of the selected edge |
 | `human.gate.text` | The user's freeform text (if applicable) |
+| `human.gate.<node>.question` | The question text for a specific human gate node |
+| `human.gate.<node>.answer` | The answer text for a specific human gate node |
+| `human.gate.<node>.label` | The selected label for a specific human gate node, when applicable |
 
 These can be read in edge conditions or referenced by downstream agents.

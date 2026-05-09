@@ -36,6 +36,7 @@ export function mapRunStagesToSidebarStages(
     .map((stage) => ({
       id: stage.id,
       name: stage.name,
+      handler: stage.handler,
       nodeId: stage.node_id,
       visit: stage.visit,
       status: stage.status,

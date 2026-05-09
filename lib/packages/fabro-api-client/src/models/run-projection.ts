@@ -15,6 +15,9 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { DiffSummary } from './diff-summary';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { PendingInterviewRecord } from './pending-interview-record';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -54,6 +57,7 @@ export interface RunProjection {
     'conclusion'?: { [key: string]: any; } | null;
     'sandbox'?: { [key: string]: any; } | null;
     'final_patch'?: string | null;
+    'diff_summary'?: DiffSummary | null;
     'pull_request'?: { [key: string]: any; } | null;
     'superseded_by'?: string | null;
     'pending_interviews'?: { [key: string]: PendingInterviewRecord; };

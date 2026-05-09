@@ -10,7 +10,7 @@ use fabro_types::{
     BilledModelUsage, Checkpoint, CommandTermination, Conclusion, EventBody, FailureSignature,
     InterviewQuestionRecord, Outcome, PendingInterviewRecord, PullRequestRecord, RunControlAction,
     RunEvent, RunId, RunProjection, RunSpec, RunStatus, RunSummary, SandboxRecord, StageCompletion,
-    StageId, StageOutcome, StageProjection, StageState, StartRecord, TerminalStatus,
+    StageHandler, StageId, StageOutcome, StageProjection, StageState, StartRecord, TerminalStatus,
     first_event_seq,
 };
 use fabro_util::error::render_with_causes;
@@ -155,6 +155,7 @@ impl RunProjectionReducer for RunProjection {
                 self.pending_control = None;
                 self.conclusion = Some(conclusion_from_completed(props, ts)?);
                 self.final_patch.clone_from(&props.final_patch);
+                self.diff_summary = props.diff_summary.or(self.diff_summary);
                 self.pending_interviews.clear();
             }
             EventBody::RunFailed(props) => {
@@ -167,6 +168,7 @@ impl RunProjectionReducer for RunProjection {
                 self.pending_control = None;
                 self.conclusion = Some(conclusion_from_failed(props, ts));
                 self.final_patch.clone_from(&props.final_patch);
+                self.diff_summary = props.diff_summary.or(self.diff_summary);
                 self.pending_interviews.clear();
             }
             EventBody::RunSupersededBy(props) => {
@@ -196,6 +198,7 @@ impl RunProjectionReducer for RunProjection {
             }
             EventBody::CheckpointCompleted(props) => {
                 let checkpoint = checkpoint_from_props(props, ts);
+                self.diff_summary = props.diff_summary.or(self.diff_summary);
                 if let Some(node_id) = stored.node_id.as_deref() {
                     let visit = checkpoint
                         .node_visits
@@ -277,7 +280,7 @@ impl RunProjectionReducer for RunProjection {
             EventBody::InterviewInterrupted(props) if !props.question_id.is_empty() => {
                 self.pending_interviews.remove(&props.question_id);
             }
-            EventBody::StageStarted(_) => {
+            EventBody::StageStarted(props) => {
                 let Some(stage_id) = stored.stage_id.as_ref() else {
                     return Ok(());
                 };
@@ -286,7 +289,10 @@ impl RunProjectionReducer for RunProjection {
                     stage_id.visit(),
                     first_event_seq(event.seq),
                 );
-                stage.begin_attempt(ts);
+                stage.begin_attempt(
+                    ts,
+                    StageHandler::from_handler_type(Some(&props.handler_type)),
+                );
             }
             EventBody::StageRetrying(_) => {
                 let Some(stage) = stage_at_stored_or_current_visit(self, stored, event.seq) else {
@@ -371,11 +377,8 @@ impl RunProjectionReducer for RunProjection {
                 let Some(stage) = stage_at_stored_or_current_visit(self, stored, event.seq) else {
                     return Ok(());
                 };
-                stage.stdout = Some(props.stdout.clone());
-                stage.stderr = Some(props.stderr.clone());
-                stage.stdout_bytes = Some(props.stdout_bytes);
-                stage.stderr_bytes = Some(props.stderr_bytes);
-                stage.streams_separated = Some(props.streams_separated);
+                stage.output = Some(props.output.clone());
+                stage.output_bytes = Some(props.output_bytes);
                 stage.live_streaming = Some(props.live_streaming);
                 stage.termination = Some(props.termination);
                 stage.script_timing = Some(script_timing);
@@ -387,8 +390,7 @@ impl RunProjectionReducer for RunProjection {
                 apply_agent_cli_terminal(
                     stage,
                     props,
-                    &props.stdout,
-                    &props.stderr,
+                    merge_agent_cli_output(&props.stdout, &props.stderr),
                     CommandTermination::Exited,
                 )?;
             }
@@ -399,8 +401,7 @@ impl RunProjectionReducer for RunProjection {
                 apply_agent_cli_terminal(
                     stage,
                     props,
-                    &props.stdout,
-                    &props.stderr,
+                    merge_agent_cli_output(&props.stdout, &props.stderr),
                     CommandTermination::Cancelled,
                 )?;
             }
@@ -411,8 +412,7 @@ impl RunProjectionReducer for RunProjection {
                 apply_agent_cli_terminal(
                     stage,
                     props,
-                    &props.stdout,
-                    &props.stderr,
+                    merge_agent_cli_output(&props.stdout, &props.stderr),
                     CommandTermination::TimedOut,
                 )?;
             }
@@ -550,6 +550,8 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> RunSummary
             .and_then(|conclusion| conclusion.billing.as_ref())
             .and_then(|billing| billing.total_usd_micros),
         state.superseded_by,
+        state.diff_summary,
+        state.pull_request.clone(),
     )
 }
 
@@ -702,17 +704,24 @@ fn provider_used_from_agent_cli_started(props: &AgentCliStartedProps) -> Value {
 fn apply_agent_cli_terminal(
     stage: &mut StageProjection,
     props: &impl serde::Serialize,
-    stdout: &str,
-    stderr: &str,
+    output: String,
     termination: CommandTermination,
 ) -> Result<()> {
     let script_timing = serde_json::to_value(props)
         .map_err(|err| Error::InvalidEvent(format!("invalid agent.cli terminal payload: {err}")))?;
-    stage.stdout = Some(stdout.to_string());
-    stage.stderr = Some(stderr.to_string());
+    stage.output = Some(output);
     stage.termination = Some(termination);
     stage.script_timing = Some(script_timing);
     Ok(())
+}
+
+fn merge_agent_cli_output(stdout: &str, stderr: &str) -> String {
+    match (stdout.is_empty(), stderr.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => stdout.to_string(),
+        (true, false) => stderr.to_string(),
+        (false, false) => format!("{stdout}\n{stderr}"),
+    }
 }
 
 #[cfg(test)]
@@ -895,7 +904,7 @@ mod tests {
                 "build@2": {
                     "first_event_seq": 1,
                     "diff": "diff --git a/file b/file",
-                    "stdout": "done"
+                    "output": "done"
                 }
             }
         }))
@@ -912,7 +921,7 @@ mod tests {
             serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
         let serialized = serde_json::to_value(&state).unwrap();
         let round_tripped_node = round_tripped.stage(&stage_id).unwrap();
-        assert_eq!(round_tripped_node.stdout.as_deref(), Some("done"));
+        assert_eq!(round_tripped_node.output.as_deref(), Some("done"));
         assert_eq!(round_tripped.list_node_visits("build"), vec![2]);
         assert_eq!(
             round_tripped.pending_control,
@@ -939,7 +948,7 @@ mod tests {
             restart_failure_signatures: HashMap::new(),
             node_visits:                HashMap::from([("build".to_string(), 2usize)]),
         })];
-        state.stage_entry("build", 2, first_event_seq(7)).stdout = Some("done".to_string());
+        state.stage_entry("build", 2, first_event_seq(7)).output = Some("done".to_string());
 
         let round_tripped: RunProjection =
             serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
@@ -948,7 +957,7 @@ mod tests {
             round_tripped
                 .stage(&StageId::new("build", 2))
                 .unwrap()
-                .stdout
+                .output
                 .as_deref(),
             Some("done")
         );
@@ -1111,8 +1120,7 @@ mod tests {
             .unwrap();
 
         let stage = state.stage(&stage_id).unwrap();
-        assert_eq!(stage.stdout.as_deref(), Some("done"));
-        assert_eq!(stage.stderr.as_deref(), Some("warn"));
+        assert_eq!(stage.output.as_deref(), Some("done\nwarn"));
         assert_eq!(stage.termination, Some(CommandTermination::Exited));
         assert_eq!(
             stage.script_timing.as_ref().unwrap()["duration_ms"],
@@ -1139,8 +1147,7 @@ mod tests {
             .unwrap();
 
         let stage = state.stage(&stage_id).unwrap();
-        assert_eq!(stage.stdout.as_deref(), Some("partial"));
-        assert_eq!(stage.stderr.as_deref(), Some("cancelled"));
+        assert_eq!(stage.output.as_deref(), Some("partial\ncancelled"));
         assert_eq!(stage.termination, Some(CommandTermination::Cancelled));
         assert_eq!(
             stage.script_timing.as_ref().unwrap()["duration_ms"],
@@ -1167,8 +1174,7 @@ mod tests {
             .unwrap();
 
         let stage = state.stage(&stage_id).unwrap();
-        assert_eq!(stage.stdout.as_deref(), Some("partial"));
-        assert_eq!(stage.stderr.as_deref(), Some("timeout"));
+        assert_eq!(stage.output.as_deref(), Some("partial\ntimeout"));
         assert_eq!(stage.termination, Some(CommandTermination::TimedOut));
         assert_eq!(
             stage.script_timing.as_ref().unwrap()["duration_ms"],
@@ -1404,6 +1410,7 @@ mod tests {
                     restart_failure_signatures: BTreeMap::new(),
                     node_visits: BTreeMap::from([("skip_me".to_string(), 1usize)]),
                     diff: None,
+                    diff_summary: None,
                 }),
                 None,
             ))
@@ -1738,12 +1745,116 @@ mod tests {
                     reason:         FailureReason::WorkflowError,
                     git_commit_sha: Some("abc123".to_string()),
                     final_patch:    Some(patch.to_string()),
+                    diff_summary:   None,
                 }),
                 None,
             ))
             .unwrap();
 
         assert_eq!(state.final_patch.as_deref(), Some(patch));
+    }
+
+    #[test]
+    fn patch_bearing_events_roll_up_diff_summary_without_blanking_prior_value() {
+        let mut state = RunProjection::default();
+
+        state
+            .apply_event(&test_raw_event(
+                1,
+                "checkpoint.completed",
+                &json!({
+                    "status": "running",
+                    "current_node": "build",
+                    "completed_nodes": ["build"],
+                    "diff_summary": {
+                        "files_changed": 2,
+                        "additions": 10,
+                        "deletions": 3
+                    }
+                }),
+                Some("build"),
+            ))
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(build_summary(&state, &fixtures::RUN_1)).unwrap()["diff_summary"],
+            json!({
+                "files_changed": 2,
+                "additions": 10,
+                "deletions": 3
+            })
+        );
+
+        state
+            .apply_event(&test_raw_event(
+                2,
+                "checkpoint.completed",
+                &json!({
+                    "status": "running",
+                    "current_node": "review",
+                    "completed_nodes": ["build", "review"]
+                }),
+                Some("review"),
+            ))
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(build_summary(&state, &fixtures::RUN_1)).unwrap()["diff_summary"]
+                ["files_changed"],
+            2
+        );
+
+        state
+            .apply_event(&test_raw_event(
+                3,
+                "run.completed",
+                &json!({
+                    "duration_ms": 42,
+                    "artifact_count": 0,
+                    "status": "succeeded",
+                    "reason": "completed",
+                    "diff_summary": {
+                        "files_changed": 4,
+                        "additions": 18,
+                        "deletions": 7
+                    }
+                }),
+                None,
+            ))
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(build_summary(&state, &fixtures::RUN_1)).unwrap()["diff_summary"],
+            json!({
+                "files_changed": 4,
+                "additions": 18,
+                "deletions": 7
+            })
+        );
+
+        let mut failed_state = RunProjection::default();
+        failed_state
+            .apply_event(&test_raw_event(
+                1,
+                "run.failed",
+                &json!({
+                    "error": "boom",
+                    "duration_ms": 42,
+                    "reason": "workflow_error",
+                    "diff_summary": {
+                        "files_changed": 5,
+                        "additions": 20,
+                        "deletions": 8
+                    }
+                }),
+                None,
+            ))
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(build_summary(&failed_state, &fixtures::RUN_1)).unwrap()["diff_summary"],
+            json!({
+                "files_changed": 5,
+                "additions": 20,
+                "deletions": 8
+            })
+        );
     }
 
     #[test]
@@ -1762,6 +1873,7 @@ mod tests {
                     reason:         FailureReason::WorkflowError,
                     git_commit_sha: None,
                     final_patch:    None,
+                    diff_summary:   None,
                 }),
                 None,
             ))
@@ -1791,6 +1903,7 @@ mod tests {
                     total_usd_micros:     None,
                     final_git_commit_sha: None,
                     final_patch:          None,
+                    diff_summary:         None,
                     billing:              None,
                 }),
                 None,
@@ -1839,6 +1952,42 @@ mod tests {
     }
 
     #[test]
+    fn pull_request_created_populates_projection_and_summary() {
+        use fabro_types::run_event::PullRequestCreatedProps;
+
+        let mut state = RunProjection::default();
+        state
+            .apply_event(&test_event(
+                1,
+                EventBody::PullRequestCreated(PullRequestCreatedProps {
+                    pr_url:      "https://github.com/fabro-sh/fabro/pull/123".to_string(),
+                    pr_number:   123,
+                    owner:       "fabro-sh".to_string(),
+                    repo:        "fabro".to_string(),
+                    base_branch: "main".to_string(),
+                    head_branch: "fabro/run/demo".to_string(),
+                    title:       "Add run PR chip".to_string(),
+                    draft:       false,
+                }),
+                None,
+            ))
+            .unwrap();
+
+        let pull_request = state
+            .pull_request
+            .as_ref()
+            .expect("projection should store pull request");
+        assert_eq!(
+            pull_request.html_url,
+            "https://github.com/fabro-sh/fabro/pull/123"
+        );
+        assert_eq!(pull_request.number, 123);
+
+        let summary = build_summary(&state, &fixtures::RUN_1);
+        assert_eq!(summary.pull_request, state.pull_request);
+    }
+
+    #[test]
     fn run_unarchived_restores_prior_status() {
         use fabro_types::run_event::{RunArchivedProps, RunCompletedProps, RunUnarchivedProps};
 
@@ -1854,6 +2003,7 @@ mod tests {
                     total_usd_micros:     None,
                     final_git_commit_sha: None,
                     final_patch:          None,
+                    diff_summary:         None,
                     billing:              None,
                 }),
                 None,
@@ -1984,6 +2134,7 @@ mod tests {
                     total_usd_micros:     None,
                     final_git_commit_sha: None,
                     final_patch:          None,
+                    diff_summary:         None,
                     billing:              None,
                 }),
                 None,

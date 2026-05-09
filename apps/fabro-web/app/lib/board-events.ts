@@ -63,7 +63,7 @@ export function subscribeToBoardEvents(
       subscribeToSharedEventSource<EventPayload>({
         subscriptions,
         subscriptionKey: BOARD_SUBSCRIPTION_KEY,
-        url: queryKeys.system.attach(),
+        url: queryKeys.system.attachUrl(),
         mutate,
         eventSourceFactory,
         debounceMs,

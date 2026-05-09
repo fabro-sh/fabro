@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use super::{BilledTokenCounts, ExecOutputTail, RunNoticeLevel};
 use crate::status::{BlockedReason, FailureReason, SuccessReason};
 use crate::{
-    ForkSourceRef, GitContext, Graph, RunBlobId, RunControlAction, RunId, RunProvenance,
-    WorkflowSettings,
+    DiffSummary, ForkSourceRef, GitContext, Graph, RunBlobId, RunControlAction, RunId,
+    RunProvenance, WorkflowSettings,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -139,6 +139,8 @@ pub struct RunCompletedProps {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_patch:          Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_summary:         Option<DiffSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub billing:              Option<BilledTokenCounts>,
 }
 
@@ -155,6 +157,8 @@ pub struct RunFailedProps {
     // pre-change events replay with `final_patch: None` via serde default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_patch:    Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_summary:   Option<DiffSummary>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -27,6 +27,7 @@ pub mod sandbox_record;
 pub mod secret;
 pub mod settings;
 pub mod stage_completion;
+pub mod stage_handler;
 pub mod stage_id;
 pub mod start;
 pub mod status;
@@ -44,7 +45,7 @@ pub use checkpoint::Checkpoint;
 pub use command_output::{CommandOutputStream, CommandTermination};
 pub use conclusion::{Conclusion, StageSummary};
 pub use dense::{ServerSettings, UserSettings, WorkflowSettings};
-pub use diff::DiffStats;
+pub use diff::{DiffStats, DiffSummary};
 pub use event_envelope::EventEnvelope;
 pub use failure_signature::FailureSignature;
 pub use graph::{
@@ -75,6 +76,7 @@ pub use run_summary::RunSummary;
 pub use sandbox_record::SandboxRecord;
 pub use secret::{SecretMetadata, SecretType};
 pub use stage_completion::StageCompletion;
+pub use stage_handler::StageHandler;
 pub use stage_id::{InvalidStageVisit, ParallelBranchId, StageId};
 pub use start::StartRecord;
 pub use status::{

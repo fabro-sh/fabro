@@ -12,6 +12,7 @@ import {
   type EventPayload,
   type EventSourceLike,
   type MutateFn,
+  type SseKey,
   type SharedEventSubscription,
 } from "./sse";
 
@@ -63,9 +64,12 @@ const STAGE_EVENTS = new Set([
 // to run-scoped invalidations (stages list, graph, detail).
 export const STAGE_ACTIVITY_EVENT_TYPES = [
   "stage.prompt",
+  "prompt.completed",
   "agent.message",
   "agent.tool.started",
   "agent.tool.completed",
+  "agent.steering.injected",
+  "agent.interrupt.injected",
   "command.started",
   "command.completed",
 ] as const;
@@ -81,6 +85,7 @@ const STEERING_EVENTS = new Set([
   "run.interrupt",
   "run.steer",
   "agent.steering.injected",
+  "agent.interrupt.injected",
   "agent.session.activated",
   "agent.session.deactivated",
   "agent.steer.buffered",
@@ -91,7 +96,7 @@ export function queryKeysForRunEvent(
   runId: string,
   event: string,
   stageId?: string,
-): string[] {
+): SseKey[] {
   if (event === "checkpoint.completed") {
     return [queryKeys.runs.files(runId)];
   }
@@ -119,7 +124,7 @@ export function queryKeysForRunEvent(
   }
 
   if (STAGE_EVENTS.has(event)) {
-    const keys = [
+    const keys: SseKey[] = [
       queryKeys.runs.stages(runId),
       queryKeys.runs.billing(runId),
       queryKeys.runs.events(runId, 1000),
@@ -133,16 +138,16 @@ export function queryKeysForRunEvent(
     return keys;
   }
 
-  if (STAGE_ACTIVITY_EVENTS.has(event)) {
-    return stageId ? [queryKeys.runs.stageEvents(runId, stageId)] : [];
-  }
-
   if (STEERING_EVENTS.has(event)) {
-    const keys = [queryKeys.runs.events(runId, 1000)];
+    const keys: SseKey[] = [queryKeys.runs.events(runId, 1000)];
     if (stageId) {
       keys.push(queryKeys.runs.stageEvents(runId, stageId));
     }
     return keys;
+  }
+
+  if (STAGE_ACTIVITY_EVENTS.has(event)) {
+    return stageId ? [queryKeys.runs.stageEvents(runId, stageId)] : [];
   }
 
   return [];
@@ -169,7 +174,7 @@ export function subscribeToRunEvents(
       subscribeToSharedEventSource<RunEventPayload>({
         subscriptions,
         subscriptionKey: runId,
-        url: queryKeys.runs.attach(runId),
+        url: queryKeys.runs.attachUrl(runId),
         mutate,
         eventSourceFactory,
         debounceMs,

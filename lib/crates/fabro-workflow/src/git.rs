@@ -508,16 +508,13 @@ mod tests {
         .await
         .unwrap();
         append_event(&run, &fixtures::RUN_1, &Event::CommandCompleted {
-            node_id:           "work".into(),
-            stdout:            "hi\n".into(),
-            stderr:            String::new(),
-            exit_code:         Some(0),
-            duration_ms:       10,
-            termination:       CommandTermination::Exited,
-            stdout_bytes:      3,
-            stderr_bytes:      0,
-            streams_separated: true,
-            live_streaming:    true,
+            node_id:        "work".into(),
+            output:         "hi\n".into(),
+            exit_code:      Some(0),
+            duration_ms:    10,
+            termination:    CommandTermination::Exited,
+            output_bytes:   3,
+            live_streaming: true,
         })
         .await
         .unwrap();
@@ -545,6 +542,7 @@ mod tests {
             restart_failure_signatures: std::collections::BTreeMap::new(),
             node_visits: std::collections::BTreeMap::from([("work".into(), 2)]),
             diff: Some("diff --git a/story.txt b/story.txt".into()),
+            diff_summary: None,
         })
         .await
         .unwrap();

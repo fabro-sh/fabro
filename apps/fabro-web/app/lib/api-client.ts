@@ -1,7 +1,23 @@
-export interface ApiOptions {
-  init?: RequestInit;
-  request?: Request;
-}
+import axios, {
+  isAxiosError,
+  type AxiosPromise,
+  type AxiosResponse,
+  type RawAxiosRequestConfig,
+} from "axios";
+import {
+  AuthApi,
+  Configuration,
+  HumanInTheLoopApi,
+  InsightsApi,
+  InstallApi,
+  RunInternalsApi,
+  RunInternalsApiAxiosParamCreator,
+  RunOutputsApi,
+  RunsApi,
+  SettingsApi,
+  SystemApi,
+  WorkflowsApi,
+} from "@qltysh/fabro-api-client";
 
 export interface PaginatedEnvelope<T> {
   data: T[];
@@ -32,13 +48,75 @@ export class ApiError extends Error {
   }
 }
 
-const API_PREFIX = "/api/v1";
+interface ApiCallOptions {
+  redirectOnUnauthorized?: boolean;
+}
+
 const PAGINATED_API_MAX_PAGES = 50;
 const PAGINATED_API_MAX_ITEMS = 5000;
 
-export function apiPath(path: string): string {
-  return path.startsWith(API_PREFIX) ? path : `${API_PREFIX}${path}`;
-}
+export const generatedAxios = axios.create({
+  baseURL: "",
+  withCredentials: true,
+});
+
+export const generatedApiConfiguration = new Configuration({
+  basePath: "",
+  baseOptions: {
+    withCredentials: true,
+  },
+});
+
+export const authApi = new AuthApi(
+  generatedApiConfiguration,
+  "",
+  generatedAxios,
+);
+export const humanInTheLoopApi = new HumanInTheLoopApi(
+  generatedApiConfiguration,
+  "",
+  generatedAxios,
+);
+export const insightsApi = new InsightsApi(
+  generatedApiConfiguration,
+  "",
+  generatedAxios,
+);
+export const installApi = new InstallApi(
+  generatedApiConfiguration,
+  "",
+  generatedAxios,
+);
+export const runInternalsApi = new RunInternalsApi(
+  generatedApiConfiguration,
+  "",
+  generatedAxios,
+);
+export const runOutputsApi = new RunOutputsApi(
+  generatedApiConfiguration,
+  "",
+  generatedAxios,
+);
+export const runsApi = new RunsApi(
+  generatedApiConfiguration,
+  "",
+  generatedAxios,
+);
+export const settingsApi = new SettingsApi(
+  generatedApiConfiguration,
+  "",
+  generatedAxios,
+);
+export const systemApi = new SystemApi(
+  generatedApiConfiguration,
+  "",
+  generatedAxios,
+);
+export const workflowsApi = new WorkflowsApi(
+  generatedApiConfiguration,
+  "",
+  generatedAxios,
+);
 
 export function isNotAvailable(status: number): boolean {
   return status === 404 || status === 501;
@@ -65,106 +143,106 @@ export function extractRequestId(body: unknown): string | null {
   return null;
 }
 
-function requestIdFromHeaders(headers: Headers): string | null {
+function requestIdFromHeaders(headers: unknown): string | null {
   return (
-    headers.get("x-request-id") ??
-    headers.get("x-fabro-request-id") ??
-    headers.get("request-id")
+    headerValue(headers, "x-request-id")
+    ?? headerValue(headers, "x-fabro-request-id")
+    ?? headerValue(headers, "request-id")
   );
 }
 
-async function parseResponseBody(response: Response): Promise<unknown> {
-  const contentType = response.headers.get("content-type") ?? "";
-  const text = await response.text().catch(() => "");
-  if (!text) return null;
-  if (contentType.includes("json")) {
-    try {
-      return JSON.parse(text);
-    } catch {
-      return text;
-    }
+function headerValue(headers: unknown, name: string): string | null {
+  if (!headers || typeof headers !== "object") return null;
+
+  const getter = (headers as { get?: (key: string) => unknown }).get;
+  if (typeof getter === "function") {
+    const value = getter.call(headers, name);
+    if (typeof value === "string") return value;
   }
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
+
+  const wanted = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
+    if (key.toLowerCase() !== wanted) continue;
+    if (typeof value === "string") return value;
+    if (Array.isArray(value) && typeof value[0] === "string") return value[0];
   }
+  return null;
 }
 
-async function apiErrorFromResponse(response: Response): Promise<ApiError> {
-  const body = await parseResponseBody(response);
-  const requestId = requestIdFromHeaders(response.headers) ?? extractRequestId(body);
+function apiErrorFromAxios(error: unknown): ApiError | null {
+  if (!isAxiosError(error) || !error.response) return null;
+
+  const { response } = error;
+  const requestId = requestIdFromHeaders(response.headers) ?? extractRequestId(response.data);
   return new ApiError({
     status: response.status,
-    message: response.statusText || `HTTP ${response.status}`,
+    message: extractErrorDetail(response.data) ?? (response.statusText || `HTTP ${response.status}`),
     requestId,
-    body,
+    body: response.data ?? null,
   });
 }
 
-export async function apiRequest(path: string, options?: ApiOptions): Promise<Response> {
-  const { init, request } = options ?? {};
-  const response = await fetch(apiPath(path), {
-    ...init,
-    credentials: "include",
-    headers: init?.headers,
-    ...(request?.signal ? { signal: request.signal } : {}),
-  });
+function extractErrorDetail(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  const errors = (body as Record<string, unknown>).errors;
+  if (!Array.isArray(errors) || errors.length === 0) return null;
 
-  if (response.status === 401) {
-    if (typeof window !== "undefined") {
-      window.location.href = "/login";
-    }
-    throw await apiErrorFromResponse(response);
+  const first = errors[0];
+  if (!first || typeof first !== "object") return null;
+  const detail = (first as Record<string, unknown>).detail;
+  return typeof detail === "string" && detail.length > 0 ? detail : null;
+}
+
+function redirectToLogin(error: ApiError, options: ApiCallOptions) {
+  if (error.status !== 401 || options.redirectOnUnauthorized === false) return;
+  if (typeof window !== "undefined") {
+    window.location.href = "/login";
   }
-
-  return response;
 }
 
-export async function apiFetcher<T>(key: string): Promise<T> {
-  const response = await apiRequest(key);
-  if (!response.ok) {
-    throw await apiErrorFromResponse(response);
+export async function apiData<T>(
+  call: () => AxiosPromise<T>,
+  options: ApiCallOptions = {},
+): Promise<T> {
+  try {
+    const response = await call();
+    return response.data;
+  } catch (error) {
+    const apiError = apiErrorFromAxios(error);
+    if (!apiError) throw error;
+    redirectToLogin(apiError, options);
+    throw apiError;
   }
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
 }
 
-export async function apiTextFetcher(key: string): Promise<string> {
-  const response = await apiRequest(key);
-  if (!response.ok) {
-    throw await apiErrorFromResponse(response);
+export async function apiResponse<T>(
+  call: () => AxiosPromise<T>,
+  options: ApiCallOptions = {},
+): Promise<AxiosResponse<T>> {
+  try {
+    return await call();
+  } catch (error) {
+    const apiError = apiErrorFromAxios(error);
+    if (!apiError) throw error;
+    redirectToLogin(apiError, options);
+    throw apiError;
   }
-  return response.text();
 }
 
-export async function apiNullableFetcher<T>(key: string): Promise<T | null> {
-  const response = await apiRequest(key);
-  if (isNotAvailable(response.status)) return null;
-  if (!response.ok) {
-    throw await apiErrorFromResponse(response);
+export async function apiNullableData<T>(
+  call: () => AxiosPromise<T>,
+): Promise<T | null> {
+  try {
+    return await apiData(call);
+  } catch (error) {
+    if (error instanceof ApiError && isNotAvailable(error.status)) return null;
+    throw error;
   }
-  return response.json() as Promise<T>;
 }
 
-export async function apiNullableTextFetcher(key: string): Promise<string | null> {
-  const response = await apiRequest(key);
-  if (isNotAvailable(response.status)) return null;
-  if (!response.ok) {
-    throw await apiErrorFromResponse(response);
-  }
-  return response.text();
-}
-
-function paginatedApiPath(key: string, limit: number, offset: number): string {
-  const url = new URL(apiPath(key), "http://fabro.local");
-  url.searchParams.set("page[limit]", String(limit));
-  url.searchParams.set("page[offset]", String(offset));
-  return `${url.pathname}${url.search}`;
-}
-
-export async function apiPaginatedFetcher<TItem, TExtra extends object = {}>(
-  key: string,
+export async function fetchAllPages<TItem, TExtra extends object = {}>(
+  label: string,
+  loadPage: (limit: number, offset: number) => Promise<PaginatedEnvelope<TItem> & TExtra>,
 ): Promise<PaginatedEnvelope<TItem> & TExtra> {
   const limit = 100;
   let offset = 0;
@@ -173,12 +251,7 @@ export async function apiPaginatedFetcher<TItem, TExtra extends object = {}>(
   let pagesLoaded = 0;
 
   while (true) {
-    const response = await apiRequest(paginatedApiPath(key, limit, offset));
-    if (!response.ok) {
-      throw await apiErrorFromResponse(response);
-    }
-
-    const page = (await response.json()) as PaginatedEnvelope<TItem> & TExtra;
+    const page = await loadPage(limit, offset);
     if (extras == null) {
       const { data: _data, meta: _meta, ...rest } = page as PaginatedEnvelope<TItem> &
         Record<string, unknown>;
@@ -199,12 +272,12 @@ export async function apiPaginatedFetcher<TItem, TExtra extends object = {}>(
     }
 
     if (
-      pagesLoaded >= PAGINATED_API_MAX_PAGES ||
-      pageItems.length < page.data.length ||
-      data.length >= PAGINATED_API_MAX_ITEMS
+      pagesLoaded >= PAGINATED_API_MAX_PAGES
+      || pageItems.length < page.data.length
+      || data.length >= PAGINATED_API_MAX_ITEMS
     ) {
       console.warn(
-        `Stopped paginated API fetch for ${key} after ${pagesLoaded} pages and ${data.length} items because the safety cap was reached.`,
+        `Stopped paginated API fetch for ${label} after ${pagesLoaded} pages and ${data.length} items because the safety cap was reached.`,
       );
       return {
         ...(extras ?? ({} as TExtra)),
@@ -217,24 +290,9 @@ export async function apiPaginatedFetcher<TItem, TExtra extends object = {}>(
   }
 }
 
-function stageEventsPagePath(key: string, sinceSeq: number, limit: number): string {
-  const url = new URL(apiPath(key), "http://fabro.local");
-  url.searchParams.set("since_seq", String(sinceSeq));
-  url.searchParams.set("limit", String(limit));
-  return `${url.pathname}${url.search}`;
-}
-
-/**
- * Cursor-paginated fetcher for `/runs/{id}/stages/{stageId}/events`.
- *
- * Loops from `since_seq=1` with a 1000-event page size, advancing the cursor
- * to `highestSeq + 1` until the server reports `meta.has_more === false`.
- * The empty-page guard mirrors `apiPaginatedFetcher`: if the server claims
- * `has_more` but returns no rows we exit and `console.warn` to surface the
- * server invariant violation without spinning the UI.
- */
 export async function fetchAllStageEvents<TItem extends { seq: number }>(
-  key: string,
+  label: string,
+  loadPage: (sinceSeq: number, limit: number) => Promise<PaginatedEnvelope<TItem>>,
 ): Promise<TItem[]> {
   const PAGE_LIMIT = 1000;
   const MAX_PAGES = 50;
@@ -243,17 +301,13 @@ export async function fetchAllStageEvents<TItem extends { seq: number }>(
   let pagesLoaded = 0;
 
   while (true) {
-    const response = await apiRequest(stageEventsPagePath(key, sinceSeq, PAGE_LIMIT));
-    if (!response.ok) {
-      throw await apiErrorFromResponse(response);
-    }
-    const page = (await response.json()) as PaginatedEnvelope<TItem>;
+    const page = await loadPage(sinceSeq, PAGE_LIMIT);
     pagesLoaded += 1;
 
     if (page.data.length === 0) {
       if (page.meta.has_more) {
         console.warn(
-          `Stage events fetch for ${key} returned an empty page with has_more=true; stopping at ${data.length} items to avoid spinning.`,
+          `Stage events fetch for ${label} returned an empty page with has_more=true; stopping at ${data.length} items to avoid spinning.`,
         );
       }
       return data;
@@ -264,7 +318,7 @@ export async function fetchAllStageEvents<TItem extends { seq: number }>(
 
     if (pagesLoaded >= MAX_PAGES) {
       console.warn(
-        `Stopped stage events fetch for ${key} after ${pagesLoaded} pages and ${data.length} items because the safety cap was reached.`,
+        `Stopped stage events fetch for ${label} after ${pagesLoaded} pages and ${data.length} items because the safety cap was reached.`,
       );
       return data;
     }
@@ -272,7 +326,7 @@ export async function fetchAllStageEvents<TItem extends { seq: number }>(
     const highestSeq = page.data.reduce((max, event) => Math.max(max, event.seq), sinceSeq - 1);
     if (highestSeq < sinceSeq) {
       console.warn(
-        `Stage events fetch for ${key} returned a non-advancing page at since_seq=${sinceSeq}; stopping at ${data.length} items to avoid spinning.`,
+        `Stage events fetch for ${label} returned a non-advancing page at since_seq=${sinceSeq}; stopping at ${data.length} items to avoid spinning.`,
       );
       return data;
     }
@@ -280,20 +334,18 @@ export async function fetchAllStageEvents<TItem extends { seq: number }>(
   }
 }
 
-export async function apiJsonMutation<TResponse, TArg = unknown>(
-  key: string,
-  { arg }: { arg: TArg },
-): Promise<TResponse> {
-  const response = await apiRequest(key, {
-    init: {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: arg === undefined ? undefined : JSON.stringify(arg),
-    },
-  });
-  if (!response.ok) {
-    throw await apiErrorFromResponse(response);
-  }
-  if (response.status === 204) return undefined as TResponse;
-  return response.json() as Promise<TResponse>;
+export function requestSignalOptions(request?: Request): RawAxiosRequestConfig {
+  return request?.signal ? { signal: request.signal } : {};
+}
+
+export async function stageArtifactDownloadUrl(
+  id: string,
+  stageId: string,
+  filename: string,
+  retry: number,
+): Promise<string> {
+  const requestArgs = await RunInternalsApiAxiosParamCreator(
+    generatedApiConfiguration,
+  ).getStageArtifact(id, stageId, filename, retry);
+  return `${generatedApiConfiguration.basePath ?? ""}${requestArgs.url}`;
 }

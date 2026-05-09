@@ -145,6 +145,18 @@ macro_rules! delegate_sandbox {
                 self.$field.initialize().await
             }
 
+            async fn start(&self) -> $crate::Result<()> {
+                self.$field.start().await
+            }
+
+            async fn stop(&self) -> $crate::Result<()> {
+                self.$field.stop().await
+            }
+
+            async fn delete(&self) -> $crate::Result<()> {
+                self.$field.delete().await
+            }
+
             async fn cleanup(&self) -> $crate::Result<()> {
                 self.$field.cleanup().await
             }
@@ -263,6 +275,45 @@ pub enum SandboxEvent {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         causes:   Vec<String>,
     },
+    StartStarted {
+        provider: String,
+    },
+    StartCompleted {
+        provider:    String,
+        duration_ms: u64,
+    },
+    StartFailed {
+        provider: String,
+        error:    String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        causes:   Vec<String>,
+    },
+    StopStarted {
+        provider: String,
+    },
+    StopCompleted {
+        provider:    String,
+        duration_ms: u64,
+    },
+    StopFailed {
+        provider: String,
+        error:    String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        causes:   Vec<String>,
+    },
+    DeleteStarted {
+        provider: String,
+    },
+    DeleteCompleted {
+        provider:    String,
+        duration_ms: u64,
+    },
+    DeleteFailed {
+        provider: String,
+        error:    String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        causes:   Vec<String>,
+    },
 
     // -- Snapshot lifecycle --
     SnapshotPulling {
@@ -336,6 +387,54 @@ impl SandboxEvent {
                 causes,
             } => {
                 warn!(provider, error, causes = ?causes, "Sandbox cleanup failed");
+            }
+            Self::StartStarted { provider } => {
+                info!(provider, "Sandbox start started");
+            }
+            Self::StartCompleted {
+                provider,
+                duration_ms,
+            } => {
+                info!(provider, duration_ms, "Sandbox start completed");
+            }
+            Self::StartFailed {
+                provider,
+                error,
+                causes,
+            } => {
+                warn!(provider, error, causes = ?causes, "Sandbox start failed");
+            }
+            Self::StopStarted { provider } => {
+                info!(provider, "Sandbox stop started");
+            }
+            Self::StopCompleted {
+                provider,
+                duration_ms,
+            } => {
+                info!(provider, duration_ms, "Sandbox stop completed");
+            }
+            Self::StopFailed {
+                provider,
+                error,
+                causes,
+            } => {
+                warn!(provider, error, causes = ?causes, "Sandbox stop failed");
+            }
+            Self::DeleteStarted { provider } => {
+                info!(provider, "Sandbox delete started");
+            }
+            Self::DeleteCompleted {
+                provider,
+                duration_ms,
+            } => {
+                info!(provider, duration_ms, "Sandbox delete completed");
+            }
+            Self::DeleteFailed {
+                provider,
+                error,
+                causes,
+            } => {
+                warn!(provider, error, causes = ?causes, "Sandbox delete failed");
             }
             Self::SnapshotPulling { name } => {
                 debug!(name, "Snapshot pulling");
@@ -675,6 +774,15 @@ pub trait Sandbox: Send + Sync {
         remote_path: &str,
     ) -> crate::Result<()>;
     async fn initialize(&self) -> crate::Result<()>;
+    async fn start(&self) -> crate::Result<()> {
+        Ok(())
+    }
+    async fn stop(&self) -> crate::Result<()> {
+        Ok(())
+    }
+    async fn delete(&self) -> crate::Result<()> {
+        self.cleanup().await
+    }
     async fn cleanup(&self) -> crate::Result<()>;
     fn working_directory(&self) -> &str;
     fn platform(&self) -> &str;

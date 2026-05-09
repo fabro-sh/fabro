@@ -73,6 +73,7 @@ async fn append_completed_run_with_final_patch(
             total_usd_micros:     None,
             final_git_commit_sha: Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string()),
             final_patch:          Some(final_patch.to_string()),
+            diff_summary:         None,
             billing:              None,
         },
     )

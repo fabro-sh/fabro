@@ -228,6 +228,63 @@ pub struct SandboxCleanupFailedProps {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SandboxStartStartedProps {
+    pub provider: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SandboxStartCompletedProps {
+    pub provider:    String,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SandboxStartFailedProps {
+    pub provider: String,
+    pub error:    String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub causes:   Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SandboxStopStartedProps {
+    pub provider: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SandboxStopCompletedProps {
+    pub provider:    String,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SandboxStopFailedProps {
+    pub provider: String,
+    pub error:    String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub causes:   Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SandboxDeleteStartedProps {
+    pub provider: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SandboxDeleteCompletedProps {
+    pub provider:    String,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SandboxDeleteFailedProps {
+    pub provider: String,
+    pub error:    String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub causes:   Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SnapshotNameProps {
     pub name: String,
 }

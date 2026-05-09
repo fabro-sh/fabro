@@ -17,6 +17,7 @@ use bollard::image::CreateImageOptions;
 use bollard::models::HostConfig;
 use fabro_github::GitHubCredentials;
 use fabro_types::{CommandOutputStream, CommandTermination, RunId};
+use fabro_util::time::elapsed_ms;
 use futures::StreamExt;
 use tokio::sync::OnceCell;
 use tokio::{fs, time};
@@ -130,11 +131,12 @@ impl DockerSandbox {
         repo_cloned: bool,
         clone_origin_url: Option<String>,
         clone_branch: Option<String>,
+        run_id: Option<RunId>,
     ) -> crate::Result<Self> {
         let sandbox = Self::new(
             DockerSandboxOptions::default(),
             None,
-            None,
+            run_id,
             clone_origin_url.clone(),
             clone_branch,
         )?;
@@ -691,8 +693,26 @@ impl DockerSandbox {
             .map_err(|e| crate::Error::context("Failed to upload file to container", e))
     }
 
-    fn cleanup_error(&self, error: crate::Error) -> crate::Result<()> {
-        self.emit(SandboxEvent::CleanupFailed {
+    fn start_error(&self, error: crate::Error) -> crate::Result<()> {
+        self.emit(SandboxEvent::StartFailed {
+            provider: "docker".into(),
+            error:    error.to_string(),
+            causes:   error.causes(),
+        });
+        Err(error)
+    }
+
+    fn stop_error(&self, error: crate::Error) -> crate::Result<()> {
+        self.emit(SandboxEvent::StopFailed {
+            provider: "docker".into(),
+            error:    error.to_string(),
+            causes:   error.causes(),
+        });
+        Err(error)
+    }
+
+    fn delete_error(&self, error: crate::Error) -> crate::Result<()> {
+        self.emit(SandboxEvent::DeleteFailed {
             provider: "docker".into(),
             error:    error.to_string(),
             causes:   error.causes(),
@@ -854,7 +874,7 @@ fn docker_not_found(error: &DockerError) -> bool {
     })
 }
 
-fn docker_already_stopped(error: &DockerError) -> bool {
+fn docker_not_modified(error: &DockerError) -> bool {
     matches!(error, DockerError::DockerResponseServerError {
         status_code: 304,
         ..
@@ -1110,15 +1130,64 @@ impl Sandbox for DockerSandbox {
         Ok(())
     }
 
-    async fn cleanup(&self) -> crate::Result<()> {
-        self.emit(SandboxEvent::CleanupStarted {
+    async fn start(&self) -> crate::Result<()> {
+        self.emit(SandboxEvent::StartStarted {
+            provider: "docker".into(),
+        });
+        let start = Instant::now();
+        let container_id = self.container_id()?.to_string();
+        let labels = match self.inspect_labels(&container_id).await {
+            Ok(labels) => labels,
+            Err(e) => return self.start_error(e),
+        };
+        if let Err(e) = verify_managed_labels(&container_id, &labels, self.run_id.as_ref()) {
+            return self.start_error(e);
+        }
+
+        if let Err(e) = self
+            .docker
+            .start_container(&container_id, None::<StartContainerOptions<String>>)
+            .await
+        {
+            if !docker_not_modified(&e) {
+                return self.start_error(crate::Error::context(
+                    format!(
+                        "Failed to start Docker container '{container_id}' with labels {labels:?}"
+                    ),
+                    e,
+                ));
+            }
+        }
+
+        let (_, stderr, exit_code) = self
+            .docker_exec(vec!["true".to_string()], None, None)
+            .await
+            .map_err(|e| {
+                crate::Error::context(format!("Docker container '{container_id}' health check"), e)
+            })?;
+        if exit_code != 0 {
+            return self.start_error(crate::Error::message(format!(
+                "Docker container '{container_id}' health check failed: {stderr}"
+            )));
+        }
+
+        let duration_ms = elapsed_ms(start);
+        self.emit(SandboxEvent::StartCompleted {
+            provider: "docker".into(),
+            duration_ms,
+        });
+        Ok(())
+    }
+
+    async fn stop(&self) -> crate::Result<()> {
+        self.emit(SandboxEvent::StopStarted {
             provider: "docker".into(),
         });
         let start = Instant::now();
 
         let Some(container_id) = self.container_id.get().cloned() else {
-            let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-            self.emit(SandboxEvent::CleanupCompleted {
+            let duration_ms = elapsed_ms(start);
+            self.emit(SandboxEvent::StopCompleted {
                 provider: "docker".into(),
                 duration_ms,
             });
@@ -1127,10 +1196,10 @@ impl Sandbox for DockerSandbox {
 
         let labels = match self.inspect_labels(&container_id).await {
             Ok(labels) => labels,
-            Err(e) => return self.cleanup_error(e),
+            Err(e) => return self.stop_error(e),
         };
         if let Err(e) = verify_managed_labels(&container_id, &labels, self.run_id.as_ref()) {
-            return self.cleanup_error(e);
+            return self.stop_error(e);
         }
 
         let stop_opts = StopContainerOptions { t: 1 };
@@ -1139,14 +1208,46 @@ impl Sandbox for DockerSandbox {
             .stop_container(&container_id, Some(stop_opts))
             .await
         {
-            if !docker_not_found(&e) && !docker_already_stopped(&e) {
-                return self.cleanup_error(crate::Error::context(
+            if !docker_not_found(&e) && !docker_not_modified(&e) {
+                return self.stop_error(crate::Error::context(
                     format!(
                         "Failed to stop Docker container '{container_id}' with labels {labels:?}"
                     ),
                     e,
                 ));
             }
+        }
+
+        let duration_ms = elapsed_ms(start);
+        self.emit(SandboxEvent::StopCompleted {
+            provider: "docker".into(),
+            duration_ms,
+        });
+
+        Ok(())
+    }
+
+    async fn delete(&self) -> crate::Result<()> {
+        self.emit(SandboxEvent::DeleteStarted {
+            provider: "docker".into(),
+        });
+        let start = Instant::now();
+
+        let Some(container_id) = self.container_id.get().cloned() else {
+            let duration_ms = elapsed_ms(start);
+            self.emit(SandboxEvent::DeleteCompleted {
+                provider: "docker".into(),
+                duration_ms,
+            });
+            return Ok(());
+        };
+
+        let labels = match self.inspect_labels(&container_id).await {
+            Ok(labels) => labels,
+            Err(e) => return self.delete_error(e),
+        };
+        if let Err(e) = verify_managed_labels(&container_id, &labels, self.run_id.as_ref()) {
+            return self.delete_error(e);
         }
 
         let remove_opts = RemoveContainerOptions {
@@ -1159,7 +1260,7 @@ impl Sandbox for DockerSandbox {
             .await
         {
             if !docker_not_found(&e) {
-                return self.cleanup_error(crate::Error::context(
+                return self.delete_error(crate::Error::context(
                     format!(
                         "Failed to remove Docker container '{container_id}' with labels {labels:?}"
                     ),
@@ -1168,13 +1269,17 @@ impl Sandbox for DockerSandbox {
             }
         }
 
-        let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-        self.emit(SandboxEvent::CleanupCompleted {
+        let duration_ms = elapsed_ms(start);
+        self.emit(SandboxEvent::DeleteCompleted {
             provider: "docker".into(),
             duration_ms,
         });
 
         Ok(())
+    }
+
+    async fn cleanup(&self) -> crate::Result<()> {
+        self.delete().await
     }
 
     async fn exec_command(

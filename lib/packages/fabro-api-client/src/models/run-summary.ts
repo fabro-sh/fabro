@@ -15,6 +15,12 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { DiffSummary } from './diff-summary';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { PullRequestRecord } from './pull-request-record';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { RepositoryReference } from './repository-reference';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -46,6 +52,8 @@ export interface RunSummary {
     'elapsed_secs'?: number | null;
     'total_usd_micros'?: number | null;
     'superseded_by'?: string | null;
+    'diff_summary'?: DiffSummary | null;
+    'pull_request'?: PullRequestRecord | null;
 }
 
 

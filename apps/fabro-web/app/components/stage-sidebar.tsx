@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ComponentType } from "react";
 import { Link } from "react-router";
-import type { StageState } from "@qltysh/fabro-api-client";
+import type { StageHandler, StageState } from "@qltysh/fabro-api-client";
 import {
   ArrowPathIcon,
   CheckCircleIcon,
@@ -9,7 +9,13 @@ import {
   PauseCircleIcon,
   XCircleIcon,
 } from "@heroicons/react/24/solid";
-import { Bars3BottomLeftIcon, DocumentTextIcon, MapIcon } from "@heroicons/react/24/outline";
+import {
+  Bars3BottomLeftIcon,
+  BoltIcon,
+  DocumentTextIcon,
+  MapIcon,
+  PaperClipIcon,
+} from "@heroicons/react/24/outline";
 import { formatDurationSecs } from "../lib/format";
 import { ACTIVE_STAGE_STATES, formatStageLabel } from "../lib/stage-sidebar";
 import { useTickingNow } from "../lib/time";
@@ -17,6 +23,7 @@ import { useTickingNow } from "../lib/time";
 export interface Stage {
   id: string;
   name: string;
+  handler: StageHandler;
   status: StageState;
   duration: string;
   nodeId: string;
@@ -39,7 +46,7 @@ interface StageSidebarProps {
   stages: Stage[];
   runId: string;
   selectedStageId?: string;
-  activeLink?: "settings" | "graph" | "logs";
+  activeLink?: "settings" | "source" | "logs" | "artifacts" | "events";
 }
 
 export function StageSidebar({ stages, runId, selectedStageId, activeLink }: StageSidebarProps) {
@@ -114,28 +121,15 @@ export function StageSidebar({ stages, runId, selectedStageId, activeLink }: Sta
         <ul className="mt-2 space-y-0.5">
           <li>
             <Link
-              to={`/runs/${runId}/settings`}
+              to={`/runs/${runId}/source`}
               className={`${linkBase} ${
-                activeLink === "settings"
-                  ? "bg-overlay text-fg"
-                  : "text-fg-3 hover:bg-overlay hover:text-fg"
-              }`}
-            >
-              <DocumentTextIcon className="size-4 shrink-0 text-fg-muted" />
-              Run Settings
-            </Link>
-          </li>
-          <li>
-            <Link
-              to={`/runs/${runId}/graph`}
-              className={`${linkBase} ${
-                activeLink === "graph"
+                activeLink === "source"
                   ? "bg-overlay text-fg"
                   : "text-fg-3 hover:bg-overlay hover:text-fg"
               }`}
             >
               <MapIcon className="size-4 shrink-0 text-fg-muted" />
-              Workflow Graph
+              Graph Source
             </Link>
           </li>
           <li>
@@ -149,6 +143,45 @@ export function StageSidebar({ stages, runId, selectedStageId, activeLink }: Sta
             >
               <Bars3BottomLeftIcon className="size-4 shrink-0 text-fg-muted" />
               Run Logs
+            </Link>
+          </li>
+          <li>
+            <Link
+              to={`/runs/${runId}/events`}
+              className={`${linkBase} ${
+                activeLink === "events"
+                  ? "bg-overlay text-fg"
+                  : "text-fg-3 hover:bg-overlay hover:text-fg"
+              }`}
+            >
+              <BoltIcon className="size-4 shrink-0 text-fg-muted" />
+              Run Events
+            </Link>
+          </li>
+          <li>
+            <Link
+              to={`/runs/${runId}/artifacts`}
+              className={`${linkBase} ${
+                activeLink === "artifacts"
+                  ? "bg-overlay text-fg"
+                  : "text-fg-3 hover:bg-overlay hover:text-fg"
+              }`}
+            >
+              <PaperClipIcon className="size-4 shrink-0 text-fg-muted" />
+              Artifacts
+            </Link>
+          </li>
+          <li>
+            <Link
+              to={`/runs/${runId}/settings`}
+              className={`${linkBase} ${
+                activeLink === "settings"
+                  ? "bg-overlay text-fg"
+                  : "text-fg-3 hover:bg-overlay hover:text-fg"
+              }`}
+            >
+              <DocumentTextIcon className="size-4 shrink-0 text-fg-muted" />
+              Run Settings
             </Link>
           </li>
         </ul>

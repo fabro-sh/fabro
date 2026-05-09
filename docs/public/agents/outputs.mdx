@@ -131,11 +131,11 @@ For the **CLI backend**, Fabro takes a different approach: it runs `git diff --n
 
 ## Artifact offloading
 
-When a stage produces a large context value -- an LLM response or any context update -- Fabro automatically offloads it into a global content-addressed blob store instead of leaving the full value inline in durable context. Command stdout and stderr are streamed to stage log files while the command runs, then finalized into durable blob refs after completion.
+When a stage produces a large context value -- an LLM response or any context update -- Fabro automatically offloads it into a global content-addressed blob store instead of leaving the full value inline in durable context. Command output is streamed to a stage log file while the command runs, then finalized into a durable blob ref after completion.
 
 ### How offloading works
 
-After each node completes, Fabro checks every context update. If the serialized JSON of a value exceeds **100KB**, it is stored once by SHA-256 hash and replaced with a durable blob ref. Command stdout and stderr are always stored this way after completion, even when they are small or empty:
+After each node completes, Fabro checks every context update. If the serialized JSON of a value exceeds **100KB**, it is stored once by SHA-256 hash and replaced with a durable blob ref. Command output is always stored this way after completion, even when it is small or empty:
 
 ```
 response.plan  -->  blob://sha256/2cf24dba5fb0...
@@ -238,5 +238,6 @@ Outputs and artifacts appear in several observability surfaces:
 |---|---|
 | `StageCompleted` event | `files_touched` list for the stage |
 | `WorkflowRunCompleted` event | `artifact_count` -- total number of offloaded artifacts across the run |
+| Web UI | Run stage output, stage artifacts, and downloadable artifact files |
 | [Preambles](/execution/context#preamble-construction) | File list and artifact pointer references for completed stages |
 | Stage logs | `status.json` in each stage's run directory contains the full outcome including `files_touched` |

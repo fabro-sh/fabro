@@ -1,0 +1,11 @@
+digraph Sleeper {
+    graph [goal="Sleep long enough for a human to practice interrupts and steering"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    nap [label="Nap", timeout="360s", prompt="Run exactly one shell command using the Bash tool: `sleep 300`, with the tool `timeout_ms` parameter set to 310000 or higher. Wait for it to return. Do not run any other commands, do not read or edit any files, do not check the environment first. After `sleep 300` returns, reply with the single word 'done' and stop."]
+
+    start -> nap -> exit
+}

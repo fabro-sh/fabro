@@ -48,11 +48,8 @@ export interface StageProjection {
      * Per-branch result objects produced by a parallel stage.
      */
     'parallel_results'?: Array<object> | null;
-    'stdout'?: string | null;
-    'stderr'?: string | null;
-    'stdout_bytes'?: number | null;
-    'stderr_bytes'?: number | null;
-    'streams_separated'?: boolean | null;
+    'output'?: string | null;
+    'output_bytes'?: number | null;
     'live_streaming'?: boolean | null;
     'termination'?: CommandTermination | null;
     /**

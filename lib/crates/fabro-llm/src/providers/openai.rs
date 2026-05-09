@@ -179,6 +179,28 @@ struct InputTokenDetails {
     cached_tokens: Option<i64>,
 }
 
+fn token_counts_from_api_usage(usage: Option<&ApiUsage>) -> TokenCounts {
+    usage.map_or_else(TokenCounts::default, |u| {
+        let cached_tokens = u
+            .input_tokens_details
+            .as_ref()
+            .and_then(|d| d.cached_tokens)
+            .unwrap_or(0);
+        let reasoning_tokens = u
+            .output_tokens_details
+            .as_ref()
+            .and_then(|d| d.reasoning_tokens)
+            .unwrap_or(0);
+        TokenCounts {
+            input_tokens: u.input_tokens.saturating_sub(cached_tokens),
+            output_tokens: u.output_tokens.saturating_sub(reasoning_tokens),
+            reasoning_tokens,
+            cache_read_tokens: cached_tokens,
+            ..TokenCounts::default()
+        }
+    })
+}
+
 /// Map the Responses API status to a `FinishReason`.
 fn map_finish_reason(status: Option<&str>, has_tool_calls: bool) -> FinishReason {
     if has_tool_calls {
@@ -462,11 +484,7 @@ async fn build_api_request(request: &Request, stream: bool, codex_mode: bool) ->
         .as_ref()
         .and_then(translate_response_format);
 
-    let include = if reasoning.is_some() {
-        vec!["reasoning.encrypted_content".to_string()]
-    } else {
-        Vec::new()
-    };
+    let include = vec!["reasoning.encrypted_content".to_string()];
 
     let instructions = if codex_mode {
         Some(instructions.unwrap_or_default())
@@ -491,10 +509,9 @@ async fn build_api_request(request: &Request, stream: bool, codex_mode: bool) ->
         text,
         stop: request.stop_sequences.clone(),
         metadata: request.metadata.clone(),
-        // store: false is required for non-Azure OpenAI endpoints. Reasoning
-        // items still round-trip correctly because we request encrypted_content
-        // via the `include` field, which embeds them in the response payload
-        // rather than relying on server-side storage.
+        // store: false means output items are not persisted server-side.
+        // Request encrypted reasoning content on every turn so reasoning items
+        // from models that emit them by default can round-trip statelessly.
         store: false,
         include,
         stream,
@@ -927,22 +944,7 @@ fn handle_response_completed(
 
     if let Some(usage_data) = response_data.get("usage") {
         if let Ok(u) = serde_json::from_value::<ApiUsage>(usage_data.clone()) {
-            let reasoning_tokens = u
-                .output_tokens_details
-                .as_ref()
-                .and_then(|d| d.reasoning_tokens)
-                .unwrap_or(0);
-            state.usage = TokenCounts {
-                input_tokens: u.input_tokens,
-                output_tokens: u.output_tokens.saturating_sub(reasoning_tokens),
-                reasoning_tokens,
-                cache_read_tokens: u
-                    .input_tokens_details
-                    .as_ref()
-                    .and_then(|d| d.cached_tokens)
-                    .unwrap_or(0),
-                ..TokenCounts::default()
-            };
+            state.usage = token_counts_from_api_usage(Some(&u));
         }
     }
 
@@ -1050,27 +1052,7 @@ impl ProviderAdapter for Adapter {
         let (content_parts, has_tool_calls) = parse_output(&api_resp.output);
         let finish_reason = map_finish_reason(api_resp.status.as_deref(), has_tool_calls);
 
-        let usage = api_resp
-            .usage
-            .as_ref()
-            .map_or_else(TokenCounts::default, |u| {
-                let reasoning_tokens = u
-                    .output_tokens_details
-                    .as_ref()
-                    .and_then(|d| d.reasoning_tokens)
-                    .unwrap_or(0);
-                TokenCounts {
-                    input_tokens: u.input_tokens,
-                    output_tokens: u.output_tokens.saturating_sub(reasoning_tokens),
-                    reasoning_tokens,
-                    cache_read_tokens: u
-                        .input_tokens_details
-                        .as_ref()
-                        .and_then(|d| d.cached_tokens)
-                        .unwrap_or(0),
-                    ..TokenCounts::default()
-                }
-            });
+        let usage = token_counts_from_api_usage(api_resp.usage.as_ref());
 
         Ok(Response {
             id: api_resp.id,
@@ -1262,6 +1244,18 @@ mod tests {
         assert_eq!(body["model"], "gpt-4o");
         // stream field is omitted when false (skip_serializing_if)
         assert!(body.get("stream").is_none());
+    }
+
+    #[tokio::test]
+    async fn build_request_body_includes_encrypted_reasoning_for_stateless_requests() {
+        let request = minimal_request();
+
+        let body = build_request_body(&request, false, false).await;
+
+        assert_eq!(
+            body["include"],
+            serde_json::json!(["reasoning.encrypted_content"])
+        );
     }
 
     #[tokio::test]
@@ -1701,6 +1695,36 @@ mod tests {
             raw_response:            None,
             rate_limit:              None,
         }
+    }
+
+    #[test]
+    fn token_counts_disjoint_with_cache_and_reasoning() {
+        let mut state = empty_sse_state();
+        let body = serde_json::json!({
+            "response": {
+                "id": "resp_test",
+                "model": "gpt-5",
+                "output": [],
+                "status": "completed",
+                "usage": {
+                    "input_tokens": 200,
+                    "input_tokens_details": { "cached_tokens": 180 },
+                    "output_tokens": 500,
+                    "output_tokens_details": { "reasoning_tokens": 300 },
+                    "total_tokens": 700
+                }
+            }
+        });
+        let mut events = Vec::new();
+
+        handle_response_completed(&mut state, &body, &mut events);
+
+        assert_eq!(state.usage.input_tokens, 20);
+        assert_eq!(state.usage.cache_read_tokens, 180);
+        assert_eq!(state.usage.output_tokens, 200);
+        assert_eq!(state.usage.reasoning_tokens, 300);
+        assert_eq!(state.usage.cache_write_tokens, 0);
+        assert_eq!(state.usage.total_tokens(), 700);
     }
 
     #[test]

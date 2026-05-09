@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import type { AxiosAdapter, AxiosRequestConfig } from "axios";
 
 import {
   putInstallObjectStore,
@@ -7,6 +8,52 @@ import {
   testInstallObjectStore,
   testInstallSandbox,
 } from "./install-api";
+import { generatedAxios } from "./lib/api-client";
+
+type StubGeneratedResponse = {
+  status: number;
+  data?: unknown;
+  statusText?: string;
+};
+
+const originalAdapter = generatedAxios.defaults.adapter;
+
+afterEach(() => {
+  generatedAxios.defaults.adapter = originalAdapter;
+});
+
+function stubGeneratedAxios(response: StubGeneratedResponse) {
+  const calls: AxiosRequestConfig[] = [];
+  generatedAxios.defaults.adapter = (async (config) => {
+    calls.push(config);
+    if (response.status >= 400) {
+      throw {
+        isAxiosError: true,
+        message: response.statusText ?? `HTTP ${response.status}`,
+        response: {
+          status: response.status,
+          statusText: response.statusText ?? "",
+          data: response.data,
+          headers: {},
+        },
+      };
+    }
+    return {
+      data: response.data,
+      status: response.status,
+      statusText: response.statusText ?? "",
+      headers: {},
+      config,
+    };
+  }) as AxiosAdapter;
+  return calls;
+}
+
+function headerValue(config: AxiosRequestConfig, name: string): string | undefined {
+  const headers = config.headers as { get?: (key: string) => unknown } | undefined;
+  const value = headers?.get?.(name);
+  return typeof value === "string" ? value : undefined;
+}
 
 describe("readInstallError", () => {
   test("prefers the structured install error payload", async () => {
@@ -39,11 +86,7 @@ describe("readInstallError", () => {
 
 describe("install object-store requests", () => {
   test("testInstallObjectStore posts the install payload to the validation endpoint", async () => {
-    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
-    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-      calls.push({ input, init });
-      return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
-    }) as typeof fetch;
+    const calls = stubGeneratedAxios({ status: 200, data: { ok: true } });
 
     await testInstallObjectStore("test-install-token", {
       provider: "s3",
@@ -53,13 +96,11 @@ describe("install object-store requests", () => {
     });
 
     expect(calls).toHaveLength(1);
-    expect(String(calls[0]!.input)).toBe("/install/object-store/test");
-    expect(calls[0]!.init?.method).toBe("POST");
-    expect(calls[0]!.init?.headers).toEqual({
-      Authorization: "Bearer test-install-token",
-      "Content-Type": "application/json",
-    });
-    expect(calls[0]!.init?.body).toBe(
+    expect(calls[0]!.url).toBe("/install/object-store/test");
+    expect(calls[0]!.method).toBe("post");
+    expect(headerValue(calls[0]!, "Authorization")).toBe("Bearer test-install-token");
+    expect(headerValue(calls[0]!, "Content-Type")).toContain("application/json");
+    expect(calls[0]!.data).toBe(
       JSON.stringify({
         provider: "s3",
         bucket: "fabro-data",
@@ -70,24 +111,19 @@ describe("install object-store requests", () => {
   });
 
   test("putInstallObjectStore surfaces structured API errors", async () => {
-    globalThis.fetch = (() =>
-      Promise.resolve(
-        new Response(
-          JSON.stringify({
-            errors: [
-              {
-                status: "422",
-                title: "Unprocessable Entity",
-                detail: "Bucket is required.",
-              },
-            ],
-          }),
+    stubGeneratedAxios({
+      status: 422,
+      statusText: "Unprocessable Entity",
+      data: {
+        errors: [
           {
-            status: 422,
-            headers: { "Content-Type": "application/json" },
+            status: "422",
+            title: "Unprocessable Entity",
+            detail: "Bucket is required.",
           },
-        ),
-      )) as typeof fetch;
+        ],
+      },
+    });
 
     await expect(
       putInstallObjectStore("test-install-token", { provider: "s3" }),
@@ -97,41 +133,35 @@ describe("install object-store requests", () => {
 
 describe("install sandbox requests", () => {
   test("testInstallSandbox posts the install payload to the validation endpoint", async () => {
-    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
-    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-      calls.push({ input, init });
-      return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
-    }) as typeof fetch;
+    const calls = stubGeneratedAxios({ status: 200, data: { ok: true } });
 
     await testInstallSandbox("test-install-token", {
       provider: "daytona",
-      api_key:  "dtn_test",
+      api_key: "dtn_test",
     });
 
     expect(calls).toHaveLength(1);
-    expect(String(calls[0]!.input)).toBe("/install/sandbox/test");
-    expect(calls[0]!.init?.method).toBe("POST");
-    expect(calls[0]!.init?.body).toBe(
+    expect(calls[0]!.url).toBe("/install/sandbox/test");
+    expect(calls[0]!.method).toBe("post");
+    expect(calls[0]!.data).toBe(
       JSON.stringify({ provider: "daytona", api_key: "dtn_test" }),
     );
   });
 
   test("putInstallSandbox surfaces structured API errors", async () => {
-    globalThis.fetch = (() =>
-      Promise.resolve(
-        new Response(
-          JSON.stringify({
-            errors: [
-              {
-                status: "422",
-                title: "Unprocessable Entity",
-                detail: "api_key is required for daytona",
-              },
-            ],
-          }),
-          { status: 422, headers: { "Content-Type": "application/json" } },
-        ),
-      )) as typeof fetch;
+    stubGeneratedAxios({
+      status: 422,
+      statusText: "Unprocessable Entity",
+      data: {
+        errors: [
+          {
+            status: "422",
+            title: "Unprocessable Entity",
+            detail: "api_key is required for daytona",
+          },
+        ],
+      },
+    });
 
     await expect(
       putInstallSandbox("test-install-token", { provider: "daytona" }),

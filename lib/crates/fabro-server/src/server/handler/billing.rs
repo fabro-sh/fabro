@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use fabro_types::{RunProjection, StageProjection, StageState};
+use fabro_types::{RunProjection, StageHandler, StageProjection, StageState};
 
 use super::super::{
     ApiError, AppState, BillingByModel, BillingStageRef, IntoResponse, Json, ListResponse,
@@ -39,15 +39,24 @@ async fn list_run_stages(
     let projection = cached.projection;
 
     let now = Utc::now();
+    let graph = projection.spec().map(fabro_types::RunSpec::graph);
     let stages = projection
         .iter_stages()
         .map(|(stage_id, stage)| {
+            let handler = stage.handler.unwrap_or_else(|| {
+                StageHandler::from_handler_type(
+                    graph
+                        .and_then(|g| g.nodes.get(stage_id.node_id()))
+                        .and_then(|n| n.handler_type()),
+                )
+            });
             run_stage_from_stage_id(
                 stage_id,
                 stage_id.node_id().to_string(),
                 stage.effective_state(),
                 stage.runtime_secs(now),
                 stage.started_at,
+                handler,
             )
         })
         .collect::<Vec<_>>();
@@ -144,7 +153,7 @@ fn live_billing_rows(projection: &RunProjection, now: DateTime<Utc>) -> Vec<Live
 
     for (stage_id, stage) in projection.iter_stages() {
         let node_id = stage_id.node_id();
-        if is_exit_stage(projection, node_id) || !stage_has_billing_row(stage) {
+        if is_boundary_stage(projection, node_id) || !stage_has_billing_row(stage) {
             continue;
         }
 
@@ -187,9 +196,9 @@ fn stage_has_billing_row(stage: &StageProjection) -> bool {
         || stage.state.is_some()
 }
 
-fn is_exit_stage(projection: &RunProjection, node_id: &str) -> bool {
+fn is_boundary_stage(projection: &RunProjection, node_id: &str) -> bool {
     projection
         .spec()
         .and_then(|spec| spec.graph().nodes.get(node_id))
-        .is_some_and(|node| node.handler_type() == Some("exit"))
+        .is_some_and(|node| matches!(node.handler_type(), Some("start" | "exit")))
 }

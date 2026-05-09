@@ -228,6 +228,13 @@ Start nodes can also be identified by ID (`start` or `Start`). Exit nodes can be
 |---|---|---|
 | `duration` | Duration | How long to pause (required). E.g. `"30s"`, `"2m"` |
 
+### Human nodes
+
+| Attribute | Type | Description |
+|---|---|---|
+| `question_type` | String | Optional interview question type override: `yes_no`, `confirmation`, `multiple_choice`, `multi_select`, or `freeform`. Defaults to `freeform` when the gate only has a freeform edge; otherwise defaults to `multiple_choice`. |
+| `human.default_choice` | String | Target node to use when the question times out. |
+
 ### Manager loop (sub-workflow) nodes
 
 | Attribute | Type | Description |

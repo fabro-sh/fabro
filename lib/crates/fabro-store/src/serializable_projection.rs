@@ -14,8 +14,7 @@ impl Serialize for SerializableProjection<'_> {
             stage.prompt = None;
             stage.response = None;
             stage.diff = None;
-            stage.stdout = None;
-            stage.stderr = None;
+            stage.output = None;
         }
 
         projection.serialize(serializer)

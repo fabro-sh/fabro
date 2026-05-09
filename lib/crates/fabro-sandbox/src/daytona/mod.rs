@@ -425,7 +425,8 @@ impl DaytonaSandbox {
             name: Some(name),
             auto_stop_interval: self.config.auto_stop_interval,
             labels: self.config.labels.clone(),
-            ephemeral: Some(true),
+            auto_delete_interval: Some(-1),
+            ephemeral: Some(false),
             network_block_all,
             network_allow_list,
             ..Default::default()
@@ -902,16 +903,62 @@ impl Sandbox for DaytonaSandbox {
         Ok(())
     }
 
-    async fn cleanup(&self) -> crate::Result<()> {
-        self.emit(SandboxEvent::CleanupStarted {
+    async fn start(&self) -> crate::Result<()> {
+        self.emit(SandboxEvent::StartStarted {
+            provider: "daytona".into(),
+        });
+        let start = Instant::now();
+        let sandbox = self.sandbox()?;
+        if let Err(e) = self.client.start(&sandbox.name).await {
+            let err = crate::Error::context("Failed to start Daytona sandbox", e);
+            self.emit(SandboxEvent::StartFailed {
+                provider: "daytona".into(),
+                error:    err.to_string(),
+                causes:   err.causes(),
+            });
+            return Err(err);
+        }
+        let duration_ms = elapsed_ms(start);
+        self.emit(SandboxEvent::StartCompleted {
+            provider: "daytona".into(),
+            duration_ms,
+        });
+        Ok(())
+    }
+
+    async fn stop(&self) -> crate::Result<()> {
+        self.emit(SandboxEvent::StopStarted {
+            provider: "daytona".into(),
+        });
+        let start = Instant::now();
+        let sandbox = self.sandbox()?;
+        if let Err(e) = self.client.stop(&sandbox.name).await {
+            let err = crate::Error::context("Failed to stop Daytona sandbox", e);
+            self.emit(SandboxEvent::StopFailed {
+                provider: "daytona".into(),
+                error:    err.to_string(),
+                causes:   err.causes(),
+            });
+            return Err(err);
+        }
+        let duration_ms = elapsed_ms(start);
+        self.emit(SandboxEvent::StopCompleted {
+            provider: "daytona".into(),
+            duration_ms,
+        });
+        Ok(())
+    }
+
+    async fn delete(&self) -> crate::Result<()> {
+        self.emit(SandboxEvent::DeleteStarted {
             provider: "daytona".into(),
         });
         let start = Instant::now();
         if let Some(sandbox) = self.sandbox.get() {
-            tracing::info!("Destroying Daytona sandbox");
+            tracing::info!("Deleting Daytona sandbox");
             if let Err(e) = sandbox.delete().await {
                 let err = crate::Error::context("Failed to delete Daytona sandbox", e);
-                self.emit(SandboxEvent::CleanupFailed {
+                self.emit(SandboxEvent::DeleteFailed {
                     provider: "daytona".into(),
                     error:    err.to_string(),
                     causes:   err.causes(),
@@ -919,12 +966,16 @@ impl Sandbox for DaytonaSandbox {
                 return Err(err);
             }
         }
-        let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-        self.emit(SandboxEvent::CleanupCompleted {
+        let duration_ms = elapsed_ms(start);
+        self.emit(SandboxEvent::DeleteCompleted {
             provider: "daytona".into(),
             duration_ms,
         });
         Ok(())
+    }
+
+    async fn cleanup(&self) -> crate::Result<()> {
+        self.delete().await
     }
 
     fn working_directory(&self) -> &str {
@@ -1967,6 +2018,25 @@ mod tests {
         assert!(config.snapshot.is_none());
         assert!(config.auto_stop_interval.is_none());
         assert!(config.labels.is_none());
+    }
+
+    #[tokio::test]
+    async fn base_params_create_run_owned_non_ephemeral_sandbox() {
+        let sandbox = DaytonaSandbox::new(
+            DaytonaConfig::default(),
+            None,
+            None,
+            None,
+            None,
+            Some("dtn_test".to_string()),
+        )
+        .await
+        .expect("sandbox config should be valid");
+
+        let params = sandbox.base_params();
+
+        assert_eq!(params.ephemeral, Some(false));
+        assert_eq!(params.auto_delete_interval, Some(-1));
     }
 
     #[test]

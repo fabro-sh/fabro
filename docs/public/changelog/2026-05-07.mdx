@@ -1,0 +1,66 @@
+---
+title: "Run debugger, sticky steering, and run filters"
+date: "2026-05-07"
+---
+
+<Warning>
+**Command output streams are now merged.** Command stages expose one ordered output log instead of separate stdout and stderr streams.
+
+To migrate:
+1. Replace `/api/v1/runs/{id}/stages/{stageId}/logs/{stream}` with `/api/v1/runs/{id}/stages/{stageId}/logs/output`.
+2. Replace command outcome fields such as `stdout`, `stderr`, `stdout_bytes`, and `stderr_bytes` with `output` and `output_bytes`.
+</Warning>
+
+## Stage threads and debug events
+
+The run stages view is now a stage debugger with a `Thread` view for readable agent activity and a `Debug` view for raw stage events. You can search and filter events, inspect tool calls in a side panel, see token and duration metrics, and open formatted JSON or Markdown details without leaving the stage.
+
+Command stages now get a `Logs` tab with the real command output, so command-heavy workflows no longer require jumping to raw run logs to see what happened. Consecutive calls to the same tool are grouped together, which keeps long agent stages scannable while preserving the underlying details.
+
+## Steering stays attached to the run
+
+The web app now keeps steering and interview controls in a bottom-attached run dock. You can move between stages, logs, source, and billing while keeping the current human action available at the bottom of the screen.
+
+Steering actions are also available from the run menu, including interrupt steering. That makes it easier to redirect a running agent from whichever run view you are already using.
+
+## More useful run lists
+
+The runs page now supports URL-backed filters for search, repository, workflow, created time, archived runs, and list-versus-column view. Run rows split repository, workflow, and created time into separate columns, and archived runs can be shown explicitly instead of disappearing from the board.
+
+Run cards now surface pull request diff counts when available, and each terminal column can archive all archivable runs in that column from its actions menu.
+
+## More
+
+<Accordion title="API">
+- Board run listing now accepts `include_archived=true` and can return an `archived` column
+- Run projections and summaries now expose `last_event_at` for activity-aware run views
+- Run projections and summaries now expose `diff_summary` with changed-file, addition, and deletion counts
+- Command stage log responses now return a single ordered output log instead of separate stdout and stderr fields
+</Accordion>
+
+<Accordion title="CLI">
+- Raw run logs are now kept free of ANSI escape sequences
+- Colored run span fields are parsed correctly when reading server-backed run logs
+</Accordion>
+
+<Accordion title="Workflows">
+- Command stages now persist one merged output stream for ordered stdout/stderr display
+- Workflow breadcrumbs stay visible on run detail pages
+- The Graph tab has moved to the run sidebar as `Graph Source`
+</Accordion>
+
+<Accordion title="Improvements">
+- Run Logs now support level filtering, text search, copied output, and live refresh while a run is active
+- Run stage rows show model, duration, token counts, and absolute timestamp tooltips
+- Run Billing hides stages with no billing usage while keeping active stages visible
+- Run headers now show workflow metadata and recent activity
+- The run detail action buttons are collapsed into a menu
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed active SSE streams blocking server shutdown
+- Fixed the synthetic start node being included in billing rollups
+- Fixed the Billing tab losing its anchored layout on run detail pages
+- Fixed full-height run stage layouts collapsing in the browser
+- Fixed the degraded sandbox banner appearing on the run files page after the sandbox is gone
+</Accordion>

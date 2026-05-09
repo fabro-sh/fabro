@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use fabro_types::{CommandOutputStream, Principal, RunBlobId, RunId, StageId, UserPrincipal};
+use fabro_types::{Principal, RunBlobId, RunId, StageId, UserPrincipal};
 use jsonwebtoken::decode_header;
 use strum::IntoStaticStr;
 
@@ -54,11 +54,7 @@ pub(crate) struct RequireRunScoped(pub(crate) RunId);
 pub(crate) struct RequireRunBlob(pub(crate) RunId, pub(crate) RunBlobId);
 pub(crate) struct RequireRunStageScoped(pub(crate) RunId, pub(crate) String);
 pub(crate) struct RequireStageArtifact(pub(crate) RunId, pub(crate) StageId);
-pub(crate) struct RequireCommandLog(
-    pub(crate) RunId,
-    pub(crate) StageId,
-    pub(crate) CommandOutputStream,
-);
+pub(crate) struct RequireCommandLog(pub(crate) RunId, pub(crate) StageId);
 
 #[derive(Clone, Debug)]
 pub(crate) struct AuthenticatedUser {
@@ -246,18 +242,14 @@ impl FromRequestParts<Arc<AppState>> for RequireCommandLog {
         parts: &mut Parts,
         state: &Arc<AppState>,
     ) -> Result<Self, Self::Rejection> {
-        let Path((id, stage_id, stream)): Path<(String, String, String)> =
-            Path::from_request_parts(parts, state)
-                .await
-                .map_err(IntoResponse::into_response)?;
+        let Path((id, stage_id)): Path<(String, String)> = Path::from_request_parts(parts, state)
+            .await
+            .map_err(IntoResponse::into_response)?;
         let run_id = parse_run_id_path(&id)?;
         let stage_id = parse_stage_id_path(&stage_id)?;
-        let stream = stream
-            .parse::<CommandOutputStream>()
-            .map_err(|_| ApiError::bad_request("Invalid command log stream.").into_response())?;
         require_worker_or_user_for_run(&auth_slot_from_parts(parts), &run_id)
             .map_err(IntoResponse::into_response)?;
-        Ok(Self(run_id, stage_id, stream))
+        Ok(Self(run_id, stage_id))
     }
 }
 

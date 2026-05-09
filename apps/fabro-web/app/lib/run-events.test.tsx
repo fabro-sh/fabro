@@ -9,7 +9,7 @@ import {
   type BroadcastChannelLike,
 } from "./cross-tab-sse";
 import { queryKeys } from "./query-keys";
-import type { EventSourceLike } from "./sse";
+import type { EventSourceLike, SseKey } from "./sse";
 
 type MessageHandler = ((event: { data: string }) => void) | null;
 
@@ -68,13 +68,20 @@ describe("queryKeysForRunEvent", () => {
       queryKeys.runs.stageEvents("run-1", "agent@1"),
     ]);
   });
+
+  test("stage-scoped interrupt injection invalidates run events and stage events", () => {
+    expect(queryKeysForRunEvent("run-1", "agent.interrupt.injected", "nap@1")).toEqual([
+      queryKeys.runs.events("run-1", 1000),
+      queryKeys.runs.stageEvents("run-1", "nap@1"),
+    ]);
+  });
 });
 
 describe("subscribeToRunEvents", () => {
   test("coordinated mode uses the global attach stream and filters by run_id", async () => {
     const source = new FakeEventSource();
     const created: string[] = [];
-    const keys: string[] = [];
+    const keys: SseKey[] = [];
     const coordinator = createCoordinator((url) => {
       created.push(url);
       return source;
@@ -107,7 +114,7 @@ describe("subscribeToRunEvents", () => {
 
   test("coordinated terminal events invalidate without closing the global stream", async () => {
     const source = new FakeEventSource();
-    const keys: string[] = [];
+    const keys: SseKey[] = [];
     const coordinator = createCoordinator(() => source);
     const cleanup = subscribeToRunEvents(
       "run-terminal",
@@ -124,8 +131,8 @@ describe("subscribeToRunEvents", () => {
 
     source.emit({ event: "run.failed", run_id: "run-terminal" });
     expect(source.closed).toBe(false);
-    expect(keys).toContain(queryKeys.runs.files("run-terminal"));
-    expect(keys).toContain(queryKeys.runs.billing("run-terminal"));
+    expect(keys).toContainEqual(queryKeys.runs.files("run-terminal"));
+    expect(keys).toContainEqual(queryKeys.runs.billing("run-terminal"));
 
     keys.length = 0;
     source.emit({ event: "run.archived", run_id: "run-terminal" });
@@ -139,9 +146,9 @@ describe("subscribeToRunEvents", () => {
   test("fallback refcounts run-scoped sources and keeps mutators active until final unsubscribe", () => {
     const source = new FakeEventSource();
     const created: string[] = [];
-    const keys: string[] = [];
+    const keys: SseKey[] = [];
     const coordinator = createFallbackCoordinator();
-    const mutate = (key: string) => {
+    const mutate = (key: SseKey) => {
       keys.push(key);
       return Promise.resolve();
     };
@@ -170,9 +177,9 @@ describe("subscribeToRunEvents", () => {
   test("fallback runs payload callbacks for later subscribers on a shared source", () => {
     const source = new FakeEventSource();
     const seen: string[] = [];
-    const keys: string[] = [];
+    const keys: SseKey[] = [];
     const coordinator = createFallbackCoordinator();
-    const mutate = (key: string) => {
+    const mutate = (key: SseKey) => {
       keys.push(key);
       return Promise.resolve();
     };
@@ -204,7 +211,7 @@ describe("subscribeToRunEvents", () => {
 
   test("fallback terminal events close the source after invalidating keys", () => {
     const source = new FakeEventSource();
-    const keys: string[] = [];
+    const keys: SseKey[] = [];
     const coordinator = createFallbackCoordinator();
     const cleanup = subscribeToRunEvents(
       "run-terminal",
@@ -219,8 +226,8 @@ describe("subscribeToRunEvents", () => {
     source.emit({ event: "run.failed" });
 
     expect(source.closed).toBe(true);
-    expect(keys).toContain(queryKeys.runs.files("run-terminal"));
-    expect(keys).toContain(queryKeys.runs.billing("run-terminal"));
+    expect(keys).toContainEqual(queryKeys.runs.files("run-terminal"));
+    expect(keys).toContainEqual(queryKeys.runs.billing("run-terminal"));
 
     cleanup();
     coordinator.close();
@@ -228,7 +235,7 @@ describe("subscribeToRunEvents", () => {
 
   test("envelope with suffixed stage_id invalidates stageEvents(runId, stageId)", async () => {
     const source = new FakeEventSource();
-    const keys: string[] = [];
+    const keys: SseKey[] = [];
     const coordinator = createCoordinator(() => source);
     const cleanup = subscribeToRunEvents(
       "run-stage",
@@ -248,12 +255,12 @@ describe("subscribeToRunEvents", () => {
       node_id: "verify",
     });
 
-    expect(keys).toContain(queryKeys.runs.stageEvents("run-stage", "verify@2"));
-    expect(keys).toContain(queryKeys.runs.stages("run-stage"));
-    expect(keys).toContain(queryKeys.runs.events("run-stage", 1000));
-    expect(keys).toContain(queryKeys.runs.graph("run-stage", "LR"));
-    expect(keys).toContain(queryKeys.runs.detail("run-stage"));
-    expect(keys).not.toContain(queryKeys.runs.stageEvents("run-stage", "verify"));
+    expect(keys).toContainEqual(queryKeys.runs.stageEvents("run-stage", "verify@2"));
+    expect(keys).toContainEqual(queryKeys.runs.stages("run-stage"));
+    expect(keys).toContainEqual(queryKeys.runs.events("run-stage", 1000));
+    expect(keys).toContainEqual(queryKeys.runs.graph("run-stage", "LR"));
+    expect(keys).toContainEqual(queryKeys.runs.detail("run-stage"));
+    expect(keys).not.toContainEqual(queryKeys.runs.stageEvents("run-stage", "verify"));
 
     cleanup();
     coordinator.close();
@@ -261,7 +268,7 @@ describe("subscribeToRunEvents", () => {
 
   test("falls back to node_id when an event has no stage_id", async () => {
     const source = new FakeEventSource();
-    const keys: string[] = [];
+    const keys: SseKey[] = [];
     const coordinator = createCoordinator(() => source);
     const cleanup = subscribeToRunEvents(
       "run-stage-node",
@@ -276,8 +283,8 @@ describe("subscribeToRunEvents", () => {
     await waitFor(() => source.onmessage !== null);
     source.emit({ event: "stage.started", run_id: "run-stage-node", node_id: "verify" });
 
-    expect(keys).toContain(queryKeys.runs.stageEvents("run-stage-node", "verify"));
-    expect(keys).toContain(queryKeys.runs.stages("run-stage-node"));
+    expect(keys).toContainEqual(queryKeys.runs.stageEvents("run-stage-node", "verify"));
+    expect(keys).toContainEqual(queryKeys.runs.stages("run-stage-node"));
 
     cleanup();
     coordinator.close();
@@ -287,7 +294,7 @@ describe("subscribeToRunEvents", () => {
     const firstSource = new FakeEventSource();
     const secondSource = new FakeEventSource();
     const sources = [firstSource, secondSource];
-    const keys: string[] = [];
+    const keys: SseKey[] = [];
     const coordinator = createFallbackCoordinator();
 
     const firstCleanup = subscribeToRunEvents(

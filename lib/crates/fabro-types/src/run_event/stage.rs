@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::ExecOutputTail;
-use crate::{BilledModelUsage, FailureDetail, Outcome, StageOutcome};
+use crate::{BilledModelUsage, DiffSummary, FailureDetail, Outcome, StageOutcome};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StageStartedProps {
@@ -114,6 +114,8 @@ pub struct CheckpointCompletedProps {
     pub node_visits: BTreeMap<String, usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diff: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_summary: Option<DiffSummary>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

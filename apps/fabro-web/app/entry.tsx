@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router";
 import { SWRConfig } from "swr";
 import { installRoutes } from "./install-router";
-import { apiFetcher } from "./lib/api-client";
 import { resolveFabroMode } from "./mode";
 import { routes } from "./router";
 
@@ -26,7 +25,6 @@ createRoot(rootElement).render(
   <StrictMode>
     <SWRConfig
       value={{
-        fetcher: apiFetcher,
         revalidateOnFocus: false,
         dedupingInterval: 2000,
         shouldRetryOnError: false,

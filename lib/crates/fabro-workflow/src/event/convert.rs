@@ -159,6 +159,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             total_usd_micros,
             final_git_commit_sha,
             final_patch,
+            diff_summary,
             billing,
         } => EventBody::RunCompleted(fabro_types::RunCompletedProps {
             duration_ms:          *duration_ms,
@@ -168,6 +169,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             total_usd_micros:     *total_usd_micros,
             final_git_commit_sha: final_git_commit_sha.clone(),
             final_patch:          final_patch.clone(),
+            diff_summary:         *diff_summary,
             billing:              billing.clone(),
         }),
         Event::WorkflowRunFailed {
@@ -176,6 +178,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             reason,
             git_commit_sha,
             final_patch,
+            diff_summary,
         } => EventBody::RunFailed(fabro_types::RunFailedProps {
             error:          error.to_string(),
             causes:         error.causes(),
@@ -183,6 +186,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             reason:         *reason,
             git_commit_sha: git_commit_sha.clone(),
             final_patch:    final_patch.clone(),
+            diff_summary:   *diff_summary,
         }),
         Event::RunNotice {
             level,
@@ -428,6 +432,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             restart_failure_signatures,
             node_visits,
             diff,
+            diff_summary,
             ..
         } => EventBody::CheckpointCompleted(fabro_types::CheckpointCompletedProps {
             status: status.clone(),
@@ -442,6 +447,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             restart_failure_signatures: restart_failure_signatures.clone(),
             node_visits: node_visits.clone(),
             diff: diff.clone(),
+            diff_summary: *diff_summary,
         }),
         Event::CheckpointFailed {
             error,
@@ -776,6 +782,69 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 error:    error.clone(),
                 causes:   causes.clone(),
             }),
+            SandboxEvent::StartStarted { provider } => {
+                EventBody::SandboxStartStarted(fabro_types::SandboxStartStartedProps {
+                    provider: provider.clone(),
+                })
+            }
+            SandboxEvent::StartCompleted {
+                provider,
+                duration_ms,
+            } => EventBody::SandboxStartCompleted(fabro_types::SandboxStartCompletedProps {
+                provider:    provider.clone(),
+                duration_ms: *duration_ms,
+            }),
+            SandboxEvent::StartFailed {
+                provider,
+                error,
+                causes,
+            } => EventBody::SandboxStartFailed(fabro_types::SandboxStartFailedProps {
+                provider: provider.clone(),
+                error:    error.clone(),
+                causes:   causes.clone(),
+            }),
+            SandboxEvent::StopStarted { provider } => {
+                EventBody::SandboxStopStarted(fabro_types::SandboxStopStartedProps {
+                    provider: provider.clone(),
+                })
+            }
+            SandboxEvent::StopCompleted {
+                provider,
+                duration_ms,
+            } => EventBody::SandboxStopCompleted(fabro_types::SandboxStopCompletedProps {
+                provider:    provider.clone(),
+                duration_ms: *duration_ms,
+            }),
+            SandboxEvent::StopFailed {
+                provider,
+                error,
+                causes,
+            } => EventBody::SandboxStopFailed(fabro_types::SandboxStopFailedProps {
+                provider: provider.clone(),
+                error:    error.clone(),
+                causes:   causes.clone(),
+            }),
+            SandboxEvent::DeleteStarted { provider } => {
+                EventBody::SandboxDeleteStarted(fabro_types::SandboxDeleteStartedProps {
+                    provider: provider.clone(),
+                })
+            }
+            SandboxEvent::DeleteCompleted {
+                provider,
+                duration_ms,
+            } => EventBody::SandboxDeleteCompleted(fabro_types::SandboxDeleteCompletedProps {
+                provider:    provider.clone(),
+                duration_ms: *duration_ms,
+            }),
+            SandboxEvent::DeleteFailed {
+                provider,
+                error,
+                causes,
+            } => EventBody::SandboxDeleteFailed(fabro_types::SandboxDeleteFailedProps {
+                provider: provider.clone(),
+                error:    error.clone(),
+                causes:   causes.clone(),
+            }),
             SandboxEvent::SnapshotPulling { name } => {
                 EventBody::SnapshotPulling(fabro_types::SnapshotNameProps { name: name.clone() })
             }
@@ -959,26 +1028,20 @@ fn event_body_from_event(event: &Event) -> EventBody {
             timeout_ms: *timeout_ms,
         }),
         Event::CommandCompleted {
-            stdout,
-            stderr,
+            output,
             exit_code,
             duration_ms,
             termination,
-            stdout_bytes,
-            stderr_bytes,
-            streams_separated,
+            output_bytes,
             live_streaming,
             ..
         } => EventBody::CommandCompleted(fabro_types::CommandCompletedProps {
-            stdout:            stdout.clone(),
-            stderr:            stderr.clone(),
-            exit_code:         *exit_code,
-            duration_ms:       *duration_ms,
-            termination:       *termination,
-            stdout_bytes:      *stdout_bytes,
-            stderr_bytes:      *stderr_bytes,
-            streams_separated: *streams_separated,
-            live_streaming:    *live_streaming,
+            output:         output.clone(),
+            exit_code:      *exit_code,
+            duration_ms:    *duration_ms,
+            termination:    *termination,
+            output_bytes:   *output_bytes,
+            live_streaming: *live_streaming,
         }),
         Event::AgentCliStarted {
             visit,
@@ -1033,6 +1096,11 @@ fn event_body_from_event(event: &Event) -> EventBody {
         }
         Event::AgentSessionEnded { .. } => {
             EventBody::AgentSessionEnded(fabro_types::AgentSessionEndedProps {})
+        }
+        Event::AgentInterruptInjected { visit, .. } => {
+            EventBody::AgentInterruptInjected(fabro_types::AgentInterruptInjectedProps {
+                visit: *visit,
+            })
         }
         Event::AgentSteerBuffered { .. } => {
             EventBody::AgentSteerBuffered(fabro_types::AgentSteerBufferedProps::default())
@@ -1400,6 +1468,25 @@ mod tests {
     }
 
     #[test]
+    fn run_event_sandbox_stop_and_delete_use_distinct_event_names() {
+        let stopped = to_run_event(&fixtures::RUN_5, &Event::Sandbox {
+            event: SandboxEvent::StopCompleted {
+                provider:    "docker".to_string(),
+                duration_ms: 10,
+            },
+        });
+        let deleted = to_run_event(&fixtures::RUN_5, &Event::Sandbox {
+            event: SandboxEvent::DeleteCompleted {
+                provider:    "docker".to_string(),
+                duration_ms: 20,
+            },
+        });
+
+        assert_eq!(stopped.event_name(), "sandbox.stop.completed");
+        assert_eq!(deleted.event_name(), "sandbox.delete.completed");
+    }
+
+    #[test]
     fn run_event_sandbox_failure_serializes_causes() {
         let stored = to_run_event(&fixtures::RUN_5, &Event::Sandbox {
             event: SandboxEvent::InitializeFailed {
@@ -1431,6 +1518,7 @@ mod tests {
             reason:         FailureReason::WorkflowError,
             git_commit_sha: Some("abc123".to_string()),
             final_patch:    None,
+            diff_summary:   None,
         });
 
         assert_eq!(stored.event_name(), "run.failed");
@@ -1448,6 +1536,7 @@ mod tests {
             reason:         FailureReason::WorkflowError,
             git_commit_sha: None,
             final_patch:    None,
+            diff_summary:   None,
         });
 
         let properties = stored.properties().unwrap();
@@ -1553,6 +1642,30 @@ mod tests {
             stored.parallel_branch_id,
             Some(ParallelBranchId::new(StageId::new("fanout", 2), 0))
         );
+    }
+
+    #[test]
+    fn agent_interrupt_injected_populates_stage_session_and_actor() {
+        let actor = Principal::System {
+            system_kind: SystemActorKind::Engine,
+        };
+        let stored = to_run_event(&fixtures::RUN_1, &Event::AgentInterruptInjected {
+            node_id:    "code".to_string(),
+            visit:      3,
+            session_id: "ses_1".to_string(),
+            actor:      Some(actor.clone()),
+        });
+
+        assert_eq!(stored.event_name(), "agent.interrupt.injected");
+        assert_eq!(stored.node_id.as_deref(), Some("code"));
+        assert_eq!(stored.node_label.as_deref(), Some("code"));
+        assert_eq!(stored.stage_id, Some(StageId::new("code", 3)));
+        assert_eq!(stored.session_id.as_deref(), Some("ses_1"));
+        assert_eq!(stored.actor, Some(actor));
+        match stored.body {
+            EventBody::AgentInterruptInjected(props) => assert_eq!(props.visit, 3),
+            other => panic!("unexpected body: {other:?}"),
+        }
     }
 
     #[test]

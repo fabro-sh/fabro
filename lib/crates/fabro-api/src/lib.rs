@@ -29,12 +29,12 @@ pub mod types {
         BlockedReason, FailureReason, RunControlAction, RunStatus, SuccessReason, TerminalStatus,
     };
     pub use fabro_types::{
-        AuthMethod, BilledTokenCounts, CommandOutputStream, CommandTermination, DiffStats,
-        DirtyStatus, EventEnvelope, GitContext, IdpIdentity, InterviewOption,
-        InterviewQuestionRecord, PendingInterviewRecord, PreRunPushOutcome, Principal,
-        QuestionType, RepositoryReference, RunClientProvenance, RunEvent, RunProjection,
-        RunProvenance, RunServerProvenance, RunSummary, SecretMetadata, SecretType, ServerSettings,
-        StageCompletion, StageOutcome, StageProjection, StageState, SystemActorKind, UserPrincipal,
+        AuthMethod, BilledTokenCounts, CommandTermination, DiffStats, DiffSummary, DirtyStatus,
+        EventEnvelope, GitContext, IdpIdentity, InterviewOption, InterviewQuestionRecord,
+        PendingInterviewRecord, PreRunPushOutcome, Principal, QuestionType, RepositoryReference,
+        RunClientProvenance, RunEvent, RunProjection, RunProvenance, RunServerProvenance,
+        RunSummary, SecretMetadata, SecretType, ServerSettings, StageCompletion, StageHandler,
+        StageOutcome, StageProjection, StageState, SystemActorKind, UserPrincipal,
         WorkflowSettings,
     };
 

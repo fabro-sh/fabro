@@ -26,6 +26,7 @@ import type { LocalSandboxSettings } from './local-sandbox-settings';
 export interface RunSandboxSettings {
     'provider': string;
     'preserve': boolean;
+    'stop_on_terminal': boolean;
     'devcontainer': boolean;
     'env': { [key: string]: string; };
     'local': LocalSandboxSettings;

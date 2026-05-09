@@ -118,8 +118,7 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
     stage.parallel_results = Some(json!([{ "stage": "fanout@1" }]));
     stage.duration_ms = Some(1234);
     stage.usage = Some(sample_usage());
-    stage.stdout = Some("stdout".to_string());
-    stage.stderr = Some("stderr".to_string());
+    stage.output = Some("output".to_string());
 
     let serialized = serde_json::to_value(SerializableProjection(&projection))
         .expect("projection should serialize");
@@ -144,8 +143,7 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
     assert_eq!(node.prompt, None);
     assert_eq!(node.response, None);
     assert_eq!(node.diff, None);
-    assert_eq!(node.stdout, None);
-    assert_eq!(node.stderr, None);
+    assert_eq!(node.output, None);
     assert_eq!(node.first_event_seq, first_event_seq(2));
     assert_eq!(
         node.completion

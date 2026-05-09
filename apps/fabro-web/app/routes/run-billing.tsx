@@ -22,6 +22,15 @@ function isInFlight(stage: RunBillingStage): boolean {
   return stage.state != null && IN_FLIGHT_STAGE_STATES.has(stage.state);
 }
 
+function isVisibleRow(row: MappedStageRow): boolean {
+  if (row.inFlight) return true;
+  return (
+    (row.inputTokens ?? 0) > 0 ||
+    (row.outputTokens ?? 0) > 0 ||
+    (row.totalUsdMicros ?? 0) > 0
+  );
+}
+
 interface MappedStageRow {
   stage:          string;
   model:          string | null;
@@ -29,6 +38,7 @@ interface MappedStageRow {
   outputTokens:   number | null;
   runtimeSecs:    number;
   totalUsdMicros: number | null | undefined;
+  inFlight:       boolean;
 }
 
 function liveRuntimeSecs(stage: RunBillingStage, now: number): number {
@@ -41,6 +51,8 @@ function liveRuntimeSecs(stage: RunBillingStage, now: number): number {
   return stage.runtime_secs;
 }
 
+export const handle = { wide: true };
+
 function mapStageRow(stage: RunBillingStage, runtimeSecs: number): MappedStageRow {
   const hasModel = stage.model != null;
   return {
@@ -52,6 +64,7 @@ function mapStageRow(stage: RunBillingStage, runtimeSecs: number): MappedStageRo
       : null,
     runtimeSecs,
     totalUsdMicros: stage.billing.total_usd_micros,
+    inFlight:       isInFlight(stage),
   };
 }
 
@@ -121,7 +134,7 @@ export default function RunBilling({ params }: { params: { id: string } }) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6">
       <div className="overflow-hidden rounded-md border border-line">
         <table className="w-full text-sm">
           <thead>
@@ -134,7 +147,7 @@ export default function RunBilling({ params }: { params: { id: string } }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {rows.filter(isVisibleRow).map((row) => (
               <tr key={row.stage} className="border-b border-line last:border-b-0">
                 <td className="px-4 py-3 text-fg-2">{row.stage}</td>
                 <td className="px-4 py-3 font-mono text-xs text-fg-3">

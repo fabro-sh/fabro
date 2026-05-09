@@ -44,7 +44,7 @@ pub(super) fn demo_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/blobs", post(not_implemented))
         .route("/runs/{id}/blobs/{blobId}", get(not_implemented))
         .route(
-            "/runs/{id}/stages/{stageId}/logs/{stream}",
+            "/runs/{id}/stages/{stageId}/logs/output",
             get(not_implemented),
         )
         .route("/runs/{id}/checkpoint", get(demo::checkpoint_stub))
@@ -107,6 +107,9 @@ pub(super) fn demo_routes() -> Router<Arc<AppState>> {
         .route("/system/repair/runs", get(demo::get_system_repair_runs))
         .route("/system/prune/runs", post(demo::prune_runs))
         .route("/billing", get(demo::get_aggregate_billing))
+        .route("/workflows", get(demo::list_workflows))
+        .route("/workflows/{name}", get(demo::get_workflow))
+        .route("/workflows/{name}/runs", get(demo::list_workflow_runs))
         .merge(runs::manifest_routes())
         .merge(graph::manifest_routes())
         .merge(models::routes())

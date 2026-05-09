@@ -26,6 +26,8 @@ import type { CloseRunPullRequestResponse } from '../models';
 // @ts-ignore
 import type { CreateRunPullRequestRequest } from '../models';
 // @ts-ignore
+import type { DeleteRunResponse } from '../models';
+// @ts-ignore
 import type { ErrorResponse } from '../models';
 // @ts-ignore
 import type { ForkRequest } from '../models';
@@ -275,7 +277,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Deletes durable store state for a run. This does not remove any local run directory. Active runs require `force=true`.
+         * Deletes durable store state, local run scratch data, and the run-owned sandbox unless sandbox preservation is enabled. Active runs require `force=true`.
          * @summary Delete Run
          * @param {string} id Unique run identifier (ULID).
          * @param {boolean} [force] Whether to force deletion of an active run. Defaults to &#x60;false&#x60;.
@@ -757,10 +759,11 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
          * Renders the workflow graph as an SVG image using Graphviz.
          * @summary Render SVG
          * @param {string} id Unique run identifier (ULID).
+         * @param {RetrieveRunGraphDirectionEnum} [direction] Optional Graphviz rank direction override for the rendered graph.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        retrieveRunGraph: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        retrieveRunGraph: async (id: string, direction?: RetrieveRunGraphDirectionEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('retrieveRunGraph', 'id', id)
             const localVarPath = `/api/v1/runs/{id}/graph`
@@ -781,6 +784,10 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             // authentication BearerAuth required
             // http bearer authentication required
             await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (direction !== undefined) {
+                localVarQueryParameter['direction'] = direction;
+            }
 
             localVarHeaderParameter['Accept'] = 'image/svg+xml,application/json';
 
@@ -1157,14 +1164,14 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Deletes durable store state for a run. This does not remove any local run directory. Active runs require `force=true`.
+         * Deletes durable store state, local run scratch data, and the run-owned sandbox unless sandbox preservation is enabled. Active runs require `force=true`.
          * @summary Delete Run
          * @param {string} id Unique run identifier (ULID).
          * @param {boolean} [force] Whether to force deletion of an active run. Defaults to &#x60;false&#x60;.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async deleteRun(id: string, force?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+        async deleteRun(id: string, force?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DeleteRunResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.deleteRun(id, force, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.deleteRun']?.[localVarOperationServerIndex]?.url;
@@ -1310,11 +1317,12 @@ export const RunsApiFp = function(configuration?: Configuration) {
          * Renders the workflow graph as an SVG image using Graphviz.
          * @summary Render SVG
          * @param {string} id Unique run identifier (ULID).
+         * @param {RetrieveRunGraphDirectionEnum} [direction] Optional Graphviz rank direction override for the rendered graph.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async retrieveRunGraph(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<string>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveRunGraph(id, options);
+        async retrieveRunGraph(id: string, direction?: RetrieveRunGraphDirectionEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<string>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveRunGraph(id, direction, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.retrieveRunGraph']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -1473,14 +1481,14 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.createRunPullRequest(id, createRunPullRequestRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Deletes durable store state for a run. This does not remove any local run directory. Active runs require `force=true`.
+         * Deletes durable store state, local run scratch data, and the run-owned sandbox unless sandbox preservation is enabled. Active runs require `force=true`.
          * @summary Delete Run
          * @param {string} id Unique run identifier (ULID).
          * @param {boolean} [force] Whether to force deletion of an active run. Defaults to &#x60;false&#x60;.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        deleteRun(id: string, force?: boolean, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+        deleteRun(id: string, force?: boolean, options?: RawAxiosRequestConfig): AxiosPromise<DeleteRunResponse> {
             return localVarFp.deleteRun(id, force, options).then((request) => request(axios, basePath));
         },
         /**
@@ -1593,11 +1601,12 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
          * Renders the workflow graph as an SVG image using Graphviz.
          * @summary Render SVG
          * @param {string} id Unique run identifier (ULID).
+         * @param {RetrieveRunGraphDirectionEnum} [direction] Optional Graphviz rank direction override for the rendered graph.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        retrieveRunGraph(id: string, options?: RawAxiosRequestConfig): AxiosPromise<string> {
-            return localVarFp.retrieveRunGraph(id, options).then((request) => request(axios, basePath));
+        retrieveRunGraph(id: string, direction?: RetrieveRunGraphDirectionEnum, options?: RawAxiosRequestConfig): AxiosPromise<string> {
+            return localVarFp.retrieveRunGraph(id, direction, options).then((request) => request(axios, basePath));
         },
         /**
          * Returns the raw Graphviz DOT source for the workflow graph (the contents of the workflow\'s `.fabro` file).
@@ -1735,7 +1744,7 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Deletes durable store state for a run. This does not remove any local run directory. Active runs require `force=true`.
+     * Deletes durable store state, local run scratch data, and the run-owned sandbox unless sandbox preservation is enabled. Active runs require `force=true`.
      * @summary Delete Run
      * @param {string} id Unique run identifier (ULID).
      * @param {boolean} [force] Whether to force deletion of an active run. Defaults to &#x60;false&#x60;.
@@ -1866,11 +1875,12 @@ export class RunsApi extends BaseAPI {
      * Renders the workflow graph as an SVG image using Graphviz.
      * @summary Render SVG
      * @param {string} id Unique run identifier (ULID).
+     * @param {RetrieveRunGraphDirectionEnum} [direction] Optional Graphviz rank direction override for the rendered graph.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public retrieveRunGraph(id: string, options?: RawAxiosRequestConfig) {
-        return RunsApiFp(this.configuration).retrieveRunGraph(id, options).then((request) => request(this.axios, this.basePath));
+    public retrieveRunGraph(id: string, direction?: RetrieveRunGraphDirectionEnum, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).retrieveRunGraph(id, direction, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -1953,3 +1963,10 @@ export class RunsApi extends BaseAPI {
     }
 }
 
+export const RetrieveRunGraphDirectionEnum = {
+    LR: 'LR',
+    TB: 'TB',
+    BT: 'BT',
+    RL: 'RL'
+} as const;
+export type RetrieveRunGraphDirectionEnum = typeof RetrieveRunGraphDirectionEnum[keyof typeof RetrieveRunGraphDirectionEnum];

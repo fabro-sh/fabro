@@ -13,15 +13,16 @@ import {
   RectangleStackIcon,
   SignalIcon,
 } from "@heroicons/react/20/solid";
-import { Link, Outlet, useLocation, useMatches } from "react-router";
+import { Link, Outlet, useLocation, useMatches, useNavigate } from "react-router";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 
+import { InlineMarkdown } from "../components/inline-markdown";
 import { InterviewDock } from "../components/interview-dock";
+import { PullRequestChip } from "../components/pull-request-chip";
 import { SteerBar, type SteerBarHandle } from "../components/steer-bar";
-import { SteerComposer } from "../components/steer-composer";
 import { ErrorState } from "../components/state";
 import { useToast } from "../components/toast";
-import { SECONDARY_BUTTON_CLASS } from "../components/ui";
+import { ConfirmDialog, SECONDARY_BUTTON_CLASS, Tooltip } from "../components/ui";
 import {
   isRunStatus,
   mapRunSummaryToRunItem,
@@ -29,6 +30,7 @@ import {
   type RunSummary,
 } from "../data/runs";
 import { useDemoMode } from "../lib/demo-mode";
+import { useSWRConfig } from "swr";
 import {
   useArchiveRun,
   useCancelRun,
@@ -38,14 +40,18 @@ import {
   type LifecycleMutationResult,
   type PreviewMutationResult,
 } from "../lib/mutations";
-import { formatRelativeTime } from "../lib/format";
+import { formatAbsoluteTs, formatRelativeTime } from "../lib/format";
+import { queryKeys } from "../lib/query-keys";
 import { useRunEvents } from "../lib/run-events";
 import { useRunToasts } from "../hooks/use-run-toasts";
 import { useRun, useRunQuestions } from "../lib/queries";
 import {
   canArchive,
   canCancel,
+  canDelete,
   canUnarchive,
+  deleteErrorMessage,
+  deleteRun,
   isTerminalCancelledRun,
   mapError,
   type LifecycleAction,
@@ -56,11 +62,27 @@ const allTabs = [
   { name: "Overview", path: "", count: null, demoOnly: false },
   { name: "Stages", path: "/stages", count: null, demoOnly: false },
   { name: "Files Changed", path: "/files", count: null, demoOnly: false },
-  { name: "Graph", path: "/graph", count: null, demoOnly: false },
   { name: "Billing", path: "/billing", count: null, demoOnly: false },
 ];
 
 export const handle = { hideHeader: true };
+
+export function focusSteerAfterMenuClose(focus: () => void) {
+  globalThis.setTimeout(focus, 0);
+}
+
+export function actionMenuSeparatorVisibility({
+  hasLifecycle,
+  hasDestructive,
+}: {
+  hasLifecycle: boolean;
+  hasDestructive: boolean;
+}) {
+  return {
+    afterOperations:   hasLifecycle || hasDestructive,
+    beforeDestructive: hasLifecycle && hasDestructive,
+  };
+}
 
 const ACTIONS_TRIGGER_CLASS =
   `${SECONDARY_BUTTON_CLASS} disabled:cursor-not-allowed disabled:opacity-60`;
@@ -109,6 +131,7 @@ export function lifecycleActionVisibility(status: string | null | undefined) {
     showPrimaryCancel: canCancel(status),
     showArchive: canArchive(status),
     showUnarchive: canUnarchive(status),
+    showDelete: canDelete(status),
   };
 }
 
@@ -149,11 +172,19 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const archiveMutation = useArchiveRun(params.id);
   const unarchiveMutation = useUnarchiveRun(params.id);
   const interruptMutation = useInterruptRun(params.id);
+  const navigate = useNavigate();
+  const { mutate } = useSWRConfig();
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletePending, setDeletePending] = useState(false);
   const { push, dismiss } = useToast();
-  const tabs = allTabs.filter((t) => !t.demoOnly || demoMode);
+  const filesCount = runQuery.data?.diff_summary?.files_changed ?? null;
+  const tabs = allTabs
+    .map((tab) =>
+      tab.name === "Files Changed" ? { ...tab, count: filesCount } : tab,
+    )
+    .filter((t) => !t.demoOnly || demoMode);
   const lifecycleToastStateRef = useRef<LifecycleToastState>(INITIAL_LIFECYCLE_TOAST_STATE);
   const steerBarRef = useRef<SteerBarHandle | null>(null);
-  const [steerOpen, setSteerOpen] = useState(false);
   const now = useTickingNow(30_000);
   const fullHeight = matches.some(
     (m) => (m.handle as { fullHeight?: boolean } | undefined)?.fullHeight,
@@ -215,11 +246,26 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const cancelPending = cancelMutation.isMutating;
   const archivePending = archiveMutation.isMutating;
   const unarchivePending = unarchiveMutation.isMutating;
+  const handleConfirmDelete = async () => {
+    setDeletePending(true);
+    try {
+      await deleteRun(params.id);
+      void mutate(queryKeys.boards.runs());
+      void mutate(queryKeys.boards.runs(true));
+      push({ message: "Run deleted." });
+      navigate("/runs");
+    } catch (error) {
+      push({ message: deleteErrorMessage(error), tone: "error" });
+    } finally {
+      setDeletePending(false);
+      setDeleteDialogOpen(false);
+    }
+  };
   const hasPendingQuestions = isBlocked && pendingQuestions.length > 0;
   const dockClearance = hasPendingQuestions ? "18rem" : "5rem";
-  const rootStyle = fullHeight
-    ? ({ "--fabro-interview-dock-clearance": dockClearance } as CSSProperties)
-    : undefined;
+  const rootStyle = {
+    "--fabro-interview-dock-clearance": dockClearance,
+  } as CSSProperties;
 
   return (
     <div
@@ -233,14 +279,13 @@ export default function RunDetail({ params }: { params: { id: string } }) {
         )}
       >
         <Link to="/runs" className="text-fg-3 hover:text-fg">Runs</Link>
-        {demoMode && (
-          <>
-            <ChevronRightIcon className="size-3" />
-            <Link to={`/workflows/${run.workflow}`} className="text-fg-3 hover:text-fg">
-              {run.workflow}
-            </Link>
-          </>
-        )}
+        <ChevronRightIcon className="size-3" />
+        <Link
+          to={`/runs?workflow=${encodeURIComponent(run.workflow)}`}
+          className="text-fg-3 hover:text-fg"
+        >
+          {run.workflow}
+        </Link>
         <ChevronRightIcon className="size-3" />
         <span>{run.title}</span>
       </nav>
@@ -252,7 +297,9 @@ export default function RunDetail({ params }: { params: { id: string } }) {
         )}
       >
         <div className="min-w-0 flex-1">
-          <h2 className="text-xl font-semibold text-fg">{run.title}</h2>
+          <h2 className="text-xl font-semibold text-fg">
+            <InlineMarkdown content={run.title} />
+          </h2>
           <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
             <span className="flex items-center gap-1.5">
               <span className={`size-2 rounded-full ${run.statusDot}`} />
@@ -273,13 +320,19 @@ export default function RunDetail({ params }: { params: { id: string } }) {
               </span>
             )}
             {run.lastEventAt && (
-              <span
-                className="flex items-center gap-1.5 font-mono text-xs text-fg-muted"
-                title={`Last event ${new Date(run.lastEventAt).toLocaleString()}`}
-              >
-                <SignalIcon className="size-3.5" aria-hidden="true" />
-                {formatRelativeTime(run.lastEventAt, now)}
-              </span>
+              <Tooltip label={`Last event ${formatAbsoluteTs(run.lastEventAt)}`}>
+                <span className="flex items-center gap-1.5 font-mono text-xs text-fg-muted">
+                  <SignalIcon className="size-3.5" aria-hidden="true" />
+                  {formatRelativeTime(run.lastEventAt, now)}
+                </span>
+              </Tooltip>
+            )}
+            {run.number != null && run.pullRequestUrl && (
+              <PullRequestChip
+                number={run.number}
+                url={run.pullRequestUrl}
+                iconClassName="size-3.5"
+              />
             )}
           </div>
         </div>
@@ -287,13 +340,13 @@ export default function RunDetail({ params }: { params: { id: string } }) {
         {demoMode && <ConnectMenu />}
 
         <ActionsMenu
-          canSteer={statusKind === "running"}
-          onSteer={() => setSteerOpen(true)}
           canSendInterrupt={statusKind === "running"}
           interruptPending={interruptMutation.isMutating}
           onSendInterrupt={() => void interruptMutation.trigger()}
           canFocusSteer={statusKind === "running" && !hasPendingQuestions}
-          onFocusSteer={() => steerBarRef.current?.focus()}
+          onFocusSteer={() => {
+            focusSteerAfterMenuClose(() => steerBarRef.current?.focus());
+          }}
           canPreview={!!run.sandboxId}
           previewPending={previewPending}
           onPreview={() => void previewMutation.trigger({
@@ -306,11 +359,30 @@ export default function RunDetail({ params }: { params: { id: string } }) {
           canUnarchive={visibility.showUnarchive}
           unarchivePending={unarchivePending}
           onUnarchive={() => void unarchiveMutation.trigger()}
+          canDelete={visibility.showDelete}
+          deletePending={deletePending}
+          onDelete={() => setDeleteDialogOpen(true)}
           canCancel={visibility.showPrimaryCancel}
           cancelPending={cancelPending}
           onCancel={() => void cancelMutation.trigger()}
         />
       </div>
+
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        title="Delete this run?"
+        description={
+          <>
+            This permanently removes <span className="font-mono text-fg-2">{run.title}</span> and its
+            durable state. This action cannot be undone.
+          </>
+        }
+        confirmLabel="Delete run"
+        pendingLabel="Deleting…"
+        pending={deletePending}
+        onConfirm={() => void handleConfirmDelete()}
+        onCancel={() => setDeleteDialogOpen(false)}
+      />
 
       <div
         className={classNames(
@@ -348,15 +420,15 @@ export default function RunDetail({ params }: { params: { id: string } }) {
         </nav>
       </div>
 
-      <div className={fullHeight ? "mt-6 flex min-h-0 flex-1 flex-col" : "mt-6"}>
+      <div
+        className={
+          fullHeight
+            ? "mt-6 flex min-h-0 flex-1 flex-col"
+            : "mt-6 pb-[var(--fabro-interview-dock-clearance)]"
+        }
+      >
         <Outlet />
       </div>
-
-      <SteerComposer
-        runId={params.id}
-        open={steerOpen}
-        onClose={() => setSteerOpen(false)}
-      />
 
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-page">
         {hasPendingQuestions ? (
@@ -444,8 +516,6 @@ function ConnectMenu() {
 }
 
 interface ActionsMenuProps {
-  canSteer: boolean;
-  onSteer: () => void;
   canSendInterrupt: boolean;
   interruptPending: boolean;
   onSendInterrupt: () => void;
@@ -460,6 +530,9 @@ interface ActionsMenuProps {
   canUnarchive: boolean;
   unarchivePending: boolean;
   onUnarchive: () => void;
+  canDelete: boolean;
+  deletePending: boolean;
+  onDelete: () => void;
   canCancel: boolean;
   cancelPending: boolean;
   onCancel: () => void;
@@ -467,22 +540,23 @@ interface ActionsMenuProps {
 
 function ActionsMenu(props: ActionsMenuProps) {
   const {
-    canSteer, onSteer,
     canSendInterrupt, interruptPending, onSendInterrupt,
     canFocusSteer, onFocusSteer,
     canPreview, previewPending, onPreview,
     canArchive, archivePending, onArchive,
     canUnarchive, unarchivePending, onUnarchive,
+    canDelete, deletePending, onDelete,
     canCancel, cancelPending, onCancel,
   } = props;
 
   const hasOps =
-    canPreview || canSteer || canSendInterrupt || canFocusSteer;
+    canPreview || canSendInterrupt || canFocusSteer;
   const hasLifecycle = canArchive || canUnarchive;
-  const hasDestructive = canCancel;
+  const hasDestructive = canCancel || canDelete;
   const hasAny = hasOps || hasLifecycle || hasDestructive;
   const anyPending =
-    previewPending || archivePending || unarchivePending || cancelPending || interruptPending;
+    previewPending || archivePending || unarchivePending || deletePending || cancelPending || interruptPending;
+  const separators = actionMenuSeparatorVisibility({ hasLifecycle, hasDestructive });
 
   if (!hasAny) return null;
 
@@ -510,13 +584,6 @@ function ActionsMenu(props: ActionsMenuProps) {
             </button>
           </MenuItem>
         )}
-        {canSteer && (
-          <MenuItem>
-            <button type="button" onClick={onSteer} className={MENU_ITEM_CLASS}>
-              Steer
-            </button>
-          </MenuItem>
-        )}
         <MenuItem>
           <button
             type="button"
@@ -537,7 +604,7 @@ function ActionsMenu(props: ActionsMenuProps) {
             Send steering…
           </button>
         </MenuItem>
-        {(hasLifecycle || hasDestructive) && (
+        {separators.afterOperations && (
           <div className="my-1 h-px bg-line" role="separator" />
         )}
         {canArchive && (
@@ -564,7 +631,7 @@ function ActionsMenu(props: ActionsMenuProps) {
             </button>
           </MenuItem>
         )}
-        {(hasOps || hasLifecycle) && hasDestructive && (
+        {separators.beforeDestructive && (
           <div className="my-1 h-px bg-line" role="separator" />
         )}
         {canCancel && (
@@ -576,6 +643,18 @@ function ActionsMenu(props: ActionsMenuProps) {
               className={MENU_ITEM_DANGER_CLASS}
             >
               {cancelPending ? "Cancelling…" : "Cancel"}
+            </button>
+          </MenuItem>
+        )}
+        {canDelete && (
+          <MenuItem>
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={deletePending}
+              className={MENU_ITEM_DANGER_CLASS}
+            >
+              {deletePending ? "Deleting…" : "Delete"}
             </button>
           </MenuItem>
         )}

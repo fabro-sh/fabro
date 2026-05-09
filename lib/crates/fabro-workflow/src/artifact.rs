@@ -122,7 +122,7 @@ pub async fn resolve_context_for_edge_selection(
     run_store: &RunStoreHandle,
 ) -> Result<Context> {
     let mut values = context.snapshot();
-    for key in [context::keys::COMMAND_OUTPUT, context::keys::COMMAND_STDERR] {
+    for key in [context::keys::COMMAND_OUTPUT] {
         if let Some(Value::String(current)) = values.get_mut(key) {
             *current = resolve_text_or_blob_ref_str(current, run_store).await?;
         }
@@ -274,10 +274,7 @@ fn resolve_execution_value<'a>(
     Box::pin(async move {
         match value {
             Value::String(current) => {
-                if matches!(
-                    key,
-                    Some(context::keys::COMMAND_OUTPUT | context::keys::COMMAND_STDERR)
-                ) {
+                if matches!(key, Some(context::keys::COMMAND_OUTPUT)) {
                     *current = resolve_text_or_blob_ref_str(current, run_store).await?;
                 } else if let Some(blob_id) = parse_blob_ref(current) {
                     *current = materialize_blob_ref(&blob_id, run_store, env, run_dir).await?;

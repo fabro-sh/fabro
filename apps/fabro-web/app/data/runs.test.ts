@@ -27,6 +27,10 @@ describe("mapRunListItem", () => {
       created_at: "2026-04-08T12:00:00Z",
       start_time: "2026-04-08T12:00:00Z",
       pending_control: null,
+      pull_request: {
+        number: 123,
+        html_url: "https://github.com/fabro-sh/fabro/pull/123",
+      },
     } as const;
     const item = mapRunListItem(summary);
     expect(item.id).toBe("01ABC");
@@ -37,6 +41,8 @@ describe("mapRunListItem", () => {
     expect(item.elapsed).toBeDefined();
     expect(item.column).toBe("running");
     expect(item.lifecycleStatus).toBe("paused");
+    expect(item.number).toBe(123);
+    expect(item.pullRequestUrl).toBe("https://github.com/fabro-sh/fabro/pull/123");
   });
 
   test("uses a fallback title when the server title is blank", () => {
@@ -81,6 +87,15 @@ describe("mapRunSummaryToRunItem", () => {
       created_at: "2026-04-08T12:00:00Z",
       start_time: "2026-04-08T12:00:00Z",
       pending_control: null,
+      pull_request: {
+        html_url: "https://github.com/fabro-sh/fabro/pull/456",
+        number: 456,
+        owner: "fabro-sh",
+        repo: "fabro",
+        base_branch: "main",
+        head_branch: "fabro/run/demo",
+        title: "Add run PR chip",
+      },
     };
     const item = mapRunSummaryToRunItem(summary);
     expect(item.id).toBe("01ABC");
@@ -90,6 +105,8 @@ describe("mapRunSummaryToRunItem", () => {
     expect(item.sourceDirectory).toBe("/home/user/myrepo");
     expect(item.elapsed).toBeDefined();
     expect(item.lifecycleStatus).toBe("running");
+    expect(item.number).toBe(456);
+    expect(item.pullRequestUrl).toBe("https://github.com/fabro-sh/fabro/pull/456");
   });
 
   test("handles missing optional fields", () => {

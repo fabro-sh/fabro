@@ -43,7 +43,7 @@ pub fn billing_rollup_from_projection(projection: &RunProjection) -> ProjectionB
     let mut billed_visit_count = 0_usize;
 
     for (stage_id, stage) in projection.iter_stages() {
-        if is_exit_stage(projection, stage_id.node_id()) {
+        if is_boundary_stage(projection, stage_id.node_id()) {
             continue;
         }
         if stage.completion.is_none() && stage.duration_ms.is_none() && stage.usage.is_none() {
@@ -97,11 +97,11 @@ pub fn billing_rollup_from_projection(projection: &RunProjection) -> ProjectionB
     }
 }
 
-fn is_exit_stage(projection: &RunProjection, node_id: &str) -> bool {
+fn is_boundary_stage(projection: &RunProjection, node_id: &str) -> bool {
     projection
         .spec()
         .and_then(|spec| spec.graph().nodes.get(node_id))
-        .is_some_and(|node| node.handler_type() == Some("exit"))
+        .is_some_and(|node| matches!(node.handler_type(), Some("start" | "exit")))
 }
 
 fn accumulate_usage(counts: &mut BilledTokenCounts, usage: &BilledModelUsage) {
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn rollup_includes_completed_non_llm_stage_rows_with_zero_billing() {
         let mut projection = RunProjection::default();
-        let stage = projection.stage_entry("start", 1, first_event_seq(1));
+        let stage = projection.stage_entry("build", 1, first_event_seq(1));
         stage.duration_ms = Some(25);
         stage.completion = Some(StageCompletion {
             outcome:        StageOutcome::Succeeded,
@@ -217,7 +217,7 @@ mod tests {
         let rollup = billing_rollup_from_projection(&projection);
 
         assert_eq!(rollup.stages.len(), 1);
-        assert_eq!(rollup.stages[0].node_id, "start");
+        assert_eq!(rollup.stages[0].node_id, "build");
         assert_eq!(rollup.stages[0].duration_ms, 25);
         assert!(rollup.stages[0].model_id.is_none());
         assert_eq!(rollup.stages[0].billing.input_tokens, 0);
@@ -227,9 +227,9 @@ mod tests {
     }
 
     #[test]
-    fn rollup_excludes_terminal_exit_stage_rows() {
+    fn rollup_excludes_workflow_boundary_stage_rows() {
         let mut projection = RunProjection::default();
-        projection.spec = Some(run_spec_with_exit_node());
+        projection.spec = Some(run_spec_with_boundary_nodes());
         let start = projection.stage_entry("start", 1, first_event_seq(1));
         start.duration_ms = Some(25);
         start.completion = Some(StageCompletion {
@@ -249,12 +249,11 @@ mod tests {
 
         let rollup = billing_rollup_from_projection(&projection);
 
-        assert_eq!(rollup.stages.len(), 1);
-        assert_eq!(rollup.stages[0].node_id, "start");
-        assert_eq!(rollup.runtime_ms, 25);
+        assert_eq!(rollup.stages.len(), 0);
+        assert_eq!(rollup.runtime_ms, 0);
     }
 
-    fn run_spec_with_exit_node() -> RunSpec {
+    fn run_spec_with_boundary_nodes() -> RunSpec {
         let mut graph = Graph::new("test");
         graph.nodes.insert("start".to_string(), {
             let mut node = Node::new("start");
