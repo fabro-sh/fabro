@@ -1743,7 +1743,6 @@ override = "server"
             dry_run:          None,
             label:            Vec::new(),
             model:            None,
-            no_retro:         None,
             preserve_sandbox: None,
             provider:         None,
             sandbox:          None,
