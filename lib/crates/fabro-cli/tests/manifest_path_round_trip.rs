@@ -29,13 +29,9 @@ fn cli_built_manifest_resolves_user_global_at_path() {
     std::fs::write(workflow_dir.join("prompts/hello.md"), "hello from bundle").unwrap();
 
     let built = build_run_manifest(ManifestBuildInput {
-        workflow:           workflow_dir.join("workflow.fabro"),
-        cwd:                project,
-        run_overrides:      None,
-        cli_overrides:      None,
-        args:               None,
-        run_id:             None,
-        user_settings_path: None,
+        workflow: workflow_dir.join("workflow.fabro"),
+        cwd: project,
+        ..Default::default()
     })
     .unwrap();
 

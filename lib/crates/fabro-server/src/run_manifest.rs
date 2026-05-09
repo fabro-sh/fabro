@@ -11,7 +11,7 @@ use fabro_config::run::parse_run_layer_from_settings_toml;
 use fabro_config::{
     CliLayer, CliOutputLayer, DaytonaDockerfileLayer, DockerSandboxLayer, LocalSandboxLayer,
     ReplaceMap, RunExecutionLayer, RunLayer, RunModelLayer, RunSandboxLayer,
-    WorkflowSettingsBuilder,
+    WorkflowSettingsBuilder, parse_input_overrides,
 };
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_graphviz::render::apply_direction;
@@ -61,8 +61,9 @@ pub(crate) struct PreparedManifest {
 
 #[derive(Clone, Debug, Default)]
 struct ManifestSettingsOverrides {
-    run: Option<RunLayer>,
-    cli: Option<CliLayer>,
+    run:             Option<RunLayer>,
+    cli:             Option<CliLayer>,
+    input_overrides: HashMap<String, toml::Value>,
 }
 
 #[cfg(test)]
@@ -88,7 +89,8 @@ pub(crate) fn prepare_manifest(
         .ok_or_else(|| anyhow!("manifest target path is missing from workflows map"))?;
     let root_source = workflow_input.source.clone();
 
-    let args_overrides = manifest_args_overrides(manifest.args.as_ref());
+    let args_overrides =
+        manifest_args_overrides(manifest.args.as_ref()).context("failed to parse manifest args")?;
     let workflow_run_layer = root_workflow_run_layer(&workflow_input)?;
     let mut workflow_settings_builder =
         WorkflowSettingsBuilder::new().server_run_defaults(manifest_run_defaults.clone());
@@ -123,6 +125,7 @@ pub(crate) fn prepare_manifest(
     let mut settings = workflow_settings_builder
         .build()
         .context("failed to resolve manifest settings")?;
+    settings.run.inputs.extend(args_overrides.input_overrides);
     if let Some(goal) = manifest.goal.as_ref() {
         settings.run.goal = Some(RunGoal::Inline(InterpString::parse(&goal.text)));
     }
@@ -304,9 +307,11 @@ fn root_workflow_run_layer(workflow: &BundledWorkflow) -> Result<RunLayer> {
     Ok(run)
 }
 
-fn manifest_args_overrides(args: Option<&types::ManifestArgs>) -> ManifestSettingsOverrides {
+fn manifest_args_overrides(
+    args: Option<&types::ManifestArgs>,
+) -> Result<ManifestSettingsOverrides> {
     let Some(args) = args else {
-        return ManifestSettingsOverrides::default();
+        return Ok(ManifestSettingsOverrides::default());
     };
 
     let model = (args.model.is_some() || args.provider.is_some()).then(|| RunModelLayer {
@@ -372,7 +377,11 @@ fn manifest_args_overrides(args: Option<&types::ManifestArgs>) -> ManifestSettin
         })
     });
 
-    ManifestSettingsOverrides { run, cli }
+    Ok(ManifestSettingsOverrides {
+        run,
+        cli,
+        input_overrides: parse_input_overrides(&args.input)?,
+    })
 }
 
 fn parse_worktree_mode_arg(value: &str) -> Option<WorktreeMode> {
@@ -1704,6 +1713,7 @@ root = "/srv/fabro"
             provider:         None,
             sandbox:          None,
             docker_image:     None,
+            input:            Vec::new(),
             verbose:          None,
             worktree_mode:    None,
         });
@@ -1713,6 +1723,45 @@ root = "/srv/fabro"
         assert_eq!(
             prepared.settings.run.execution.mode,
             fabro_types::settings::run::RunMode::DryRun
+        );
+    }
+
+    #[test]
+    fn prepare_manifest_applies_input_args_as_sparse_overrides() {
+        let server_settings = manifest_run_defaults(Some(&server_settings_fixture(
+            r#"
+_version = 1
+
+[run.inputs]
+keep = "server"
+override = "server"
+"#,
+        )));
+        let mut manifest = minimal_manifest();
+        manifest.args = Some(types::ManifestArgs {
+            auto_approve:     None,
+            dry_run:          None,
+            label:            Vec::new(),
+            model:            None,
+            no_retro:         None,
+            preserve_sandbox: None,
+            provider:         None,
+            sandbox:          None,
+            docker_image:     None,
+            input:            vec!["override=cli".to_string()],
+            verbose:          None,
+            worktree_mode:    None,
+        });
+
+        let prepared = prepare_manifest(&server_settings, &manifest).unwrap();
+
+        assert_eq!(
+            prepared.settings.run.inputs.get("keep"),
+            Some(&toml::Value::String("server".to_string()))
+        );
+        assert_eq!(
+            prepared.settings.run.inputs.get("override"),
+            Some(&toml::Value::String("cli".to_string()))
         );
     }
 

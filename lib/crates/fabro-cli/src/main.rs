@@ -548,6 +548,7 @@ mod tests {
         AuthCommand, AuthNamespace, Commands, InstallGitHubStrategyArg, ModelsCommand,
         ProviderCommand, ProviderNamespace,
     };
+    use clap::error::ErrorKind;
     use temp_env::with_var;
     use tokio::runtime::Runtime;
 
@@ -1175,6 +1176,64 @@ destination = "{destination}"
             }
             _ => panic!("unexpected command variant"),
         }
+    }
+
+    #[test]
+    fn parse_run_input_short_flag() {
+        let cli = Cli::try_parse_from(["fabro", "run", "workflow.toml", "-I", "foo=bar"])
+            .expect("should parse");
+        match *cli.command.unwrap() {
+            Commands::RunCmd(RunCommands::Run(args)) => {
+                assert_eq!(args.inputs.values, vec!["foo=bar"]);
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn run_manifest_args_preserves_input_only_manifest_args() {
+        let cli = Cli::try_parse_from(["fabro", "run", "workflow.toml", "-I", "foo=bar"])
+            .expect("should parse");
+        match *cli.command.unwrap() {
+            Commands::RunCmd(RunCommands::Run(args)) => {
+                let manifest_args = manifest_builder::run_manifest_args(&args)
+                    .expect("input-only args should be retained");
+                assert_eq!(manifest_args.input, vec!["foo=bar"]);
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_create_input_long_flag() {
+        let cli = Cli::try_parse_from(["fabro", "create", "workflow.toml", "--input", "foo=bar"])
+            .expect("should parse");
+        match *cli.command.unwrap() {
+            Commands::RunCmd(RunCommands::Create(args)) => {
+                assert_eq!(args.inputs.values, vec!["foo=bar"]);
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_preflight_input_short_flag() {
+        let cli = Cli::try_parse_from(["fabro", "preflight", "workflow.toml", "-I", "foo=bar"])
+            .expect("should parse");
+        match *cli.command.unwrap() {
+            Commands::Preflight(args) => {
+                assert_eq!(args.inputs.values, vec!["foo=bar"]);
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_top_level_short_version_still_reports_version() {
+        let Err(err) = Cli::try_parse_from(["fabro", "-V"]) else {
+            panic!("should report version");
+        };
+        assert_eq!(err.kind(), ErrorKind::DisplayVersion);
     }
 
     #[test]

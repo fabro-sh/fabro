@@ -32,6 +32,14 @@ impl TemplateContext {
         self
     }
 
+    /// Context that interpolates inputs but leaves `{{ goal }}` as a literal
+    /// pass-through — used for structural pre-rendering before the goal is
+    /// known (e.g. manifest scanning, import resolution).
+    #[must_use]
+    pub fn for_input_scan(inputs: HashMap<String, toml::Value>) -> Self {
+        Self::new().with_goal("{{ goal }}").with_inputs(inputs)
+    }
+
     #[must_use]
     pub fn with_env_lookup<E>(mut self, env: &E) -> Self
     where

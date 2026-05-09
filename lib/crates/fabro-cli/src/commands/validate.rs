@@ -17,13 +17,10 @@ pub(crate) fn run(
 ) -> anyhow::Result<()> {
     let printer = base_ctx.printer();
     let built = build_run_manifest(ManifestBuildInput {
-        workflow:           args.workflow.clone(),
-        cwd:                base_ctx.cwd().to_path_buf(),
-        run_overrides:      None,
-        cli_overrides:      None,
-        args:               None,
-        run_id:             None,
+        workflow: args.workflow.clone(),
+        cwd: base_ctx.cwd().to_path_buf(),
         user_settings_path: Some(active_settings_path(None)),
+        ..Default::default()
     })?;
     let response = manifest_validation::validate_manifest(&RunLayer::default(), &built.manifest)?;
     let diagnostics = api_diagnostics_to_local(&response.workflow.diagnostics);

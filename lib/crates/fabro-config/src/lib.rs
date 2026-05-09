@@ -15,6 +15,7 @@ pub mod daemon;
 pub mod envfile;
 pub mod error;
 pub mod home;
+pub mod input_overrides;
 mod load;
 pub mod logging;
 pub mod parse;
@@ -35,6 +36,7 @@ pub use builders::{
 pub use error::{Error, Result};
 pub use fabro_util::path::expand_tilde;
 pub use home::Home;
+pub use input_overrides::{InputOverrideParseError, parse_input_overrides};
 pub use layers::{
     CliAuthLayer, CliExecAgentLayer, CliExecLayer, CliExecModelLayer, CliLayer, CliLoggingLayer,
     CliOutputLayer, CliTargetLayer, CliUpdatesLayer, DaytonaDockerfileLayer, DaytonaSandboxLayer,

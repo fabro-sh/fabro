@@ -33,13 +33,10 @@ pub(crate) async fn run(
     let printer = base_ctx.printer();
     let ctx = base_ctx.with_target(&args.target)?;
     let built = build_run_manifest(ManifestBuildInput {
-        workflow:           args.workflow.clone(),
-        cwd:                ctx.cwd().to_path_buf(),
-        run_overrides:      None,
-        cli_overrides:      None,
-        args:               None,
-        run_id:             None,
+        workflow: args.workflow.clone(),
+        cwd: ctx.cwd().to_path_buf(),
         user_settings_path: Some(active_settings_path(None)),
+        ..Default::default()
     })?;
     let client = ctx.server().await?;
     let preflight = client.run_preflight(built.manifest.clone()).await?;
