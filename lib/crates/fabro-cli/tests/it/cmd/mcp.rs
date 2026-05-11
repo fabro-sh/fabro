@@ -568,7 +568,8 @@ async fn mcp_create_and_search_manage_real_runs_with_cli_auth() {
           },
           "source_directory": "[SOURCE_DIRECTORY]",
           "repo_origin_url": null,
-          "goal": "Run tests and report results"
+          "goal_preview": "Run tests and report results",
+          "goal_truncated": false
         }
       ],
       "next_cursor": null
@@ -783,7 +784,7 @@ async fn mcp_search_filters_status_dates_and_paginates() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn mcp_search_includes_archived_runs_by_default() {
+async fn mcp_search_hides_archived_runs_by_default() {
     let context = test_context!();
     let server = MockServer::start();
     let target_url = format!("{}/api/v1", server.base_url());
@@ -820,13 +821,13 @@ async fn mcp_search_includes_archived_runs_by_default() {
     )
     .await;
 
-    assert_eq!(result["runs"].as_array().unwrap().len(), 2);
+    assert_eq!(result["runs"].as_array().unwrap().len(), 1);
     assert!(
         result["runs"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|run| run["archived"] == true)
+            .all(|run| run["archived"] == false)
     );
     active_resolve.assert();
     archived_resolve.assert();
