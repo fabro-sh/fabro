@@ -2,18 +2,30 @@
 
 ## Purpose
 
-Manually smoke test the `add-acp-backend` branch with real LLM-backed agents across local, Docker, and Daytona sandbox providers.
+Manually smoke test the `add-acp-backend` branch with real LLM-backed agents across the full sandbox/agent matrix:
 
-The key branch constraint is intentional: ACP requires bidirectional raw stdio and is supported by local and Docker in this cutover, but not by Daytona. This QA plan first proves ACP works through local and Docker sandboxes, then uses Daytona for positive real-agent coverage through the API and CLI backends, and finally verifies ACP-on-Daytona fails clearly instead of falling back to host execution or PTY transport.
+| Sandbox provider | Claude | Codex | Gemini |
+| --- | --- | --- | --- |
+| Local | Required | Required | Required |
+| Docker | Required | Required | Required |
+| Daytona | Required | Required | Required |
+
+The key branch constraint is intentional: ACP requires bidirectional raw stdio and is supported by local and Docker in this cutover, but not by Daytona. This QA plan proves ACP works through local and Docker sandboxes for Claude, Codex, and Gemini; uses Daytona CLI execution for the same three agents as the positive Daytona coverage; and finally verifies ACP-on-Daytona fails clearly instead of falling back to host execution or PTY transport.
 
 ## Scope
 
 In scope:
 
-- A real ACP-backed agent running through the local sandbox provider with no container.
-- A real ACP-backed agent running in a Docker sandbox.
-- A real API-backed agent running in a Daytona sandbox.
-- A real CLI-backed agent running in a Daytona sandbox.
+- A real Claude ACP-backed agent running through the local sandbox provider with no container.
+- A real Codex ACP-backed agent running through the local sandbox provider with no container.
+- A real Gemini ACP-backed agent running through the local sandbox provider with no container.
+- A real Claude ACP-backed agent running in a Docker sandbox.
+- A real Codex ACP-backed agent running in a Docker sandbox.
+- A real Gemini ACP-backed agent running in a Docker sandbox.
+- A real Claude CLI-backed agent running in a Daytona sandbox.
+- A real Codex CLI-backed agent running in a Daytona sandbox.
+- A real Gemini CLI-backed agent running in a Daytona sandbox.
+- Optional Daytona API backend control coverage after the required 3x3 matrix.
 - An ACP-backed node on Daytona returning the expected unsupported-provider failure.
 - Evidence capture through `inspect`, `events`, `dump`, and optional preserved-sandbox SSH.
 
@@ -30,7 +42,7 @@ Out of scope:
 - Local host has Node/npx available for the no-container ACP smoke.
 - Docker is available for the Docker sandbox smoke.
 - Daytona API key is available with sandbox/snapshot scopes.
-- At least one real LLM credential is available. The commands below use Anthropic.
+- Real LLM credentials are available for all three required agents.
 - GitHub access is configured if the operator chooses not to use `skip_clone = true`.
 - Network access from the host, Docker container, and Daytona sandbox allows installing CLI packages.
 
@@ -47,10 +59,12 @@ set +a
 $FABRO doctor -v
 ```
 
-Required environment variables for the default path:
+Required environment variables for the full matrix:
 
 - `DAYTONA_API_KEY`
 - `ANTHROPIC_API_KEY`
+- `OPENAI_API_KEY`
+- `GEMINI_API_KEY`
 
 ## Test Data Setup
 
@@ -60,37 +74,60 @@ Create a scratch directory for manual smoke files:
 mkdir -p smoke tmp
 ```
 
-Docker and Daytona smoke configs use `skip_clone = true` to avoid depending on pushed branch state. This keeps the test focused on runtime behavior and real agent execution. The local smoke intentionally runs directly in the current working tree because `provider = "local"` has no container boundary; remove `smoke_local_acp_result.txt`, `.fabro-smoke-claude-acp`, and `.fabro-smoke-home/` during cleanup if they remain.
+Docker and Daytona smoke configs use `skip_clone = true` to avoid depending on pushed branch state. This keeps the test focused on runtime behavior and real agent execution. The local smoke intentionally runs directly in the current working tree because `provider = "local"` has no container boundary; remove `smoke_local_acp_*_result.txt`, `.fabro-smoke-*-acp`, and `.fabro-smoke-home/` during cleanup if they remain.
 
-## Smoke 1: Local ACP Backend With Real Agent
+Agent definitions for the required matrix:
+
+| Agent | Provider | Model | Credential | ACP command | Daytona CLI install |
+| --- | --- | --- | --- | --- | --- |
+| Claude | `anthropic` | `claude-haiku-4-5` | `ANTHROPIC_API_KEY` | `npx -y @zed-industries/claude-code-acp@latest` | `npm install -g @anthropic-ai/claude-code`; binary: `claude` |
+| Codex | `openai` | `gpt-5.3-codex` | `OPENAI_API_KEY` | `npx -y @zed-industries/codex-acp@latest` | `npm install -g @openai/codex`; binary: `codex` |
+| Gemini | `gemini` | `gemini-3.1-pro-preview` | `GEMINI_API_KEY` | `npx -y -- @google/gemini-cli@latest --experimental-acp` | `npm install -g @google/gemini-cli`; binary: `gemini` |
+
+## Smoke 1: Local ACP Backend Matrix
 
 ### Goal
 
-Prove a real ACP-backed agent can run through the local sandbox provider without a container, use bidirectional raw stdio, and mutate the local workflow filesystem.
+Prove real Claude, Codex, and Gemini ACP-backed agents can run through the local sandbox provider without a container, use bidirectional raw stdio, and mutate the local workflow filesystem.
+
+Required local combinations:
+
+| Agent | Workflow | Result file | Expected content |
+| --- | --- | --- | --- |
+| Claude | `smoke/local_acp_claude.toml` | `smoke_local_acp_claude_result.txt` | `local-acp-claude-ok` |
+| Codex | `smoke/local_acp_codex.toml` | `smoke_local_acp_codex_result.txt` | `local-acp-codex-ok` |
+| Gemini | `smoke/local_acp_gemini.toml` | `smoke_local_acp_gemini_result.txt` | `local-acp-gemini-ok` |
 
 ### Files
 
-Create `smoke/local_acp.fabro`:
+Create one graph per agent. The Claude graph is:
 
 ```dot
-digraph LocalAcpSmoke {
-  graph [goal="Local ACP backend smoke"]
+digraph LocalAcpClaudeSmoke {
+  graph [goal="Local ACP Claude backend smoke"]
   start [shape=Mdiamond]
-  setup [shape=parallelogram, script="rm -f smoke_local_acp_result.txt"]
-  work [type="agent", backend="acp", provider="anthropic", model="claude-haiku-4-5", acp_command="/bin/bash .fabro-smoke-claude-acp", prompt="Create a file named smoke_local_acp_result.txt containing exactly: local-acp-ok"]
-  verify [shape=parallelogram, script="test \"$(cat smoke_local_acp_result.txt)\" = \"local-acp-ok\" && cat smoke_local_acp_result.txt"]
+  setup [shape=parallelogram, script="rm -f smoke_local_acp_claude_result.txt"]
+  work [type="agent", backend="acp", provider="anthropic", model="claude-haiku-4-5", acp_command="/bin/bash .fabro-smoke-claude-acp", prompt="Create a file named smoke_local_acp_claude_result.txt containing exactly: local-acp-claude-ok"]
+  verify [shape=parallelogram, script="test \"$(cat smoke_local_acp_claude_result.txt)\" = \"local-acp-claude-ok\" && cat smoke_local_acp_claude_result.txt"]
   exit [shape=Msquare]
   start -> setup -> work -> verify -> exit
 }
 ```
 
-Create `smoke/local_acp.toml`:
+Create matching Codex and Gemini graphs with these substitutions:
+
+| Agent | Graph file | Provider | Model | ACP wrapper | Result file | Expected content |
+| --- | --- | --- | --- | --- | --- | --- |
+| Codex | `smoke/local_acp_codex.fabro` | `openai` | `gpt-5.3-codex` | `.fabro-smoke-codex-acp` | `smoke_local_acp_codex_result.txt` | `local-acp-codex-ok` |
+| Gemini | `smoke/local_acp_gemini.fabro` | `gemini` | `gemini-3.1-pro-preview` | `.fabro-smoke-gemini-acp` | `smoke_local_acp_gemini_result.txt` | `local-acp-gemini-ok` |
+
+Create `smoke/local_acp_claude.toml`:
 
 ```toml
 _version = 1
 
 [workflow]
-graph = "local_acp.fabro"
+graph = "local_acp_claude.fabro"
 
 [run.sandbox]
 provider = "local"
@@ -111,25 +148,32 @@ chmod +x .fabro-smoke-claude-acp
 '''
 ```
 
+Create matching Codex and Gemini TOML files:
+
+- `smoke/local_acp_codex.toml` uses `graph = "local_acp_codex.fabro"`, writes `.fabro-smoke-codex-acp`, and the wrapper ends with `exec "$NPX_PATH" -y @zed-industries/codex-acp@latest`.
+- `smoke/local_acp_gemini.toml` uses `graph = "local_acp_gemini.fabro"`, writes `.fabro-smoke-gemini-acp`, and the wrapper ends with `exec "$NPX_PATH" -y -- @google/gemini-cli@latest --experimental-acp`.
+
 ### Run
 
 ```bash
-$FABRO run --auto-approve smoke/local_acp.toml
+$FABRO run --auto-approve smoke/local_acp_claude.toml
+$FABRO run --auto-approve smoke/local_acp_codex.toml
+$FABRO run --auto-approve smoke/local_acp_gemini.toml
 ```
 
 ### Pass Criteria
 
-- Run exits successfully.
-- The `verify` stage prints `local-acp-ok`.
-- `fabro events <run-id> --tail 200` includes:
+- Each of the three local runs exits successfully.
+- Each `verify` stage prints its expected `local-acp-<agent>-ok` content.
+- `fabro events <run-id> --tail 200` for each run includes:
   - `agent.acp.started`
   - `agent.acp.completed`
   - `stage.completed` for `work`
   - `stage.completed` for `verify`
-- Events do not include `agent.session.activated` for the `work` stage.
-- Events do not include `agent.cli.started` for the `work` stage.
-- `fabro inspect <run-id>` shows the run succeeded.
-- The local working tree contains `smoke_local_acp_result.txt` with exactly `local-acp-ok`.
+- Events for each run do not include `agent.session.activated` for the `work` stage.
+- Events for each run do not include `agent.cli.started` for the `work` stage.
+- `fabro inspect <run-id>` shows each run succeeded.
+- The local working tree contains each expected `smoke_local_acp_<agent>_result.txt` file with exactly the expected content.
 
 ### Failure Notes
 
@@ -137,35 +181,50 @@ $FABRO run --auto-approve smoke/local_acp.toml
 - A successful run with API or CLI events instead of ACP events is a branch failure because ACP silently fell back to another backend.
 - The local provider writes directly into the current working tree; check `git status` before cleanup.
 
-## Smoke 2: Docker ACP Backend With Real Agent
+## Smoke 2: Docker ACP Backend Matrix
 
 ### Goal
 
-Prove a real ACP-backed agent can run inside a Docker sandbox, use bidirectional non-PTY stdio through Docker exec, and mutate only the container workspace.
+Prove real Claude, Codex, and Gemini ACP-backed agents can run inside Docker sandboxes, use bidirectional non-PTY stdio through Docker exec, and mutate only the container workspace.
+
+Required Docker combinations:
+
+| Agent | Workflow | Result file | Expected content |
+| --- | --- | --- | --- |
+| Claude | `smoke/docker_acp_claude.toml` | `smoke_docker_acp_claude_result.txt` | `docker-acp-claude-ok` |
+| Codex | `smoke/docker_acp_codex.toml` | `smoke_docker_acp_codex_result.txt` | `docker-acp-codex-ok` |
+| Gemini | `smoke/docker_acp_gemini.toml` | `smoke_docker_acp_gemini_result.txt` | `docker-acp-gemini-ok` |
 
 ### Files
 
-Create `smoke/docker_acp.fabro`:
+Create one graph per agent. The Claude graph is:
 
 ```dot
-digraph DockerAcpSmoke {
-  graph [goal="Docker ACP backend smoke"]
+digraph DockerAcpClaudeSmoke {
+  graph [goal="Docker ACP Claude backend smoke"]
   start [shape=Mdiamond]
-  setup [shape=parallelogram, script="rm -f smoke_docker_acp_result.txt"]
-  work [type="agent", backend="acp", provider="anthropic", model="claude-haiku-4-5", acp_command="/bin/bash .fabro-smoke-claude-acp", prompt="Create a file named smoke_docker_acp_result.txt containing exactly: docker-acp-ok"]
-  verify [shape=parallelogram, script="test \"$(cat smoke_docker_acp_result.txt)\" = \"docker-acp-ok\" && cat smoke_docker_acp_result.txt"]
+  setup [shape=parallelogram, script="rm -f smoke_docker_acp_claude_result.txt"]
+  work [type="agent", backend="acp", provider="anthropic", model="claude-haiku-4-5", acp_command="/bin/bash .fabro-smoke-claude-acp", prompt="Create a file named smoke_docker_acp_claude_result.txt containing exactly: docker-acp-claude-ok"]
+  verify [shape=parallelogram, script="test \"$(cat smoke_docker_acp_claude_result.txt)\" = \"docker-acp-claude-ok\" && cat smoke_docker_acp_claude_result.txt"]
   exit [shape=Msquare]
   start -> setup -> work -> verify -> exit
 }
 ```
 
-Create `smoke/docker_acp.toml`:
+Create matching Codex and Gemini graphs with these substitutions:
+
+| Agent | Graph file | Provider | Model | ACP wrapper | Result file | Expected content |
+| --- | --- | --- | --- | --- | --- | --- |
+| Codex | `smoke/docker_acp_codex.fabro` | `openai` | `gpt-5.3-codex` | `.fabro-smoke-codex-acp` | `smoke_docker_acp_codex_result.txt` | `docker-acp-codex-ok` |
+| Gemini | `smoke/docker_acp_gemini.fabro` | `gemini` | `gemini-3.1-pro-preview` | `.fabro-smoke-gemini-acp` | `smoke_docker_acp_gemini_result.txt` | `docker-acp-gemini-ok` |
+
+Create `smoke/docker_acp_claude.toml`:
 
 ```toml
 _version = 1
 
 [workflow]
-graph = "docker_acp.fabro"
+graph = "docker_acp_claude.fabro"
 
 [run.sandbox]
 provider = "docker"
@@ -201,38 +260,45 @@ chmod +x .fabro-smoke-claude-acp
 '''
 ```
 
+Create matching Codex and Gemini TOML files:
+
+- `smoke/docker_acp_codex.toml` uses `graph = "docker_acp_codex.fabro"`, writes `.fabro-smoke-codex-acp`, and the wrapper ends with `exec "$NPX_PATH" -y @zed-industries/codex-acp@latest`.
+- `smoke/docker_acp_gemini.toml` uses `graph = "docker_acp_gemini.fabro"`, writes `.fabro-smoke-gemini-acp`, and the wrapper ends with `exec "$NPX_PATH" -y -- @google/gemini-cli@latest --experimental-acp`.
+
 ### Run
 
 ```bash
-$FABRO run --auto-approve smoke/docker_acp.toml
+$FABRO run --auto-approve smoke/docker_acp_claude.toml
+$FABRO run --auto-approve smoke/docker_acp_codex.toml
+$FABRO run --auto-approve smoke/docker_acp_gemini.toml
 ```
 
 ### Pass Criteria
 
-- Run exits successfully.
-- The `verify` stage prints `docker-acp-ok`.
-- `fabro events <run-id> --tail 200` includes:
+- Each of the three Docker runs exits successfully.
+- Each `verify` stage prints its expected `docker-acp-<agent>-ok` content.
+- `fabro events <run-id> --tail 200` for each run includes:
   - `sandbox.ready`
   - `setup.started`
   - `setup.completed`
   - `agent.acp.started`
   - `agent.acp.completed`
   - `stage.completed` for `verify`
-- Events do not include `agent.session.activated` for the `work` stage.
-- Events do not include `agent.cli.started` for the `work` stage.
-- `fabro inspect <run-id>` shows the run succeeded.
-- The preserved Docker sandbox contains `smoke_docker_acp_result.txt` with exactly `docker-acp-ok`.
+- Events for each run do not include `agent.session.activated` for the `work` stage.
+- Events for each run do not include `agent.cli.started` for the `work` stage.
+- `fabro inspect <run-id>` shows each run succeeded.
+- Each preserved Docker sandbox contains its expected `smoke_docker_acp_<agent>_result.txt` file with exactly the expected content.
 
 ### Failure Notes
 
 - Docker daemon, image pull, or package-install failures are setup failures unless the error indicates ACP stdio or sandbox routing broke.
 - A successful run with API or CLI events instead of ACP events is a branch failure because ACP silently fell back to another backend.
 
-## Smoke 3: Daytona API Backend With Real Agent
+## Smoke 3: Daytona API Backend Control
 
 ### Goal
 
-Prove a real provider API agent can use Fabro-managed tools inside the Daytona sandbox and mutate the sandbox filesystem.
+Optionally prove a real provider API agent can use Fabro-managed tools inside the Daytona sandbox and mutate the sandbox filesystem. This is a backend control smoke, not part of the required 3x3 external-agent matrix.
 
 ### Files
 
@@ -289,35 +355,50 @@ $FABRO run --auto-approve smoke/daytona_api.toml
 - Provider authentication failures are setup failures unless the error indicates sandbox routing or missing Daytona state.
 - Missing `smoke_api_result.txt` after a successful agent stage is a failure.
 
-## Smoke 4: Daytona CLI Backend With Real Agent
+## Smoke 4: Daytona CLI Backend Matrix
 
 ### Goal
 
-Prove the branch runs a real external CLI agent inside Daytona when the CLI is preinstalled by the workflow environment. This also confirms Fabro no longer installs CLIs implicitly at stage runtime.
+Prove the branch runs real Claude, Codex, and Gemini external CLI agents inside Daytona when the CLI is preinstalled by the workflow environment. This also confirms Fabro no longer installs CLIs implicitly at stage runtime.
+
+Required Daytona combinations:
+
+| Agent | Workflow | Result file | Expected content | CLI binary |
+| --- | --- | --- | --- | --- |
+| Claude | `smoke/daytona_cli_claude.toml` | `smoke_daytona_cli_claude_result.txt` | `daytona-cli-claude-ok` | `claude` |
+| Codex | `smoke/daytona_cli_codex.toml` | `smoke_daytona_cli_codex_result.txt` | `daytona-cli-codex-ok` | `codex` |
+| Gemini | `smoke/daytona_cli_gemini.toml` | `smoke_daytona_cli_gemini_result.txt` | `daytona-cli-gemini-ok` | `gemini` |
 
 ### Files
 
-Create `smoke/daytona_cli.fabro`:
+Create one graph per agent. The Claude graph is:
 
 ```dot
-digraph DaytonaCliSmoke {
-  graph [goal="Daytona CLI backend smoke"]
+digraph DaytonaCliClaudeSmoke {
+  graph [goal="Daytona CLI Claude backend smoke"]
   start [shape=Mdiamond]
-  setup [shape=parallelogram, script="rm -f smoke_cli_result.txt"]
-  work [type="agent", backend="cli", provider="anthropic", model="claude-haiku-4-5", prompt="Create a file named smoke_cli_result.txt containing exactly: daytona-cli-ok"]
-  verify [shape=parallelogram, script="test \"$(cat smoke_cli_result.txt)\" = \"daytona-cli-ok\" && cat smoke_cli_result.txt"]
+  setup [shape=parallelogram, script="rm -f smoke_daytona_cli_claude_result.txt"]
+  work [type="agent", backend="cli", provider="anthropic", model="claude-haiku-4-5", prompt="Create a file named smoke_daytona_cli_claude_result.txt containing exactly: daytona-cli-claude-ok"]
+  verify [shape=parallelogram, script="test \"$(cat smoke_daytona_cli_claude_result.txt)\" = \"daytona-cli-claude-ok\" && cat smoke_daytona_cli_claude_result.txt"]
   exit [shape=Msquare]
   start -> setup -> work -> verify -> exit
 }
 ```
 
-Create `smoke/daytona_cli.toml`:
+Create matching Codex and Gemini graphs with these substitutions:
+
+| Agent | Graph file | Provider | Model | Result file | Expected content |
+| --- | --- | --- | --- | --- | --- |
+| Codex | `smoke/daytona_cli_codex.fabro` | `openai` | `gpt-5.3-codex` | `smoke_daytona_cli_codex_result.txt` | `daytona-cli-codex-ok` |
+| Gemini | `smoke/daytona_cli_gemini.fabro` | `gemini` | `gemini-3.1-pro-preview` | `smoke_daytona_cli_gemini_result.txt` | `daytona-cli-gemini-ok` |
+
+Create `smoke/daytona_cli_claude.toml`:
 
 ```toml
 _version = 1
 
 [workflow]
-graph = "daytona_cli.fabro"
+graph = "daytona_cli_claude.fabro"
 
 [run.sandbox]
 provider = "daytona"
@@ -341,34 +422,42 @@ claude --version
 '''
 ```
 
+Create matching Codex and Gemini TOML files:
+
+- `smoke/daytona_cli_codex.toml` uses `graph = "daytona_cli_codex.fabro"`, installs `@openai/codex` when `codex` is missing, and prints `codex --version`.
+- `smoke/daytona_cli_gemini.toml` uses `graph = "daytona_cli_gemini.fabro"`, installs `@google/gemini-cli` when `gemini` is missing, and prints `gemini --version`.
+
 ### Run
 
 ```bash
-$FABRO run --auto-approve smoke/daytona_cli.toml
+$FABRO run --auto-approve smoke/daytona_cli_claude.toml
+$FABRO run --auto-approve smoke/daytona_cli_codex.toml
+$FABRO run --auto-approve smoke/daytona_cli_gemini.toml
 ```
 
 ### Pass Criteria
 
-- Run exits successfully.
-- The `verify` stage prints `daytona-cli-ok`.
-- `fabro events <run-id> --tail 200` includes:
+- Each of the three Daytona CLI runs exits successfully.
+- Each `verify` stage prints its expected `daytona-cli-<agent>-ok` content.
+- `fabro events <run-id> --tail 200` for each run includes:
   - `setup.started`
   - `setup.completed`
   - `agent.cli.started`
   - `agent.cli.completed`
   - `stage.completed` for `verify`
-- Events do not include new `cli.ensure.started`, `cli.ensure.completed`, or `cli.ensure.failed` entries for this branch's runtime path.
+- Events for each run do not include new `cli.ensure.started`, `cli.ensure.completed`, or `cli.ensure.failed` entries for this branch's runtime path.
+- Each preserved Daytona sandbox contains its expected `smoke_daytona_cli_<agent>_result.txt` file with exactly the expected content.
 
 ### Failure Notes
 
-- `CLI backend requires 'claude' to be installed in the sandbox PATH` means the prepare step did not install the CLI where the backend expects it. Treat this as environment/setup failure unless the prepare logs prove `claude` was installed in `$HOME/.local/bin`.
+- `CLI backend requires '<binary>' to be installed in the sandbox PATH` means the prepare step did not install the agent CLI where the backend expects it. Treat this as environment/setup failure unless the prepare logs prove `claude`, `codex`, or `gemini` was installed in `$HOME/.local/bin`.
 - CLI package-install failures may be caused by Daytona network policy or npm registry availability.
 
 ## Smoke 5: Daytona ACP Backend Expected Unsupported Failure
 
 ### Goal
 
-Prove ACP on Daytona fails explicitly because Daytona lacks bidirectional raw stdio support. This test guards against unsafe fallbacks such as running ACP on the host or over a PTY.
+Prove ACP on Daytona fails explicitly because Daytona lacks bidirectional raw stdio support. This provider-boundary check is run once with Claude because the failure must happen before any agent-specific command is launched. This test guards against unsafe fallbacks such as running ACP on the host or over a PTY.
 
 ### Files
 
@@ -423,14 +512,21 @@ $FABRO run --auto-approve smoke/daytona_acp_unsupported.toml
 - If the failure is about `acp_command` missing, the workflow file is wrong.
 - If the failure is about `npx` missing before the Daytona unsupported error, inspect the code path: the smoke should prove the sandbox stdio provider boundary, not package availability.
 
-## Optional Variant: Codex Or Gemini CLI On Daytona
+## Required 3x3 Matrix Record
 
-If Anthropic CLI smoke passes and broader real-agent coverage is desired, repeat Smoke 4 with another provider:
+The plan is incomplete until all nine sandbox/agent combinations below have a run ID and evidence:
 
-- OpenAI CLI: install `@openai/codex`, use `provider="openai"`, and require `OPENAI_API_KEY`.
-- Gemini CLI: install `@google/gemini-cli`, use `provider="gemini"`, and require `GEMINI_API_KEY`.
-
-Keep these as optional because they increase external-provider flake surface without changing the branch's Daytona ACP boundary.
+| Sandbox | Agent | Backend | Workflow | Run ID |
+| --- | --- | --- | --- | --- |
+| Local | Claude | ACP | `smoke/local_acp_claude.toml` | `________________` |
+| Local | Codex | ACP | `smoke/local_acp_codex.toml` | `________________` |
+| Local | Gemini | ACP | `smoke/local_acp_gemini.toml` | `________________` |
+| Docker | Claude | ACP | `smoke/docker_acp_claude.toml` | `________________` |
+| Docker | Codex | ACP | `smoke/docker_acp_codex.toml` | `________________` |
+| Docker | Gemini | ACP | `smoke/docker_acp_gemini.toml` | `________________` |
+| Daytona | Claude | CLI | `smoke/daytona_cli_claude.toml` | `________________` |
+| Daytona | Codex | CLI | `smoke/daytona_cli_codex.toml` | `________________` |
+| Daytona | Gemini | CLI | `smoke/daytona_cli_gemini.toml` | `________________` |
 
 ## Verification Checklist
 
@@ -447,54 +543,66 @@ Use this checklist as the operator-facing record for the smoke. Fill in run IDs 
 - [ ] Host `npx` is available for the local ACP smoke.
 - [ ] Docker is available for the Docker sandbox smoke.
 - [ ] `DAYTONA_API_KEY` is present and has sandbox/snapshot scopes.
-- [ ] `ANTHROPIC_API_KEY` is present for the default Anthropic smoke path.
+- [ ] `ANTHROPIC_API_KEY` is present for Claude smokes.
+- [ ] `OPENAI_API_KEY` is present for Codex smokes.
+- [ ] `GEMINI_API_KEY` is present for Gemini smokes.
 - [ ] Host, Docker, and Daytona network paths can install CLI packages.
 - [ ] `smoke/` and `tmp/` directories exist.
 
-### Smoke 1: Local ACP Backend
+### Smoke 1: Local ACP Backend Matrix
 
-- [ ] Created `smoke/local_acp.fabro`.
-- [ ] Created `smoke/local_acp.toml`.
-- [ ] Config uses `provider = "local"`.
-- [ ] Prepare step creates `.fabro-smoke-claude-acp`.
-- [ ] Ran `$FABRO run --auto-approve smoke/local_acp.toml`.
-- [ ] Recorded local ACP smoke run ID: `________________`.
-- [ ] Run exited successfully.
-- [ ] `verify` stage printed `local-acp-ok`.
-- [ ] Events include `agent.acp.started`.
-- [ ] Events include `agent.acp.completed`.
-- [ ] Events include `stage.completed` for `work`.
-- [ ] Events include `stage.completed` for `verify`.
-- [ ] Events do not include `agent.session.activated` for the `work` stage.
-- [ ] Events do not include `agent.cli.started` for the `work` stage.
-- [ ] `fabro inspect <run-id>` shows the run succeeded.
-- [ ] Local working tree contains `smoke_local_acp_result.txt` with exactly `local-acp-ok`.
+- [ ] Created `smoke/local_acp_claude.fabro` and `smoke/local_acp_claude.toml`.
+- [ ] Created `smoke/local_acp_codex.fabro` and `smoke/local_acp_codex.toml`.
+- [ ] Created `smoke/local_acp_gemini.fabro` and `smoke/local_acp_gemini.toml`.
+- [ ] All three local configs use `provider = "local"`.
+- [ ] Prepare steps create `.fabro-smoke-claude-acp`, `.fabro-smoke-codex-acp`, and `.fabro-smoke-gemini-acp`.
+- [ ] Ran `$FABRO run --auto-approve smoke/local_acp_claude.toml`.
+- [ ] Recorded local Claude ACP run ID: `________________`.
+- [ ] Ran `$FABRO run --auto-approve smoke/local_acp_codex.toml`.
+- [ ] Recorded local Codex ACP run ID: `________________`.
+- [ ] Ran `$FABRO run --auto-approve smoke/local_acp_gemini.toml`.
+- [ ] Recorded local Gemini ACP run ID: `________________`.
+- [ ] Each local ACP run exited successfully.
+- [ ] Verify stages printed `local-acp-claude-ok`, `local-acp-codex-ok`, and `local-acp-gemini-ok`.
+- [ ] Each local run's events include `agent.acp.started`.
+- [ ] Each local run's events include `agent.acp.completed`.
+- [ ] Each local run's events include `stage.completed` for `work`.
+- [ ] Each local run's events include `stage.completed` for `verify`.
+- [ ] Each local run's events do not include `agent.session.activated` for the `work` stage.
+- [ ] Each local run's events do not include `agent.cli.started` for the `work` stage.
+- [ ] `fabro inspect <run-id>` shows each local run succeeded.
+- [ ] Local working tree contains the three expected `smoke_local_acp_<agent>_result.txt` files with exact contents.
 
-### Smoke 2: Docker ACP Backend
+### Smoke 2: Docker ACP Backend Matrix
 
-- [ ] Created `smoke/docker_acp.fabro`.
-- [ ] Created `smoke/docker_acp.toml`.
-- [ ] Config uses Docker with `preserve = true`.
-- [ ] Config uses `skip_clone = true`.
-- [ ] Prepare step installs or verifies Node.
-- [ ] Prepare step verifies `npx`.
-- [ ] Prepare step creates `.fabro-smoke-claude-acp`.
-- [ ] Ran `$FABRO run --auto-approve smoke/docker_acp.toml`.
-- [ ] Recorded Docker ACP smoke run ID: `________________`.
-- [ ] Run exited successfully.
-- [ ] `verify` stage printed `docker-acp-ok`.
-- [ ] Events include `sandbox.ready`.
-- [ ] Events include `setup.started`.
-- [ ] Events include `setup.completed`.
-- [ ] Events include `agent.acp.started`.
-- [ ] Events include `agent.acp.completed`.
-- [ ] Events include `stage.completed` for `verify`.
-- [ ] Events do not include `agent.session.activated` for the `work` stage.
-- [ ] Events do not include `agent.cli.started` for the `work` stage.
-- [ ] `fabro inspect <run-id>` shows the run succeeded.
-- [ ] Preserved Docker sandbox contains `smoke_docker_acp_result.txt` with exactly `docker-acp-ok`.
+- [ ] Created `smoke/docker_acp_claude.fabro` and `smoke/docker_acp_claude.toml`.
+- [ ] Created `smoke/docker_acp_codex.fabro` and `smoke/docker_acp_codex.toml`.
+- [ ] Created `smoke/docker_acp_gemini.fabro` and `smoke/docker_acp_gemini.toml`.
+- [ ] All three Docker configs use Docker with `preserve = true`.
+- [ ] All three Docker configs use `skip_clone = true`.
+- [ ] Prepare steps install or verify Node.
+- [ ] Prepare steps verify `npx`.
+- [ ] Prepare steps create `.fabro-smoke-claude-acp`, `.fabro-smoke-codex-acp`, and `.fabro-smoke-gemini-acp`.
+- [ ] Ran `$FABRO run --auto-approve smoke/docker_acp_claude.toml`.
+- [ ] Recorded Docker Claude ACP run ID: `________________`.
+- [ ] Ran `$FABRO run --auto-approve smoke/docker_acp_codex.toml`.
+- [ ] Recorded Docker Codex ACP run ID: `________________`.
+- [ ] Ran `$FABRO run --auto-approve smoke/docker_acp_gemini.toml`.
+- [ ] Recorded Docker Gemini ACP run ID: `________________`.
+- [ ] Each Docker ACP run exited successfully.
+- [ ] Verify stages printed `docker-acp-claude-ok`, `docker-acp-codex-ok`, and `docker-acp-gemini-ok`.
+- [ ] Each Docker run's events include `sandbox.ready`.
+- [ ] Each Docker run's events include `setup.started`.
+- [ ] Each Docker run's events include `setup.completed`.
+- [ ] Each Docker run's events include `agent.acp.started`.
+- [ ] Each Docker run's events include `agent.acp.completed`.
+- [ ] Each Docker run's events include `stage.completed` for `verify`.
+- [ ] Each Docker run's events do not include `agent.session.activated` for the `work` stage.
+- [ ] Each Docker run's events do not include `agent.cli.started` for the `work` stage.
+- [ ] `fabro inspect <run-id>` shows each Docker run succeeded.
+- [ ] Preserved Docker sandboxes contain their expected `smoke_docker_acp_<agent>_result.txt` files with exact contents.
 
-### Smoke 3: Daytona API Backend
+### Smoke 3: Daytona API Backend Control
 
 - [ ] Created `smoke/daytona_api.fabro`.
 - [ ] Created `smoke/daytona_api.toml`.
@@ -511,28 +619,33 @@ Use this checklist as the operator-facing record for the smoke. Fill in run IDs 
 - [ ] `fabro inspect <run-id>` shows the run succeeded.
 - [ ] Preserved Daytona sandbox contains `smoke_api_result.txt` with exactly `daytona-api-ok`.
 
-### Smoke 4: Daytona CLI Backend
+### Smoke 4: Daytona CLI Backend Matrix
 
-- [ ] Created `smoke/daytona_cli.fabro`.
-- [ ] Created `smoke/daytona_cli.toml`.
-- [ ] Config uses Daytona with `preserve = true`.
-- [ ] Config uses `skip_clone = true`.
-- [ ] Prepare step installs or verifies Node.
-- [ ] Prepare step installs or verifies `claude` in the sandbox PATH.
-- [ ] Prepare step prints `claude --version`.
-- [ ] Ran `$FABRO run --auto-approve smoke/daytona_cli.toml`.
-- [ ] Recorded Daytona CLI smoke run ID: `________________`.
-- [ ] Run exited successfully.
-- [ ] `verify` stage printed `daytona-cli-ok`.
-- [ ] Events include `setup.started`.
-- [ ] Events include `setup.completed`.
-- [ ] Events include `agent.cli.started`.
-- [ ] Events include `agent.cli.completed`.
-- [ ] Events include `stage.completed` for `verify`.
-- [ ] Events do not include `cli.ensure.started`.
-- [ ] Events do not include `cli.ensure.completed`.
-- [ ] Events do not include `cli.ensure.failed`.
-- [ ] Preserved Daytona sandbox contains `smoke_cli_result.txt` with exactly `daytona-cli-ok`.
+- [ ] Created `smoke/daytona_cli_claude.fabro` and `smoke/daytona_cli_claude.toml`.
+- [ ] Created `smoke/daytona_cli_codex.fabro` and `smoke/daytona_cli_codex.toml`.
+- [ ] Created `smoke/daytona_cli_gemini.fabro` and `smoke/daytona_cli_gemini.toml`.
+- [ ] All three Daytona CLI configs use Daytona with `preserve = true`.
+- [ ] All three Daytona CLI configs use `skip_clone = true`.
+- [ ] Prepare steps install or verify Node.
+- [ ] Prepare steps install or verify `claude`, `codex`, and `gemini` in the sandbox PATH.
+- [ ] Prepare steps print `claude --version`, `codex --version`, and `gemini --version`.
+- [ ] Ran `$FABRO run --auto-approve smoke/daytona_cli_claude.toml`.
+- [ ] Recorded Daytona Claude CLI run ID: `________________`.
+- [ ] Ran `$FABRO run --auto-approve smoke/daytona_cli_codex.toml`.
+- [ ] Recorded Daytona Codex CLI run ID: `________________`.
+- [ ] Ran `$FABRO run --auto-approve smoke/daytona_cli_gemini.toml`.
+- [ ] Recorded Daytona Gemini CLI run ID: `________________`.
+- [ ] Each Daytona CLI run exited successfully.
+- [ ] Verify stages printed `daytona-cli-claude-ok`, `daytona-cli-codex-ok`, and `daytona-cli-gemini-ok`.
+- [ ] Each Daytona CLI run's events include `setup.started`.
+- [ ] Each Daytona CLI run's events include `setup.completed`.
+- [ ] Each Daytona CLI run's events include `agent.cli.started`.
+- [ ] Each Daytona CLI run's events include `agent.cli.completed`.
+- [ ] Each Daytona CLI run's events include `stage.completed` for `verify`.
+- [ ] Each Daytona CLI run's events do not include `cli.ensure.started`.
+- [ ] Each Daytona CLI run's events do not include `cli.ensure.completed`.
+- [ ] Each Daytona CLI run's events do not include `cli.ensure.failed`.
+- [ ] Preserved Daytona sandboxes contain their expected `smoke_daytona_cli_<agent>_result.txt` files with exact contents.
 
 ### Smoke 5: Daytona ACP Unsupported Failure
 
@@ -574,13 +687,13 @@ For provider-specific filesystem checks:
 ### Cleanup And Final Acceptance
 
 - [ ] Removed each run with `$FABRO rm -f <run-id>` after evidence capture.
-- [ ] Removed local smoke artifacts: `smoke_local_acp_result.txt`, `.fabro-smoke-claude-acp`, and `.fabro-smoke-home/`.
+- [ ] Removed local smoke artifacts: `smoke_local_acp_*_result.txt`, `.fabro-smoke-*-acp`, and `.fabro-smoke-home/`.
 - [ ] Verified preserved Docker sandbox is gone with Docker or `fabro inspect <run-id>`.
 - [ ] Verified preserved Daytona sandboxes are gone from the Daytona dashboard or `fabro inspect <run-id>`.
-- [ ] Local ACP backend smoke succeeded with a real agent and no API/CLI fallback.
-- [ ] Docker ACP backend smoke succeeded with a real agent and no API/CLI fallback.
-- [ ] Daytona API backend smoke succeeded with a real agent.
-- [ ] Daytona CLI backend smoke succeeded with a real agent after explicit CLI installation in prepare steps.
+- [ ] Local ACP backend smoke succeeded with Claude, Codex, and Gemini and no API/CLI fallback.
+- [ ] Docker ACP backend smoke succeeded with Claude, Codex, and Gemini and no API/CLI fallback.
+- [ ] Daytona CLI backend smoke succeeded with Claude, Codex, and Gemini after explicit CLI installation in prepare steps.
+- [ ] Optional Daytona API backend control result was recorded if run.
 - [ ] Daytona ACP smoke failed with the expected unsupported bidirectional-stdio message.
 - [ ] Captured events and dumps are sufficient to diagnose any failure without rerunning immediately.
 
@@ -597,14 +710,20 @@ $FABRO dump --output tmp/<run-id>-dump <run-id>
 For the local smoke, inspect the local filesystem. For preserved Docker and Daytona sandboxes, inspect the provider filesystem:
 
 ```bash
-cat smoke_local_acp_result.txt 2>/dev/null || true
+cat smoke_local_acp_claude_result.txt 2>/dev/null || true
+cat smoke_local_acp_codex_result.txt 2>/dev/null || true
+cat smoke_local_acp_gemini_result.txt 2>/dev/null || true
 
 $FABRO sandbox ssh <run-id>
 pwd
 ls -la
-cat smoke_docker_acp_result.txt 2>/dev/null || true
+cat smoke_docker_acp_claude_result.txt 2>/dev/null || true
+cat smoke_docker_acp_codex_result.txt 2>/dev/null || true
+cat smoke_docker_acp_gemini_result.txt 2>/dev/null || true
 cat smoke_api_result.txt 2>/dev/null || true
-cat smoke_cli_result.txt 2>/dev/null || true
+cat smoke_daytona_cli_claude_result.txt 2>/dev/null || true
+cat smoke_daytona_cli_codex_result.txt 2>/dev/null || true
+cat smoke_daytona_cli_gemini_result.txt 2>/dev/null || true
 cat smoke_acp_result.txt 2>/dev/null || true
 exit
 ```
@@ -624,7 +743,7 @@ After evidence capture:
 
 ```bash
 $FABRO rm -f <run-id>
-rm -f smoke_local_acp_result.txt .fabro-smoke-claude-acp
+rm -f smoke_local_acp_*_result.txt .fabro-smoke-*-acp
 rm -rf .fabro-smoke-home
 ```
 
@@ -634,10 +753,10 @@ Verify preserved Docker and Daytona sandboxes are gone from Docker/Daytona or by
 
 The branch passes this manual QA plan when:
 
-1. The ACP backend smoke succeeds with a real agent on the local sandbox provider.
-2. The ACP backend smoke succeeds with a real agent on the Docker sandbox provider.
-3. The API backend smoke succeeds with a real agent on Daytona.
-4. The CLI backend smoke succeeds with a real agent on Daytona after explicit CLI installation in prepare steps.
+1. The local sandbox provider succeeds with real Claude, Codex, and Gemini ACP-backed agents.
+2. The Docker sandbox provider succeeds with real Claude, Codex, and Gemini ACP-backed agents.
+3. The Daytona sandbox provider succeeds with real Claude, Codex, and Gemini CLI-backed agents after explicit CLI installation in prepare steps.
+4. The optional Daytona API control smoke, if run, succeeds or has a clearly recorded external-provider/setup failure.
 5. The ACP Daytona smoke fails with the expected unsupported bidirectional-stdio message.
 6. No evidence shows ACP-on-Daytona ran on the host, used a PTY fallback, or silently fell back to API/CLI.
 7. Captured run events and dumps are sufficient to diagnose any failure without rerunning immediately.
