@@ -43,29 +43,29 @@ fn bare() {
     exit_code: 0
     ----- stdout -----
     MODEL                               PROVIDER   ALIASES                  CONTEXT            COST       SPEED 
-     claude-opus-4-7                     anthropic  opus, claude-opus             1m    $5.0 / $25.0    25 tok/s 
+     claude-haiku-4-5                    anthropic  haiku, claude-haiku         200k     $0.8 / $4.0   100 tok/s 
      claude-opus-4-6                     anthropic                                1m    $5.0 / $25.0    25 tok/s 
+     claude-opus-4-7                     anthropic  opus, claude-opus             1m    $5.0 / $25.0    25 tok/s 
      claude-sonnet-4-5                   anthropic                              200k    $3.0 / $15.0    50 tok/s 
      claude-sonnet-4-6                   anthropic  sonnet, claude-sonnet       200k    $3.0 / $15.0    50 tok/s 
-     claude-haiku-4-5                    anthropic  haiku, claude-haiku         200k     $0.8 / $4.0   100 tok/s 
-     gpt-5.2                             openai     gpt5                          1m    $1.8 / $14.0    65 tok/s 
+     gemini-3-flash-preview              gemini     gemini-flash                  1m     $0.5 / $3.0   150 tok/s 
+     gemini-3.1-flash-lite-preview       gemini     gemini-flash-lite             1m     $0.2 / $1.5   200 tok/s 
+     gemini-3.1-pro-preview              gemini     gemini-pro                    1m    $2.0 / $12.0    85 tok/s 
+     gemini-3.1-pro-preview-customtools  gemini     gemini-customtools            1m    $2.0 / $12.0    85 tok/s 
+     mercury-2                           inception  mercury                     131k     $0.2 / $0.8  1000 tok/s 
+     kimi-k2.5                           kimi       kimi                        262k     $0.6 / $3.0    50 tok/s 
+     minimax-m2.5                        minimax    minimax                     197k     $0.3 / $1.2    45 tok/s 
      gpt-5-mini                          openai     gpt5-mini                     1m     $0.2 / $2.0    70 tok/s 
+     gpt-5.2                             openai     gpt5                          1m    $1.8 / $14.0    65 tok/s 
      gpt-5.2-codex                       openai                                   1m    $1.8 / $14.0   100 tok/s 
      gpt-5.3-codex                       openai     codex                         1m    $1.8 / $14.0   100 tok/s 
      gpt-5.3-codex-spark                 openai     codex-spark                 131k           - / -  1000 tok/s 
      gpt-5.4                             openai     gpt54, gpt-54                 1m    $2.5 / $15.0    70 tok/s 
+     gpt-5.4-mini                        openai     gpt54-mini, gpt-54-mini     400k     $0.8 / $4.5   140 tok/s 
+     gpt-5.4-pro                         openai     gpt54-pro, gpt-54-pro         1m  $30.0 / $180.0    20 tok/s 
      gpt-5.5                             openai     gpt55, gpt-55                 1m    $5.0 / $30.0    70 tok/s 
      gpt-5.5-pro                         openai     gpt55-pro, gpt-55-pro         1m  $30.0 / $180.0    20 tok/s 
-     gpt-5.4-pro                         openai     gpt54-pro, gpt-54-pro         1m  $30.0 / $180.0    20 tok/s 
-     gpt-5.4-mini                        openai     gpt54-mini, gpt-54-mini     400k     $0.8 / $4.5   140 tok/s 
-     gemini-3.1-pro-preview              gemini     gemini-pro                    1m    $2.0 / $12.0    85 tok/s 
-     gemini-3.1-pro-preview-customtools  gemini     gemini-customtools            1m    $2.0 / $12.0    85 tok/s 
-     gemini-3-flash-preview              gemini     gemini-flash                  1m     $0.5 / $3.0   150 tok/s 
-     gemini-3.1-flash-lite-preview       gemini     gemini-flash-lite             1m     $0.2 / $1.5   200 tok/s 
-     kimi-k2.5                           kimi       kimi                        262k     $0.6 / $3.0    50 tok/s 
-     glm-4.7                             zai        glm, glm4                   203k     $0.6 / $2.2   100 tok/s 
-     minimax-m2.5                        minimax    minimax                     197k     $0.3 / $1.2    45 tok/s 
-     mercury-2                           inception  mercury                     131k     $0.2 / $0.8  1000 tok/s
+     glm-4.7                             zai        glm, glm4                   203k     $0.6 / $2.2   100 tok/s
     ----- stderr -----
     ");
 }
@@ -80,29 +80,29 @@ fn list() {
     exit_code: 0
     ----- stdout -----
     MODEL                               PROVIDER   ALIASES                  CONTEXT            COST       SPEED 
-     claude-opus-4-7                     anthropic  opus, claude-opus             1m    $5.0 / $25.0    25 tok/s 
+     claude-haiku-4-5                    anthropic  haiku, claude-haiku         200k     $0.8 / $4.0   100 tok/s 
      claude-opus-4-6                     anthropic                                1m    $5.0 / $25.0    25 tok/s 
+     claude-opus-4-7                     anthropic  opus, claude-opus             1m    $5.0 / $25.0    25 tok/s 
      claude-sonnet-4-5                   anthropic                              200k    $3.0 / $15.0    50 tok/s 
      claude-sonnet-4-6                   anthropic  sonnet, claude-sonnet       200k    $3.0 / $15.0    50 tok/s 
-     claude-haiku-4-5                    anthropic  haiku, claude-haiku         200k     $0.8 / $4.0   100 tok/s 
-     gpt-5.2                             openai     gpt5                          1m    $1.8 / $14.0    65 tok/s 
+     gemini-3-flash-preview              gemini     gemini-flash                  1m     $0.5 / $3.0   150 tok/s 
+     gemini-3.1-flash-lite-preview       gemini     gemini-flash-lite             1m     $0.2 / $1.5   200 tok/s 
+     gemini-3.1-pro-preview              gemini     gemini-pro                    1m    $2.0 / $12.0    85 tok/s 
+     gemini-3.1-pro-preview-customtools  gemini     gemini-customtools            1m    $2.0 / $12.0    85 tok/s 
+     mercury-2                           inception  mercury                     131k     $0.2 / $0.8  1000 tok/s 
+     kimi-k2.5                           kimi       kimi                        262k     $0.6 / $3.0    50 tok/s 
+     minimax-m2.5                        minimax    minimax                     197k     $0.3 / $1.2    45 tok/s 
      gpt-5-mini                          openai     gpt5-mini                     1m     $0.2 / $2.0    70 tok/s 
+     gpt-5.2                             openai     gpt5                          1m    $1.8 / $14.0    65 tok/s 
      gpt-5.2-codex                       openai                                   1m    $1.8 / $14.0   100 tok/s 
      gpt-5.3-codex                       openai     codex                         1m    $1.8 / $14.0   100 tok/s 
      gpt-5.3-codex-spark                 openai     codex-spark                 131k           - / -  1000 tok/s 
      gpt-5.4                             openai     gpt54, gpt-54                 1m    $2.5 / $15.0    70 tok/s 
+     gpt-5.4-mini                        openai     gpt54-mini, gpt-54-mini     400k     $0.8 / $4.5   140 tok/s 
+     gpt-5.4-pro                         openai     gpt54-pro, gpt-54-pro         1m  $30.0 / $180.0    20 tok/s 
      gpt-5.5                             openai     gpt55, gpt-55                 1m    $5.0 / $30.0    70 tok/s 
      gpt-5.5-pro                         openai     gpt55-pro, gpt-55-pro         1m  $30.0 / $180.0    20 tok/s 
-     gpt-5.4-pro                         openai     gpt54-pro, gpt-54-pro         1m  $30.0 / $180.0    20 tok/s 
-     gpt-5.4-mini                        openai     gpt54-mini, gpt-54-mini     400k     $0.8 / $4.5   140 tok/s 
-     gemini-3.1-pro-preview              gemini     gemini-pro                    1m    $2.0 / $12.0    85 tok/s 
-     gemini-3.1-pro-preview-customtools  gemini     gemini-customtools            1m    $2.0 / $12.0    85 tok/s 
-     gemini-3-flash-preview              gemini     gemini-flash                  1m     $0.5 / $3.0   150 tok/s 
-     gemini-3.1-flash-lite-preview       gemini     gemini-flash-lite             1m     $0.2 / $1.5   200 tok/s 
-     kimi-k2.5                           kimi       kimi                        262k     $0.6 / $3.0    50 tok/s 
-     glm-4.7                             zai        glm, glm4                   203k     $0.6 / $2.2   100 tok/s 
-     minimax-m2.5                        minimax    minimax                     197k     $0.3 / $1.2    45 tok/s 
-     mercury-2                           inception  mercury                     131k     $0.2 / $0.8  1000 tok/s
+     glm-4.7                             zai        glm, glm4                   203k     $0.6 / $2.2   100 tok/s
     ----- stderr -----
     ");
 }
@@ -117,11 +117,11 @@ fn list_provider() {
     exit_code: 0
     ----- stdout -----
     MODEL              PROVIDER   ALIASES                CONTEXT          COST      SPEED 
-     claude-opus-4-7    anthropic  opus, claude-opus           1m  $5.0 / $25.0   25 tok/s 
+     claude-haiku-4-5   anthropic  haiku, claude-haiku       200k   $0.8 / $4.0  100 tok/s 
      claude-opus-4-6    anthropic                              1m  $5.0 / $25.0   25 tok/s 
+     claude-opus-4-7    anthropic  opus, claude-opus           1m  $5.0 / $25.0   25 tok/s 
      claude-sonnet-4-5  anthropic                            200k  $3.0 / $15.0   50 tok/s 
-     claude-sonnet-4-6  anthropic  sonnet, claude-sonnet     200k  $3.0 / $15.0   50 tok/s 
-     claude-haiku-4-5   anthropic  haiku, claude-haiku       200k   $0.8 / $4.0  100 tok/s
+     claude-sonnet-4-6  anthropic  sonnet, claude-sonnet     200k  $3.0 / $15.0   50 tok/s
     ----- stderr -----
     ");
 }
@@ -136,8 +136,8 @@ fn list_query() {
     exit_code: 0
     ----- stdout -----
     MODEL            PROVIDER   ALIASES            CONTEXT          COST     SPEED 
-     claude-opus-4-7  anthropic  opus, claude-opus       1m  $5.0 / $25.0  25 tok/s 
-     claude-opus-4-6  anthropic                          1m  $5.0 / $25.0  25 tok/s
+     claude-opus-4-6  anthropic                          1m  $5.0 / $25.0  25 tok/s 
+     claude-opus-4-7  anthropic  opus, claude-opus       1m  $5.0 / $25.0  25 tok/s
     ----- stderr -----
     ");
 }
@@ -169,8 +169,8 @@ fn list_query_case_insensitive() {
     exit_code: 0
     ----- stdout -----
     MODEL            PROVIDER   ALIASES            CONTEXT          COST     SPEED 
-     claude-opus-4-7  anthropic  opus, claude-opus       1m  $5.0 / $25.0  25 tok/s 
-     claude-opus-4-6  anthropic                          1m  $5.0 / $25.0  25 tok/s
+     claude-opus-4-6  anthropic                          1m  $5.0 / $25.0  25 tok/s 
+     claude-opus-4-7  anthropic  opus, claude-opus       1m  $5.0 / $25.0  25 tok/s
     ----- stderr -----
     ");
 }

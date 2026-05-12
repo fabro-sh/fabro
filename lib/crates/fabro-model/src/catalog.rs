@@ -517,10 +517,8 @@ impl Catalog {
         providers.sort_by(provider_order);
 
         let mut provider_index = HashMap::new();
-        let mut provider_priorities = HashMap::new();
         for (idx, provider) in providers.iter().enumerate() {
             provider_index.insert(provider.id.clone(), idx);
-            provider_priorities.insert(provider.id.clone(), provider.priority);
         }
 
         let provider_aliases = build_provider_aliases(&providers)?;
@@ -593,8 +591,7 @@ impl Catalog {
             return Err(CatalogBuildError::NoDefaultModel);
         }
 
-        models_with_settings
-            .sort_by(|(left, _), (right, _)| model_order(left, right, &provider_priorities));
+        models_with_settings.sort_by(|(left, _), (right, _)| model_order(left, right));
         let mut model_settings_by_id = HashMap::new();
         let mut models = Vec::new();
         for (model, settings) in models_with_settings {
@@ -1334,16 +1331,9 @@ fn provider_order(left: &CatalogProvider, right: &CatalogProvider) -> std::cmp::
         .then_with(|| left.id.cmp(&right.id))
 }
 
-fn model_order(
-    left: &Model,
-    right: &Model,
-    priorities: &HashMap<ProviderId, i32>,
-) -> std::cmp::Ordering {
-    let left_priority = priorities.get(&left.provider).copied().unwrap_or_default();
-    let right_priority = priorities.get(&right.provider).copied().unwrap_or_default();
-    right_priority
-        .cmp(&left_priority)
-        .then_with(|| left.provider.cmp(&right.provider))
+fn model_order(left: &Model, right: &Model) -> std::cmp::Ordering {
+    left.provider
+        .cmp(&right.provider)
         .then_with(|| left.id.cmp(&right.id))
 }
 
@@ -1804,6 +1794,74 @@ reasoning = false
                 .id,
             "low_default"
         );
+    }
+
+    #[test]
+    fn catalog_lists_models_by_provider_then_model_id() {
+        let layer = minimal_settings(
+            r#"
+[providers.zeta]
+display_name = "Zeta"
+adapter = "openai"
+priority = 20
+
+[providers.alpha]
+display_name = "Alpha"
+adapter = "openai"
+priority = 10
+
+[models.zeta_two]
+provider = "zeta"
+display_name = "Zeta Two"
+family = "test"
+default = true
+
+[models.zeta_two.limits]
+context_window = 1000
+
+[models.zeta_two.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.alpha_one]
+provider = "alpha"
+display_name = "Alpha One"
+family = "test"
+default = true
+
+[models.alpha_one.limits]
+context_window = 1000
+
+[models.alpha_one.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.zeta_one]
+provider = "zeta"
+display_name = "Zeta One"
+family = "test"
+
+[models.zeta_one.limits]
+context_window = 1000
+
+[models.zeta_one.features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        );
+        let catalog = Catalog::from_settings(&layer).unwrap();
+
+        let ids = catalog
+            .list(None)
+            .into_iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(ids, ["alpha_one", "zeta_one", "zeta_two"]);
+        assert_eq!(catalog.default_model().id, "zeta_two");
     }
 
     #[test]

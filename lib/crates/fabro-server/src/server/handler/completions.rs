@@ -87,8 +87,9 @@ async fn create_completion(
     let catalog_info = fabro_model::Catalog::builtin().get(&model_id);
 
     // Resolve provider: explicit request > catalog > None
-    let provider_name = req
-        .provider
+    let explicit_provider = req.provider;
+    let provider_name = explicit_provider
+        .clone()
         .or_else(|| catalog_info.map(|i| i.provider.to_string()));
 
     info!(model = %model_id, provider = ?provider_name, "Completion request received");
@@ -166,7 +167,7 @@ async fn create_completion(
         warn!(provider = %provider, error = %issue, "LLM provider unavailable due to auth issue");
     }
     let client = llm_result.client;
-    if let Some(provider) = request.provider.as_deref() {
+    if let Some(provider) = explicit_provider.as_deref() {
         if !client.has_provider(provider) {
             return ApiError::bad_request(format!("Provider \"{provider}\" is not configured"))
                 .into_response();
