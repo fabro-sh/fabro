@@ -123,7 +123,7 @@ async fn test_model(
         return ApiError::bad_request(auth_issue_message(&info.provider, issue)).into_response();
     }
     let provider_name = info.provider.as_str();
-    if !llm_result.client.provider_names().contains(&provider_name) {
+    if !llm_result.client.has_provider(provider_name) {
         return Json(serde_json::json!({
             "model_id": info.id,
             "status": "skip",

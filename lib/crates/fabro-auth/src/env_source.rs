@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use fabro_model::{Provider, ProviderId};
+use fabro_model::catalog::CatalogProvider;
+use fabro_model::{Catalog, CredentialRef, HeaderValueRef, Provider, ProviderId};
 use fabro_static::EnvVars;
 
 use crate::credential_source::{CredentialSource, ResolvedCredentials};
@@ -31,38 +32,61 @@ impl EnvCredentialSource {
         (self.env_lookup)(name)
     }
 
-    fn credential_for(&self, provider: Provider) -> Option<ApiCredential> {
-        let key = provider
-            .api_key_env_vars()
-            .iter()
-            .find_map(|var| self.lookup(var))?;
+    fn credential_for(&self, provider: &CatalogProvider) -> Option<ApiCredential> {
+        let key = provider.credentials.iter().find_map(|credential_ref| {
+            let CredentialRef::Env(name) = credential_ref else {
+                return None;
+            };
+            self.lookup(name)
+        })?;
 
-        let mut cred = ApiCredential::from_api_key(provider, key);
-        match provider {
-            Provider::Anthropic => {
-                cred.base_url = self.lookup(EnvVars::ANTHROPIC_BASE_URL);
+        let mut cred = ApiCredential::from_api_key(provider.id.clone(), key);
+        cred.base_url = self
+            .env_base_url(&provider.id)
+            .or_else(|| provider.base_url.clone());
+        cred.extra_headers = self.resolved_extra_headers(provider)?;
+        if provider.id == Provider::OpenAi.id() {
+            cred.org_id = self.lookup(EnvVars::OPENAI_ORG_ID);
+            cred.project_id = self.lookup(EnvVars::OPENAI_PROJECT_ID);
+            if let Some(account_id) = self.lookup(EnvVars::CHATGPT_ACCOUNT_ID) {
+                cred.base_url = Some("https://chatgpt.com/backend-api/codex".to_string());
+                cred.codex_mode = true;
+                cred.extra_headers
+                    .insert("ChatGPT-Account-Id".to_string(), account_id);
+                cred.extra_headers
+                    .insert("originator".to_string(), "fabro".to_string());
             }
-            Provider::OpenAi => {
-                cred.base_url = self.lookup(EnvVars::OPENAI_BASE_URL);
-                cred.org_id = self.lookup(EnvVars::OPENAI_ORG_ID);
-                cred.project_id = self.lookup(EnvVars::OPENAI_PROJECT_ID);
-                if let Some(account_id) = self.lookup(EnvVars::CHATGPT_ACCOUNT_ID) {
-                    cred.base_url = Some("https://chatgpt.com/backend-api/codex".to_string());
-                    cred.codex_mode = true;
-                    cred.extra_headers
-                        .insert("ChatGPT-Account-Id".to_string(), account_id);
-                    cred.extra_headers
-                        .insert("originator".to_string(), "fabro".to_string());
-                }
-            }
-            Provider::Gemini => {
-                cred.base_url = self.lookup(EnvVars::GEMINI_BASE_URL);
-            }
-            Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => {}
-            // OpenAiCompatible has no api_key_env_vars, so find_map returned None above.
-            Provider::OpenAiCompatible => unreachable!(),
         }
         Some(cred)
+    }
+
+    fn env_base_url(&self, provider: &ProviderId) -> Option<String> {
+        match Provider::from_id(provider) {
+            Some(Provider::Anthropic) => self.lookup(EnvVars::ANTHROPIC_BASE_URL),
+            Some(Provider::OpenAi) => self.lookup(EnvVars::OPENAI_BASE_URL),
+            Some(Provider::Gemini) => self.lookup(EnvVars::GEMINI_BASE_URL),
+            Some(Provider::OpenAiCompatible) => self.lookup(EnvVars::OPENAI_COMPATIBLE_BASE_URL),
+            Some(Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception)
+            | None => None,
+        }
+    }
+
+    fn resolved_extra_headers(
+        &self,
+        provider: &CatalogProvider,
+    ) -> Option<std::collections::HashMap<String, String>> {
+        provider
+            .extra_headers
+            .iter()
+            .map(|(name, value_ref)| {
+                let value = match value_ref {
+                    HeaderValueRef::Literal(value) => Some(value.clone()),
+                    HeaderValueRef::Env(name) => self.lookup(name),
+                    HeaderValueRef::Credential(_) => None,
+                }?;
+                Some((name.clone(), value))
+            })
+            .collect()
     }
 }
 
@@ -82,9 +106,9 @@ impl Default for EnvCredentialSource {
 #[async_trait]
 impl CredentialSource for EnvCredentialSource {
     async fn resolve(&self) -> anyhow::Result<ResolvedCredentials> {
-        let credentials = Provider::ALL
+        let credentials = Catalog::builtin()
+            .providers()
             .iter()
-            .copied()
             .filter_map(|provider| self.credential_for(provider))
             .collect();
 
@@ -95,16 +119,18 @@ impl CredentialSource for EnvCredentialSource {
     }
 
     async fn configured_providers(&self) -> Vec<ProviderId> {
-        Provider::ALL
+        Catalog::builtin()
+            .providers()
             .iter()
-            .copied()
             .filter(|provider| {
                 provider
-                    .api_key_env_vars()
+                    .credentials
                     .iter()
-                    .any(|env_var| self.lookup(env_var).is_some())
+                    .any(|credential_ref| {
+                        matches!(credential_ref, CredentialRef::Env(name) if self.lookup(name).is_some())
+                    })
             })
-            .map(Provider::id)
+            .map(|provider| provider.id.clone())
             .collect()
     }
 }
@@ -168,5 +194,19 @@ mod tests {
             Some(&"acct_123".to_string())
         );
         assert_eq!(credential.project_id.as_deref(), Some("project_123"));
+    }
+
+    #[tokio::test]
+    async fn resolve_uses_catalog_credentials_and_base_url_for_openai_compatible_providers() {
+        let source = test_source(&[("KIMI_API_KEY", "kimi-key")]);
+
+        let resolved = source.resolve().await.unwrap();
+        let credential = resolved.credentials.first().unwrap();
+
+        assert_eq!(credential.provider, Provider::Kimi.id());
+        assert_eq!(
+            credential.base_url.as_deref(),
+            Some("https://api.moonshot.ai/v1")
+        );
     }
 }

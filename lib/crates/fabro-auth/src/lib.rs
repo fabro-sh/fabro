@@ -20,7 +20,8 @@ pub use env_source::EnvCredentialSource;
 pub use refresh::refresh_oauth_credential;
 pub use resolve::{
     ApiCredential, CliAgentKind, CliCredential, CredentialResolver, CredentialUsage, EnvLookup,
-    ResolveError, ResolvedCredential, auth_issue_message, configured_providers_from_process_env,
+    ResolveError, ResolvedCredential, auth_issue_message, build_api_key_header,
+    configured_providers_from_process_env,
 };
 pub use strategy::{
     AuthMethod, AuthStrategy, CODEX_AUTH_URL, CODEX_CLIENT_ID, CODEX_TOKEN_URL, codex_oauth_config,

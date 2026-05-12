@@ -4,7 +4,7 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 
 use rust_embed::RustEmbed;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use strum::VariantArray;
 use toml::de::Error as TomlDeError;
 
@@ -139,17 +139,32 @@ pub struct CostRates {
     pub cache_input_cost_per_mtok: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(try_from = "String")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
 pub enum CredentialRef {
     Credential(String),
     Env(String),
 }
 
-impl TryFrom<String> for CredentialRef {
-    type Error = CredentialRefParseError;
+impl std::fmt::Display for CredentialRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Credential(id) => write!(f, "credential:{id}"),
+            Self::Env(name) => write!(f, "env:{name}"),
+        }
+    }
+}
 
-    fn try_from(value: String) -> Result<Self, Self::Error> {
+impl From<CredentialRef> for String {
+    fn from(value: CredentialRef) -> Self {
+        value.to_string()
+    }
+}
+
+impl FromStr for CredentialRef {
+    type Err = CredentialRefParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
         if let Some(id) = value.strip_prefix("credential:") {
             if id.is_empty() {
                 return Err(CredentialRefParseError::EmptyCredential);
@@ -163,6 +178,14 @@ impl TryFrom<String> for CredentialRef {
             return Ok(Self::Env(name.to_string()));
         }
         Err(CredentialRefParseError::Invalid)
+    }
+}
+
+impl TryFrom<String> for CredentialRef {
+    type Error = CredentialRefParseError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
     }
 }
 
@@ -181,6 +204,33 @@ pub enum HeaderValueRef {
     Literal(String),
     Env(String),
     Credential(String),
+}
+
+impl Serialize for HeaderValueRef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeMap;
+
+        let mut map = serializer.serialize_map(Some(1))?;
+        match self {
+            Self::Literal(value) => map.serialize_entry("literal", value)?,
+            Self::Env(value) => map.serialize_entry("env", value)?,
+            Self::Credential(value) => map.serialize_entry("credential", value)?,
+        }
+        map.end()
+    }
+}
+
+impl std::fmt::Display for HeaderValueRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Literal(_) => f.write_str("literal:<redacted>"),
+            Self::Env(name) => write!(f, "env:{name}"),
+            Self::Credential(id) => write!(f, "credential:{id}"),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -262,7 +312,7 @@ pub enum HeaderValueRefParseError {
     EmptyValue,
 }
 
-fn deserialize_knowledge_cutoff<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+pub fn deserialize_knowledge_cutoff<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -449,6 +499,7 @@ pub struct Catalog {
     models:           Vec<Model>,
     providers:        Vec<CatalogProvider>,
     model_settings:   HashMap<String, CatalogModelSettings>,
+    model_index:      HashMap<String, usize>,
     provider_aliases: HashMap<String, ProviderId>,
     provider_index:   HashMap<ProviderId, usize>,
 }
@@ -550,11 +601,13 @@ impl Catalog {
             model_settings_by_id.insert(model.id.clone(), settings);
             models.push(model);
         }
+        let model_index = build_model_index(&models);
 
         Ok(Self {
             models,
             providers,
             model_settings: model_settings_by_id,
+            model_index,
             provider_aliases,
             provider_index,
         })
@@ -571,10 +624,7 @@ impl Catalog {
             }
             providers.push(CatalogProvider {
                 id:            model.provider.clone(),
-                display_name:  Provider::from_id(&model.provider).map_or_else(
-                    || model.provider.to_string(),
-                    |provider| provider.display_name().to_string(),
-                ),
+                display_name:  Provider::display_name_for_id(&model.provider),
                 adapter:       default_adapter_for_provider(&model.provider).to_string(),
                 base_url:      None,
                 credentials:   Vec::new(),
@@ -599,11 +649,13 @@ impl Catalog {
                 })
             })
             .collect();
+        let model_index = build_model_index(&models);
 
         Self {
             models,
             providers,
             model_settings,
+            model_index,
             provider_aliases: HashMap::new(),
             provider_index,
         }
@@ -645,9 +697,14 @@ impl Catalog {
     /// Look up a model by ID or alias.
     #[must_use]
     pub fn get(&self, id: &str) -> Option<&Model> {
-        self.models
-            .iter()
-            .find(|m| m.id == id || m.aliases.iter().any(|a| a == id))
+        self.model_index
+            .get(id)
+            .and_then(|idx| self.models.get(*idx))
+    }
+
+    #[must_use]
+    pub fn providers(&self) -> &[CatalogProvider] {
+        &self.providers
     }
 
     #[must_use]
@@ -832,6 +889,17 @@ impl Catalog {
             })
             .collect()
     }
+}
+
+fn build_model_index(models: &[Model]) -> HashMap<String, usize> {
+    let mut index = HashMap::new();
+    for (idx, model) in models.iter().enumerate() {
+        index.insert(model.id.clone(), idx);
+        for alias in &model.aliases {
+            index.insert(alias.clone(), idx);
+        }
+    }
+    index
 }
 
 fn build_providers(

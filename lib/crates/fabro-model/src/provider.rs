@@ -132,6 +132,14 @@ impl Provider {
             Self::OpenAiCompatible => "OpenAI Compatible",
         }
     }
+
+    #[must_use]
+    pub fn display_name_for_id(id: &ProviderId) -> String {
+        Self::from_id(id).map_or_else(
+            || id.to_string(),
+            |provider| provider.display_name().to_string(),
+        )
+    }
 }
 
 impl From<Provider> for ProviderId {

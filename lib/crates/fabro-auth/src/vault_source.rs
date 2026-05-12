@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use fabro_model::{Provider, ProviderId};
+use fabro_model::{Catalog, ProviderId};
 use fabro_vault::Vault;
 use tokio::sync::RwLock as AsyncRwLock;
 
@@ -45,15 +45,15 @@ impl CredentialSource for VaultCredentialSource {
         let mut credentials = Vec::new();
         let mut auth_issues = Vec::new();
 
-        for provider in Provider::ALL {
+        for provider in Catalog::builtin().providers() {
             match self
                 .resolver
-                .resolve(*provider, CredentialUsage::ApiRequest)
+                .resolve(provider.id.clone(), CredentialUsage::ApiRequest)
                 .await
             {
                 Ok(ResolvedCredential::Api(credential)) => credentials.push(credential),
                 Ok(ResolvedCredential::Cli(_)) | Err(ResolveError::NotConfigured(_)) => {}
-                Err(err) => auth_issues.push((provider.id(), err)),
+                Err(err) => auth_issues.push((provider.id.clone(), err)),
             }
         }
 

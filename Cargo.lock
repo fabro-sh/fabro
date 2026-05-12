@@ -1843,6 +1843,7 @@ dependencies = [
  "clap",
  "dirs",
  "fabro-macros",
+ "fabro-model",
  "fabro-options-metadata",
  "fabro-proc",
  "fabro-static",

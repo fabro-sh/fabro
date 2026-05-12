@@ -4,16 +4,11 @@ use std::sync::Arc;
 use fabro_auth::{ApiCredential, ApiKeyHeader, CredentialSource};
 use tracing::debug;
 
+use crate::adapter_registry::{AdapterConfig, factory_for};
 use crate::error::Error;
 use crate::middleware::{Middleware, NextFn, NextStreamFn};
 use crate::provider::{ProviderAdapter, StreamEventStream};
-use crate::providers;
 use crate::types::{Request, Response};
-
-const KIMI_BASE_URL: &str = "https://api.moonshot.ai/v1";
-const ZAI_BASE_URL: &str = "https://api.z.ai/api/coding/paas/v4";
-const MINIMAX_BASE_URL: &str = "https://api.minimax.io/v1";
-const INCEPTION_BASE_URL: &str = "https://api.inceptionlabs.ai/v1";
 
 /// The core client that routes requests to provider adapters (Section 2.2, 3).
 #[derive(Clone)]
@@ -65,116 +60,35 @@ impl Client {
         };
 
         for credential in credentials {
-            let auth_value = auth_value(&credential.auth_header);
             let provider_id = credential.provider.clone();
-            match fabro_model::Provider::from_id(&provider_id) {
-                Some(fabro_model::Provider::Anthropic) => {
-                    let mut adapter = providers::AnthropicAdapter::new(auth_value);
-                    if let Some(base_url) = credential.base_url {
-                        adapter = adapter.with_base_url(base_url);
-                    }
-                    if !credential.extra_headers.is_empty() {
-                        adapter = adapter.with_default_headers(credential.extra_headers);
-                    }
-                    client.register_provider(Arc::new(adapter)).await?;
-                }
-                Some(fabro_model::Provider::OpenAi) => {
-                    let mut adapter = providers::OpenAiAdapter::new(auth_value);
-                    if let Some(base_url) = credential.base_url {
-                        adapter = adapter.with_base_url(base_url);
-                    }
-                    if !credential.extra_headers.is_empty() {
-                        adapter = adapter.with_default_headers(credential.extra_headers);
-                    }
-                    if credential.codex_mode {
-                        adapter = adapter.with_codex_mode();
-                    }
-                    if let Some(org_id) = credential.org_id {
-                        adapter = adapter.with_org_id(org_id);
-                    }
-                    if let Some(project_id) = credential.project_id {
-                        adapter = adapter.with_project_id(project_id);
-                    }
-                    client.register_provider(Arc::new(adapter)).await?;
-                }
-                Some(fabro_model::Provider::Gemini) => {
-                    let mut adapter = providers::GeminiAdapter::new(auth_value);
-                    if let Some(base_url) = credential.base_url {
-                        adapter = adapter.with_base_url(base_url);
-                    }
-                    if !credential.extra_headers.is_empty() {
-                        adapter = adapter.with_default_headers(credential.extra_headers);
-                    }
-                    client.register_provider(Arc::new(adapter)).await?;
-                }
-                Some(fabro_model::Provider::Kimi) => {
-                    let mut adapter = providers::OpenAiCompatibleAdapter::new(
-                        auth_value,
-                        credential
-                            .base_url
-                            .unwrap_or_else(|| KIMI_BASE_URL.to_string()),
-                    )
-                    .with_name("kimi");
-                    if !credential.extra_headers.is_empty() {
-                        adapter = adapter.with_default_headers(credential.extra_headers);
-                    }
-                    client.register_provider(Arc::new(adapter)).await?;
-                }
-                Some(fabro_model::Provider::Zai) => {
-                    let mut adapter = providers::OpenAiCompatibleAdapter::new(
-                        auth_value,
-                        credential
-                            .base_url
-                            .unwrap_or_else(|| ZAI_BASE_URL.to_string()),
-                    )
-                    .with_name("zai");
-                    if !credential.extra_headers.is_empty() {
-                        adapter = adapter.with_default_headers(credential.extra_headers);
-                    }
-                    client.register_provider(Arc::new(adapter)).await?;
-                }
-                Some(fabro_model::Provider::Minimax) => {
-                    let mut adapter = providers::OpenAiCompatibleAdapter::new(
-                        auth_value,
-                        credential
-                            .base_url
-                            .unwrap_or_else(|| MINIMAX_BASE_URL.to_string()),
-                    )
-                    .with_name("minimax");
-                    if !credential.extra_headers.is_empty() {
-                        adapter = adapter.with_default_headers(credential.extra_headers);
-                    }
-                    client.register_provider(Arc::new(adapter)).await?;
-                }
-                Some(fabro_model::Provider::Inception) => {
-                    let mut adapter = providers::OpenAiCompatibleAdapter::new(
-                        auth_value,
-                        credential
-                            .base_url
-                            .unwrap_or_else(|| INCEPTION_BASE_URL.to_string()),
-                    )
-                    .with_name("inception");
-                    if !credential.extra_headers.is_empty() {
-                        adapter = adapter.with_default_headers(credential.extra_headers);
-                    }
-                    client.register_provider(Arc::new(adapter)).await?;
-                }
-                Some(fabro_model::Provider::OpenAiCompatible) => {
-                    return Err(Error::Configuration {
-                        message: "Provider::OpenAiCompatible is not supported by from_credentials"
-                            .to_string(),
-                        source:  None,
-                    });
-                }
-                None => {
-                    return Err(Error::Configuration {
-                        message: format!(
-                            "Provider \"{provider_id}\" is not supported by credential-only registration"
-                        ),
-                        source:  None,
-                    });
-                }
-            }
+            let Some(provider) = fabro_model::Catalog::builtin().provider(&provider_id) else {
+                return Err(Error::Configuration {
+                    message: format!(
+                        "Provider \"{provider_id}\" is not supported by credential-only registration"
+                    ),
+                    source:  None,
+                });
+            };
+            let Some(factory) = factory_for(&provider.adapter) else {
+                return Err(Error::Configuration {
+                    message: format!(
+                        "Provider \"{provider_id}\" uses unsupported adapter \"{}\"",
+                        provider.adapter
+                    ),
+                    source:  None,
+                });
+            };
+
+            let adapter = factory(AdapterConfig {
+                provider_id:   provider.id.to_string(),
+                auth_header:   credential.auth_header,
+                base_url:      credential.base_url.or_else(|| provider.base_url.clone()),
+                extra_headers: credential.extra_headers,
+                codex_mode:    credential.codex_mode,
+                org_id:        credential.org_id,
+                project_id:    credential.project_id,
+            });
+            client.register_provider(adapter).await?;
         }
 
         debug!(
@@ -321,6 +235,12 @@ impl Client {
             .keys()
             .map(std::string::String::as_str)
             .collect()
+    }
+
+    /// Check whether a provider adapter is registered.
+    #[must_use]
+    pub fn has_provider(&self, name: &str) -> bool {
+        self.providers.contains_key(name)
     }
 
     /// Get the default provider name.

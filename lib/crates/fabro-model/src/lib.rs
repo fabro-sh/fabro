@@ -18,7 +18,9 @@ pub use billing::{
     ModelBillingFacts, ModelBillingInput, ModelPricing, ModelPricingPolicy, ModelRef, ModelUsage,
     OpenAiBillingFacts, OpenAiModelPricing, PricePerMTok, Speed, TokenCounts, UsdMicros,
 };
-pub use catalog::{Catalog, FallbackTarget};
+pub use catalog::{
+    Catalog, CredentialRef, CredentialRefParseError, FallbackTarget, HeaderValueRef,
+};
 pub use ids::{ModelId, ProviderId};
 pub use model_ref::ModelHandle;
 pub use model_test::ModelTestMode;

@@ -101,13 +101,6 @@ fn color_choice(use_color: bool) -> cli_table::ColorChoice {
     }
 }
 
-fn provider_display_name(provider: &ProviderId) -> String {
-    Provider::from_id(provider).map_or_else(
-        || provider.to_string(),
-        |provider| provider.display_name().to_string(),
-    )
-}
-
 fn model_row(model: &Model, use_color: bool) -> Vec<CellStruct> {
     let aliases = model.aliases.join(", ");
     let cost = format!(
@@ -315,7 +308,7 @@ async fn test_models_via_server(
 
         for info in &unconfigured {
             skipped += 1;
-            let provider_name = provider_display_name(&info.provider);
+            let provider_name = Provider::display_name_for_id(&info.provider);
             if !skipped_providers.contains(&provider_name) {
                 skipped_providers.push(provider_name);
             }
