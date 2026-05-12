@@ -56,6 +56,7 @@ use fabro_llm::types::{
     ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest, Role, ToolChoice,
     ToolDefinition,
 };
+use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{BilledTokenCounts, Catalog, ModelTestMode, ProviderId};
 use fabro_redact::redact_jsonl_line;
 use fabro_sandbox::daytona::{self, DaytonaSandbox};
@@ -527,6 +528,7 @@ pub struct AppState {
     manifest_run_defaults: RwLock<Arc<RunLayer>>,
     manifest_run_settings: RwLock<std::result::Result<RunNamespace, SharedError>>,
     pub(crate) server_settings: RwLock<Arc<ServerSettings>>,
+    catalog: RwLock<Arc<Catalog>>,
     pub(crate) env_lookup: EnvLookup,
     pub(crate) github_api_base_url: String,
     http_client: Option<fabro_http::HttpClient>,
@@ -602,6 +604,7 @@ pub(crate) struct ResolvedAppStateSettings {
     pub(crate) server_settings:       ServerSettings,
     pub(crate) manifest_run_defaults: RunLayer,
     pub(crate) manifest_run_settings: std::result::Result<RunNamespace, SharedError>,
+    pub(crate) llm_catalog_settings:  LlmCatalogSettings,
 }
 
 fn accumulate_billing_rollup(
@@ -658,6 +661,10 @@ impl AppState {
                 .read()
                 .expect("server settings lock poisoned"),
         )
+    }
+
+    pub(crate) fn catalog(&self) -> Arc<Catalog> {
+        Arc::clone(&self.catalog.read().expect("catalog lock poisoned"))
     }
 
     pub(crate) fn manifest_run_settings(&self) -> std::result::Result<RunNamespace, SharedError> {
@@ -826,9 +833,14 @@ impl AppState {
             server_settings,
             manifest_run_defaults,
             manifest_run_settings,
+            llm_catalog_settings,
         } = resolved_settings;
         let server_settings = Arc::new(server_settings);
         let manifest_run_defaults = Arc::new(manifest_run_defaults);
+        let catalog = Arc::new(
+            Catalog::from_builtin_with_overrides(&llm_catalog_settings)
+                .context("building LLM model catalog")?,
+        );
         resolve_canonical_origin(&server_settings.server, &self.env_lookup)
             .map_err(anyhow::Error::msg)?;
 
@@ -844,6 +856,7 @@ impl AppState {
             .server_settings
             .write()
             .expect("server settings lock poisoned") = server_settings;
+        *self.catalog.write().expect("catalog lock poisoned") = catalog;
         Ok(())
     }
 }
@@ -1519,6 +1532,10 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
     let current_server_settings = Arc::new(resolved_settings.server_settings);
     let current_manifest_run_defaults = Arc::new(resolved_settings.manifest_run_defaults);
     let current_manifest_run_settings = resolved_settings.manifest_run_settings;
+    let current_catalog = Arc::new(
+        Catalog::from_builtin_with_overrides(&resolved_settings.llm_catalog_settings)
+            .context("building LLM model catalog")?,
+    );
     let slack_service = {
         current_server_settings
             .server
@@ -1563,6 +1580,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         manifest_run_defaults: RwLock::new(current_manifest_run_defaults),
         manifest_run_settings: RwLock::new(current_manifest_run_settings),
         server_settings: RwLock::new(current_server_settings),
+        catalog: RwLock::new(current_catalog),
         env_lookup: Arc::clone(&env_lookup),
         github_api_base_url,
         http_client,

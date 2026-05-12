@@ -436,10 +436,11 @@ async fn build_preflight_report(
     }
 
     let configured_providers = state.llm_source.configured_providers().await;
+    let catalog = state.catalog();
     let materialized = materialize_run(
         prepared.settings.clone(),
         graph,
-        Catalog::builtin(),
+        catalog.as_ref(),
         &configured_providers,
     );
     let resolved_run = materialized.run;
@@ -486,6 +487,7 @@ async fn build_preflight_report(
         graph,
         &resolved_run,
         &configured_providers,
+        catalog.as_ref(),
     )
     .await;
     run_github_token_check(&mut checks, prepared, &resolved_run, github_app).await;
@@ -887,8 +889,9 @@ async fn run_llm_check(
     graph: &Graph,
     settings: &RunNamespace,
     configured_providers: &[ProviderId],
+    catalog: &Catalog,
 ) -> bool {
-    let (model, provider) = resolve_model_provider(settings, graph, configured_providers);
+    let (model, provider) = resolve_model_provider(settings, graph, configured_providers, catalog);
     let default_provider = provider.as_deref().unwrap_or("anthropic");
 
     match state.resolve_llm_client().await {
@@ -912,7 +915,7 @@ async fn run_llm_check(
                 let node_model = node.model().unwrap_or(&model);
                 let node_provider = node.provider().unwrap_or(default_provider);
                 let (resolved_model, resolved_provider) =
-                    if let Some(info) = Catalog::builtin().get(node_model) {
+                    if let Some(info) = catalog.get(node_model) {
                         (info.id.clone(), info.provider.to_string())
                     } else {
                         (node_model.to_string(), node_provider.to_string())
@@ -930,12 +933,11 @@ async fn run_llm_check(
             }
 
             if model_providers.is_empty() {
-                let (resolved_model, resolved_provider) =
-                    if let Some(info) = Catalog::builtin().get(&model) {
-                        (info.id.clone(), info.provider.to_string())
-                    } else {
-                        (model.clone(), default_provider.to_string())
-                    };
+                let (resolved_model, resolved_provider) = if let Some(info) = catalog.get(&model) {
+                    (info.id.clone(), info.provider.to_string())
+                } else {
+                    (model.clone(), default_provider.to_string())
+                };
                 model_providers.insert((resolved_model, resolved_provider));
             }
 
@@ -1040,6 +1042,7 @@ fn resolve_model_provider(
     settings: &RunNamespace,
     _graph: &Graph,
     configured_providers: &[ProviderId],
+    catalog: &Catalog,
 ) -> (String, Option<String>) {
     let provider = settings
         .model
@@ -1048,7 +1051,7 @@ fn resolve_model_provider(
         .map(InterpString::as_source);
     let model = settings.model.name.as_ref().map_or_else(
         || {
-            Catalog::builtin()
+            catalog
                 .default_for_configured_ids(configured_providers)
                 .id
                 .clone()
@@ -1056,7 +1059,7 @@ fn resolve_model_provider(
         InterpString::as_source,
     );
 
-    match Catalog::builtin().get(&model) {
+    match catalog.get(&model) {
         Some(info) => (
             info.id.clone(),
             provider.or(Some(info.provider.to_string())),
@@ -2026,6 +2029,77 @@ digraph Demo {
             .iter()
             .find(|check| check.name == "LLM" && check.summary == "venice-model")
             .expect("preflight should include the requested custom LLM provider");
+        assert_eq!(llm_check.status, types::PreflightCheckResultStatus::Warning);
+        assert_eq!(
+            llm_check.remediation.as_deref(),
+            Some("Provider \"venice\" is not configured")
+        );
+        assert!(
+            llm_check
+                .details
+                .iter()
+                .any(|detail| detail.text == "Provider: venice")
+        );
+    }
+
+    #[tokio::test]
+    async fn preflight_resolves_model_aliases_from_app_state_catalog() {
+        let llm_catalog_settings: fabro_model::catalog::LlmCatalogSettings = toml::from_str(
+            r#"
+[providers.venice]
+display_name = "Venice"
+adapter = "openai_compatible"
+base_url = "https://api.venice.ai/api/v1"
+credentials = ["env:VENICE_API_KEY"]
+
+[models."venice-large"]
+provider = "venice"
+display_name = "Venice Large"
+family = "venice"
+default = true
+aliases = ["vl"]
+
+[models."venice-large".limits]
+context_window = 128000
+
+[models."venice-large".features]
+tools = true
+vision = false
+reasoning = false
+effort = false
+"#,
+        )
+        .expect("catalog fixture should parse");
+        let state = crate::test_support::TestAppStateBuilder::new()
+            .llm_catalog_settings(llm_catalog_settings)
+            .build();
+        let mut manifest = minimal_manifest();
+        manifest.workflows.get_mut("workflow.fabro").unwrap().source = r#"
+digraph Demo {
+    start [shape=Mdiamond]
+    exit  [shape=Msquare]
+    work  [prompt="Do work", model="vl"]
+    start -> work -> exit
+}
+"#
+        .to_string();
+        let prepared = prepare_manifest(
+            &manifest_run_defaults(Some(&default_settings_fixture())),
+            &manifest,
+        )
+        .unwrap();
+        let validated = validate_prepared_manifest(&prepared, RenderMode::Strict).unwrap();
+
+        let (response, ok) = run_preflight(state.as_ref(), &prepared, &validated)
+            .await
+            .unwrap();
+
+        assert!(!ok);
+        let llm_check = response.checks.sections[0]
+            .checks
+            .iter()
+            .find(|check| check.name == "LLM" && check.summary == "venice-large")
+            .expect("preflight should resolve the catalog alias");
         assert_eq!(llm_check.status, types::PreflightCheckResultStatus::Warning);
         assert_eq!(
             llm_check.remediation.as_deref(),

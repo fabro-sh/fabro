@@ -77,14 +77,12 @@ async fn create_completion(
     Json(req): Json<CreateCompletionRequest>,
 ) -> Response {
     // Resolve model
-    let model_id = req.model.unwrap_or_else(|| {
-        fabro_model::Catalog::builtin()
-            .list(None)
-            .first()
-            .map_or_else(|| "claude-sonnet-4-5".to_string(), |m| m.id.clone())
-    });
+    let catalog = state.catalog();
+    let model_id = req
+        .model
+        .unwrap_or_else(|| catalog.default_model().id.clone());
 
-    let catalog_info = fabro_model::Catalog::builtin().get(&model_id);
+    let catalog_info = catalog.get(&model_id);
 
     // Resolve provider: explicit request > catalog > None
     let explicit_provider = req.provider;
@@ -131,7 +129,7 @@ async fn create_completion(
     let request = LlmRequest {
         model: model_id.clone(),
         messages,
-        provider: provider_name,
+        provider: provider_name.clone(),
         tools,
         tool_choice,
         response_format: None,
@@ -167,7 +165,7 @@ async fn create_completion(
         warn!(provider = %provider, error = %issue, "LLM provider unavailable due to auth issue");
     }
     let client = llm_result.client;
-    if let Some(provider) = explicit_provider.as_deref() {
+    if let Some(provider) = provider_name.as_deref() {
         if !client.has_provider(provider) {
             return ApiError::bad_request(format!("Provider \"{provider}\" is not configured"))
                 .into_response();

@@ -47,7 +47,8 @@ async fn list_models(
         .into_iter()
         .collect();
 
-    let mut models = fabro_model::Catalog::builtin()
+    let catalog = state.catalog();
+    let mut models = catalog
         .list(provider_id.as_ref())
         .into_iter()
         .filter(|model| match &query {
@@ -100,7 +101,8 @@ async fn test_model(
         },
         None => ModelTestMode::Basic,
     };
-    let Some(info) = fabro_model::Catalog::builtin().get(&id) else {
+    let catalog = state.catalog();
+    let Some(info) = catalog.get(&id) else {
         return ApiError::not_found(format!("Model not found: {id}")).into_response();
     };
 

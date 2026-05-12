@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use super::super::{
-    ApiError, AppState, Catalog, CloseRunPullRequestResponse, CreateRunPullRequestRequest,
-    IntoResponse, Json, MergeRunPullRequestRequest, MergeRunPullRequestResponse, PullRequestRecord,
+    ApiError, AppState, CloseRunPullRequestResponse, CreateRunPullRequestRequest, IntoResponse,
+    Json, MergeRunPullRequestRequest, MergeRunPullRequestResponse, PullRequestRecord,
     RequireRunScoped, Response, Router, RunId, State, StatusCode, get, lock_pull_request_create,
     post, pull_request, warn, workflow_event,
 };
@@ -248,7 +248,8 @@ async fn create_run_pull_request(
         model
     } else {
         let configured = state.llm_source.configured_providers().await;
-        Catalog::builtin()
+        state
+            .catalog()
             .default_for_configured_ids(&configured)
             .id
             .clone()

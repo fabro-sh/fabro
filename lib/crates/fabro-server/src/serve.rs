@@ -713,6 +713,7 @@ where
         server_settings:       runtime_settings.server_settings,
         manifest_run_defaults: runtime_settings.manifest_run_defaults,
         manifest_run_settings: runtime_settings.manifest_run_settings,
+        llm_catalog_settings:  runtime_settings.llm_catalog_settings,
     };
     let resolved_server_settings = resolved_app_settings.server_settings.server.clone();
     let (auth_mode, server_secrets) = resolve_startup(
@@ -882,6 +883,7 @@ where
                                 server_settings:       resolved.server_settings,
                                 manifest_run_defaults: resolved.manifest_run_defaults,
                                 manifest_run_settings: resolved.manifest_run_settings,
+                                llm_catalog_settings:  resolved.llm_catalog_settings,
                             }
                         });
                         match resolved {
@@ -1262,6 +1264,7 @@ mod tests {
                 .map_err(|err| fabro_util::error::SharedError::new(anyhow::Error::new(err))),
             manifest_run_defaults,
             server_settings: server_settings(source),
+            llm_catalog_settings: fabro_model::catalog::LlmCatalogSettings::default(),
         }
     }
 

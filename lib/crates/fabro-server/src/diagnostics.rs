@@ -119,13 +119,17 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
         .filter_map(|name| name.parse::<Provider>().ok())
         .collect();
     let client = &result.client;
-    let probe_outcomes = join_all(providers.iter().map(|&provider| async move {
-        let outcome = timeout(
-            Duration::from_secs(30),
-            probe_llm_provider(client, provider),
-        )
-        .await;
-        (provider, outcome)
+    let catalog = state.catalog();
+    let probe_outcomes = join_all(providers.iter().map(|&provider| {
+        let catalog = catalog.clone();
+        async move {
+            let outcome = timeout(
+                Duration::from_secs(30),
+                probe_llm_provider(client, provider, catalog.as_ref()),
+            )
+            .await;
+            (provider, outcome)
+        }
     }))
     .await;
     for (provider, probe_result) in probe_outcomes {
@@ -200,15 +204,19 @@ fn short_error_line(rendered: &str) -> String {
     }
 }
 
-fn probe_model(provider: Provider) -> String {
-    Catalog::builtin()
+fn probe_model(provider: Provider, catalog: &Catalog) -> String {
+    catalog
         .probe_for_provider(provider)
         .map_or_else(|| format!("unknown-{provider}"), |m| m.id.clone())
 }
 
-async fn probe_llm_provider(client: &LlmClient, provider: Provider) -> fabro_llm::Result<()> {
+async fn probe_llm_provider(
+    client: &LlmClient,
+    provider: Provider,
+    catalog: &Catalog,
+) -> fabro_llm::Result<()> {
     let request = Request {
-        model:            probe_model(provider),
+        model:            probe_model(provider, catalog),
         messages:         vec![Message::user("hi")],
         provider:         Some(provider.to_string()),
         tools:            None,

@@ -1,6 +1,8 @@
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 
+use fabro_model::catalog as model_catalog;
 use fabro_types::settings::{RunNamespace, WorkflowNamespace};
 use fabro_types::{ServerSettings, UserSettings, WorkflowSettings};
 use fabro_util::error::SharedError;
@@ -12,7 +14,11 @@ use crate::resolve::{
     resolve_workflow,
 };
 use crate::user::load_settings_config;
-use crate::{CliLayer, Combine, Error, Result, RunLayer, ServerLayer, SettingsLayer, run};
+use crate::{
+    CliLayer, Combine, CostRates, Error, LlmLayer, LlmModelFeatures, LlmModelLimits, ModelControls,
+    ModelCostTable, ModelSettings, ProviderSettings, Result, RunLayer, ServerLayer, SettingsLayer,
+    run,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolveErrors(pub Vec<ResolveError>);
@@ -204,6 +210,7 @@ pub struct ServerRuntimeSettings {
     pub server_settings:       ServerSettings,
     pub manifest_run_defaults: RunLayer,
     pub manifest_run_settings: std::result::Result<RunNamespace, SharedError>,
+    pub llm_catalog_settings:  model_catalog::LlmCatalogSettings,
 }
 
 pub fn load_server_runtime_settings(
@@ -251,12 +258,132 @@ fn resolve_server_runtime_settings(
     }
 
     let manifest_run_defaults = layer.run.clone().unwrap_or_default();
+    let llm_catalog_settings = llm_catalog_settings_from_layer(&layer);
     Ok(ServerRuntimeSettings {
         server_settings: ServerSettingsBuilder::from_layer(&layer)?,
         manifest_run_settings: RunSettingsBuilder::from_run_layer(&manifest_run_defaults)
             .map_err(|err| SharedError::new(anyhow::Error::new(err))),
         manifest_run_defaults,
+        llm_catalog_settings,
     })
+}
+
+fn llm_catalog_settings_from_layer(layer: &SettingsLayer) -> model_catalog::LlmCatalogSettings {
+    let layer = layer.clone().combine(DEFAULTS_LAYER.clone());
+    layer
+        .llm
+        .map(llm_layer_to_catalog_settings)
+        .unwrap_or_default()
+}
+
+fn llm_layer_to_catalog_settings(llm: LlmLayer) -> model_catalog::LlmCatalogSettings {
+    model_catalog::LlmCatalogSettings {
+        providers: llm
+            .providers
+            .into_inner()
+            .into_iter()
+            .map(|(id, settings)| (id, provider_settings_to_catalog(settings)))
+            .collect(),
+        models:    llm
+            .models
+            .into_inner()
+            .into_iter()
+            .map(|(id, settings)| (id, model_settings_to_catalog(settings)))
+            .collect(),
+    }
+}
+
+fn provider_settings_to_catalog(
+    settings: ProviderSettings,
+) -> model_catalog::ProviderCatalogSettings {
+    model_catalog::ProviderCatalogSettings {
+        display_name:  settings.display_name,
+        adapter:       settings.adapter,
+        base_url:      settings.base_url,
+        credentials:   settings.credentials,
+        extra_headers: settings.extra_headers,
+        priority:      settings.priority,
+        enabled:       settings.enabled,
+        aliases:       settings.aliases,
+    }
+}
+
+fn model_settings_to_catalog(settings: ModelSettings) -> model_catalog::ModelCatalogSettings {
+    let ModelSettings {
+        provider,
+        api_id,
+        display_name,
+        family,
+        training,
+        knowledge_cutoff,
+        default,
+        enabled,
+        aliases,
+        estimated_output_tps,
+        limits,
+        features,
+        controls,
+        costs,
+    } = settings;
+    model_catalog::ModelCatalogSettings {
+        provider,
+        api_id,
+        display_name,
+        family,
+        training,
+        knowledge_cutoff,
+        default,
+        enabled,
+        aliases,
+        estimated_output_tps,
+        limits: limits.as_ref().map(model_limits_to_catalog),
+        features: features.as_ref().map(model_features_to_catalog),
+        controls: controls.map(model_controls_to_catalog),
+        costs: costs.as_ref().map(model_cost_table_to_catalog),
+    }
+}
+
+fn model_limits_to_catalog(limits: &LlmModelLimits) -> model_catalog::SettingsModelLimits {
+    model_catalog::SettingsModelLimits {
+        context_window: limits.context_window,
+        max_output:     limits.max_output,
+    }
+}
+
+fn model_features_to_catalog(features: &LlmModelFeatures) -> model_catalog::SettingsModelFeatures {
+    model_catalog::SettingsModelFeatures {
+        tools:     features.tools,
+        vision:    features.vision,
+        reasoning: features.reasoning,
+        effort:    features.effort,
+    }
+}
+
+fn model_controls_to_catalog(controls: ModelControls) -> model_catalog::SettingsModelControls {
+    model_catalog::SettingsModelControls {
+        reasoning_effort: controls.reasoning_effort,
+        speed:            controls.speed,
+    }
+}
+
+fn model_cost_table_to_catalog(costs: &ModelCostTable) -> model_catalog::SettingsModelCostTable {
+    model_catalog::SettingsModelCostTable {
+        base:  cost_rates_to_catalog(&costs.base),
+        speed: costs.speed.as_ref().map(|speed| {
+            speed
+                .iter()
+                .map(|(key, rates)| (key.clone(), cost_rates_to_catalog(rates)))
+                .collect::<BTreeMap<_, _>>()
+        }),
+    }
+}
+
+fn cost_rates_to_catalog(rates: &CostRates) -> model_catalog::CostRates {
+    model_catalog::CostRates {
+        input_cost_per_mtok:       rates.input_cost_per_mtok,
+        output_cost_per_mtok:      rates.output_cost_per_mtok,
+        cache_input_cost_per_mtok: rates.cache_input_cost_per_mtok,
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -456,7 +583,7 @@ mod tests {
     use fabro_types::settings::cli::OutputVerbosity;
     use fabro_types::settings::run::{ApprovalMode, RunMode};
 
-    use super::{RunSettingsBuilder, WorkflowSettingsBuilder};
+    use super::{RunSettingsBuilder, WorkflowSettingsBuilder, server_runtime_settings_from_toml};
     use crate::{CliLayer, CliOutputLayer, ReplaceMap, RunExecutionLayer, RunLayer, RunModelLayer};
 
     #[test]
@@ -530,5 +657,52 @@ command = ["demo-mcp"]
         );
         assert_eq!(settings.run.execution.mode, RunMode::DryRun);
         assert_eq!(settings.run.execution.approval, ApprovalMode::Auto);
+    }
+
+    #[test]
+    fn server_runtime_settings_preserves_llm_catalog_overrides() {
+        let settings = server_runtime_settings_from_toml(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[llm.providers.venice]
+display_name = "Venice"
+adapter = "openai_compatible"
+base_url = "https://api.venice.ai/api/v1"
+credentials = ["env:VENICE_API_KEY"]
+
+[llm.models."venice-large"]
+provider = "venice"
+display_name = "Venice Large"
+family = "venice"
+default = true
+
+[llm.models."venice-large".limits]
+context_window = 128000
+
+[llm.models."venice-large".features]
+tools = true
+vision = false
+reasoning = false
+effort = false
+"#,
+            None,
+            None,
+        )
+        .expect("server runtime settings should resolve");
+
+        let catalog =
+            fabro_model::Catalog::from_builtin_with_overrides(&settings.llm_catalog_settings)
+                .expect("catalog overrides should build");
+
+        assert_eq!(
+            catalog
+                .get("venice-large")
+                .map(|model| model.provider.clone()),
+            Some(fabro_model::ProviderId::new("venice"))
+        );
     }
 }

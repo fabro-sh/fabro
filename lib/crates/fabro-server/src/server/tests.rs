@@ -72,6 +72,7 @@ fn resolved_runtime_settings_from_toml(source: &str) -> ResolvedAppStateSettings
     resolved_runtime_settings_for_tests(
         server_settings_from_toml(source),
         manifest_run_defaults_from_toml(source),
+        fabro_model::catalog::LlmCatalogSettings::default(),
     )
 }
 
@@ -1756,6 +1757,7 @@ methods = ["dev-token"]
         resolved_settings: resolved_runtime_settings_for_tests(
             server_settings,
             RunLayer::default(),
+            fabro_model::catalog::LlmCatalogSettings::default(),
         ),
         registry_factory_override: None,
         max_concurrent_runs: 5,
@@ -3455,6 +3457,7 @@ fn create_github_token_app_state_with_env_lookup(
         resolved_settings: resolved_runtime_settings_for_tests(
             github_token_settings(),
             RunLayer::default(),
+            fabro_model::catalog::LlmCatalogSettings::default(),
         ),
         registry_factory_override: None,
         max_concurrent_runs: 5,
@@ -3835,6 +3838,53 @@ async fn list_models_unknown_provider_returns_empty_page() {
     let body = response_json!(response, StatusCode::OK).await;
     assert_eq!(body["data"].as_array().unwrap().len(), 0);
     assert_eq!(body["meta"]["has_more"].as_bool(), Some(false));
+}
+
+#[tokio::test]
+async fn list_models_uses_app_state_catalog_overrides() {
+    let llm_catalog_settings: fabro_model::catalog::LlmCatalogSettings = toml::from_str(
+        r#"
+[providers.venice]
+display_name = "Venice"
+adapter = "openai_compatible"
+base_url = "https://api.venice.ai/api/v1"
+credentials = ["env:VENICE_API_KEY"]
+priority = 120
+
+[models."venice-large"]
+provider = "venice"
+display_name = "Venice Large"
+family = "venice"
+default = true
+
+[models."venice-large".limits]
+context_window = 128000
+
+[models."venice-large".features]
+tools = true
+vision = false
+reasoning = false
+effort = false
+"#,
+    )
+    .expect("catalog fixture should parse");
+    let state = TestAppStateBuilder::new()
+        .llm_catalog_settings(llm_catalog_settings)
+        .build();
+    let app = crate::test_support::build_test_router(state);
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/models?provider=venice"))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let models = body["data"].as_array().unwrap();
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0]["id"], "venice-large");
+    assert_eq!(models[0]["provider"], "venice");
 }
 
 #[tokio::test]
@@ -9105,6 +9155,65 @@ async fn create_completion_unknown_provider_returns_clear_error() {
             serde_json::json!({
                 "provider": "venice",
                 "model": "gpt-5.4",
+                "stream": false,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"kind": "text", "data": "hi"}]
+                    }
+                ]
+            })
+            .to_string(),
+        ))
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::BAD_REQUEST).await;
+    assert_eq!(
+        body["errors"][0]["detail"],
+        "Provider \"venice\" is not configured"
+    );
+}
+
+#[tokio::test]
+async fn create_completion_default_model_uses_app_state_catalog() {
+    let llm_catalog_settings: fabro_model::catalog::LlmCatalogSettings = toml::from_str(
+        r#"
+[providers.venice]
+display_name = "Venice"
+adapter = "openai_compatible"
+base_url = "https://api.venice.ai/api/v1"
+credentials = ["env:VENICE_API_KEY"]
+priority = 120
+
+[models."venice-large"]
+provider = "venice"
+display_name = "Venice Large"
+family = "venice"
+default = true
+
+[models."venice-large".limits]
+context_window = 128000
+
+[models."venice-large".features]
+tools = true
+vision = false
+reasoning = false
+effort = false
+"#,
+    )
+    .expect("catalog fixture should parse");
+    let state = TestAppStateBuilder::new()
+        .llm_catalog_settings(llm_catalog_settings)
+        .build();
+    let app = crate::test_support::build_test_router(state);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api("/completions"))
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({
                 "stream": false,
                 "messages": [
                     {

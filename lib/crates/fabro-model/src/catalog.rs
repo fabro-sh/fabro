@@ -610,6 +610,14 @@ impl Catalog {
         })
     }
 
+    pub fn from_builtin_with_overrides(
+        overrides: &LlmCatalogSettings,
+    ) -> Result<Self, CatalogBuildError> {
+        let builtins = Self::builtin_settings()?;
+        let settings = merge_catalog_settings(overrides.clone(), builtins);
+        Self::from_settings(&settings)
+    }
+
     /// Create a catalog from a custom set of models (useful for testing).
     #[must_use]
     pub fn from_models(models: Vec<Model>) -> Self {
@@ -658,7 +666,7 @@ impl Catalog {
         }
     }
 
-    fn from_builtin_toml() -> Result<Self, CatalogBuildError> {
+    fn builtin_settings() -> Result<LlmCatalogSettings, CatalogBuildError> {
         let mut layer = LlmCatalogSettings::default();
         let mut paths = BuiltinCatalogToml::iter()
             .filter(|path| path.ends_with(".toml"))
@@ -688,7 +696,11 @@ impl Catalog {
             layer.models.extend(fragment.models);
         }
 
-        Self::from_settings(&layer)
+        Ok(layer)
+    }
+
+    fn from_builtin_toml() -> Result<Self, CatalogBuildError> {
+        Self::from_settings(&Self::builtin_settings()?)
     }
 
     /// Look up a model by ID or alias.
@@ -897,6 +909,146 @@ fn build_model_index(models: &[Model]) -> HashMap<String, usize> {
         }
     }
     index
+}
+
+fn merge_catalog_settings(
+    higher: LlmCatalogSettings,
+    mut fallback: LlmCatalogSettings,
+) -> LlmCatalogSettings {
+    for (id, provider) in higher.providers {
+        let provider = match fallback.providers.remove(&id) {
+            Some(fallback_provider) => merge_provider_settings(provider, fallback_provider),
+            None => provider,
+        };
+        fallback.providers.insert(id, provider);
+    }
+
+    for (id, model) in higher.models {
+        let model = match fallback.models.remove(&id) {
+            Some(fallback_model) => merge_model_settings(model, fallback_model),
+            None => model,
+        };
+        fallback.models.insert(id, model);
+    }
+
+    fallback
+}
+
+fn merge_provider_settings(
+    higher: ProviderCatalogSettings,
+    fallback: ProviderCatalogSettings,
+) -> ProviderCatalogSettings {
+    ProviderCatalogSettings {
+        display_name:  higher.display_name.or(fallback.display_name),
+        adapter:       higher.adapter.or(fallback.adapter),
+        base_url:      higher.base_url.or(fallback.base_url),
+        credentials:   higher.credentials.or(fallback.credentials),
+        extra_headers: higher.extra_headers.or(fallback.extra_headers),
+        priority:      higher.priority.or(fallback.priority),
+        enabled:       higher.enabled.or(fallback.enabled),
+        aliases:       higher.aliases.or(fallback.aliases),
+    }
+}
+
+fn merge_model_settings(
+    higher: ModelCatalogSettings,
+    fallback: ModelCatalogSettings,
+) -> ModelCatalogSettings {
+    ModelCatalogSettings {
+        provider:             higher.provider.or(fallback.provider),
+        api_id:               higher.api_id.or(fallback.api_id),
+        display_name:         higher.display_name.or(fallback.display_name),
+        family:               higher.family.or(fallback.family),
+        training:             higher.training.or(fallback.training),
+        knowledge_cutoff:     higher.knowledge_cutoff.or(fallback.knowledge_cutoff),
+        default:              higher.default.or(fallback.default),
+        enabled:              higher.enabled.or(fallback.enabled),
+        aliases:              higher.aliases.or(fallback.aliases),
+        estimated_output_tps: higher
+            .estimated_output_tps
+            .or(fallback.estimated_output_tps),
+        limits:               merge_optional(
+            higher.limits,
+            fallback.limits,
+            merge_model_limits_settings,
+        ),
+        features:             merge_optional(
+            higher.features,
+            fallback.features,
+            merge_model_features_settings,
+        ),
+        controls:             merge_optional(
+            higher.controls,
+            fallback.controls,
+            merge_model_controls_settings,
+        ),
+        costs:                merge_optional(higher.costs, fallback.costs, merge_model_cost_table),
+    }
+}
+
+fn merge_optional<T>(higher: Option<T>, fallback: Option<T>, merge: fn(&T, &T) -> T) -> Option<T> {
+    match (higher, fallback) {
+        (Some(higher), Some(fallback)) => Some(merge(&higher, &fallback)),
+        (Some(higher), None) => Some(higher),
+        (None, fallback) => fallback,
+    }
+}
+
+fn merge_model_limits_settings(
+    higher: &SettingsModelLimits,
+    fallback: &SettingsModelLimits,
+) -> SettingsModelLimits {
+    SettingsModelLimits {
+        context_window: higher.context_window.or(fallback.context_window),
+        max_output:     higher.max_output.or(fallback.max_output),
+    }
+}
+
+fn merge_model_features_settings(
+    higher: &SettingsModelFeatures,
+    fallback: &SettingsModelFeatures,
+) -> SettingsModelFeatures {
+    SettingsModelFeatures {
+        tools:     higher.tools.or(fallback.tools),
+        vision:    higher.vision.or(fallback.vision),
+        reasoning: higher.reasoning.or(fallback.reasoning),
+        effort:    higher.effort.or(fallback.effort),
+    }
+}
+
+fn merge_model_controls_settings(
+    higher: &SettingsModelControls,
+    fallback: &SettingsModelControls,
+) -> SettingsModelControls {
+    SettingsModelControls {
+        reasoning_effort: higher
+            .reasoning_effort
+            .clone()
+            .or_else(|| fallback.reasoning_effort.clone()),
+        speed:            higher.speed.clone().or_else(|| fallback.speed.clone()),
+    }
+}
+
+fn merge_model_cost_table(
+    higher: &SettingsModelCostTable,
+    fallback: &SettingsModelCostTable,
+) -> SettingsModelCostTable {
+    SettingsModelCostTable {
+        base:  merge_cost_rates(&higher.base, &fallback.base),
+        speed: higher.speed.clone().or_else(|| fallback.speed.clone()),
+    }
+}
+
+fn merge_cost_rates(higher: &CostRates, fallback: &CostRates) -> CostRates {
+    CostRates {
+        input_cost_per_mtok:       higher.input_cost_per_mtok.or(fallback.input_cost_per_mtok),
+        output_cost_per_mtok:      higher
+            .output_cost_per_mtok
+            .or(fallback.output_cost_per_mtok),
+        cache_input_cost_per_mtok: higher
+            .cache_input_cost_per_mtok
+            .or(fallback.cache_input_cost_per_mtok),
+    }
 }
 
 fn build_providers(
@@ -1353,6 +1505,85 @@ mod tests {
     }
 
     // ---- Catalog struct tests ----
+
+    #[test]
+    fn builtin_with_empty_overrides_matches_builtin_catalog() {
+        let catalog = Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
+            .expect("empty overrides should build");
+
+        assert_eq!(
+            catalog.get("sonnet").map(|model| model.id.as_str()),
+            Catalog::builtin()
+                .get("sonnet")
+                .map(|model| model.id.as_str())
+        );
+        assert_eq!(
+            catalog.default_model().id,
+            Catalog::builtin().default_model().id
+        );
+    }
+
+    #[test]
+    fn builtin_overrides_sparse_provider_fields() {
+        let catalog = Catalog::from_builtin_with_overrides(&minimal_settings(
+            r"
+[providers.anthropic]
+enabled = false
+",
+        ))
+        .expect("sparse built-in provider override should build");
+
+        assert!(catalog.provider(&ProviderId::anthropic()).is_none());
+        assert!(catalog.get("claude-sonnet-4-5").is_none());
+        assert!(
+            catalog
+                .providers()
+                .iter()
+                .any(|provider| provider.id == ProviderId::openai())
+        );
+    }
+
+    #[test]
+    fn builtin_overrides_add_custom_openai_compatible_provider_and_model() {
+        let catalog = Catalog::from_builtin_with_overrides(&minimal_settings(
+            r#"
+[providers.venice]
+display_name = "Venice"
+adapter = "openai_compatible"
+base_url = "https://api.venice.ai/api/v1"
+credentials = ["env:VENICE_API_KEY"]
+priority = 120
+aliases = ["venice-ai"]
+
+[models."venice-large"]
+provider = "venice"
+display_name = "Venice Large"
+family = "venice"
+default = true
+aliases = ["vl"]
+
+[models."venice-large".limits]
+context_window = 128000
+
+[models."venice-large".features]
+tools = true
+vision = false
+reasoning = false
+effort = false
+"#,
+        ))
+        .expect("custom provider overlay should build");
+
+        let provider = catalog
+            .provider(&ProviderId::new("venice-ai"))
+            .expect("provider alias should resolve");
+        assert_eq!(provider.id, ProviderId::new("venice"));
+        assert_eq!(provider.adapter, "openai_compatible");
+
+        let model = catalog.get("vl").expect("model alias should resolve");
+        assert_eq!(model.id, "venice-large");
+        assert_eq!(model.provider, ProviderId::new("venice"));
+    }
 
     #[test]
     fn builtin_get_by_id() {
