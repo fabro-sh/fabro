@@ -31,12 +31,11 @@ fn acp_backend_workflow() {
             r#"digraph ACP {{
   graph [goal="Exercise ACP backend"]
   start [shape=Mdiamond]
-  work [type="agent", backend="acp", provider="openai", model="fake-acp", prompt="write hello.txt", acp_command={}]
+  work [type="agent", backend="acp", provider="openai", model="fake-acp", prompt="write hello.txt", acp_command={acp_command}]
   exit [shape=Msquare]
   start -> work
   work -> exit
-}}"#,
-            acp_command
+}}"#
         ),
     );
     init_git_repo(&context.temp_dir);
@@ -105,12 +104,11 @@ fn acp_prompt_workflow_uses_acp_backend() {
             r#"digraph ACP {{
   graph [goal="Exercise ACP prompt backend"]
   start [shape=Mdiamond]
-  prompt [type="prompt", backend="acp", provider="openai", model="fake-acp", project_memory=false, prompt="write hello.txt", acp_command={}]
+  prompt [type="prompt", backend="acp", provider="openai", model="fake-acp", project_memory=false, prompt="write hello.txt", acp_command={acp_command}]
   exit [shape=Msquare]
   start -> prompt
   prompt -> exit
-}}"#,
-            acp_command
+}}"#
         ),
     );
     init_git_repo(&context.temp_dir);

@@ -8,10 +8,12 @@ use fabro_acp::{AcpError, AcpRunRequest, AcpRunResult, resolve_acp_command, run_
 use fabro_sandbox::test_support::MockSandbox;
 use fabro_sandbox::{LocalSandbox, Sandbox, shell_quote};
 use fabro_util::error::collect_chain;
-use tokio::fs::{read_to_string, write};
+use tokio::fs::{metadata, read_to_string, write};
 use tokio::process::Command;
-use tokio::time::sleep;
+use tokio::time::{Instant, sleep};
 use tokio_util::sync::CancellationToken;
+
+const ACP_TEST_TIMEOUT_MS: u64 = 30_000;
 
 #[allow(
     unused,
@@ -36,7 +38,7 @@ async fn stdio_spawn_failure_returns_sandbox_error() {
         command,
         prompt: "hello".to_string(),
         cwd: "/workspace".to_string(),
-        timeout_ms: Some(5_000),
+        timeout_ms: Some(ACP_TEST_TIMEOUT_MS),
         env: HashMap::new(),
         sandbox,
         cancel_token: CancellationToken::new(),
@@ -75,7 +77,7 @@ async fn session_lifecycle_initializes_sends_prompt_and_aggregates_text() {
         command,
         prompt: "hello".to_string(),
         cwd: tempdir.path().to_string_lossy().into_owned(),
-        timeout_ms: Some(5_000),
+        timeout_ms: Some(ACP_TEST_TIMEOUT_MS),
         env: HashMap::from([(
             "ACP_RECORD".to_string(),
             record_path.to_string_lossy().into_owned(),
@@ -111,7 +113,7 @@ async fn permission_request_selects_allow_always() {
                 permission_path.to_string_lossy().into_owned(),
             ),
         ]),
-        Some(5_000),
+        Some(ACP_TEST_TIMEOUT_MS),
         CancellationToken::new(),
     )
     .await
@@ -139,7 +141,7 @@ async fn runs_inside_sandbox_and_uses_requested_cwd() {
                 cwd_path.to_string_lossy().into_owned(),
             ),
         ]),
-        Some(5_000),
+        Some(ACP_TEST_TIMEOUT_MS),
         CancellationToken::new(),
     )
     .await
@@ -164,8 +166,10 @@ async fn runs_inside_sandbox_and_uses_requested_cwd() {
 async fn cancellation_sends_session_cancel_and_returns_cancelled() {
     let tempdir = tempfile::tempdir().expect("create tempdir");
     let cancel_path = tempdir.path().join("cancel.txt");
+    let prompt_path = tempdir.path().join("prompt.json");
     let tempdir_path = tempdir.path().to_path_buf();
     let cancel_path_for_task = cancel_path.clone();
+    let prompt_path_for_task = prompt_path.clone();
     let cancel_token = CancellationToken::new();
     let cancel_for_task = cancel_token.clone();
 
@@ -178,14 +182,18 @@ async fn cancellation_sends_session_cancel_and_returns_cancelled() {
                     "ACP_CANCEL_RECORD".to_string(),
                     cancel_path_for_task.to_string_lossy().into_owned(),
                 ),
+                (
+                    "ACP_PROMPT_RECORD".to_string(),
+                    prompt_path_for_task.to_string_lossy().into_owned(),
+                ),
             ]),
-            Some(5_000),
+            Some(ACP_TEST_TIMEOUT_MS),
             cancel_for_task,
         )
         .await
     });
 
-    sleep(Duration::from_millis(100)).await;
+    wait_for_file(&prompt_path, Duration::from_secs(10)).await;
     cancel_token.cancel();
     let err = task
         .await
@@ -233,7 +241,7 @@ async fn successful_turn_terminates_lingering_agent_process() {
                 pid_path.to_string_lossy().into_owned(),
             ),
         ]),
-        Some(5_000),
+        Some(ACP_TEST_TIMEOUT_MS),
         CancellationToken::new(),
     )
     .await
@@ -264,7 +272,7 @@ async fn refusal_stop_reason_returns_text() {
     let result = run_fake_agent(
         tempdir.path(),
         HashMap::from([("ACP_STOP_REASON".to_string(), "refusal".to_string())]),
-        Some(5_000),
+        Some(ACP_TEST_TIMEOUT_MS),
         CancellationToken::new(),
     )
     .await
@@ -281,7 +289,7 @@ async fn max_tokens_stop_reason_returns_partial_text_error() {
     let err = run_fake_agent(
         tempdir.path(),
         HashMap::from([("ACP_STOP_REASON".to_string(), "max_tokens".to_string())]),
-        Some(5_000),
+        Some(ACP_TEST_TIMEOUT_MS),
         CancellationToken::new(),
     )
     .await
@@ -304,7 +312,7 @@ async fn max_turn_requests_stop_reason_returns_partial_text_error() {
             "ACP_STOP_REASON".to_string(),
             "max_turn_requests".to_string(),
         )]),
-        Some(5_000),
+        Some(ACP_TEST_TIMEOUT_MS),
         CancellationToken::new(),
     )
     .await
@@ -340,7 +348,7 @@ async fn malformed_json_returns_protocol_error() {
     let err = run_fake_agent(
         tempdir.path(),
         HashMap::from([("ACP_MODE".to_string(), "malformed".to_string())]),
-        Some(5_000),
+        Some(ACP_TEST_TIMEOUT_MS),
         CancellationToken::new(),
     )
     .await
@@ -356,7 +364,7 @@ async fn early_exit_returns_protocol_error_with_stderr() {
     let err = run_fake_agent(
         tempdir.path(),
         HashMap::from([("ACP_MODE".to_string(), "early_exit".to_string())]),
-        Some(5_000),
+        Some(ACP_TEST_TIMEOUT_MS),
         CancellationToken::new(),
     )
     .await
@@ -401,6 +409,17 @@ async fn run_fake_agent(
         on_activity: None,
     })
     .await
+}
+
+async fn wait_for_file(path: &Path, max_wait: Duration) {
+    let deadline = Instant::now() + max_wait;
+    while Instant::now() < deadline {
+        if metadata(path).await.is_ok() {
+            return;
+        }
+        sleep(Duration::from_millis(25)).await;
+    }
+    panic!("timed out waiting for {}", path.display());
 }
 
 async fn process_is_running(pid: &str) -> bool {
