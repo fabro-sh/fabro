@@ -12,6 +12,7 @@ use fabro_auth::CredentialSource;
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate_object};
 use fabro_llm::types::{Message, Request, ToolResult};
+use fabro_model::Catalog;
 use fabro_template::{TemplateContext, render as render_template};
 use fabro_types::settings::InterpString;
 use fabro_util::env::{Env, SystemEnv};
@@ -50,6 +51,7 @@ pub trait HookExecutor: Send + Sync {
         sandbox: Arc<dyn Sandbox>,
         work_dir: Option<&Path>,
         llm_source: &dyn CredentialSource,
+        catalog: Arc<Catalog>,
     ) -> HookResult;
 }
 
@@ -253,9 +255,9 @@ impl HookExecutorImpl {
     }
 
     /// Resolve a model alias (e.g. "haiku") to a concrete model ID.
-    fn resolve_model(model: Option<&str>) -> String {
+    fn resolve_model(model: Option<&str>, catalog: &Catalog) -> String {
         let model_id = model.unwrap_or("haiku");
-        let model_info = fabro_model::Catalog::builtin().get(model_id);
+        let model_info = catalog.get(model_id);
         model_info.map_or(model_id, |m| m.id.as_str()).to_string()
     }
 
@@ -291,6 +293,7 @@ impl HookExecutorImpl {
         context: &HookContext,
         env: &E,
         llm_source: &dyn CredentialSource,
+        catalog: Arc<Catalog>,
     ) -> HookDecision
     where
         E: Env + Clone + Send + Sync + fmt::Debug + 'static,
@@ -300,11 +303,11 @@ impl HookExecutorImpl {
             return HookDecision::Proceed;
         };
 
-        let resolved_model = Self::resolve_model(model.as_deref());
+        let resolved_model = Self::resolve_model(model.as_deref(), catalog.as_ref());
         let user_msg = Self::build_hook_user_message(&prompt, context);
 
         Self::execute_llm_with_timeout(definition.timeout(), "prompt", || async move {
-            let client = match LlmClient::from_source(llm_source).await {
+            let client = match LlmClient::from_source_with_catalog(llm_source, catalog).await {
                 Ok(client) => Arc::new(client),
                 Err(e) => {
                     tracing::warn!(error = %e, "prompt hook client creation failed, proceeding");
@@ -354,6 +357,7 @@ impl HookExecutorImpl {
         sandbox: Arc<dyn Sandbox>,
         env: &E,
         llm_source: &dyn CredentialSource,
+        catalog: Arc<Catalog>,
     ) -> HookDecision
     where
         E: Env + Clone + Send + Sync + fmt::Debug + 'static,
@@ -363,11 +367,11 @@ impl HookExecutorImpl {
             return HookDecision::Proceed;
         };
 
-        let resolved_model = Self::resolve_model(model.as_deref());
+        let resolved_model = Self::resolve_model(model.as_deref(), catalog.as_ref());
         let user_msg = Self::build_hook_user_message(&prompt, context);
 
         Self::execute_llm_with_timeout(definition.timeout(), "agent", || async move {
-            let client = match LlmClient::from_source(llm_source).await {
+            let client = match LlmClient::from_source_with_catalog(llm_source, catalog).await {
                 Ok(c) => c,
                 Err(e) => {
                     tracing::warn!(error = %e, "agent hook client creation failed, proceeding");
@@ -617,6 +621,7 @@ impl HookExecutor for HookExecutorImpl {
         sandbox: Arc<dyn Sandbox>,
         work_dir: Option<&Path>,
         llm_source: &dyn CredentialSource,
+        catalog: Arc<Catalog>,
     ) -> HookResult {
         use std::sync::OnceLock;
         static HTTP_CLIENTS: OnceLock<HttpClientCache> = OnceLock::new();
@@ -675,6 +680,7 @@ impl HookExecutor for HookExecutorImpl {
                     context,
                     &env,
                     llm_source,
+                    Arc::clone(&catalog),
                 )
                 .await
             }
@@ -699,6 +705,7 @@ impl HookExecutor for HookExecutorImpl {
                     sandbox,
                     &env,
                     llm_source,
+                    Arc::clone(&catalog),
                 )
                 .await
             }
@@ -719,6 +726,7 @@ impl HookExecutor for HookExecutorImpl {
 #[cfg(test)]
 mod tests {
     use fabro_auth::{CredentialSource, EnvCredentialSource};
+    use fabro_model::catalog::LlmCatalogSettings;
     use fabro_types::fixtures;
     use fabro_util::env::TestEnv;
 
@@ -738,6 +746,10 @@ mod tests {
 
     fn test_llm_source() -> Arc<dyn CredentialSource> {
         Arc::new(EnvCredentialSource::new())
+    }
+
+    fn test_catalog() -> Arc<Catalog> {
+        Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap())
     }
 
     fn test_http_client() -> fabro_http::HttpClient {
@@ -822,7 +834,7 @@ mod tests {
         let sandbox = make_sandbox();
         let source = test_llm_source();
         let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref())
+            .execute(&def, &ctx, sandbox, None, source.as_ref(), test_catalog())
             .await;
         assert_eq!(result.decision, HookDecision::Proceed);
         assert_eq!(result.hook_name.as_deref(), Some("test-hook"));
@@ -836,7 +848,7 @@ mod tests {
         let sandbox = make_sandbox();
         let source = test_llm_source();
         let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref())
+            .execute(&def, &ctx, sandbox, None, source.as_ref(), test_catalog())
             .await;
         assert!(matches!(result.decision, HookDecision::Block { .. }));
     }
@@ -849,7 +861,7 @@ mod tests {
         let sandbox = make_sandbox();
         let source = test_llm_source();
         let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref())
+            .execute(&def, &ctx, sandbox, None, source.as_ref(), test_catalog())
             .await;
         assert!(matches!(result.decision, HookDecision::Block { .. }));
     }
@@ -862,7 +874,7 @@ mod tests {
         let sandbox = make_sandbox();
         let source = test_llm_source();
         let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref())
+            .execute(&def, &ctx, sandbox, None, source.as_ref(), test_catalog())
             .await;
         assert_eq!(result.decision, HookDecision::Skip {
             reason: Some("test skip".into()),
@@ -879,7 +891,7 @@ mod tests {
         let sandbox = make_sandbox();
         let source = test_llm_source();
         let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref())
+            .execute(&def, &ctx, sandbox, None, source.as_ref(), test_catalog())
             .await;
         assert_eq!(result.decision, HookDecision::Proceed);
     }
@@ -901,7 +913,7 @@ mod tests {
         let sandbox = make_sandbox();
         let source = test_llm_source();
         let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref())
+            .execute(&def, &ctx, sandbox, None, source.as_ref(), test_catalog())
             .await;
         assert!(matches!(result.decision, HookDecision::Block { .. }));
     }
@@ -1296,7 +1308,7 @@ mod tests {
         let sandbox = make_sandbox();
         let source = test_llm_source();
         let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref())
+            .execute(&def, &ctx, sandbox, None, source.as_ref(), test_catalog())
             .await;
 
         mock.assert_async().await;
@@ -1329,6 +1341,7 @@ mod tests {
             &make_context(),
             &test_env(&[]),
             test_llm_source().as_ref(),
+            test_catalog(),
         )
         .await;
 
@@ -1346,6 +1359,7 @@ mod tests {
             make_sandbox(),
             &test_env(&[]),
             test_llm_source().as_ref(),
+            test_catalog(),
         )
         .await;
 

@@ -7,6 +7,8 @@ use std::time::Duration;
 use fabro_agent::Sandbox;
 use fabro_auth::{CredentialSource, EnvCredentialSource};
 use fabro_graphviz::graph::Graph as GvGraph;
+use fabro_model::Catalog;
+use fabro_model::catalog::LlmCatalogSettings;
 use fabro_store::{ArtifactStore, Database, RunProjection};
 use object_store::local::LocalFileSystem;
 
@@ -164,6 +166,10 @@ async fn initialized(
                     options
                         .llm_source
                         .unwrap_or_else(|| Arc::new(EnvCredentialSource::new())),
+                    Arc::new(
+                        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
+                            .expect("default catalog should build"),
+                    ),
                     Arc::new(SandboxGitRuntime::new()),
                     Arc::new(RunMetadataRuntime::new()),
                     None,

@@ -1,9 +1,13 @@
+use std::sync::Arc;
+
+use fabro_model::Catalog;
 use futures::{StreamExt, stream};
 
 use crate::error::{Error, ProviderErrorDetail, ProviderErrorKind, error_from_status_code};
 use crate::provider::{ProviderAdapter, StreamEventStream, validate_tool_choice};
 use crate::providers::common::{
-    parse_error_body, parse_rate_limit_headers, parse_retry_after, send_and_read_response,
+    api_model_id, parse_error_body, parse_rate_limit_headers, parse_retry_after,
+    send_and_read_response,
 };
 use crate::types::{
     AdapterTimeout, ContentPart, FinishReason, Message, RateLimitInfo, Request, Response,
@@ -21,14 +25,21 @@ use crate::types::{
 pub struct Adapter {
     pub(crate) http: super::http_api::HttpApi,
     provider_name:   String,
+    catalog:         Option<Arc<Catalog>>,
 }
 
 impl Adapter {
     #[must_use]
     pub fn new(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
+        Self::new_optional_auth(Some(api_key.into()), base_url)
+    }
+
+    #[must_use]
+    pub fn new_optional_auth(api_key: Option<String>, base_url: impl Into<String>) -> Self {
         Self {
-            http:          super::http_api::HttpApi::new(api_key, base_url),
+            http:          super::http_api::HttpApi::new_optional(api_key, base_url),
             provider_name: "openai-compatible".to_string(),
+            catalog:       None,
         }
     }
 
@@ -47,6 +58,12 @@ impl Adapter {
     }
 
     #[must_use]
+    pub fn with_catalog(mut self, catalog: Arc<Catalog>) -> Self {
+        self.catalog = Some(catalog);
+        self
+    }
+
+    #[must_use]
     pub fn with_timeout(self, timeout: AdapterTimeout) -> Self {
         Self {
             http: self.http.with_timeout(timeout),
@@ -61,7 +78,10 @@ impl Adapter {
         for (key, value) in &self.http.default_headers {
             req = req.header(key, value);
         }
-        req.bearer_auth(&self.http.api_key)
+        if let Some(api_key) = &self.http.api_key {
+            req = req.bearer_auth(api_key);
+        }
+        req
     }
 }
 
@@ -393,10 +413,20 @@ fn translate_response_format(format: &ResponseFormat) -> serde_json::Value {
 ///
 /// Returns a `serde_json::Value` so that `provider_options.<provider_name>`
 /// fields can be merged into the request before sending.
+#[cfg(test)]
 fn build_api_request(
     request: &Request,
     stream: Option<bool>,
     provider_name: &str,
+) -> serde_json::Value {
+    build_api_request_with_catalog(request, stream, provider_name, None)
+}
+
+fn build_api_request_with_catalog(
+    request: &Request,
+    stream: Option<bool>,
+    provider_name: &str,
+    catalog: Option<&Catalog>,
 ) -> serde_json::Value {
     let chat_messages = translate_messages(&request.messages);
     let tools = request.tools.as_ref().map(|t| translate_tools(t));
@@ -407,7 +437,7 @@ fn build_api_request(
         .map(translate_response_format);
 
     let api_request = ApiRequest {
-        model: request.model.clone(),
+        model: api_model_id(catalog, &request.model),
         messages: chat_messages,
         temperature: request.temperature,
         max_tokens: request.max_tokens,
@@ -460,7 +490,12 @@ impl ProviderAdapter for Adapter {
         if let Some(tc) = &request.tool_choice {
             validate_tool_choice(self, tc)?;
         }
-        let api_body = build_api_request(request, None, &self.provider_name);
+        let api_body = build_api_request_with_catalog(
+            request,
+            None,
+            &self.provider_name,
+            self.catalog.as_deref(),
+        );
         let url = format!("{}/chat/completions", self.http.base_url);
 
         let mut req = self.build_request(&url).json(&api_body);
@@ -538,7 +573,12 @@ impl ProviderAdapter for Adapter {
         if let Some(tc) = &request.tool_choice {
             validate_tool_choice(self, tc)?;
         }
-        let api_body = build_api_request(request, Some(true), &self.provider_name);
+        let api_body = build_api_request_with_catalog(
+            request,
+            Some(true),
+            &self.provider_name,
+            self.catalog.as_deref(),
+        );
         let url = format!("{}/chat/completions", self.http.base_url);
 
         let http_resp = self
@@ -913,6 +953,8 @@ impl StreamState {
 
 #[cfg(test)]
 mod tests {
+    use fabro_model::catalog::LlmCatalogSettings;
+
     use super::*;
     use crate::types::{AudioData, DocumentData};
 
@@ -1310,6 +1352,44 @@ mod tests {
         let body = build_api_request(&request, None, "groq");
         assert_eq!(body["model"], "llama-3.1-70b");
         assert!(body.get("stream").is_none());
+    }
+
+    #[test]
+    fn catalog_api_id_is_used_for_provider_request_body() {
+        let settings: LlmCatalogSettings = toml::from_str(
+            r#"
+[providers.venice]
+display_name = "Venice"
+adapter = "openai_compatible"
+base_url = "https://api.venice.ai/api/v1"
+credentials = ["env:VENICE_API_KEY"]
+
+[models."venice-large"]
+provider = "venice"
+api_id = "venice/model-large"
+display_name = "Venice Large"
+family = "venice"
+default = true
+
+[models."venice-large".limits]
+context_window = 128000
+
+[models."venice-large".features]
+tools = true
+vision = false
+reasoning = false
+effort = false
+"#,
+        )
+        .unwrap();
+        let catalog = Catalog::from_builtin_with_overrides(&settings).unwrap();
+        let mut request = minimal_request();
+        request.model = "venice-large".to_string();
+
+        let body = build_api_request_with_catalog(&request, None, "venice", Some(&catalog));
+
+        assert_eq!(request.model, "venice-large");
+        assert_eq!(body["model"], "venice/model-large");
     }
 
     #[test]

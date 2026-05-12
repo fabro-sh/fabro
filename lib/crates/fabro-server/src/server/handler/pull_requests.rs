@@ -247,13 +247,14 @@ async fn create_run_pull_request(
     let model = if let Some(model) = body.model {
         model
     } else {
-        let configured = state.llm_source.configured_providers().await;
-        state
-            .catalog()
-            .default_for_configured_ids(&configured)
-            .id
-            .clone()
+        let catalog = state.catalog();
+        let configured = state
+            .llm_source
+            .configured_providers_for_catalog(catalog.as_ref())
+            .await;
+        catalog.default_for_configured_ids(&configured).id.clone()
     };
+    let catalog = state.catalog();
 
     let run_store_handle = run_store.clone().into();
     let request = pull_request::OpenPullRequestRequest {
@@ -268,6 +269,7 @@ async fn create_run_pull_request(
         auto_merge: None,
         run_store: &run_store_handle,
         llm_source: state.llm_source.as_ref(),
+        catalog,
         conclusion: Some(inputs.conclusion),
         run_state: Some(&run_state),
     };

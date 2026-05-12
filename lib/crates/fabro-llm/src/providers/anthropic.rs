@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use fabro_model::Catalog;
 use futures::stream;
 
 use crate::error::{Error, error_from_status_code};
@@ -18,14 +21,21 @@ use crate::types::{
 pub struct Adapter {
     pub(crate) http: super::http_api::HttpApi,
     provider_name:   String,
+    catalog:         Option<Arc<Catalog>>,
 }
 
 impl Adapter {
     #[must_use]
     pub fn new(api_key: impl Into<String>) -> Self {
+        Self::new_optional_auth(Some(api_key.into()))
+    }
+
+    #[must_use]
+    pub fn new_optional_auth(api_key: Option<String>) -> Self {
         Self {
-            http:          super::http_api::HttpApi::new(api_key, DEFAULT_BASE_URL),
+            http:          super::http_api::HttpApi::new_optional(api_key, DEFAULT_BASE_URL),
             provider_name: "anthropic".to_string(),
+            catalog:       None,
         }
     }
 
@@ -47,6 +57,12 @@ impl Adapter {
             http: self.http.with_default_headers(headers),
             ..self
         }
+    }
+
+    #[must_use]
+    pub fn with_catalog(mut self, catalog: Arc<Catalog>) -> Self {
+        self.catalog = Some(catalog);
+        self
     }
 
     #[must_use]
@@ -1145,7 +1161,8 @@ async fn build_api_request(
     // Check whether this model supports the `output_config.effort` parameter.
     // Older reasoning models (e.g. claude-sonnet-4-5) need `thinking` with
     // `budget_tokens` instead.
-    let model_info = fabro_model::Catalog::builtin().get(&request.model);
+    let model_info = common::catalog_model(adapter.catalog.as_deref(), &request.model)
+        .or_else(|| Catalog::builtin().get(&request.model));
     let supports_effort = model_info.is_none_or(|m| m.features.effort);
 
     let mut resolved_max_tokens = request
@@ -1195,7 +1212,7 @@ async fn build_api_request(
     let is_fast = request.speed.as_deref() == Some("fast");
 
     let api_request = ApiRequest {
-        model: request.model.clone(),
+        model: common::api_model_id(adapter.catalog.as_deref(), &request.model),
         messages: api_messages,
         max_tokens: resolved_max_tokens,
         system: system_value,
@@ -1219,9 +1236,10 @@ async fn build_api_request(
     }
 
     if adapter.provider_name == "anthropic" {
-        req_builder = req_builder
-            .header("x-api-key", &adapter.http.api_key)
-            .header("anthropic-version", "2023-06-01");
+        if let Some(api_key) = &adapter.http.api_key {
+            req_builder = req_builder.header("x-api-key", api_key);
+        }
+        req_builder = req_builder.header("anthropic-version", "2023-06-01");
 
         let include_1m_context = model_info.is_some_and(|m| m.context_window() >= 1_000_000);
         if let Some(beta_str) = build_beta_header(
@@ -1232,8 +1250,8 @@ async fn build_api_request(
         ) {
             req_builder = req_builder.header("anthropic-beta", beta_str);
         }
-    } else {
-        req_builder = req_builder.bearer_auth(&adapter.http.api_key);
+    } else if let Some(api_key) = &adapter.http.api_key {
+        req_builder = req_builder.bearer_auth(api_key);
     }
 
     let req_builder = req_builder.json(&merge_provider_options(

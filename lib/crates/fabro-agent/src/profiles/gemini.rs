@@ -1,4 +1,4 @@
-use fabro_model::Provider;
+use fabro_model::{Provider, ProviderId};
 
 use super::EnvContext;
 use crate::agent_profile::AgentProfile;
@@ -38,16 +38,36 @@ impl GeminiProfile {
         Self {
             base: BaseProfile {
                 provider: Provider::Gemini,
+                provider_id: Provider::Gemini.id(),
                 model: model.into(),
                 registry,
             },
         }
+    }
+
+    /// Override the provider identity.
+    #[must_use]
+    pub fn with_provider(mut self, provider: Provider) -> Self {
+        self.base.provider = provider;
+        self.base.provider_id = provider.id();
+        self
+    }
+
+    /// Override the provider ID while retaining the adapter/profile behavior.
+    #[must_use]
+    pub fn with_provider_id(mut self, provider_id: ProviderId) -> Self {
+        self.base.provider_id = provider_id;
+        self
     }
 }
 
 impl AgentProfile for GeminiProfile {
     fn provider(&self) -> Provider {
         self.base.provider
+    }
+
+    fn provider_id(&self) -> ProviderId {
+        self.base.provider_id.clone()
     }
 
     fn model(&self) -> &str {

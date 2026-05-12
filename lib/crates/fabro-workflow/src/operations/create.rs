@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use fabro_config::Storage;
 use fabro_graphviz::graph::{AttrValue, Graph};
+use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{Catalog, ProviderId};
 use fabro_sandbox::SandboxProvider;
 use fabro_store::Database;
@@ -74,6 +75,7 @@ struct PersistCreateOptions {
     fork_source_ref:      Option<ForkSourceRef>,
     provenance:           Option<RunProvenance>,
     configured_providers: Vec<ProviderId>,
+    catalog:              Arc<Catalog>,
 }
 
 /// Resolve workflow inputs, normalize settings, and persist a run directory.
@@ -81,6 +83,21 @@ pub async fn create(
     store: &Database,
     request: CreateRunInput,
     storage_root: PathBuf,
+) -> Result<CreatedRun, Error> {
+    let catalog = Arc::new(
+        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
+            .map_err(|err| Error::engine(format!("building default LLM catalog: {err}")))?,
+    );
+    Box::pin(create_with_catalog(store, request, storage_root, catalog)).await
+}
+
+/// Resolve workflow inputs, normalize settings using a caller-provided catalog,
+/// and persist a run directory.
+pub async fn create_with_catalog(
+    store: &Database,
+    request: CreateRunInput,
+    storage_root: PathBuf,
+    catalog: Arc<Catalog>,
 ) -> Result<CreatedRun, Error> {
     let resolved = resolve_workflow(ResolveWorkflowInput {
         workflow: request.workflow,
@@ -144,6 +161,7 @@ pub async fn create(
                 fork_source_ref,
                 provenance,
                 configured_providers,
+                catalog,
             },
             current_dir,
             file_resolver,
@@ -425,12 +443,13 @@ fn persist_validated(
         fork_source_ref,
         provenance,
         configured_providers,
+        catalog,
     } = options;
 
     let settings = materialize_run(
         settings,
         validated.graph(),
-        Catalog::builtin(),
+        catalog.as_ref(),
         &configured_providers,
     );
 

@@ -1,4 +1,4 @@
-use fabro_model::Provider;
+use fabro_model::{Provider, ProviderId};
 
 use super::EnvContext;
 use crate::agent_profile::AgentProfile;
@@ -34,6 +34,7 @@ impl OpenAiProfile {
         Self {
             base: BaseProfile {
                 provider: Provider::OpenAi,
+                provider_id: Provider::OpenAi.id(),
                 model: model.into(),
                 registry,
             },
@@ -45,6 +46,14 @@ impl OpenAiProfile {
     #[must_use]
     pub fn with_provider(mut self, provider: Provider) -> Self {
         self.base.provider = provider;
+        self.base.provider_id = provider.id();
+        self
+    }
+
+    /// Override the provider ID while retaining the adapter/profile behavior.
+    #[must_use]
+    pub fn with_provider_id(mut self, provider_id: ProviderId) -> Self {
+        self.base.provider_id = provider_id;
         self
     }
 
@@ -63,6 +72,10 @@ impl OpenAiProfile {
 impl AgentProfile for OpenAiProfile {
     fn provider(&self) -> Provider {
         self.base.provider
+    }
+
+    fn provider_id(&self) -> ProviderId {
+        self.base.provider_id.clone()
     }
 
     fn model(&self) -> &str {

@@ -10,9 +10,11 @@ use fabro_auth::CredentialSource;
 #[cfg(test)]
 use fabro_auth::ResolvedCredentials;
 use fabro_hooks::{HookContext, HookDecision, HookRunner};
-use fabro_model::Provider;
 #[cfg(test)]
 use fabro_model::ProviderId;
+#[cfg(test)]
+use fabro_model::catalog::LlmCatalogSettings;
+use fabro_model::{Catalog, Provider};
 use tokio_util::sync::CancellationToken;
 
 use crate::ManifestPath;
@@ -42,6 +44,7 @@ pub struct RunServices {
     pub(crate) cancel_token:     CancellationToken,
     pub provider:                Provider,
     pub llm_source:              Arc<dyn CredentialSource>,
+    pub catalog:                 Arc<Catalog>,
     pub(crate) sandbox_git:      Arc<SandboxGitRuntime>,
     pub(crate) metadata_runtime: Arc<RunMetadataRuntime>,
     pub(crate) metadata_writer:  Option<RunMetadataWriterHandle>,
@@ -57,6 +60,7 @@ impl RunServices {
         cancel_token: CancellationToken,
         provider: Provider,
         llm_source: Arc<dyn CredentialSource>,
+        catalog: Arc<Catalog>,
         sandbox_git: Arc<SandboxGitRuntime>,
         metadata_runtime: Arc<RunMetadataRuntime>,
         metadata_writer: Option<RunMetadataWriterHandle>,
@@ -69,6 +73,7 @@ impl RunServices {
             cancel_token,
             provider,
             llm_source,
+            catalog,
             sandbox_git,
             metadata_runtime,
             metadata_writer,
@@ -229,6 +234,10 @@ impl EngineServices {
                 CancellationToken::new(),
                 Provider::Anthropic,
                 Arc::new(StubCredentialSource),
+                Arc::new(
+                    Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
+                        .expect("default catalog should build"),
+                ),
                 Arc::new(SandboxGitRuntime::new()),
                 Arc::new(RunMetadataRuntime::new()),
                 None,

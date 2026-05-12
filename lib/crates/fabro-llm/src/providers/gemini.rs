@@ -1,6 +1,9 @@
+use std::sync::Arc;
+
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use fabro_http::HeaderMap;
+use fabro_model::Catalog;
 use futures::stream;
 
 use crate::error::{
@@ -22,14 +25,29 @@ const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta
 /// Provider adapter for the Google Gemini `generateContent` API.
 pub struct Adapter {
     pub(crate) http: super::http_api::HttpApi,
+    provider_name:   String,
+    catalog:         Option<Arc<Catalog>>,
 }
 
 impl Adapter {
     #[must_use]
     pub fn new(api_key: impl Into<String>) -> Self {
+        Self::new_optional_auth(Some(api_key.into()))
+    }
+
+    #[must_use]
+    pub fn new_optional_auth(api_key: Option<String>) -> Self {
         Self {
-            http: super::http_api::HttpApi::new(api_key, DEFAULT_BASE_URL),
+            http:          super::http_api::HttpApi::new_optional(api_key, DEFAULT_BASE_URL),
+            provider_name: "gemini".to_string(),
+            catalog:       None,
         }
+    }
+
+    #[must_use]
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.provider_name = name.into();
+        self
     }
 
     #[must_use]
@@ -42,13 +60,21 @@ impl Adapter {
     pub fn with_default_headers(self, headers: std::collections::HashMap<String, String>) -> Self {
         Self {
             http: self.http.with_default_headers(headers),
+            ..self
         }
+    }
+
+    #[must_use]
+    pub fn with_catalog(mut self, catalog: Arc<Catalog>) -> Self {
+        self.catalog = Some(catalog);
+        self
     }
 
     #[must_use]
     pub fn with_timeout(self, timeout: AdapterTimeout) -> Self {
         Self {
             http: self.http.with_timeout(timeout),
+            ..self
         }
     }
 }
@@ -894,8 +920,8 @@ impl SseStreamState {
 
 #[async_trait::async_trait]
 impl ProviderAdapter for Adapter {
-    fn name(&self) -> &'static str {
-        "gemini"
+    fn name(&self) -> &str {
+        &self.provider_name
     }
 
     async fn complete(&self, request: &Request) -> Result<Response, Error> {
@@ -904,16 +930,16 @@ impl ProviderAdapter for Adapter {
         }
         let api_body = build_api_request(request).await;
 
+        let api_model = common::api_model_id(self.catalog.as_deref(), &request.model);
         let url = format!(
             "{}/models/{}:generateContent",
-            self.http.base_url, request.model
+            self.http.base_url, api_model
         );
 
-        let mut req = self
-            .http
-            .client
-            .post(&url)
-            .header("x-goog-api-key", &self.http.api_key);
+        let mut req = self.http.client.post(&url);
+        if let Some(api_key) = &self.http.api_key {
+            req = req.header("x-goog-api-key", api_key);
+        }
         for (key, value) in &self.http.default_headers {
             req = req.header(key, value);
         }
@@ -953,7 +979,7 @@ impl ProviderAdapter for Adapter {
         Ok(Response {
             id: uuid::Uuid::new_v4().to_string(),
             model: request.model.clone(),
-            provider: "gemini".to_string(),
+            provider: self.provider_name.clone(),
             message: Message {
                 role:         Role::Assistant,
                 content:      content_parts,
@@ -974,16 +1000,16 @@ impl ProviderAdapter for Adapter {
         }
         let api_body = build_api_request(request).await;
 
+        let api_model = common::api_model_id(self.catalog.as_deref(), &request.model);
         let url = format!(
             "{}/models/{}:streamGenerateContent?alt=sse",
-            self.http.base_url, request.model
+            self.http.base_url, api_model
         );
 
-        let mut req = self
-            .http
-            .client
-            .post(&url)
-            .header("x-goog-api-key", &self.http.api_key);
+        let mut req = self.http.client.post(&url);
+        if let Some(api_key) = &self.http.api_key {
+            req = req.header("x-goog-api-key", api_key);
+        }
         for (key, value) in &self.http.default_headers {
             req = req.header(key, value);
         }

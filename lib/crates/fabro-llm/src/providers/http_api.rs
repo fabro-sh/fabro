@@ -9,7 +9,7 @@ use crate::types::AdapterTimeout;
 /// configuration that every provider needs. Provider-specific fields live on
 /// the adapter struct itself.
 pub struct HttpApi {
-    pub(crate) api_key:             String,
+    pub(crate) api_key:             Option<String>,
     pub(crate) base_url:            String,
     pub(crate) default_headers:     HashMap<String, String>,
     pub(crate) client:              fabro_http::HttpClient,
@@ -27,10 +27,15 @@ impl HttpApi {
 
     #[must_use]
     pub fn new(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
+        Self::new_optional(Some(api_key.into()), base_url)
+    }
+
+    #[must_use]
+    pub fn new_optional(api_key: Option<String>, base_url: impl Into<String>) -> Self {
         let timeout = AdapterTimeout::default();
         let client = Self::build_client(timeout);
         Self {
-            api_key: api_key.into(),
+            api_key,
             base_url: base_url.into(),
             default_headers: HashMap::new(),
             client,

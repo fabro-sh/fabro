@@ -17,7 +17,7 @@ use fabro_interview::{
 };
 use fabro_llm::types::{Message as LlmMessage, Request as LlmRequest};
 use fabro_model::catalog::LlmCatalogSettings;
-use fabro_model::{ModelRef, Provider};
+use fabro_model::{Catalog, ModelRef, Provider};
 use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{
     AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
@@ -91,6 +91,13 @@ fn test_app_with() -> Router {
 
 fn spa_fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/spa")
+}
+
+fn state_test_catalog() -> Arc<Catalog> {
+    Arc::new(
+        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
+            .expect("default catalog should build"),
+    )
 }
 
 fn test_app_with_scheduler(state: Arc<AppState>) -> Router {
@@ -1227,7 +1234,8 @@ impl CredentialSource for FailingCredentialSource {
 
 #[tokio::test]
 async fn resolve_llm_client_from_source_preserves_credential_source_chain() {
-    let Err(err) = resolve_llm_client_from_source(&FailingCredentialSource).await else {
+    let catalog = state_test_catalog();
+    let Err(err) = resolve_llm_client_from_source(&FailingCredentialSource, catalog).await else {
         panic!("expected credential resolution to fail");
     };
     let chain = err.chain().map(ToString::to_string).collect::<Vec<_>>();
@@ -1264,9 +1272,14 @@ async fn llm_source_configured_providers_reads_openai_codex_from_vault() {
         )
         .unwrap();
 
-    assert_eq!(state.llm_source.configured_providers().await, vec![
-        Provider::OpenAi.id()
-    ]);
+    let catalog = state.catalog();
+    assert_eq!(
+        state
+            .llm_source
+            .configured_providers_for_catalog(catalog.as_ref())
+            .await,
+        vec![Provider::OpenAi.id()]
+    );
 }
 
 #[tokio::test]

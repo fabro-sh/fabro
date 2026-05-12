@@ -1,12 +1,25 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use fabro_http::HeaderMap;
+use fabro_model::{Catalog, Model};
 use fabro_static::EnvVars;
 use tokio::{fs, time};
 use tracing::warn;
 
 use crate::error::{Error, error_from_status_code};
 use crate::types::{Message, RateLimitInfo, Role};
+
+#[must_use]
+pub fn catalog_model<'a>(catalog: Option<&'a Catalog>, model: &str) -> Option<&'a Model> {
+    catalog.and_then(|catalog| catalog.get(model))
+}
+
+#[must_use]
+pub fn api_model_id(catalog: Option<&Catalog>, model: &str) -> String {
+    catalog
+        .and_then(|catalog| catalog.model_settings(model))
+        .map_or_else(|| model.to_string(), |settings| settings.api_id.clone())
+}
 
 /// Parse an error response body, extracting the message and error code.
 ///

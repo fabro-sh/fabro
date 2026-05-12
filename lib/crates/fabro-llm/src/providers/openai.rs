@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use fabro_model::Catalog;
 use futures::{StreamExt, stream};
 
 use crate::error::{Error, ProviderErrorDetail, ProviderErrorKind, error_from_status_code};
@@ -25,6 +28,8 @@ pub struct Adapter {
     pub(crate) http: super::http_api::HttpApi,
     org_id:          Option<String>,
     project_id:      Option<String>,
+    provider_name:   String,
+    catalog:         Option<Arc<Catalog>>,
     /// When true, always use streaming (required by the Codex endpoint).
     codex_mode:      bool,
 }
@@ -32,12 +37,25 @@ pub struct Adapter {
 impl Adapter {
     #[must_use]
     pub fn new(api_key: impl Into<String>) -> Self {
+        Self::new_optional_auth(Some(api_key.into()))
+    }
+
+    #[must_use]
+    pub fn new_optional_auth(api_key: Option<String>) -> Self {
         Self {
-            http:       super::http_api::HttpApi::new(api_key, DEFAULT_BASE_URL),
-            org_id:     None,
-            project_id: None,
-            codex_mode: false,
+            http:          super::http_api::HttpApi::new_optional(api_key, DEFAULT_BASE_URL),
+            org_id:        None,
+            project_id:    None,
+            provider_name: "openai".to_string(),
+            catalog:       None,
+            codex_mode:    false,
         }
+    }
+
+    #[must_use]
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.provider_name = name.into();
+        self
     }
 
     #[must_use]
@@ -73,6 +91,12 @@ impl Adapter {
     }
 
     #[must_use]
+    pub fn with_catalog(mut self, catalog: Arc<Catalog>) -> Self {
+        self.catalog = Some(catalog);
+        self
+    }
+
+    #[must_use]
     pub fn with_timeout(self, timeout: AdapterTimeout) -> Self {
         Self {
             http: self.http.with_timeout(timeout),
@@ -88,7 +112,9 @@ impl Adapter {
         for (key, value) in &self.http.default_headers {
             req = req.header(key, value);
         }
-        req = req.bearer_auth(&self.http.api_key);
+        if let Some(api_key) = &self.http.api_key {
+            req = req.bearer_auth(api_key);
+        }
         if let Some(org_id) = &self.org_id {
             req = req.header("OpenAI-Organization", org_id);
         }
@@ -471,7 +497,12 @@ fn translate_response_format(format: &ResponseFormat) -> Option<serde_json::Valu
 /// When `codex_mode` is true, unsupported fields (`temperature`,
 /// `max_output_tokens`, `top_p`) are omitted and empty instructions are sent as
 /// `""` (required by the Codex endpoint).
-async fn build_api_request(request: &Request, stream: bool, codex_mode: bool) -> ApiRequest {
+async fn build_api_request(
+    request: &Request,
+    stream: bool,
+    codex_mode: bool,
+    catalog: Option<&Catalog>,
+) -> ApiRequest {
     let (instructions, input) = translate_input(&request.messages).await;
     let api_tools = request.tools.as_ref().map(|t| translate_tools(t));
     let tool_choice = request.tool_choice.as_ref().map(translate_tool_choice);
@@ -493,7 +524,7 @@ async fn build_api_request(request: &Request, stream: bool, codex_mode: bool) ->
     };
 
     ApiRequest {
-        model: request.model.clone(),
+        model: common::api_model_id(catalog, &request.model),
         input,
         instructions,
         temperature: if codex_mode {
@@ -520,12 +551,22 @@ async fn build_api_request(request: &Request, stream: bool, codex_mode: bool) ->
 
 /// Serialize an `ApiRequest` to JSON and merge any `provider_options.openai`
 /// keys into it.
+#[cfg(test)]
 async fn build_request_body(
     request: &Request,
     stream: bool,
     codex_mode: bool,
 ) -> serde_json::Value {
-    let api_request = build_api_request(request, stream, codex_mode).await;
+    build_request_body_with_catalog(request, stream, codex_mode, None).await
+}
+
+async fn build_request_body_with_catalog(
+    request: &Request,
+    stream: bool,
+    codex_mode: bool,
+    catalog: Option<&Catalog>,
+) -> serde_json::Value {
+    let api_request = build_api_request(request, stream, codex_mode, catalog).await;
     let mut body = serde_json::to_value(&api_request).unwrap_or_else(|_| serde_json::json!({}));
 
     if let Some(openai_opts) = request
@@ -1024,8 +1065,8 @@ fn handle_response_completed(
 
 #[async_trait::async_trait]
 impl ProviderAdapter for Adapter {
-    fn name(&self) -> &'static str {
-        "openai"
+    fn name(&self) -> &str {
+        &self.provider_name
     }
 
     async fn complete(&self, request: &Request) -> Result<Response, Error> {
@@ -1037,7 +1078,8 @@ impl ProviderAdapter for Adapter {
         if let Some(tc) = &request.tool_choice {
             validate_tool_choice(self, tc)?;
         }
-        let request_body = build_request_body(request, false, false).await;
+        let request_body =
+            build_request_body_with_catalog(request, false, false, self.catalog.as_deref()).await;
         let url = format!("{}/responses", self.http.base_url);
 
         let mut req = self.build_request(&url).json(&request_body);
@@ -1076,7 +1118,13 @@ impl ProviderAdapter for Adapter {
         if let Some(tc) = &request.tool_choice {
             validate_tool_choice(self, tc)?;
         }
-        let request_body = build_request_body(request, true, self.codex_mode).await;
+        let request_body = build_request_body_with_catalog(
+            request,
+            true,
+            self.codex_mode,
+            self.catalog.as_deref(),
+        )
+        .await;
         let url = format!("{}/responses", self.http.base_url);
 
         let http_resp = self

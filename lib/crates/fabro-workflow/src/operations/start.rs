@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use fabro_auth::configured_providers_from_process_env;
+use fabro_auth::{CredentialSource, EnvCredentialSource, VaultCredentialSource};
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
-use fabro_model::{Catalog, FallbackTarget, Provider};
+use fabro_model::{AgentProfileKind, Catalog, FallbackTarget, Provider, ProviderId, adapter};
 use fabro_sandbox::config::{
     DaytonaNetwork, DaytonaSnapshotSettings, DockerfileSource as SandboxDockerfileSource,
 };
@@ -79,6 +79,7 @@ struct RunSession {
     workflow_bundle:   Option<Arc<WorkflowBundle>>,
     run_control:       Option<Arc<RunControlState>>,
     vault:             Option<Arc<AsyncRwLock<Vault>>>,
+    catalog:           Arc<Catalog>,
 }
 
 pub struct StartServices {
@@ -96,6 +97,7 @@ pub struct StartServices {
     /// sandbox env. Empty when github integration has no permissions.
     pub github_permissions: HashMap<String, String>,
     pub vault:              Option<Arc<AsyncRwLock<Vault>>>,
+    pub catalog:            Arc<Catalog>,
     pub on_node:            crate::OnNodeCallback,
     pub registry_override:  Option<Arc<HandlerRegistry>>,
 }
@@ -310,14 +312,11 @@ impl RunSession {
             } else {
                 sandbox_provider
             };
-        let configured = configured_providers_from_process_env(services.vault.as_ref()).await;
+        let catalog = Arc::clone(&services.catalog);
+        let configured =
+            configured_providers_for_start(services.vault.as_ref(), catalog.as_ref()).await;
         let model = resolved.model.name.as_ref().map_or_else(
-            || {
-                Catalog::builtin()
-                    .default_for_configured_ids(&configured)
-                    .id
-                    .clone()
-            },
+            || catalog.default_for_configured_ids(&configured).id.clone(),
             InterpString::as_source,
         );
         let provider = resolved
@@ -327,19 +326,41 @@ impl RunSession {
             .map(InterpString::as_source)
             .filter(|value| !value.is_empty());
 
-        let provider_enum: Provider = if let Some(value) = provider.as_deref() {
-            value.parse::<Provider>().map_err(|_| {
-                Error::Precondition(format!("Provider \"{value}\" is not configured"))
-            })?
+        let provider_id = if let Some(value) = provider.as_deref() {
+            let provider_id = ProviderId::from(value);
+            catalog
+                .provider(&provider_id)
+                .ok_or_else(|| {
+                    Error::Precondition(format!("Provider \"{value}\" is not configured"))
+                })?
+                .id
+                .clone()
+        } else if let Some(model) = catalog.get(&model) {
+            model.provider.clone()
         } else {
-            let configured = configured
-                .iter()
-                .filter_map(Provider::from_id)
-                .collect::<Vec<_>>();
-            Provider::default_for_configured(&configured)
+            catalog
+                .default_for_configured_ids(&configured)
+                .provider
+                .clone()
         };
 
-        let fallback_chain = resolve_fallback_chain(provider_enum, &model, &resolved.model);
+        let catalog_provider = catalog.provider(&provider_id).ok_or_else(|| {
+            Error::Precondition(format!("Provider \"{provider_id}\" is not configured"))
+        })?;
+        let profile_kind = adapter::get(&catalog_provider.adapter)
+            .map(|metadata| metadata.default_profile)
+            .ok_or_else(|| {
+                Error::Precondition(format!(
+                    "Provider \"{provider_id}\" uses unknown adapter \"{}\"",
+                    catalog_provider.adapter,
+                ))
+            })?;
+        let provider_enum = Provider::from_id(&provider_id).unwrap_or_else(|| {
+            profile_provider_for_custom_provider(profile_kind, &catalog_provider.adapter)
+        });
+
+        let fallback_chain =
+            resolve_fallback_chain(catalog.as_ref(), &provider_id, &model, &resolved.model);
         let mcp_servers = resolved
             .agent
             .mcps
@@ -416,6 +437,8 @@ impl RunSession {
             llm: LlmSpec {
                 model: model.clone(),
                 provider: provider_enum,
+                provider_id: provider_id.clone(),
+                profile_kind,
                 fallback_chain,
                 mcp_servers,
                 dry_run: resolved.execution.mode == RunMode::DryRun,
@@ -448,7 +471,31 @@ impl RunSession {
             workflow_path,
             workflow_bundle,
             vault: services.vault,
+            catalog,
         })
+    }
+}
+
+async fn configured_providers_for_start(
+    vault: Option<&Arc<AsyncRwLock<Vault>>>,
+    catalog: &Catalog,
+) -> Vec<ProviderId> {
+    let source: Arc<dyn CredentialSource> = match vault {
+        Some(vault) => Arc::new(VaultCredentialSource::with_env_lookup(
+            Arc::clone(vault),
+            process_env_var,
+        )),
+        None => Arc::new(EnvCredentialSource::new()),
+    };
+    source.configured_providers_for_catalog(catalog).await
+}
+
+fn profile_provider_for_custom_provider(profile_kind: AgentProfileKind, adapter: &str) -> Provider {
+    match (profile_kind, adapter) {
+        (AgentProfileKind::Anthropic, _) => Provider::Anthropic,
+        (AgentProfileKind::Gemini, _) => Provider::Gemini,
+        (AgentProfileKind::OpenAi, "openai_compatible") => Provider::OpenAiCompatible,
+        (AgentProfileKind::OpenAi, _) => Provider::OpenAi,
     }
 }
 
@@ -535,7 +582,8 @@ fn resolve_docker_config(settings: &ResolvedRunSettings) -> DockerSandboxOptions
 }
 
 fn resolve_fallback_chain(
-    provider: Provider,
+    catalog: &Catalog,
+    provider: &ProviderId,
     model: &str,
     settings: &ResolvedRunModelSettings,
 ) -> Vec<FallbackTarget> {
@@ -556,7 +604,7 @@ fn resolve_fallback_chain(
             .or_default()
             .push(model_ref.to_string());
     }
-    Catalog::builtin().build_fallback_chain(&provider.id(), model, &by_provider)
+    catalog.build_fallback_chain(provider, model, &by_provider)
 }
 
 fn runtime_mcp_server(settings: &ResolvedMcpServerSettings) -> McpServerSettings {
@@ -768,6 +816,7 @@ impl RunSession {
             llm: self.llm,
             interviewer: self.interviewer,
             steering_hub: Arc::clone(&self.steering_hub),
+            catalog: Arc::clone(&self.catalog),
             lifecycle: self.lifecycle,
             run_options,
             workflow_path: self.workflow_path,
@@ -1023,6 +1072,7 @@ mod tests {
 
     use chrono::Utc;
     use fabro_config::{RunCloneLayer, RunExecutionLayer, RunLayer, WorkflowSettingsBuilder};
+    use fabro_model::catalog::LlmCatalogSettings;
     use fabro_store::Database;
     use fabro_types::settings::run::RunMode;
     use fabro_types::{WorkflowSettings, fixtures};
@@ -1186,6 +1236,10 @@ mod tests {
             github_app: None,
             github_permissions: HashMap::new(),
             vault: None,
+            catalog: Arc::new(
+                Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
+                    .expect("default catalog should build"),
+            ),
             on_node: None,
             registry_override: Some(registry),
         }

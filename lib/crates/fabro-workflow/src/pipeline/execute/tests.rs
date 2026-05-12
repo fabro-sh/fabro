@@ -80,6 +80,15 @@ fn test_run_id(label: &str) -> RunId {
     }
 }
 
+fn test_catalog() -> Arc<fabro_model::Catalog> {
+    Arc::new(
+        fabro_model::Catalog::from_builtin_with_overrides(
+            &fabro_model::catalog::LlmCatalogSettings::default(),
+        )
+        .expect("default catalog should build"),
+    )
+}
+
 fn test_emitter(label: &str) -> Emitter {
     Emitter::new(test_run_id(label))
 }
@@ -239,12 +248,15 @@ async fn execute_test_run_with_options(
             llm: LlmSpec {
                 model:          "test-model".to_string(),
                 provider:       fabro_llm::Provider::Anthropic,
+                provider_id:    fabro_llm::Provider::Anthropic.id(),
+                profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
                 dry_run:        true,
             },
             interviewer: Arc::new(AutoApproveInterviewer::engine()),
             steering_hub: Arc::new(crate::steering_hub::SteeringHub::new(emitter.clone())),
+            catalog: test_catalog(),
             lifecycle: LifecycleOptions {
                 setup_commands:           vec![],
                 setup_command_timeout_ms: 1_000,
@@ -300,6 +312,8 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
             llm: LlmSpec {
                 model:          "test-model".to_string(),
                 provider:       fabro_llm::Provider::Anthropic,
+                provider_id:    fabro_llm::Provider::Anthropic.id(),
+                profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
                 dry_run:        true,
@@ -308,6 +322,7 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
             steering_hub: Arc::new(crate::steering_hub::SteeringHub::new(test_emitter_arc(
                 "run-test",
             ))),
+            catalog: test_catalog(),
             lifecycle: LifecycleOptions {
                 setup_commands:           vec![],
                 setup_command_timeout_ms: 1_000,
@@ -376,12 +391,15 @@ async fn run_with_lifecycle(
             llm: LlmSpec {
                 model:          "test-model".to_string(),
                 provider:       fabro_llm::Provider::Anthropic,
+                provider_id:    fabro_llm::Provider::Anthropic.id(),
+                profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
                 dry_run:        true,
             },
             interviewer: Arc::new(AutoApproveInterviewer::engine()),
             steering_hub: Arc::new(crate::steering_hub::SteeringHub::new(emitter.clone())),
+            catalog: test_catalog(),
             lifecycle,
             run_options,
             workflow_path: None,

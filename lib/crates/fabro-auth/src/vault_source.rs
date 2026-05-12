@@ -42,17 +42,32 @@ impl std::fmt::Debug for VaultCredentialSource {
 #[async_trait]
 impl CredentialSource for VaultCredentialSource {
     async fn resolve(&self) -> anyhow::Result<ResolvedCredentials> {
+        self.resolve_for_catalog(Catalog::builtin()).await
+    }
+
+    async fn resolve_for_catalog(&self, catalog: &Catalog) -> anyhow::Result<ResolvedCredentials> {
         let mut credentials = Vec::new();
         let mut auth_issues = Vec::new();
 
-        for provider in Catalog::builtin().providers() {
+        for provider in catalog.providers() {
             match self
                 .resolver
-                .resolve(provider.id.clone(), CredentialUsage::ApiRequest)
+                .resolve_for_catalog(provider.id.clone(), CredentialUsage::ApiRequest, catalog)
                 .await
             {
                 Ok(ResolvedCredential::Api(credential)) => credentials.push(credential),
-                Ok(ResolvedCredential::Cli(_)) | Err(ResolveError::NotConfigured(_)) => {}
+                Ok(ResolvedCredential::Cli(_)) => {}
+                Err(ResolveError::NotConfigured(_)) => {
+                    match self
+                        .resolver
+                        .header_only_api_credential_for_catalog(provider, catalog)
+                        .await
+                    {
+                        Ok(Some(credential)) => credentials.push(credential),
+                        Ok(None) => {}
+                        Err(err) => auth_issues.push((provider.id.clone(), err)),
+                    }
+                }
                 Err(err) => auth_issues.push((provider.id.clone(), err)),
             }
         }
@@ -64,8 +79,14 @@ impl CredentialSource for VaultCredentialSource {
     }
 
     async fn configured_providers(&self) -> Vec<ProviderId> {
+        self.configured_providers_for_catalog(Catalog::builtin())
+            .await
+    }
+
+    async fn configured_providers_for_catalog(&self, catalog: &Catalog) -> Vec<ProviderId> {
         let vault = self.vault.read().await;
-        self.resolver.configured_providers(&vault)
+        self.resolver
+            .configured_providers_for_catalog(&vault, catalog)
     }
 }
 

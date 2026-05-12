@@ -402,7 +402,11 @@ async fn create_run(
     info!(run_id = %run_id, "Run created");
 
     let web_url = state.run_web_url(&run_id);
-    let configured_providers = state.llm_source.configured_providers().await;
+    let catalog = state.catalog();
+    let configured_providers = state
+        .llm_source
+        .configured_providers_for_catalog(catalog.as_ref())
+        .await;
     let mut create_input =
         run_manifest::create_run_input(prepared.clone(), configured_providers, web_url.clone());
     create_input.run_id = Some(run_id);
@@ -419,10 +423,11 @@ async fn create_run(
             .into_response();
         }
     };
-    let created = match Box::pin(operations::create(
+    let created = match Box::pin(operations::create_with_catalog(
         state.store.as_ref(),
         create_input,
         storage_root,
+        catalog,
     ))
     .await
     {

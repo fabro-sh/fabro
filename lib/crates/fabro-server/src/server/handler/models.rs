@@ -40,14 +40,14 @@ async fn list_models(
     let query = params.query.as_ref().map(|value| value.to_lowercase());
     let limit = params.limit.clamp(1, 100) as usize;
     let offset = params.offset.min(MAX_PAGE_OFFSET) as usize;
+    let catalog = state.catalog();
     let configured: HashSet<ProviderId> = state
         .llm_source
-        .configured_providers()
+        .configured_providers_for_catalog(catalog.as_ref())
         .await
         .into_iter()
         .collect();
 
-    let catalog = state.catalog();
     let mut models = catalog
         .list(provider_id.as_ref())
         .into_iter()

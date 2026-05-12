@@ -31,3 +31,4 @@ tokio.workspace = true
 httpmock = "0.8"
 tempfile = "3"
 tokio = { workspace = true, features = ["macros", "test-util"] }
+toml.workspace = true

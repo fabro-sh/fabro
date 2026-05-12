@@ -1,4 +1,5 @@
 use fabro_graphviz::graph::{AttrValue, Graph};
+use fabro_model::Catalog;
 
 use super::Transform;
 use crate::error::Error;
@@ -17,7 +18,7 @@ impl Transform for ModelResolutionTransform {
                 .and_then(AttrValue::as_str)
                 .map(String::from);
             if let Some(model) = model {
-                if let Some(info) = fabro_model::Catalog::builtin().get(&model) {
+                if let Some(info) = Catalog::builtin().get(&model) {
                     let canonical_id = info.id.clone();
                     let provider = info.provider.to_string();
                     // Resolve alias to canonical model ID

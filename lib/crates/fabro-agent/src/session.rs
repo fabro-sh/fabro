@@ -13,7 +13,7 @@ use fabro_llm::types::{
 use fabro_llm::{Error as LlmError, retry};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_mcp::connection_manager::McpConnectionManager;
-use fabro_model::{ModelRef, Provider, Speed};
+use fabro_model::{Catalog, ModelRef, Provider, Speed};
 use fabro_types::Principal;
 use futures::StreamExt;
 use tokio::sync::{Mutex as AsyncMutex, Notify, broadcast};
@@ -329,6 +329,24 @@ impl Session {
         ))
     }
 
+    pub async fn from_source_with_catalog(
+        source: &dyn CredentialSource,
+        catalog: Arc<Catalog>,
+        provider_profile: Arc<dyn AgentProfile>,
+        sandbox: Arc<dyn Sandbox>,
+        config: SessionOptions,
+        subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
+    ) -> Result<Self, LlmError> {
+        let client = Client::from_source_with_catalog(source, catalog).await?;
+        Ok(Self::new(
+            client,
+            provider_profile,
+            sandbox,
+            config,
+            subagent_manager,
+        ))
+    }
+
     pub fn set_tool_env_provider(&mut self, provider: Arc<dyn ToolEnvProvider>) {
         self.tool_env_provider = Some(provider);
     }
@@ -348,6 +366,11 @@ impl Session {
     }
 
     #[must_use]
+    pub fn provider_id(&self) -> fabro_model::ProviderId {
+        self.provider_profile.provider_id()
+    }
+
+    #[must_use]
     pub fn model(&self) -> &str {
         self.provider_profile.model()
     }
@@ -364,7 +387,7 @@ impl Session {
 
         self.event_emitter
             .emit(self.id.clone(), AgentEvent::SessionStarted {
-                provider: Some(self.provider_profile.provider().to_string()),
+                provider: Some(self.provider_profile.provider_id().to_string()),
                 model:    Some(self.provider_profile.model().to_string()),
             });
 
@@ -1125,7 +1148,7 @@ impl Session {
             // Call LLM (streaming) with retry for transient errors
             let retry_emitter = self.event_emitter.clone();
             let retry_session_id = self.id.clone();
-            let retry_provider = self.provider_profile.provider().to_string();
+            let retry_provider = self.provider_profile.provider_id().to_string();
             let retry_model = self.provider_profile.model().to_string();
             let retry_policy = RetryPolicy {
                 max_retries: 3,
@@ -1327,7 +1350,7 @@ impl Session {
                 .as_deref()
                 .and_then(|value| value.parse::<Speed>().ok());
             let model = ModelRef {
-                provider: self.provider_profile.provider().id(),
+                provider: self.provider_profile.provider_id(),
                 model_id: if response.model.is_empty() {
                     self.provider_profile.model().to_string()
                 } else {
@@ -1525,7 +1548,7 @@ impl Session {
         Request {
             model: self.provider_profile.model().to_string(),
             messages,
-            provider: Some(self.provider_profile.provider().to_string()),
+            provider: Some(self.provider_profile.provider_id().to_string()),
             tools: if has_tools { Some(tools) } else { None },
             tool_choice: if has_tools {
                 Some(ToolChoice::Auto)

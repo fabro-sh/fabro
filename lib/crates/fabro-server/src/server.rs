@@ -700,7 +700,7 @@ impl AppState {
     }
 
     pub(crate) async fn resolve_llm_client(&self) -> anyhow::Result<LlmClientResult> {
-        resolve_llm_client_from_source(self.llm_source.as_ref()).await
+        resolve_llm_client_from_source(self.llm_source.as_ref(), self.catalog()).await
     }
 
     pub(crate) fn vault_or_env(&self, name: &str) -> Option<String> {
@@ -863,12 +863,13 @@ impl AppState {
 
 async fn resolve_llm_client_from_source(
     source: &dyn CredentialSource,
+    catalog: Arc<Catalog>,
 ) -> anyhow::Result<LlmClientResult> {
     let resolved = source
-        .resolve()
+        .resolve_for_catalog(catalog.as_ref())
         .await
         .context("resolving LLM credentials")?;
-    let client = LlmClient::from_credentials(resolved.credentials)
+    let client = LlmClient::from_credentials_with_catalog(resolved.credentials, catalog)
         .await
         .context("creating LLM client")?;
 
@@ -3033,6 +3034,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         github_app,
         github_permissions,
         vault: Some(Arc::clone(&state.vault)),
+        catalog: state.catalog(),
         on_node: None,
         registry_override,
     };

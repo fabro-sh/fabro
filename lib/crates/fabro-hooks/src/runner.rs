@@ -6,6 +6,9 @@ use fabro_agent::Sandbox;
 use fabro_auth::CredentialSource;
 #[cfg(test)]
 use fabro_auth::EnvCredentialSource;
+use fabro_model::Catalog;
+#[cfg(test)]
+use fabro_model::catalog::LlmCatalogSettings;
 
 use crate::config::{HookDefinition, HookSettings};
 use crate::executor::{HookExecutor, HookExecutorImpl};
@@ -17,18 +20,24 @@ pub struct HookRunner {
     config:            HookSettings,
     executor:          Arc<dyn HookExecutor>,
     llm_source:        Arc<dyn CredentialSource>,
+    catalog:           Arc<Catalog>,
     /// Pre-compiled regexes keyed by matcher pattern string.
     compiled_matchers: HashMap<String, regex::Regex>,
 }
 
 impl HookRunner {
     #[must_use]
-    pub fn new(config: HookSettings, llm_source: Arc<dyn CredentialSource>) -> Self {
+    pub fn new(
+        config: HookSettings,
+        llm_source: Arc<dyn CredentialSource>,
+        catalog: Arc<Catalog>,
+    ) -> Self {
         let compiled_matchers = Self::compile_matchers(&config);
         Self {
             config,
             executor: Arc::new(HookExecutorImpl),
             llm_source,
+            catalog,
             compiled_matchers,
         }
     }
@@ -41,6 +50,10 @@ impl HookRunner {
             config,
             executor,
             llm_source: Arc::new(EnvCredentialSource::new()),
+            catalog: Arc::new(
+                Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
+                    .expect("default catalog should build"),
+            ),
             compiled_matchers,
         }
     }
@@ -152,6 +165,7 @@ impl HookRunner {
                     sandbox.clone(),
                     work_dir,
                     self.llm_source.as_ref(),
+                    Arc::clone(&self.catalog),
                 )
                 .await;
             tracing::debug!(
@@ -206,6 +220,7 @@ impl HookRunner {
                     sandbox.clone(),
                     work_dir,
                     self.llm_source.as_ref(),
+                    Arc::clone(&self.catalog),
                 )
                 .await;
             tracing::debug!(
@@ -249,6 +264,7 @@ mod tests {
             _sandbox: Arc<dyn Sandbox>,
             _work_dir: Option<&Path>,
             _llm_source: &dyn CredentialSource,
+            _catalog: Arc<Catalog>,
         ) -> HookResult {
             HookResult {
                 hook_name:   definition.name.clone(),
@@ -272,6 +288,13 @@ mod tests {
         Arc::new(EnvCredentialSource::new())
     }
 
+    fn test_catalog() -> Arc<Catalog> {
+        Arc::new(
+            Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
+                .expect("default catalog should build"),
+        )
+    }
+
     fn make_hook(event: HookEvent, name: &str) -> HookDefinition {
         HookDefinition {
             name: Some(name.into()),
@@ -287,7 +310,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_hooks_returns_proceed() {
-        let runner = HookRunner::new(HookSettings::default(), test_llm_source());
+        let runner = HookRunner::new(HookSettings::default(), test_llm_source(), test_catalog());
         let ctx = make_context(HookEvent::RunStart);
         let sandbox = make_sandbox();
         let decision = runner.run(&ctx, sandbox.clone(), None).await;
@@ -452,7 +475,7 @@ mod tests {
                 h
             }],
         };
-        let runner = HookRunner::new(config, test_llm_source());
+        let runner = HookRunner::new(config, test_llm_source(), test_catalog());
         let ctx = make_context(HookEvent::RunStart);
         let sandbox = make_sandbox();
         let decision = runner.run(&ctx, sandbox.clone(), None).await;
@@ -468,7 +491,7 @@ mod tests {
                 h
             }],
         };
-        let runner = HookRunner::new(config, test_llm_source());
+        let runner = HookRunner::new(config, test_llm_source(), test_catalog());
         let ctx = make_context(HookEvent::RunStart);
         let sandbox = make_sandbox();
         let decision = runner.run(&ctx, sandbox.clone(), None).await;

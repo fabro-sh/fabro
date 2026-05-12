@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use fabro_auth::ApiKeyHeader;
+use fabro_model::Catalog;
 use fabro_model::adapter::{self as model_adapter, AdapterMetadata};
 
 use crate::client::auth_value;
@@ -32,7 +33,7 @@ pub struct AdapterConfig {
     pub provider_id:   String,
     /// Authentication header constructed by `fabro-auth` from the resolved
     /// credential and the adapter's [`fabro_model::ApiKeyHeaderPolicy`].
-    pub auth_header:   ApiKeyHeader,
+    pub auth_header:   Option<ApiKeyHeader>,
     /// Provider base URL override. `None` means use the adapter's built-in
     /// default.
     pub base_url:      Option<String>,
@@ -44,19 +45,21 @@ pub struct AdapterConfig {
     pub org_id:        Option<String>,
     /// OpenAI-only: project ID.
     pub project_id:    Option<String>,
+    pub catalog:       Option<Arc<Catalog>>,
 }
 
 impl AdapterConfig {
     /// Construct a minimal config with just provider ID and auth header.
     pub fn new(provider_id: impl Into<String>, auth_header: ApiKeyHeader) -> Self {
         Self {
-            provider_id: provider_id.into(),
-            auth_header,
-            base_url: None,
+            provider_id:   provider_id.into(),
+            auth_header:   Some(auth_header),
+            base_url:      None,
             extra_headers: HashMap::new(),
-            codex_mode: false,
-            org_id: None,
-            project_id: None,
+            codex_mode:    false,
+            org_id:        None,
+            project_id:    None,
+            catalog:       None,
         }
     }
 }
@@ -69,13 +72,23 @@ impl AdapterConfig {
 /// rather than re-shaping every existing factory.
 pub type AdapterFactory = fn(AdapterConfig) -> Arc<dyn ProviderAdapter>;
 
+fn auth_value_optional(auth_header: Option<&ApiKeyHeader>) -> Option<String> {
+    auth_header.map(auth_value)
+}
+
 fn build_anthropic_adapter(config: AdapterConfig) -> providers::AnthropicAdapter {
-    let mut adapter = providers::AnthropicAdapter::new(auth_value(&config.auth_header));
+    let mut adapter = providers::AnthropicAdapter::new_optional_auth(auth_value_optional(
+        config.auth_header.as_ref(),
+    ))
+    .with_name(config.provider_id.clone());
     if let Some(base_url) = config.base_url {
         adapter = adapter.with_base_url(base_url);
     }
     if !config.extra_headers.is_empty() {
         adapter = adapter.with_default_headers(config.extra_headers);
+    }
+    if let Some(catalog) = config.catalog {
+        adapter = adapter.with_catalog(catalog);
     }
     adapter
 }
@@ -85,7 +98,10 @@ fn build_anthropic(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
 }
 
 fn build_openai_adapter(config: AdapterConfig) -> providers::OpenAiAdapter {
-    let mut adapter = providers::OpenAiAdapter::new(auth_value(&config.auth_header));
+    let mut adapter = providers::OpenAiAdapter::new_optional_auth(auth_value_optional(
+        config.auth_header.as_ref(),
+    ))
+    .with_name(config.provider_id.clone());
     if let Some(base_url) = config.base_url {
         adapter = adapter.with_base_url(base_url);
     }
@@ -101,6 +117,9 @@ fn build_openai_adapter(config: AdapterConfig) -> providers::OpenAiAdapter {
     if let Some(project_id) = config.project_id {
         adapter = adapter.with_project_id(project_id);
     }
+    if let Some(catalog) = config.catalog {
+        adapter = adapter.with_catalog(catalog);
+    }
     adapter
 }
 
@@ -109,12 +128,18 @@ fn build_openai(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
 }
 
 fn build_gemini_adapter(config: AdapterConfig) -> providers::GeminiAdapter {
-    let mut adapter = providers::GeminiAdapter::new(auth_value(&config.auth_header));
+    let mut adapter = providers::GeminiAdapter::new_optional_auth(auth_value_optional(
+        config.auth_header.as_ref(),
+    ))
+    .with_name(config.provider_id.clone());
     if let Some(base_url) = config.base_url {
         adapter = adapter.with_base_url(base_url);
     }
     if !config.extra_headers.is_empty() {
         adapter = adapter.with_default_headers(config.extra_headers);
+    }
+    if let Some(catalog) = config.catalog {
+        adapter = adapter.with_catalog(catalog);
     }
     adapter
 }
@@ -132,11 +157,16 @@ fn build_openai_compatible_adapter(config: AdapterConfig) -> providers::OpenAiCo
         "openai_compatible adapter requires a base_url; resolve it from provider settings before \
          building AdapterConfig",
     );
-    let mut adapter =
-        providers::OpenAiCompatibleAdapter::new(auth_value(&config.auth_header), base_url)
-            .with_name(config.provider_id);
+    let mut adapter = providers::OpenAiCompatibleAdapter::new_optional_auth(
+        auth_value_optional(config.auth_header.as_ref()),
+        base_url,
+    )
+    .with_name(config.provider_id);
     if !config.extra_headers.is_empty() {
         adapter = adapter.with_default_headers(config.extra_headers);
+    }
+    if let Some(catalog) = config.catalog {
+        adapter = adapter.with_catalog(catalog);
     }
     adapter
 }
@@ -228,12 +258,13 @@ mod tests {
     fn openai_compatible_factory_uses_provider_id_for_name() {
         let config = AdapterConfig {
             provider_id:   "kimi".to_string(),
-            auth_header:   ApiKeyHeader::Bearer("k".to_string()),
+            auth_header:   Some(ApiKeyHeader::Bearer("k".to_string())),
             base_url:      Some("https://api.moonshot.ai/v1".to_string()),
             extra_headers: HashMap::new(),
             codex_mode:    false,
             org_id:        None,
             project_id:    None,
+            catalog:       None,
         };
         let adapter = factory_for("openai_compatible").unwrap()(config);
         assert_eq!(adapter.name(), "kimi");
@@ -243,7 +274,7 @@ mod tests {
     fn openai_compatible_factory_preserves_extra_headers() {
         let config = AdapterConfig {
             provider_id:   "portkey".to_string(),
-            auth_header:   ApiKeyHeader::Bearer("unused-primary-key".to_string()),
+            auth_header:   Some(ApiKeyHeader::Bearer("unused-primary-key".to_string())),
             base_url:      Some("https://api.portkey.ai/v1".to_string()),
             extra_headers: HashMap::from([
                 (
@@ -258,6 +289,7 @@ mod tests {
             codex_mode:    false,
             org_id:        None,
             project_id:    None,
+            catalog:       None,
         };
 
         let adapter = build_openai_compatible_adapter(config);
@@ -277,10 +309,10 @@ mod tests {
     fn anthropic_factory_preserves_extra_headers() {
         let config = AdapterConfig {
             provider_id:   "anthropic-through-portkey".to_string(),
-            auth_header:   ApiKeyHeader::Custom {
+            auth_header:   Some(ApiKeyHeader::Custom {
                 name:  "x-api-key".to_string(),
                 value: "unused-primary-key".to_string(),
-            },
+            }),
             base_url:      Some("https://api.portkey.ai/v1".to_string()),
             extra_headers: HashMap::from([(
                 "x-portkey-api-key".to_string(),
@@ -289,11 +321,12 @@ mod tests {
             codex_mode:    false,
             org_id:        None,
             project_id:    None,
+            catalog:       None,
         };
 
         let adapter = build_anthropic_adapter(config);
 
-        assert_eq!(adapter.name(), "anthropic");
+        assert_eq!(adapter.name(), "anthropic-through-portkey");
         assert_eq!(
             adapter.http.default_headers.get("x-portkey-api-key"),
             Some(&"resolved-portkey-key".to_string()),

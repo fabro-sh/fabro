@@ -45,5 +45,6 @@ insta = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 httpmock = "0.8"
 serde_json.workspace = true
+toml.workspace = true
 fabro-macros = { path = "../fabro-macros" }
 fabro-test = { workspace = true }

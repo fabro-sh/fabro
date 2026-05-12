@@ -13,7 +13,8 @@ use fabro_graphviz::graph::Node;
 use fabro_llm::client::Client;
 use fabro_llm::types::{Message, Request, TokenCounts};
 use fabro_mcp::config::McpServerSettings;
-use fabro_model::{FallbackTarget, Provider};
+use fabro_model::catalog::LlmCatalogSettings;
+use fabro_model::{AgentProfileKind, Catalog, FallbackTarget, Provider, ProviderId, adapter};
 use fabro_types::{SessionCapability, StageId};
 use tokio::sync::Mutex as TokioMutex;
 use tokio::task::JoinHandle;
@@ -98,6 +99,13 @@ enum AgentApiErrorDisposition {
     Terminal(Error),
 }
 
+#[derive(Clone)]
+struct ProviderContext {
+    provider:     Provider,
+    provider_id:  ProviderId,
+    profile_kind: AgentProfileKind,
+}
+
 fn classify_agent_error(err: fabro_agent::Error, allow_failover: bool) -> AgentApiErrorDisposition {
     match err {
         fabro_agent::Error::Interrupted(fabro_agent::InterruptReason::Cancelled) => {
@@ -128,7 +136,7 @@ fn begin_session_lifecycle(
     emitter.emit(&Event::AgentSessionStarted {
         session_id: session.id().to_string(),
         parent_session_id,
-        provider: Some(session.provider().to_string()),
+        provider: Some(session.provider_id().to_string()),
         model: Some(session.model().to_string()),
     });
 }
@@ -150,17 +158,55 @@ fn discard_session(
     }
 }
 
-fn build_profile(model: &str, provider: Provider) -> Box<dyn AgentProfile> {
+fn build_profile(
+    model: &str,
+    provider: Provider,
+    provider_id: ProviderId,
+    profile_kind: AgentProfileKind,
+) -> Box<dyn AgentProfile> {
+    match profile_kind {
+        AgentProfileKind::OpenAi => Box::new(
+            OpenAiProfile::new(model)
+                .with_provider(provider)
+                .with_provider_id(provider_id),
+        ),
+        AgentProfileKind::Gemini => Box::new(
+            GeminiProfile::new(model)
+                .with_provider(provider)
+                .with_provider_id(provider_id),
+        ),
+        AgentProfileKind::Anthropic => Box::new(
+            AnthropicProfile::new(model)
+                .with_provider(provider)
+                .with_provider_id(provider_id),
+        ),
+    }
+}
+
+fn default_profile_kind(provider: Provider) -> AgentProfileKind {
     match provider {
-        Provider::OpenAi => Box::new(OpenAiProfile::new(model)),
-        Provider::Kimi
+        Provider::Anthropic => AgentProfileKind::Anthropic,
+        Provider::Gemini => AgentProfileKind::Gemini,
+        Provider::OpenAi
+        | Provider::Kimi
         | Provider::Zai
         | Provider::Minimax
         | Provider::Inception
-        | Provider::OpenAiCompatible => Box::new(OpenAiProfile::new(model).with_provider(provider)),
-        Provider::Gemini => Box::new(GeminiProfile::new(model)),
-        Provider::Anthropic => Box::new(AnthropicProfile::new(model)),
+        | Provider::OpenAiCompatible => AgentProfileKind::OpenAi,
     }
+}
+
+fn profile_provider_for_catalog_provider(
+    provider_id: &ProviderId,
+    profile_kind: AgentProfileKind,
+    adapter: &str,
+) -> Provider {
+    Provider::from_id(provider_id).unwrap_or(match (profile_kind, adapter) {
+        (AgentProfileKind::Anthropic, _) => Provider::Anthropic,
+        (AgentProfileKind::Gemini, _) => Provider::Gemini,
+        (AgentProfileKind::OpenAi, "openai_compatible") => Provider::OpenAiCompatible,
+        (AgentProfileKind::OpenAi, _) => Provider::OpenAi,
+    })
 }
 
 /// Shared state for tracking file modifications from agent tool calls.
@@ -249,12 +295,15 @@ fn spawn_event_forwarder(
 pub struct AgentApiBackend {
     model:          String,
     provider:       Provider,
+    provider_id:    ProviderId,
+    profile_kind:   AgentProfileKind,
     fallback_chain: Vec<FallbackTarget>,
     sessions:       Mutex<HashMap<String, Session>>,
     tool_env:       Option<Arc<dyn ToolEnvProvider>>,
     mcp_servers:    Vec<McpServerSettings>,
     source:         Arc<dyn CredentialSource>,
     steering_hub:   Arc<SteeringHub>,
+    catalog:        Arc<Catalog>,
 }
 
 impl AgentApiBackend {
@@ -266,15 +315,45 @@ impl AgentApiBackend {
         source: Arc<dyn CredentialSource>,
         steering_hub: Arc<SteeringHub>,
     ) -> Self {
+        let catalog = Arc::new(
+            Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
+                .expect("default catalog should build"),
+        );
+        Self::new_with_catalog(
+            model,
+            provider,
+            provider.id(),
+            default_profile_kind(provider),
+            fallback_chain,
+            source,
+            steering_hub,
+            catalog,
+        )
+    }
+
+    #[must_use]
+    pub fn new_with_catalog(
+        model: String,
+        provider: Provider,
+        provider_id: ProviderId,
+        profile_kind: AgentProfileKind,
+        fallback_chain: Vec<FallbackTarget>,
+        source: Arc<dyn CredentialSource>,
+        steering_hub: Arc<SteeringHub>,
+        catalog: Arc<Catalog>,
+    ) -> Self {
         Self {
             model,
             provider,
+            provider_id,
+            profile_kind,
             fallback_chain,
             sessions: Mutex::new(HashMap::new()),
             tool_env: None,
             mcp_servers: Vec::new(),
             source,
             steering_hub,
+            catalog,
         }
     }
 
@@ -312,6 +391,51 @@ impl AgentApiBackend {
         self
     }
 
+    fn resolve_provider_context(
+        &self,
+        model: &str,
+        provider_attr: Option<&str>,
+    ) -> Result<ProviderContext, Error> {
+        let provider_id = if let Some(provider) = provider_attr {
+            let requested = ProviderId::from(provider);
+            self.catalog
+                .provider(&requested)
+                .ok_or_else(|| {
+                    Error::Precondition(format!("Provider \"{provider}\" is not configured"))
+                })?
+                .id
+                .clone()
+        } else if let Some(model) = self.catalog.get(model) {
+            model.provider.clone()
+        } else {
+            self.provider_id.clone()
+        };
+        let Some(provider) = self.catalog.provider(&provider_id) else {
+            return Ok(ProviderContext {
+                provider:     self.provider,
+                provider_id:  self.provider_id.clone(),
+                profile_kind: self.profile_kind,
+            });
+        };
+        let profile_kind = adapter::get(&provider.adapter)
+            .map(|metadata| metadata.default_profile)
+            .ok_or_else(|| {
+                Error::Precondition(format!(
+                    "Provider \"{provider_id}\" uses unknown adapter \"{}\"",
+                    provider.adapter,
+                ))
+            })?;
+        Ok(ProviderContext {
+            provider: profile_provider_for_catalog_provider(
+                &provider.id,
+                profile_kind,
+                &provider.adapter,
+            ),
+            provider_id: provider.id.clone(),
+            profile_kind,
+        })
+    }
+
     async fn create_session(
         &self,
         node: &Node,
@@ -319,16 +443,14 @@ impl AgentApiBackend {
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
     ) -> Result<Session, Error> {
         let model = node.model().unwrap_or(&self.model);
-        let provider = node
-            .provider()
-            .and_then(|p| p.parse::<Provider>().ok())
-            .unwrap_or(self.provider);
+        let provider = self.resolve_provider_context(model, node.provider())?;
         Self::create_session_for(
             model,
             provider,
             node,
             sandbox,
             self.source.as_ref(),
+            Arc::clone(&self.catalog),
             self.tool_env.as_ref(),
             tool_hooks,
             self.mcp_servers.clone(),
@@ -338,19 +460,25 @@ impl AgentApiBackend {
 
     async fn create_session_for(
         model: &str,
-        provider: Provider,
+        provider: ProviderContext,
         node: &Node,
         sandbox: &Arc<dyn Sandbox>,
         source: &dyn CredentialSource,
+        catalog: Arc<Catalog>,
         tool_env: Option<&Arc<dyn ToolEnvProvider>>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
         mcp_servers: Vec<McpServerSettings>,
     ) -> Result<Session, Error> {
-        let client = Client::from_source(source)
+        let client = Client::from_source_with_catalog(source, catalog)
             .await
             .map_err(|e| Error::handler_with_source("Failed to create LLM client", &e))?;
 
-        let mut profile = build_profile(model, provider);
+        let mut profile = build_profile(
+            model,
+            provider.provider,
+            provider.provider_id.clone(),
+            provider.profile_kind,
+        );
 
         let config = SessionOptions {
             max_tokens: node.max_tokens(),
@@ -369,21 +497,16 @@ impl AgentApiBackend {
         // Build factory that creates child sessions WITHOUT subagent tools
         let factory_client = client.clone();
         let factory_model = model.to_string();
+        let factory_provider = provider.clone();
         let factory_env = Arc::clone(sandbox);
         let factory_tool_env = tool_env.cloned();
         let factory: SessionFactory = Arc::new(move || {
-            let child_profile: Arc<dyn AgentProfile> = match provider {
-                Provider::OpenAi => Arc::new(OpenAiProfile::new(&factory_model)),
-                Provider::Kimi
-                | Provider::Zai
-                | Provider::Minimax
-                | Provider::Inception
-                | Provider::OpenAiCompatible => {
-                    Arc::new(OpenAiProfile::new(&factory_model).with_provider(provider))
-                }
-                Provider::Gemini => Arc::new(GeminiProfile::new(&factory_model)),
-                Provider::Anthropic => Arc::new(AnthropicProfile::new(&factory_model)),
-            };
+            let child_profile: Arc<dyn AgentProfile> = Arc::from(build_profile(
+                &factory_model,
+                factory_provider.provider,
+                factory_provider.provider_id.clone(),
+                factory_provider.profile_kind,
+            ));
             let mut session = Session::new(
                 factory_client.clone(),
                 child_profile,
@@ -435,7 +558,7 @@ impl AgentApiBackend {
                 stage_id:     stage_id.clone(),
                 session_id:   session.id().to_string(),
                 thread_id:    thread_id.map(str::to_string),
-                provider:     Some(session.provider().to_string()),
+                provider:     Some(session.provider_id().to_string()),
                 model:        Some(session.model().to_string()),
                 capabilities: vec![SessionCapability::Steer],
                 hub:          Arc::clone(&self.steering_hub),
@@ -483,21 +606,18 @@ impl CodergenBackend for AgentApiBackend {
         let emitter = request.emitter;
         let stage_scope = request.stage_scope;
 
-        let client = Client::from_source(self.source.as_ref())
-            .await
-            .map_err(|e| Error::handler_with_source("Failed to create LLM client", &e))?;
+        let client =
+            Client::from_source_with_catalog(self.source.as_ref(), Arc::clone(&self.catalog))
+                .await
+                .map_err(|e| Error::handler_with_source("Failed to create LLM client", &e))?;
 
         let model = node.model().unwrap_or(&self.model);
-        let provider = node
-            .provider()
-            .map(String::from)
-            .or_else(|| Some(self.provider.to_string()));
+        let provider = self.resolve_provider_context(model, node.provider())?;
+        let provider_id = provider.provider_id.to_string();
 
-        let max_tokens = node.max_tokens().or_else(|| {
-            fabro_model::Catalog::builtin()
-                .get(model)
-                .and_then(|m| m.limits.max_output)
-        });
+        let max_tokens = node
+            .max_tokens()
+            .or_else(|| self.catalog.get(model).and_then(|m| m.limits.max_output));
 
         let mut messages = Vec::new();
         if let Some(sys) = system_prompt {
@@ -508,7 +628,7 @@ impl CodergenBackend for AgentApiBackend {
         let request = Request {
             model: model.to_string(),
             messages,
-            provider,
+            provider: Some(provider_id),
             reasoning_effort: node.reasoning_effort().parse().ok(),
             speed: node.speed().map(String::from),
             tools: None,
@@ -532,7 +652,7 @@ impl CodergenBackend for AgentApiBackend {
 
         let result = client.complete(&request).await;
 
-        let default_provider = self.provider.to_string();
+        let default_provider = self.provider_id.to_string();
 
         let (response, actual_model, actual_provider) = match result {
             Ok(resp) => (
@@ -568,7 +688,7 @@ impl CodergenBackend for AgentApiBackend {
                     );
 
                     let max_tokens = node.max_tokens().or_else(|| {
-                        fabro_model::Catalog::builtin()
+                        self.catalog
                             .get(&target.model)
                             .and_then(|m| m.limits.max_output)
                     });
@@ -762,7 +882,7 @@ impl CodergenBackend for AgentApiBackend {
                 }
                 AgentApiErrorDisposition::FailoverEligible(sdk_err) => {
                     let error_msg = sdk_err.to_string();
-                    let from_provider = self.provider.to_string();
+                    let from_provider = self.provider_id.to_string();
                     let from_model = self.model.clone();
 
                     let mut last_err = Error::Llm(sdk_err);
@@ -784,9 +904,10 @@ impl CodergenBackend for AgentApiBackend {
                             &stage_scope,
                         );
 
-                        let target_provider: Provider = match target.provider.parse() {
-                            Ok(p) => p,
-                            Err(_) => continue,
+                        let Ok(target_provider) =
+                            self.resolve_provider_context(&target.model, Some(&target.provider))
+                        else {
+                            continue;
                         };
 
                         if cancel_token.is_cancelled() {
@@ -798,6 +919,7 @@ impl CodergenBackend for AgentApiBackend {
                             node,
                             sandbox,
                             self.source.as_ref(),
+                            Arc::clone(&self.catalog),
                             self.tool_env.as_ref(),
                             tool_hooks.clone(),
                             self.mcp_servers.clone(),
@@ -995,7 +1117,7 @@ impl CompletionCoordinator for SteeringCompletionCoordinator {
 mod tests {
     use fabro_agent::subagent::SessionFactory;
     use fabro_agent::{AgentProfile, ToolRegistry};
-    use fabro_auth::{AuthCredential, AuthDetails, VaultCredentialSource};
+    use fabro_auth::{AuthCredential, AuthDetails, EnvCredentialSource, VaultCredentialSource};
     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
     use fabro_llm::{Error as LlmError, ProviderErrorDetail, ProviderErrorKind};
     use fabro_vault::{SecretType, Vault};
@@ -1196,7 +1318,12 @@ mod tests {
 
     #[test]
     fn build_profile_can_register_subagent_tools() {
-        let mut profile = build_profile("claude-opus-4-6", Provider::Anthropic);
+        let mut profile = build_profile(
+            "claude-opus-4-6",
+            Provider::Anthropic,
+            Provider::Anthropic.id(),
+            AgentProfileKind::Anthropic,
+        );
         let manager = Arc::new(TokioMutex::new(SubAgentManager::new(1)));
         let factory: SessionFactory = Arc::new(|| {
             panic!("factory should not be called in this test");
@@ -1208,6 +1335,55 @@ mod tests {
         assert!(names.contains(&"send_input".to_string()));
         assert!(names.contains(&"wait".to_string()));
         assert!(names.contains(&"close_agent".to_string()));
+    }
+
+    #[test]
+    fn api_backend_resolves_custom_catalog_provider_profile() {
+        let settings: LlmCatalogSettings = toml::from_str(
+            r#"
+[providers.venice]
+adapter = "openai_compatible"
+base_url = "https://api.venice.ai/api/v1"
+credentials = ["env:VENICE_API_KEY"]
+
+[models.venice-llama]
+provider = "venice"
+display_name = "Venice Llama"
+family = "llama"
+training = "2026-01"
+default = true
+
+[models.venice-llama.limits]
+context_window = 131072
+max_output = 8192
+
+[models.venice-llama.features]
+tools = true
+vision = false
+reasoning = false
+effort = false
+"#,
+        )
+        .unwrap();
+        let catalog = Arc::new(Catalog::from_builtin_with_overrides(&settings).unwrap());
+        let backend = AgentApiBackend::new_with_catalog(
+            "venice-llama".to_string(),
+            Provider::OpenAiCompatible,
+            ProviderId::from("venice"),
+            AgentProfileKind::OpenAi,
+            Vec::new(),
+            Arc::new(EnvCredentialSource::new()),
+            SteeringHub::for_tests(),
+            catalog,
+        );
+
+        let provider = backend
+            .resolve_provider_context("venice-llama", None)
+            .unwrap();
+
+        assert_eq!(provider.provider_id, ProviderId::from("venice"));
+        assert_eq!(provider.profile_kind, AgentProfileKind::OpenAi);
+        assert_eq!(provider.provider, Provider::OpenAiCompatible);
     }
 
     #[tokio::test]
@@ -1239,7 +1415,10 @@ mod tests {
             SteeringHub::for_tests(),
         );
 
-        let client = Client::from_source(backend.source.as_ref()).await.unwrap();
+        let client =
+            Client::from_source_with_catalog(backend.source.as_ref(), Arc::clone(&backend.catalog))
+                .await
+                .unwrap();
 
         assert_eq!(client.provider_names(), vec!["anthropic"]);
     }

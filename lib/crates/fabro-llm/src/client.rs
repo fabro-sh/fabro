@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use fabro_auth::{ApiCredential, ApiKeyHeader, CredentialSource};
+use fabro_model::catalog::LlmCatalogSettings;
+use fabro_model::{Catalog, ProviderId};
 use tracing::debug;
 
 use crate::adapter_registry::{AdapterConfig, factory_for};
@@ -16,6 +18,7 @@ pub struct Client {
     providers:        HashMap<String, Arc<dyn ProviderAdapter>>,
     default_provider: Option<String>,
     middleware:       Vec<Arc<dyn Middleware>>,
+    catalog:          Option<Arc<Catalog>>,
 }
 
 impl Client {
@@ -30,6 +33,7 @@ impl Client {
             providers,
             default_provider,
             middleware,
+            catalog: None,
         }
     }
 
@@ -47,21 +51,52 @@ impl Client {
         Self::from_credentials(resolved.credentials).await
     }
 
+    pub async fn from_source_with_catalog(
+        source: &dyn CredentialSource,
+        catalog: Arc<Catalog>,
+    ) -> Result<Self, Error> {
+        let resolved =
+            source
+                .resolve_for_catalog(&catalog)
+                .await
+                .map_err(|err| Error::Configuration {
+                    message: format!("Failed to resolve LLM credentials: {err}"),
+                    source:  None,
+                })?;
+        Self::from_credentials_with_catalog(resolved.credentials, catalog).await
+    }
+
     /// Create a Client from typed provider credentials.
     ///
     /// # Errors
     ///
     /// Returns `Error` if any provider adapter fails to initialize.
     pub async fn from_credentials(credentials: Vec<ApiCredential>) -> Result<Self, Error> {
+        let catalog = Arc::new(
+            Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).map_err(
+                |err| Error::Configuration {
+                    message: "Failed to build bootstrap LLM catalog".to_string(),
+                    source:  Some(Arc::new(err)),
+                },
+            )?,
+        );
+        Self::from_credentials_with_catalog(credentials, catalog).await
+    }
+
+    pub async fn from_credentials_with_catalog(
+        credentials: Vec<ApiCredential>,
+        catalog: Arc<Catalog>,
+    ) -> Result<Self, Error> {
         let mut client = Self {
             providers:        HashMap::new(),
             default_provider: None,
             middleware:       Vec::new(),
+            catalog:          Some(Arc::clone(&catalog)),
         };
 
         for credential in credentials {
             let provider_id = credential.provider.clone();
-            let Some(provider) = fabro_model::Catalog::builtin().provider(&provider_id) else {
+            let Some(provider) = catalog.provider(&provider_id) else {
                 return Err(Error::Configuration {
                     message: format!(
                         "Provider \"{provider_id}\" is not supported by credential-only registration"
@@ -87,6 +122,7 @@ impl Client {
                 codex_mode:    credential.codex_mode,
                 org_id:        credential.org_id,
                 project_id:    credential.project_id,
+                catalog:       Some(Arc::clone(&catalog)),
             });
             client.register_provider(adapter).await?;
         }
@@ -125,11 +161,23 @@ impl Client {
         self.middleware.push(mw);
     }
 
+    fn canonical_provider_name(&self, provider_name: &str) -> String {
+        self.catalog
+            .as_ref()
+            .and_then(|catalog| catalog.provider(&ProviderId::new(provider_name)))
+            .map_or_else(
+                || provider_name.to_string(),
+                |provider| provider.id.to_string(),
+            )
+    }
+
     /// Resolve the provider for a request.
     fn resolve_provider(&self, request: &Request) -> Result<Arc<dyn ProviderAdapter>, Error> {
-        let catalog_provider = fabro_model::Catalog::builtin()
-            .get(&request.model)
-            .map(|info| info.provider.to_string());
+        let catalog_provider = self.catalog.as_ref().and_then(|catalog| {
+            catalog
+                .get(&request.model)
+                .map(|info| info.provider.to_string())
+        });
 
         let provider_name = request
             .provider
@@ -140,9 +188,10 @@ impl Client {
                 message: "No provider specified and no default provider set".into(),
                 source:  None,
             })?;
+        let provider_name = self.canonical_provider_name(provider_name);
 
         self.providers
-            .get(provider_name)
+            .get(&provider_name)
             .cloned()
             .ok_or_else(|| Error::Configuration {
                 message: format!("Provider '{provider_name}' not registered"),
@@ -241,6 +290,11 @@ impl Client {
     #[must_use]
     pub fn has_provider(&self, name: &str) -> bool {
         self.providers.contains_key(name)
+            || self
+                .catalog
+                .as_ref()
+                .and_then(|catalog| catalog.provider(&ProviderId::new(name)))
+                .is_some_and(|provider| self.providers.contains_key(provider.id.as_str()))
     }
 
     /// Get the default provider name.
@@ -260,6 +314,7 @@ pub(crate) fn auth_value(auth_header: &ApiKeyHeader) -> String {
 mod tests {
     use async_trait::async_trait;
     use fabro_auth::{CredentialSource, ResolvedCredentials};
+    use fabro_model::catalog::LlmCatalogSettings;
     use futures::stream;
 
     use super::*;
@@ -352,6 +407,11 @@ mod tests {
         credentials: Vec<ApiCredential>,
     }
 
+    fn catalog_with(overrides: &str) -> Arc<Catalog> {
+        let settings: LlmCatalogSettings = toml::from_str(overrides).unwrap();
+        Arc::new(Catalog::from_builtin_with_overrides(&settings).unwrap())
+    }
+
     #[async_trait]
     impl CredentialSource for StubSource {
         async fn resolve(&self) -> anyhow::Result<ResolvedCredentials> {
@@ -428,10 +488,10 @@ mod tests {
         let client = Client::from_credentials(vec![
             ApiCredential {
                 provider:      fabro_model::Provider::Anthropic.id(),
-                auth_header:   ApiKeyHeader::Custom {
+                auth_header:   Some(ApiKeyHeader::Custom {
                     name:  "x-api-key".to_string(),
                     value: "anthropic-key".to_string(),
-                },
+                }),
                 extra_headers: HashMap::new(),
                 base_url:      None,
                 codex_mode:    false,
@@ -440,7 +500,7 @@ mod tests {
             },
             ApiCredential {
                 provider:      fabro_model::Provider::OpenAi.id(),
-                auth_header:   ApiKeyHeader::Bearer("openai-key".to_string()),
+                auth_header:   Some(ApiKeyHeader::Bearer("openai-key".to_string())),
                 extra_headers: HashMap::new(),
                 base_url:      None,
                 codex_mode:    false,
@@ -461,7 +521,7 @@ mod tests {
     async fn from_credentials_supports_openai_compatible_provider_constants() {
         let client = Client::from_credentials(vec![ApiCredential {
             provider:      fabro_model::Provider::Kimi.id(),
-            auth_header:   ApiKeyHeader::Bearer("kimi-key".to_string()),
+            auth_header:   Some(ApiKeyHeader::Bearer("kimi-key".to_string())),
             extra_headers: HashMap::new(),
             base_url:      None,
             codex_mode:    false,
@@ -479,7 +539,7 @@ mod tests {
     async fn from_credentials_rejects_custom_provider_id_without_adapter() {
         let result = Client::from_credentials(vec![ApiCredential {
             provider:      fabro_model::ProviderId::new("venice"),
-            auth_header:   ApiKeyHeader::Bearer("venice-key".to_string()),
+            auth_header:   Some(ApiKeyHeader::Bearer("venice-key".to_string())),
             extra_headers: HashMap::new(),
             base_url:      None,
             codex_mode:    false,
@@ -505,10 +565,10 @@ mod tests {
         let source = StubSource {
             credentials: vec![ApiCredential {
                 provider:      fabro_model::Provider::Anthropic.id(),
-                auth_header:   ApiKeyHeader::Custom {
+                auth_header:   Some(ApiKeyHeader::Custom {
                     name:  "x-api-key".to_string(),
                     value: "anthropic-key".to_string(),
-                },
+                }),
                 extra_headers: HashMap::new(),
                 base_url:      None,
                 codex_mode:    false,
@@ -520,6 +580,154 @@ mod tests {
         let client = Client::from_source(&source).await.unwrap();
 
         assert_eq!(client.provider_names(), vec!["anthropic"]);
+    }
+
+    #[tokio::test]
+    async fn from_credentials_with_catalog_registers_custom_openai_compatible_provider() {
+        let catalog = catalog_with(
+            r#"
+[providers.venice]
+display_name = "Venice"
+adapter = "openai_compatible"
+base_url = "https://api.venice.ai/api/v1"
+credentials = ["env:VENICE_API_KEY"]
+aliases = ["venice-ai"]
+
+[models."venice-large"]
+provider = "venice"
+display_name = "Venice Large"
+family = "venice"
+default = true
+
+[models."venice-large".limits]
+context_window = 128000
+
+[models."venice-large".features]
+tools = true
+vision = false
+reasoning = false
+effort = false
+"#,
+        );
+
+        let client = Client::from_credentials_with_catalog(
+            vec![ApiCredential {
+                provider:      fabro_model::ProviderId::new("venice"),
+                auth_header:   Some(ApiKeyHeader::Bearer("venice-key".to_string())),
+                extra_headers: HashMap::new(),
+                base_url:      None,
+                codex_mode:    false,
+                org_id:        None,
+                project_id:    None,
+            }],
+            Arc::clone(&catalog),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(client.provider_names(), vec!["venice"]);
+        assert!(client.has_provider("venice"));
+        assert!(client.has_provider("venice-ai"));
+    }
+
+    #[tokio::test]
+    async fn resolve_provider_accepts_catalog_provider_alias() {
+        let catalog = catalog_with(
+            r#"
+[providers.venice]
+display_name = "Venice"
+adapter = "openai_compatible"
+base_url = "https://api.venice.ai/api/v1"
+credentials = ["env:VENICE_API_KEY"]
+aliases = ["venice-ai"]
+
+[models."venice-large"]
+provider = "venice"
+display_name = "Venice Large"
+family = "venice"
+default = true
+
+[models."venice-large".limits]
+context_window = 128000
+
+[models."venice-large".features]
+tools = true
+vision = false
+reasoning = false
+effort = false
+"#,
+        );
+
+        let client = Client::from_credentials_with_catalog(
+            vec![ApiCredential {
+                provider:      fabro_model::ProviderId::new("venice"),
+                auth_header:   Some(ApiKeyHeader::Bearer("venice-key".to_string())),
+                extra_headers: HashMap::new(),
+                base_url:      None,
+                codex_mode:    false,
+                org_id:        None,
+                project_id:    None,
+            }],
+            Arc::clone(&catalog),
+        )
+        .await
+        .unwrap();
+        let mut request = test_request();
+        request.provider = Some("venice-ai".to_string());
+
+        let provider = client.resolve_provider(&request).unwrap();
+
+        assert_eq!(provider.name(), "venice");
+    }
+
+    #[tokio::test]
+    async fn from_credentials_with_catalog_registers_header_only_provider() {
+        let catalog = catalog_with(
+            r#"
+[providers.portkey]
+display_name = "Portkey Bedrock"
+adapter = "anthropic"
+base_url = "https://api.portkey.ai/v1"
+
+[providers.portkey.extra_headers]
+x-portkey-api-key = { literal = "pk-live" }
+
+[models."portkey-claude"]
+provider = "portkey"
+display_name = "Portkey Claude"
+family = "claude"
+default = true
+
+[models."portkey-claude".limits]
+context_window = 200000
+
+[models."portkey-claude".features]
+tools = true
+vision = true
+reasoning = true
+effort = true
+"#,
+        );
+
+        let client = Client::from_credentials_with_catalog(
+            vec![ApiCredential {
+                provider:      fabro_model::ProviderId::new("portkey"),
+                auth_header:   None,
+                extra_headers: HashMap::from([(
+                    "x-portkey-api-key".to_string(),
+                    "pk-live".to_string(),
+                )]),
+                base_url:      None,
+                codex_mode:    false,
+                org_id:        None,
+                project_id:    None,
+            }],
+            Arc::clone(&catalog),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(client.provider_names(), vec!["portkey"]);
     }
 
     #[tokio::test]

@@ -32,6 +32,8 @@ use fabro_interview::{
     QueueInterviewer, RecordingInterviewer,
 };
 use fabro_llm::provider::Provider;
+use fabro_model::Catalog;
+use fabro_model::catalog::LlmCatalogSettings;
 use fabro_store::{ArtifactKey, ArtifactStore, Database};
 use fabro_types::{CommandTermination, RunEvent, RunId, StageId, WorkflowSettings, parse_blob_ref};
 use fabro_validate::{Severity, validate, validate_or_raise};
@@ -60,6 +62,13 @@ use fabro_workflow::transforms::{StylesheetApplicationTransform, TemplateTransfo
 use object_store::local::LocalFileSystem;
 use tokio_util::sync::CancellationToken;
 use ulid::Ulid;
+
+fn default_catalog() -> Arc<Catalog> {
+    Arc::new(
+        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
+            .expect("default catalog should build"),
+    )
+}
 
 fn local_env() -> Arc<dyn fabro_agent::Sandbox> {
     Arc::new(fabro_agent::LocalSandbox::new(
@@ -6993,6 +7002,7 @@ async fn workflow_run_with_vault_only_openai_codex_builds_pr_body() {
         "gpt-5.4",
         &run_store_handle,
         llm_source.as_ref(),
+        default_catalog(),
         Some(&Conclusion {
             timestamp:            Utc::now(),
             status:               StageOutcome::Succeeded,
@@ -7801,6 +7811,7 @@ fn hook_runner_from_defs(hooks: Vec<fabro_hooks::HookDefinition>) -> Arc<fabro_h
     Arc::new(fabro_hooks::HookRunner::new(
         fabro_hooks::HookSettings { hooks },
         Arc::new(fabro_auth::EnvCredentialSource::new()),
+        default_catalog(),
     ))
 }
 

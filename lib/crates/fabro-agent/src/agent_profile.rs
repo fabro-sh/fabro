@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use fabro_llm::types::ToolDefinition;
-use fabro_model::{Catalog, Provider};
+use fabro_model::{Catalog, Provider, ProviderId};
 use tokio::sync::Mutex;
 
 use crate::profiles::EnvContext;
@@ -15,6 +15,9 @@ use crate::tool_registry::ToolRegistry;
 
 pub trait AgentProfile: Send + Sync {
     fn provider(&self) -> Provider;
+    fn provider_id(&self) -> ProviderId {
+        self.provider().id()
+    }
     fn model(&self) -> &str;
     fn tool_registry(&self) -> &ToolRegistry;
     fn tool_registry_mut(&mut self) -> &mut ToolRegistry;
