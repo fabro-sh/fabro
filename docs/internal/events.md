@@ -1952,6 +1952,8 @@ Emitted when an image or snapshot ensure step fails.
 
 ## CLI ensure events
 
+These legacy events may appear in older run logs. Current CLI backend runs do not emit them because Fabro no longer installs or prepares provider CLIs at stage runtime.
+
 ### `cli.ensure.started`
 
 ```json

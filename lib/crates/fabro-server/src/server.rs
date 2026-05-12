@@ -189,30 +189,30 @@ impl<T: serde::Serialize> ListResponse<T> {
 
 /// Snapshot of a managed run.
 struct ManagedRun {
-    dot_source:         String,
-    status:             RunStatus,
-    error:              Option<String>,
-    created_at:         chrono::DateTime<chrono::Utc>,
-    enqueued_at:        Instant,
+    dot_source: String,
+    status: RunStatus,
+    error: Option<String>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    enqueued_at: Instant,
     // Populated when running:
-    answer_transport:   Option<RunAnswerTransport>,
+    answer_transport: Option<RunAnswerTransport>,
     accepted_questions: HashSet<String>,
     /// Stage IDs of currently steerable API-mode (SDK) agent sessions,
     /// keyed to the session id that owns the active lease. Used by the
     /// steerability predicate.
-    active_api_stages:  HashMap<StageId, String>,
-    /// Stage IDs of currently running CLI-mode agent sessions, observed
-    /// from `agent.cli.started/completed` plus `stage.completed`/
+    active_api_stages: HashMap<StageId, String>,
+    /// Stage IDs of currently running non-steerable agent sessions, observed
+    /// from CLI/ACP start/completion events plus `stage.completed`/
     /// `stage.failed` backstops.
-    active_cli_stages:  HashSet<StageId>,
-    event_tx:           Option<broadcast::Sender<RunEvent>>,
-    checkpoint:         Option<Checkpoint>,
-    cancel_tx:          Option<oneshot::Sender<()>>,
-    cancel_token:       Option<CancellationToken>,
-    worker_pid:         Option<u32>,
-    worker_pgid:        Option<u32>,
-    run_dir:            Option<std::path::PathBuf>,
-    execution_mode:     RunExecutionMode,
+    active_non_steerable_agent_stages: HashSet<StageId>,
+    event_tx: Option<broadcast::Sender<RunEvent>>,
+    checkpoint: Option<Checkpoint>,
+    cancel_tx: Option<oneshot::Sender<()>>,
+    cancel_token: Option<CancellationToken>,
+    worker_pid: Option<u32>,
+    worker_pgid: Option<u32>,
+    run_dir: Option<std::path::PathBuf>,
+    execution_mode: RunExecutionMode,
 }
 
 #[derive(Clone, Copy)]
@@ -1953,7 +1953,7 @@ fn clear_live_run_state(run: &mut ManagedRun) {
     run.answer_transport = None;
     run.accepted_questions.clear();
     run.active_api_stages.clear();
-    run.active_cli_stages.clear();
+    run.active_non_steerable_agent_stages.clear();
     run.event_tx = None;
     run.cancel_tx = None;
     run.cancel_token = None;
@@ -2291,7 +2291,7 @@ fn managed_run(
         answer_transport: None,
         accepted_questions: HashSet::new(),
         active_api_stages: HashMap::new(),
-        active_cli_stages: HashSet::new(),
+        active_non_steerable_agent_stages: HashSet::new(),
         event_tx: None,
         checkpoint: None,
         cancel_tx: None,
@@ -2320,6 +2320,15 @@ async fn load_pending_control(
         .find(&run_id)
         .await?
         .and_then(|summary| summary.lifecycle.pending_control))
+}
+
+async fn durable_run_status(state: &AppState, run_id: RunId) -> anyhow::Result<Option<RunStatus>> {
+    Ok(state
+        .store
+        .runs()
+        .find(&run_id)
+        .await?
+        .map(|summary| summary.lifecycle.status))
 }
 
 fn fail_managed_run(state: &Arc<AppState>, run_id: RunId, reason: FailureReason, message: String) {
@@ -2388,7 +2397,7 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
             };
             managed_run.error = None;
             managed_run.active_api_stages.clear();
-            managed_run.active_cli_stages.clear();
+            managed_run.active_non_steerable_agent_stages.clear();
         }
         EventBody::RunFailed(props) => {
             managed_run.status = RunStatus::Failed {
@@ -2396,7 +2405,7 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
             };
             managed_run.error = Some(props.error.clone());
             managed_run.active_api_stages.clear();
-            managed_run.active_cli_stages.clear();
+            managed_run.active_non_steerable_agent_stages.clear();
         }
         // Track API-mode steerable sessions. Activated/deactivated are
         // leased by session id so stale deactivations cannot clear a newer
@@ -2425,17 +2434,24 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
                 }
             }
         }
-        // Track CLI-mode agent stages. CLI started/completed are coarser
-        // and sometimes fail to emit `completed` on error paths — the
-        // stage.completed/stage.failed handler below is the backstop.
-        EventBody::AgentCliStarted(_) => {
+        // Track non-steerable agent stages. CLI/ACP started/completed are
+        // coarser and sometimes fail to emit terminal events on error paths;
+        // stage.completed/stage.failed below are the backstops.
+        EventBody::AgentCliStarted(_) | EventBody::AgentAcpStarted(_) => {
             if let Some(stage_id) = event.stage_id.as_ref() {
-                managed_run.active_cli_stages.insert(stage_id.clone());
+                managed_run
+                    .active_non_steerable_agent_stages
+                    .insert(stage_id.clone());
             }
         }
-        EventBody::AgentCliCompleted(_) => {
+        EventBody::AgentCliCompleted(_)
+        | EventBody::AgentAcpCompleted(_)
+        | EventBody::AgentAcpCancelled(_)
+        | EventBody::AgentAcpTimedOut(_) => {
             if let Some(stage_id) = &event.stage_id {
-                managed_run.active_cli_stages.remove(stage_id);
+                managed_run
+                    .active_non_steerable_agent_stages
+                    .remove(stage_id);
             }
         }
         // Stage lifecycle backstop: cover both completion and failure
@@ -2443,7 +2459,9 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
         EventBody::StageCompleted(_) | EventBody::StageFailed(_) => {
             if let Some(stage_id) = &event.stage_id {
                 managed_run.active_api_stages.remove(stage_id);
-                managed_run.active_cli_stages.remove(stage_id);
+                managed_run
+                    .active_non_steerable_agent_stages
+                    .remove(stage_id);
             }
         }
         _ => {}

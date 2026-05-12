@@ -7,6 +7,7 @@
 //! behavior, and artifact collection.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Duration as StdDuration;
 
 use serde::ser::SerializeStruct;
@@ -341,6 +342,10 @@ pub struct RunAgentSettings {
 pub struct McpServerSettings {
     pub name:                 String,
     pub transport:            McpTransport,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_dir:          Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub clear_env:            bool,
     pub startup_timeout_secs: u64,
     pub tool_timeout_secs:    u64,
 }
@@ -353,6 +358,8 @@ impl Default for McpServerSettings {
                 command: Vec::new(),
                 env:     HashMap::new(),
             },
+            current_dir:          None,
+            clear_env:            false,
             startup_timeout_secs: 10,
             tool_timeout_secs:    60,
         }
@@ -387,6 +394,14 @@ pub enum McpTransport {
         port:    u16,
         env:     HashMap<String, String>,
     },
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if helpers receive borrowed field values"
+)]
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default, Serialize)]

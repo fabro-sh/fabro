@@ -1,0 +1,57 @@
+---
+title: "Sandbox tools, auth sessions, and Live Events"
+date: "2026-05-10"
+---
+
+<Warning>
+**Run API responses now use the canonical `Run` payload.** Run list, board, create, retrieve, and lifecycle endpoints now return the same public run shape. Archive state moved out of `status.kind = "archived"` and into run lifecycle metadata, sandbox fields distinguish planned settings from runtime state, and pull request records are separate from live pull request details.
+
+To migrate:
+1. Regenerate API clients from the current OpenAPI spec.
+2. Replace `RunSummary`, `RunListItem`, and `RunStatusResponse` assumptions with the canonical `Run` shape.
+3. Read archive state from lifecycle metadata instead of treating `archived` as a terminal status.
+</Warning>
+
+## Sandbox tools in one place
+
+The run Sandbox tab now includes a read-only filesystem browser, Daytona VNC previews, discovered sandbox services, and terminal access from the same page. Empty files render cleanly, large file previews are virtualized, and directory sentinel files are hidden from the browser.
+
+Daytona sandboxes can start a signed noVNC preview from the web UI, and discovered listening TCP services are listed with their ports, bind addresses, process summaries, and preview support.
+
+## Auth sessions and Live Events
+
+Profile now includes a Sessions page for the current browser session and active CLI session chains. CLI sessions can be revoked from the same surface, while browser sessions are listed as non-revocable in this API version.
+
+Settings now includes a Live Events page for watching server events in the web app. The page reuses the event debugger and adds the filtering and navigation needed for operational inspection.
+
+## Automations navigation
+
+The web app now uses Automations as the product label for workflow definitions and runs. Routes, nav labels, and run pages were updated together so the main app shell reads as Automations, Runs, Settings, and Profile instead of mixing workflow terminology into the navigation.
+
+## More
+
+<Accordion title="API">
+- New `GET /api/v1/auth/sessions` endpoint lists browser and CLI auth sessions for the authenticated user
+- New `DELETE /api/v1/auth/sessions/{id}` endpoint revokes active CLI session chains
+- New `GET /api/v1/runs/{id}/sandbox/services` endpoint lists listening TCP services inside a run sandbox
+- New `POST /api/v1/runs/{id}/sandbox/vnc` endpoint creates signed noVNC preview URLs for Daytona sandboxes
+- Run list, board, create, retrieve, and lifecycle endpoints now return canonical `Run` objects
+</Accordion>
+
+<Accordion title="Improvements">
+- Added Profile sub-navigation with Overview and Sessions pages
+- Added Settings sub-navigation with Overview and Live Events pages
+- Added a full-screen terminal route and an "Open in new tab" action for embedded terminals
+- Added read-only filesystem and Daytona VNC modes to the run Sandbox tab
+- Added a Services tab to the run Sandbox page
+- Virtualized sandbox file previews and improved empty-file handling
+- Renamed the Workflows tab to Automations
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed sandbox service discovery so listening services are detected more reliably
+- Fixed sandbox VNC previews to open the noVNC viewer page
+- Fixed full-screen terminal toast notifications by wrapping the route in the Toast provider
+- Fixed filesystem directory sentinels showing in the sandbox file browser
+- Fixed projection cache hydration before appending later events
+</Accordion>

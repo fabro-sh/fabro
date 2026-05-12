@@ -5,12 +5,45 @@
 
 use std::process::Output;
 
+use fabro_auth::{AuthCredential, AuthDetails};
+use fabro_config::Storage;
+use fabro_model::Provider;
 use fabro_test::{fabro_snapshot, test_context, twin_openai};
+use fabro_vault::{SecretType, Vault};
 
 async fn run_success_output(mut cmd: assert_cmd::Command) -> Output {
     tokio::task::spawn_blocking(move || cmd.assert().success().get_output().clone())
         .await
         .expect("blocking command task should complete")
+}
+
+fn toml_path(path: &std::path::Path) -> String {
+    path.display()
+        .to_string()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+}
+
+fn seed_openai_vault(storage_dir: &std::path::Path, base_url: &str, api_key: &str) {
+    let mut vault =
+        Vault::load(Storage::new(storage_dir).secrets_path()).expect("test vault should load");
+    vault
+        .set(
+            "openai",
+            &serde_json::to_string(&AuthCredential {
+                provider: Provider::OpenAi,
+                details:  AuthDetails::ApiKey {
+                    key: api_key.to_string(),
+                },
+            })
+            .expect("OpenAI test credential should serialize"),
+            SecretType::Credential,
+            None,
+        )
+        .expect("OpenAI credential should store in test vault");
+    vault
+        .set("OPENAI_BASE_URL", base_url, SecretType::Environment, None)
+        .expect("OpenAI base URL should store in test vault");
 }
 
 #[test]
@@ -64,9 +97,28 @@ fn live_doctor() {
 
 #[fabro_macros::e2e_test(twin)]
 async fn twin_doctor() {
-    let context = test_context!();
+    let mut context = test_context!();
     let twin = twin_openai().await;
     let namespace = format!("{}::{}", module_path!(), line!());
+    let storage_dir = context.temp_dir.join("doctor-server-storage");
+    context.write_home(
+        ".fabro/settings.toml",
+        format!(
+            r#"[server.storage]
+root = "{}"
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.integrations.github]
+strategy = "app"
+"#,
+            toml_path(&storage_dir)
+        ),
+    );
+    seed_openai_vault(&storage_dir, &twin.base_url, &namespace);
+    context.isolated_server();
+
     let mut cmd = context.doctor();
     cmd.arg("--verbose");
     cmd.env_clear();

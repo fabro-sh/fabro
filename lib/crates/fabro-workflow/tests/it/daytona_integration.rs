@@ -995,7 +995,7 @@ async fn daytona_parallel_git_branching_e2e() {
 // CLI Backend on Daytona — real CLI tools via exec_command
 // ---------------------------------------------------------------------------
 
-use fabro_workflow::handler::agent::{CodergenBackend, CodergenResult};
+use fabro_workflow::handler::agent::{CodergenBackend, CodergenResult, CodergenRunRequest};
 use fabro_workflow::handler::llm::AgentCliBackend;
 
 /// Helper: run a real CLI backend test on Daytona.
@@ -1072,16 +1072,16 @@ async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: 
     let emitter = Arc::new(Emitter::default());
 
     let result = backend
-        .run(
-            &node,
-            "What is 2+2? Reply with just the number.",
-            &context,
-            None,
-            &emitter,
-            &env,
-            None,
-            CancellationToken::new(),
-        )
+        .run(CodergenRunRequest {
+            node:         &node,
+            prompt:       "What is 2+2? Reply with just the number.",
+            context:      &context,
+            thread_id:    None,
+            emitter:      &emitter,
+            sandbox:      &env,
+            tool_hooks:   None,
+            cancel_token: CancellationToken::new(),
+        })
         .await;
 
     match result {
@@ -2149,6 +2149,8 @@ async fn daytona_playwright_mcp_sandbox_transport() {
             port:    mcp_port,
             env:     std::collections::HashMap::new(),
         },
+        current_dir:          None,
+        clear_env:            false,
         startup_timeout_secs: 30,
         tool_timeout_secs:    120,
     };
@@ -2205,6 +2207,8 @@ async fn daytona_playwright_mcp_sandbox_transport() {
             fabro_mcp::config::McpServerSettings {
                 name:                 mcp_config.name.clone(),
                 transport:            fabro_mcp::config::McpTransport::Http { url, headers },
+                current_dir:          mcp_config.current_dir.clone(),
+                clear_env:            mcp_config.clear_env,
                 startup_timeout_secs: mcp_config.startup_timeout_secs,
                 tool_timeout_secs:    mcp_config.tool_timeout_secs,
             }

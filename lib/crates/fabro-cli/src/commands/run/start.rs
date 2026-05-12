@@ -8,5 +8,5 @@ pub(crate) async fn start_run_with_client(
     run_id: &RunId,
     resume: bool,
 ) -> Result<()> {
-    client.start_run(run_id, resume).await
+    client.start_run(run_id, resume).await.map(|_| ())
 }

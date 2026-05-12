@@ -11,7 +11,7 @@ auto_stop_interval = 30
 repo = "fabro-sh/fabro"
 
 [run.sandbox.daytona.snapshot]
-name = "fabro-v8"
+name = "fabro-v9"
 cpu = 8
 memory = "16GB"
 disk = "20GB"
@@ -20,6 +20,8 @@ FROM ubuntu:24.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 \
+        xvfb xfce4 xfce4-terminal x11vnc novnc dbus-x11 \
+        libx11-6 libxrandr2 libxext6 libxrender1 libxfixes3 libxss1 libxtst6 libxi6 \
     && rm -rf /var/lib/apt/lists/*
 
 # GitHub CLI

@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::Result;
+#[cfg(any(feature = "docker", feature = "daytona"))]
 use chrono::{DateTime, Utc};
 use fabro_types::{
     RunId, RunSandbox, SandboxDetails, SandboxProvider, SandboxResources, SandboxState,
@@ -55,6 +56,7 @@ fn local_details(record: &RunSandbox) -> SandboxDetails {
     }
 }
 
+#[cfg(any(feature = "docker", feature = "daytona"))]
 fn parse_rfc3339_utc(value: &str) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(value)
         .ok()

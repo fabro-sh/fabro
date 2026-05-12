@@ -28,35 +28,35 @@ pub enum CodergenResult {
     Full(Outcome),
 }
 
+pub struct CodergenRunRequest<'a> {
+    pub node:         &'a Node,
+    pub prompt:       &'a str,
+    pub context:      &'a Context,
+    pub thread_id:    Option<&'a str>,
+    pub emitter:      &'a Arc<Emitter>,
+    pub sandbox:      &'a Arc<dyn Sandbox>,
+    pub tool_hooks:   Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+    pub cancel_token: CancellationToken,
+}
+
+pub struct OneShotRequest<'a> {
+    pub node:          &'a Node,
+    pub prompt:        &'a str,
+    pub system_prompt: Option<&'a str>,
+    pub emitter:       &'a Arc<Emitter>,
+    pub stage_scope:   &'a StageScope,
+    pub sandbox:       &'a Arc<dyn Sandbox>,
+    pub cancel_token:  CancellationToken,
+}
+
 /// Backend interface for LLM execution in codergen nodes.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "Codergen backends need the node, prompt, context, and runtime handles separately."
-)]
 #[async_trait]
 pub trait CodergenBackend: Send + Sync {
     /// Run a multi-turn agent loop (the default codergen mode).
-    async fn run(
-        &self,
-        node: &Node,
-        prompt: &str,
-        context: &Context,
-        thread_id: Option<&str>,
-        emitter: &Arc<Emitter>,
-        sandbox: &Arc<dyn Sandbox>,
-        tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-        cancel_token: CancellationToken,
-    ) -> Result<CodergenResult, Error>;
+    async fn run(&self, request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error>;
 
     /// Run a single LLM call with no tools (one_shot mode).
-    async fn one_shot(
-        &self,
-        _node: &Node,
-        _prompt: &str,
-        _system_prompt: Option<&str>,
-        _emitter: &Arc<Emitter>,
-        _stage_scope: &StageScope,
-    ) -> Result<CodergenResult, Error> {
+    async fn one_shot(&self, _request: OneShotRequest<'_>) -> Result<CodergenResult, Error> {
         Err(Error::Validation(
             "one_shot mode not supported by this backend".into(),
         ))
@@ -301,16 +301,16 @@ impl Handler for AgentHandler {
         let (response_text, stage_usage, backend_files_touched, last_file_touched) =
             if let Some(backend) = &self.backend {
                 let result = backend
-                    .run(
+                    .run(CodergenRunRequest {
                         node,
-                        &prompt,
+                        prompt: &prompt,
                         context,
-                        thread_id.as_deref(),
-                        &services.run.emitter,
-                        &services.run.sandbox,
+                        thread_id: thread_id.as_deref(),
+                        emitter: &services.run.emitter,
+                        sandbox: &services.run.sandbox,
                         tool_hooks,
-                        services.run.cancel_token(),
-                    )
+                        cancel_token: services.run.cancel_token(),
+                    })
                     .await;
                 match result {
                     Ok(CodergenResult::Full(outcome)) => return Ok(outcome),
@@ -429,7 +429,6 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::event::Emitter;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
@@ -641,25 +640,13 @@ mod tests {
 
     #[tokio::test]
     async fn codergen_handler_prefers_response_text_over_status_json() {
-        use std::sync::Arc;
-
         // Backend returns response text with routing directives — status.json
         // in the sandbox should be ignored.
         struct DirectiveBackend;
 
         #[async_trait]
         impl CodergenBackend for DirectiveBackend {
-            async fn run(
-                &self,
-                _node: &Node,
-                _prompt: &str,
-                _context: &Context,
-                _thread_id: Option<&str>,
-                _emitter: &Arc<Emitter>,
-                _sandbox: &Arc<dyn fabro_agent::Sandbox>,
-                _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-                _cancel_token: CancellationToken,
-            ) -> Result<CodergenResult, Error> {
+            async fn run(&self, _request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
                 Ok(CodergenResult::Text {
                     text:
                         r#"Done. {"outcome": "succeeded", "preferred_next_label": "approve"}"#
@@ -704,23 +691,11 @@ mod tests {
 
     #[tokio::test]
     async fn codergen_handler_extracts_status_from_last_file_touched() {
-        use std::sync::Arc;
-
         struct LastFileBackend;
 
         #[async_trait]
         impl CodergenBackend for LastFileBackend {
-            async fn run(
-                &self,
-                _node: &Node,
-                _prompt: &str,
-                _context: &Context,
-                _thread_id: Option<&str>,
-                _emitter: &Arc<Emitter>,
-                _sandbox: &Arc<dyn fabro_agent::Sandbox>,
-                _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-                _cancel_token: CancellationToken,
-            ) -> Result<CodergenResult, Error> {
+            async fn run(&self, _request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
                 Ok(CodergenResult::Text {
                     text:              "Done writing results.".to_string(),
                     usage:             None,
@@ -772,21 +747,11 @@ mod tests {
 
         #[async_trait]
         impl CodergenBackend for ProviderEventBackend {
-            async fn run(
-                &self,
-                node: &Node,
-                _prompt: &str,
-                context: &Context,
-                _thread_id: Option<&str>,
-                emitter: &Arc<Emitter>,
-                _sandbox: &Arc<dyn fabro_agent::Sandbox>,
-                _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-                _cancel_token: CancellationToken,
-            ) -> Result<CodergenResult, Error> {
-                let scope = StageScope::for_handler(context, &node.id);
-                emitter.emit_scoped(
+            async fn run(&self, request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
+                let scope = StageScope::for_handler(request.context, &request.node.id);
+                request.emitter.emit_scoped(
                     &crate::event::Event::AgentSessionActivated {
-                        node_id:      node.id.clone(),
+                        node_id:      request.node.id.clone(),
                         visit:        scope.visit,
                         session_id:   "session_123".to_string(),
                         thread_id:    None,
@@ -883,18 +848,9 @@ mod tests {
 
         #[async_trait]
         impl CodergenBackend for ThreadCapturingBackend {
-            async fn run(
-                &self,
-                _node: &Node,
-                _prompt: &str,
-                _context: &Context,
-                thread_id: Option<&str>,
-                _emitter: &Arc<Emitter>,
-                _sandbox: &Arc<dyn Sandbox>,
-                _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-                _cancel_token: CancellationToken,
-            ) -> Result<CodergenResult, Error> {
-                *self.captured_thread_id.lock().unwrap() = Some(thread_id.map(String::from));
+            async fn run(&self, request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
+                *self.captured_thread_id.lock().unwrap() =
+                    Some(request.thread_id.map(String::from));
                 Ok(CodergenResult::Text {
                     text:              "ok".to_string(),
                     usage:             None,
@@ -936,18 +892,9 @@ mod tests {
 
         #[async_trait]
         impl CodergenBackend for ThreadCapturingBackend {
-            async fn run(
-                &self,
-                _node: &Node,
-                _prompt: &str,
-                _context: &Context,
-                thread_id: Option<&str>,
-                _emitter: &Arc<Emitter>,
-                _sandbox: &Arc<dyn Sandbox>,
-                _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-                _cancel_token: CancellationToken,
-            ) -> Result<CodergenResult, Error> {
-                *self.captured_thread_id.lock().unwrap() = Some(thread_id.map(String::from));
+            async fn run(&self, request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
+                *self.captured_thread_id.lock().unwrap() =
+                    Some(request.thread_id.map(String::from));
                 Ok(CodergenResult::Text {
                     text:              "ok".to_string(),
                     usage:             None,
@@ -984,17 +931,7 @@ mod tests {
 
         #[async_trait]
         impl CodergenBackend for FailingBackend {
-            async fn run(
-                &self,
-                _node: &Node,
-                _prompt: &str,
-                _context: &Context,
-                _thread_id: Option<&str>,
-                _emitter: &Arc<Emitter>,
-                _sandbox: &Arc<dyn Sandbox>,
-                _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-                _cancel_token: CancellationToken,
-            ) -> Result<CodergenResult, Error> {
+            async fn run(&self, _request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
                 Err(Error::handler("Request timed out".to_string()))
             }
         }
@@ -1132,17 +1069,7 @@ Some text in between.
 
         #[async_trait]
         impl CodergenBackend for ValidationFailBackend {
-            async fn run(
-                &self,
-                _node: &Node,
-                _prompt: &str,
-                _context: &Context,
-                _thread_id: Option<&str>,
-                _emitter: &Arc<Emitter>,
-                _sandbox: &Arc<dyn Sandbox>,
-                _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-                _cancel_token: CancellationToken,
-            ) -> Result<CodergenResult, Error> {
+            async fn run(&self, _request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
                 Err(Error::Validation("bad config".to_string()))
             }
         }
@@ -1173,18 +1100,8 @@ Some text in between.
 
         #[async_trait]
         impl CodergenBackend for PromptCapturingBackend {
-            async fn run(
-                &self,
-                _node: &Node,
-                prompt: &str,
-                _context: &Context,
-                _thread_id: Option<&str>,
-                _emitter: &Arc<Emitter>,
-                _sandbox: &Arc<dyn Sandbox>,
-                _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-                _cancel_token: CancellationToken,
-            ) -> Result<CodergenResult, Error> {
-                *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
+            async fn run(&self, request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
+                *self.captured_prompt.lock().unwrap() = Some(request.prompt.to_string());
                 Ok(CodergenResult::Text {
                     text:              "ok".to_string(),
                     usage:             None,
@@ -1243,18 +1160,8 @@ Some text in between.
 
         #[async_trait]
         impl CodergenBackend for PromptCapturingBackend {
-            async fn run(
-                &self,
-                _node: &Node,
-                prompt: &str,
-                _context: &Context,
-                _thread_id: Option<&str>,
-                _emitter: &Arc<Emitter>,
-                _sandbox: &Arc<dyn Sandbox>,
-                _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-                _cancel_token: CancellationToken,
-            ) -> Result<CodergenResult, Error> {
-                *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
+            async fn run(&self, request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
+                *self.captured_prompt.lock().unwrap() = Some(request.prompt.to_string());
                 Ok(CodergenResult::Text {
                     text:              "ok".to_string(),
                     usage:             None,

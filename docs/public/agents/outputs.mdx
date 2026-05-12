@@ -127,7 +127,7 @@ The tracked paths are stored as `files_touched` on the stage outcome:
 
 For the **API backend**, Fabro subscribes to agent session events. When a `ToolCallStarted` event fires for `write_file` or `edit_file`, Fabro records the `file_path` argument as pending. When the corresponding `ToolCallCompleted` arrives without an error, the path is confirmed as touched. Failed tool calls are discarded.
 
-For the **CLI backend**, Fabro takes a different approach: it runs `git diff --name-only` and `git ls-files --others --exclude-standard` before and after the agent session, then computes the difference. Any files that appear in the "after" snapshot but not "before" are recorded as touched.
+For the **CLI** and **ACP** backends, Fabro takes a different approach: it runs `git diff --name-only` and `git ls-files --others --exclude-standard` before and after the external agent session, then computes the difference. Any files that appear in the "after" snapshot but not "before" are recorded as touched.
 
 ## Artifact offloading
 

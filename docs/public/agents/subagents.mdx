@@ -6,7 +6,7 @@ description: "Delegate subtasks to child agent sessions"
 An agent can spawn **sub-agents** to delegate work to independent child sessions. Each sub-agent gets its own LLM session and tool access, runs concurrently with the parent, and returns its result when finished.
 
 <Note>
-Sub-agents are only available with the [API backend](/core-concepts/agents#api-backend-default) (the default). Agents using the [CLI backend](/core-concepts/agents#cli-backend) cannot spawn sub-agents.
+Sub-agents are only available with the [API backend](/core-concepts/agents#api-backend-default) (the default). Agents using the [CLI backend](/core-concepts/agents#cli-backend) or [ACP backend](/core-concepts/agents#acp-backend) cannot spawn Fabro sub-agents.
 </Note>
 
 ## Tools

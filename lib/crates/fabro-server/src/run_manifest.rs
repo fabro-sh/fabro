@@ -9,8 +9,7 @@ use fabro_api::types;
 use fabro_auth::auth_issue_message;
 use fabro_config::run::parse_run_layer_from_settings_toml;
 use fabro_config::{
-    CliLayer, CliOutputLayer, DaytonaDockerfileLayer, DockerSandboxLayer, ReplaceMap,
-    RunExecutionLayer, RunLayer, RunModelLayer, RunSandboxLayer, WorkflowSettingsBuilder,
+    CliLayer, CliOutputLayer, DaytonaDockerfileLayer, RunLayer, WorkflowSettingsBuilder,
     parse_input_overrides,
 };
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
@@ -28,8 +27,8 @@ use fabro_static::EnvVars;
 use fabro_types::settings::cli::OutputVerbosity;
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{
-    ApprovalMode, DaytonaNetworkLayer, DaytonaSettings, DockerSettings, DockerfileSource, RunGoal,
-    RunMode, RunNamespace,
+    DaytonaNetworkLayer, DaytonaSettings, DockerSettings, DockerfileSource, RunGoal, RunMode,
+    RunNamespace,
 };
 use fabro_types::{RunId, WorkflowSettings};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
@@ -316,47 +315,16 @@ fn manifest_args_overrides(
         return Ok(ManifestSettingsOverrides::default());
     };
 
-    let model = (args.model.is_some() || args.provider.is_some()).then(|| RunModelLayer {
-        provider:  args.provider.as_deref().map(InterpString::parse),
-        name:      args.model.as_deref().map(InterpString::parse),
-        fallbacks: Vec::new(),
-        controls:  None,
-    });
-    let sandbox =
-        (args.sandbox.is_some() || args.preserve_sandbox.is_some() || args.docker_image.is_some())
-            .then(|| RunSandboxLayer {
-                provider: args.sandbox.clone(),
-                preserve: args.preserve_sandbox,
-                docker: args.docker_image.as_ref().map(|image| DockerSandboxLayer {
-                    image: Some(image.clone()),
-                    ..DockerSandboxLayer::default()
-                }),
-                ..RunSandboxLayer::default()
-            });
-
-    let execution_has_any = args.dry_run.is_some() || args.auto_approve.is_some();
-    let execution = execution_has_any.then(|| RunExecutionLayer {
-        mode:     args
-            .dry_run
-            .map(|d| if d { RunMode::DryRun } else { RunMode::Normal }),
-        approval: args.auto_approve.map(|a| {
-            if a {
-                ApprovalMode::Auto
-            } else {
-                ApprovalMode::Prompt
-            }
-        }),
-    });
-
-    let run_has_any =
-        model.is_some() || sandbox.is_some() || execution.is_some() || !args.label.is_empty();
-
-    let run = run_has_any.then(|| RunLayer {
-        model,
-        sandbox,
-        execution,
-        metadata: ReplaceMap::from(parse_labels(&args.label)),
-        ..RunLayer::default()
+    let run = fabro_manifest::build_sparse_run_overrides(fabro_manifest::RunOverrideInput {
+        goal:             None,
+        model:            args.model.as_deref(),
+        provider:         args.provider.as_deref(),
+        sandbox:          args.sandbox.as_deref(),
+        docker_image:     args.docker_image.as_deref(),
+        preserve_sandbox: args.preserve_sandbox,
+        dry_run:          args.dry_run,
+        auto_approve:     args.auto_approve,
+        labels:           parse_labels(&args.label),
     });
 
     // Verbose is a CLI output concern in v2; route it through cli.output.verbosity.

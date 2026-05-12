@@ -8,11 +8,11 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use fabro_agent::{Sandbox, StaticEnvProvider, ToolEnvProvider, shell_quote};
-use fabro_auth::{CliAgentKind, CredentialResolver, CredentialUsage, ResolvedCredential};
+use fabro_auth::CredentialResolver;
 use fabro_graphviz::graph::Node;
 use fabro_llm::types::TokenCounts;
 use fabro_model::Provider;
-use fabro_types::{CommandOutputStream, CommandTermination};
+use fabro_types::{CommandOutputStream, CommandTermination, LlmBackend};
 use fabro_util::time::elapsed_ms;
 use tokio_util::sync::CancellationToken;
 
@@ -38,10 +38,12 @@ fn cli_failure_detail(stdout: &str, stderr: &str, command: &str) -> String {
     }
 }
 
-use super::super::agent::{CodergenBackend, CodergenResult};
-use crate::context::Context;
+use super::super::agent::{CodergenBackend, CodergenResult, CodergenRunRequest, OneShotRequest};
+use super::acp::AgentAcpBackend;
+use super::launch_env::{AgentLaunchEnvRequest, resolve_agent_launch_env};
+use super::{changed_files, routing};
 use crate::error::Error;
-use crate::event::{Emitter, Event, RunNoticeCode, RunNoticeLevel, StageScope};
+use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::billed_model_usage_from_llm;
 
 /// Maps a provider to its corresponding CLI tool metadata.
@@ -73,41 +75,20 @@ impl AgentCli {
             Self::Gemini => "gemini",
         }
     }
-
-    pub fn npm_package(self) -> &'static str {
-        match self {
-            Self::Claude => "@anthropic-ai/claude-code",
-            Self::Codex => "@openai/codex",
-            Self::Gemini => "@anthropic-ai/gemini-cli",
-        }
-    }
 }
 
-/// Ensure the CLI tool for the given provider is installed in the sandbox.
-///
-/// Checks if the CLI binary exists; if not, installs Node.js (if missing) and
-/// the CLI via npm. Emits `CliEnsure*` events for observability.
-async fn ensure_cli(
+/// Verify the provider CLI exists in the sandbox. Fabro does not install agent
+/// CLIs at runtime; sandbox images or setup steps own tool installation.
+async fn verify_cli_available(
     cli: AgentCli,
-    provider: Provider,
     sandbox: &Arc<dyn Sandbox>,
-    emitter: &Arc<Emitter>,
     cancel_token: &CancellationToken,
 ) -> Result<(), Error> {
-    let start = std::time::Instant::now();
     let cli_name = cli.name();
-    let provider_str = <&'static str>::from(provider);
 
-    emitter.emit(&Event::CliEnsureStarted {
-        cli_name: cli_name.to_string(),
-        provider: provider_str.to_string(),
-    });
-
-    // Check if the CLI is already installed (include ~/.local/bin for npm-installed
-    // CLIs)
-    let version_check = sandbox
+    let availability_check = sandbox
         .exec_command(
-            &format!("PATH=\"$HOME/.local/bin:$PATH\" {cli_name} --version"),
+            &format!("PATH=\"$HOME/.local/bin:$PATH\" command -v {cli_name}"),
             30_000,
             None,
             None,
@@ -115,68 +96,17 @@ async fn ensure_cli(
         )
         .await
         .map_err(|e| {
-            Error::handler_with_source(format!("Failed to check {cli_name} version"), &e)
+            Error::handler_with_source(format!("Failed to check {cli_name} availability"), &e)
         })?;
 
-    if version_check.is_success() {
-        let duration_ms = elapsed_ms(start);
-        emitter.emit(&Event::CliEnsureCompleted {
-            cli_name: cli_name.to_string(),
-            provider: provider_str.to_string(),
-            already_installed: true,
-            node_installed: false,
-            duration_ms,
-        });
+    if availability_check.is_success() {
         return Ok(());
     }
 
-    // Install Node.js (if needed) and the CLI in a single shell so PATH persists
-    let install_cmd = format!(
-        "export PATH=\"$HOME/.local/bin:$PATH\" && \
-         (node --version >/dev/null 2>&1 || \
-          (mkdir -p ~/.local && curl -fsSL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-x64.tar.gz | tar -xz --strip-components=1 -C ~/.local)) && \
-         npm install -g {}",
-        cli.npm_package()
-    );
-    let install_result = sandbox
-        .exec_command(
-            &install_cmd,
-            180_000,
-            None,
-            None,
-            Some(cancel_token.child_token()),
-        )
-        .await
-        .map_err(|e| Error::handler_with_source(format!("Failed to install {cli_name}"), &e))?;
-
-    let node_installed = true;
-    if !install_result.is_success() {
-        let duration_ms = elapsed_ms(start);
-        let exec_output_tail = install_result.default_redacted_output_tail();
-        let error_msg = format!(
-            "{cli_name} install exited with code {}",
-            install_result.display_exit_code()
-        );
-        emitter.emit(&Event::CliEnsureFailed {
-            cli_name: cli_name.to_string(),
-            provider: provider_str.to_string(),
-            error: error_msg.clone(),
-            duration_ms,
-            exec_output_tail,
-        });
-        return Err(Error::handler(error_msg));
-    }
-
-    let duration_ms = elapsed_ms(start);
-    emitter.emit(&Event::CliEnsureCompleted {
-        cli_name: cli_name.to_string(),
-        provider: provider_str.to_string(),
-        already_installed: false,
-        node_installed,
-        duration_ms,
-    });
-
-    Ok(())
+    Err(Error::handler(format!(
+        "CLI backend requires '{cli_name}' to be installed in the sandbox PATH. Install it in the \
+         sandbox image or setup steps before running backend=\"cli\"."
+    )))
 }
 
 /// Models that are only available through CLI tools (not via API).
@@ -404,7 +334,6 @@ pub struct AgentCliBackend {
     provider: Provider,
     tool_env: Option<Arc<dyn ToolEnvProvider>>,
     github_token_refresh_managed: bool,
-    poll_interval: std::time::Duration,
     resolver: Option<CredentialResolver>,
 }
 
@@ -416,7 +345,6 @@ impl AgentCliBackend {
             provider,
             tool_env: None,
             github_token_refresh_managed: false,
-            poll_interval: std::time::Duration::from_secs(5),
             resolver: Some(resolver),
         }
     }
@@ -428,7 +356,6 @@ impl AgentCliBackend {
             provider,
             tool_env: None,
             github_token_refresh_managed: false,
-            poll_interval: std::time::Duration::from_secs(5),
             resolver: None,
         }
     }
@@ -449,79 +376,20 @@ impl AgentCliBackend {
         self.github_token_refresh_managed = github_token_refresh_managed;
         self
     }
-
-    #[must_use]
-    pub fn with_poll_interval(mut self, interval: std::time::Duration) -> Self {
-        self.poll_interval = interval;
-        self
-    }
-
-    /// Detect changed files by comparing git state before and after the CLI
-    /// run.
-    async fn detect_changed_files(&self, sandbox: &Arc<dyn Sandbox>) -> Vec<String> {
-        // Get unstaged changes
-        let diff_result = sandbox
-            .exec_command("git diff --name-only", 30_000, None, None, None)
-            .await;
-
-        // Get untracked files
-        let untracked_result = sandbox
-            .exec_command(
-                "git ls-files --others --exclude-standard",
-                30_000,
-                None,
-                None,
-                None,
-            )
-            .await;
-
-        let mut files: Vec<String> = Vec::new();
-
-        if let Ok(result) = diff_result {
-            if result.is_success() {
-                files.extend(
-                    result
-                        .stdout
-                        .lines()
-                        .filter(|l| !l.trim().is_empty())
-                        .map(String::from),
-                );
-            }
-        }
-
-        if let Ok(result) = untracked_result {
-            if result.is_success() {
-                files.extend(
-                    result
-                        .stdout
-                        .lines()
-                        .filter(|l| !l.trim().is_empty())
-                        .map(String::from),
-                );
-            }
-        }
-
-        files.sort();
-        files.dedup();
-        files
-    }
 }
 
 #[async_trait]
 impl CodergenBackend for AgentCliBackend {
-    async fn run(
-        &self,
-        node: &Node,
-        prompt: &str,
-        context: &Context,
-        _thread_id: Option<&str>,
-        emitter: &Arc<Emitter>,
-        sandbox: &Arc<dyn Sandbox>,
-        _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-        cancel_token: CancellationToken,
-    ) -> Result<CodergenResult, Error> {
+    async fn run(&self, request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
+        let node = request.node;
+        let prompt = request.prompt;
+        let context = request.context;
+        let emitter = request.emitter;
+        let sandbox = request.sandbox;
+        let cancel_token = request.cancel_token;
+
         // 1. Snapshot git state before the CLI run
-        let files_before = self.detect_changed_files(sandbox).await;
+        let files_before = changed_files::detect_changed_files(sandbox).await;
 
         // 2. Generate unique paths for this run
         let run_id = uuid::Uuid::new_v4().to_string();
@@ -541,9 +409,8 @@ impl CodergenBackend for AgentCliBackend {
             .and_then(|s| s.parse::<Provider>().ok())
             .unwrap_or(self.provider);
 
-        // Ensure the CLI tool is installed in the sandbox
         let cli = AgentCli::for_provider(provider);
-        ensure_cli(cli, provider, sandbox, emitter, &cancel_token).await?;
+        verify_cli_available(cli, sandbox, &cancel_token).await?;
 
         let command = cli_command_for_provider(provider, model, &prompt_path);
         let stage_scope = StageScope::for_handler(context, &node.id);
@@ -559,67 +426,18 @@ impl CodergenBackend for AgentCliBackend {
             &stage_scope,
         );
 
-        // Forward provider API key and custom env vars so the CLI tool can
-        // authenticate. Resolve credentials and run any pre-login command
-        // before the main CLI invocation.
-        let cli_agent = match cli {
-            AgentCli::Claude => CliAgentKind::Claude,
-            AgentCli::Codex => CliAgentKind::Codex,
-            AgentCli::Gemini => CliAgentKind::Gemini,
-        };
-        let mut launch_env = if let Some(resolver) = &self.resolver {
-            let resolved = resolver
-                .resolve(provider, CredentialUsage::CliAgent(cli_agent))
-                .await
-                .map_err(|e| Error::handler_with_source("Failed to resolve CLI credential", &e))?;
-            let ResolvedCredential::Cli(cli_credential) = resolved else {
-                return Err(Error::handler("Expected CLI credential".to_string()));
-            };
-            if let Some(login_cmd) = &cli_credential.login_command {
-                let login_result = sandbox
-                    .exec_command(
-                        login_cmd,
-                        30_000,
-                        None,
-                        None,
-                        Some(cancel_token.child_token()),
-                    )
-                    .await
-                    .map_err(|e| Error::handler_with_source("codex login failed", &e))?;
-                if !login_result.is_success() {
-                    tracing::warn!(
-                        exit_code = login_result.display_exit_code(),
-                        "codex login --with-api-key failed: {}",
-                        login_result.stderr
-                    );
-                }
-            }
-            cli_credential.env_vars
-        } else {
-            let mut env = HashMap::new();
-            for name in provider.api_key_env_vars() {
-                if let Some(val) = process_env_var(name) {
-                    env.insert((*name).to_string(), val);
-                }
-            }
-            env
-        };
-        if let Some(provider) = &self.tool_env {
-            if self.github_token_refresh_managed {
-                emitter.notice(
-                    RunNoticeLevel::Info,
-                    RunNoticeCode::GithubTokenRefreshLimited,
-                    "CLI agent stages receive GitHub tokens at process launch; stages running \
-                     beyond token expiry may need to be retried.",
-                );
-            }
-            let tool_env = provider.resolve().await.map_err(|err| {
-                Error::handler_with_anyhow("Failed to resolve CLI agent env", &err)
-            })?;
-            for (name, val) in tool_env {
-                launch_env.insert(name, val);
-            }
-        }
+        let launch_env = resolve_agent_launch_env(AgentLaunchEnvRequest {
+            provider,
+            cli,
+            resolver: self.resolver.as_ref(),
+            tool_env: self.tool_env.as_ref(),
+            github_token_refresh_managed: self.github_token_refresh_managed,
+            stage_label: "CLI",
+            emitter,
+            sandbox,
+            cancel_token: &cancel_token,
+        })
+        .await?;
 
         // Write env file so the inner shell that runs the CLI command picks up
         // PATH and provider env vars; we still pass `launch_env` to
@@ -801,29 +619,8 @@ impl CodergenBackend for AgentCliBackend {
             .ok_or_else(|| Error::handler("Failed to parse CLI output".to_string()))?;
 
         // 5. Detect changed files
-        let files_after = self.detect_changed_files(sandbox).await;
-        let files_touched: Vec<String> = files_after
-            .into_iter()
-            .filter(|f| !files_before.contains(f))
-            .collect();
-
-        // Find the most recently modified file by mtime
-        let last_file_touched = if files_touched.is_empty() {
-            None
-        } else {
-            let quoted_files: Vec<String> = files_touched.iter().map(|f| shell_quote(f)).collect();
-            let cmd = format!("ls -t {} | head -1", quoted_files.join(" "));
-            if let Ok(result) = sandbox.exec_command(&cmd, 5_000, None, None, None).await {
-                let trimmed = result.stdout.trim().to_string();
-                if result.is_success() && !trimmed.is_empty() {
-                    Some(trimmed)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        };
+        let (files_touched, last_file_touched) =
+            changed_files::files_touched_since(sandbox, &files_before).await;
 
         let stage_usage =
             billed_model_usage_from_llm(model, provider, node.speed(), &TokenCounts {
@@ -845,105 +642,65 @@ impl CodergenBackend for AgentCliBackend {
     clippy::disallowed_methods,
     reason = "CLI agent fallback credentials intentionally read provider API-key env vars."
 )]
-fn process_env_var(name: &str) -> Option<String> {
+pub(crate) fn process_env_var(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
-/// Routes codergen invocations to either the API backend or CLI backend
-/// based on node attributes and model type.
+/// Routes codergen invocations to API, CLI, or ACP backends based on node
+/// attributes and model type.
 pub struct BackendRouter {
-    api_backend: Box<dyn CodergenBackend>,
-    cli_backend: AgentCliBackend,
+    api: Box<dyn CodergenBackend>,
+    cli: AgentCliBackend,
+    acp: AgentAcpBackend,
 }
 
 impl BackendRouter {
     #[must_use]
-    pub fn new(api_backend: Box<dyn CodergenBackend>, cli_backend: AgentCliBackend) -> Self {
+    pub fn new(
+        api_backend: Box<dyn CodergenBackend>,
+        cli_backend: AgentCliBackend,
+        acp_backend: AgentAcpBackend,
+    ) -> Self {
         Self {
-            api_backend,
-            cli_backend,
+            api: api_backend,
+            cli: cli_backend,
+            acp: acp_backend,
         }
     }
 
-    #[allow(
-        clippy::unused_self,
-        reason = "CLI backend selection lives on the router even though it only inspects the node."
-    )]
-    fn should_use_cli(&self, node: &Node) -> bool {
-        // Explicit backend="cli" attribute on the node
-        if node.backend() == Some("cli") {
-            return true;
-        }
+    fn select_backend(node: &Node) -> Result<LlmBackend, Error> {
+        routing::select_run_backend(node)
+    }
 
-        // CLI-only model on the node
-        if let Some(model) = node.model() {
-            if is_cli_only_model(model) {
-                return true;
-            }
-        }
+    fn select_one_shot_backend(node: &Node) -> Result<LlmBackend, Error> {
+        routing::select_one_shot_backend(node)
+    }
 
-        false
+    #[cfg(test)]
+    fn should_use_cli(node: &Node) -> bool {
+        matches!(Self::select_backend(node), Ok(LlmBackend::Cli))
     }
 }
 
 #[async_trait]
 impl CodergenBackend for BackendRouter {
-    async fn run(
-        &self,
-        node: &Node,
-        prompt: &str,
-        context: &Context,
-        thread_id: Option<&str>,
-        emitter: &Arc<Emitter>,
-        sandbox: &Arc<dyn Sandbox>,
-        tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-        cancel_token: CancellationToken,
-    ) -> Result<CodergenResult, Error> {
-        if self.should_use_cli(node) {
-            self.cli_backend
-                .run(
-                    node,
-                    prompt,
-                    context,
-                    thread_id,
-                    emitter,
-                    sandbox,
-                    tool_hooks,
-                    cancel_token,
-                )
-                .await
-        } else {
-            self.api_backend
-                .run(
-                    node,
-                    prompt,
-                    context,
-                    thread_id,
-                    emitter,
-                    sandbox,
-                    tool_hooks,
-                    cancel_token,
-                )
-                .await
+    async fn run(&self, request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
+        match Self::select_backend(request.node)? {
+            LlmBackend::Api => self.api.run(request).await,
+            LlmBackend::Cli => self.cli.run(request).await,
+            LlmBackend::Acp => self.acp.run(request).await,
         }
     }
 
-    async fn one_shot(
-        &self,
-        node: &Node,
-        prompt: &str,
-        system_prompt: Option<&str>,
-        emitter: &Arc<Emitter>,
-        stage_scope: &StageScope,
-    ) -> Result<CodergenResult, Error> {
-        // CLI backend doesn't support one_shot, always route to API
-        self.api_backend
-            .one_shot(node, prompt, system_prompt, emitter, stage_scope)
-            .await
+    async fn one_shot(&self, request: OneShotRequest<'_>) -> Result<CodergenResult, Error> {
+        match Self::select_one_shot_backend(request.node)? {
+            LlmBackend::Acp => self.acp.one_shot(request).await,
+            LlmBackend::Api | LlmBackend::Cli => self.api.one_shot(request).await,
+        }
     }
 
     async fn shutdown(&self, emitter: &Arc<Emitter>) {
-        self.api_backend.shutdown(emitter).await;
+        self.api.shutdown(emitter).await;
     }
 }
 
@@ -951,10 +708,12 @@ impl CodergenBackend for BackendRouter {
 mod tests {
     use std::path::Path;
 
+    use fabro_agent::LocalSandbox;
     use fabro_agent::sandbox::ExecResult;
     use fabro_graphviz::graph::AttrValue;
 
     use super::*;
+    use crate::context::Context;
 
     // -- AgentCli --
 
@@ -979,18 +738,12 @@ mod tests {
         assert_eq!(AgentCli::Gemini.name(), "gemini");
     }
 
-    #[test]
-    fn agent_cli_npm_package() {
-        assert_eq!(AgentCli::Claude.npm_package(), "@anthropic-ai/claude-code");
-        assert_eq!(AgentCli::Codex.npm_package(), "@openai/codex");
-        assert_eq!(AgentCli::Gemini.npm_package(), "@anthropic-ai/gemini-cli");
-    }
-
-    // -- ensure_cli --
+    // -- verify_cli_available --
 
     use std::collections::VecDeque;
     use std::sync::Mutex;
 
+    use fabro_acp::test_support::fake_acp_agent_script;
     use fabro_agent::sandbox::{DirEntry, GrepOptions};
 
     /// Mock sandbox that returns pre-configured ExecResults in FIFO order.
@@ -1123,113 +876,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ensure_cli_skips_install_when_present() {
+    async fn verify_cli_available_succeeds_when_present() {
         let commands = Arc::new(Mutex::new(Vec::new()));
         let sandbox: Arc<dyn Sandbox> = Arc::new(CliMockSandbox::new(
             vec![ok_result()],
             Arc::clone(&commands),
         ));
-        let emitter = Arc::new(Emitter::default());
-
-        let result = ensure_cli(
-            AgentCli::Claude,
-            Provider::Anthropic,
-            &sandbox,
-            &emitter,
-            &CancellationToken::new(),
-        )
-        .await;
+        let result =
+            verify_cli_available(AgentCli::Claude, &sandbox, &CancellationToken::new()).await;
         assert!(result.is_ok());
 
         let commands = commands.lock().unwrap();
         assert_eq!(commands.len(), 1);
-        assert!(commands[0].contains("claude --version"));
+        assert!(commands[0].contains("command -v claude"));
     }
 
     #[tokio::test]
-    async fn ensure_cli_installs_when_missing() {
+    async fn verify_cli_available_fails_when_missing_without_installing() {
         let commands = Arc::new(Mutex::new(Vec::new()));
-        // version check fails, combined install succeeds
         let sandbox: Arc<dyn Sandbox> = Arc::new(CliMockSandbox::new(
-            vec![
-                fail_result(127), // claude --version
-                ok_result(),      // combined node + npm install
-            ],
+            vec![fail_result(127)],
             Arc::clone(&commands),
         ));
-        let emitter = Arc::new(Emitter::default());
 
-        let result = ensure_cli(
-            AgentCli::Claude,
-            Provider::Anthropic,
-            &sandbox,
-            &emitter,
-            &CancellationToken::new(),
-        )
-        .await;
-        assert!(result.is_ok());
+        let result =
+            verify_cli_available(AgentCli::Claude, &sandbox, &CancellationToken::new()).await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("CLI backend requires 'claude' to be installed")
+        );
 
         let commands = commands.lock().unwrap();
-        assert_eq!(commands.len(), 2);
-        assert!(commands[1].contains("npm install -g @anthropic-ai/claude-code"));
-    }
-
-    #[tokio::test]
-    async fn ensure_cli_fails_on_install_failure() {
-        let commands = Arc::new(Mutex::new(Vec::new()));
-        let sandbox: Arc<dyn Sandbox> = Arc::new(CliMockSandbox::new(
-            vec![
-                fail_result(127), // claude --version
-                fail_result_with_output(1, "install stdout detail", "install stderr detail"),
-            ],
-            Arc::clone(&commands),
-        ));
-        let emitter = Arc::new(Emitter::default());
-        let events = Arc::new(Mutex::new(Vec::<fabro_types::RunEvent>::new()));
-        emitter.on_event({
-            let events = Arc::clone(&events);
-            move |event| events.lock().unwrap().push(event.clone())
-        });
-
-        let result = ensure_cli(
-            AgentCli::Claude,
-            Provider::Anthropic,
-            &sandbox,
-            &emitter,
-            &CancellationToken::new(),
-        )
-        .await;
-        assert!(result.is_err());
-        let error = result.unwrap_err().to_string();
-        assert!(error.contains("install exited with code 1"));
-        assert!(!error.contains("install stdout detail"));
-        assert!(!error.contains("install stderr detail"));
-
-        let events = events.lock().unwrap();
-        let failed = events
-            .iter()
-            .find(|event| event.event_name() == "cli.ensure.failed")
-            .expect("cli ensure failed event");
-        match &failed.body {
-            fabro_types::EventBody::CliEnsureFailed(props) => {
-                assert_eq!(props.error, "claude install exited with code 1");
-                assert_eq!(
-                    props
-                        .exec_output_tail
-                        .as_ref()
-                        .and_then(|tail| tail.stdout.as_deref()),
-                    Some("install stdout detail")
-                );
-                assert_eq!(
-                    props
-                        .exec_output_tail
-                        .as_ref()
-                        .and_then(|tail| tail.stderr.as_deref()),
-                    Some("install stderr detail")
-                );
-            }
-            other => panic!("expected cli ensure failed body, got {other:?}"),
-        }
+        assert_eq!(commands.len(), 1);
+        assert!(commands[0].contains("command -v claude"));
+        assert!(
+            !commands
+                .iter()
+                .any(|command| command.contains("npm install"))
+        );
     }
 
     // -- Cycle 1: cli_command_for_provider --
@@ -1388,18 +1075,14 @@ mod tests {
         node.attrs
             .insert("backend".to_string(), AttrValue::String("cli".to_string()));
 
-        let cli_backend = AgentCliBackend::new_from_env("model".into(), Provider::Anthropic);
-        let router = BackendRouter::new(Box::new(StubBackend), cli_backend);
-        assert!(router.should_use_cli(&node));
+        assert!(BackendRouter::should_use_cli(&node));
     }
 
     #[test]
     fn router_uses_api_by_default() {
         let node = Node::new("test");
 
-        let cli_backend = AgentCliBackend::new_from_env("model".into(), Provider::Anthropic);
-        let router = BackendRouter::new(Box::new(StubBackend), cli_backend);
-        assert!(!router.should_use_cli(&node));
+        assert!(!BackendRouter::should_use_cli(&node));
     }
 
     #[test]
@@ -1410,9 +1093,168 @@ mod tests {
             AttrValue::String("claude-opus-4-6".to_string()),
         );
 
+        assert!(!BackendRouter::should_use_cli(&node));
+    }
+
+    #[test]
+    fn router_uses_api_for_backend_api() {
+        let mut node = Node::new("test");
+        node.attrs
+            .insert("backend".to_string(), AttrValue::String("api".to_string()));
+
+        assert_eq!(
+            BackendRouter::select_backend(&node).unwrap(),
+            LlmBackend::Api
+        );
+    }
+
+    #[test]
+    fn router_uses_cli_for_backend_cli() {
+        let mut node = Node::new("test");
+        node.attrs
+            .insert("backend".to_string(), AttrValue::String("cli".to_string()));
+
+        assert_eq!(
+            BackendRouter::select_backend(&node).unwrap(),
+            LlmBackend::Cli
+        );
+    }
+
+    #[test]
+    fn router_uses_acp_for_backend_acp() {
+        let mut node = Node::new("test");
+        node.attrs
+            .insert("backend".to_string(), AttrValue::String("acp".to_string()));
+
+        assert_eq!(
+            BackendRouter::select_backend(&node).unwrap(),
+            LlmBackend::Acp
+        );
+    }
+
+    #[test]
+    fn router_rejects_unknown_backend() {
+        let mut node = Node::new("test");
+        node.attrs.insert(
+            "backend".to_string(),
+            AttrValue::String("codex".to_string()),
+        );
+
+        let err = BackendRouter::select_backend(&node).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Validation error: unsupported LLM backend \"codex\"; expected one of: api, cli, acp"
+        );
+    }
+
+    #[tokio::test]
+    async fn router_routes_one_shot_to_acp_for_backend_acp() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let script_path = tempdir.path().join("fake_acp_agent.py");
+        tokio::fs::write(&script_path, fake_acp_agent_script())
+            .await
+            .unwrap();
+        let sandbox: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(tempdir.path().to_path_buf()));
+        let mut node = Node::new("test");
+        node.attrs
+            .insert("backend".to_string(), AttrValue::String("acp".to_string()));
+        node.attrs.insert(
+            "acp_command".to_string(),
+            AttrValue::String(format!(
+                "python3 {}",
+                shell_quote(&script_path.to_string_lossy())
+            )),
+        );
+
+        let context = Context::new();
+        let router = test_router();
+        let emitter = Arc::new(Emitter::default());
+        let stage_scope = StageScope::for_handler(&context, "test");
+        let result = router
+            .one_shot(OneShotRequest {
+                node:          &node,
+                prompt:        "prompt",
+                system_prompt: None,
+                emitter:       &emitter,
+                stage_scope:   &stage_scope,
+                sandbox:       &sandbox,
+                cancel_token:  CancellationToken::new(),
+            })
+            .await
+            .unwrap();
+
+        let CodergenResult::Text { text, .. } = result else {
+            panic!("expected text result");
+        };
+        assert_eq!(text, "hello from acp");
+    }
+
+    #[tokio::test]
+    async fn router_routes_one_shot_to_api_by_default() {
+        let node = Node::new("test");
+        let sandbox: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(
+            tempfile::tempdir().unwrap().path().to_path_buf(),
+        ));
+        let context = Context::new();
+        let router = test_router();
+        let emitter = Arc::new(Emitter::default());
+        let stage_scope = StageScope::for_handler(&context, "test");
+
+        let result = router
+            .one_shot(OneShotRequest {
+                node:          &node,
+                prompt:        "prompt",
+                system_prompt: None,
+                emitter:       &emitter,
+                stage_scope:   &stage_scope,
+                sandbox:       &sandbox,
+                cancel_token:  CancellationToken::new(),
+            })
+            .await
+            .unwrap();
+
+        let CodergenResult::Text { text, .. } = result else {
+            panic!("expected text result");
+        };
+        assert_eq!(text, "api one-shot");
+    }
+
+    #[tokio::test]
+    async fn router_routes_one_shot_to_api_for_legacy_cli_backend() {
+        let mut node = Node::new("test");
+        node.attrs
+            .insert("backend".to_string(), AttrValue::String("cli".to_string()));
+        let sandbox: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(
+            tempfile::tempdir().unwrap().path().to_path_buf(),
+        ));
+        let context = Context::new();
+        let router = test_router();
+        let emitter = Arc::new(Emitter::default());
+        let stage_scope = StageScope::for_handler(&context, "test");
+
+        let result = router
+            .one_shot(OneShotRequest {
+                node:          &node,
+                prompt:        "prompt",
+                system_prompt: None,
+                emitter:       &emitter,
+                stage_scope:   &stage_scope,
+                sandbox:       &sandbox,
+                cancel_token:  CancellationToken::new(),
+            })
+            .await
+            .unwrap();
+
+        let CodergenResult::Text { text, .. } = result else {
+            panic!("expected text result");
+        };
+        assert_eq!(text, "api one-shot");
+    }
+
+    fn test_router() -> BackendRouter {
         let cli_backend = AgentCliBackend::new_from_env("model".into(), Provider::Anthropic);
-        let router = BackendRouter::new(Box::new(StubBackend), cli_backend);
-        assert!(!router.should_use_cli(&node));
+        let acp_backend = AgentAcpBackend::new_from_env("model".into(), Provider::Anthropic);
+        BackendRouter::new(Box::new(StubBackend), cli_backend, acp_backend)
     }
 
     /// Minimal stub backend for testing routing logic.
@@ -1420,19 +1262,18 @@ mod tests {
 
     #[async_trait]
     impl CodergenBackend for StubBackend {
-        async fn run(
-            &self,
-            _node: &Node,
-            _prompt: &str,
-            _context: &Context,
-            _thread_id: Option<&str>,
-            _emitter: &Arc<Emitter>,
-            _sandbox: &Arc<dyn Sandbox>,
-            _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            _cancel_token: CancellationToken,
-        ) -> Result<CodergenResult, Error> {
+        async fn run(&self, _request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
             Ok(CodergenResult::Text {
                 text:              "stub".to_string(),
+                usage:             None,
+                files_touched:     Vec::new(),
+                last_file_touched: None,
+            })
+        }
+
+        async fn one_shot(&self, _request: OneShotRequest<'_>) -> Result<CodergenResult, Error> {
+            Ok(CodergenResult::Text {
+                text:              "api one-shot".to_string(),
                 usage:             None,
                 files_touched:     Vec::new(),
                 last_file_touched: None,
@@ -1484,8 +1325,8 @@ mod tests {
             _cancel_token: Option<CancellationToken>,
         ) -> fabro_sandbox::Result<ExecResult> {
             self.commands.lock().unwrap().push(command.to_string());
-            // Default: success for git/version/cat/rm/ls.
-            if command.contains("--version") {
+            // Default: success for CLI availability checks and lightweight setup.
+            if command.contains("command -v ") {
                 return Ok(ok_result());
             }
             Ok(ExecResult {
@@ -1581,16 +1422,16 @@ mod tests {
         let events = collect_events(&emitter);
 
         let result = backend
-            .run(
-                &node,
-                "Do something",
-                &context,
-                None,
-                &emitter,
-                &sandbox,
-                None,
-                CancellationToken::new(),
-            )
+            .run(CodergenRunRequest {
+                node:         &node,
+                prompt:       "Do something",
+                context:      &context,
+                thread_id:    None,
+                emitter:      &emitter,
+                sandbox:      &sandbox,
+                tool_hooks:   None,
+                cancel_token: CancellationToken::new(),
+            })
             .await;
 
         let Err(err) = result else {
@@ -1634,16 +1475,16 @@ mod tests {
         let events = collect_events(&emitter);
 
         let result = backend
-            .run(
-                &node,
-                "Do something slow",
-                &context,
-                None,
-                &emitter,
-                &sandbox,
-                None,
-                CancellationToken::new(),
-            )
+            .run(CodergenRunRequest {
+                node:         &node,
+                prompt:       "Do something slow",
+                context:      &context,
+                thread_id:    None,
+                emitter:      &emitter,
+                sandbox:      &sandbox,
+                tool_hooks:   None,
+                cancel_token: CancellationToken::new(),
+            })
             .await;
 
         let Err(err) = result else {

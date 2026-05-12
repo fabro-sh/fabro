@@ -41,8 +41,9 @@ pub use profiles::{AnthropicProfile, EnvContext, GeminiProfile, OpenAiProfile};
 pub use read_before_write_sandbox::ReadBeforeWriteSandbox;
 pub use sandbox::{
     CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GrepOptions, Sandbox,
-    SandboxEvent, SandboxEventCallback, WorktreeEvent, WorktreeEventCallback, WorktreeOptions,
-    WorktreeSandbox, format_lines_numbered, shell_quote,
+    SandboxEvent, SandboxEventCallback, StderrCollector, StdioProcess, StdioProcessHandle,
+    WorktreeEvent, WorktreeEventCallback, WorktreeOptions, WorktreeSandbox, format_lines_numbered,
+    shell_quote,
 };
 pub use session::{
     CompletionCoordinator, Session, SessionControlHandle, StaticEnvProvider, SteeringItem,

@@ -794,25 +794,27 @@ impl Client {
         Ok(bytes)
     }
 
-    pub async fn start_run(&self, run_id: &RunId, resume: bool) -> Result<()> {
-        self.send_api(|client| async move {
-            client
-                .start_run()
-                .id(run_id.to_string())
-                .body(types::StartRunRequest { resume })
-                .send()
-                .await
-        })
-        .await?;
-        Ok(())
+    pub async fn start_run(&self, run_id: &RunId, resume: bool) -> Result<RunSummary> {
+        let response = self
+            .send_api(|client| async move {
+                client
+                    .start_run()
+                    .id(run_id.to_string())
+                    .body(types::StartRunRequest { resume })
+                    .send()
+                    .await
+            })
+            .await?;
+        convert_type(response.into_inner())
     }
 
-    pub async fn cancel_run(&self, run_id: &RunId) -> Result<()> {
-        self.send_api(
-            |client| async move { client.cancel_run().id(run_id.to_string()).send().await },
-        )
-        .await?;
-        Ok(())
+    pub async fn cancel_run(&self, run_id: &RunId) -> Result<RunSummary> {
+        let response = self
+            .send_api(
+                |client| async move { client.cancel_run().id(run_id.to_string()).send().await },
+            )
+            .await?;
+        convert_type(response.into_inner())
     }
 
     pub async fn interrupt_run(&self, run_id: &RunId) -> Result<()> {
@@ -844,20 +846,22 @@ impl Client {
         Ok(())
     }
 
-    pub async fn archive_run(&self, run_id: &RunId) -> Result<()> {
-        self.send_api(
-            |client| async move { client.archive_run().id(run_id.to_string()).send().await },
-        )
-        .await?;
-        Ok(())
+    pub async fn archive_run(&self, run_id: &RunId) -> Result<RunSummary> {
+        let response = self
+            .send_api(
+                |client| async move { client.archive_run().id(run_id.to_string()).send().await },
+            )
+            .await?;
+        convert_type(response.into_inner())
     }
 
-    pub async fn unarchive_run(&self, run_id: &RunId) -> Result<()> {
-        self.send_api(|client| async move {
-            client.unarchive_run().id(run_id.to_string()).send().await
-        })
-        .await?;
-        Ok(())
+    pub async fn unarchive_run(&self, run_id: &RunId) -> Result<RunSummary> {
+        let response = self
+            .send_api(
+                |client| async move { client.unarchive_run().id(run_id.to_string()).send().await },
+            )
+            .await?;
+        convert_type(response.into_inner())
     }
 
     pub async fn rewind_run(
@@ -1115,6 +1119,50 @@ impl Client {
             all_events.extend(page_events);
 
             if limit.is_some() || !parsed.meta.has_more || next_page_since_seq.is_none() {
+                break;
+            }
+            next_since_seq = next_page_since_seq;
+        }
+
+        Ok(all_events)
+    }
+
+    pub async fn list_run_events_until(
+        &self,
+        run_id: &RunId,
+        since_seq: Option<u32>,
+        max_events: usize,
+    ) -> Result<Vec<EventEnvelope>> {
+        if max_events == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut next_since_seq = since_seq;
+        let mut all_events = Vec::new();
+        while all_events.len() < max_events {
+            let remaining = max_events - all_events.len();
+            let response = self
+                .send_api(|client| async move {
+                    let mut request = client
+                        .list_run_events()
+                        .id(run_id.to_string())
+                        .limit(remaining.min(1000) as u64);
+                    if let Some(seq) = next_since_seq.and_then(non_zero_u64_from_u32) {
+                        request = request.since_seq(seq);
+                    }
+                    request.send().await
+                })
+                .await?;
+            let parsed = response.into_inner();
+            let page_events = parsed
+                .data
+                .into_iter()
+                .map(convert_type::<_, EventEnvelope>)
+                .collect::<Result<Vec<EventEnvelope>>>()?;
+            let next_page_since_seq = page_events.last().map(|event| event.seq.saturating_add(1));
+            all_events.extend(page_events);
+
+            if !parsed.meta.has_more || next_page_since_seq.is_none() {
                 break;
             }
             next_since_seq = next_page_since_seq;

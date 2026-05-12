@@ -13,11 +13,11 @@ Two new built-in tools bring real-time information into workflow decisions. `web
 
 ## CLI backends
 
-Individual workflow nodes can now delegate work to external AI coding assistants. Set the backend to `claude-code`, `codex`, or `gemini-cli` and the node will use that CLI tool instead of the built-in agent loop.
+Individual workflow nodes can delegate work to external AI coding assistants. Set `backend="cli"` and choose a provider; Fabro selects `claude`, `codex`, or `gemini` for the node instead of the built-in API agent loop. Current backend values are `api`, `cli`, and `acp`.
 
 ```dot
-implement [handler=codergen, cli_backend=codex]
-review [handler=codergen, cli_backend=claude-code]
+implement [type="agent", backend="cli", provider="openai"]
+review [type="agent", backend="cli", provider="anthropic"]
 ```
 
 This means each stage in a workflow can use a different AI tool — use Codex for implementation and Claude Code for review, for example.

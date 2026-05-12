@@ -1,0 +1,29 @@
+[package]
+name = "fabro-manifest"
+edition.workspace = true
+version.workspace = true
+publish = false
+license.workspace = true
+description = "Fabro run manifest construction"
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+fabro-api = { path = "../fabro-api" }
+fabro-config = { path = "../fabro-config" }
+fabro-github = { path = "../fabro-github" }
+fabro-graphviz = { path = "../fabro-graphviz" }
+fabro-template = { path = "../fabro-template" }
+fabro-types = { path = "../fabro-types" }
+fabro-workflow = { path = "../fabro-workflow" }
+git2.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+temp-env = "0.3"

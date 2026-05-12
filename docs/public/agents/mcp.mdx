@@ -1,11 +1,40 @@
 ---
 title: "MCP"
-description: "Extend agents with Model Context Protocol servers"
+description: "Connect MCP tools to agents and expose Fabro runs to MCP clients"
 ---
 
 MCP ([Model Context Protocol](https://modelcontextprotocol.io/)) lets you connect external tool servers to Fabro agents. An MCP server exposes tools over a standardized protocol — databases, APIs, file systems, custom services — and Fabro discovers and registers them automatically. Agents call MCP tools the same way they call built-in tools.
 
-## How it works
+Fabro can also run as an MCP server. MCP clients can use Fabro's run-management tools to create, inspect, control, wait for, and read events from workflow runs through the authenticated `fabro` CLI.
+
+## Fabro as an MCP server
+
+Use `fabro mcp init` to configure an MCP client to launch Fabro:
+
+```bash
+fabro mcp init claude
+```
+
+Supported client targets are `claude`, `cursor`, and `windsurf`. The generated configuration launches `fabro mcp start` over stdio and reuses the CLI's normal server selection, OAuth refresh, dev-token handling, proxy behavior, and local storage.
+
+You can also print the MCP configuration JSON or start the server directly:
+
+```bash
+fabro mcp config
+fabro mcp start
+```
+
+Pass `--server` when the MCP client should connect to a specific Fabro server, or `--storage-dir` when it should use a non-default CLI storage directory.
+
+| Tool | Purpose |
+|---|---|
+| `fabro_run_create` | Create one or more workflow runs, starting them by default. |
+| `fabro_run_search` | Search runs by ID, workflow, labels, status, archive state, and creation time. |
+| `fabro_run_interact` | Get, start, message, cancel, archive, unarchive, inspect questions, or answer a run. |
+| `fabro_run_gather` | Wait for runs to reach terminal states, returning current state on timeout. |
+| `fabro_run_events` | List, inspect, or search stored events for a run. |
+
+## Fabro agents as MCP clients
 
 When an agent session starts with MCP servers configured, Fabro:
 
@@ -26,12 +55,12 @@ mcp__{server}__{tool}
 
 For example, a server named `filesystem` exposing a `read_file` tool becomes `mcp__filesystem__read_file`. Special characters in server or tool names (hyphens, dots, etc.) are replaced with underscores.
 
-## Configuration
+## Agent MCP configuration
 
-MCP servers can be configured in two places:
+MCP servers available to Fabro agents can be configured in two places:
 
-- **`~/.fabro/settings.toml`** — applies to `fabro exec` sessions. See [User Configuration](/reference/user-configuration#mcp_servers-section).
-- **Run config TOML** — applies to workflow runs (`fabro run`). See [Run Configuration](/execution/run-configuration#mcp_servers).
+- **User configuration** — `~/.fabro/settings.toml` can define shared workflow MCP servers under `[run.agent.mcps.<name>]`, or `fabro exec`-only servers under `[cli.exec.agent.mcps.<name>]`. See [User Configuration](/reference/user-configuration).
+- **Run config TOML** — workflow config can define run-specific MCP servers under `[run.agent.mcps.<name>]`. See [Run Configuration](/execution/run-configuration#runagentmcps).
 
 Each server entry specifies a transport type and optional timeouts. The server name is the TOML table key and is used in qualified tool names.
 
@@ -42,13 +71,13 @@ Each server entry specifies a transport type and optional timeouts. The server n
 The most common transport. Fabro spawns a child process on the host and communicates over stdin/stdout:
 
 ```toml
-[mcp_servers.filesystem]
+[run.agent.mcps.filesystem]
 type = "stdio"
 command = ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
-startup_timeout_secs = 15
-tool_timeout_secs = 90
+startup_timeout = "15s"
+tool_timeout = "90s"
 
-[mcp_servers.filesystem.env]
+[run.agent.mcps.filesystem.env]
 NODE_ENV = "production"
 ```
 
@@ -56,20 +85,21 @@ NODE_ENV = "production"
 |---|---|---|
 | `type` | Must be `"stdio"`. | — |
 | `command` | Array: the executable followed by its arguments. | — |
+| `script` | Shell script alternative to `command`. | — |
 | `env` | Additional environment variables for the child process. | `{}` |
-| `startup_timeout_secs` | Max seconds to wait for the MCP handshake. | `10` |
-| `tool_timeout_secs` | Max seconds to wait for a single tool call. | `60` |
+| `startup_timeout` | Max duration to wait for the MCP handshake. | `"10s"` |
+| `tool_timeout` | Max duration for a single tool call. | `"60s"` |
 
 ### HTTP
 
 For remote MCP servers accessible over Streamable HTTP:
 
 ```toml
-[mcp_servers.sentry]
+[run.agent.mcps.sentry]
 type = "http"
 url = "https://mcp.sentry.dev/mcp"
 
-[mcp_servers.sentry.headers]
+[run.agent.mcps.sentry.headers]
 Authorization = "Bearer sk-xxx"
 ```
 
@@ -78,30 +108,31 @@ Authorization = "Bearer sk-xxx"
 | `type` | Must be `"http"`. | — |
 | `url` | The MCP server endpoint URL. | — |
 | `headers` | Optional HTTP headers (e.g., for authentication). | `{}` |
-| `startup_timeout_secs` | Max seconds to wait for the MCP handshake. | `10` |
-| `tool_timeout_secs` | Max seconds to wait for a single tool call. | `60` |
+| `startup_timeout` | Max duration to wait for the MCP handshake. | `"10s"` |
+| `tool_timeout` | Max duration for a single tool call. | `"60s"` |
 
 ### Sandbox
 
 Runs the MCP server inside the workflow's sandbox (e.g., a [Daytona](/integrations/daytona) cloud VM). Fabro starts the server as a background process, waits for it to listen on the specified port, obtains an authenticated preview URL, and connects via HTTP. This is the right transport for MCP servers that need access to the sandbox environment — for example, [Playwright](https://github.com/microsoft/playwright-mcp) for browser automation.
 
 ```toml
-[mcp_servers.playwright]
+[run.agent.mcps.playwright]
 type = "sandbox"
 command = ["npx", "@playwright/mcp@latest", "--port", "3100", "--headless", "--browser", "chromium"]
 port = 3100
-startup_timeout_secs = 60
-tool_timeout_secs = 120
+startup_timeout = "60s"
+tool_timeout = "2m"
 ```
 
 | Field | Description | Default |
 |---|---|---|
 | `type` | Must be `"sandbox"`. | — |
 | `command` | Array: the command to run inside the sandbox. Must include a flag that makes the server listen on `port`. | — |
+| `script` | Shell script alternative to `command`. | — |
 | `port` | The port the MCP server listens on inside the sandbox. | — |
 | `env` | Additional environment variables for the server process. | `{}` |
-| `startup_timeout_secs` | Max seconds to wait for the server to start listening and complete the MCP handshake. | `10` |
-| `tool_timeout_secs` | Max seconds to wait for a single tool call. | `60` |
+| `startup_timeout` | Max duration to wait for the server to start listening and complete the MCP handshake. | `"10s"` |
+| `tool_timeout` | Max duration for a single tool call. | `"60s"` |
 
 The sandbox transport requires a remote sandbox provider (Daytona) that supports preview URLs. During session initialization, Fabro:
 
@@ -117,7 +148,7 @@ The sandbox transport requires a remote sandbox provider (Daytona) that supports
 Each MCP server is started sequentially during session initialization. The startup sequence for each server is:
 
 1. **Spawn / connect** — For stdio, spawn the child process. For HTTP, create the HTTP client. For sandbox, start the server inside the sandbox and connect via preview URL.
-2. **Handshake** — Perform the MCP protocol handshake within the `startup_timeout_secs` window.
+2. **Handshake** — Perform the MCP protocol handshake within the `startup_timeout` window.
 3. **Tool discovery** — Call `tools/list` to enumerate available tools.
 4. **Registration** — Add each tool to the agent's registry with its qualified name.
 
@@ -132,7 +163,7 @@ When the LLM calls an MCP tool:
 3. The server executes the tool and returns a result
 4. The result is converted to text and returned to the LLM as a tool result
 
-Tool calls are subject to the `tool_timeout_secs` configured on the server. If a call exceeds the timeout, it fails with a timeout error.
+Tool calls are subject to the `tool_timeout` configured on the server. If a call exceeds the timeout, it fails with a timeout error.
 
 ### Content handling
 
@@ -197,7 +228,7 @@ MCP servers that fail to start do not block the agent session. The agent proceed
 
 ## Protocol details
 
-Fabro implements the MCP client side using the `rmcp` SDK (protocol version `2025-03-26`). The client identifies itself as `fabro-mcp` and supports:
+For agent-side MCP connections, Fabro implements the MCP client side using the `rmcp` SDK (protocol version `2025-03-26`). The client identifies itself as `fabro-mcp` and supports:
 
 - Tool listing and invocation
 - Server logging notifications (routed to Fabro's tracing system)

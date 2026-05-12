@@ -10,11 +10,7 @@ mod gh;
 mod landing;
 mod local_server;
 mod logging;
-#[allow(
-    unreachable_pub,
-    reason = "The library exports manifest builder helpers for tests; the binary includes the same module privately."
-)]
-mod manifest_builder;
+mod manifest_args;
 mod server_client;
 mod server_runs;
 mod shared;
@@ -280,6 +276,9 @@ async fn main_inner(worker_token: Option<String>) -> (String, Result<()>) {
             }
             Commands::Model { command } => {
                 commands::model::execute(command, &base_ctx).await?;
+            }
+            Commands::Mcp(ns) => {
+                commands::mcp::dispatch(ns, &base_ctx).await?;
             }
             Commands::Server(ns) => {
                 Box::pin(commands::server::dispatch(
@@ -1196,7 +1195,7 @@ destination = "{destination}"
             .expect("should parse");
         match *cli.command.unwrap() {
             Commands::RunCmd(RunCommands::Run(args)) => {
-                let manifest_args = manifest_builder::run_manifest_args(&args)
+                let manifest_args = manifest_args::run_manifest_args(&args)
                     .expect("input-only args should be retained");
                 assert_eq!(manifest_args.input, vec!["foo=bar"]);
             }

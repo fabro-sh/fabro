@@ -29,7 +29,7 @@ use crate::redact::redact_auth_url;
 use crate::sandbox::{optional_timeout, resolve_path};
 use crate::{
     CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GrepOptions, Sandbox,
-    SandboxEvent, SandboxEventCallback, format_lines_numbered, shell_quote,
+    SandboxEvent, SandboxEventCallback, StdioProcess, format_lines_numbered, shell_quote,
 };
 
 const WORKING_DIRECTORY: &str = "/home/daytona/workspace";
@@ -1533,6 +1533,18 @@ impl Sandbox for DaytonaSandbox {
             streams_separated,
             live_streaming: saw_live_chunk.load(Ordering::Relaxed),
         })
+    }
+
+    async fn spawn_stdio_process(
+        &self,
+        _command: &str,
+        _working_dir: Option<&str>,
+        _env_vars: Option<&HashMap<String, String>>,
+        _cancel_token: Option<CancellationToken>,
+    ) -> crate::Result<StdioProcess> {
+        Err(crate::Error::message(
+            "ACP backend requires bidirectional stdio; the Daytona sandbox provider does not support it yet",
+        ))
     }
 
     async fn grep(

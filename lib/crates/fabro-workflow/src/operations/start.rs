@@ -547,6 +547,8 @@ fn runtime_mcp_server(settings: &ResolvedMcpServerSettings) -> McpServerSettings
                 env:     env.clone(),
             },
         },
+        current_dir:          None,
+        clear_env:            false,
         startup_timeout_secs: settings.startup_timeout_secs,
         tool_timeout_secs:    settings.tool_timeout_secs,
     }

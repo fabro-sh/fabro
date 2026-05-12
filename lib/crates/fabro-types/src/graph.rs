@@ -3,6 +3,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::LlmBackend;
+
 /// Typed attribute values for nodes, edges, and graph-level attributes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AttrValue {
@@ -264,6 +266,16 @@ impl Node {
     #[must_use]
     pub fn backend(&self) -> Option<&str> {
         self.str_attr("backend")
+    }
+
+    #[must_use]
+    pub fn llm_backend(&self) -> Option<Result<LlmBackend, strum::ParseError>> {
+        self.backend().map(str::parse)
+    }
+
+    #[must_use]
+    pub fn acp_command(&self) -> Option<&str> {
+        self.str_attr("acp_command")
     }
 
     #[must_use]

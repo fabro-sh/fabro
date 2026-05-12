@@ -6,7 +6,7 @@ description: "Built-in tools for file I/O, shell commands, search, and web acces
 Every agent in Fabro has access to a set of built-in tools for interacting with the codebase and environment. Tools execute inside the agent's [sandbox](/execution/environments) — whether that's the local machine, a Docker container, or a Daytona VM — so the same tool calls work identically regardless of provider.
 
 <Note>
-The tools described on this page apply to the **API backend** (the default). When using the [CLI backend](/core-concepts/agents#cli-backend), the external CLI tool (`claude`, `codex`, or `gemini`) provides its own tools — Fabro's built-in tools are not used.
+The tools described on this page apply to the **API backend** (the default). When using the [CLI backend](/core-concepts/agents#cli-backend) or [ACP backend](/core-concepts/agents#acp-backend), the external agent process provides its own tools — Fabro's built-in tools are not used.
 </Note>
 
 ## Core tools

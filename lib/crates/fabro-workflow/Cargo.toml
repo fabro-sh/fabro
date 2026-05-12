@@ -19,6 +19,7 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 fabro-auth = { path = "../fabro-auth" }
+fabro-acp = { path = "../fabro-acp" }
 fabro-agent = { path = "../fabro-agent" }
 fabro-config = { path = "../fabro-config" }
 fabro-graphviz = { path = "../fabro-graphviz" }
@@ -70,7 +71,8 @@ toml.workspace = true
 fabro-vault = { path = "../fabro-vault" }
 [dev-dependencies]
 base64.workspace = true
-fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona", "test-support"] }
+fabro-acp = { path = "../fabro-acp", features = ["test-support"] }
+fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona", "docker", "test-support"] }
 fabro-mcp = { path = "../fabro-mcp" }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 object_store.workspace = true

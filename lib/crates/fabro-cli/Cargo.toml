@@ -31,6 +31,8 @@ fabro-hooks = { path = "../fabro-hooks" }
 fabro-install = { path = "../fabro-install" }
 fabro-interview = { path = "../fabro-interview" }
 fabro-mcp = { path = "../fabro-mcp" }
+fabro-mcp-server = { path = "../fabro-mcp-server" }
+fabro-manifest = { path = "../fabro-manifest" }
 fabro-proc = { path = "../fabro-proc" }
 fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona"] }
 fabro-checkpoint = { path = "../fabro-checkpoint" }
@@ -113,6 +115,7 @@ chrono = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = "2"
+fabro-acp = { path = "../fabro-acp", features = ["test-support"] }
 fabro-build-support = { path = "../build-support" }
 fabro-server = { path = "../fabro-server", features = ["test-support"] }
 insta = { workspace = true, features = ["filters"] }

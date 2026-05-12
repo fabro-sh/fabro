@@ -68,7 +68,7 @@ Stylesheets support four properties:
 | `provider` | Provider name (optional — auto-inferred from the model catalog when omitted) | `anthropic`, `openai`, `gemini` |
 | `reasoning_effort` | Reasoning effort level | `low`, `medium`, `high` |
 | `speed` | Output speed mode. `fast` enables Anthropic's fast mode for up to 2.5x faster output at higher cost. | `fast` |
-| `backend` | Agent execution backend — `api` (default) runs Fabro's own tool loop, `cli` delegates to an external CLI tool. See [Backends](/core-concepts/agents#backends). | `cli`, `api` |
+| `backend` | Agent execution backend — `api` (default) runs Fabro's own tool loop, `cli` delegates to a legacy external CLI tool, and `acp` runs an Agent Client Protocol stdio agent in the active sandbox. See [Backends](/core-concepts/agents#backends). | `api`, `cli`, `acp` |
 
 See [Models](/core-concepts/models) for the full list of model IDs and aliases.
 

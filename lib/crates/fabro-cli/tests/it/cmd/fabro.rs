@@ -33,6 +33,7 @@ fn help() {
       archive     Mark terminal runs as archived (reviewed, no further action needed). Archived runs are hidden from default listings
       unarchive   Restore archived runs to their prior terminal status
       model       List and test LLM models
+      mcp         Model Context Protocol server
       server      Server operations
       doctor      Check environment and integration health
       version     Show client and server version information

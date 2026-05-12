@@ -401,7 +401,7 @@ V2 keeps the current durable family surface broadly intact.
 
 - `sandbox.*`
 - `setup.*`
-- `cli.ensure.*`
+- `cli.ensure.*` (legacy only)
 - `command.*`
 - `agent.cli.*`
 - `devcontainer.*`

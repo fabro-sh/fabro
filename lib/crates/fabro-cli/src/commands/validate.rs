@@ -1,13 +1,13 @@
 use anyhow::bail;
 use fabro_config::RunLayer;
 use fabro_config::user::active_settings_path;
+use fabro_manifest::{ManifestBuildInput, build_run_manifest};
 use fabro_server::manifest_validation;
 use fabro_util::terminal::Styles;
 
 use crate::args::ValidateArgs;
 use crate::command_context::CommandContext;
 use crate::commands::run::output::api_diagnostics_to_local;
-use crate::manifest_builder::{ManifestBuildInput, build_run_manifest};
 use crate::shared::{print_diagnostics, print_json_pretty, relative_path};
 
 pub(crate) fn run(

@@ -127,18 +127,7 @@ pub(crate) fn color_if(use_color: bool, color: Color) -> Option<Color> {
 }
 
 pub(crate) fn run_status_kind(status: RunStatus) -> &'static str {
-    match status {
-        RunStatus::Submitted => "submitted",
-        RunStatus::Queued => "queued",
-        RunStatus::Starting => "starting",
-        RunStatus::Running => "running",
-        RunStatus::Blocked { .. } => "blocked",
-        RunStatus::Paused { .. } => "paused",
-        RunStatus::Removing => "removing",
-        RunStatus::Succeeded { .. } => "succeeded",
-        RunStatus::Failed { .. } => "failed",
-        RunStatus::Dead => "dead",
-    }
+    status.kind().into()
 }
 
 pub(crate) fn split_run_path(s: &str) -> Option<(&str, &str)> {

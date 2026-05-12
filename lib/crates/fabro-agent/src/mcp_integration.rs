@@ -62,6 +62,8 @@ mod tests {
                 command: vec!["python3".into(), test_server],
                 env:     HashMap::new(),
             },
+            current_dir:          None,
+            clear_env:            false,
             startup_timeout_secs: 10,
             tool_timeout_secs:    30,
         }

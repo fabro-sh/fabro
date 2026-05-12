@@ -18,7 +18,7 @@ This loop continues until the model stops calling tools, indicating it considers
 
 ## Backends
 
-Every agent node uses a **backend** that determines how Fabro interacts with the LLM. There are two options:
+Every agent and prompt node uses a **backend** that determines how Fabro interacts with the LLM. There are three options:
 
 ### API backend (default)
 
@@ -31,7 +31,7 @@ Fabro manages the agent loop directly — it calls the LLM provider's API, execu
 
 ### CLI backend
 
-Fabro delegates execution to an external coding assistant CLI. The CLI tool manages its own tool loop internally — Fabro sends the prompt, waits for the CLI to finish, and tracks file changes via `git diff` before and after execution.
+Fabro delegates execution to a legacy external coding assistant CLI. The CLI tool manages its own tool loop internally — Fabro sends the prompt, waits for the CLI to finish, and tracks file changes via `git diff` before and after execution.
 
 The CLI is selected automatically based on the node's provider:
 
@@ -40,6 +40,8 @@ The CLI is selected automatically based on the node's provider:
 | Anthropic | `claude` |
 | OpenAI | `codex` |
 | Gemini | `gemini` |
+
+Fabro does not install these CLIs at runtime. Install the selected CLI in the sandbox image or run setup steps before the workflow reaches a `backend="cli"` node.
 
 Set the CLI backend on a node with `backend="cli"` or via a [model stylesheet](/workflows/stylesheets):
 
@@ -52,21 +54,41 @@ implement [label="Implement", backend="cli"]
 * { backend: cli; }
 ```
 
+### ACP backend
+
+Fabro can also run Agent Client Protocol (ACP) stdio agents with `backend="acp"`. ACP agents run inside the active Fabro sandbox, so local and Docker runs keep the same workspace isolation, secret forwarding, cancellation, and file-change tracking behavior as other agent stages.
+
+Set ACP on a node with `backend="acp"` and an explicit `acp_command`:
+
+```dot
+implement [label="Implement", backend="acp", acp_command="python3 tools/fake_acp_agent.py"]
+```
+
+Fabro does not install ACP agents, Node.js, npm, or `npx` at runtime. The command must already be available in the sandbox image, repository, or setup steps. You can use `npx ...@latest` as an explicit `acp_command` if that is the behavior you want, but Fabro will treat it like any other user-supplied command.
+
+ACP v1 does not have a portable model-selection request. Fabro records the selected provider and model in events and run projections, but model-specific ACP behavior must be encoded in the chosen command for now. ACP is supported with local and Docker sandboxes; Daytona does not expose bidirectional stdio yet, so ACP nodes fail there with an explicit unsupported-provider error.
+
 ### Comparison
 
-| Capability | API backend | CLI backend |
-|---|---|---|
-| Tools | Fabro built-in tools + MCP | CLI's own tool set |
-| Session caching | Supported (`fidelity` + `thread_id`) | Not supported |
-| Sub-agents | Supported | Not supported |
-| Provider failover | Supported | Not supported |
-| File tracking | Tool call events | `git diff` before/after |
+| Capability | API backend | CLI backend | ACP backend |
+|---|---|---|---|
+| Tools | Fabro built-in tools + MCP | CLI's own tool set | ACP agent's own tool set |
+| Session caching | Supported (`fidelity` + `thread_id`) | Not supported | Agent-dependent |
+| Sub-agents | Supported | Not supported | Not supported through Fabro tools |
+| Provider failover | Supported | Not supported | Not supported |
+| File tracking | Tool call events | `git diff` before/after | `git diff` before/after |
 
 ### When to use the CLI backend
 
 - **CLI-specific tools** — leverage tool implementations built into a specific CLI (e.g. Claude Code's computer use, Codex's sandboxed execution)
 - **CLI-only models** — use models that are only available through a CLI tool, not via API
 - **Existing workflows** — integrate a CLI tool you already depend on without rewriting its configuration
+
+### When to use the ACP backend
+
+- **Protocol adapters** — run ACP-compatible coding agents through a stable stdio protocol
+- **Sandbox parity** — keep agent process execution inside Fabro's local or Docker sandbox
+- **Custom agents** — use `acp_command` for a checked-in or preinstalled ACP adapter
 
 ## Tools
 

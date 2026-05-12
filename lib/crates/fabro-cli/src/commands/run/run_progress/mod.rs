@@ -472,6 +472,7 @@ mod tests {
     use fabro_agent::{AgentEvent, SandboxEvent};
     use fabro_llm::types::TokenCounts;
     use fabro_model::{ModelRef, Provider};
+    use fabro_types::run_event::CliEnsureCompletedProps;
     use fabro_types::{
         MetadataSnapshotFailureKind, MetadataSnapshotPhase, ParallelBranchId, SandboxProvider,
         StageId, fixtures,
@@ -525,6 +526,24 @@ mod tests {
     fn emit_ref(ui: &mut ProgressUI, event: &Event) {
         let stored = to_run_event(&fixtures::RUN_1, event);
         ui.handle_event(&stored);
+    }
+
+    fn emit_body(ui: &mut ProgressUI, body: fabro_types::EventBody) {
+        ui.handle_event(&RunEvent {
+            id: "evt_legacy".to_string(),
+            ts: Utc::now(),
+            run_id: fixtures::RUN_1,
+            node_id: None,
+            node_label: None,
+            stage_id: None,
+            parallel_group_id: None,
+            parallel_branch_id: None,
+            session_id: None,
+            parent_session_id: None,
+            tool_call_id: None,
+            actor: None,
+            body,
+        });
     }
 
     fn agent_event(stage: &str, event: AgentEvent) -> Event {
@@ -860,13 +879,16 @@ mod tests {
         });
         emit(&mut ui, Event::SetupStarted { command_count: 2 });
         emit(&mut ui, Event::SetupCompleted { duration_ms: 8200 });
-        emit(&mut ui, Event::CliEnsureCompleted {
-            cli_name:          "gh".into(),
-            provider:          "github".into(),
-            already_installed: false,
-            node_installed:    false,
-            duration_ms:       600,
-        });
+        emit_body(
+            &mut ui,
+            fabro_types::EventBody::CliEnsureCompleted(CliEnsureCompletedProps {
+                cli_name:          "gh".into(),
+                provider:          "github".into(),
+                already_installed: false,
+                node_installed:    false,
+                duration_ms:       600,
+            }),
+        );
         emit(&mut ui, Event::DevcontainerResolved {
             dockerfile_lines:        24,
             environment_count:       3,

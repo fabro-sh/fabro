@@ -74,8 +74,8 @@ fn scenario_full_stack(sandbox: &str) {
     // Verify node stdout should contain PASS
     let export_dir = dump_export(&context, &run_id_for(&run_dir));
     let stdout =
-        std::fs::read_to_string(stage_dump_dir(&export_dir, "verify@1").join("stdout.log"))
-            .expect("verify stdout.log should exist");
+        std::fs::read_to_string(stage_dump_dir(&export_dir, "verify@1").join("output.log"))
+            .expect("verify output.log should exist");
     assert!(
         stdout.contains("PASS"),
         "verify stdout should contain PASS, got: {stdout}"

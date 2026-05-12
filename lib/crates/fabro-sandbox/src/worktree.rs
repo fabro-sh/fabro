@@ -8,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 use crate::sandbox::fetch_source_run_ref;
 use crate::{
     CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GitRunInfo, GitSetupIntent,
-    GrepOptions, Sandbox, shell_quote,
+    GrepOptions, Sandbox, StdioProcess, shell_quote,
 };
 
 /// Git command prefix that disables background maintenance.
@@ -264,6 +264,19 @@ impl Sandbox for WorktreeSandbox {
                 cancel_token,
                 output_callback,
             )
+            .await
+    }
+
+    async fn spawn_stdio_process(
+        &self,
+        command: &str,
+        working_dir: Option<&str>,
+        env_vars: Option<&HashMap<String, String>>,
+        cancel_token: Option<CancellationToken>,
+    ) -> crate::Result<StdioProcess> {
+        let wd = working_dir.unwrap_or(&self.config.worktree_path);
+        self.inner
+            .spawn_stdio_process(command, Some(wd), env_vars, cancel_token)
             .await
     }
 
@@ -673,6 +686,23 @@ mod tests {
             wdirs.last(),
             Some(&Some("/explicit/path".to_string())),
             "explicit working_dir should be passed through unchanged"
+        );
+    }
+
+    #[tokio::test]
+    async fn stdio_process_none_working_dir_defaults_to_worktree_path() {
+        let (inner, mock) = make_mock();
+        let wt = WorktreeSandbox::new(inner, make_config("/tmp/wt"));
+
+        wt.spawn_stdio_process("python fake_agent.py", None, None, None)
+            .await
+            .unwrap();
+
+        let wdirs = mock.captured_working_dirs.lock().unwrap().clone();
+        assert_eq!(
+            wdirs.last(),
+            Some(&Some("/tmp/wt".to_string())),
+            "None working_dir should be replaced with worktree path"
         );
     }
 

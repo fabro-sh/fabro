@@ -1,4 +1,5 @@
 mod all_conditional_edges;
+mod backend_valid;
 mod condition_syntax;
 mod direction_valid;
 mod edge_target_exists;
@@ -43,6 +44,7 @@ pub fn built_in_rules() -> Vec<Box<dyn LintRule>> {
         condition_syntax::rule(),
         stylesheet_syntax::rule(),
         type_known::rule(),
+        backend_valid::rule(),
         fidelity_valid::rule(),
         retry_target_exists::rule(),
         goal_gate_has_retry::rule(),

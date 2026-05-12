@@ -20,6 +20,7 @@ mod inspect;
 mod install;
 mod json_global;
 mod logs;
+mod mcp;
 mod model;
 mod model_list;
 mod model_test;

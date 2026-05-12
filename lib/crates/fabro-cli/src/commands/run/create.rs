@@ -1,6 +1,7 @@
 use anyhow::{Context as _, bail};
 use fabro_config::RunLayer;
 use fabro_config::user::active_settings_path;
+use fabro_manifest::{ManifestBuildInput, build_run_manifest};
 use fabro_server::manifest_validation;
 use fabro_types::RunId;
 use fabro_util::terminal::Styles;
@@ -9,7 +10,7 @@ use super::output::{api_diagnostics_to_local, print_workflow_summary};
 use super::overrides::run_args_overrides;
 use crate::args::RunArgs;
 use crate::command_context::CommandContext;
-use crate::manifest_builder::{ManifestBuildInput, build_run_manifest, run_manifest_args};
+use crate::manifest_args::run_manifest_args;
 
 pub(crate) struct CreatedRun {
     pub(crate) run_id: RunId,

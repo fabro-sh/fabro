@@ -168,6 +168,49 @@ pub(crate) struct ServerConnectionArgs {
     pub(crate) target: ServerTargetArgs,
 }
 
+#[derive(Args)]
+pub(crate) struct McpNamespace {
+    #[command(subcommand)]
+    pub(crate) command: McpCommand,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum McpCommand {
+    /// Start the Fabro MCP server over stdio
+    Start(McpStartArgs),
+    /// Print MCP client configuration JSON
+    Config(McpConfigArgs),
+    /// Configure an MCP client to launch Fabro
+    Init(McpInitArgs),
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub(crate) struct McpStartArgs {
+    #[command(flatten)]
+    pub(crate) connection: ServerConnectionArgs,
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub(crate) struct McpConfigArgs {
+    #[command(flatten)]
+    pub(crate) connection: ServerConnectionArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+pub(crate) struct McpInitArgs {
+    pub(crate) agent: McpAgent,
+
+    #[command(flatten)]
+    pub(crate) connection: ServerConnectionArgs,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum McpAgent {
+    Claude,
+    Cursor,
+    Windsurf,
+}
+
 #[derive(Args, Debug, Clone, Default)]
 pub(crate) struct InputOverrideArgs {
     /// Override a workflow input value (repeatable, format: KEY=VALUE)
@@ -1118,6 +1161,8 @@ pub(crate) enum Commands {
         #[command(subcommand)]
         command: Option<ModelsCommand>,
     },
+    /// Model Context Protocol server
+    Mcp(McpNamespace),
     /// Server operations
     Server(ServerNamespace),
     /// Check environment and integration health
@@ -1208,6 +1253,11 @@ impl Commands {
                 Some(ModelsCommand::List(_)) => "model list",
                 Some(ModelsCommand::Test(_)) => "model test",
                 None => "model",
+            },
+            Self::Mcp(ns) => match &ns.command {
+                McpCommand::Start(_) => "mcp start",
+                McpCommand::Config(_) => "mcp config",
+                McpCommand::Init(_) => "mcp init",
             },
             Self::Server(ns) => match &ns.command {
                 ServerCommand::Start(_) => "server start",

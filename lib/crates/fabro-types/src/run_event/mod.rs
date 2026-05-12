@@ -290,6 +290,14 @@ pub enum EventBody {
     AgentCliCancelled(AgentCliCancelledProps),
     #[serde(rename = "agent.cli.timed_out")]
     AgentCliTimedOut(AgentCliTimedOutProps),
+    #[serde(rename = "agent.acp.started")]
+    AgentAcpStarted(AgentAcpStartedProps),
+    #[serde(rename = "agent.acp.completed")]
+    AgentAcpCompleted(AgentAcpCompletedProps),
+    #[serde(rename = "agent.acp.cancelled")]
+    AgentAcpCancelled(AgentAcpCancelledProps),
+    #[serde(rename = "agent.acp.timed_out")]
+    AgentAcpTimedOut(AgentAcpTimedOutProps),
     #[serde(rename = "pull_request.created")]
     PullRequestCreated(PullRequestCreatedProps),
     #[serde(rename = "pull_request.failed")]
@@ -484,6 +492,10 @@ impl EventBody {
             Self::AgentCliCompleted(_) => "agent.cli.completed",
             Self::AgentCliCancelled(_) => "agent.cli.cancelled",
             Self::AgentCliTimedOut(_) => "agent.cli.timed_out",
+            Self::AgentAcpStarted(_) => "agent.acp.started",
+            Self::AgentAcpCompleted(_) => "agent.acp.completed",
+            Self::AgentAcpCancelled(_) => "agent.acp.cancelled",
+            Self::AgentAcpTimedOut(_) => "agent.acp.timed_out",
             Self::PullRequestCreated(_) => "pull_request.created",
             Self::PullRequestFailed(_) => "pull_request.failed",
             Self::DevcontainerResolved(_) => "devcontainer.resolved",
@@ -629,6 +641,12 @@ fn is_known_event_name(event: &str) -> bool {
             | "command.completed"
             | "agent.cli.started"
             | "agent.cli.completed"
+            | "agent.cli.cancelled"
+            | "agent.cli.timed_out"
+            | "agent.acp.started"
+            | "agent.acp.completed"
+            | "agent.acp.cancelled"
+            | "agent.acp.timed_out"
             | "pull_request.created"
             | "pull_request.failed"
             | "devcontainer.resolved"

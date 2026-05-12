@@ -152,6 +152,43 @@ pub fn apply_test_isolation(cmd: &mut std::process::Command, home_dir: &Path) {
     apply_test_isolation_with_lookup(cmd, home_dir, |name| std::env::var_os(name));
 }
 
+#[must_use]
+pub fn isolated_env(home_dir: &Path) -> HashMap<String, String> {
+    let mut env = HashMap::new();
+    if let Some(coverage) =
+        std::env::var_os(EnvVars::LLVM_PROFILE_FILE).and_then(|value| value.into_string().ok())
+    {
+        env.insert(EnvVars::LLVM_PROFILE_FILE.to_string(), coverage);
+    }
+    if let Some(path) = std::env::var_os(EnvVars::PATH).and_then(|value| value.into_string().ok()) {
+        env.insert(EnvVars::PATH.to_string(), path);
+    }
+    env.insert(EnvVars::NO_COLOR.to_string(), "1".to_string());
+    env.insert(EnvVars::HOME.to_string(), home_dir.display().to_string());
+    env.insert(
+        EnvVars::FABRO_NO_UPGRADE_CHECK.to_string(),
+        "true".to_string(),
+    );
+    env.insert(
+        EnvVars::FABRO_HTTP_PROXY_POLICY.to_string(),
+        "disabled".to_string(),
+    );
+    env.insert(EnvVars::FABRO_TELEMETRY.to_string(), "off".to_string());
+    env.insert(
+        EnvVars::FABRO_SUPPRESS_OPEN_BROWSER.to_string(),
+        "1".to_string(),
+    );
+    env.insert(
+        EnvVars::FABRO_SERVER_MAX_CONCURRENT_RUNS.to_string(),
+        "64".to_string(),
+    );
+    env.insert(
+        EnvVars::FABRO_TEST_IN_MEMORY_STORE.to_string(),
+        "1".to_string(),
+    );
+    env
+}
+
 fn apply_test_isolation_with_lookup(
     cmd: &mut std::process::Command,
     home_dir: &Path,

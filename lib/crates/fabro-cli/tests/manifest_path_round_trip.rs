@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use fabro_cli::{ManifestBuildInput, build_run_manifest};
+use fabro_manifest::{ManifestBuildInput, build_run_manifest};
 use fabro_workflow::ManifestPath;
 
 #[test]

@@ -336,6 +336,37 @@ pub struct AgentCliTimedOutProps {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentAcpStartedProps {
+    pub visit:    u32,
+    pub mode:     String,
+    pub provider: String,
+    pub model:    String,
+    pub command:  String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentAcpCompletedProps {
+    pub stdout:      String,
+    pub stderr:      String,
+    pub stop_reason: String,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentAcpCancelledProps {
+    pub stdout:      String,
+    pub stderr:      String,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentAcpTimedOutProps {
+    pub stdout:      String,
+    pub stderr:      String,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PullRequestCreatedProps {
     pub pr_url:      String,
     pub pr_number:   u64,

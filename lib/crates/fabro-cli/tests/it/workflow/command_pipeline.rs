@@ -49,8 +49,8 @@ fn scenario_command_pipeline(sandbox: &str) {
 
     let export_dir = dump_export(&context, &run_id_for(&run_dir));
     let stdout1 =
-        std::fs::read_to_string(stage_dump_dir(&export_dir, "step1@1").join("stdout.log"))
-            .expect("step1 stdout.log should exist");
+        std::fs::read_to_string(stage_dump_dir(&export_dir, "step1@1").join("output.log"))
+            .expect("step1 output.log should exist");
     assert!(
         stdout1.contains("hello-from-step1"),
         "step1 stdout should contain hello-from-step1, got: {stdout1}"

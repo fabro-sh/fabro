@@ -206,7 +206,8 @@ Start nodes can also be identified by ID (`start` or `Start`). Exit nodes can be
 | `model` | String | Explicit model ID (overrides stylesheet) |
 | `provider` | String | Explicit provider name (overrides stylesheet). Auto-inferred from the model catalog when omitted. |
 | `project_memory` | Boolean | When `true` (default), prompt nodes discover and include project docs (`AGENTS.md`, `CLAUDE.md`, etc.) as a system prompt. Set to `false` to disable. |
-| `backend` | String | Agent execution backend. `api` (default): Fabro calls the LLM API directly and runs its own tool loop. `cli`: Fabro delegates to an external CLI tool (`claude`, `codex`, or `gemini` based on provider). See [Agents — Backends](/core-concepts/agents#backends). |
+| `backend` | String | Agent execution backend: `api` (default), `cli`, or `acp`. `api` runs Fabro's tool loop through provider APIs; `cli` delegates to the legacy provider CLI; `acp` runs an Agent Client Protocol stdio agent inside the active sandbox. See [Agents — Backends](/core-concepts/agents#backends). |
+| `acp_command` | String | Required for nodes with `backend="acp"`. The value must be a stdio ACP command available in the sandbox. Fabro records model selection but does not send it through stable ACP v1. |
 
 ### Command nodes
 

@@ -59,6 +59,72 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-client-protocol"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2af62fb84df2af0f933d8f5fd78b843fa5eb0ec5a48fa1b528c41951d0bbe36c"
+dependencies = [
+ "agent-client-protocol-derive",
+ "agent-client-protocol-schema",
+ "anyhow",
+ "futures",
+ "futures-concurrency",
+ "jsonrpcmsg",
+ "rmcp",
+ "rustc-hash",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "agent-client-protocol-derive"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce42c2d3c048c12897eef2e577dfff1e3355c632c9f1625cc953b9df48b44631"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "agent-client-protocol-schema"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49bae57dad1c28a362fbdcf7bab0583316a02b45a70792109fced55780a3b63c"
+dependencies = [
+ "anyhow",
+ "derive_more",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "strum",
+ "tracing",
+]
+
+[[package]]
+name = "agent-client-protocol-tokio"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e1572b219f22c4b3be0f20f934c8b6f1d1457126ce72923c4f6608f96153b65"
+dependencies = [
+ "agent-client-protocol",
+ "futures",
+ "serde",
+ "serde_json",
+ "shell-words",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -595,6 +661,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc0b364ead1874514c8c2855ab558056ebfeb775653e7ae45ff72f28f8f3166c"
 
 [[package]]
+name = "bs58"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf88ba1141d185c399bee5288d850d63b8369520c1eafc32a0430b5b6c287bf4"
+dependencies = [
+ "tinyvec",
+]
+
+[[package]]
 name = "bstr"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1090,16 +1165,6 @@ dependencies = [
 
 [[package]]
 name = "darling"
-version = "0.21.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cdf337090841a411e2a7f3deb9187445851f91b309c0c0a29e05f74a00a48c0"
-dependencies = [
- "darling_core 0.21.3",
- "darling_macro 0.21.3",
-]
-
-[[package]]
-name = "darling"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "25ae13da2f202d56bd7f91c25fba009e7717a1e4a1cc98a76d844b65ae912e9d"
@@ -1124,20 +1189,6 @@ dependencies = [
 
 [[package]]
 name = "darling_core"
-version = "0.21.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1247195ecd7e3c85f83c8d2a366e4210d588e802133e1e355180a9870b517ea4"
-dependencies = [
- "fnv",
- "ident_case",
- "proc-macro2",
- "quote",
- "strsim 0.11.1",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "darling_core"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9865a50f7c335f53564bb694ef660825eb8610e0a53d3e11bf1b0d3df31e03b0"
@@ -1158,17 +1209,6 @@ dependencies = [
  "darling_core 0.14.4",
  "quote",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "darling_macro"
-version = "0.21.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d38308df82d1080de0afee5d069fa14b0326a88c14f15c5ccda35b4a6c414c81"
-dependencies = [
- "darling_core 0.21.3",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]
@@ -1309,6 +1349,7 @@ dependencies = [
  "quote",
  "rustc_version",
  "syn 2.0.117",
+ "unicode-xid",
 ]
 
 [[package]]
@@ -1538,8 +1579,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabro-acp"
+version = "0.231.0-nightly.1"
+dependencies = [
+ "agent-client-protocol",
+ "agent-client-protocol-tokio",
+ "bytes",
+ "fabro-model",
+ "fabro-sandbox",
+ "fabro-types",
+ "fabro-util",
+ "futures",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "fabro-agent"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1578,7 +1641,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-api"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "chrono",
  "fabro-config",
@@ -1599,7 +1662,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-auth"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1623,11 +1686,11 @@ dependencies = [
 
 [[package]]
 name = "fabro-build-support"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 
 [[package]]
 name = "fabro-checkpoint"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "chrono",
  "fabro-config",
@@ -1643,7 +1706,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-cli"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1661,6 +1724,7 @@ dependencies = [
  "dialoguer",
  "dirs",
  "dotenvy",
+ "fabro-acp",
  "fabro-agent",
  "fabro-api",
  "fabro-auth",
@@ -1678,7 +1742,9 @@ dependencies = [
  "fabro-interview",
  "fabro-llm",
  "fabro-macros",
+ "fabro-manifest",
  "fabro-mcp",
+ "fabro-mcp-server",
  "fabro-model",
  "fabro-oauth",
  "fabro-proc",
@@ -1741,7 +1807,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-client"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1770,7 +1836,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-config"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1797,7 +1863,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-core"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "async-trait",
  "fabro-types",
@@ -1812,7 +1878,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-dev"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1831,7 +1897,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-devcontainer"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "fabro-http",
  "fabro-static",
@@ -1848,7 +1914,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-dump"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1862,7 +1928,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-github"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "base64",
@@ -1884,7 +1950,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-graphviz"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "fabro-types",
@@ -1898,7 +1964,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-hooks"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "async-trait",
  "fabro-agent",
@@ -1922,7 +1988,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-http"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "fabro-static",
  "http",
@@ -1932,7 +1998,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-install"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "base64",
@@ -1947,7 +2013,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-interview"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "async-trait",
  "dialoguer",
@@ -1962,7 +2028,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-llm"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1994,7 +2060,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-macros"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "clap",
  "fabro-options-metadata",
@@ -2004,8 +2070,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabro-manifest"
+version = "0.231.0-nightly.1"
+dependencies = [
+ "anyhow",
+ "fabro-api",
+ "fabro-config",
+ "fabro-github",
+ "fabro-graphviz",
+ "fabro-template",
+ "fabro-types",
+ "fabro-workflow",
+ "git2",
+ "temp-env",
+ "tempfile",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "fabro-mcp"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "fabro-config",
@@ -2020,8 +2104,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabro-mcp-server"
+version = "0.231.0-nightly.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "fabro-api",
+ "fabro-client",
+ "fabro-config",
+ "fabro-manifest",
+ "fabro-server",
+ "fabro-types",
+ "fabro-util",
+ "futures",
+ "rmcp",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "fabro-model"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "fabro-static",
  "insta",
@@ -2032,7 +2138,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-oauth"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -2054,7 +2160,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-options-metadata"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2062,7 +2168,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-proc"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "cc",
  "libc",
@@ -2071,7 +2177,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-redact"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "aho-corasick",
  "ref-cast",
@@ -2087,7 +2193,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-sandbox"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2130,7 +2236,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-server"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2155,6 +2261,7 @@ dependencies = [
  "fabro-interview",
  "fabro-llm",
  "fabro-macros",
+ "fabro-manifest",
  "fabro-model",
  "fabro-proc",
  "fabro-redact",
@@ -2211,7 +2318,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-slack"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "fabro-http",
  "fabro-interview",
@@ -2232,18 +2339,18 @@ dependencies = [
 
 [[package]]
 name = "fabro-spa"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "rust-embed",
 ]
 
 [[package]]
 name = "fabro-static"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 
 [[package]]
 name = "fabro-store"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2270,7 +2377,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-telemetry"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "base64",
@@ -2296,7 +2403,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-template"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "fabro-util",
@@ -2308,7 +2415,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-test"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "assert_cmd",
  "axum",
@@ -2331,7 +2438,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-tracker"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2345,7 +2452,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-types"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "chrono",
  "clap",
@@ -2366,7 +2473,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-util"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "console 0.15.11",
@@ -2386,17 +2493,18 @@ dependencies = [
 
 [[package]]
 name = "fabro-validate"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "fabro-graphviz",
  "fabro-model",
+ "fabro-types",
  "serde",
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "fabro-vault"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "chrono",
  "fabro-types",
@@ -2408,7 +2516,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-workflow"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -2417,6 +2525,7 @@ dependencies = [
  "bytes",
  "chrono",
  "dirs",
+ "fabro-acp",
  "fabro-agent",
  "fabro-auth",
  "fabro-checkpoint",
@@ -2529,6 +2638,12 @@ name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+
+[[package]]
+name = "fixedbitset"
+version = "0.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 
 [[package]]
 name = "flatbuffers"
@@ -2801,6 +2916,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "futures-concurrency"
+version = "7.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "175cd8cca9e1d45b87f18ffa75088f2099e3c4fe5e2f83e42de112560bea8ea6"
+dependencies = [
+ "fixedbitset",
+ "futures-core",
+ "futures-lite",
+ "pin-project",
+ "smallvec",
+]
+
+[[package]]
 name = "futures-core"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2822,6 +2950,19 @@ name = "futures-io"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cecba35d7ad927e23624b22ad55235f2239cfa44fd10428eecbeba6d6a717718"
+
+[[package]]
+name = "futures-lite"
+version = "2.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f78e10609fe0e0b3f4157ffab1876319b5b0db102a2c60dc4626306dc46b44ad"
+dependencies = [
+ "fastrand",
+ "futures-core",
+ "futures-io",
+ "parking",
+ "pin-project-lite",
+]
 
 [[package]]
 name = "futures-macro"
@@ -3687,6 +3828,16 @@ checksum = "b49715b7073f385ba4bc528e5747d02e66cb39c6146efb66b781f131f0fb399c"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "jsonrpcmsg"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d833a15225c779251e13929203518c2ff26e2fe0f322d584b213f4f4dad37bd"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -5587,6 +5738,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2231b2c085b371c01bc90c0e6c1cab8834711b6394533375bdbf870b0166d419"
 dependencies = [
  "async-trait",
+ "base64",
  "chrono",
  "futures",
  "http",
@@ -6134,11 +6286,12 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.17.0"
+version = "3.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "381b283ce7bc6b476d903296fb59d0d36633652b633b27f64db4fb46dcbfc3b9"
+checksum = "e72c1c2cb7b223fafb600a619537a871c2818583d619401b785e7c0b746ccde2"
 dependencies = [
  "base64",
+ "bs58",
  "chrono",
  "hex",
  "indexmap 1.9.3",
@@ -6153,11 +6306,11 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "3.17.0"
+version = "3.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6d4e30573c8cb306ed6ab1dca8423eec9a463ea0e155f45399455e0368b27e0"
+checksum = "b90c488738ecb4fb0262f41f43bc40efc5868d9fb744319ddf5f5317f417bfac"
 dependencies = [
- "darling 0.21.3",
+ "darling 0.23.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -6888,6 +7041,7 @@ checksum = "9ae9cec805b01e8fc3fd2fe289f89149a9b66dd16786abd8b19cfa7b48cb0098"
 dependencies = [
  "bytes",
  "futures-core",
+ "futures-io",
  "futures-sink",
  "futures-util",
  "hashbrown 0.15.5",
@@ -7140,7 +7294,7 @@ dependencies = [
 
 [[package]]
 name = "twin-github"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "axum",
  "base64",
@@ -7159,7 +7313,7 @@ dependencies = [
 
 [[package]]
 name = "twin-openai"
-version = "0.230.0-nightly.0"
+version = "0.231.0-nightly.1"
 dependencies = [
  "anyhow",
  "async-stream",

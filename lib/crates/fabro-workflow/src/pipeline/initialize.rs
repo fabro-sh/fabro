@@ -28,7 +28,9 @@ use crate::devcontainer_bridge::{devcontainer_to_snapshot_config, run_devcontain
 use crate::error::Error;
 use crate::event::{Event, RunNoticeCode, RunNoticeLevel};
 use crate::github_token_source::{AppIatMinter, GitHubTokenSource};
-use crate::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
+use crate::handler::llm::{
+    AgentAcpBackend, AgentApiBackend, AgentCliBackend, BackendRouter, routing,
+};
 use crate::handler::{HandlerRegistry, default_registry};
 use crate::run_metadata::{RunMetadataRuntime, build_metadata_writer, metadata_branch_name};
 use crate::run_options::{GitCheckpointOptions, RunOptions};
@@ -124,7 +126,13 @@ async fn build_registry(
     llm_source: Arc<dyn CredentialSource>,
     cli_resolver: Option<CredentialResolver>,
 ) -> Result<(Arc<HandlerRegistry>, bool), Error> {
-    let build_no_backend = || Arc::new(default_registry(Arc::clone(&interviewer), || None));
+    let no_backend_interviewer = Arc::clone(&interviewer);
+    let build_no_backend = move || {
+        Arc::new(default_registry(
+            Arc::clone(&no_backend_interviewer),
+            || None,
+        ))
+    };
 
     if spec.dry_run {
         return Ok((build_no_backend(), true));
@@ -134,6 +142,51 @@ async fn build_registry(
         .nodes
         .values()
         .any(|n| graph::is_llm_handler_type(n.handler_type()));
+
+    if !graph_needs_llm {
+        return Ok((build_no_backend(), false));
+    }
+
+    let build_llm_registry = || {
+        let model = spec.model.clone();
+        let provider = spec.provider;
+        let fallback_chain = spec.fallback_chain.clone();
+        let mcp_servers = spec.mcp_servers.clone();
+        let llm_source_for_api = Arc::clone(&llm_source);
+        let steering_hub_for_api = Arc::clone(&steering_hub);
+        let tool_env_provider_for_backend = Arc::clone(&tool_env_provider);
+        Arc::new(default_registry(interviewer, move || {
+            let tool_env_provider = Arc::clone(&tool_env_provider_for_backend);
+            let api = AgentApiBackend::new(
+                model.clone(),
+                provider,
+                fallback_chain.clone(),
+                Arc::clone(&llm_source_for_api),
+                Arc::clone(&steering_hub_for_api),
+            )
+            .with_tool_env_provider(tool_env_provider.clone())
+            .with_mcp_servers(mcp_servers.clone());
+            let cli = cli_resolver
+                .clone()
+                .map_or_else(
+                    || AgentCliBackend::new_from_env(model.clone(), provider),
+                    |resolver| AgentCliBackend::new(model.clone(), provider, resolver),
+                )
+                .with_tool_env_provider(tool_env_provider.clone(), github_token_refresh_managed);
+            let acp = cli_resolver
+                .clone()
+                .map_or_else(
+                    || AgentAcpBackend::new_from_env(model.clone(), provider),
+                    |resolver| AgentAcpBackend::new(model.clone(), provider, resolver),
+                )
+                .with_tool_env_provider(tool_env_provider.clone(), github_token_refresh_managed);
+            Some(Box::new(BackendRouter::new(Box::new(api), cli, acp)))
+        }))
+    };
+
+    if !graph_needs_api_backend(graph) {
+        return Ok((build_llm_registry(), false));
+    }
 
     match llm_source.resolve().await {
         Ok(result) if result.credentials.is_empty() => {
@@ -156,36 +209,7 @@ async fn build_registry(
             }
             Ok((build_no_backend(), false))
         }
-        Ok(_result) => {
-            let model = spec.model.clone();
-            let provider = spec.provider;
-            let fallback_chain = spec.fallback_chain.clone();
-            let mcp_servers = spec.mcp_servers.clone();
-            let llm_source_for_api = Arc::clone(&llm_source);
-            let steering_hub_for_api = Arc::clone(&steering_hub);
-            let tool_env_provider_for_backend = Arc::clone(&tool_env_provider);
-            let registry = Arc::new(default_registry(interviewer, move || {
-                let tool_env_provider = Arc::clone(&tool_env_provider_for_backend);
-                let api = AgentApiBackend::new(
-                    model.clone(),
-                    provider,
-                    fallback_chain.clone(),
-                    Arc::clone(&llm_source_for_api),
-                    Arc::clone(&steering_hub_for_api),
-                )
-                .with_tool_env_provider(tool_env_provider.clone())
-                .with_mcp_servers(mcp_servers.clone());
-                let cli = cli_resolver
-                    .clone()
-                    .map_or_else(
-                        || AgentCliBackend::new_from_env(model.clone(), provider),
-                        |resolver| AgentCliBackend::new(model.clone(), provider, resolver),
-                    )
-                    .with_tool_env_provider(tool_env_provider, github_token_refresh_managed);
-                Some(Box::new(BackendRouter::new(Box::new(api), cli)))
-            }));
-            Ok((registry, false))
-        }
+        Ok(_result) => Ok((build_llm_registry(), false)),
         Err(e) => {
             if graph_needs_llm {
                 return Err(Error::Precondition(format!(
@@ -195,6 +219,10 @@ async fn build_registry(
             Ok((build_no_backend(), false))
         }
     }
+}
+
+fn graph_needs_api_backend(graph: &graph::Graph) -> bool {
+    graph.nodes.values().any(routing::node_needs_api_backend)
 }
 
 fn build_llm_source(vault: Option<Arc<AsyncRwLock<Vault>>>) -> Arc<dyn CredentialSource> {
@@ -666,6 +694,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use fabro_acp::test_support::fake_acp_agent_script;
     use fabro_auth::{AuthCredential, AuthDetails};
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
     use fabro_interview::AutoApproveInterviewer;
@@ -674,9 +703,11 @@ mod tests {
     use fabro_types::{EventBody, RunEvent, RunId, WorkflowSettings, fixtures};
     use fabro_vault::{SecretType, Vault};
     use object_store::memory::InMemory;
+    use tokio::fs::{create_dir_all, write};
     use tokio::sync::RwLock as AsyncRwLock;
 
     use super::*;
+    use crate::context::{Context, keys};
     use crate::event::StoreProgressLogger;
     use crate::pipeline::types::InitOptions;
     use crate::records::RunSpec;
@@ -995,6 +1026,170 @@ mod tests {
         .unwrap();
 
         assert!(!effective_dry_run);
+    }
+
+    #[tokio::test]
+    async fn initialize_executes_acp_backend_node_from_registry() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("run");
+        create_dir_all(&run_dir).await.unwrap();
+        let script_path = temp.path().join("fake_acp_agent.py");
+        write(&script_path, fake_acp_agent_script()).await.unwrap();
+
+        let source = format!(
+            r#"digraph test {{
+  start [shape=Mdiamond];
+  writer [type="agent", backend="acp", provider="openai", model="fake-acp", prompt="write hello", acp_command="python3 {}"];
+  exit [shape=Msquare];
+  start -> writer;
+  writer -> exit;
+}}"#,
+            script_path.display()
+        );
+        let mut graph = Graph::new("test");
+        let mut start = Node::new("start");
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
+        let mut writer = Node::new("writer");
+        writer
+            .attrs
+            .insert("type".to_string(), AttrValue::String("agent".to_string()));
+        writer
+            .attrs
+            .insert("backend".to_string(), AttrValue::String("acp".to_string()));
+        writer.attrs.insert(
+            "provider".to_string(),
+            AttrValue::String("openai".to_string()),
+        );
+        writer.attrs.insert(
+            "model".to_string(),
+            AttrValue::String("fake-acp".to_string()),
+        );
+        writer.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("write hello".to_string()),
+        );
+        writer.attrs.insert(
+            "acp_command".to_string(),
+            AttrValue::String(format!(
+                "python3 {}",
+                fabro_sandbox::shell_quote(&script_path.to_string_lossy())
+            )),
+        );
+        let mut exit = Node::new("exit");
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
+        graph.nodes.insert("start".to_string(), start);
+        graph.nodes.insert("writer".to_string(), writer);
+        graph.nodes.insert("exit".to_string(), exit);
+        graph.edges.push(Edge::new("start", "writer"));
+        graph.edges.push(Edge::new("writer", "exit"));
+
+        let mut vault = Vault::load(temp.path().join("secrets.json")).unwrap();
+        vault
+            .set(
+                "openai",
+                &serde_json::to_string(&AuthCredential {
+                    provider: fabro_llm::Provider::OpenAi,
+                    details:  AuthDetails::ApiKey {
+                        key: "openai-key".to_string(),
+                    },
+                })
+                .unwrap(),
+                SecretType::Credential,
+                None,
+            )
+            .unwrap();
+        let vault = Arc::new(AsyncRwLock::new(vault));
+
+        let emitter = Arc::new(crate::event::Emitter::new(test_run_id()));
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        emitter.on_event({
+            let seen = Arc::clone(&seen);
+            move |event| seen.lock().unwrap().push(event.event_name().to_string())
+        });
+        let store = memory_store();
+        let run_store = store.create_run(&test_run_id()).await.unwrap();
+        let initialized = initialize(test_persisted(graph, source, &run_dir), InitOptions {
+            run_id:            test_run_id(),
+            run_store:         run_store.into(),
+            dry_run:           false,
+            emitter:           emitter.clone(),
+            sandbox:           SandboxSpec::Local {
+                working_directory: temp.path().to_path_buf(),
+            },
+            llm:               LlmSpec {
+                model:          "fake-acp".to_string(),
+                provider:       fabro_llm::Provider::OpenAi,
+                fallback_chain: Vec::new(),
+                mcp_servers:    Vec::new(),
+                dry_run:        false,
+            },
+            interviewer:       Arc::new(AutoApproveInterviewer::engine()),
+            steering_hub:      Arc::new(crate::steering_hub::SteeringHub::new(emitter)),
+            lifecycle:         crate::run_options::LifecycleOptions {
+                setup_commands:           Vec::new(),
+                setup_command_timeout_ms: 1_000,
+                devcontainer_phases:      Vec::new(),
+            },
+            run_options:       test_settings(&run_dir),
+            workflow_path:     None,
+            workflow_bundle:   None,
+            hooks:             fabro_hooks::HookSettings { hooks: vec![] },
+            sandbox_env:       SandboxEnvSpec {
+                devcontainer_env:   HashMap::new(),
+                toml_env:           HashMap::new(),
+                github_permissions: None,
+                origin_url:         None,
+            },
+            vault:             Some(vault),
+            devcontainer:      None,
+            git:               None,
+            run_control:       None,
+            registry_override: None,
+            artifact_sink:     None,
+            checkpoint:        None,
+            seed_context:      None,
+        })
+        .await
+        .unwrap();
+
+        let node = initialized.graph.nodes.get("writer").unwrap().clone();
+        let handler = initialized.engine.registry.resolve(&node);
+        let context = Context::new();
+        context.set(
+            keys::INTERNAL_RUN_ID,
+            serde_json::json!(test_run_id().to_string()),
+        );
+        let outcome = handler
+            .execute(
+                &node,
+                &context,
+                &initialized.graph,
+                &initialized.run_options.run_dir,
+                &initialized.engine,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            outcome.context_updates.get(&keys::response_key("writer")),
+            Some(&serde_json::json!("hello from acp"))
+        );
+        assert!(
+            seen.lock()
+                .unwrap()
+                .contains(&"agent.acp.started".to_string())
+        );
+        assert!(
+            seen.lock()
+                .unwrap()
+                .contains(&"agent.acp.completed".to_string())
+        );
     }
 
     #[tokio::test]

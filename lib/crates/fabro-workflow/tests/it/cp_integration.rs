@@ -17,6 +17,9 @@
 use fabro_sandbox::reconnect::reconnect;
 use fabro_types::{RunSandbox, RunSandboxRuntime, SandboxProvider};
 
+const DOCKER_MANAGED_LABEL: &str = "sh.fabro.managed";
+const DOCKER_CP_IMAGE: &str = "buildpack-deps:noble";
+
 // ---------------------------------------------------------------------------
 // Local sandbox
 // ---------------------------------------------------------------------------
@@ -143,14 +146,84 @@ fn docker_record(container_id: &str) -> RunSandbox {
     }
 }
 
+struct DockerCpContainer {
+    id:      String,
+    cleanup: bool,
+}
+
+impl Drop for DockerCpContainer {
+    fn drop(&mut self) {
+        if self.cleanup {
+            let _ = std::process::Command::new("docker")
+                .args(["rm", "-f", &self.id])
+                .output();
+        }
+    }
+}
+
+fn docker_cp_container() -> DockerCpContainer {
+    if let Ok(id) = std::env::var("FABRO_DOCKER_CP_CONTAINER") {
+        return DockerCpContainer { id, cleanup: false };
+    }
+
+    ensure_docker_image(DOCKER_CP_IMAGE);
+    let output = std::process::Command::new("docker")
+        .args([
+            "run",
+            "-d",
+            "--label",
+            &format!("{DOCKER_MANAGED_LABEL}=true"),
+            "--workdir",
+            "/workspace",
+            DOCKER_CP_IMAGE,
+            "sh",
+            "-c",
+            "mkdir -p /workspace && sleep 300",
+        ])
+        .output()
+        .expect("docker run should execute");
+    assert!(
+        output.status.success(),
+        "docker run failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let id = String::from_utf8(output.stdout)
+        .expect("docker run stdout should be UTF-8")
+        .trim()
+        .to_string();
+    assert!(!id.is_empty(), "docker run should return a container id");
+    DockerCpContainer { id, cleanup: true }
+}
+
+fn ensure_docker_image(image: &str) {
+    let inspect = std::process::Command::new("docker")
+        .args(["image", "inspect", image])
+        .output()
+        .expect("docker image inspect should execute");
+    if inspect.status.success() {
+        return;
+    }
+
+    let pull = std::process::Command::new("docker")
+        .args(["pull", image])
+        .output()
+        .expect("docker pull should execute");
+    assert!(
+        pull.status.success(),
+        "docker pull {image} failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&pull.stdout),
+        String::from_utf8_lossy(&pull.stderr)
+    );
+}
+
 #[tokio::test]
 #[ignore] // requires Docker daemon
 async fn docker_cp_upload_download_round_trip() {
-    let container_id = std::env::var("FABRO_DOCKER_CP_CONTAINER")
-        .expect("set FABRO_DOCKER_CP_CONTAINER to an initialized Fabro-managed container ID");
+    let container = docker_cp_container();
     let scratch = tempfile::tempdir().unwrap();
 
-    let record = docker_record(&container_id);
+    let record = docker_record(&container.id);
     let sandbox = reconnect(&record, None).await.expect("reconnect docker");
 
     // Upload a text file
@@ -176,11 +249,10 @@ async fn docker_cp_upload_download_round_trip() {
 #[tokio::test]
 #[ignore] // requires Docker daemon
 async fn docker_cp_binary_round_trip() {
-    let container_id = std::env::var("FABRO_DOCKER_CP_CONTAINER")
-        .expect("set FABRO_DOCKER_CP_CONTAINER to an initialized Fabro-managed container ID");
+    let container = docker_cp_container();
     let scratch = tempfile::tempdir().unwrap();
 
-    let record = docker_record(&container_id);
+    let record = docker_record(&container.id);
     let sandbox = reconnect(&record, None).await.expect("reconnect docker");
 
     let binary: Vec<u8> = (0..=255).collect();
@@ -204,11 +276,10 @@ async fn docker_cp_binary_round_trip() {
 #[tokio::test]
 #[ignore] // requires Docker daemon
 async fn docker_cp_creates_parent_dirs() {
-    let container_id = std::env::var("FABRO_DOCKER_CP_CONTAINER")
-        .expect("set FABRO_DOCKER_CP_CONTAINER to an initialized Fabro-managed container ID");
+    let container = docker_cp_container();
     let scratch = tempfile::tempdir().unwrap();
 
-    let record = docker_record(&container_id);
+    let record = docker_record(&container.id);
     let sandbox = reconnect(&record, None).await.expect("reconnect docker");
 
     let content = b"nested docker file\n";

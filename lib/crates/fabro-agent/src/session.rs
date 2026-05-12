@@ -493,6 +493,8 @@ impl Session {
                             resolved.push(McpServerSettings {
                                 name:                 config.name.clone(),
                                 transport:            McpTransport::Http { url, headers },
+                                current_dir:          config.current_dir.clone(),
+                                clear_env:            config.clear_env,
                                 startup_timeout_secs: config.startup_timeout_secs,
                                 tool_timeout_secs:    config.tool_timeout_secs,
                             });
@@ -3367,6 +3369,8 @@ mod tests {
                     command: vec!["python3".into(), test_server],
                     env:     HashMap::new(),
                 },
+                current_dir:          None,
+                clear_env:            false,
                 startup_timeout_secs: 10,
                 tool_timeout_secs:    30,
             }],

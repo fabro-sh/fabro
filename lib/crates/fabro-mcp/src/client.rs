@@ -22,6 +22,8 @@ enum ClientState {
     Connecting(Option<PendingTransport>),
     /// Handshake complete, ready for tool calls.
     Ready(Arc<RunningService<RoleClient, LoggingClientHandler>>),
+    /// Connection was explicitly closed.
+    Closed,
 }
 
 enum PendingTransport {
@@ -51,8 +53,14 @@ impl McpClient {
                     .stderr(Stdio::piped())
                     .kill_on_drop(true);
 
+                if config.clear_env {
+                    cmd.env_clear();
+                }
                 if !env.is_empty() {
                     cmd.envs(env);
+                }
+                if let Some(current_dir) = config.current_dir.as_ref() {
+                    cmd.current_dir(current_dir);
                 }
 
                 #[cfg(unix)]
@@ -116,6 +124,7 @@ impl McpClient {
                     .take()
                     .ok_or_else(|| anyhow!("client already initializing"))?,
                 ClientState::Ready(_) => return Err(anyhow!("client already initialized")),
+                ClientState::Closed => return Err(anyhow!("MCP client is shut down")),
             };
 
             // Drop the lock before the blocking handshake
@@ -243,11 +252,38 @@ impl McpClient {
         Ok(result)
     }
 
+    pub async fn shutdown(self) -> Result<()> {
+        let service = {
+            let mut guard = self.state.lock().await;
+            match std::mem::replace(&mut *guard, ClientState::Closed) {
+                ClientState::Connecting(_) | ClientState::Closed => None,
+                ClientState::Ready(service) => Some(service),
+            }
+        };
+
+        if let Some(service) = service {
+            match Arc::try_unwrap(service) {
+                Ok(mut service) => {
+                    service
+                        .close_with_timeout(Duration::from_secs(2))
+                        .await
+                        .context("failed to shut down MCP client")?;
+                }
+                Err(service) => {
+                    service.cancellation_token().cancel();
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     async fn service(&self) -> Result<Arc<RunningService<RoleClient, LoggingClientHandler>>> {
         let guard = self.state.lock().await;
         match &*guard {
             ClientState::Ready(service) => Ok(Arc::clone(service)),
             ClientState::Connecting(_) => Err(anyhow!("MCP client not initialized")),
+            ClientState::Closed => Err(anyhow!("MCP client is shut down")),
         }
     }
 }

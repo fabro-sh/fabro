@@ -26,14 +26,17 @@ fn local_run_lifecycle() {
     };
 
     // 1. Run a workflow
-    cmd(&[
-        "run",
-        "--auto-approve",
-        "--sandbox",
-        "local",
-        fixture("command_pipeline.fabro").to_str().unwrap(),
-    ])
-    .success();
+    context
+        .run_cmd()
+        .args([
+            "--auto-approve",
+            "--sandbox",
+            "local",
+            fixture("command_pipeline.fabro").to_str().unwrap(),
+        ])
+        .timeout(timeout_for("local"))
+        .assert()
+        .success();
 
     // 2. ps -a --json — should list exactly one run
     let label = context.test_case_label();

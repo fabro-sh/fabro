@@ -102,6 +102,10 @@ impl CommandContext {
         &self.cwd
     }
 
+    pub(crate) fn storage_dir(&self) -> &Path {
+        &self.storage_dir
+    }
+
     pub(crate) fn run_settings(&self) -> Result<&RunNamespace> {
         self.run_settings
             .as_ref()

@@ -354,6 +354,8 @@ pub(crate) fn resolve_mcp_entry(name: &str, entry: &McpEntryLayer) -> McpServerS
     McpServerSettings {
         name: name.to_string(),
         transport,
+        current_dir: None,
+        clear_env: false,
         startup_timeout_secs,
         tool_timeout_secs,
     }

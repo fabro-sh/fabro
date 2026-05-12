@@ -71,7 +71,7 @@ async fn run_bulk(action: Action, identifiers: &[String], ctx: &CommandContext) 
             Action::Unarchive => client.unarchive_run(&run_id).await,
         };
         match result {
-            Ok(()) => {
+            Ok(_) => {
                 let run_id_string = run_id.to_string();
                 changed.push(run_id_string.clone());
                 if !json {

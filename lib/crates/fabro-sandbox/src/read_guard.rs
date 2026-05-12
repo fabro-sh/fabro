@@ -277,4 +277,22 @@ mod tests {
 
         assert!(result.is_ok());
     }
+
+    #[tokio::test]
+    async fn stdio_process_forwards_to_inner_sandbox() {
+        let mock = Arc::new(MockSandbox::linux());
+        let env = ReadBeforeWriteSandbox::new(mock.clone());
+
+        env.spawn_stdio_process("python fake_agent.py", Some("/work/sub"), None, None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            *mock.captured_command.lock().unwrap(),
+            Some("python fake_agent.py".to_string())
+        );
+        assert_eq!(*mock.captured_working_dirs.lock().unwrap(), vec![Some(
+            "/work/sub".to_string()
+        )]);
+    }
 }

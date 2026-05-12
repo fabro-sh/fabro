@@ -6,7 +6,7 @@ use fabro_agent::Sandbox;
 use fabro_graphviz::graph::{Graph, Node};
 use tokio_util::sync::CancellationToken;
 
-use super::agent::{CodergenBackend, CodergenResult};
+use super::agent::{CodergenBackend, CodergenResult, CodergenRunRequest};
 use super::{EngineServices, Handler};
 use crate::context::{Context, keys};
 use crate::error::Error;
@@ -260,16 +260,16 @@ async fn llm_evaluate(
 
     // Fan-in evaluation runs outside a thread context, so pass None
     match backend
-        .run(
-            &eval_node,
-            &full_prompt,
+        .run(CodergenRunRequest {
+            node: &eval_node,
+            prompt: &full_prompt,
             context,
-            None,
+            thread_id: None,
             emitter,
             sandbox,
-            None,
+            tool_hooks: None,
             cancel_token,
-        )
+        })
         .await
     {
         Ok(CodergenResult::Full(outcome)) => {
@@ -469,23 +469,13 @@ mod tests {
     async fn fan_in_with_backend_llm_eval() {
         use tempfile::TempDir;
 
-        use crate::handler::agent::CodergenBackend;
+        use crate::handler::agent::{CodergenBackend, CodergenRunRequest};
 
         struct MockBackend;
 
         #[async_trait]
         impl CodergenBackend for MockBackend {
-            async fn run(
-                &self,
-                _node: &Node,
-                _prompt: &str,
-                _context: &Context,
-                _thread_id: Option<&str>,
-                _emitter: &Arc<Emitter>,
-                _sandbox: &Arc<dyn Sandbox>,
-                _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-                _cancel_token: CancellationToken,
-            ) -> Result<CodergenResult, Error> {
+            async fn run(&self, _request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
                 // Return text that contains the ID "branch_b"
                 Ok(CodergenResult::Text {
                     text:              "The best candidate is branch_b".to_string(),

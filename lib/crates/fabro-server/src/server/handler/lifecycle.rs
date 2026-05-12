@@ -5,7 +5,7 @@ use super::super::{
     Principal, RequiredUser, Response, RewindRequest, RewindResponse, Router, RunAnswerTransport,
     RunControlAction, RunExecutionMode, RunId, RunStatus, StartRunRequest, State, StatusCode,
     Storage, TimelineEntryResponse, WORKER_CANCEL_GRACE, WorkflowError, append_control_request,
-    get, load_pending_control, managed_run, operations, parse_run_id_path,
+    durable_run_status, get, load_pending_control, managed_run, operations, parse_run_id_path,
     persist_cancelled_run_status, post, reject_if_archived, sleep, update_live_run_from_event,
     workflow_event,
 };
@@ -171,7 +171,7 @@ async fn cancel_run(
                 .into_response();
         }
     };
-    let (persist_cancelled_status, answer_transport, cancel_token, cancel_tx, worker_pid) = {
+    let cancel_target = {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         match runs.get_mut(&id) {
             Some(managed_run) => match managed_run.status {
@@ -192,7 +192,7 @@ async fn cancel_run(
                             reason: FailureReason::Cancelled,
                         };
                     }
-                    (
+                    Some((
                         persist_cancelled_status,
                         managed_run.answer_transport.clone(),
                         managed_run.cancel_token.clone(),
@@ -200,15 +200,20 @@ async fn cancel_run(
                             .then(|| managed_run.cancel_tx.take())
                             .flatten(),
                         managed_run.worker_pid,
-                    )
+                    ))
                 }
                 _ => {
                     return ApiError::new(StatusCode::CONFLICT, "Run is not cancellable.")
                         .into_response();
                 }
             },
-            None => return ApiError::not_found("Run not found.").into_response(),
+            None => None,
         }
+    };
+    let Some((persist_cancelled_status, answer_transport, cancel_token, cancel_tx, worker_pid)) =
+        cancel_target
+    else {
+        return unmanaged_cancel_response(state.as_ref(), id).await;
     };
 
     if pending_control != Some(RunControlAction::Cancel) {
@@ -254,6 +259,23 @@ async fn cancel_run(
     }
 
     run_response(state.as_ref(), id, StatusCode::OK).await
+}
+
+async fn unmanaged_cancel_response(state: &AppState, id: RunId) -> Response {
+    match durable_run_status(state, id).await {
+        Ok(Some(status)) if status.is_terminal() => ApiError::new(
+            StatusCode::CONFLICT,
+            "Run is already terminal and cannot be cancelled.",
+        )
+        .into_response(),
+        Ok(Some(_)) => {
+            ApiError::new(StatusCode::CONFLICT, "Run is not cancellable.").into_response()
+        }
+        Ok(None) => ApiError::not_found("Run not found.").into_response(),
+        Err(err) => {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
+    }
 }
 
 /// How `pause_run` should enact the transition, chosen from the current run

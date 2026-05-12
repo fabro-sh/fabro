@@ -79,6 +79,7 @@ fabro [OPTIONS] [COMMAND]
 | `fabro inspect` | Show detailed information about a workflow run |
 | `fabro install` | Set up the Fabro environment (LLMs, certs, GitHub) |
 | `fabro logs` | View the raw worker tracing log of a workflow run |
+| `fabro mcp` | Model Context Protocol server |
 | `fabro model` | List and test LLM models |
 | `fabro pr` | Pull request operations |
 | `fabro preflight` | Validate run configuration without executing |
@@ -509,6 +510,73 @@ fabro logs [OPTIONS] <RUN>
 | --- | --- |
 | `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
 | `-n, --tail <tail>` | Lines from end (default: all) |
+
+### `fabro mcp`
+
+Model Context Protocol server
+
+```bash
+fabro mcp [OPTIONS] <COMMAND>
+```
+
+#### Subcommands
+
+| Command | Description |
+| --- | --- |
+| `fabro mcp config` | Print MCP client configuration JSON |
+| `fabro mcp init` | Configure an MCP client to launch Fabro |
+| `fabro mcp start` | Start the Fabro MCP server over stdio |
+
+#### `fabro mcp config`
+
+Print MCP client configuration JSON
+
+```bash
+fabro mcp config [OPTIONS]
+```
+
+#### Options
+
+| Option | Description |
+| --- | --- |
+| `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
+| `--storage-dir <storage_dir>` | Local storage directory (default: ~/.fabro/storage) |
+
+#### `fabro mcp init`
+
+Configure an MCP client to launch Fabro
+
+```bash
+fabro mcp init [OPTIONS] <AGENT>
+```
+
+#### Arguments
+
+| Name | Description |
+| --- | --- |
+| `AGENT` | Values: `claude`, `cursor`, `windsurf` |
+
+#### Options
+
+| Option | Description |
+| --- | --- |
+| `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
+| `--storage-dir <storage_dir>` | Local storage directory (default: ~/.fabro/storage) |
+
+#### `fabro mcp start`
+
+Start the Fabro MCP server over stdio
+
+```bash
+fabro mcp start [OPTIONS]
+```
+
+#### Options
+
+| Option | Description |
+| --- | --- |
+| `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
+| `--storage-dir <storage_dir>` | Local storage directory (default: ~/.fabro/storage) |
 
 ### `fabro model`
 

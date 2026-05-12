@@ -1,0 +1,47 @@
+---
+title: "Fabro MCP server"
+date: "2026-05-11"
+---
+
+## Fabro MCP server
+
+Fabro now ships a stdio-based Model Context Protocol server, so MCP clients can manage workflow runs through the authenticated `fabro` CLI. It reuses normal CLI server targeting, OAuth refresh, dev-token and local-server handling, proxy behavior, and storage configuration instead of requiring a separate MCP authentication flow.
+
+```bash
+fabro mcp init claude
+```
+
+You can also print client configuration JSON or start the server directly:
+
+```bash
+fabro mcp config
+fabro mcp start
+```
+
+## Run management from MCP clients
+
+The MCP server exposes structured tools for creating runs, searching runs, reading run events, interacting with pending human questions, and waiting for runs to finish. MCP-created runs use the same manifest construction and override semantics as CLI-created runs, so workflow paths, goals, inputs, labels, model settings, sandbox settings, and dry-run options behave consistently.
+
+This lets agent tools orchestrate Fabro runs without scraping CLI output or hand-rolling HTTP clients.
+
+## More
+
+<Accordion title="CLI">
+- Added `fabro mcp start` to launch the MCP server over stdio
+- Added `fabro mcp config` to print MCP client configuration JSON
+- Added `fabro mcp init <agent>` for Claude, Cursor, and Windsurf client setup
+</Accordion>
+
+<Accordion title="Workflows">
+- Added a bundled `daytona-medium` workflow for verifying the Daytona Medium sandbox starts with standard tooling
+</Accordion>
+
+<Accordion title="Improvements">
+- MCP run tools can create multiple runs, apply scalar input overrides, attach labels, start or stage runs, and return structured run summaries
+- MCP event tools support category, event type, text, timestamp, direction, and pagination filters
+- MCP interact tools support cancelling, archiving, unarchiving, inspecting questions, answering questions, and sending run messages
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed deleting terminal runs so successful completions are not followed by cancelled failure events
+</Accordion>

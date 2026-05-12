@@ -1,0 +1,78 @@
+---
+title: "Sparse inputs, sandbox terminals, and run file diffs"
+date: "2026-05-09"
+---
+
+<Warning>
+**Automatic retros have been removed.** Workflow runs now go directly from execution to finalization and optional pull request creation. The retro crate, retro events, retro docs page, PR retro section, `--no-retro`, `[run.execution].retros`, `features.retros`, and retro projection fields are no longer part of the product surface.
+
+To migrate:
+1. Use Run Events, Stages, Turns, logs, and dumps for post-run analysis.
+2. Remove retro-specific CLI flags, config keys, API field reads, and docs links.
+</Warning>
+
+<Warning>
+**Public local worktree mode has been removed.** Local sandbox runs now execute directly in the resolved working directory, and `--in-place` plus `run.sandbox.local.worktree_mode` are no longer supported.
+
+To migrate:
+1. Run with `--sandbox local` from the checkout you want Fabro to use.
+2. Create a separate clone or Git worktree yourself when you want local isolation.
+3. Use Docker or Daytona for managed sandbox isolation.
+</Warning>
+
+## Sparse input overrides
+
+Workflow inputs can now be overridden one key at a time from the CLI. Repeat `-I` or `--input` on `fabro run`, `fabro create`, and `fabro preflight` to replace specific inputs while preserving unrelated inherited values from settings and workflow config.
+
+```bash
+fabro run .fabro/workflows/check/workflow.toml -I repo_name=fabro-2 --input language=rust
+```
+
+Input-driven prompt paths, imports, and child workflow paths are rendered with the effective inputs before bundling, so sparse overrides work even when they change which files a workflow references.
+
+## Sandbox access from run detail
+
+Run detail now has a dedicated Sandbox tab and terminal route. You can inspect the run sandbox from the web app, open an interactive terminal, copy Docker exec access commands, and see sandbox identity information without switching to a separate CLI session.
+
+This also gives long-running debug sessions a clearer place to live. Terminal framing, scroll behavior, Daytona proxying, and terminal error states were tightened so the terminal stays usable inside the run UI.
+
+## Run file diff controls
+
+The Files Changed view can now compare committed run history and sandbox file scopes from the same toolbar. You can switch diff scope next to the file count, pick commits from the run history, and refresh patch diffs when the selected scope changes.
+
+This makes the file browser useful both during active sandbox work and after a run has committed checkpoints.
+
+## More
+
+<Accordion title="API">
+- Run file APIs now expose commit lists and diff scope metadata for committed history and sandbox comparisons
+- Run payloads, events, and mutations now support explicit run titles
+- Billing projections now include live per-stage token usage while a run is active
+- Sandbox details now expose control-plane metadata used by the run Sandbox tab
+</Accordion>
+
+<Accordion title="CLI">
+- Added repeatable `-I, --input <key=value>` to `fabro run`, `fabro create`, and `fabro preflight`
+- Added Docker host preflight checks for Docker-based deployment and sandbox diagnostics
+</Accordion>
+
+<Accordion title="Improvements">
+- Run titles can now be edited inline from the run header
+- Run title fields now preserve explicit titles across create, fork, archive, unarchive, and attach flows
+- Added a demo-only Start tab for app-shell demos
+- Docker Compose deployment defaults now include safer sandbox-facing defaults
+- Added Thread DNA timeline strips to debug events and agent stage views
+- Added specialized stage renderers for non-agent workflow handlers
+- The Billing tab now shows an empty state when no models were used
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed deletion of unreadable runs
+- Fixed CLI verification failure handling
+- Fixed Daytona terminals to use the toolbox proxy and hide control frames
+- Fixed terminal dock spacing, bottom-row clipping, and overlap with the steer bar
+- Fixed run file diffs refreshing when the selected scope changes
+- Fixed scoped run file diffs to only include tracked files
+- Fixed deprecated project directory settings being applied to workflow discovery
+- Fixed embedded build Git metadata being stale on branch commits
+</Accordion>

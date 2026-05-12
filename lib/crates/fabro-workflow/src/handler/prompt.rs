@@ -6,7 +6,8 @@ use fabro_graphviz::graph::{Graph, Node};
 use fabro_model::Provider;
 
 use super::agent::{
-    CodergenBackend, CodergenResult, expand_variables, extract_status_fields, truncate,
+    CodergenBackend, CodergenResult, OneShotRequest, expand_variables, extract_status_fields,
+    truncate,
 };
 use super::{EngineServices, Handler};
 use crate::context::{Context, WorkflowContext, keys};
@@ -120,13 +121,15 @@ impl Handler for PromptHandler {
         let (response_text, stage_usage, backend_files_touched) =
             if let Some(backend) = &self.backend {
                 let result = backend
-                    .one_shot(
+                    .one_shot(OneShotRequest {
                         node,
-                        &prompt,
-                        system_prompt.as_deref(),
-                        &services.run.emitter,
-                        &stage_scope,
-                    )
+                        prompt: &prompt,
+                        system_prompt: system_prompt.as_deref(),
+                        emitter: &services.run.emitter,
+                        stage_scope: &stage_scope,
+                        sandbox: &services.run.sandbox,
+                        cancel_token: services.run.cancel_token(),
+                    })
                     .await;
                 match result {
                     Ok(CodergenResult::Full(outcome)) => return Ok(outcome),
@@ -207,10 +210,10 @@ mod tests {
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
     use tempfile::TempDir;
-    use tokio_util::sync::CancellationToken;
 
     use super::*;
     use crate::event::Emitter;
+    use crate::handler::agent::CodergenRunRequest;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
@@ -308,33 +311,17 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_handler_dispatches_to_backend_one_shot() {
-        use fabro_agent::Sandbox;
-
         struct OneShotBackend;
 
         #[async_trait]
         impl CodergenBackend for OneShotBackend {
-            async fn run(
-                &self,
-                _node: &Node,
-                _prompt: &str,
-                _context: &Context,
-                _thread_id: Option<&str>,
-                _emitter: &Arc<Emitter>,
-                _sandbox: &Arc<dyn Sandbox>,
-                _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-                _cancel_token: CancellationToken,
-            ) -> Result<CodergenResult, Error> {
+            async fn run(&self, _request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
                 panic!("run() should not be called for prompt handler");
             }
 
             async fn one_shot(
                 &self,
-                _node: &Node,
-                _prompt: &str,
-                _system_prompt: Option<&str>,
-                _emitter: &Arc<Emitter>,
-                _stage_scope: &StageScope,
+                _request: OneShotRequest<'_>,
             ) -> Result<CodergenResult, Error> {
                 Ok(CodergenResult::Text {
                     text:              "one-shot response".to_string(),
@@ -371,33 +358,17 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_handler_projects_provider_used_from_prompt_events() {
-        use fabro_agent::Sandbox;
-
         struct ProviderOneShotBackend;
 
         #[async_trait]
         impl CodergenBackend for ProviderOneShotBackend {
-            async fn run(
-                &self,
-                _node: &Node,
-                _prompt: &str,
-                _context: &Context,
-                _thread_id: Option<&str>,
-                _emitter: &Arc<Emitter>,
-                _sandbox: &Arc<dyn Sandbox>,
-                _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-                _cancel_token: CancellationToken,
-            ) -> Result<CodergenResult, Error> {
+            async fn run(&self, _request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
                 panic!("run() should not be called for prompt handler");
             }
 
             async fn one_shot(
                 &self,
-                _node: &Node,
-                _prompt: &str,
-                _system_prompt: Option<&str>,
-                _emitter: &Arc<Emitter>,
-                _stage_scope: &StageScope,
+                _request: OneShotRequest<'_>,
             ) -> Result<CodergenResult, Error> {
                 Ok(CodergenResult::Text {
                     text:              "one-shot response".to_string(),
@@ -437,30 +408,14 @@ mod tests {
 
     #[async_trait]
     impl CodergenBackend for OneShotCapturingBackend {
-        async fn run(
-            &self,
-            _node: &Node,
-            _prompt: &str,
-            _context: &Context,
-            _thread_id: Option<&str>,
-            _emitter: &Arc<Emitter>,
-            _sandbox: &Arc<dyn fabro_agent::Sandbox>,
-            _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            _cancel_token: CancellationToken,
-        ) -> Result<CodergenResult, Error> {
+        async fn run(&self, _request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
             panic!("run() should not be called for prompt handler");
         }
 
-        async fn one_shot(
-            &self,
-            _node: &Node,
-            prompt: &str,
-            system_prompt: Option<&str>,
-            _emitter: &Arc<Emitter>,
-            _stage_scope: &StageScope,
-        ) -> Result<CodergenResult, Error> {
-            *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
-            *self.captured_system_prompt.lock().unwrap() = Some(system_prompt.map(String::from));
+        async fn one_shot(&self, request: OneShotRequest<'_>) -> Result<CodergenResult, Error> {
+            *self.captured_prompt.lock().unwrap() = Some(request.prompt.to_string());
+            *self.captured_system_prompt.lock().unwrap() =
+                Some(request.system_prompt.map(String::from));
             Ok(CodergenResult::Text {
                 text:              "classified".to_string(),
                 usage:             None,

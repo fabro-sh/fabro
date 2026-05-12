@@ -2,14 +2,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
-use fabro_config::{
-    CliLayer, CliOutputLayer, ReplaceMap, RunExecutionLayer, RunGoalLayer, RunLayer, RunModelLayer,
-    RunSandboxLayer, parse_input_overrides,
-};
+use fabro_config::{CliLayer, CliOutputLayer, RunGoalLayer, RunLayer, parse_input_overrides};
+use fabro_manifest::{RunOverrideInput, build_run_overrides};
 use fabro_sandbox::SandboxProvider;
 use fabro_types::settings::cli::OutputVerbosity;
 use fabro_types::settings::interp::InterpString;
-use fabro_types::settings::run::{ApprovalMode, RunMode};
 
 use crate::args::{PreflightArgs, RunArgs};
 
@@ -30,48 +27,6 @@ pub(crate) fn parse_labels(labels: &[String]) -> HashMap<String, String> {
         .filter_map(|label| label.split_once('='))
         .map(|(key, value)| (key.to_string(), value.to_string()))
         .collect()
-}
-
-fn model_from_args(model: Option<&str>, provider: Option<&str>) -> Option<RunModelLayer> {
-    if model.is_none() && provider.is_none() {
-        return None;
-    }
-    Some(RunModelLayer {
-        provider:  provider.map(InterpString::parse),
-        name:      model.map(InterpString::parse),
-        fallbacks: Vec::new(),
-        controls:  None,
-    })
-}
-
-fn sandbox_layer(
-    sandbox: Option<SandboxProvider>,
-    preserve: Option<bool>,
-) -> Option<RunSandboxLayer> {
-    if sandbox.is_none() && preserve.is_none() {
-        return None;
-    }
-    Some(RunSandboxLayer {
-        provider: sandbox.map(|p| p.to_string()),
-        preserve,
-        ..RunSandboxLayer::default()
-    })
-}
-
-fn execution_layer(dry_run: Option<bool>, auto_approve: Option<bool>) -> Option<RunExecutionLayer> {
-    if dry_run.is_none() && auto_approve.is_none() {
-        return None;
-    }
-    Some(RunExecutionLayer {
-        mode:     dry_run.map(|d| if d { RunMode::DryRun } else { RunMode::Normal }),
-        approval: auto_approve.map(|a| {
-            if a {
-                ApprovalMode::Auto
-            } else {
-                ApprovalMode::Prompt
-            }
-        }),
-    })
 }
 
 fn cli_layer_for_verbose(verbose: bool) -> Option<CliLayer> {
@@ -120,24 +75,22 @@ fn current_dir_or_dot() -> PathBuf {
 }
 
 pub(crate) fn run_args_overrides(args: &RunArgs) -> Result<ManifestSettingsOverrides> {
-    let model = model_from_args(args.model.as_deref(), args.provider.as_deref());
-    let sandbox = sandbox_layer(
-        args.sandbox.map(Into::into),
-        sparse_flag(args.preserve_sandbox),
-    );
-    let execution = execution_layer(sparse_flag(args.dry_run), sparse_flag(args.auto_approve));
-
     let cwd = current_dir_or_dot();
     let goal = goal_layer_from_args(args.goal.as_deref(), args.goal_file.as_deref(), &cwd)?;
-
-    let run = RunLayer {
-        goal,
-        metadata: ReplaceMap::from(parse_labels(&args.label)),
-        model,
-        sandbox,
-        execution,
-        ..RunLayer::default()
-    };
+    let sandbox = args.sandbox.map(SandboxProvider::from);
+    let sandbox_provider = sandbox.as_ref().map(ToString::to_string);
+    let mut run = build_run_overrides(RunOverrideInput {
+        goal:             None,
+        model:            args.model.as_deref(),
+        provider:         args.provider.as_deref(),
+        sandbox:          sandbox_provider.as_deref(),
+        docker_image:     None,
+        preserve_sandbox: sparse_flag(args.preserve_sandbox),
+        dry_run:          sparse_flag(args.dry_run),
+        auto_approve:     sparse_flag(args.auto_approve),
+        labels:           parse_labels(&args.label),
+    });
+    run.goal = goal;
 
     Ok(ManifestSettingsOverrides {
         run:             Some(run),
@@ -147,21 +100,23 @@ pub(crate) fn run_args_overrides(args: &RunArgs) -> Result<ManifestSettingsOverr
 }
 
 pub(crate) fn preflight_args_overrides(args: &PreflightArgs) -> Result<ManifestSettingsOverrides> {
-    let model = model_from_args(args.model.as_deref(), args.provider.as_deref());
-    let sandbox = args.sandbox.map(|s| RunSandboxLayer {
-        provider: Some(SandboxProvider::from(s).to_string()),
-        ..RunSandboxLayer::default()
-    });
-
     let cwd = current_dir_or_dot();
     let goal = goal_layer_from_args(args.goal.as_deref(), args.goal_file.as_deref(), &cwd)?;
-
-    let run = RunLayer {
-        goal,
-        model,
-        sandbox,
-        ..RunLayer::default()
-    };
+    let sandbox_provider = args
+        .sandbox
+        .map(|sandbox| SandboxProvider::from(sandbox).to_string());
+    let mut run = build_run_overrides(RunOverrideInput {
+        goal:             None,
+        model:            args.model.as_deref(),
+        provider:         args.provider.as_deref(),
+        sandbox:          sandbox_provider.as_deref(),
+        docker_image:     None,
+        preserve_sandbox: None,
+        dry_run:          None,
+        auto_approve:     None,
+        labels:           HashMap::new(),
+    });
+    run.goal = goal;
 
     Ok(ManifestSettingsOverrides {
         run:             Some(run),

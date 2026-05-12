@@ -23,6 +23,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use fabro_acp::test_support::fake_acp_agent_script;
 use fabro_config::RunScratch;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_graphviz::parser::parse;
@@ -37,11 +38,14 @@ use fabro_validate::{Severity, validate, validate_or_raise};
 use fabro_workflow::context::Context;
 use fabro_workflow::error::{Error, FailureSignatureExt};
 use fabro_workflow::event::{Emitter, Event};
-use fabro_workflow::handler::agent::{AgentHandler, CodergenBackend, CodergenResult};
+use fabro_workflow::handler::agent::{
+    AgentHandler, CodergenBackend, CodergenResult, CodergenRunRequest,
+};
 use fabro_workflow::handler::command::CommandHandler;
 use fabro_workflow::handler::conditional::ConditionalHandler;
 use fabro_workflow::handler::exit::ExitHandler;
 use fabro_workflow::handler::human::HumanHandler;
+use fabro_workflow::handler::llm::AgentAcpBackend;
 use fabro_workflow::handler::llm::cli::{AgentCliBackend, BackendRouter, parse_cli_response};
 use fabro_workflow::handler::manager_loop::SubWorkflowHandler;
 use fabro_workflow::handler::start::StartHandler;
@@ -61,6 +65,25 @@ fn local_env() -> Arc<dyn fabro_agent::Sandbox> {
     Arc::new(fabro_agent::LocalSandbox::new(
         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
     ))
+}
+
+fn codergen_run_request<'a>(
+    node: &'a Node,
+    prompt: &'a str,
+    context: &'a Context,
+    emitter: &'a Arc<Emitter>,
+    sandbox: &'a Arc<dyn fabro_agent::Sandbox>,
+) -> CodergenRunRequest<'a> {
+    CodergenRunRequest {
+        node,
+        prompt,
+        context,
+        thread_id: None,
+        emitter,
+        sandbox,
+        tool_hooks: None,
+        cancel_token: CancellationToken::new(),
+    }
 }
 
 fn test_run_id(label: &str) -> RunId {
@@ -1604,22 +1627,12 @@ struct MockCodergenBackend;
 
 #[async_trait::async_trait]
 impl CodergenBackend for MockCodergenBackend {
-    async fn run(
-        &self,
-        node: &Node,
-        prompt: &str,
-        _context: &Context,
-        _thread_id: Option<&str>,
-        _emitter: &Arc<Emitter>,
-        _sandbox: &Arc<dyn fabro_agent::Sandbox>,
-        _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-        _cancel_token: tokio_util::sync::CancellationToken,
-    ) -> Result<CodergenResult, Error> {
+    async fn run(&self, request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
         Ok(CodergenResult::Text {
             text:              format!(
                 "Response for {}: processed prompt '{}'",
-                node.id,
-                &prompt[..prompt.len().min(50)]
+                request.node.id,
+                &request.prompt[..request.prompt.len().min(50)]
             ),
             usage:             None,
             files_touched:     Vec::new(),
@@ -6281,9 +6294,10 @@ mod real_llm {
     use fabro_llm::providers::OpenAiAdapter;
     use fabro_llm::types::{Message, Request};
     use fabro_types::WorkflowSettings;
-    use fabro_workflow::context::Context;
     use fabro_workflow::error::Error;
-    use fabro_workflow::handler::agent::{AgentHandler, CodergenBackend, CodergenResult};
+    use fabro_workflow::handler::agent::{
+        AgentHandler, CodergenBackend, CodergenResult, CodergenRunRequest, OneShotRequest,
+    };
     use tokio_util::sync::CancellationToken;
 
     struct LlmCodergenBackend {
@@ -6294,29 +6308,12 @@ mod real_llm {
 
     #[async_trait]
     impl CodergenBackend for LlmCodergenBackend {
-        async fn run(
-            &self,
-            _node: &Node,
-            prompt: &str,
-            _context: &Context,
-            _thread_id: Option<&str>,
-            _emitter: &Arc<Emitter>,
-            _sandbox: &Arc<dyn fabro_agent::Sandbox>,
-            _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            _cancel_token: tokio_util::sync::CancellationToken,
-        ) -> Result<CodergenResult, Error> {
-            self.complete(prompt).await
+        async fn run(&self, request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
+            self.complete(request.prompt).await
         }
 
-        async fn one_shot(
-            &self,
-            _node: &Node,
-            prompt: &str,
-            _system_prompt: Option<&str>,
-            _emitter: &Arc<Emitter>,
-            _stage_scope: &fabro_workflow::event::StageScope,
-        ) -> Result<CodergenResult, Error> {
-            self.complete(prompt).await
+        async fn one_shot(&self, request: OneShotRequest<'_>) -> Result<CodergenResult, Error> {
+            self.complete(request.prompt).await
         }
     }
 
@@ -9656,14 +9653,25 @@ impl fabro_agent::Sandbox for CliTestEnv {
     ) -> fabro_sandbox::Result<fabro_agent::ExecResult> {
         self.commands.lock().unwrap().push(command.to_string());
 
-        // git diff calls: first pair returns empty (before), second pair returns
-        // configured files
-        if command.starts_with("git diff") || command.starts_with("git ls-files") {
+        // Changed-file snapshot calls: first returns empty (before), second
+        // returns configured files (after).
+        if command.contains("__FABRO_CHANGED_FILES_DIFF__")
+            || command.starts_with("git diff")
+            || command.starts_with("git ls-files")
+        {
             let call_num = self
                 .git_diff_call_count
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            // Calls 0,1 = before snapshot (empty), calls 2,3 = after snapshot
-            let stdout = if call_num >= 2 && command.starts_with("git diff") {
+            let stdout = if command.contains("__FABRO_CHANGED_FILES_DIFF__") {
+                if call_num >= 1 {
+                    format!(
+                        "__FABRO_CHANGED_FILES_DIFF__\n{}__FABRO_CHANGED_FILES_UNTRACKED__\n",
+                        self.git_diff_after
+                    )
+                } else {
+                    "__FABRO_CHANGED_FILES_DIFF__\n__FABRO_CHANGED_FILES_UNTRACKED__\n".to_string()
+                }
+            } else if call_num >= 2 && command.starts_with("git diff") {
                 self.git_diff_after.clone()
             } else {
                 String::new()
@@ -9678,11 +9686,10 @@ impl fabro_agent::Sandbox for CliTestEnv {
             });
         }
 
-        // CLI version check during ensure_cli — return success so install path
-        // is skipped.
-        if command.contains("--version") {
+        // CLI availability check.
+        if command.contains("command -v ") {
             return Ok(fabro_agent::ExecResult {
-                stdout:    "1.0.0\n".into(),
+                stdout:    "/usr/local/bin/agent-cli\n".into(),
                 stderr:    String::new(),
                 exit_code: Some(0),
 
@@ -9789,24 +9796,20 @@ async fn cli_backend_run_writes_prompt_and_calls_exec() {
     let claude_output = r#"{"type":"result","result":"I fixed the bug.","usage":{"input_tokens":500,"output_tokens":200}}"#;
     let test_env = Arc::new(CliTestEnv::new(claude_output));
     let env: Arc<dyn fabro_agent::Sandbox> = test_env.clone();
-    let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic)
-        .with_poll_interval(Duration::from_millis(10));
+    let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
 
     let node = Node::new("fix_code");
     let context = Context::new();
     let emitter = Arc::new(Emitter::default());
 
     let result = backend
-        .run(
+        .run(codergen_run_request(
             &node,
             "Fix the authentication bug",
             &context,
-            None,
             &emitter,
             &env,
-            None,
-            CancellationToken::new(),
-        )
+        ))
         .await
         .expect("CLI backend should succeed");
 
@@ -9863,24 +9866,20 @@ async fn cli_backend_run_detects_changed_files() {
     let claude_output = r#"{"type":"result","result":"Created new file.","usage":{"input_tokens":100,"output_tokens":50}}"#;
     let env: Arc<dyn fabro_agent::Sandbox> =
         Arc::new(CliTestEnv::new(claude_output).with_git_diff_after("src/main.rs\nsrc/lib.rs\n"));
-    let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic)
-        .with_poll_interval(Duration::from_millis(10));
+    let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
 
     let node = Node::new("implement");
     let context = Context::new();
     let emitter = Arc::new(Emitter::default());
 
     let result = backend
-        .run(
+        .run(codergen_run_request(
             &node,
             "Add a new feature",
             &context,
-            None,
             &emitter,
             &env,
-            None,
-            CancellationToken::new(),
-        )
+        ))
         .await
         .expect("CLI backend should succeed");
 
@@ -9897,24 +9896,20 @@ async fn cli_backend_run_with_codex_provider() {
     let codex_output = "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"Implemented the feature.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":300,\"output_tokens\":150}}";
     let test_env = Arc::new(CliTestEnv::new(codex_output));
     let env: Arc<dyn fabro_agent::Sandbox> = test_env.clone();
-    let backend = AgentCliBackend::new_from_env("gpt-5.3-codex".into(), Provider::OpenAi)
-        .with_poll_interval(Duration::from_millis(10));
+    let backend = AgentCliBackend::new_from_env("gpt-5.3-codex".into(), Provider::OpenAi);
 
     let node = Node::new("implement");
     let context = Context::new();
     let emitter = Arc::new(Emitter::default());
 
     let result = backend
-        .run(
+        .run(codergen_run_request(
             &node,
             "Build the API",
             &context,
-            None,
             &emitter,
             &env,
-            None,
-            CancellationToken::new(),
-        )
+        ))
         .await
         .expect("CLI backend should succeed");
 
@@ -9991,10 +9986,10 @@ async fn cli_backend_run_fails_on_nonzero_exit() {
                     duration_ms: 0,
                 });
             }
-            // CLI version check during ensure_cli — pretend already installed.
-            if command.contains("--version") {
+            // CLI availability check.
+            if command.contains("command -v ") {
                 return Ok(fabro_agent::ExecResult {
-                    stdout:    "1.0.0\n".into(),
+                    stdout:    "/usr/local/bin/agent-cli\n".into(),
                     stderr:    String::new(),
                     exit_code: Some(0),
 
@@ -10064,8 +10059,7 @@ async fn cli_backend_run_fails_on_nonzero_exit() {
     }
 
     let failing_env: Arc<dyn fabro_agent::Sandbox> = Arc::new(FailingCliEnv);
-    let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic)
-        .with_poll_interval(Duration::from_millis(10));
+    let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
     let node = Node::new("step");
     let context = Context::new();
     let emitter = Arc::new(Emitter::default());
@@ -10073,16 +10067,13 @@ async fn cli_backend_run_fails_on_nonzero_exit() {
     let _ = env; // unused, just for the above struct
 
     let result = backend
-        .run(
+        .run(codergen_run_request(
             &node,
             "do something",
             &context,
-            None,
             &emitter,
             &failing_env,
-            None,
-            CancellationToken::new(),
-        )
+        ))
         .await;
 
     let err = match result {
@@ -10103,24 +10094,20 @@ async fn cli_backend_run_fails_on_nonzero_exit() {
 #[tokio::test]
 async fn cli_backend_run_fails_on_unparseable_output() {
     let env: Arc<dyn fabro_agent::Sandbox> = Arc::new(CliTestEnv::new("this is not json at all"));
-    let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic)
-        .with_poll_interval(Duration::from_millis(10));
+    let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
 
     let node = Node::new("step");
     let context = Context::new();
     let emitter = Arc::new(Emitter::default());
 
     let result = backend
-        .run(
+        .run(codergen_run_request(
             &node,
             "do something",
             &context,
-            None,
             &emitter,
             &env,
-            None,
-            CancellationToken::new(),
-        )
+        ))
         .await;
 
     let err = match result {
@@ -10140,8 +10127,7 @@ async fn cli_backend_run_uses_node_model_override() {
         r#"{"type":"result","result":"ok","usage":{"input_tokens":10,"output_tokens":5}}"#;
     let test_env = Arc::new(CliTestEnv::new(claude_output));
     let env: Arc<dyn fabro_agent::Sandbox> = test_env.clone();
-    let backend = AgentCliBackend::new_from_env("default-model".into(), Provider::Anthropic)
-        .with_poll_interval(Duration::from_millis(10));
+    let backend = AgentCliBackend::new_from_env("default-model".into(), Provider::Anthropic);
 
     let mut node = Node::new("step");
     node.attrs.insert(
@@ -10153,16 +10139,9 @@ async fn cli_backend_run_uses_node_model_override() {
     let emitter = Arc::new(Emitter::default());
 
     backend
-        .run(
-            &node,
-            "test",
-            &context,
-            None,
-            &emitter,
-            &env,
-            None,
-            CancellationToken::new(),
-        )
+        .run(codergen_run_request(
+            &node, "test", &context, &emitter, &env,
+        ))
         .await
         .expect("should succeed");
 
@@ -10186,8 +10165,7 @@ async fn cli_backend_run_uses_node_provider_override() {
     let codex_output = "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"ok\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}";
     let test_env = Arc::new(CliTestEnv::new(codex_output));
     let env: Arc<dyn fabro_agent::Sandbox> = test_env.clone();
-    let backend = AgentCliBackend::new_from_env("default-model".into(), Provider::Anthropic)
-        .with_poll_interval(Duration::from_millis(10));
+    let backend = AgentCliBackend::new_from_env("default-model".into(), Provider::Anthropic);
 
     let mut node = Node::new("step");
     node.attrs.insert(
@@ -10203,16 +10181,9 @@ async fn cli_backend_run_uses_node_provider_override() {
     let emitter = Arc::new(Emitter::default());
 
     backend
-        .run(
-            &node,
-            "test",
-            &context,
-            None,
-            &emitter,
-            &env,
-            None,
-            CancellationToken::new(),
-        )
+        .run(codergen_run_request(
+            &node, "test", &context, &emitter, &env,
+        ))
         .await
         .expect("should succeed");
 
@@ -10229,24 +10200,16 @@ async fn cli_backend_run_returns_text_and_usage() {
     let claude_output =
         r#"{"type":"result","result":"done","usage":{"input_tokens":10,"output_tokens":5}}"#;
     let env: Arc<dyn fabro_agent::Sandbox> = Arc::new(CliTestEnv::new(claude_output));
-    let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic)
-        .with_poll_interval(Duration::from_millis(10));
+    let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
 
     let node = Node::new("step");
     let context = Context::new();
     let emitter = Arc::new(Emitter::default());
 
     let result = backend
-        .run(
-            &node,
-            "test",
-            &context,
-            None,
-            &emitter,
-            &env,
-            None,
-            CancellationToken::new(),
-        )
+        .run(codergen_run_request(
+            &node, "test", &context, &emitter, &env,
+        ))
         .await
         .expect("should succeed");
 
@@ -10264,15 +10227,18 @@ async fn cli_backend_run_returns_text_and_usage() {
 
 // -- BackendRouter e2e: delegates to correct backend --
 
+fn test_acp_backend() -> AgentAcpBackend {
+    AgentAcpBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic)
+}
+
 #[tokio::test]
 async fn backend_router_delegates_to_cli_for_cli_node() {
     let claude_output = r#"{"type":"result","result":"CLI response","usage":{"input_tokens":10,"output_tokens":5}}"#;
     let env: Arc<dyn fabro_agent::Sandbox> = Arc::new(CliTestEnv::new(claude_output));
 
     let api_backend = Box::new(MockCodergenBackend); // would return "Response for ..."
-    let cli = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic)
-        .with_poll_interval(Duration::from_millis(10));
-    let router = BackendRouter::new(api_backend, cli);
+    let cli = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+    let router = BackendRouter::new(api_backend, cli, test_acp_backend());
 
     let mut node = Node::new("cli_step");
     node.attrs
@@ -10286,16 +10252,13 @@ async fn backend_router_delegates_to_cli_for_cli_node() {
     let emitter = Arc::new(Emitter::default());
 
     let result = router
-        .run(
+        .run(codergen_run_request(
             &node,
             "Fix the bug",
             &context,
-            None,
             &emitter,
             &env,
-            None,
-            CancellationToken::new(),
-        )
+        ))
         .await
         .expect("router should succeed");
 
@@ -10315,9 +10278,8 @@ async fn backend_router_delegates_to_api_for_normal_node() {
     let env = local_env();
 
     let api_backend = Box::new(MockCodergenBackend);
-    let cli = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic)
-        .with_poll_interval(Duration::from_millis(10));
-    let router = BackendRouter::new(api_backend, cli);
+    let cli = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+    let router = BackendRouter::new(api_backend, cli, test_acp_backend());
 
     let mut node = Node::new("api_step");
     node.attrs.insert(
@@ -10329,16 +10291,13 @@ async fn backend_router_delegates_to_api_for_normal_node() {
     let emitter = Arc::new(Emitter::default());
 
     let result = router
-        .run(
+        .run(codergen_run_request(
             &node,
             "Plan the work",
             &context,
-            None,
             &emitter,
             &env,
-            None,
-            CancellationToken::new(),
-        )
+        ))
         .await
         .expect("router should succeed");
 
@@ -10359,9 +10318,8 @@ async fn backend_router_delegates_to_cli_for_backend_attr() {
     let env: Arc<dyn fabro_agent::Sandbox> = Arc::new(CliTestEnv::new(codex_output));
 
     let api_backend = Box::new(MockCodergenBackend);
-    let cli = AgentCliBackend::new_from_env("gpt-5.3-codex".into(), Provider::OpenAi)
-        .with_poll_interval(Duration::from_millis(10));
-    let router = BackendRouter::new(api_backend, cli);
+    let cli = AgentCliBackend::new_from_env("gpt-5.3-codex".into(), Provider::OpenAi);
+    let router = BackendRouter::new(api_backend, cli, test_acp_backend());
 
     let mut node = Node::new("codex_step");
     node.attrs
@@ -10375,16 +10333,9 @@ async fn backend_router_delegates_to_cli_for_backend_attr() {
     let emitter = Arc::new(Emitter::default());
 
     let result = router
-        .run(
-            &node,
-            "Build it",
-            &context,
-            None,
-            &emitter,
-            &env,
-            None,
-            CancellationToken::new(),
-        )
+        .run(codergen_run_request(
+            &node, "Build it", &context, &emitter, &env,
+        ))
         .await
         .expect("router should succeed");
 
@@ -10393,6 +10344,64 @@ async fn backend_router_delegates_to_cli_for_backend_attr() {
             assert_eq!(
                 text, "Codex did it",
                 "should route to CLI backend for backend=cli"
+            );
+        }
+        CodergenResult::Full(_) => panic!("expected Text result"),
+    }
+}
+
+#[tokio::test]
+async fn backend_router_delegates_to_acp_for_acp_node() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let script_path = tempdir.path().join("fake_acp_agent.py");
+    tokio::fs::write(&script_path, fake_acp_agent_script())
+        .await
+        .unwrap();
+    let env: Arc<dyn fabro_agent::Sandbox> =
+        Arc::new(fabro_agent::LocalSandbox::new(tempdir.path().to_path_buf()));
+
+    let api_backend = Box::new(MockCodergenBackend);
+    let cli = AgentCliBackend::new_from_env("gpt-5.3-codex".into(), Provider::OpenAi);
+    let router = BackendRouter::new(
+        api_backend,
+        cli,
+        AgentAcpBackend::new_from_env("fake-acp".into(), Provider::OpenAi),
+    );
+
+    let mut node = Node::new("acp_step");
+    node.attrs
+        .insert("backend".to_string(), AttrValue::String("acp".to_string()));
+    node.attrs.insert(
+        "provider".to_string(),
+        AttrValue::String("openai".to_string()),
+    );
+    node.attrs.insert(
+        "model".to_string(),
+        AttrValue::String("fake-acp".to_string()),
+    );
+    node.attrs.insert(
+        "acp_command".to_string(),
+        AttrValue::String(format!(
+            "python3 {}",
+            fabro_agent::shell_quote(&script_path.to_string_lossy())
+        )),
+    );
+
+    let context = Context::new();
+    let emitter = Arc::new(Emitter::default());
+
+    let result = router
+        .run(codergen_run_request(
+            &node, "Build it", &context, &emitter, &env,
+        ))
+        .await
+        .expect("router should succeed");
+
+    match result {
+        CodergenResult::Text { text, .. } => {
+            assert_eq!(
+                text, "hello from acp",
+                "should route to ACP backend for backend=acp"
             );
         }
         CodergenResult::Full(_) => panic!("expected Text result"),
@@ -10453,9 +10462,8 @@ async fn full_pipeline_with_cli_backend_node() {
 
     // Build engine with BackendRouter
     let api = MockCodergenBackend;
-    let cli = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic)
-        .with_poll_interval(Duration::from_millis(10));
-    let router = BackendRouter::new(Box::new(api), cli);
+    let cli = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+    let router = BackendRouter::new(Box::new(api), cli, test_acp_backend());
     let codergen_handler = AgentHandler::new(Some(Box::new(router)));
 
     let mut registry = HandlerRegistry::new(Box::new(codergen_handler));
@@ -10466,9 +10474,8 @@ async fn full_pipeline_with_cli_backend_node() {
         Box::new(AgentHandler::new(Some(Box::new({
             // Second BackendRouter for the "agent" handler
             let api2 = MockCodergenBackend;
-            let cli2 = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic)
-                .with_poll_interval(Duration::from_millis(10));
-            BackendRouter::new(Box::new(api2), cli2)
+            let cli2 = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+            BackendRouter::new(Box::new(api2), cli2, test_acp_backend())
         })))),
     );
 
@@ -10575,17 +10582,15 @@ async fn stylesheet_backend_property_routes_to_cli() {
 
     // Run the pipeline
     let api = MockCodergenBackend;
-    let cli = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic)
-        .with_poll_interval(Duration::from_millis(10));
-    let router = BackendRouter::new(Box::new(api), cli);
+    let cli = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+    let router = BackendRouter::new(Box::new(api), cli, test_acp_backend());
 
     let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(Some(Box::new(router)))));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     let api2 = MockCodergenBackend;
-    let cli2 = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic)
-        .with_poll_interval(Duration::from_millis(10));
-    let router2 = BackendRouter::new(Box::new(api2), cli2);
+    let cli2 = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+    let router2 = BackendRouter::new(Box::new(api2), cli2, test_acp_backend());
     registry.register(
         "agent",
         Box::new(AgentHandler::new(Some(Box::new(router2)))),

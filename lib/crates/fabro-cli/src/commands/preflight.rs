@@ -1,5 +1,6 @@
 use anyhow::bail;
 use fabro_config::user::active_settings_path;
+use fabro_manifest::{ManifestBuildInput, build_run_manifest};
 use fabro_util::terminal::Styles;
 
 use crate::args::PreflightArgs;
@@ -8,7 +9,7 @@ use crate::commands::run::output::{
     api_check_report_to_local, api_diagnostics_to_local, print_workflow_summary,
 };
 use crate::commands::run::overrides::preflight_args_overrides;
-use crate::manifest_builder::{ManifestBuildInput, build_run_manifest, preflight_manifest_args};
+use crate::manifest_args::preflight_manifest_args;
 use crate::shared::{cyan_spinner, print_json_pretty};
 
 pub(crate) async fn execute(

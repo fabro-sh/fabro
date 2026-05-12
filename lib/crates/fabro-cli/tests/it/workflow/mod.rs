@@ -3,6 +3,7 @@
     reason = "This test module prefers explicit type paths over extra imports."
 )]
 
+mod acp;
 mod agent_linear;
 mod command_agent_mixed;
 mod command_pipeline;

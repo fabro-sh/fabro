@@ -1,5 +1,5 @@
 ---
-title: "Run Events, artifacts, and typed interviews"
+title: "Run Events, sandbox lifecycle, and typed interviews"
 date: "2026-05-08"
 ---
 
@@ -18,21 +18,26 @@ Run detail sidebars now include dedicated `Run Events` and `Artifacts` pages. `R
 
 This gives you a direct path to the two things users usually need after a run: the complete audit trail and the files produced by stages.
 
+## Run-owned sandbox lifecycle
+
+Run sandboxes now belong to the run lifecycle instead of being detached provider resources that require manual cleanup. Terminal runs stop their sandboxes by default, resumes reconnect to persisted sandboxes, and run deletion either removes the sandbox or returns preserved provider details according to the run's preserve settings.
+
+The run settings page now shows `stop_on_terminal` alongside sandbox preservation, so you can tell whether cleanup is automatic before launching or deleting a run.
+
 ## Typed interview answers
 
 Human-in-the-loop answers now have explicit API shapes for yes/no, single-select, multi-select, and text responses. The web UI and CLI attach flow use those shapes consistently, which removes ambiguity around which field should be present for each question type.
 
 `fabro attach` also handles interview edge cases better. Invalid input re-prompts instead of dropping the interaction, and attach no longer blocks when a question was already answered from another client.
 
-## API client coverage for the web app
-
-The web app now uses the generated TypeScript API client for the auth, workflow, run, artifact, settings, and human-in-the-loop calls that can be generated from OpenAPI. The API reference now documents the browser auth and workflow routes the app relies on, which keeps the UI and public contract aligned as routes evolve.
-
 ## More
 
 <Accordion title="API">
+- `DELETE /api/v1/runs/{id}` can now return preserved sandbox details when deletion leaves a provider resource alive
+- `RunSandboxSettings` now includes `stop_on_terminal`
 - `RunStage` now includes a canonical `handler` field so clients can choose agent, command, or debug renderers without guessing from names
 - Run summaries now include stored pull request records with `html_url`
+- The web app now uses the generated TypeScript API client for auth, workflow, run, artifact, settings, and human-in-the-loop calls generated from OpenAPI
 - OpenAPI now documents browser auth config, current user, demo toggle, and development-token login endpoints
 - OpenAPI now documents workflow list, workflow detail, and workflow runs endpoints
 - `GET /api/v1/runs/{id}/graph` now documents the optional `direction` query parameter
@@ -49,6 +54,8 @@ The web app now uses the generated TypeScript API client for the auth, workflow,
 
 <Accordion title="Improvements">
 - Added a Profile page to the user menu
+- Run titles now render inline Markdown in run lists and run detail headers
+- Run Files sidebar now shows the whole tree instead of filtering to changed files only
 - Run cards now show a pull request icon and number only when a stored pull request exists
 - Run cards now show repository names without repeating the owner prefix
 - Archived runs now have a Delete action in the web app
@@ -56,6 +63,8 @@ The web app now uses the generated TypeScript API client for the auth, workflow,
 </Accordion>
 
 <Accordion title="Fixes">
+- Fixed provider token usage normalization so OpenAI, Gemini, and Anthropic totals match provider billing semantics
+- Fixed terminal sandbox regressions after run-owned sandbox lifecycle changes
 - Fixed prompt-only stages missing completed responses in the Thread view
 - Fixed stage interrupt events missing from the Thread view
 - Fixed OpenAI reasoning metadata being lost across stateless round trips

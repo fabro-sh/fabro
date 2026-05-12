@@ -10,18 +10,20 @@ use anyhow::{Context, Result, anyhow};
 use fabro_api::types;
 use fabro_config::project::{self, discover_project_config, resolve_workflow_path};
 use fabro_config::run::{resolve_run_goal_from_layer, resolve_run_goal_from_namespace};
-use fabro_config::{CliLayer, DaytonaDockerfileLayer, RunLayer, WorkflowSettingsBuilder};
+use fabro_config::{
+    CliLayer, DaytonaDockerfileLayer, DockerSandboxLayer, ReplaceMap, RunExecutionLayer,
+    RunGoalLayer, RunLayer, RunModelLayer, RunSandboxLayer, WorkflowSettingsBuilder,
+};
 use fabro_graphviz::graph::AttrValue;
 use fabro_graphviz::parser;
 use fabro_template::{TemplateContext, render as render_template};
-use fabro_types::settings::run::{ResolvedGoalSource, ResolvedRunGoal};
+use fabro_types::settings::interp::InterpString;
+use fabro_types::settings::run::{ApprovalMode, ResolvedGoalSource, ResolvedRunGoal, RunMode};
 use fabro_types::{DirtyStatus, GitContext, PreRunPushOutcome, RunId, WorkflowSettings};
 use fabro_workflow::ManifestPath;
 use fabro_workflow::git::{
     GitSyncStatus, branch_needs_push, head_sha, push_branch_noninteractive, sync_status,
 };
-
-use crate::args::{PreflightArgs, RunArgs};
 
 #[derive(Debug, Default)]
 pub struct ManifestBuildInput {
@@ -41,6 +43,81 @@ pub struct ManifestBuildInput {
 pub struct BuiltManifest {
     pub manifest:    types::RunManifest,
     pub target_path: PathBuf,
+}
+
+#[derive(Debug, Default)]
+pub struct RunOverrideInput<'a> {
+    pub goal:             Option<&'a str>,
+    pub model:            Option<&'a str>,
+    pub provider:         Option<&'a str>,
+    pub sandbox:          Option<&'a str>,
+    pub docker_image:     Option<&'a str>,
+    pub preserve_sandbox: Option<bool>,
+    pub dry_run:          Option<bool>,
+    pub auto_approve:     Option<bool>,
+    pub labels:           HashMap<String, String>,
+}
+
+#[must_use]
+pub fn build_run_overrides(input: RunOverrideInput<'_>) -> RunLayer {
+    let goal = input
+        .goal
+        .map(|goal| RunGoalLayer::Inline(InterpString::parse(goal)));
+    let model = (input.model.is_some() || input.provider.is_some()).then(|| RunModelLayer {
+        provider:  input.provider.map(InterpString::parse),
+        name:      input.model.map(InterpString::parse),
+        fallbacks: Vec::new(),
+        controls:  None,
+    });
+    let sandbox = (input.sandbox.is_some()
+        || input.docker_image.is_some()
+        || input.preserve_sandbox.is_some())
+    .then(|| RunSandboxLayer {
+        provider: input.sandbox.map(ToOwned::to_owned),
+        docker: input.docker_image.map(|image| DockerSandboxLayer {
+            image: Some(image.to_string()),
+            ..DockerSandboxLayer::default()
+        }),
+        preserve: input.preserve_sandbox,
+        ..RunSandboxLayer::default()
+    });
+    let execution =
+        (input.dry_run.is_some() || input.auto_approve.is_some()).then(|| RunExecutionLayer {
+            mode:     input.dry_run.map(|dry_run| {
+                if dry_run {
+                    RunMode::DryRun
+                } else {
+                    RunMode::Normal
+                }
+            }),
+            approval: input.auto_approve.map(|auto_approve| {
+                if auto_approve {
+                    ApprovalMode::Auto
+                } else {
+                    ApprovalMode::Prompt
+                }
+            }),
+        });
+
+    RunLayer {
+        goal,
+        metadata: ReplaceMap::from(input.labels),
+        model,
+        sandbox,
+        execution,
+        ..RunLayer::default()
+    }
+}
+
+#[must_use]
+pub fn build_sparse_run_overrides(input: RunOverrideInput<'_>) -> Option<RunLayer> {
+    let run = build_run_overrides(input);
+    (run.goal.is_some()
+        || !run.metadata.is_empty()
+        || run.model.is_some()
+        || run.sandbox.is_some()
+        || run.execution.is_some())
+    .then_some(run)
 }
 
 struct CollectContext<'a> {
@@ -170,42 +247,6 @@ pub fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
         },
         target_path,
     })
-}
-
-pub(crate) fn run_manifest_args(args: &RunArgs) -> Option<types::ManifestArgs> {
-    let payload = types::ManifestArgs {
-        auto_approve:     args.auto_approve.then_some(true),
-        dry_run:          args.dry_run.then_some(true),
-        label:            args.label.clone(),
-        model:            args.model.clone(),
-        preserve_sandbox: args.preserve_sandbox.then_some(true),
-        provider:         args.provider.clone(),
-        sandbox:          args
-            .sandbox
-            .map(|provider| fabro_sandbox::SandboxProvider::from(provider).to_string()),
-        docker_image:     None,
-        input:            args.inputs.values.clone(),
-        verbose:          args.verbose.then_some(true),
-    };
-    (!manifest_args_is_empty(&payload)).then_some(payload)
-}
-
-pub(crate) fn preflight_manifest_args(args: &PreflightArgs) -> Option<types::ManifestArgs> {
-    let payload = types::ManifestArgs {
-        auto_approve:     None,
-        dry_run:          None,
-        label:            Vec::new(),
-        model:            args.model.clone(),
-        preserve_sandbox: None,
-        provider:         args.provider.clone(),
-        sandbox:          args
-            .sandbox
-            .map(|provider| fabro_sandbox::SandboxProvider::from(provider).to_string()),
-        docker_image:     None,
-        input:            args.inputs.values.clone(),
-        verbose:          args.verbose.then_some(true),
-    };
-    (!manifest_args_is_empty(&payload)).then_some(payload)
 }
 
 fn collect_workflow_entry(
@@ -650,7 +691,7 @@ fn manifest_path_from_absolute(path: &Path, cwd: &Path) -> Result<ManifestPath> 
         .ok_or_else(|| anyhow!("Failed to compute manifest path for {}", path.display()))
 }
 
-fn manifest_args_is_empty(args: &types::ManifestArgs) -> bool {
+pub fn manifest_args_is_empty(args: &types::ManifestArgs) -> bool {
     args.auto_approve.is_none()
         && args.dry_run.is_none()
         && args.label.is_empty()
@@ -666,6 +707,65 @@ fn manifest_args_is_empty(args: &types::ManifestArgs) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn build_run_overrides_sets_common_cli_and_mcp_layers() {
+        let overrides = build_run_overrides(RunOverrideInput {
+            goal:             Some("ship it"),
+            model:            Some("gpt-5.4-mini"),
+            provider:         Some("openai"),
+            sandbox:          Some("local"),
+            docker_image:     None,
+            preserve_sandbox: Some(true),
+            dry_run:          Some(true),
+            auto_approve:     Some(false),
+            labels:           [("source".to_string(), "mcp".to_string())]
+                .into_iter()
+                .collect(),
+        });
+
+        let goal = overrides.goal.expect("goal override");
+        assert!(matches!(goal, fabro_config::RunGoalLayer::Inline(_)));
+        assert_eq!(
+            overrides
+                .model
+                .as_ref()
+                .unwrap()
+                .name
+                .as_ref()
+                .unwrap()
+                .as_source(),
+            "gpt-5.4-mini"
+        );
+        assert_eq!(
+            overrides
+                .model
+                .as_ref()
+                .unwrap()
+                .provider
+                .as_ref()
+                .unwrap()
+                .as_source(),
+            "openai"
+        );
+        assert_eq!(
+            overrides.sandbox.as_ref().unwrap().provider.as_deref(),
+            Some("local")
+        );
+        assert_eq!(overrides.sandbox.as_ref().unwrap().preserve, Some(true));
+        assert_eq!(
+            overrides.execution.as_ref().unwrap().mode,
+            Some(RunMode::DryRun)
+        );
+        assert_eq!(
+            overrides.execution.as_ref().unwrap().approval,
+            Some(ApprovalMode::Prompt)
+        );
+        assert_eq!(
+            overrides.metadata.0.get("source").map(String::as_str),
+            Some("mcp")
+        );
+    }
 
     #[test]
     fn build_manifest_bundles_imports_prompts_and_children() {

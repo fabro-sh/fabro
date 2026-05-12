@@ -12,13 +12,13 @@ use std::io::Write;
 use anyhow::{Context, bail};
 use fabro_api::types;
 use fabro_config::user::active_settings_path;
+use fabro_manifest::{ManifestBuildInput, build_run_manifest};
 use fabro_util::terminal::Styles;
 use tracing::debug;
 
 use crate::args::{GraphArgs, GraphDirection, GraphOutputFormat};
 use crate::command_context::CommandContext;
 use crate::commands::run::output::api_diagnostics_to_local;
-use crate::manifest_builder::{ManifestBuildInput, build_run_manifest};
 use crate::shared::{absolute_or_current, print_diagnostics, print_json_pretty, relative_path};
 
 pub(crate) async fn run(

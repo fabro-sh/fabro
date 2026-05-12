@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::Cursor;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
@@ -12,23 +13,25 @@ use bollard::container::{
     UploadToContainerOptions,
 };
 use bollard::errors::Error as DockerError;
-use bollard::exec::{CreateExecOptions, StartExecResults};
+use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use bollard::image::CreateImageOptions;
 use bollard::models::HostConfig;
 use fabro_github::GitHubCredentials;
 use fabro_types::{CommandOutputStream, CommandTermination, RunId};
 use fabro_util::time::elapsed_ms;
 use futures::StreamExt;
-use tokio::sync::OnceCell;
+use tokio::io::{AsyncWriteExt, duplex};
+use tokio::sync::{Mutex as TokioMutex, Notify, OnceCell};
 use tokio::{fs, time};
 use tokio_util::sync::CancellationToken;
 
 use crate::clone_source::{self, CloneDecision, EmptyWorkspaceReason};
 use crate::redact::redact_auth_url;
-use crate::sandbox::{optional_timeout, resolve_path};
+use crate::sandbox::{StdioProcessControl, optional_timeout, resolve_path};
 use crate::{
-    CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GrepOptions, Sandbox,
-    SandboxEvent, SandboxEventCallback, format_lines_numbered, shell_quote,
+    CommandOutputCallback, DEFAULT_EXEC_OUTPUT_TAIL_BYTES, DirEntry, ExecResult,
+    ExecStreamingResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback, StderrCollector,
+    StdioProcess, StdioProcessHandle, StdioProcessTermination, format_lines_numbered, shell_quote,
 };
 
 const WORKING_DIRECTORY: &str = "/workspace";
@@ -216,17 +219,15 @@ impl DockerSandbox {
             ..Default::default()
         };
 
-        let exec_instance = self
-            .docker
-            .create_exec(container_id, exec_opts)
-            .await
-            .map_err(|e| crate::Error::context("Failed to create exec", e))?;
-
-        let start_result = self
-            .docker
-            .start_exec(&exec_instance.id, None)
-            .await
-            .map_err(|e| crate::Error::context("Failed to start exec", e))?;
+        let (exec_id, start_result) = create_and_start_exec(
+            &self.docker,
+            container_id,
+            exec_opts,
+            None,
+            "Failed to create exec",
+            "Failed to start exec",
+        )
+        .await?;
 
         let mut stdout = String::new();
         let mut stderr = String::new();
@@ -250,7 +251,7 @@ impl DockerSandbox {
 
         let inspect = self
             .docker
-            .inspect_exec(&exec_instance.id)
+            .inspect_exec(&exec_id)
             .await
             .map_err(|e| crate::Error::context("Failed to inspect exec", e))?;
 
@@ -278,15 +279,15 @@ impl DockerSandbox {
             ..Default::default()
         };
 
-        let exec_instance = docker
-            .create_exec(&container_id, exec_opts)
-            .await
-            .map_err(|e| crate::Error::context("Failed to create exec", e))?;
-
-        let start_result = docker
-            .start_exec(&exec_instance.id, None)
-            .await
-            .map_err(|e| crate::Error::context("Failed to start exec", e))?;
+        let (exec_id, start_result) = create_and_start_exec(
+            &docker,
+            &container_id,
+            exec_opts,
+            None,
+            "Failed to create exec",
+            "Failed to start exec",
+        )
+        .await?;
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
@@ -311,7 +312,7 @@ impl DockerSandbox {
         }
 
         let inspect = docker
-            .inspect_exec(&exec_instance.id)
+            .inspect_exec(&exec_id)
             .await
             .map_err(|e| crate::Error::context("Failed to inspect exec", e))?;
 
@@ -451,20 +452,7 @@ impl DockerSandbox {
     }
 
     async fn request_docker_exec_stop(&self, stop_file: &str) -> crate::Result<()> {
-        let command = format!("touch {}", shell_quote(stop_file));
-        let (stdout, stderr, exit_code) = self
-            .docker_exec(
-                vec!["/bin/bash".to_string(), "-lc".to_string(), command.clone()],
-                Some("/"),
-                None,
-            )
-            .await?;
-        if exit_code != 0 {
-            return Err(crate::Error::message(format!(
-                "Failed to request Docker exec stop (exit {exit_code}): {stderr}{stdout}"
-            )));
-        }
-        Ok(())
+        request_docker_exec_stop_with(&self.docker, self.container_id()?, stop_file).await
     }
 
     async fn ensure_image(&self) -> crate::Result<EnsureImageOutcome> {
@@ -769,6 +757,7 @@ fn docker_controlled_shell_command(command: &str, stop_file: &str, pid_file: &st
 stop_file={stop_file}; \
 pid_file={pid_file}; \
 user_command={command}; \
+exec 3<&0; \
 rm -f \"$pid_file\"; \
 if [ -e \"$stop_file\" ]; then \
   rm -f \"$stop_file\" \"$pid_file\"; \
@@ -783,11 +772,12 @@ fi; \
   kill -KILL \"-$child\" 2>/dev/null || kill -KILL \"$child\" 2>/dev/null || true; \
 ) & watcher=$!; \
 if command -v setsid >/dev/null 2>&1; then \
-  setsid /bin/bash -lc \"$user_command\" & \
+  setsid /bin/bash -lc \"$user_command\" <&3 & \
 else \
-  /bin/bash -lc \"$user_command\" & \
+  /bin/bash -lc \"$user_command\" <&3 & \
 fi; \
 child=$!; \
+exec 3<&-; \
 echo \"$child\" > \"$pid_file\"; \
 wait \"$child\"; \
 status=$?; \
@@ -802,6 +792,213 @@ exit \"$status\"\
         stop_poll_sleep = EXEC_STOP_POLL_SLEEP_SECONDS,
         term_grace = EXEC_TERM_GRACE_SECONDS,
     )
+}
+
+fn docker_stdio_exec_options(
+    command: String,
+    working_dir: String,
+    env: Option<Vec<String>>,
+) -> (CreateExecOptions<String>, StartExecOptions) {
+    (
+        CreateExecOptions {
+            attach_stdin: Some(true),
+            attach_stdout: Some(true),
+            attach_stderr: Some(true),
+            tty: Some(false),
+            cmd: Some(vec!["/bin/bash".to_string(), "-lc".to_string(), command]),
+            working_dir: Some(working_dir),
+            env,
+            ..Default::default()
+        },
+        StartExecOptions {
+            detach:          false,
+            tty:             false,
+            output_capacity: None,
+        },
+    )
+}
+
+async fn create_and_start_exec(
+    docker: &Docker,
+    container_id: &str,
+    exec_options: CreateExecOptions<String>,
+    start_options: Option<StartExecOptions>,
+    create_context: &'static str,
+    start_context: &'static str,
+) -> crate::Result<(String, StartExecResults)> {
+    let exec_instance = docker
+        .create_exec(container_id, exec_options)
+        .await
+        .map_err(|err| crate::Error::context(create_context, err))?;
+    let exec_id = exec_instance.id;
+    let start_result = docker
+        .start_exec(&exec_id, start_options)
+        .await
+        .map_err(|err| crate::Error::context(start_context, err))?;
+
+    Ok((exec_id, start_result))
+}
+
+async fn request_docker_exec_stop_with(
+    docker: &Docker,
+    container_id: &str,
+    stop_file: &str,
+) -> crate::Result<()> {
+    let command = format!("touch {}", shell_quote(stop_file));
+    let exec_opts = CreateExecOptions {
+        cmd: Some(vec!["/bin/bash".to_string(), "-lc".to_string(), command]),
+        attach_stdout: Some(true),
+        attach_stderr: Some(true),
+        working_dir: Some("/".to_string()),
+        ..Default::default()
+    };
+    let (exec_id, start_result) = create_and_start_exec(
+        docker,
+        container_id,
+        exec_opts,
+        None,
+        "Failed to create Docker exec stop request",
+        "Failed to start Docker exec stop request",
+    )
+    .await?;
+
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    if let StartExecResults::Attached { mut output, .. } = start_result {
+        while let Some(chunk) = output.next().await {
+            match chunk {
+                Ok(LogOutput::StdOut { message }) => {
+                    stdout.push_str(&String::from_utf8_lossy(&message));
+                }
+                Ok(LogOutput::StdErr { message }) => {
+                    stderr.push_str(&String::from_utf8_lossy(&message));
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(crate::Error::context(
+                        "Error reading stop request output",
+                        e,
+                    ));
+                }
+            }
+        }
+    }
+
+    let inspect = docker
+        .inspect_exec(&exec_id)
+        .await
+        .map_err(|e| crate::Error::context("Failed to inspect Docker exec stop request", e))?;
+    let exit_code = inspect
+        .exit_code
+        .and_then(|code| i32::try_from(code).ok())
+        .unwrap_or(-1);
+    if exit_code != 0 {
+        return Err(crate::Error::message(format!(
+            "Failed to request Docker exec stop (exit {exit_code}): {stderr}{stdout}"
+        )));
+    }
+    Ok(())
+}
+
+struct DockerStdioProcessControl {
+    docker:       Docker,
+    container_id: String,
+    exec_id:      String,
+    stop_file:    String,
+    state:        Arc<DockerStdioProcessState>,
+}
+
+#[derive(Default)]
+struct DockerStdioProcessState {
+    stop_requested:     AtomicBool,
+    termination:        TokioMutex<Option<StdioProcessTermination>>,
+    termination_notify: Notify,
+}
+
+impl DockerStdioProcessState {
+    async fn cached_termination(&self) -> Option<StdioProcessTermination> {
+        *self.termination.lock().await
+    }
+
+    async fn request_stop_once(&self) -> bool {
+        self.cached_termination().await.is_none()
+            && !self.stop_requested.swap(true, Ordering::AcqRel)
+    }
+
+    async fn cache_termination(&self, termination: StdioProcessTermination) {
+        let mut cached = self.termination.lock().await;
+        if cached.is_none() {
+            *cached = Some(termination);
+            self.termination_notify.notify_waiters();
+        }
+    }
+
+    async fn wait_for_cached_termination(&self) -> StdioProcessTermination {
+        loop {
+            if let Some(termination) = self.cached_termination().await {
+                return termination;
+            }
+            self.termination_notify.notified().await;
+        }
+    }
+}
+
+#[async_trait]
+impl StdioProcessControl for DockerStdioProcessControl {
+    async fn terminate(&self) -> crate::Result<()> {
+        if !self.state.request_stop_once().await {
+            return Ok(());
+        }
+        request_docker_exec_stop_with(&self.docker, &self.container_id, &self.stop_file).await?;
+        Ok(())
+    }
+
+    async fn wait(&self) -> crate::Result<StdioProcessTermination> {
+        if let Some(termination) = self.state.cached_termination().await {
+            return Ok(termination);
+        }
+
+        let mut poll_interval = time::interval(std::time::Duration::from_secs(1));
+        loop {
+            if let Some(termination) = self.state.cached_termination().await {
+                return Ok(termination);
+            }
+            let inspect = self
+                .docker
+                .inspect_exec(&self.exec_id)
+                .await
+                .map_err(|e| crate::Error::context("Failed to inspect Docker stdio exec", e))?;
+            if inspect.running != Some(true) {
+                let exit_code = inspect.exit_code.and_then(|code| i32::try_from(code).ok());
+                let termination = StdioProcessTermination::exited(exit_code);
+                self.state.cache_termination(termination).await;
+                return Ok(termination);
+            }
+            tokio::select! {
+                termination = self.state.wait_for_cached_termination() => return Ok(termination),
+                _ = poll_interval.tick() => {}
+            }
+        }
+    }
+}
+
+async fn cache_docker_stdio_completion(
+    docker: Docker,
+    exec_id: String,
+    state: Arc<DockerStdioProcessState>,
+) {
+    match docker.inspect_exec(&exec_id).await {
+        Ok(inspect) if inspect.running != Some(true) => {
+            let exit_code = inspect.exit_code.and_then(|code| i32::try_from(code).ok());
+            state
+                .cache_termination(StdioProcessTermination::exited(exit_code))
+                .await;
+        }
+        Ok(_) => {}
+        Err(err) => {
+            tracing::warn!(error = %err, "Failed to inspect completed Docker stdio exec");
+        }
+    }
 }
 
 fn git_clone_command(clone_url: &str, branch: Option<&str>) -> String {
@@ -1333,6 +1530,98 @@ impl Sandbox for DockerSandbox {
         .await
     }
 
+    async fn spawn_stdio_process(
+        &self,
+        command: &str,
+        working_dir: Option<&str>,
+        env_vars: Option<&HashMap<String, String>>,
+        cancel_token: Option<CancellationToken>,
+    ) -> crate::Result<StdioProcess> {
+        let effective_dir = working_dir.map_or_else(
+            || WORKING_DIRECTORY.to_string(),
+            Self::resolve_container_path,
+        );
+        let env: Option<Vec<String>> =
+            env_vars.map(|vars| vars.iter().map(|(k, v)| format!("{k}={v}")).collect());
+        let (stop_file, pid_file) = docker_exec_control_paths();
+        let controlled_command = docker_controlled_shell_command(command, &stop_file, &pid_file);
+        let (create_opts, start_opts) =
+            docker_stdio_exec_options(controlled_command, effective_dir, env);
+
+        let container_id = self.container_id()?.to_string();
+        let (exec_id, start_result) = create_and_start_exec(
+            &self.docker,
+            &container_id,
+            create_opts,
+            Some(start_opts),
+            "Failed to create Docker stdio exec",
+            "Failed to start Docker stdio exec",
+        )
+        .await?;
+
+        let StartExecResults::Attached { mut output, input } = start_result else {
+            return Err(crate::Error::message(
+                "Docker stdio exec started detached unexpectedly",
+            ));
+        };
+
+        let stderr_collector = StderrCollector::new(DEFAULT_EXEC_OUTPUT_TAIL_BYTES);
+        let stderr_for_output = stderr_collector.clone();
+        let (mut stdout_writer, stdout_reader) = duplex(64 * 1024);
+        let state = Arc::new(DockerStdioProcessState::default());
+        let state_for_output = Arc::clone(&state);
+        let docker_for_output = self.docker.clone();
+        let exec_id_for_output = exec_id.clone();
+        tokio::spawn(async move {
+            while let Some(chunk) = output.next().await {
+                match chunk {
+                    Ok(LogOutput::StdOut { message }) => {
+                        if let Err(err) = stdout_writer.write_all(&message).await {
+                            tracing::warn!(error = %err, "Failed to forward Docker stdio stdout");
+                            break;
+                        }
+                    }
+                    Ok(LogOutput::StdErr { message }) => {
+                        stderr_for_output.push(&message).await;
+                    }
+                    Ok(_) => {}
+                    Err(err) => {
+                        let message = format!("Docker stdio output stream error: {err}");
+                        stderr_for_output.push(message.as_bytes()).await;
+                        break;
+                    }
+                }
+            }
+            cache_docker_stdio_completion(docker_for_output, exec_id_for_output, state_for_output)
+                .await;
+        });
+
+        let handle = StdioProcessHandle::new(DockerStdioProcessControl {
+            docker: self.docker.clone(),
+            container_id,
+            exec_id,
+            stop_file,
+            state,
+        });
+
+        if let Some(token) = cancel_token {
+            let handle_for_cancel = handle.clone();
+            tokio::spawn(async move {
+                token.cancelled().await;
+                if let Err(err) = handle_for_cancel.terminate().await {
+                    tracing::warn!(error = %err, "Failed to terminate cancelled Docker stdio exec");
+                }
+            });
+        }
+
+        Ok(StdioProcess {
+            stdin: input,
+            stdout: Box::pin(stdout_reader),
+            stderr: stderr_collector,
+            handle,
+        })
+    }
+
     async fn read_file(
         &self,
         path: &str,
@@ -1666,8 +1955,10 @@ mod tests {
         reason = "unit test reads an in-memory tar entry synchronously"
     )]
     use std::io::Read as _;
+    use std::process::Stdio;
     use std::time::Duration;
 
+    use tokio::io::AsyncWriteExt as _;
     use tokio::process::Command;
 
     use super::*;
@@ -1744,6 +2035,33 @@ mod tests {
         );
     }
 
+    #[test]
+    fn stdio_exec_options_attach_streams_without_tty() {
+        let (create, start) = docker_stdio_exec_options(
+            "python fake_agent.py".to_string(),
+            WORKING_DIRECTORY.to_string(),
+            Some(vec!["MODE=test".to_string()]),
+        );
+
+        assert_eq!(create.attach_stdin, Some(true));
+        assert_eq!(create.attach_stdout, Some(true));
+        assert_eq!(create.attach_stderr, Some(true));
+        assert_eq!(create.tty, Some(false));
+        assert_eq!(create.working_dir.as_deref(), Some(WORKING_DIRECTORY));
+        assert_eq!(create.env, Some(vec!["MODE=test".to_string()]));
+        assert_eq!(
+            create.cmd,
+            Some(vec![
+                "/bin/bash".to_string(),
+                "-lc".to_string(),
+                "python fake_agent.py".to_string()
+            ])
+        );
+        assert!(!start.detach);
+        assert!(!start.tty);
+        assert_eq!(start.output_capacity, None);
+    }
+
     #[tokio::test]
     async fn controlled_shell_command_honors_stop_requested_before_pid_file_exists() {
         let tempdir = tempfile::tempdir().expect("tempdir should be created");
@@ -1786,6 +2104,59 @@ mod tests {
             matching_processes.is_empty(),
             "controlled shell command should not leave child processes: {matching_processes:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn controlled_shell_command_preserves_stdin_for_user_command() {
+        let tempdir = tempfile::tempdir().expect("tempdir should be created");
+        let stop_file = tempdir.path().join("stop");
+        let pid_file = tempdir.path().join("pid");
+        let stop_file = stop_file.to_string_lossy().into_owned();
+        let pid_file = pid_file.to_string_lossy().into_owned();
+        let command = docker_controlled_shell_command("cat", &stop_file, &pid_file);
+
+        let mut child = Command::new("/bin/bash")
+            .arg("-lc")
+            .arg(command)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("controlled shell command should spawn");
+        let mut stdin = child
+            .stdin
+            .take()
+            .expect("controlled shell command stdin should be piped");
+        stdin
+            .write_all(b"abc\n")
+            .await
+            .expect("stdin should be written");
+        drop(stdin);
+
+        let output = time::timeout(Duration::from_secs(5), child.wait_with_output())
+            .await
+            .expect("controlled shell command should not hang")
+            .expect("controlled shell command should run");
+
+        assert!(
+            output.status.success(),
+            "controlled shell command should exit successfully: {output:?}"
+        );
+        assert_eq!(output.stdout, b"abc\n");
+    }
+
+    #[tokio::test]
+    async fn docker_stdio_process_state_does_not_cache_cancelled_on_stop_request() {
+        let state = DockerStdioProcessState::default();
+
+        assert!(state.request_stop_once().await);
+        assert_eq!(state.cached_termination().await, None);
+        assert!(!state.request_stop_once().await);
+
+        let termination = StdioProcessTermination::exited(Some(143));
+        state.cache_termination(termination).await;
+        assert_eq!(state.cached_termination().await, Some(termination));
+        assert!(!state.request_stop_once().await);
     }
 
     #[tokio::test]

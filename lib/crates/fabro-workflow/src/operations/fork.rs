@@ -231,6 +231,9 @@ fn replay_event_for_fork_projection(body: &EventBody) -> bool {
             | EventBody::AgentCliStarted(_)
             | EventBody::AgentCliCancelled(_)
             | EventBody::AgentCliTimedOut(_)
+            | EventBody::AgentAcpStarted(_)
+            | EventBody::AgentAcpCancelled(_)
+            | EventBody::AgentAcpTimedOut(_)
             | EventBody::CommandStarted(_)
             | EventBody::CommandCompleted(_)
             | EventBody::ParallelCompleted(_)
@@ -313,6 +316,41 @@ mod tests {
         ));
         assert!(!replay_event_for_fork_projection(
             &EventBody::AgentSessionEnded(fabro_types::run_event::AgentSessionEndedProps {})
+        ));
+    }
+
+    #[test]
+    fn fork_replay_preserves_agent_acp_projection_events() {
+        assert!(replay_event_for_fork_projection(
+            &EventBody::AgentAcpStarted(fabro_types::run_event::AgentAcpStartedProps {
+                visit:    1,
+                mode:     "acp".to_string(),
+                provider: "openai".to_string(),
+                model:    "fake-acp".to_string(),
+                command:  "python fake_agent.py".to_string(),
+            })
+        ));
+        assert!(replay_event_for_fork_projection(
+            &EventBody::AgentAcpCancelled(fabro_types::run_event::AgentAcpCancelledProps {
+                stdout:      "partial".to_string(),
+                stderr:      "cancelled".to_string(),
+                duration_ms: 7,
+            })
+        ));
+        assert!(replay_event_for_fork_projection(
+            &EventBody::AgentAcpTimedOut(fabro_types::run_event::AgentAcpTimedOutProps {
+                stdout:      "partial".to_string(),
+                stderr:      "timeout".to_string(),
+                duration_ms: 99,
+            })
+        ));
+        assert!(!replay_event_for_fork_projection(
+            &EventBody::AgentAcpCompleted(fabro_types::run_event::AgentAcpCompletedProps {
+                stdout:      "done".to_string(),
+                stderr:      String::new(),
+                stop_reason: "end_turn".to_string(),
+                duration_ms: 42,
+            })
         ));
     }
 

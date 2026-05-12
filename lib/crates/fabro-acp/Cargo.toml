@@ -1,0 +1,37 @@
+[package]
+name = "fabro-acp"
+edition.workspace = true
+version.workspace = true
+publish = false
+license.workspace = true
+description = "Agent Client Protocol backend support for Fabro"
+
+[features]
+test-support = []
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+agent-client-protocol.workspace = true
+agent-client-protocol-tokio.workspace = true
+fabro-model = { path = "../fabro-model" }
+fabro-sandbox = { path = "../fabro-sandbox" }
+fabro-types = { path = "../fabro-types" }
+fabro-util = { path = "../fabro-util" }
+bytes.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util = { workspace = true, features = ["compat", "io"] }
+futures.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+fabro-sandbox = { path = "../fabro-sandbox", features = ["test-support"] }
+tempfile = "3"

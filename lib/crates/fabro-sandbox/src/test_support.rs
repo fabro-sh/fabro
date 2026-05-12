@@ -4,9 +4,15 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use fabro_types::CommandTermination;
 use tokio::fs;
+use tokio::io::duplex;
 use tokio_util::sync::CancellationToken;
 
-use crate::{DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback};
+use crate::sandbox::StdioProcessControl;
+use crate::{
+    DEFAULT_EXEC_OUTPUT_TAIL_BYTES, DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent,
+    SandboxEventCallback, StderrCollector, StdioProcess, StdioProcessHandle,
+    StdioProcessTermination,
+};
 
 // --- MockSandbox ---
 
@@ -36,6 +42,7 @@ pub struct MockSandbox {
     pub stop_calls:              Mutex<u32>,
     pub delete_calls:            Mutex<u32>,
     pub event_callback:          Option<SandboxEventCallback>,
+    pub stdio_process_error:     Option<String>,
 }
 
 impl MockSandbox {
@@ -100,7 +107,21 @@ impl Default for MockSandbox {
             stop_calls:              Mutex::new(0),
             delete_calls:            Mutex::new(0),
             event_callback:          None,
+            stdio_process_error:     None,
         }
+    }
+}
+
+struct MockStdioProcessControl;
+
+#[async_trait]
+impl StdioProcessControl for MockStdioProcessControl {
+    async fn terminate(&self) -> crate::Result<()> {
+        Ok(())
+    }
+
+    async fn wait(&self) -> crate::Result<StdioProcessTermination> {
+        Ok(StdioProcessTermination::exited(Some(0)))
     }
 }
 
@@ -182,6 +203,44 @@ impl Sandbox for MockSandbox {
             .lock()
             .expect("captured_env_vars lock poisoned") = env_vars.cloned();
         Ok(self.exec_result.clone())
+    }
+
+    async fn spawn_stdio_process(
+        &self,
+        command: &str,
+        working_dir: Option<&str>,
+        env_vars: Option<&std::collections::HashMap<String, String>>,
+        _cancel_token: Option<CancellationToken>,
+    ) -> crate::Result<StdioProcess> {
+        *self
+            .captured_command
+            .lock()
+            .expect("captured_command lock poisoned") = Some(command.to_string());
+        self.captured_commands
+            .lock()
+            .expect("captured_commands lock poisoned")
+            .push(command.to_string());
+        self.captured_working_dirs
+            .lock()
+            .expect("captured_working_dirs lock poisoned")
+            .push(working_dir.map(String::from));
+        *self
+            .captured_env_vars
+            .lock()
+            .expect("captured_env_vars lock poisoned") = env_vars.cloned();
+
+        if let Some(error) = &self.stdio_process_error {
+            return Err(crate::Error::message(error.clone()));
+        }
+
+        let (stdin, _stdin_read) = duplex(1024);
+        let (_stdout_write, stdout) = duplex(1024);
+        Ok(StdioProcess {
+            stdin:  Box::pin(stdin),
+            stdout: Box::pin(stdout),
+            stderr: StderrCollector::new(DEFAULT_EXEC_OUTPUT_TAIL_BYTES),
+            handle: StdioProcessHandle::new(MockStdioProcessControl),
+        })
     }
 
     async fn grep(

@@ -7,14 +7,16 @@ use fabro_types::{CommandOutputStream, CommandTermination};
 use fabro_util::time::elapsed_ms;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::{Child, Command};
+use tokio::sync::watch;
 use tokio::task::spawn_blocking;
 use tokio::{fs, time};
 use tokio_util::sync::CancellationToken;
 
-use crate::sandbox::optional_timeout;
+use crate::sandbox::{StdioProcessControl, optional_timeout};
 use crate::{
-    CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GrepOptions, Sandbox,
-    SandboxEvent, SandboxEventCallback, format_lines_numbered,
+    CommandOutputCallback, DEFAULT_EXEC_OUTPUT_TAIL_BYTES, DirEntry, ExecResult,
+    ExecStreamingResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback, StderrCollector,
+    StdioProcess, StdioProcessHandle, StdioProcessTermination, format_lines_numbered,
 };
 
 pub struct LocalSandbox {
@@ -128,6 +130,34 @@ fn process_env_vars() -> Vec<(String, String)> {
     std::env::vars().collect()
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ExplicitEnvPolicy {
+    FilterSensitive,
+    TrustCaller,
+}
+
+fn filtered_env_vars(
+    env_vars: Option<&std::collections::HashMap<String, String>>,
+    explicit_policy: ExplicitEnvPolicy,
+) -> Vec<(String, String)> {
+    let mut filtered_env: Vec<(String, String)> = process_env_vars()
+        .into_iter()
+        .filter(|(key, _)| !LocalSandbox::should_filter_env_var(key))
+        .collect();
+
+    if let Some(extra) = env_vars {
+        for (key, value) in extra {
+            if matches!(explicit_policy, ExplicitEnvPolicy::TrustCaller)
+                || !LocalSandbox::should_filter_env_var(key)
+            {
+                filtered_env.push((key.clone(), value.clone()));
+            }
+        }
+    }
+
+    filtered_env
+}
+
 async fn drain_pipe<R>(mut pipe: Option<R>, stream: CommandOutputStream) -> String
 where
     R: AsyncRead + Unpin,
@@ -139,6 +169,77 @@ where
         }
     }
     buf
+}
+
+type LocalStdioOutcome = Result<StdioProcessTermination, String>;
+
+struct LocalStdioProcessControl {
+    terminate_tx:   watch::Sender<bool>,
+    termination_rx: watch::Receiver<Option<LocalStdioOutcome>>,
+}
+
+impl LocalStdioProcessControl {
+    fn new(mut child: Child) -> Self {
+        let (terminate_tx, mut terminate_rx) = watch::channel(false);
+        let (termination_tx, termination_rx) = watch::channel(None);
+
+        tokio::spawn(async move {
+            let outcome = tokio::select! {
+                status = child.wait() => {
+                    status
+                        .map(|status| StdioProcessTermination::exited(status.code()))
+                        .map_err(|err| format!("Failed to wait for stdio process: {err}"))
+                }
+                changed = terminate_rx.changed() => {
+                    if changed.is_err() || !*terminate_rx.borrow() {
+                        child.wait()
+                            .await
+                            .map(|status| StdioProcessTermination::exited(status.code()))
+                            .map_err(|err| format!("Failed to wait for stdio process: {err}"))
+                    } else {
+                        sigterm_then_kill(&mut child).await;
+                        Ok(StdioProcessTermination::cancelled())
+                    }
+                }
+            };
+            let _ = termination_tx.send(Some(outcome));
+        });
+
+        Self {
+            terminate_tx,
+            termination_rx,
+        }
+    }
+
+    async fn wait_for_termination(&self) -> crate::Result<StdioProcessTermination> {
+        let mut termination_rx = self.termination_rx.clone();
+        loop {
+            if let Some(outcome) = termination_rx.borrow().clone() {
+                return outcome.map_err(crate::Error::message);
+            }
+            termination_rx.changed().await.map_err(|_| {
+                crate::Error::message(
+                    "stdio process supervisor stopped before reporting termination",
+                )
+            })?;
+        }
+    }
+}
+
+#[async_trait]
+impl StdioProcessControl for LocalStdioProcessControl {
+    async fn terminate(&self) -> crate::Result<()> {
+        if self.termination_rx.borrow().is_some() {
+            return Ok(());
+        }
+
+        self.terminate_tx.send_replace(true);
+        self.wait_for_termination().await.map(|_| ())
+    }
+
+    async fn wait(&self) -> crate::Result<StdioProcessTermination> {
+        self.wait_for_termination().await
+    }
 }
 
 #[async_trait]
@@ -252,18 +353,7 @@ impl Sandbox for LocalSandbox {
     ) -> crate::Result<ExecResult> {
         let start = Instant::now();
 
-        let mut filtered_env: Vec<(String, String)> = process_env_vars()
-            .into_iter()
-            .filter(|(key, _)| !Self::should_filter_env_var(key))
-            .collect();
-
-        if let Some(extra) = env_vars {
-            for (k, v) in extra {
-                if !Self::should_filter_env_var(k) {
-                    filtered_env.push((k.clone(), v.clone()));
-                }
-            }
-        }
+        let filtered_env = filtered_env_vars(env_vars, ExplicitEnvPolicy::FilterSensitive);
 
         let effective_dir =
             working_dir.map_or_else(|| self.working_directory.clone(), std::path::PathBuf::from);
@@ -340,18 +430,7 @@ impl Sandbox for LocalSandbox {
     ) -> crate::Result<ExecStreamingResult> {
         let start = Instant::now();
 
-        let mut filtered_env: Vec<(String, String)> = process_env_vars()
-            .into_iter()
-            .filter(|(key, _)| !Self::should_filter_env_var(key))
-            .collect();
-
-        if let Some(extra) = env_vars {
-            for (k, v) in extra {
-                if !Self::should_filter_env_var(k) {
-                    filtered_env.push((k.clone(), v.clone()));
-                }
-            }
-        }
+        let filtered_env = filtered_env_vars(env_vars, ExplicitEnvPolicy::FilterSensitive);
 
         let effective_dir =
             working_dir.map_or_else(|| self.working_directory.clone(), std::path::PathBuf::from);
@@ -421,6 +500,71 @@ impl Sandbox for LocalSandbox {
             },
             streams_separated: true,
             live_streaming:    true,
+        })
+    }
+
+    async fn spawn_stdio_process(
+        &self,
+        command: &str,
+        working_dir: Option<&str>,
+        env_vars: Option<&std::collections::HashMap<String, String>>,
+        cancel_token: Option<CancellationToken>,
+    ) -> crate::Result<StdioProcess> {
+        let filtered_env = filtered_env_vars(env_vars, ExplicitEnvPolicy::TrustCaller);
+
+        let effective_dir =
+            working_dir.map_or_else(|| self.working_directory.clone(), std::path::PathBuf::from);
+
+        let mut cmd = Command::new("/bin/bash");
+        cmd.arg("-lc")
+            .arg(format!("exec {command}"))
+            .current_dir(&effective_dir)
+            .env_clear()
+            .envs(filtered_env)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        #[cfg(unix)]
+        fabro_proc::pre_exec_setpgid(cmd.as_std_mut());
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| crate::Error::context("Failed to spawn stdio process", e))?;
+
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| crate::Error::message("Failed to open stdio process stdin"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| crate::Error::message("Failed to open stdio process stdout"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| crate::Error::message("Failed to open stdio process stderr"))?;
+
+        let stderr_collector = StderrCollector::new(DEFAULT_EXEC_OUTPUT_TAIL_BYTES);
+        stderr_collector.spawn_reader(stderr);
+
+        let handle = StdioProcessHandle::new(LocalStdioProcessControl::new(child));
+
+        if let Some(token) = cancel_token {
+            let handle_for_cancel = handle.clone();
+            tokio::spawn(async move {
+                token.cancelled().await;
+                if let Err(err) = handle_for_cancel.terminate().await {
+                    tracing::warn!(error = %err, "Failed to terminate cancelled stdio process");
+                }
+            });
+        }
+
+        Ok(StdioProcess {
+            stdin: Box::pin(stdin),
+            stdout: Box::pin(stdout),
+            stderr: stderr_collector,
+            handle,
         })
     }
 
@@ -740,7 +884,7 @@ mod tests {
     use std::pin::Pin;
     use std::task::{Context as TaskContext, Poll};
 
-    use tokio::io::ReadBuf;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, ReadBuf};
 
     use super::*;
 
@@ -873,6 +1017,58 @@ mod tests {
         assert_eq!(result.exit_code, Some(0));
         assert_eq!(result.termination, CommandTermination::Exited);
         assert!(result.duration_ms < 5000);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn stdio_process_round_trips_lines() {
+        let dir = temp_dir();
+        let sandbox = LocalSandbox::new(dir.clone());
+        let process = sandbox
+            .spawn_stdio_process(
+                "python3 -u -c 'import sys; [print(line.strip()[::-1], flush=True) for line in sys.stdin]'",
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let mut stdin = process.stdin;
+        let mut stdout = BufReader::new(process.stdout);
+
+        stdin.write_all(b"abc\n").await.unwrap();
+        stdin.flush().await.unwrap();
+
+        let mut line = String::new();
+        stdout.read_line(&mut line).await.unwrap();
+        assert_eq!(line.trim_end(), "cba");
+
+        process.handle.terminate().await.unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn stdio_process_forwards_explicit_provider_credentials() {
+        let dir = temp_dir();
+        let sandbox = LocalSandbox::new(dir.clone());
+        let env = HashMap::from([("OPENAI_API_KEY".to_string(), "test-key".to_string())]);
+        let process = sandbox
+            .spawn_stdio_process(
+                "python3 -u -c 'import os; print(os.environ.get(\"OPENAI_API_KEY\", \"missing\"), flush=True)'",
+                None,
+                Some(&env),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let mut stdout = BufReader::new(process.stdout);
+        let mut line = String::new();
+        stdout.read_line(&mut line).await.unwrap();
+        assert_eq!(line.trim_end(), "test-key");
+
+        process.handle.wait().await.unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

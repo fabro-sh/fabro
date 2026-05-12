@@ -2,6 +2,35 @@ use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString, IntoStaticStr};
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum RunStatusKind {
+    Submitted,
+    Queued,
+    Starting,
+    Running,
+    Blocked,
+    Paused,
+    Removing,
+    Succeeded,
+    Failed,
+    Dead,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -19,6 +48,10 @@ pub enum RunStatus {
 }
 
 impl RunStatus {
+    pub fn kind(self) -> RunStatusKind {
+        self.into()
+    }
+
     /// Whether the run has reached a terminal outcome and stops poll loops,
     /// finalization, and similar "done" handling.
     pub fn is_terminal(self) -> bool {
@@ -134,6 +167,23 @@ impl RunStatus {
             Ok(to)
         } else {
             Err(InvalidTransition { from: self, to })
+        }
+    }
+}
+
+impl From<RunStatus> for RunStatusKind {
+    fn from(status: RunStatus) -> Self {
+        match status {
+            RunStatus::Submitted => Self::Submitted,
+            RunStatus::Queued => Self::Queued,
+            RunStatus::Starting => Self::Starting,
+            RunStatus::Running => Self::Running,
+            RunStatus::Blocked { .. } => Self::Blocked,
+            RunStatus::Paused { .. } => Self::Paused,
+            RunStatus::Removing => Self::Removing,
+            RunStatus::Succeeded { .. } => Self::Succeeded,
+            RunStatus::Failed { .. } => Self::Failed,
+            RunStatus::Dead => Self::Dead,
         }
     }
 }
