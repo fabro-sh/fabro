@@ -26,7 +26,7 @@
 //! Resolution against the static adapter registry happens in `fabro-model`
 //! when the resolved [`Catalog`](fabro_model::Catalog) is built.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use chrono::NaiveDate;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -64,6 +64,11 @@ pub struct ProviderSettings {
     /// `env:<NAME>`); literal secret strings fail deserialization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credentials:  Option<Vec<CredentialRef>>,
+    /// Extra HTTP headers attached to every outgoing provider request after
+    /// credential resolution. Header values are typed so secret-bearing values
+    /// stay as references until a later resolution phase.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra_headers: Option<HashMap<String, HeaderValueRef>>,
     /// Higher wins; missing → `0`; ties broken by canonical provider ID.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority:     Option<i32>,
@@ -690,6 +695,56 @@ aliases = ["moonshot"]
             CredentialRef::Credential("kimi".to_string()),
             CredentialRef::Env("KIMI_API_KEY".to_string()),
         ]);
+    }
+
+    #[test]
+    fn parses_provider_extra_headers() {
+        let toml = r#"
+[providers.portkey]
+display_name = "Portkey Bedrock"
+adapter = "anthropic"
+base_url = "https://api.portkey.ai/v1"
+
+[providers.portkey.extra_headers]
+x-portkey-api-key = { env = "PORTKEY_API_KEY" }
+x-portkey-provider = { literal = "@bedrock-prod" }
+x-portkey-config = { credential = "portkey_config" }
+"#;
+
+        let layer: LlmLayer = toml::from_str(toml).unwrap();
+        let portkey = layer.providers.get("portkey").unwrap();
+
+        assert!(portkey.credentials.is_none());
+        let headers = portkey.extra_headers.as_ref().unwrap();
+        assert_eq!(
+            headers.get("x-portkey-api-key"),
+            Some(&HeaderValueRef::Env("PORTKEY_API_KEY".to_string())),
+        );
+        assert_eq!(
+            headers.get("x-portkey-provider"),
+            Some(&HeaderValueRef::Literal("@bedrock-prod".to_string())),
+        );
+        assert_eq!(
+            headers.get("x-portkey-config"),
+            Some(&HeaderValueRef::Credential("portkey_config".to_string())),
+        );
+    }
+
+    #[test]
+    fn provider_extra_headers_reject_bare_string_values() {
+        let toml = r#"
+[providers.portkey.extra_headers]
+x-portkey-api-key = "sk-portkey-literal"
+"#;
+
+        let err = toml::from_str::<LlmLayer>(toml).unwrap_err();
+        let message = err.message();
+
+        assert!(message.contains("header value"));
+        assert!(
+            !message.contains("sk-portkey-literal"),
+            "deserializer message must not echo a possible literal secret",
+        );
     }
 
     #[test]

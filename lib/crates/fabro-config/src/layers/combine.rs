@@ -14,7 +14,7 @@ use fabro_types::settings::{Duration, InterpString, Size};
 use super::LogFilter;
 use super::cli::{CliAuthLayer, CliLoggingLayer, CliTargetLayer};
 use super::features::FeaturesLayer;
-use super::llm::{CostRates, CredentialRef};
+use super::llm::{CostRates, CredentialRef, HeaderValueRef};
 use super::run::{
     DaytonaSnapshotLayer, HookAgentMarker, HookEntry, HookTlsMode, InterviewProviderLayer,
     ModelRefOrSplice, NotificationProviderLayer, RunArtifactsLayer, RunCheckpointLayer,
@@ -112,6 +112,12 @@ impl Combine for Option<BTreeMap<String, CostRates>> {
 }
 
 impl Combine for Option<HashMap<String, toml::Value>> {
+    fn combine(self, other: Self) -> Self {
+        self.or(other)
+    }
+}
+
+impl Combine for Option<HashMap<String, HeaderValueRef>> {
     fn combine(self, other: Self) -> Self {
         self.or(other)
     }
