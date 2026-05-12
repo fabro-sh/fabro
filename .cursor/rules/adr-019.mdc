@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Standardize Server-Sent Events (SSE) for Real-Time Configuration and Runtime State Updates: Sse Event Streams
+
+## Policies
+
+1. SSE event streams SHOULD include structured data payloads (JSON) with type identifiers to enable client-side event routing

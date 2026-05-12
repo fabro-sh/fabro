@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Adopt Distributed Tracing for Public API Observability: Each Trace Span
+
+## Policies
+
+1. Each trace span MUST include standardized attributes: service.name, operation.name, http.method, http.status_code, and error.type (if applicable)

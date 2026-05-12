@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Adopt Distributed Tracing for Public API Observability: Implementations Create Child
+
+## Policies
+
+1. API implementations SHOULD create child spans for significant internal operations (database queries, external service calls, computation-heavy operations)

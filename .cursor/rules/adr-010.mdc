@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Adopt Distributed Tracing for Public API Observability: Tracing Instrumentation Not
+
+## Policies
+
+1. Tracing instrumentation MUST NOT log sensitive data (passwords, tokens, PII) in span attributes or events

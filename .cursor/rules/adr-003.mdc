@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Standardize Service Boundary Logging for Observability: Log Levels Service
+
+## Policies
+
+1. Log levels at service boundaries SHOULD follow standard conventions: INFO for successful operations, WARN for degraded operations, ERROR for failures

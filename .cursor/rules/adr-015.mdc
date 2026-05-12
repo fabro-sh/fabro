@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Adopt Distributed Tracing for Public API Observability: Public External Endpoints
+
+## Policies
+
+1. All public/external API endpoints MUST instrument entry and exit points with distributed tracing spans

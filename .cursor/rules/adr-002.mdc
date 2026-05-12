@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Standardize Service Boundary Logging for Observability: Service Boundary Logs
+
+## Policies
+
+1. Service boundary logs MUST NOT include sensitive data (passwords, tokens, PII) unless explicitly redacted or masked

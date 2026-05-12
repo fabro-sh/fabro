@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Adopt Distributed Tracing for Public API Observability: Internal Private Use
+
+## Policies
+
+1. Internal/private APIs MAY use simplified tracing instrumentation with reduced attribute sets

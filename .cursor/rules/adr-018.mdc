@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Standardize Server-Sent Events (SSE) for Real-Time Configuration and Runtime State Updates: Sse Connections Implement
+
+## Policies
+
+1. SSE connections SHOULD implement heartbeat or keep-alive mechanisms to detect and handle connection failures

@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Standardize Server-Sent Events (SSE) for Real-Time Configuration and Runtime State Updates: Sse Implementations Utilize
+
+## Policies
+
+1. SSE implementations MUST utilize a centralized library module (e.g., sse.ts) to ensure consistent event formatting and connection management

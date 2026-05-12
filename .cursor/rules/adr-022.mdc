@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Standardize Server-Sent Events (SSE) for Real-Time Configuration and Runtime State Updates: Runtime State Updates
+
+## Policies
+
+1. Runtime state updates and configuration changes MUST be delivered to clients using Server-Sent Events (SSE) protocol

@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Standardize Server-Sent Events (SSE) for Real-Time Configuration and Runtime State Updates: Sse Implementations Support
+
+## Policies
+
+1. SSE implementations MAY support event filtering or subscription patterns to reduce bandwidth for clients interested in specific event types

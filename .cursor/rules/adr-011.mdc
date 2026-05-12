@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Adopt Distributed Tracing for Public API Observability: Trace Spans Include
+
+## Policies
+
+1. Trace spans SHOULD include business-relevant metadata (user_id, tenant_id, request_id) as span attributes for correlation

@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Adopt Distributed Tracing for Public API Observability: Implement Sampling Strategies
+
+## Policies
+
+1. APIs SHOULD implement sampling strategies to balance observability needs with performance overhead (e.g., 100% for errors, 10% for successful requests)

@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Standardize Service Boundary Logging for Observability: Service Implementations Include
+
+## Policies
+
+1. Service implementations MAY include additional context-specific logging within service boundaries for detailed debugging, but this does not replace boundary logging requirements

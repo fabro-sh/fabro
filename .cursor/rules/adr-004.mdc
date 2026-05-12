@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Standardize Service Boundary Logging for Observability: Service Boundary Logging
+
+## Policies
+
+1. Service boundary logging SHOULD use structured logging formats (JSON, key-value pairs) rather than unstructured text to enable automated log analysis

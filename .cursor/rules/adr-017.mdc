@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Standardize Server-Sent Events (SSE) for Real-Time Configuration and Runtime State Updates: Route Handlers Properly
+
+## Policies
+
+1. Route handlers MUST properly close SSE connections and clean up resources when clients disconnect or execution completes

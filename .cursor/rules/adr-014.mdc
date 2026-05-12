@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Adopt Distributed Tracing for Public API Observability: Tracing Implementations Propagate
+
+## Policies
+
+1. Tracing implementations MUST propagate trace context across service boundaries using W3C Trace Context or OpenTelemetry standards

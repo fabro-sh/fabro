@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Standardize Server-Sent Events (SSE) for Real-Time Configuration and Runtime State Updates: Route Handlers That
+
+## Policies
+
+1. Route handlers that expose runtime execution state MUST establish SSE connections with appropriate Content-Type headers (text/event-stream)

@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Standardize Service Boundary Logging for Observability: Service Boundary Entry
+
+## Policies
+
+1. All service boundary entry points (API handlers, RPC endpoints, query interfaces) MUST log incoming requests with sufficient context to identify the operation, caller, and key parameters

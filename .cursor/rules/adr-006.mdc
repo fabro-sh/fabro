@@ -1,0 +1,10 @@
+---
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Standardize Service Boundary Logging for Observability: Service Boundary Exit
+
+## Policies
+
+1. All service boundary exit points MUST log operation completion status (success/failure), duration, and relevant result metadata
