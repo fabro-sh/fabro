@@ -358,7 +358,7 @@ impl Sandbox for LocalSandbox {
         let effective_dir =
             working_dir.map_or_else(|| self.working_directory.clone(), std::path::PathBuf::from);
 
-        let mut cmd = Command::new("/bin/bash");
+        let mut cmd = Command::new("bash");
         cmd.arg("-c")
             .arg(command)
             .current_dir(&effective_dir)
@@ -435,7 +435,7 @@ impl Sandbox for LocalSandbox {
         let effective_dir =
             working_dir.map_or_else(|| self.working_directory.clone(), std::path::PathBuf::from);
 
-        let mut cmd = Command::new("/bin/bash");
+        let mut cmd = Command::new("bash");
         cmd.arg("-c")
             .arg(command)
             .current_dir(&effective_dir)
@@ -515,7 +515,7 @@ impl Sandbox for LocalSandbox {
         let effective_dir =
             working_dir.map_or_else(|| self.working_directory.clone(), std::path::PathBuf::from);
 
-        let mut cmd = Command::new("/bin/bash");
+        let mut cmd = Command::new("bash");
         cmd.arg("-lc")
             .arg(format!("exec {command}"))
             .current_dir(&effective_dir)
