@@ -972,7 +972,7 @@ mod tests {
             .set(
                 "anthropic",
                 &serde_json::to_string(&AuthCredential {
-                    provider: Provider::Anthropic,
+                    provider: Provider::Anthropic.id(),
                     details:  AuthDetails::ApiKey {
                         key: "vault-key".to_string(),
                     },

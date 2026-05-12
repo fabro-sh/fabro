@@ -185,7 +185,7 @@ async fn mock_daytona_current_key<'a>(
 
 fn openai_api_key_credential(key: &str) -> AuthCredential {
     AuthCredential {
-        provider: Provider::OpenAi,
+        provider: Provider::OpenAi.id(),
         details:  AuthDetails::ApiKey {
             key: key.to_string(),
         },
@@ -1014,7 +1014,7 @@ async fn create_secret_stores_valid_credential_entries() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let credential = fabro_auth::AuthCredential {
-        provider: Provider::OpenAi,
+        provider: Provider::OpenAi.id(),
         details:  fabro_auth::AuthDetails::CodexOAuth {
             tokens:     fabro_auth::OAuthTokens {
                 access_token:  "access".to_string(),
@@ -1218,7 +1218,7 @@ impl CredentialSource for FailingCredentialSource {
             .context("credential source context"))
     }
 
-    async fn configured_providers(&self) -> Vec<Provider> {
+    async fn configured_providers(&self) -> Vec<fabro_model::ProviderId> {
         Vec::new()
     }
 }
@@ -1263,7 +1263,7 @@ async fn llm_source_configured_providers_reads_openai_codex_from_vault() {
         .unwrap();
 
     assert_eq!(state.llm_source.configured_providers().await, vec![
-        Provider::OpenAi
+        Provider::OpenAi.id()
     ]);
 }
 
@@ -3822,17 +3822,19 @@ async fn list_models_marks_configured_false_when_no_credential_material() {
 }
 
 #[tokio::test]
-async fn list_models_invalid_provider_returns_400() {
+async fn list_models_unknown_provider_returns_empty_page() {
     let app = test_app_with();
 
     let req = Request::builder()
         .method("GET")
-        .uri(api("/models?provider=not-a-provider"))
+        .uri(api("/models?provider=venice"))
         .body(Body::empty())
         .unwrap();
 
     let response = app.oneshot(req).await.unwrap();
-    assert_status!(response, StatusCode::BAD_REQUEST).await;
+    let body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(body["data"].as_array().unwrap().len(), 0);
+    assert_eq!(body["meta"]["has_more"].as_bool(), Some(false));
 }
 
 #[tokio::test]
@@ -9089,6 +9091,38 @@ async fn create_completion_missing_messages_returns_422() {
 
     let response = app.oneshot(req).await.unwrap();
     assert_status!(response, StatusCode::UNPROCESSABLE_ENTITY).await;
+}
+
+#[tokio::test]
+async fn create_completion_unknown_provider_returns_clear_error() {
+    let app = test_app_with();
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api("/completions"))
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({
+                "provider": "venice",
+                "model": "gpt-5.4",
+                "stream": false,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"kind": "text", "data": "hi"}]
+                    }
+                ]
+            })
+            .to_string(),
+        ))
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::BAD_REQUEST).await;
+    assert_eq!(
+        body["errors"][0]["detail"],
+        "Provider \"venice\" is not configured"
+    );
 }
 
 #[tokio::test]

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::super::{
     ApiError, AppState, FromStr, HashSet, IntoResponse, Json, MAX_PAGE_OFFSET, ModelTestMode, Path,
-    Provider, Query, RequiredUser, Response, Router, State, StatusCode, auth_issue_message,
+    ProviderId, Query, RequiredUser, Response, Router, State, StatusCode, auth_issue_message,
     default_page_limit, error, get, post, run_model_test,
 };
 
@@ -35,25 +35,12 @@ async fn list_models(
     State(state): State<Arc<AppState>>,
     Query(params): Query<ModelListParams>,
 ) -> Response {
-    let provider = match params.provider.as_deref() {
-        Some(value) => match Provider::from_str(value) {
-            Ok(provider) => Some(provider),
-            Err(_) => {
-                return ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    format!("unknown provider: {value}"),
-                )
-                .into_response();
-            }
-        },
-        None => None,
-    };
-    let provider_id = provider.map(Provider::id);
+    let provider_id = params.provider.as_deref().map(ProviderId::from);
 
     let query = params.query.as_ref().map(|value| value.to_lowercase());
     let limit = params.limit.clamp(1, 100) as usize;
     let offset = params.offset.min(MAX_PAGE_OFFSET) as usize;
-    let configured: HashSet<Provider> = state
+    let configured: HashSet<ProviderId> = state
         .llm_source
         .configured_providers()
         .await
@@ -76,9 +63,7 @@ async fn list_models(
         })
         .cloned()
         .map(|mut model| {
-            model.configured = model
-                .builtin_provider()
-                .is_some_and(|provider| configured.contains(&provider));
+            model.configured = configured.contains(&model.provider);
             model
         })
         .collect::<Vec<_>>();
@@ -133,12 +118,9 @@ async fn test_model(
     if let Some((_, issue)) = llm_result
         .auth_issues
         .iter()
-        .find(|(provider, _)| info.builtin_provider() == Some(*provider))
+        .find(|(provider, _)| provider == &info.provider)
     {
-        let provider = info
-            .builtin_provider()
-            .expect("model test auth issue should reference a built-in provider");
-        return ApiError::bad_request(auth_issue_message(provider, issue)).into_response();
+        return ApiError::bad_request(auth_issue_message(&info.provider, issue)).into_response();
     }
     let provider_name = info.provider.as_str();
     if !llm_result.client.provider_names().contains(&provider_name) {

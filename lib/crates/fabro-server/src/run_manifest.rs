@@ -14,9 +14,8 @@ use fabro_config::{
 };
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_graphviz::render::apply_direction;
-use fabro_llm::Provider;
 use fabro_llm::model_test::{ModelTestStatus, run_basic_model_probe};
-use fabro_model::Catalog;
+use fabro_model::{Catalog, ProviderId};
 use fabro_sandbox::config::{
     DaytonaNetwork, DaytonaSnapshotSettings, DockerfileSource as SandboxDockerfileSource,
 };
@@ -170,7 +169,7 @@ pub(crate) fn validate_prepared_manifest(
 
 pub(crate) fn create_run_input(
     prepared: PreparedManifest,
-    configured_providers: Vec<Provider>,
+    configured_providers: Vec<ProviderId>,
     web_url: Option<String>,
 ) -> CreateRunInput {
     CreateRunInput {
@@ -880,7 +879,6 @@ struct PendingModelProbe {
     index:         usize,
     model_id:      String,
     provider_name: String,
-    provider:      Provider,
 }
 
 async fn run_llm_check(
@@ -888,7 +886,7 @@ async fn run_llm_check(
     checks: &mut Vec<CheckResult>,
     graph: &Graph,
     settings: &RunNamespace,
-    configured_providers: &[Provider],
+    configured_providers: &[ProviderId],
 ) -> bool {
     let (model, provider) = resolve_model_provider(settings, graph, configured_providers);
     let default_provider = provider.as_deref().unwrap_or("anthropic");
@@ -945,58 +943,36 @@ async fn run_llm_check(
             let mut completed_checks: Vec<(usize, CheckResult)> = Vec::new();
             let mut pending_probes = Vec::new();
             for (index, (model_id, provider_name)) in model_providers.iter().enumerate() {
-                match provider_name.parse::<Provider>() {
-                    Ok(provider) => {
-                        if let Some((_, issue)) = auth_issues
-                            .iter()
-                            .find(|(candidate, _)| *candidate == provider)
-                        {
-                            all_ok = false;
-                            completed_checks.push((index, CheckResult {
-                                name:        "LLM".into(),
-                                status:      CheckStatus::Warning,
-                                summary:     model_id.clone(),
-                                details:     vec![CheckDetail::new(format!(
-                                    "Provider: {provider_name}"
-                                ))],
-                                remediation: Some(auth_issue_message(provider, issue)),
-                            }));
-                        } else if !configured.iter().any(|name| name == provider_name) {
-                            all_ok = false;
-                            completed_checks.push((index, CheckResult {
-                                name:        "LLM".into(),
-                                status:      CheckStatus::Warning,
-                                summary:     model_id.clone(),
-                                details:     vec![CheckDetail::new(format!(
-                                    "Provider: {provider_name}"
-                                ))],
-                                remediation: Some(format!(
-                                    "Provider \"{provider_name}\" is not configured"
-                                )),
-                            }));
-                        } else {
-                            pending_probes.push(PendingModelProbe {
-                                index,
-                                model_id: model_id.clone(),
-                                provider_name: provider_name.clone(),
-                                provider,
-                            });
-                        }
-                    }
-                    Err(err) => {
-                        all_ok = false;
-                        completed_checks.push((index, CheckResult {
-                            name:        "LLM".into(),
-                            status:      CheckStatus::Error,
-                            summary:     model_id.clone(),
-                            details:     vec![CheckDetail::new(format!(
-                                "Provider: {provider_name}"
-                            ))],
-                            remediation: Some(format!(
-                                "Invalid provider \"{provider_name}\": {err}"
-                            )),
-                        }));
-                    }
+                let provider_id = ProviderId::from(provider_name.as_str());
+                if let Some((_, issue)) = auth_issues
+                    .iter()
+                    .find(|(candidate, _)| candidate == &provider_id)
+                {
+                    all_ok = false;
+                    completed_checks.push((index, CheckResult {
+                        name:        "LLM".into(),
+                        status:      CheckStatus::Warning,
+                        summary:     model_id.clone(),
+                        details:     vec![CheckDetail::new(format!("Provider: {provider_name}"))],
+                        remediation: Some(auth_issue_message(&provider_id, issue)),
+                    }));
+                } else if !configured.iter().any(|name| name == provider_name) {
+                    all_ok = false;
+                    completed_checks.push((index, CheckResult {
+                        name:        "LLM".into(),
+                        status:      CheckStatus::Warning,
+                        summary:     model_id.clone(),
+                        details:     vec![CheckDetail::new(format!("Provider: {provider_name}"))],
+                        remediation: Some(format!(
+                            "Provider \"{provider_name}\" is not configured"
+                        )),
+                    }));
+                } else {
+                    pending_probes.push(PendingModelProbe {
+                        index,
+                        model_id: model_id.clone(),
+                        provider_name: provider_name.clone(),
+                    });
                 }
             }
 
@@ -1005,7 +981,8 @@ async fn run_llm_check(
                     let client = Arc::clone(&client);
                     async move {
                         let outcome =
-                            run_basic_model_probe(&probe.model_id, probe.provider, client).await;
+                            run_basic_model_probe(&probe.model_id, &probe.provider_name, client)
+                                .await;
                         let (status, remediation) = if outcome.status == ModelTestStatus::Ok {
                             (CheckStatus::Pass, None)
                         } else {
@@ -1062,7 +1039,7 @@ async fn run_llm_check(
 fn resolve_model_provider(
     settings: &RunNamespace,
     _graph: &Graph,
-    configured_providers: &[Provider],
+    configured_providers: &[ProviderId],
 ) -> (String, Option<String>) {
     let provider = settings
         .model
@@ -1072,7 +1049,7 @@ fn resolve_model_provider(
     let model = settings.model.name.as_ref().map_or_else(
         || {
             Catalog::builtin()
-                .default_for_configured(configured_providers)
+                .default_for_configured_ids(configured_providers)
                 .id
                 .clone()
         },
@@ -1298,6 +1275,8 @@ fn report_to_api(report: &CheckReport) -> types::PreflightCheckReport {
 
 #[cfg(test)]
 mod tests {
+    use fabro_model::Provider;
+
     use super::*;
 
     fn minimal_manifest() -> types::RunManifest {
@@ -1413,7 +1392,7 @@ enabled = {clone_enabled}
             prepared.settings.clone(),
             validated.graph(),
             Catalog::builtin(),
-            &[Provider::Anthropic],
+            &[Provider::Anthropic.id()],
         )
         .run;
 
@@ -1968,7 +1947,7 @@ provider = "daytona"
             .set(
                 "openai",
                 &serde_json::to_string(&fabro_auth::AuthCredential {
-                    provider: Provider::OpenAi,
+                    provider: Provider::OpenAi.id(),
                     details:  fabro_auth::AuthDetails::ApiKey {
                         key: "test-openai-key".to_string(),
                     },
@@ -2015,6 +1994,49 @@ digraph Demo {
                 .contains("Rate limited by openai: quota limited")
         );
         assert!(response_mock.calls_async().await >= 1);
+    }
+
+    #[tokio::test]
+    async fn preflight_unknown_llm_provider_reports_not_configured() {
+        let state = crate::test_support::test_app_state();
+        let mut manifest = minimal_manifest();
+        manifest.workflows.get_mut("workflow.fabro").unwrap().source = r#"
+digraph Demo {
+    start [shape=Mdiamond]
+    exit  [shape=Msquare]
+    work  [prompt="Do work", model="venice-model", provider="venice"]
+    start -> work -> exit
+}
+"#
+        .to_string();
+        let prepared = prepare_manifest(
+            &manifest_run_defaults(Some(&default_settings_fixture())),
+            &manifest,
+        )
+        .unwrap();
+        let validated = validate_prepared_manifest(&prepared, RenderMode::Strict).unwrap();
+
+        let (response, ok) = run_preflight(state.as_ref(), &prepared, &validated)
+            .await
+            .unwrap();
+
+        assert!(!ok);
+        let llm_check = response.checks.sections[0]
+            .checks
+            .iter()
+            .find(|check| check.name == "LLM" && check.summary == "venice-model")
+            .expect("preflight should include the requested custom LLM provider");
+        assert_eq!(llm_check.status, types::PreflightCheckResultStatus::Warning);
+        assert_eq!(
+            llm_check.remediation.as_deref(),
+            Some("Provider \"venice\" is not configured")
+        );
+        assert!(
+            llm_check
+                .details
+                .iter()
+                .any(|detail| detail.text == "Provider: venice")
+        );
     }
 
     mod root_workflow_run_layer_tests {

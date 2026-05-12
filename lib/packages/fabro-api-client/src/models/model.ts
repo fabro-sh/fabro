@@ -22,9 +22,6 @@ import type { ModelFeatures } from './model-features';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { ModelLimits } from './model-limits';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { Provider } from './provider';
 
 /**
  * An available LLM model from the built-in catalog.
@@ -34,7 +31,10 @@ export interface Model {
      * Unique model identifier.
      */
     'id': string;
-    'provider': Provider;
+    /**
+     * LLM provider identifier.
+     */
+    'provider': string;
     /**
      * Model family grouping.
      */
@@ -71,6 +71,5 @@ export interface Model {
      */
     'configured': boolean;
 }
-
 
 

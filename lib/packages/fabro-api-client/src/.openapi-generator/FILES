@@ -210,7 +210,6 @@ models/principal-webhook.ts
 models/principal-worker.ts
 models/principal.ts
 models/project-namespace.ts
-models/provider.ts
 models/prune-run-entry.ts
 models/prune-runs-request.ts
 models/prune-runs-response.ts

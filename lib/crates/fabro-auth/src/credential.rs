@@ -1,11 +1,11 @@
 use chrono::{DateTime, Duration, Utc};
-use fabro_model::Provider;
+use fabro_model::{Provider, ProviderId};
 use fabro_redact::redact_string;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AuthCredential {
-    pub provider: Provider,
+    pub provider: ProviderId,
     #[serde(flatten)]
     pub details:  AuthDetails,
 }
@@ -90,14 +90,15 @@ impl std::fmt::Debug for ApiKeyHeader {
 }
 
 pub fn credential_id_for(credential: &AuthCredential) -> Result<String, String> {
-    match (&credential.provider, &credential.details) {
-        (Provider::OpenAi, AuthDetails::ApiKey { .. }) => Ok("openai".to_string()),
-        (Provider::OpenAi, AuthDetails::CodexOAuth { .. }) => Ok("openai_codex".to_string()),
-        (_, AuthDetails::CodexOAuth { .. }) => Err(format!(
+    match &credential.details {
+        AuthDetails::ApiKey { .. } => Ok(credential.provider.to_string()),
+        AuthDetails::CodexOAuth { .. } if credential.provider == Provider::OpenAi.id() => {
+            Ok("openai_codex".to_string())
+        }
+        AuthDetails::CodexOAuth { .. } => Err(format!(
             "codex_oauth credentials are only valid for OpenAI, got {}",
             credential.provider
         )),
-        (provider, AuthDetails::ApiKey { .. }) => Ok(provider.to_string()),
     }
 }
 
@@ -119,7 +120,7 @@ mod tests {
 
     fn oauth_credential(expires_at: DateTime<Utc>) -> AuthCredential {
         AuthCredential {
-            provider: Provider::OpenAi,
+            provider: Provider::OpenAi.id(),
             details:  AuthDetails::CodexOAuth {
                 tokens:     OAuthTokens {
                     access_token: "access".to_string(),
@@ -162,7 +163,7 @@ mod tests {
     #[test]
     fn credential_id_for_openai_api_key() {
         let credential = AuthCredential {
-            provider: Provider::OpenAi,
+            provider: Provider::OpenAi.id(),
             details:  AuthDetails::ApiKey {
                 key: "sk-test".to_string(),
             },
@@ -173,7 +174,7 @@ mod tests {
     #[test]
     fn credential_id_for_non_openai_codex_oauth_errors() {
         let mut credential = oauth_credential(Utc::now() + Duration::hours(1));
-        credential.provider = Provider::Anthropic;
+        credential.provider = Provider::Anthropic.id();
         assert!(credential_id_for(&credential).is_err());
     }
 
@@ -185,6 +186,35 @@ mod tests {
         assert!(parse_credential_secret("openai_codex", &json).is_ok());
         assert!(parse_credential_secret("openai", &json).is_err());
         assert!(parse_credential_secret("openai_codex", "{").is_err());
+    }
+
+    #[test]
+    fn credential_id_for_custom_api_key_uses_provider_id() {
+        let credential = AuthCredential {
+            provider: ProviderId::new("venice"),
+            details:  AuthDetails::ApiKey {
+                key: "sk-test".to_string(),
+            },
+        };
+
+        assert_eq!(credential_id_for(&credential).unwrap(), "venice");
+    }
+
+    #[test]
+    fn parse_credential_secret_accepts_custom_provider_api_key() {
+        let credential = AuthCredential {
+            provider: ProviderId::new("venice"),
+            details:  AuthDetails::ApiKey {
+                key: "sk-test".to_string(),
+            },
+        };
+        let json = serde_json::to_string(&credential).unwrap();
+
+        assert_eq!(
+            parse_credential_secret("venice", &json).unwrap(),
+            credential
+        );
+        assert!(parse_credential_secret("openai", &json).is_err());
     }
 
     #[test]

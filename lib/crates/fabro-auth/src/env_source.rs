@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use fabro_model::Provider;
+use fabro_model::{Provider, ProviderId};
 use fabro_static::EnvVars;
 
 use crate::credential_source::{CredentialSource, ResolvedCredentials};
@@ -94,7 +94,7 @@ impl CredentialSource for EnvCredentialSource {
         })
     }
 
-    async fn configured_providers(&self) -> Vec<Provider> {
+    async fn configured_providers(&self) -> Vec<ProviderId> {
         Provider::ALL
             .iter()
             .copied()
@@ -104,6 +104,7 @@ impl CredentialSource for EnvCredentialSource {
                     .iter()
                     .any(|env_var| self.lookup(env_var).is_some())
             })
+            .map(Provider::id)
             .collect()
     }
 }
@@ -131,7 +132,7 @@ mod tests {
         let source = test_source(&[("ANTHROPIC_API_KEY", "anthropic-key")]);
 
         assert_eq!(source.configured_providers().await, vec![
-            Provider::Anthropic
+            Provider::Anthropic.id()
         ]);
     }
 
@@ -156,7 +157,7 @@ mod tests {
         let resolved = source.resolve().await.unwrap();
         let credential = resolved.credentials.first().unwrap();
 
-        assert_eq!(credential.provider, Provider::OpenAi);
+        assert_eq!(credential.provider, Provider::OpenAi.id());
         assert!(credential.codex_mode);
         assert_eq!(
             credential.base_url.as_deref(),

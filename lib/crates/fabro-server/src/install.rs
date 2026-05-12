@@ -1530,7 +1530,7 @@ async fn post_install_finish(
     }
     for provider in llm.providers {
         let credential = AuthCredential {
-            provider: provider.provider,
+            provider: provider.provider.id(),
             details:  AuthDetails::ApiKey {
                 key: provider.api_key,
             },

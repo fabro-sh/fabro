@@ -29,8 +29,6 @@ import type { ModelTestMode } from '../models';
 import type { ModelTestResult } from '../models';
 // @ts-ignore
 import type { PaginatedModelList } from '../models';
-// @ts-ignore
-import type { Provider } from '../models';
 /**
  * ModelsApi - axios parameter creator
  */
@@ -39,14 +37,14 @@ export const ModelsApiAxiosParamCreator = function (configuration?: Configuratio
         /**
          * Returns a paginated list of available LLM models from the built-in catalog.
          * @summary List Models
-         * @param {Provider} [provider] Filter models by provider name. Invalid values return &#x60;400&#x60;.
+         * @param {string} [provider] Filter models by provider ID. Unknown provider IDs return an empty result set.
          * @param {string} [query] Case-insensitive substring search across &#x60;id&#x60;, &#x60;display_name&#x60;, and &#x60;aliases&#x60;.
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listModels: async (provider?: Provider, query?: string, pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        listModels: async (provider?: string, query?: string, pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/v1/models`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -149,14 +147,14 @@ export const ModelsApiFp = function(configuration?: Configuration) {
         /**
          * Returns a paginated list of available LLM models from the built-in catalog.
          * @summary List Models
-         * @param {Provider} [provider] Filter models by provider name. Invalid values return &#x60;400&#x60;.
+         * @param {string} [provider] Filter models by provider ID. Unknown provider IDs return an empty result set.
          * @param {string} [query] Case-insensitive substring search across &#x60;id&#x60;, &#x60;display_name&#x60;, and &#x60;aliases&#x60;.
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async listModels(provider?: Provider, query?: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedModelList>> {
+        async listModels(provider?: string, query?: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedModelList>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.listModels(provider, query, pageLimit, pageOffset, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ModelsApi.listModels']?.[localVarOperationServerIndex]?.url;
@@ -188,14 +186,14 @@ export const ModelsApiFactory = function (configuration?: Configuration, basePat
         /**
          * Returns a paginated list of available LLM models from the built-in catalog.
          * @summary List Models
-         * @param {Provider} [provider] Filter models by provider name. Invalid values return &#x60;400&#x60;.
+         * @param {string} [provider] Filter models by provider ID. Unknown provider IDs return an empty result set.
          * @param {string} [query] Case-insensitive substring search across &#x60;id&#x60;, &#x60;display_name&#x60;, and &#x60;aliases&#x60;.
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listModels(provider?: Provider, query?: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedModelList> {
+        listModels(provider?: string, query?: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedModelList> {
             return localVarFp.listModels(provider, query, pageLimit, pageOffset, options).then((request) => request(axios, basePath));
         },
         /**
@@ -219,14 +217,14 @@ export class ModelsApi extends BaseAPI {
     /**
      * Returns a paginated list of available LLM models from the built-in catalog.
      * @summary List Models
-     * @param {Provider} [provider] Filter models by provider name. Invalid values return &#x60;400&#x60;.
+     * @param {string} [provider] Filter models by provider ID. Unknown provider IDs return an empty result set.
      * @param {string} [query] Case-insensitive substring search across &#x60;id&#x60;, &#x60;display_name&#x60;, and &#x60;aliases&#x60;.
      * @param {number} [pageLimit] Maximum number of items to return per page.
      * @param {number} [pageOffset] Number of items to skip before returning results.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public listModels(provider?: Provider, query?: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig) {
+    public listModels(provider?: string, query?: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig) {
         return ModelsApiFp(this.configuration).listModels(provider, query, pageLimit, pageOffset, options).then((request) => request(this.axios, this.basePath));
     }
 
@@ -242,4 +240,3 @@ export class ModelsApi extends BaseAPI {
         return ModelsApiFp(this.configuration).testModel(id, mode, options).then((request) => request(this.axios, this.basePath));
     }
 }
-

@@ -799,7 +799,7 @@ mod tests {
 
     fn openai_api_key_credential(key: &str) -> AuthCredential {
         AuthCredential {
-            provider: fabro_model::Provider::OpenAi,
+            provider: fabro_model::Provider::OpenAi.id(),
             details:  AuthDetails::ApiKey {
                 key: key.to_string(),
             },

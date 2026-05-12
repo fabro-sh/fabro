@@ -2466,7 +2466,7 @@ client_id = "client-id"
                 description: None,
             },
             credential_secret_request(&AuthCredential {
-                provider: Provider::Anthropic,
+                provider: Provider::Anthropic.id(),
                 details:  fabro_auth::AuthDetails::ApiKey {
                     key: "anthropic-key".to_string(),
                 },

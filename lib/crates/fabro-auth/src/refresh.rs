@@ -24,7 +24,7 @@ pub async fn refresh_oauth_credential(
             .await
             .map_err(anyhow::Error::msg)?;
             Ok(AuthCredential {
-                provider: credential.provider,
+                provider: credential.provider.clone(),
                 details:  AuthDetails::CodexOAuth {
                     tokens:     OAuthTokens {
                         access_token:  response.access_token,

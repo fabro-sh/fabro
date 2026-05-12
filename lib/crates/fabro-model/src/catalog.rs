@@ -94,6 +94,17 @@ impl Catalog {
             .unwrap_or_else(|| self.default_model())
     }
 
+    /// Default model for the best-available built-in provider IDs, falling
+    /// back to the global catalog default.
+    #[must_use]
+    pub fn default_for_configured_ids(&self, configured: &[ProviderId]) -> &Model {
+        let configured = configured
+            .iter()
+            .filter_map(Provider::from_id)
+            .collect::<Vec<_>>();
+        self.default_for_configured(&configured)
+    }
+
     /// Probe model for a provider — the cheapest model suitable for
     /// connectivity checks. Falls back to the provider's default when no
     /// explicit override is configured.

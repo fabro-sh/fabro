@@ -16,15 +16,15 @@
 // May contain unused imports in some cases
 // @ts-ignore
 import type { BillingSpeed } from './billing-speed';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { Provider } from './provider';
 
 /**
  * Provider-qualified billing model identity used for cost estimates.
  */
 export interface BillingModelRef {
-    'provider': Provider;
+    /**
+     * LLM provider identifier.
+     */
+    'provider': string;
     'model_id': string;
     'speed'?: BillingSpeed | null;
 }

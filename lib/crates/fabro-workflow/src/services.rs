@@ -11,6 +11,8 @@ use fabro_auth::CredentialSource;
 use fabro_auth::ResolvedCredentials;
 use fabro_hooks::{HookContext, HookDecision, HookRunner};
 use fabro_model::Provider;
+#[cfg(test)]
+use fabro_model::ProviderId;
 use tokio_util::sync::CancellationToken;
 
 use crate::ManifestPath;
@@ -190,7 +192,7 @@ impl EngineServices {
                 })
             }
 
-            async fn configured_providers(&self) -> Vec<Provider> {
+            async fn configured_providers(&self) -> Vec<ProviderId> {
                 Vec::new()
             }
         }

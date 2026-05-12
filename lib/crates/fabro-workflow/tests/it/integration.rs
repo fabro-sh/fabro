@@ -6847,7 +6847,7 @@ mod real_llm {
 
 fn openai_api_key_credential(key: &str) -> fabro_auth::AuthCredential {
     fabro_auth::AuthCredential {
-        provider: fabro_model::Provider::OpenAi,
+        provider: fabro_model::Provider::OpenAi.id(),
         details:  fabro_auth::AuthDetails::ApiKey {
             key: key.to_string(),
         },

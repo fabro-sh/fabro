@@ -75,7 +75,7 @@ fn materialize_run_uses_configured_provider_defaults() {
         WorkflowSettings::default(),
         &graph(source),
         Catalog::builtin(),
-        &[Provider::OpenAi],
+        &[Provider::OpenAi.id()],
     );
     let resolved = &materialized.run;
 

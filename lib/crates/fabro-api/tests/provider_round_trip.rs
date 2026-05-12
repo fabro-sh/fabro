@@ -1,33 +1,61 @@
 use std::any::{TypeId, type_name};
 
-use fabro_api::types::Provider as ApiProvider;
-use fabro_model::Provider;
+use fabro_api::types::Model as ApiModel;
+use fabro_model::{Model, ModelCosts, ModelFeatures, ModelLimits, Provider, ProviderId};
 use serde_json::json;
 
 #[test]
-fn provider_reuses_canonical_type() {
-    assert_same_type::<ApiProvider, Provider>();
+fn provider_id_reuses_canonical_model_field_type() {
+    assert_same_type::<ApiModel, Model>();
 }
 
 #[test]
-fn provider_json_matches_openapi_shape() {
+fn provider_id_json_matches_openapi_shape_through_model() {
     assert_eq!(
-        serde_json::to_value(Provider::Anthropic).unwrap(),
+        serde_json::to_value(Provider::Anthropic.id()).unwrap(),
         json!("anthropic")
     );
     assert_eq!(
-        serde_json::to_value(Provider::OpenAi).unwrap(),
+        serde_json::to_value(Provider::OpenAi.id()).unwrap(),
         json!("openai")
     );
     assert_eq!(
-        serde_json::to_value(Provider::OpenAiCompatible).unwrap(),
+        serde_json::to_value(Provider::OpenAiCompatible.id()).unwrap(),
         json!("openai_compatible")
     );
 
-    assert_eq!(
-        serde_json::from_value::<ApiProvider>(json!("inception")).unwrap(),
-        Provider::Inception
-    );
+    let model = Model {
+        id:                   "venice-custom".to_string(),
+        provider:             ProviderId::new("venice"),
+        family:               "venice".to_string(),
+        display_name:         "Venice Custom".to_string(),
+        limits:               ModelLimits {
+            context_window: 128_000,
+            max_output:     None,
+        },
+        training:             None,
+        knowledge_cutoff:     None,
+        features:             ModelFeatures {
+            tools:     false,
+            vision:    false,
+            reasoning: false,
+            effort:    false,
+        },
+        costs:                ModelCosts {
+            input_cost_per_mtok:       None,
+            output_cost_per_mtok:      None,
+            cache_input_cost_per_mtok: None,
+        },
+        estimated_output_tps: None,
+        aliases:              Vec::new(),
+        default:              false,
+        configured:           true,
+    };
+
+    let json = serde_json::to_value(&model).unwrap();
+    assert_eq!(json["provider"], "venice");
+    let round_trip: ApiModel = serde_json::from_value(json).unwrap();
+    assert_eq!(round_trip.provider, ProviderId::new("venice"));
 }
 
 fn assert_same_type<T: 'static, U: 'static>() {

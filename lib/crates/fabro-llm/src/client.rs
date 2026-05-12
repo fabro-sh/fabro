@@ -66,8 +66,9 @@ impl Client {
 
         for credential in credentials {
             let auth_value = auth_value(&credential.auth_header);
-            match credential.provider {
-                fabro_model::Provider::Anthropic => {
+            let provider_id = credential.provider.clone();
+            match fabro_model::Provider::from_id(&provider_id) {
+                Some(fabro_model::Provider::Anthropic) => {
                     let mut adapter = providers::AnthropicAdapter::new(auth_value);
                     if let Some(base_url) = credential.base_url {
                         adapter = adapter.with_base_url(base_url);
@@ -77,7 +78,7 @@ impl Client {
                     }
                     client.register_provider(Arc::new(adapter)).await?;
                 }
-                fabro_model::Provider::OpenAi => {
+                Some(fabro_model::Provider::OpenAi) => {
                     let mut adapter = providers::OpenAiAdapter::new(auth_value);
                     if let Some(base_url) = credential.base_url {
                         adapter = adapter.with_base_url(base_url);
@@ -96,7 +97,7 @@ impl Client {
                     }
                     client.register_provider(Arc::new(adapter)).await?;
                 }
-                fabro_model::Provider::Gemini => {
+                Some(fabro_model::Provider::Gemini) => {
                     let mut adapter = providers::GeminiAdapter::new(auth_value);
                     if let Some(base_url) = credential.base_url {
                         adapter = adapter.with_base_url(base_url);
@@ -106,7 +107,7 @@ impl Client {
                     }
                     client.register_provider(Arc::new(adapter)).await?;
                 }
-                fabro_model::Provider::Kimi => {
+                Some(fabro_model::Provider::Kimi) => {
                     let mut adapter = providers::OpenAiCompatibleAdapter::new(
                         auth_value,
                         credential
@@ -119,7 +120,7 @@ impl Client {
                     }
                     client.register_provider(Arc::new(adapter)).await?;
                 }
-                fabro_model::Provider::Zai => {
+                Some(fabro_model::Provider::Zai) => {
                     let mut adapter = providers::OpenAiCompatibleAdapter::new(
                         auth_value,
                         credential
@@ -132,7 +133,7 @@ impl Client {
                     }
                     client.register_provider(Arc::new(adapter)).await?;
                 }
-                fabro_model::Provider::Minimax => {
+                Some(fabro_model::Provider::Minimax) => {
                     let mut adapter = providers::OpenAiCompatibleAdapter::new(
                         auth_value,
                         credential
@@ -145,7 +146,7 @@ impl Client {
                     }
                     client.register_provider(Arc::new(adapter)).await?;
                 }
-                fabro_model::Provider::Inception => {
+                Some(fabro_model::Provider::Inception) => {
                     let mut adapter = providers::OpenAiCompatibleAdapter::new(
                         auth_value,
                         credential
@@ -158,10 +159,18 @@ impl Client {
                     }
                     client.register_provider(Arc::new(adapter)).await?;
                 }
-                fabro_model::Provider::OpenAiCompatible => {
+                Some(fabro_model::Provider::OpenAiCompatible) => {
                     return Err(Error::Configuration {
                         message: "Provider::OpenAiCompatible is not supported by from_credentials"
                             .to_string(),
+                        source:  None,
+                    });
+                }
+                None => {
+                    return Err(Error::Configuration {
+                        message: format!(
+                            "Provider \"{provider_id}\" is not supported by credential-only registration"
+                        ),
                         source:  None,
                     });
                 }
@@ -432,10 +441,10 @@ mod tests {
             })
         }
 
-        async fn configured_providers(&self) -> Vec<fabro_model::Provider> {
+        async fn configured_providers(&self) -> Vec<fabro_model::ProviderId> {
             self.credentials
                 .iter()
-                .map(|credential| credential.provider)
+                .map(|credential| credential.provider.clone())
                 .collect()
         }
     }
@@ -498,7 +507,7 @@ mod tests {
     async fn from_credentials_registers_multiple_providers() {
         let client = Client::from_credentials(vec![
             ApiCredential {
-                provider:      fabro_model::Provider::Anthropic,
+                provider:      fabro_model::Provider::Anthropic.id(),
                 auth_header:   ApiKeyHeader::Custom {
                     name:  "x-api-key".to_string(),
                     value: "anthropic-key".to_string(),
@@ -510,7 +519,7 @@ mod tests {
                 project_id:    None,
             },
             ApiCredential {
-                provider:      fabro_model::Provider::OpenAi,
+                provider:      fabro_model::Provider::OpenAi.id(),
                 auth_header:   ApiKeyHeader::Bearer("openai-key".to_string()),
                 extra_headers: HashMap::new(),
                 base_url:      None,
@@ -531,7 +540,7 @@ mod tests {
     #[tokio::test]
     async fn from_credentials_supports_openai_compatible_provider_constants() {
         let client = Client::from_credentials(vec![ApiCredential {
-            provider:      fabro_model::Provider::Kimi,
+            provider:      fabro_model::Provider::Kimi.id(),
             auth_header:   ApiKeyHeader::Bearer("kimi-key".to_string()),
             extra_headers: HashMap::new(),
             base_url:      None,
@@ -547,10 +556,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn from_credentials_rejects_custom_provider_id_without_adapter() {
+        let result = Client::from_credentials(vec![ApiCredential {
+            provider:      fabro_model::ProviderId::new("venice"),
+            auth_header:   ApiKeyHeader::Bearer("venice-key".to_string()),
+            extra_headers: HashMap::new(),
+            base_url:      None,
+            codex_mode:    false,
+            org_id:        None,
+            project_id:    None,
+        }])
+        .await;
+        let Err(err) = result else {
+            panic!("custom provider credentials should fail without a registered adapter");
+        };
+
+        assert!(matches!(
+            err,
+            Error::Configuration {
+                ref message,
+                ..
+            } if message == "Provider \"venice\" is not supported by credential-only registration"
+        ));
+    }
+
+    #[tokio::test]
     async fn from_source_registers_provider_from_resolved_credentials() {
         let source = StubSource {
             credentials: vec![ApiCredential {
-                provider:      fabro_model::Provider::Anthropic,
+                provider:      fabro_model::Provider::Anthropic.id(),
                 auth_header:   ApiKeyHeader::Custom {
                     name:  "x-api-key".to_string(),
                     value: "anthropic-key".to_string(),

@@ -33,7 +33,7 @@ impl AuthStrategy for ApiKeyStrategy {
     async fn complete(&mut self, response: AuthContextResponse) -> anyhow::Result<AuthCredential> {
         match response {
             AuthContextResponse::ApiKey { key } => Ok(AuthCredential {
-                provider: self.provider,
+                provider: self.provider.id(),
                 details:  AuthDetails::ApiKey { key },
             }),
             AuthContextResponse::DeviceCodeConfirmed => {

@@ -249,7 +249,7 @@ async fn create_run_pull_request(
     } else {
         let configured = state.llm_source.configured_providers().await;
         Catalog::builtin()
-            .default_for_configured(&configured)
+            .default_for_configured_ids(&configured)
             .id
             .clone()
     };

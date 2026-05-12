@@ -4,7 +4,7 @@ use std::path::Path;
 use fabro_auth::ResolveError;
 use fabro_config::envfile;
 use fabro_llm::client::Client;
-use fabro_model::Provider;
+use fabro_model::ProviderId;
 
 #[expect(
     clippy::disallowed_methods,
@@ -58,7 +58,7 @@ impl std::fmt::Debug for ServerSecrets {
 
 pub(crate) struct LlmClientResult {
     pub client:      Client,
-    pub auth_issues: Vec<(Provider, ResolveError)>,
+    pub auth_issues: Vec<(ProviderId, ResolveError)>,
 }
 
 #[cfg(test)]

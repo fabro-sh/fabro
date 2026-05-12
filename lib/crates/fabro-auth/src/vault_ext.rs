@@ -1,4 +1,4 @@
-use fabro_model::Provider;
+use fabro_model::ProviderId;
 use fabro_types::SecretMetadata;
 use fabro_vault::{SecretType, Vault};
 
@@ -25,8 +25,9 @@ pub fn vault_get_credential(vault: &Vault, id: &str) -> Option<AuthCredential> {
 #[must_use]
 pub fn vault_credentials_for_provider(
     vault: &Vault,
-    provider: Provider,
+    provider: impl Into<ProviderId>,
 ) -> Vec<(String, AuthCredential)> {
+    let provider = provider.into();
     vault
         .credential_entries()
         .into_iter()
@@ -42,13 +43,14 @@ pub fn vault_credentials_for_provider(
 #[cfg(test)]
 mod tests {
     use chrono::{Duration, Utc};
+    use fabro_model::Provider;
 
     use super::*;
     use crate::credential::{AuthDetails, OAuthConfig, OAuthTokens};
 
     fn oauth_credential() -> AuthCredential {
         AuthCredential {
-            provider: Provider::OpenAi,
+            provider: Provider::OpenAi.id(),
             details:  AuthDetails::CodexOAuth {
                 tokens:     OAuthTokens {
                     access_token:  "access".to_string(),
@@ -88,7 +90,7 @@ mod tests {
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
         vault_set_credential(&mut vault, "openai_codex", &oauth_credential()).unwrap();
         vault_set_credential(&mut vault, "anthropic", &AuthCredential {
-            provider: Provider::Anthropic,
+            provider: Provider::Anthropic.id(),
             details:  AuthDetails::ApiKey {
                 key: "anthropic-key".to_string(),
             },

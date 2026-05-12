@@ -314,7 +314,7 @@ impl RunSession {
         let model = resolved.model.name.as_ref().map_or_else(
             || {
                 Catalog::builtin()
-                    .default_for_configured(&configured)
+                    .default_for_configured_ids(&configured)
                     .id
                     .clone()
             },
@@ -327,11 +327,16 @@ impl RunSession {
             .map(InterpString::as_source)
             .filter(|value| !value.is_empty());
 
-        let provider_enum: Provider = match provider.as_deref() {
-            Some(value) => value
-                .parse::<Provider>()
-                .map_err(|_| Error::Precondition(format!("unknown provider: {value}")))?,
-            None => Provider::default_for_configured(&configured),
+        let provider_enum: Provider = if let Some(value) = provider.as_deref() {
+            value.parse::<Provider>().map_err(|_| {
+                Error::Precondition(format!("Provider \"{value}\" is not configured"))
+            })?
+        } else {
+            let configured = configured
+                .iter()
+                .filter_map(Provider::from_id)
+                .collect::<Vec<_>>();
+            Provider::default_for_configured(&configured)
         };
 
         let fallback_chain = resolve_fallback_chain(provider_enum, &model, &resolved.model);

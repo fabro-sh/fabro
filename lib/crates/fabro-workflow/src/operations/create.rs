@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use fabro_config::Storage;
 use fabro_graphviz::graph::{AttrValue, Graph};
-use fabro_model::{Catalog, Provider};
+use fabro_model::{Catalog, ProviderId};
 use fabro_sandbox::SandboxProvider;
 use fabro_store::Database;
 use fabro_template::{TemplateContext, TemplateError, render as render_template, render_lenient};
@@ -48,7 +48,7 @@ pub struct CreateRunInput {
     pub git: Option<GitContext>,
     pub fork_source_ref: Option<ForkSourceRef>,
     pub provenance: Option<RunProvenance>,
-    pub configured_providers: Vec<Provider>,
+    pub configured_providers: Vec<ProviderId>,
     /// Public URL where this run can be viewed in the web UI, when the server
     /// has the web UI enabled. Recorded on the `run.created` event so attach
     /// replays can surface the link.
@@ -73,7 +73,7 @@ struct PersistCreateOptions {
     git:                  Option<GitContext>,
     fork_source_ref:      Option<ForkSourceRef>,
     provenance:           Option<RunProvenance>,
-    configured_providers: Vec<Provider>,
+    configured_providers: Vec<ProviderId>,
 }
 
 /// Resolve workflow inputs, normalize settings, and persist a run directory.

@@ -195,7 +195,7 @@ async fn build_registry(
                     result
                         .auth_issues
                         .iter()
-                        .map(|(provider, issue)| auth_issue_message(*provider, issue))
+                        .map(|(provider, issue)| auth_issue_message(provider, issue))
                         .collect::<Vec<_>>()
                         .join("; ")
                 });
@@ -992,7 +992,7 @@ mod tests {
             .set(
                 "anthropic",
                 &serde_json::to_string(&AuthCredential {
-                    provider: fabro_llm::Provider::Anthropic,
+                    provider: fabro_llm::Provider::Anthropic.id(),
                     details:  AuthDetails::ApiKey {
                         key: "anthropic-key".to_string(),
                     },
@@ -1098,7 +1098,7 @@ mod tests {
             .set(
                 "openai",
                 &serde_json::to_string(&AuthCredential {
-                    provider: fabro_llm::Provider::OpenAi,
+                    provider: fabro_llm::Provider::OpenAi.id(),
                     details:  AuthDetails::ApiKey {
                         key: "openai-key".to_string(),
                     },

@@ -104,9 +104,9 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
     let mut details: Vec<CheckDetail> = Vec::new();
     let mut failures: Vec<ProviderFailure> = Vec::new();
     for (provider, issue) in &result.auth_issues {
-        let message = auth_issue_message(*provider, issue);
+        let message = auth_issue_message(provider, issue);
         failures.push(ProviderFailure {
-            provider:     *provider,
+            provider:     provider.to_string(),
             summary_line: short_error_line(&message),
         });
         details.push(CheckDetail::new(message));
@@ -134,14 +134,14 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
             Ok(Err(err)) => {
                 let rendered = collect_chain(&err).join(": ");
                 failures.push(ProviderFailure {
-                    provider,
+                    provider:     provider.to_string(),
                     summary_line: short_error_line(&rendered),
                 });
                 details.push(CheckDetail::new(format!("{provider}: {rendered}")));
             }
             Err(_) => {
                 failures.push(ProviderFailure {
-                    provider,
+                    provider:     provider.to_string(),
                     summary_line: "timeout (30s)".to_string(),
                 });
                 details.push(CheckDetail::new(format!("{provider}: timeout (30s)")));
@@ -180,7 +180,7 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
 }
 
 struct ProviderFailure {
-    provider:     Provider,
+    provider:     String,
     summary_line: String,
 }
 
@@ -717,7 +717,7 @@ mod tests {
             },
         );
         let credential = AuthCredential {
-            provider: Provider::OpenAi,
+            provider: Provider::OpenAi.id(),
             details:  AuthDetails::ApiKey {
                 key: "vault-openai-key".to_string(),
             },

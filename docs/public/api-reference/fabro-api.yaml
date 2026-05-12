@@ -3731,9 +3731,9 @@ components:
       name: provider
       in: query
       required: false
-      description: Filter models by provider name. Invalid values return `400`.
+      description: Filter models by provider ID. Unknown provider IDs return an empty result set.
       schema:
-        $ref: "#/components/schemas/Provider"
+        $ref: "#/components/schemas/ProviderId"
       example: anthropic
 
     ModelQueryFilter:
@@ -4377,18 +4377,10 @@ components:
         meta:
           $ref: "#/components/schemas/PaginationMeta"
 
-    Provider:
+    ProviderId:
       description: LLM provider identifier.
       type: string
-      enum:
-        - anthropic
-        - openai
-        - gemini
-        - kimi
-        - zai
-        - minimax
-        - inception
-        - openai_compatible
+      example: anthropic
 
     ModelLimits:
       description: Token limits for a model.
@@ -4477,7 +4469,7 @@ components:
           description: Unique model identifier.
           example: "claude-opus-4-6"
         provider:
-          $ref: "#/components/schemas/Provider"
+          $ref: "#/components/schemas/ProviderId"
         family:
           type: string
           description: Model family grouping.
@@ -6933,7 +6925,7 @@ components:
         - model_id
       properties:
         provider:
-          $ref: "#/components/schemas/Provider"
+          $ref: "#/components/schemas/ProviderId"
         model_id:
           type: string
         speed:

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use fabro_model::Provider;
+use fabro_model::{Provider, ProviderId};
 use fabro_vault::Vault;
 use tokio::sync::RwLock as AsyncRwLock;
 
@@ -53,7 +53,7 @@ impl CredentialSource for VaultCredentialSource {
             {
                 Ok(ResolvedCredential::Api(credential)) => credentials.push(credential),
                 Ok(ResolvedCredential::Cli(_)) | Err(ResolveError::NotConfigured(_)) => {}
-                Err(err) => auth_issues.push((*provider, err)),
+                Err(err) => auth_issues.push((provider.id(), err)),
             }
         }
 
@@ -63,7 +63,7 @@ impl CredentialSource for VaultCredentialSource {
         })
     }
 
-    async fn configured_providers(&self) -> Vec<Provider> {
+    async fn configured_providers(&self) -> Vec<ProviderId> {
         let vault = self.vault.read().await;
         self.resolver.configured_providers(&vault)
     }
@@ -84,8 +84,8 @@ mod tests {
 
     fn api_key_credential(provider: Provider, key: &str) -> AuthCredential {
         AuthCredential {
-            provider,
-            details: AuthDetails::ApiKey {
+            provider: provider.id(),
+            details:  AuthDetails::ApiKey {
                 key: key.to_string(),
             },
         }
@@ -93,7 +93,7 @@ mod tests {
 
     fn expired_openai_credential() -> AuthCredential {
         AuthCredential {
-            provider: Provider::OpenAi,
+            provider: Provider::OpenAi.id(),
             details:  AuthDetails::CodexOAuth {
                 tokens:     OAuthTokens {
                     access_token:  "expired-access".to_string(),
@@ -141,14 +141,14 @@ mod tests {
         let resolved = source.resolve().await.unwrap();
 
         assert_eq!(resolved.credentials.len(), 1);
-        assert_eq!(resolved.credentials[0].provider, Provider::Anthropic);
+        assert_eq!(resolved.credentials[0].provider, Provider::Anthropic.id());
         assert_eq!(resolved.auth_issues.len(), 1);
         assert!(matches!(
-            resolved.auth_issues[0].1,
+            &resolved.auth_issues[0].1,
             ResolveError::RefreshFailed {
-                provider: Provider::OpenAi,
+                provider,
                 ..
-            }
+            } if provider == &Provider::OpenAi.id()
         ));
     }
 
@@ -178,8 +178,8 @@ mod tests {
             VaultCredentialSource::with_env_lookup(Arc::new(AsyncRwLock::new(vault)), |_| None);
 
         assert_eq!(source.configured_providers().await, vec![
-            Provider::Anthropic,
-            Provider::OpenAi
+            Provider::Anthropic.id(),
+            Provider::OpenAi.id()
         ]);
     }
 }

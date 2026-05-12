@@ -187,7 +187,6 @@ export * from './principal-user';
 export * from './principal-webhook';
 export * from './principal-worker';
 export * from './project-namespace';
-export * from './provider';
 export * from './prune-run-entry';
 export * from './prune-runs-request';
 export * from './prune-runs-response';

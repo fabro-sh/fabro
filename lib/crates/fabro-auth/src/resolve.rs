@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use fabro_model::Provider;
+use fabro_model::{Provider, ProviderId};
 use fabro_static::EnvVars;
 use fabro_vault::Vault;
 use shlex::try_quote;
@@ -29,7 +29,7 @@ pub enum CredentialUsage {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiCredential {
-    pub provider:      Provider,
+    pub provider:      ProviderId,
     pub auth_header:   ApiKeyHeader,
     pub extra_headers: HashMap<String, String>,
     pub base_url:      Option<String>,
@@ -44,9 +44,10 @@ impl ApiCredential {
     /// everyone else uses `Authorization: Bearer`). All other fields
     /// default to empty.
     #[must_use]
-    pub fn from_api_key(provider: Provider, key: String) -> Self {
-        let auth_header = match provider {
-            Provider::Anthropic => ApiKeyHeader::Custom {
+    pub fn from_api_key(provider: impl Into<ProviderId>, key: String) -> Self {
+        let provider = provider.into();
+        let auth_header = match Provider::from_id(&provider) {
+            Some(Provider::Anthropic) => ApiKeyHeader::Custom {
                 name:  "x-api-key".to_string(),
                 value: key,
             },
@@ -79,33 +80,38 @@ pub enum ResolvedCredential {
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveError {
     #[error("{0} is not configured")]
-    NotConfigured(Provider),
+    NotConfigured(ProviderId),
     #[error("{provider} requires re-authentication: {source}")]
     RefreshFailed {
-        provider: Provider,
+        provider: ProviderId,
         #[source]
         source:   anyhow::Error,
     },
     #[error("{0} requires re-authentication: missing refresh token")]
-    RefreshTokenMissing(Provider),
+    RefreshTokenMissing(ProviderId),
 }
 
 #[must_use]
-pub fn auth_issue_message(provider: Provider, err: &ResolveError) -> String {
+pub fn auth_issue_message(provider: &ProviderId, err: &ResolveError) -> String {
+    let provider_name = provider_display_name(provider);
     match err {
         ResolveError::NotConfigured(_) => {
-            format!("{} is not configured", provider.display_name())
+            format!("{provider_name} is not configured")
         }
-        ResolveError::RefreshFailed { source, .. } => format!(
-            "{} requires re-authentication: {}",
-            provider.display_name(),
-            source
-        ),
-        ResolveError::RefreshTokenMissing(_) => format!(
-            "{} requires re-authentication: refresh token missing",
-            provider.display_name()
-        ),
+        ResolveError::RefreshFailed { source, .. } => {
+            format!("{provider_name} requires re-authentication: {source}")
+        }
+        ResolveError::RefreshTokenMissing(_) => {
+            format!("{provider_name} requires re-authentication: refresh token missing")
+        }
     }
+}
+
+fn provider_display_name(provider: &ProviderId) -> String {
+    Provider::from_id(provider).map_or_else(
+        || provider.to_string(),
+        |provider| provider.display_name().to_string(),
+    )
 }
 
 #[derive(Clone)]
@@ -131,12 +137,13 @@ impl CredentialResolver {
 
     pub async fn resolve(
         &self,
-        provider: Provider,
+        provider: impl Into<ProviderId>,
         usage: CredentialUsage,
     ) -> Result<ResolvedCredential, ResolveError> {
+        let provider = provider.into();
         let initial_credential = {
             let vault = self.vault.read().await;
-            self.find_credential(&vault, provider, usage)?
+            self.find_credential(&vault, &provider, usage)?
         };
 
         let credential = if initial_credential.needs_refresh() {
@@ -144,16 +151,19 @@ impl CredentialResolver {
                 unreachable!("only OAuth credentials can need refresh");
             };
             if tokens.refresh_token.is_none() {
-                return Err(ResolveError::RefreshTokenMissing(provider));
+                return Err(ResolveError::RefreshTokenMissing(provider.clone()));
             }
 
             let refreshed = refresh_oauth_credential(&initial_credential)
                 .await
-                .map_err(|source| ResolveError::RefreshFailed { provider, source })?;
+                .map_err(|source| ResolveError::RefreshFailed {
+                    provider: provider.clone(),
+                    source,
+                })?;
             let credential_id =
                 credential_id_for(&refreshed).map_err(|message| ResolveError::RefreshFailed {
-                    provider,
-                    source: anyhow::anyhow!(message),
+                    provider: provider.clone(),
+                    source:   anyhow::anyhow!(message),
                 })?;
             let refreshed_for_store = refreshed.clone();
             let vault = Arc::clone(&self.vault);
@@ -165,10 +175,13 @@ impl CredentialResolver {
             })
             .await
             .map_err(|join_err| ResolveError::RefreshFailed {
-                provider,
-                source: anyhow::Error::from(join_err),
+                provider: provider.clone(),
+                source:   anyhow::Error::from(join_err),
             })?
-            .map_err(|source| ResolveError::RefreshFailed { provider, source })?;
+            .map_err(|source| ResolveError::RefreshFailed {
+                provider: provider.clone(),
+                source,
+            })?;
             refreshed
         } else {
             initial_credential
@@ -186,44 +199,44 @@ impl CredentialResolver {
     }
 
     #[must_use]
-    pub fn configured_providers(&self, vault: &Vault) -> Vec<Provider> {
+    pub fn configured_providers(&self, vault: &Vault) -> Vec<ProviderId> {
         Provider::ALL
             .iter()
             .copied()
-            .filter(|&provider| self.has_credential_material(vault, provider))
+            .map(Provider::id)
+            .filter(|provider| self.has_credential_material(vault, provider))
             .collect()
     }
 
     fn find_credential(
         &self,
         vault: &Vault,
-        provider: Provider,
+        provider: &ProviderId,
         usage: CredentialUsage,
     ) -> Result<AuthCredential, ResolveError> {
         for credential_id in credential_ids_for(provider, usage) {
-            if let Some(credential) = vault_get_credential(vault, credential_id) {
+            if let Some(credential) = vault_get_credential(vault, &credential_id) {
                 return Ok(credential);
             }
         }
 
-        for env_var in provider.api_key_env_vars() {
+        for env_var in api_key_env_vars(provider) {
             if let Some(value) = self.lookup_env_or_vault(vault, env_var) {
                 return Ok(AuthCredential {
-                    provider,
-                    details: AuthDetails::ApiKey { key: value },
+                    provider: provider.clone(),
+                    details:  AuthDetails::ApiKey { key: value },
                 });
             }
         }
 
-        Err(ResolveError::NotConfigured(provider))
+        Err(ResolveError::NotConfigured(provider.clone()))
     }
 
-    fn has_credential_material(&self, vault: &Vault, provider: Provider) -> bool {
+    fn has_credential_material(&self, vault: &Vault, provider: &ProviderId) -> bool {
         credential_ids_for(provider, CredentialUsage::ApiRequest)
             .iter()
             .any(|id| vault_get_credential(vault, id).is_some())
-            || provider
-                .api_key_env_vars()
+            || api_key_env_vars(provider)
                 .iter()
                 .any(|env_var| self.lookup_env_or_vault(vault, env_var).is_some())
     }
@@ -233,20 +246,24 @@ impl CredentialResolver {
     }
 
     fn to_api_credential(&self, vault: &Vault, credential: &AuthCredential) -> ApiCredential {
-        let base_url = match credential.provider {
-            Provider::Anthropic => self.lookup_env_or_vault(vault, EnvVars::ANTHROPIC_BASE_URL),
-            Provider::OpenAi => self.lookup_env_or_vault(vault, EnvVars::OPENAI_BASE_URL),
-            Provider::Gemini => self.lookup_env_or_vault(vault, EnvVars::GEMINI_BASE_URL),
-            Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => None,
-            Provider::OpenAiCompatible => {
+        let base_url = match Provider::from_id(&credential.provider) {
+            Some(Provider::Anthropic) => {
+                self.lookup_env_or_vault(vault, EnvVars::ANTHROPIC_BASE_URL)
+            }
+            Some(Provider::OpenAi) => self.lookup_env_or_vault(vault, EnvVars::OPENAI_BASE_URL),
+            Some(Provider::Gemini) => self.lookup_env_or_vault(vault, EnvVars::GEMINI_BASE_URL),
+            Some(Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception)
+            | None => None,
+            Some(Provider::OpenAiCompatible) => {
                 self.lookup_env_or_vault(vault, EnvVars::OPENAI_COMPATIBLE_BASE_URL)
             }
         };
         match &credential.details {
             AuthDetails::ApiKey { key } => {
-                let mut cred = ApiCredential::from_api_key(credential.provider, key.clone());
+                let mut cred =
+                    ApiCredential::from_api_key(credential.provider.clone(), key.clone());
                 cred.base_url = base_url;
-                if credential.provider == Provider::OpenAi {
+                if credential.provider == Provider::OpenAi.id() {
                     cred.org_id = self.lookup_env_or_vault(vault, EnvVars::OPENAI_ORG_ID);
                     cred.project_id = self.lookup_env_or_vault(vault, EnvVars::OPENAI_PROJECT_ID);
                 }
@@ -261,7 +278,7 @@ impl CredentialResolver {
                     extra_headers.insert("originator".to_string(), "fabro".to_string());
                 }
                 ApiCredential {
-                    provider: credential.provider,
+                    provider: credential.provider.clone(),
                     auth_header: ApiKeyHeader::Bearer(tokens.access_token.clone()),
                     extra_headers,
                     base_url: Some("https://chatgpt.com/backend-api/codex".to_string()),
@@ -275,13 +292,14 @@ impl CredentialResolver {
 
     fn to_cli_credential(credential: &AuthCredential, kind: CliAgentKind) -> CliCredential {
         let mut env_vars = HashMap::new();
-        let login_command = match (&credential.provider, &credential.details, kind) {
-            (Provider::OpenAi, AuthDetails::ApiKey { key }, CliAgentKind::Codex) => {
+        let provider = Provider::from_id(&credential.provider);
+        let login_command = match (provider, &credential.details, kind) {
+            (Some(Provider::OpenAi), AuthDetails::ApiKey { key }, CliAgentKind::Codex) => {
                 env_vars.insert(EnvVars::OPENAI_API_KEY.to_string(), key.clone());
                 Some(codex_login_command(key))
             }
             (
-                Provider::OpenAi,
+                Some(Provider::OpenAi),
                 AuthDetails::CodexOAuth {
                     tokens, account_id, ..
                 },
@@ -297,7 +315,7 @@ impl CredentialResolver {
                 Some(codex_login_command(&tokens.access_token))
             }
             (_, AuthDetails::ApiKey { key }, _) => {
-                if let Some(name) = credential.provider.api_key_env_vars().first() {
+                if let Some(name) = api_key_env_vars(&credential.provider).first() {
                     env_vars.insert((*name).to_string(), key.clone());
                 }
                 None
@@ -320,7 +338,7 @@ impl CredentialResolver {
 
 pub async fn configured_providers_from_process_env(
     vault: Option<&Arc<AsyncRwLock<Vault>>>,
-) -> Vec<Provider> {
+) -> Vec<ProviderId> {
     match vault {
         Some(vault_arc) => {
             let resolver = CredentialResolver::new(Arc::clone(vault_arc));
@@ -331,6 +349,7 @@ pub async fn configured_providers_from_process_env(
             .iter()
             .copied()
             .filter(|provider| provider_has_process_env_api_key(*provider))
+            .map(Provider::id)
             .collect(),
     }
 }
@@ -346,6 +365,10 @@ fn provider_has_process_env_api_key(provider: Provider) -> bool {
         .any(|env_var| std::env::var(env_var).is_ok())
 }
 
+fn api_key_env_vars(provider: &ProviderId) -> &'static [&'static str] {
+    Provider::from_id(provider).map_or(&[], Provider::api_key_env_vars)
+}
+
 fn codex_login_command(api_key: &str) -> String {
     let quoted =
         try_quote(api_key).map_or_else(|_| api_key.to_string(), std::borrow::Cow::into_owned);
@@ -354,19 +377,13 @@ fn codex_login_command(api_key: &str) -> String {
     )
 }
 
-fn credential_ids_for(provider: Provider, usage: CredentialUsage) -> &'static [&'static str] {
-    match (provider, usage) {
-        (Provider::OpenAi, CredentialUsage::CliAgent(CliAgentKind::Codex)) => {
-            &["openai_codex", "openai"]
+fn credential_ids_for(provider: &ProviderId, usage: CredentialUsage) -> Vec<String> {
+    match (Provider::from_id(provider), usage) {
+        (Some(Provider::OpenAi), CredentialUsage::CliAgent(CliAgentKind::Codex)) => {
+            vec!["openai_codex".to_string(), "openai".to_string()]
         }
-        (Provider::OpenAi, _) => &["openai", "openai_codex"],
-        (Provider::Anthropic, _) => &["anthropic"],
-        (Provider::Gemini, _) => &["gemini"],
-        (Provider::Kimi, _) => &["kimi"],
-        (Provider::Zai, _) => &["zai"],
-        (Provider::Minimax, _) => &["minimax"],
-        (Provider::Inception, _) => &["inception"],
-        (Provider::OpenAiCompatible, _) => &["openai_compatible"],
+        (Some(Provider::OpenAi), _) => vec!["openai".to_string(), "openai_codex".to_string()],
+        _ => vec![provider.to_string()],
     }
 }
 
@@ -385,8 +402,8 @@ mod tests {
 
     fn api_key_credential(provider: Provider, key: &str) -> AuthCredential {
         AuthCredential {
-            provider,
-            details: AuthDetails::ApiKey {
+            provider: provider.id(),
+            details:  AuthDetails::ApiKey {
                 key: key.to_string(),
             },
         }
@@ -394,7 +411,7 @@ mod tests {
 
     fn oauth_credential(token_url: String, expires_at: chrono::DateTime<Utc>) -> AuthCredential {
         AuthCredential {
-            provider: Provider::OpenAi,
+            provider: Provider::OpenAi.id(),
             details:  AuthDetails::CodexOAuth {
                 tokens:     OAuthTokens {
                     access_token: "expired-access".to_string(),
@@ -491,7 +508,7 @@ mod tests {
 
         assert!(matches!(
             err,
-            ResolveError::NotConfigured(Provider::Anthropic)
+            ResolveError::NotConfigured(provider) if provider == Provider::Anthropic.id()
         ));
     }
 
@@ -746,7 +763,7 @@ mod tests {
         let vault = resolver.vault.read().await;
 
         assert_eq!(resolver.configured_providers(&vault), vec![
-            Provider::OpenAi
+            Provider::OpenAi.id()
         ]);
     }
 
@@ -761,7 +778,7 @@ mod tests {
         let vault = resolver.vault.read().await;
 
         assert_eq!(resolver.configured_providers(&vault), vec![
-            Provider::OpenAi
+            Provider::OpenAi.id()
         ]);
     }
 
@@ -860,15 +877,15 @@ mod tests {
 
         assert!(matches!(
             err,
-            ResolveError::RefreshTokenMissing(Provider::OpenAi)
+            ResolveError::RefreshTokenMissing(provider) if provider == Provider::OpenAi.id()
         ));
     }
 
     #[test]
     fn auth_issue_message_formats_refresh_token_missing() {
         let message = auth_issue_message(
-            Provider::OpenAi,
-            &ResolveError::RefreshTokenMissing(Provider::OpenAi),
+            &Provider::OpenAi.id(),
+            &ResolveError::RefreshTokenMissing(Provider::OpenAi.id()),
         );
 
         assert_eq!(
@@ -880,7 +897,7 @@ mod tests {
     #[test]
     fn api_credential_debug_redacts_secret_material() {
         let credential = ApiCredential {
-            provider:      Provider::OpenAi,
+            provider:      Provider::OpenAi.id(),
             auth_header:   ApiKeyHeader::Bearer("sk-test".to_string()),
             extra_headers: HashMap::new(),
             base_url:      None,

@@ -1,5 +1,5 @@
 use fabro_graphviz::graph::Graph;
-use fabro_model::{Catalog, Provider};
+use fabro_model::{Catalog, ProviderId};
 use fabro_types::WorkflowSettings;
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::RunGoal;
@@ -8,7 +8,7 @@ pub fn materialize_run(
     mut settings: WorkflowSettings,
     graph: &Graph,
     catalog: &Catalog,
-    configured_providers: &[Provider],
+    configured_providers: &[ProviderId],
 ) -> WorkflowSettings {
     let configured_model = settings
         .run
@@ -37,9 +37,9 @@ pub fn materialize_run(
     let model = configured_model.or(graph_model).unwrap_or_else(|| {
         provider
             .as_deref()
-            .and_then(|value| value.parse::<Provider>().ok())
-            .and_then(|provider| catalog.default_for_provider(&provider.id()))
-            .unwrap_or_else(|| catalog.default_for_configured(configured_providers))
+            .map(ProviderId::from)
+            .and_then(|provider| catalog.default_for_provider(&provider))
+            .unwrap_or_else(|| catalog.default_for_configured_ids(configured_providers))
             .id
             .clone()
     });

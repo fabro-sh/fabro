@@ -166,6 +166,12 @@ async fn create_completion(
         warn!(provider = %provider, error = %issue, "LLM provider unavailable due to auth issue");
     }
     let client = llm_result.client;
+    if let Some(provider) = request.provider.as_deref() {
+        if !client.provider_names().contains(&provider) {
+            return ApiError::bad_request(format!("Provider \"{provider}\" is not configured"))
+                .into_response();
+        }
+    }
 
     if use_stream {
         // Streaming path: forward all StreamEvents as SSE
