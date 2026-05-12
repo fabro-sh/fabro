@@ -123,9 +123,7 @@ fn build_gemini(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
     Arc::new(build_gemini_adapter(config))
 }
 
-fn build_openai_compatible_adapter(
-    config: AdapterConfig,
-) -> providers::OpenAiCompatibleAdapter {
+fn build_openai_compatible_adapter(config: AdapterConfig) -> providers::OpenAiCompatibleAdapter {
     // `openai_compatible` providers vary widely in base URL; the catalog must
     // pre-resolve `[llm.providers.<id>].base_url` before constructing
     // `AdapterConfig`. There is no sensible default — silently routing to one

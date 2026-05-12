@@ -53,17 +53,17 @@ pub struct LlmLayer {
 #[serde(deny_unknown_fields)]
 pub struct ProviderSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub display_name: Option<String>,
+    pub display_name:  Option<String>,
     /// Adapter registry key (e.g. `"openai_compatible"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub adapter:      Option<String>,
+    pub adapter:       Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_url:     Option<String>,
+    pub base_url:      Option<String>,
     /// Ordered list of credential references — first successful wins. Each
     /// entry must be a typed `CredentialRef` (`credential:<id>` or
     /// `env:<NAME>`); literal secret strings fail deserialization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub credentials:  Option<Vec<CredentialRef>>,
+    pub credentials:   Option<Vec<CredentialRef>>,
     /// Extra HTTP headers attached to every outgoing provider request after
     /// credential resolution. Header values are typed so secret-bearing values
     /// stay as references until a later resolution phase.
@@ -71,11 +71,11 @@ pub struct ProviderSettings {
     pub extra_headers: Option<HashMap<String, HeaderValueRef>>,
     /// Higher wins; missing → `0`; ties broken by canonical provider ID.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub priority:     Option<i32>,
+    pub priority:      Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enabled:      Option<bool>,
+    pub enabled:       Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub aliases:      Option<Vec<String>>,
+    pub aliases:       Option<Vec<String>>,
 }
 
 /// One entry in `[llm.models.<id>]`.
@@ -375,13 +375,13 @@ impl<'de> Deserialize<'de> for HeaderValueRef {
     where
         D: Deserializer<'de>,
     {
+        use serde::de::Error as _;
+
         match HeaderValueRefInput::deserialize(deserializer)? {
-            HeaderValueRefInput::Table(value) => value.try_into().map_err(serde::de::Error::custom),
+            HeaderValueRefInput::Table(value) => value.try_into().map_err(D::Error::custom),
             HeaderValueRefInput::BareString(value) => {
                 drop(value);
-                Err(serde::de::Error::custom(
-                    HeaderValueRefParseError::WrongFieldCount,
-                ))
+                Err(D::Error::custom(HeaderValueRefParseError::WrongFieldCount))
             }
         }
     }
@@ -396,9 +396,9 @@ impl TryFrom<HeaderValueRefSerde> for HeaderValueRef {
             value.env.as_ref(),
             value.credential.as_ref(),
         ]
-            .into_iter()
-            .filter(|value| value.is_some())
-            .count();
+        .into_iter()
+        .flatten()
+        .count();
 
         if populated != 1 {
             return Err(HeaderValueRefParseError::WrongFieldCount);
@@ -408,19 +408,19 @@ impl TryFrom<HeaderValueRefSerde> for HeaderValueRef {
             if value.is_empty() {
                 return Err(HeaderValueRefParseError::EmptyValue);
             }
-            return Ok(HeaderValueRef::Literal(value));
+            return Ok(Self::Literal(value));
         }
         if let Some(value) = value.env {
             if value.is_empty() {
                 return Err(HeaderValueRefParseError::EmptyValue);
             }
-            return Ok(HeaderValueRef::Env(value));
+            return Ok(Self::Env(value));
         }
         if let Some(value) = value.credential {
             if value.is_empty() {
                 return Err(HeaderValueRefParseError::EmptyValue);
             }
-            return Ok(HeaderValueRef::Credential(value));
+            return Ok(Self::Credential(value));
         }
 
         unreachable!("populated field count was already checked");
@@ -588,18 +588,17 @@ mod tests {
 
     #[test]
     fn header_value_ref_parses_credential_form() {
-        let parsed: HeaderValueRef =
-            toml::from_str(r#"value = { credential = "portkey_config" }"#)
-                .map(|v: toml::Value| {
-                    v.as_table()
-                        .unwrap()
-                        .get("value")
-                        .unwrap()
-                        .clone()
-                        .try_into()
-                        .unwrap()
-                })
-                .unwrap();
+        let parsed: HeaderValueRef = toml::from_str(r#"value = { credential = "portkey_config" }"#)
+            .map(|v: toml::Value| {
+                v.as_table()
+                    .unwrap()
+                    .get("value")
+                    .unwrap()
+                    .clone()
+                    .try_into()
+                    .unwrap()
+            })
+            .unwrap();
 
         assert_eq!(
             parsed,
