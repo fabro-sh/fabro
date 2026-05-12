@@ -69,7 +69,7 @@ impl AdapterConfig {
 /// rather than re-shaping every existing factory.
 pub type AdapterFactory = fn(AdapterConfig) -> Arc<dyn ProviderAdapter>;
 
-fn build_anthropic(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
+fn build_anthropic_adapter(config: AdapterConfig) -> providers::AnthropicAdapter {
     let mut adapter = providers::AnthropicAdapter::new(auth_value(&config.auth_header));
     if let Some(base_url) = config.base_url {
         adapter = adapter.with_base_url(base_url);
@@ -77,10 +77,14 @@ fn build_anthropic(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
     if !config.extra_headers.is_empty() {
         adapter = adapter.with_default_headers(config.extra_headers);
     }
-    Arc::new(adapter)
+    adapter
 }
 
-fn build_openai(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
+fn build_anthropic(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
+    Arc::new(build_anthropic_adapter(config))
+}
+
+fn build_openai_adapter(config: AdapterConfig) -> providers::OpenAiAdapter {
     let mut adapter = providers::OpenAiAdapter::new(auth_value(&config.auth_header));
     if let Some(base_url) = config.base_url {
         adapter = adapter.with_base_url(base_url);
@@ -97,10 +101,14 @@ fn build_openai(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
     if let Some(project_id) = config.project_id {
         adapter = adapter.with_project_id(project_id);
     }
-    Arc::new(adapter)
+    adapter
 }
 
-fn build_gemini(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
+fn build_openai(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
+    Arc::new(build_openai_adapter(config))
+}
+
+fn build_gemini_adapter(config: AdapterConfig) -> providers::GeminiAdapter {
     let mut adapter = providers::GeminiAdapter::new(auth_value(&config.auth_header));
     if let Some(base_url) = config.base_url {
         adapter = adapter.with_base_url(base_url);
@@ -108,10 +116,16 @@ fn build_gemini(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
     if !config.extra_headers.is_empty() {
         adapter = adapter.with_default_headers(config.extra_headers);
     }
-    Arc::new(adapter)
+    adapter
 }
 
-fn build_openai_compatible(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
+fn build_gemini(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
+    Arc::new(build_gemini_adapter(config))
+}
+
+fn build_openai_compatible_adapter(
+    config: AdapterConfig,
+) -> providers::OpenAiCompatibleAdapter {
     // `openai_compatible` providers vary widely in base URL; the catalog must
     // pre-resolve `[llm.providers.<id>].base_url` before constructing
     // `AdapterConfig`. There is no sensible default — silently routing to one
@@ -126,7 +140,11 @@ fn build_openai_compatible(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
     if !config.extra_headers.is_empty() {
         adapter = adapter.with_default_headers(config.extra_headers);
     }
-    Arc::new(adapter)
+    adapter
+}
+
+fn build_openai_compatible(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
+    Arc::new(build_openai_compatible_adapter(config))
 }
 
 /// Single source of truth pairing every adapter key with its factory. Both
@@ -221,6 +239,67 @@ mod tests {
         };
         let adapter = factory_for("openai_compatible").unwrap()(config);
         assert_eq!(adapter.name(), "kimi");
+    }
+
+    #[test]
+    fn openai_compatible_factory_preserves_extra_headers() {
+        let config = AdapterConfig {
+            provider_id:   "portkey".to_string(),
+            auth_header:   ApiKeyHeader::Bearer("unused-primary-key".to_string()),
+            base_url:      Some("https://api.portkey.ai/v1".to_string()),
+            extra_headers: HashMap::from([
+                (
+                    "x-portkey-api-key".to_string(),
+                    "resolved-portkey-key".to_string(),
+                ),
+                (
+                    "x-portkey-provider".to_string(),
+                    "@bedrock-prod".to_string(),
+                ),
+            ]),
+            codex_mode:    false,
+            org_id:        None,
+            project_id:    None,
+        };
+
+        let adapter = build_openai_compatible_adapter(config);
+
+        assert_eq!(adapter.name(), "portkey");
+        assert_eq!(
+            adapter.http.default_headers.get("x-portkey-api-key"),
+            Some(&"resolved-portkey-key".to_string()),
+        );
+        assert_eq!(
+            adapter.http.default_headers.get("x-portkey-provider"),
+            Some(&"@bedrock-prod".to_string()),
+        );
+    }
+
+    #[test]
+    fn anthropic_factory_preserves_extra_headers() {
+        let config = AdapterConfig {
+            provider_id:   "anthropic-through-portkey".to_string(),
+            auth_header:   ApiKeyHeader::Custom {
+                name:  "x-api-key".to_string(),
+                value: "unused-primary-key".to_string(),
+            },
+            base_url:      Some("https://api.portkey.ai/v1".to_string()),
+            extra_headers: HashMap::from([(
+                "x-portkey-api-key".to_string(),
+                "resolved-portkey-key".to_string(),
+            )]),
+            codex_mode:    false,
+            org_id:        None,
+            project_id:    None,
+        };
+
+        let adapter = build_anthropic_adapter(config);
+
+        assert_eq!(adapter.name(), "anthropic");
+        assert_eq!(
+            adapter.http.default_headers.get("x-portkey-api-key"),
+            Some(&"resolved-portkey-key".to_string()),
+        );
     }
 
     #[test]
