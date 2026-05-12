@@ -16,7 +16,7 @@ use fabro_config::{
 };
 use fabro_graphviz::graph::AttrValue;
 use fabro_graphviz::parser;
-use fabro_template::{TemplateContext, render as render_template};
+use fabro_template::{TemplateContext, render_lenient as render_scan_template};
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{ApprovalMode, ResolvedGoalSource, ResolvedRunGoal, RunMode};
 use fabro_types::{DirtyStatus, GitContext, PreRunPushOutcome, RunId, WorkflowSettings};
@@ -401,7 +401,7 @@ fn render_workflow_scan_source(
     path: &Path,
     inputs: &HashMap<String, toml::Value>,
 ) -> Result<String> {
-    render_template(source, &TemplateContext::for_input_scan(inputs.clone()))
+    render_scan_template(source, &TemplateContext::for_input_scan(inputs.clone()))
         .with_context(|| format!("Failed to render {} for manifest scanning", path.display()))
 }
 

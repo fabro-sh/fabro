@@ -151,6 +151,23 @@ fn legacy_tool() {
 }
 
 #[test]
+fn bare_fabro_with_unbound_inputs_validates_structurally_with_warning() {
+    let context = test_context!();
+    let mut cmd = context.validate();
+    cmd.arg(fixture("templated_unbound.fabro"));
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    Workflow: TemplatedUnbound (3 nodes, 2 edges)
+    Graph: [FIXTURES]/templated_unbound.fabro
+    warning: undefined template variable `inputs.app_dir` at line 2 (template_undefined_variable)
+    Validation: OK
+    ");
+}
+
+#[test]
 fn bare_fabro_picks_up_sibling_workflow_toml_inputs() {
     let context = test_context!();
     let mut cmd = context.validate();

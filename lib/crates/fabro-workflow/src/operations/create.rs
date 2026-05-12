@@ -13,11 +13,12 @@ use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::SandboxProvider;
 use fabro_store::Database;
-use fabro_template::{TemplateContext, render as render_template};
+use fabro_template::{TemplateContext, TemplateError, render as render_template, render_lenient};
 use fabro_types::settings::run::{RunMode, RunNamespace};
 use fabro_types::{ForkSourceRef, GitContext, RunId, RunProvenance, WorkflowSettings};
 use fabro_util::error::collect_chain;
 use fabro_util::json::normalize_json_value;
+use fabro_validate::{Diagnostic, Severity};
 use tokio::task::spawn_blocking;
 
 use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
@@ -272,6 +273,22 @@ fn validate_sandbox_provider(run: &RunNamespace) -> Result<(), Error> {
     Ok(())
 }
 
+/// How the template-expansion pass should treat undefined input variables.
+///
+/// Validate is structural — it should not fail just because the user has not
+/// bound `{{ inputs.* }}` yet. Run-start is strict — missing inputs are real
+/// errors. Splitting the two lets validate work on a bare `.fabro` while
+/// run-start preserves its current hard-fail behavior.
+#[derive(Clone, Copy, Debug)]
+pub(super) enum RenderMode {
+    /// Undefined inputs are hard errors. Used by run-create.
+    Strict,
+    /// Undefined inputs render as empty and become warning diagnostics on the
+    /// returned `Validated`, so structural lints still run. Used by
+    /// `fabro validate`.
+    Structural,
+}
+
 fn create_from_source(
     dot_source: &str,
     options: PersistCreateOptions,
@@ -286,6 +303,7 @@ fn create_from_source(
         Vec::new(),
         Some(&options.settings),
         goal_override,
+        RenderMode::Strict,
     )?;
 
     if validated.has_errors() {
@@ -304,15 +322,40 @@ pub(super) fn preprocess_and_validate(
     custom_transforms: Vec<Box<dyn Transform>>,
     settings: Option<&WorkflowSettings>,
     goal_override: Option<&str>,
+    render_mode: RenderMode,
 ) -> Result<Validated, Error> {
     let inputs = run_inputs(settings);
-    let source = render_template(dot_source, &TemplateContext::for_input_scan(inputs.clone()))
-        .map_err(|error| {
-            Error::Parse(format!(
-                "template expansion failed: {}",
-                collect_chain(&error).join(": ")
-            ))
-        })?;
+    let template_ctx = TemplateContext::for_input_scan(inputs.clone());
+    let (source, template_diagnostics) = match render_mode {
+        RenderMode::Strict => {
+            let source = render_template(dot_source, &template_ctx).map_err(|error| {
+                Error::Parse(format!(
+                    "template expansion failed: {}",
+                    collect_chain(&error).join(": ")
+                ))
+            })?;
+            (source, Vec::new())
+        }
+        RenderMode::Structural => match render_template(dot_source, &template_ctx) {
+            Ok(source) => (source, Vec::new()),
+            Err(error @ TemplateError::UndefinedVariable { .. }) => {
+                let diagnostic = template_diagnostic(&error);
+                let source = render_lenient(dot_source, &template_ctx).map_err(|error| {
+                    Error::Parse(format!(
+                        "template expansion failed: {}",
+                        collect_chain(&error).join(": ")
+                    ))
+                })?;
+                (source, vec![diagnostic])
+            }
+            Err(error) => {
+                return Err(Error::Parse(format!(
+                    "template expansion failed: {}",
+                    collect_chain(&error).join(": ")
+                )));
+            }
+        },
+    };
 
     let mut parsed = pipeline::parse(&source)?;
     apply_goal_override(&mut parsed.graph, goal_override);
@@ -323,7 +366,41 @@ pub(super) fn preprocess_and_validate(
         inputs,
         custom_transforms,
     })?;
-    Ok(pipeline::validate(transformed, &[]))
+    let mut validated = pipeline::validate(transformed, &[]);
+    if !template_diagnostics.is_empty() {
+        validated.prepend_diagnostics(template_diagnostics);
+    }
+    Ok(validated)
+}
+
+fn template_diagnostic(error: &TemplateError) -> Diagnostic {
+    let TemplateError::UndefinedVariable {
+        expression, line, ..
+    } = error
+    else {
+        unreachable!("template_diagnostic only called for UndefinedVariable");
+    };
+    let location = line.map(|l| format!(" at line {l}")).unwrap_or_default();
+    let (name, message) = match expression.as_deref() {
+        Some(expr) => (
+            expr.to_owned(),
+            format!("undefined template variable `{expr}`{location}"),
+        ),
+        None => (
+            "<unknown>".to_owned(),
+            format!("undefined template variable{location}"),
+        ),
+    };
+    Diagnostic {
+        rule: "template_undefined_variable".to_owned(),
+        severity: Severity::Warning,
+        message,
+        node_id: None,
+        edge: None,
+        fix: Some(format!(
+            "bind `{name}` via `[run.inputs]` in workflow.toml, or pass `--input {name}=<value>`"
+        )),
+    }
 }
 
 fn run_inputs(settings: Option<&WorkflowSettings>) -> HashMap<String, toml::Value> {
@@ -467,6 +544,63 @@ mod tests {
         assert_eq!(validated.graph().name, "Test");
         assert!(validated.graph().find_start_node().is_some());
         assert!(validated.graph().find_exit_node().is_some());
+    }
+
+    #[test]
+    fn validate_with_unbound_inputs_warns_but_succeeds() {
+        let dot = r#"digraph Test {
+            graph [goal="Build feature"]
+            start [shape=Mdiamond, label="Start"]
+            exit  [shape=Msquare,  label="Exit"]
+            work  [label="Work", prompt="Work on {{ inputs.app_dir }}"]
+            start -> work -> exit
+        }"#;
+        let validated = validate_dot(dot, WorkflowSettings::default());
+        validated.raise_on_errors().unwrap();
+
+        let diagnostic = validated
+            .diagnostics()
+            .iter()
+            .find(|d| d.rule == "template_undefined_variable")
+            .expect("expected a template_undefined_variable diagnostic");
+        assert_eq!(diagnostic.severity, Severity::Warning);
+        assert!(
+            diagnostic.message.contains("inputs.app_dir"),
+            "missing variable in: {}",
+            diagnostic.message
+        );
+    }
+
+    #[test]
+    fn strict_render_hard_fails_on_unbound_inputs() {
+        let dot = r#"digraph Test {
+            graph [goal="Build {{ inputs.app_dir }}"]
+            start [shape=Mdiamond, label="Start"]
+            exit  [shape=Msquare,  label="Exit"]
+            start -> exit
+        }"#;
+        let result = preprocess_and_validate(
+            dot,
+            None,
+            None,
+            Vec::new(),
+            Some(&WorkflowSettings::default()),
+            None,
+            RenderMode::Strict,
+        );
+
+        let Err(err) = result else {
+            panic!("expected strict mode to hard-fail on unbound inputs");
+        };
+        let message = err.to_string();
+        assert!(
+            message.contains("template expansion failed"),
+            "missing prefix in: {message}"
+        );
+        assert!(
+            message.contains("inputs.app_dir"),
+            "missing variable in: {message}"
+        );
     }
 
     #[test]

@@ -1,0 +1,10 @@
+digraph TemplatedUnbound {
+    graph [goal="Demo {{ inputs.app_dir }}"]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare,  label="Exit"]
+
+    work [label="Work", prompt="Work in {{ inputs.app_dir }}"]
+
+    start -> work -> exit
+}

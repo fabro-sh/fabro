@@ -189,11 +189,27 @@ fn is_plain_text(template: &str) -> bool {
 }
 
 pub fn render(template: &str, ctx: &TemplateContext) -> Result<String, TemplateError> {
+    render_with(template, ctx, UndefinedBehavior::Strict)
+}
+
+/// Render with chainable undefined handling: undefined variables and attribute
+/// chains render as empty strings instead of erroring. Use for structural
+/// passes (e.g. manifest scanning, `fabro validate` on a bare `.fabro`) where
+/// the user has not yet bound inputs — strict checking happens elsewhere.
+pub fn render_lenient(template: &str, ctx: &TemplateContext) -> Result<String, TemplateError> {
+    render_with(template, ctx, UndefinedBehavior::Chainable)
+}
+
+fn render_with(
+    template: &str,
+    ctx: &TemplateContext,
+    undefined: UndefinedBehavior,
+) -> Result<String, TemplateError> {
     if is_plain_text(template) {
         return Ok(template.to_owned());
     }
     let mut env = Environment::new();
-    env.set_undefined_behavior(UndefinedBehavior::Strict);
+    env.set_undefined_behavior(undefined);
     env.set_auto_escape_callback(|_| AutoEscape::None);
     env.set_debug(true);
     env.render_str(template, ctx.clone().into_value())
@@ -280,6 +296,24 @@ mod tests {
         let err = render("{{ env.SECRET }}", &ctx).unwrap_err();
 
         assert!(matches!(err, TemplateError::UndefinedVariable { .. }));
+    }
+
+    #[test]
+    fn render_lenient_treats_undefined_as_empty() {
+        let ctx = TemplateContext::new();
+
+        let rendered = render_lenient("before [{{ inputs.app_dir }}] after", &ctx).unwrap();
+
+        assert_eq!(rendered, "before [] after");
+    }
+
+    #[test]
+    fn render_lenient_still_errors_on_syntax_problems() {
+        let ctx = TemplateContext::new();
+
+        let err = render_lenient("{{ unterminated", &ctx).unwrap_err();
+
+        assert!(matches!(err, TemplateError::Syntax { .. }));
     }
 
     #[test]

@@ -78,6 +78,14 @@ impl Validated {
         &self.diagnostics
     }
 
+    /// Insert diagnostics at the front of the list. Used to surface
+    /// pre-structural-validation issues (e.g. template expansion warnings)
+    /// before the lint-rule output.
+    pub(crate) fn prepend_diagnostics(&mut self, mut diagnostics: Vec<Diagnostic>) {
+        diagnostics.append(&mut self.diagnostics);
+        self.diagnostics = diagnostics;
+    }
+
     /// True if any diagnostic has Error severity.
     #[must_use]
     pub fn has_errors(&self) -> bool {

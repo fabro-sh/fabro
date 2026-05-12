@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use fabro_types::WorkflowSettings;
 
-use super::create::preprocess_and_validate;
+use super::create::{RenderMode, preprocess_and_validate};
 use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
 use crate::error::Error;
 use crate::pipeline::Validated;
@@ -19,6 +19,10 @@ pub struct ValidateInput {
 ///
 /// Returns `Validated` even when validation produced errors. Call
 /// `validated.raise_on_errors()` if the caller wants to fail fast.
+///
+/// Uses [`RenderMode::Structural`]: undefined template inputs surface as
+/// warning diagnostics rather than hard failures, so `fabro validate` can
+/// type-check a bare `.fabro` graph before any inputs have been bound.
 pub fn validate(input: ValidateInput) -> Result<Validated, Error> {
     let resolved = resolve_workflow(ResolveWorkflowInput {
         workflow: input.workflow,
@@ -34,5 +38,6 @@ pub fn validate(input: ValidateInput) -> Result<Validated, Error> {
         input.custom_transforms,
         Some(&resolved.settings),
         resolved.goal_override.as_deref(),
+        RenderMode::Structural,
     )
 }
