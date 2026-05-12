@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use fabro_model::Model;
 pub use fabro_model::ModelTestMode;
-use fabro_model::{Model, Provider};
 use strum::IntoStaticStr;
 use tokio::time;
 
@@ -54,18 +54,18 @@ pub async fn run_model_test(
 }
 
 async fn run_basic_test(info: &Model, client: Arc<Client>) -> ModelTestOutcome {
-    run_basic_model_probe(&info.id, info.provider, client).await
+    run_basic_model_probe(&info.id, &info.provider, client).await
 }
 
 /// Run the cheap single-prompt model availability probe without requiring a
 /// catalog-backed [`Model`].
 pub async fn run_basic_model_probe(
     model_id: &str,
-    provider: Provider,
+    provider: impl ToString,
     client: Arc<Client>,
 ) -> ModelTestOutcome {
     let params = GenerateParams::new(model_id, client)
-        .provider(<&'static str>::from(provider))
+        .provider(provider.to_string())
         .prompt("Say OK")
         .max_tokens(16);
 
@@ -133,7 +133,7 @@ fn build_deep_test_params(info: &Model, client: Arc<Client>) -> Option<GenerateP
     );
 
     let mut params = GenerateParams::new(&info.id, client)
-        .provider(<&'static str>::from(info.provider))
+        .provider(info.provider.to_string())
         .prompt(
             "Use the add tool twice: first add 15 and 27, then add that result to 42. \
              Finally, tell me whether the grand total is even or odd and why.",
@@ -177,7 +177,7 @@ mod tests {
     fn test_model_with(features: ModelFeatures) -> Model {
         Model {
             id: "test-model".to_string(),
-            provider: Provider::Anthropic,
+            provider: Provider::Anthropic.id(),
             family: "test".to_string(),
             display_name: "Test Model".to_string(),
             limits: ModelLimits {

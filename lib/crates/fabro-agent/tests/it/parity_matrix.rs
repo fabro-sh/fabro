@@ -35,15 +35,15 @@ fn summarizer_model_id(provider: Provider) -> ModelHandle {
         | Provider::Minimax
         | Provider::Inception
         | Provider::OpenAiCompatible => ModelHandle::ByName {
-            provider: Provider::OpenAi,
+            provider: Provider::OpenAi.id(),
             model:    "gpt-5.4-mini".to_string(),
         },
         Provider::Gemini => ModelHandle::ByName {
-            provider: Provider::Gemini,
+            provider: Provider::Gemini.id(),
             model:    "gemini-3-flash-preview".to_string(),
         },
         Provider::Anthropic => ModelHandle::ByName {
-            provider: Provider::Anthropic,
+            provider: Provider::Anthropic.id(),
             model:    "claude-haiku-4-5".to_string(),
         },
     }

@@ -8160,7 +8160,7 @@ fn aggregate_billing_counts_projection_rollup_usage_visits() {
         by_model:           vec![
             fabro_workflow::ProjectionBillingByModel {
                 model:   ModelRef {
-                    provider: Provider::OpenAi,
+                    provider: Provider::OpenAi.id(),
                     model_id: "gpt-old".to_string(),
                     speed:    None,
                 },
@@ -8177,7 +8177,7 @@ fn aggregate_billing_counts_projection_rollup_usage_visits() {
             },
             fabro_workflow::ProjectionBillingByModel {
                 model:   ModelRef {
-                    provider: Provider::OpenAi,
+                    provider: Provider::OpenAi.id(),
                     model_id: "gpt-new".to_string(),
                     speed:    None,
                 },

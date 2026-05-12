@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use crate::ids::ProviderId;
 use crate::provider::Provider;
 use crate::types::Model;
 
@@ -50,10 +51,10 @@ impl Catalog {
 
     /// List all models, optionally filtered by provider.
     #[must_use]
-    pub fn list(&self, provider: Option<Provider>) -> Vec<&Model> {
+    pub fn list(&self, provider: Option<&ProviderId>) -> Vec<&Model> {
         match provider {
             None => self.models.iter().collect(),
-            Some(p) => self.models.iter().filter(|m| m.provider == p).collect(),
+            Some(p) => self.models.iter().filter(|m| &m.provider == p).collect(),
         }
     }
 
@@ -71,16 +72,16 @@ impl Catalog {
 
     /// The default model for a specific provider.
     #[must_use]
-    pub fn default_for_provider(&self, p: Provider) -> Option<&Model> {
-        self.models.iter().find(|m| m.provider == p && m.default)
+    pub fn default_for_provider(&self, p: &ProviderId) -> Option<&Model> {
+        self.models.iter().find(|m| &m.provider == p && m.default)
     }
 
     /// Default model for the best-available provider (based on API keys),
     /// falling back to the global catalog default.
     #[must_use]
     pub fn default_from_env(&self) -> &Model {
-        let provider = Provider::default_from_env();
-        self.default_for_provider(provider)
+        let provider = Provider::default_from_env().id();
+        self.default_for_provider(&provider)
             .unwrap_or_else(|| self.default_model())
     }
 
@@ -88,8 +89,8 @@ impl Catalog {
     /// global catalog default.
     #[must_use]
     pub fn default_for_configured(&self, configured: &[Provider]) -> &Model {
-        let provider = Provider::default_for_configured(configured);
-        self.default_for_provider(provider)
+        let provider = Provider::default_for_configured(configured).id();
+        self.default_for_provider(&provider)
             .unwrap_or_else(|| self.default_model())
     }
 
@@ -108,7 +109,7 @@ impl Catalog {
                 return Some(info);
             }
         }
-        self.default_for_provider(p)
+        self.default_for_provider(&p.id())
     }
 
     /// Find the closest model on a target provider matching the reference's
@@ -118,11 +119,11 @@ impl Catalog {
     /// `features.reasoning`. Among matches, picks the closest by
     /// `costs.input_cost_per_mtok` (absolute diff).
     #[must_use]
-    pub fn closest(&self, target: Provider, reference: &Model) -> Option<&Model> {
+    pub fn closest(&self, target: &ProviderId, reference: &Model) -> Option<&Model> {
         self.models
             .iter()
             .filter(|m| {
-                m.provider == target
+                &m.provider == target
                     && m.features.tools == reference.features.tools
                     && m.features.vision == reference.features.vision
                     && m.features.reasoning == reference.features.reasoning
@@ -145,7 +146,7 @@ impl Catalog {
     #[must_use]
     pub fn build_fallback_chain(
         &self,
-        primary: Provider,
+        primary: &ProviderId,
         model: &str,
         fallbacks: &HashMap<String, Vec<String>>,
     ) -> Vec<FallbackTarget> {
@@ -153,15 +154,15 @@ impl Catalog {
             return Vec::new();
         };
 
-        let Some(fallback_providers) = fallbacks.get(<&'static str>::from(primary)) else {
+        let Some(fallback_providers) = fallbacks.get(primary.as_str()) else {
             return Vec::new();
         };
 
         fallback_providers
             .iter()
             .filter_map(|provider_str| {
-                let provider = provider_str.parse::<Provider>().ok()?;
-                self.closest(provider, reference).map(|m| FallbackTarget {
+                let provider = ProviderId::from(provider_str.clone());
+                self.closest(&provider, reference).map(|m| FallbackTarget {
                     provider: provider_str.clone(),
                     model:    m.id.clone(),
                 })
@@ -204,15 +205,19 @@ mod tests {
 
     #[test]
     fn builtin_list_by_provider() {
-        let anthropic = Catalog::builtin().list(Some(Provider::Anthropic));
+        let anthropic = Catalog::builtin().list(Some(&Provider::Anthropic.id()));
         assert!(!anthropic.is_empty());
-        assert!(anthropic.iter().all(|m| m.provider == Provider::Anthropic));
+        assert!(
+            anthropic
+                .iter()
+                .all(|m| m.provider == Provider::Anthropic.id())
+        );
     }
 
     #[test]
     fn builtin_list_unknown_provider_empty() {
         // OpenAiCompatible has no catalog models
-        let models = Catalog::builtin().list(Some(Provider::OpenAiCompatible));
+        let models = Catalog::builtin().list(Some(&Provider::OpenAiCompatible.id()));
         assert!(models.is_empty());
     }
 
@@ -225,18 +230,18 @@ mod tests {
     #[test]
     fn builtin_default_for_provider() {
         let m = Catalog::builtin()
-            .default_for_provider(Provider::Anthropic)
+            .default_for_provider(&Provider::Anthropic.id())
             .unwrap();
         assert_eq!(m.id, "claude-sonnet-4-6");
         assert!(m.default);
 
         let m = Catalog::builtin()
-            .default_for_provider(Provider::OpenAi)
+            .default_for_provider(&Provider::OpenAi.id())
             .unwrap();
         assert_eq!(m.id, "gpt-5.4");
 
         let m = Catalog::builtin()
-            .default_for_provider(Provider::Gemini)
+            .default_for_provider(&Provider::Gemini.id())
             .unwrap();
         assert_eq!(m.id, "gemini-3.1-pro-preview");
     }
@@ -268,7 +273,9 @@ mod tests {
     #[test]
     fn builtin_closest_opus_to_gemini() {
         let opus = Catalog::builtin().get("claude-opus-4-6").unwrap();
-        let result = Catalog::builtin().closest(Provider::Gemini, opus).unwrap();
+        let result = Catalog::builtin()
+            .closest(&Provider::Gemini.id(), opus)
+            .unwrap();
         assert_eq!(result.id, "gemini-3.1-pro-preview");
     }
 
@@ -277,7 +284,7 @@ mod tests {
         let haiku = Catalog::builtin().get("claude-haiku-4-5").unwrap();
         assert!(
             Catalog::builtin()
-                .closest(Provider::OpenAi, haiku)
+                .closest(&Provider::OpenAi.id(), haiku)
                 .is_none()
         );
     }
@@ -289,7 +296,7 @@ mod tests {
             "openai".to_string(),
         ])]);
         let chain = Catalog::builtin().build_fallback_chain(
-            Provider::Anthropic,
+            &Provider::Anthropic.id(),
             "claude-opus-4-6",
             &fallbacks,
         );
@@ -303,8 +310,11 @@ mod tests {
     #[test]
     fn builtin_build_fallback_chain_unknown_model() {
         let fallbacks = HashMap::from([("anthropic".to_string(), vec!["gemini".to_string()])]);
-        let chain =
-            Catalog::builtin().build_fallback_chain(Provider::Anthropic, "unknown-xyz", &fallbacks);
+        let chain = Catalog::builtin().build_fallback_chain(
+            &Provider::Anthropic.id(),
+            "unknown-xyz",
+            &fallbacks,
+        );
         assert!(chain.is_empty());
     }
 
@@ -312,7 +322,7 @@ mod tests {
     fn builtin_build_fallback_chain_provider_not_in_map() {
         let fallbacks = HashMap::from([("openai".to_string(), vec!["anthropic".to_string()])]);
         let chain = Catalog::builtin().build_fallback_chain(
-            Provider::Anthropic,
+            &Provider::Anthropic.id(),
             "claude-opus-4-6",
             &fallbacks,
         );
@@ -326,7 +336,7 @@ mod tests {
             "kimi".to_string(),
         ])]);
         let chain = Catalog::builtin().build_fallback_chain(
-            Provider::Anthropic,
+            &Provider::Anthropic.id(),
             "claude-haiku-4-5",
             &fallbacks,
         );
@@ -339,7 +349,7 @@ mod tests {
     fn builtin_build_fallback_chain_empty_map() {
         let fallbacks = HashMap::new();
         let chain = Catalog::builtin().build_fallback_chain(
-            Provider::Anthropic,
+            &Provider::Anthropic.id(),
             "claude-opus-4-6",
             &fallbacks,
         );
@@ -352,7 +362,7 @@ mod tests {
 
         let models = vec![Model {
             id:                   "test-model".to_string(),
-            provider:             Provider::Anthropic,
+            provider:             Provider::Anthropic.id(),
             family:               "test".to_string(),
             display_name:         "Test Model".to_string(),
             limits:               ModelLimits {
@@ -391,7 +401,7 @@ mod tests {
     #[test]
     fn every_provider_has_catalog_models() {
         for &provider in Provider::ALL {
-            let models = Catalog::builtin().list(Some(provider));
+            let models = Catalog::builtin().list(Some(&provider.id()));
             assert!(
                 !models.is_empty(),
                 "Provider {provider:?} has no models in catalog"
@@ -403,7 +413,7 @@ mod tests {
     fn every_provider_has_exactly_one_default_model() {
         for &provider in Provider::ALL {
             let defaults: Vec<_> = Catalog::builtin()
-                .list(Some(provider))
+                .list(Some(&provider.id()))
                 .into_iter()
                 .filter(|m| m.default)
                 .collect();
@@ -421,11 +431,15 @@ mod tests {
     #[test]
     fn catalog_providers_roundtrip_through_static_str() {
         for model in Catalog::builtin().list(None) {
-            let roundtripped = Provider::from_str(<&'static str>::from(model.provider));
+            let roundtripped = Provider::from_id(&model.provider);
             assert_eq!(
                 roundtripped,
-                Ok(model.provider),
-                "catalog model '{}' provider {:?} does not roundtrip through IntoStaticStr",
+                Some(
+                    model
+                        .builtin_provider()
+                        .expect("catalog model provider should be a built-in provider")
+                ),
+                "catalog model '{}' provider {:?} does not roundtrip through ProviderId",
                 model.id,
                 model.provider
             );
@@ -452,7 +466,7 @@ mod tests {
         insta::assert_debug_snapshot!(info, @r#"
         Model {
             id: "claude-opus-4-6",
-            provider: Anthropic,
+            provider: anthropic,
             family: "claude-4",
             display_name: "Claude Opus 4.6",
             limits: ModelLimits {
@@ -520,7 +534,7 @@ mod tests {
         insta::assert_debug_snapshot!(m, @r#"
         Model {
             id: "gemini-3.1-flash-lite-preview",
-            provider: Gemini,
+            provider: gemini,
             family: "gemini-3",
             display_name: "Gemini 3.1 Flash Lite (Preview)",
             limits: ModelLimits {
@@ -578,7 +592,7 @@ mod tests {
         insta::assert_debug_snapshot!(m, @r#"
         Model {
             id: "kimi-k2.5",
-            provider: Kimi,
+            provider: kimi,
             family: "kimi-k2",
             display_name: "Kimi K2.5",
             limits: ModelLimits {
@@ -628,13 +642,13 @@ mod tests {
     #[test]
     fn glm_4_7_in_catalog() {
         let m = Catalog::builtin().get("glm-4.7").unwrap();
-        assert_eq!(m.provider, Provider::Zai);
+        assert_eq!(m.provider, Provider::Zai.id());
     }
 
     #[test]
     fn minimax_m2_5_in_catalog() {
         let m = Catalog::builtin().get("minimax-m2.5").unwrap();
-        assert_eq!(m.provider, Provider::Minimax);
+        assert_eq!(m.provider, Provider::Minimax.id());
     }
 
     #[test]
@@ -643,7 +657,7 @@ mod tests {
         insta::assert_debug_snapshot!(m, @r#"
         Model {
             id: "mercury-2",
-            provider: Inception,
+            provider: inception,
             family: "mercury",
             display_name: "Mercury 2",
             limits: ModelLimits {
@@ -692,7 +706,7 @@ mod tests {
         insta::assert_debug_snapshot!(m, @r#"
         Model {
             id: "gpt-5.4",
-            provider: OpenAi,
+            provider: openai,
             family: "gpt-5",
             display_name: "GPT-5.4",
             limits: ModelLimits {
@@ -743,7 +757,7 @@ mod tests {
         insta::assert_debug_snapshot!(m, @r#"
         Model {
             id: "gpt-5.4-pro",
-            provider: OpenAi,
+            provider: openai,
             family: "gpt-5",
             display_name: "GPT-5.4 Pro",
             limits: ModelLimits {
@@ -820,7 +834,7 @@ mod tests {
         insta::assert_debug_snapshot!(m, @r#"
         Model {
             id: "gpt-5.3-codex-spark",
-            provider: OpenAi,
+            provider: openai,
             family: "gpt-5",
             display_name: "GPT-5.3 Codex Spark",
             limits: ModelLimits {
@@ -872,7 +886,7 @@ mod tests {
     fn closest_model_sonnet_to_gemini() {
         let sonnet = Catalog::builtin().get("claude-sonnet-4-5").unwrap();
         let result = Catalog::builtin()
-            .closest(Provider::Gemini, sonnet)
+            .closest(&Provider::Gemini.id(), sonnet)
             .unwrap();
         assert_eq!(result.id, "gemini-3.1-pro-preview");
     }
@@ -880,14 +894,20 @@ mod tests {
     #[test]
     fn closest_model_haiku_to_kimi() {
         let haiku = Catalog::builtin().get("claude-haiku-4-5").unwrap();
-        let result = Catalog::builtin().closest(Provider::Kimi, haiku).unwrap();
+        let result = Catalog::builtin()
+            .closest(&Provider::Kimi.id(), haiku)
+            .unwrap();
         assert_eq!(result.id, "kimi-k2.5");
     }
 
     #[test]
     fn closest_model_no_capability_match() {
         let glm = Catalog::builtin().get("glm-4.7").unwrap();
-        assert!(Catalog::builtin().closest(Provider::Gemini, glm).is_none());
+        assert!(
+            Catalog::builtin()
+                .closest(&Provider::Gemini.id(), glm)
+                .is_none()
+        );
     }
 
     // ---- Cost tests ----

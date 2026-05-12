@@ -1373,7 +1373,7 @@ mod runs {
                 EventBody::AgentMessage(AgentMessageProps {
                     text:            "I'll start by loading the environment configurations for both production and staging to compare them.".into(),
                     model:           fabro_model::ModelRef {
-                        provider: fabro_model::Provider::Anthropic,
+                        provider: fabro_model::Provider::Anthropic.id(),
                         model_id: "claude-opus-4-6".into(),
                         speed: None,
                     },
@@ -1430,7 +1430,7 @@ mod runs {
                 EventBody::AgentMessage(AgentMessageProps {
                     text:            "I've detected drift in 3 resources between production and staging:\n\n1. **redis.max_connections** — production has 200, staging has 100\n2. **redis.tls** — enabled in production, disabled in staging\n3. **iam.session_duration** — production uses 3600s, staging uses 1800s".into(),
                     model:           fabro_model::ModelRef {
-                        provider: fabro_model::Provider::Anthropic,
+                        provider: fabro_model::Provider::Anthropic.id(),
                         model_id: "claude-opus-4-6".into(),
                         speed: None,
                     },

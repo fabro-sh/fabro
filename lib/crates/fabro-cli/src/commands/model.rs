@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_api::types as api_types;
-use fabro_model::{Catalog, Model, ModelTestMode, Provider};
+use fabro_model::{Catalog, Model, ModelTestMode, Provider, ProviderId};
 use fabro_util::terminal::Styles;
 use futures::{StreamExt, stream};
 use serde::Serialize;
@@ -22,7 +22,7 @@ enum ModelTestResultKind {
 #[derive(Serialize)]
 struct ModelTestRow {
     model:    String,
-    provider: Provider,
+    provider: ProviderId,
     result:   ModelTestResultKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail:   Option<String>,
@@ -101,6 +101,13 @@ fn color_choice(use_color: bool) -> cli_table::ColorChoice {
     }
 }
 
+fn provider_display_name(provider: &ProviderId) -> String {
+    Provider::from_id(provider).map_or_else(
+        || provider.to_string(),
+        |provider| provider.display_name().to_string(),
+    )
+}
+
 fn model_row(model: &Model, use_color: bool) -> Vec<CellStruct> {
     let aliases = model.aliases.join(", ");
     let cost = format!(
@@ -112,6 +119,7 @@ fn model_row(model: &Model, use_color: bool) -> Vec<CellStruct> {
         model.id.clone().cell().bold(use_color),
         model
             .provider
+            .as_str()
             .cell()
             .foreground_color(color_if(use_color, Color::Ansi256(8))),
         aliases
@@ -190,21 +198,21 @@ fn model_test_row_from_status(model: &Model, status: &str, result_color: Color) 
     match result_color {
         Color::Green => ModelTestRow {
             model:    model.id.clone(),
-            provider: model.provider,
+            provider: model.provider.clone(),
             result:   ModelTestResultKind::Pass,
             detail:   None,
             error:    None,
         },
         Color::Yellow => ModelTestRow {
             model:    model.id.clone(),
-            provider: model.provider,
+            provider: model.provider.clone(),
             result:   ModelTestResultKind::Skip,
             detail:   Some(trimmed.to_string()),
             error:    None,
         },
         _ => ModelTestRow {
             model:    model.id.clone(),
-            provider: model.provider,
+            provider: model.provider.clone(),
             result:   ModelTestResultKind::Fail,
             detail:   None,
             error:    Some(
@@ -307,7 +315,7 @@ async fn test_models_via_server(
 
         for info in &unconfigured {
             skipped += 1;
-            let provider_name = info.provider.display_name().to_string();
+            let provider_name = provider_display_name(&info.provider);
             if !skipped_providers.contains(&provider_name) {
                 skipped_providers.push(provider_name);
             }
@@ -474,31 +482,31 @@ mod tests {
 
     fn test_model_json(id: &str, provider: Provider) -> serde_json::Value {
         serde_json::to_value(Model {
-            id: id.to_string(),
-            provider,
-            family: "test".to_string(),
-            display_name: format!("{id} display"),
-            limits: ModelLimits {
+            id:                   id.to_string(),
+            provider:             provider.id(),
+            family:               "test".to_string(),
+            display_name:         format!("{id} display"),
+            limits:               ModelLimits {
                 context_window: 128_000,
                 max_output:     Some(4096),
             },
-            training: None,
-            knowledge_cutoff: None,
-            features: ModelFeatures {
+            training:             None,
+            knowledge_cutoff:     None,
+            features:             ModelFeatures {
                 tools:     true,
                 vision:    false,
                 reasoning: false,
                 effort:    false,
             },
-            costs: ModelCosts {
+            costs:                ModelCosts {
                 input_cost_per_mtok:       Some(1.0),
                 output_cost_per_mtok:      Some(2.0),
                 cache_input_cost_per_mtok: None,
             },
             estimated_output_tps: Some(100.0),
-            aliases: vec!["tm".to_string()],
-            default: false,
-            configured: false,
+            aliases:              vec!["tm".to_string()],
+            default:              false,
+            configured:           false,
         })
         .unwrap()
     }
@@ -689,7 +697,7 @@ mod tests {
         mock.assert_async().await;
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "test-model");
-        assert_eq!(models[0].provider, Provider::Anthropic);
+        assert_eq!(models[0].provider, Provider::Anthropic.id());
     }
 
     #[tokio::test]

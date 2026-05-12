@@ -571,7 +571,7 @@ mod tests {
         agent_event(stage, AgentEvent::AssistantMessage {
             text:            "done".into(),
             model:           ModelRef {
-                provider: Provider::OpenAi,
+                provider: Provider::OpenAi.id(),
                 model_id: model.into(),
                 speed:    None,
             },

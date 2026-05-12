@@ -1410,7 +1410,7 @@ mod tests {
         let summarizer = WebFetchSummarizer {
             client,
             model_id: ModelHandle::ByName {
-                provider: fabro_model::Provider::Anthropic,
+                provider: fabro_model::Provider::Anthropic.id(),
                 model:    "mock-model".to_string(),
             },
         };
@@ -1503,7 +1503,7 @@ mod tests {
 
         let mut providers = HashMap::new();
         providers.insert("other_provider".to_string(), default_provider);
-        // Register under "anthropic" so ModelRef { provider: Anthropic, .. } routes
+        // Register under "anthropic" so ModelRef { provider: "anthropic", .. } routes
         // here
         providers.insert("anthropic".to_string(), target_provider);
         let client = Client::new(providers, Some("other_provider".into()), vec![]);
@@ -1511,7 +1511,7 @@ mod tests {
         let summarizer = WebFetchSummarizer {
             client,
             model_id: ModelHandle::ByName {
-                provider: fabro_model::Provider::Anthropic,
+                provider: fabro_model::Provider::Anthropic.id(),
                 model:    "target-model".to_string(),
             },
         };

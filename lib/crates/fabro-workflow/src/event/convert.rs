@@ -552,12 +552,10 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 tool_call_count,
             } => {
                 let requested_speed = model.speed.map(<&'static str>::from);
-                let billed = billed_model_usage_from_llm(
-                    &model.model_id,
-                    model.provider,
-                    requested_speed,
-                    usage,
-                );
+                let provider = fabro_model::Provider::from_id(&model.provider)
+                    .expect("agent message billing currently requires a built-in provider ID");
+                let billed =
+                    billed_model_usage_from_llm(&model.model_id, provider, requested_speed, usage);
                 let billing = BilledTokenCounts::from_billed_usage(std::slice::from_ref(&billed));
                 EventBody::AgentMessage(fabro_types::AgentMessageProps {
                     text: text.clone(),
@@ -1963,7 +1961,7 @@ mod tests {
             event:             AgentEvent::AssistantMessage {
                 text:            "ok".to_string(),
                 model:           ModelRef {
-                    provider: Provider::Anthropic,
+                    provider: Provider::Anthropic.id(),
                     model_id: "claude-sonnet".to_string(),
                     speed:    None,
                 },

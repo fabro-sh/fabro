@@ -13,11 +13,20 @@ use serde::{Deserialize, Serialize};
 ///
 /// Wraps a `String` because the set of providers is open-ended and supplied
 /// by `[llm.providers]` settings rather than compiled into a Rust enum.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ProviderId(String);
 
 impl ProviderId {
+    pub const ANTHROPIC: &'static str = "anthropic";
+    pub const OPENAI: &'static str = "openai";
+    pub const GEMINI: &'static str = "gemini";
+    pub const KIMI: &'static str = "kimi";
+    pub const ZAI: &'static str = "zai";
+    pub const MINIMAX: &'static str = "minimax";
+    pub const INCEPTION: &'static str = "inception";
+    pub const OPENAI_COMPATIBLE: &'static str = "openai_compatible";
+
     /// Construct a provider ID from any string-like value without validation.
     /// Catalog construction is responsible for canonicalisation; consumers
     /// only need a wrapper for type clarity.
@@ -36,9 +45,55 @@ impl ProviderId {
     pub fn into_inner(self) -> String {
         self.0
     }
+
+    #[must_use]
+    pub fn anthropic() -> Self {
+        Self::new(Self::ANTHROPIC)
+    }
+
+    #[must_use]
+    pub fn openai() -> Self {
+        Self::new(Self::OPENAI)
+    }
+
+    #[must_use]
+    pub fn gemini() -> Self {
+        Self::new(Self::GEMINI)
+    }
+
+    #[must_use]
+    pub fn kimi() -> Self {
+        Self::new(Self::KIMI)
+    }
+
+    #[must_use]
+    pub fn zai() -> Self {
+        Self::new(Self::ZAI)
+    }
+
+    #[must_use]
+    pub fn minimax() -> Self {
+        Self::new(Self::MINIMAX)
+    }
+
+    #[must_use]
+    pub fn inception() -> Self {
+        Self::new(Self::INCEPTION)
+    }
+
+    #[must_use]
+    pub fn openai_compatible() -> Self {
+        Self::new(Self::OPENAI_COMPATIBLE)
+    }
 }
 
 impl fmt::Display for ProviderId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl fmt::Debug for ProviderId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
     }

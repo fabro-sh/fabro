@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::ids::ProviderId;
 use crate::provider::Provider;
 
 // --- 2.9 Model ---
@@ -34,7 +35,7 @@ pub struct ModelCosts {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Model {
     pub id:                   String,
-    pub provider:             Provider,
+    pub provider:             ProviderId,
     pub family:               String,
     pub display_name:         String,
     pub limits:               ModelLimits,
@@ -58,8 +59,12 @@ impl Model {
         &self.id
     }
 
-    pub fn provider(&self) -> Provider {
-        self.provider
+    pub fn provider(&self) -> &ProviderId {
+        &self.provider
+    }
+
+    pub fn builtin_provider(&self) -> Option<Provider> {
+        Provider::from_id(&self.provider)
     }
 
     pub fn family(&self) -> &str {
@@ -136,7 +141,7 @@ mod tests {
     fn inherent_methods_return_correct_values() {
         let info = Catalog::builtin().get("claude-opus-4-7").unwrap();
         assert_eq!(info.id(), "claude-opus-4-7");
-        assert_eq!(info.provider(), Provider::Anthropic);
+        assert_eq!(info.provider(), &Provider::Anthropic.id());
         assert_eq!(info.family(), "claude-4");
         assert_eq!(info.display_name(), "Claude Opus 4.7");
         assert_eq!(info.context_window(), 1_000_000);
@@ -158,8 +163,7 @@ mod tests {
     #[test]
     fn all_catalog_providers_are_valid() {
         for model in Catalog::builtin().list(None) {
-            // provider() just returns the Provider enum, no parsing needed
-            let _ = model.provider();
+            assert!(model.builtin_provider().is_some());
         }
     }
 }

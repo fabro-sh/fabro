@@ -671,7 +671,7 @@ mod tests {
         let event = AgentEvent::AssistantMessage {
             text:            "Hello".into(),
             model:           ModelRef {
-                provider: Provider::OpenAi,
+                provider: Provider::OpenAi.id(),
                 model_id: "test-model".into(),
                 speed:    None,
             },

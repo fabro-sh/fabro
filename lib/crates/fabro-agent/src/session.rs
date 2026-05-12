@@ -1327,7 +1327,7 @@ impl Session {
                 .as_deref()
                 .and_then(|value| value.parse::<Speed>().ok());
             let model = ModelRef {
-                provider: self.provider_profile.provider(),
+                provider: self.provider_profile.provider().id(),
                 model_id: if response.model.is_empty() {
                     self.provider_profile.model().to_string()
                 } else {

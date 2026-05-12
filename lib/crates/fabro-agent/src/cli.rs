@@ -206,8 +206,8 @@ fn build_tool_approval(
 
 fn summarizer_model_id(provider: Provider) -> ModelHandle {
     ModelHandle::ByName {
-        provider,
-        model: match provider {
+        provider: provider.id(),
+        model:    match provider {
             Provider::OpenAi | Provider::OpenAiCompatible => "gpt-4o-mini",
             Provider::Gemini => "gemini-2.0-flash",
             Provider::Anthropic => "claude-haiku-4-5",
@@ -484,7 +484,7 @@ pub async fn run_with_args_and_client(
         model
     } else {
         Catalog::builtin()
-            .default_for_provider(provider)
+            .default_for_provider(&provider.id())
             .map(|model| model.id.clone())
             .ok_or_else(|| {
                 anyhow::anyhow!(

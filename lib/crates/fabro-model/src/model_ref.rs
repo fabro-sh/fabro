@@ -1,7 +1,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use crate::provider::Provider;
+use crate::ids::ProviderId;
 use crate::types::Model;
 
 /// A reference to a model — either a fully resolved `Model` or a
@@ -12,7 +12,7 @@ pub enum ModelHandle {
     Resolved(Arc<Model>),
     /// An unresolved provider:model pair (e.g. from CLI input or config).
     ByName {
-        provider: Provider,
+        provider: ProviderId,
         model:    String,
     },
 }
@@ -29,10 +29,10 @@ impl ModelHandle {
 
     /// The provider for this model.
     #[must_use]
-    pub fn provider(&self) -> Provider {
+    pub fn provider(&self) -> &ProviderId {
         match self {
-            Self::Resolved(m) => m.provider,
-            Self::ByName { provider, .. } => *provider,
+            Self::Resolved(m) => &m.provider,
+            Self::ByName { provider, .. } => provider,
         }
     }
 }
@@ -60,11 +60,12 @@ impl fmt::Debug for ModelHandle {
 mod tests {
     use super::*;
     use crate::catalog::Catalog;
+    use crate::provider::Provider;
 
     #[test]
     fn by_name_display() {
         let r = ModelHandle::ByName {
-            provider: Provider::Anthropic,
+            provider: Provider::Anthropic.id(),
             model:    "claude-opus-4-6".to_string(),
         };
         assert_eq!(r.to_string(), "anthropic:claude-opus-4-6");
@@ -73,11 +74,11 @@ mod tests {
     #[test]
     fn by_name_accessors() {
         let r = ModelHandle::ByName {
-            provider: Provider::OpenAi,
+            provider: Provider::OpenAi.id(),
             model:    "gpt-5.4".to_string(),
         };
         assert_eq!(r.model_id(), "gpt-5.4");
-        assert_eq!(r.provider(), Provider::OpenAi);
+        assert_eq!(r.provider(), &Provider::OpenAi.id());
     }
 
     #[test]
@@ -92,17 +93,17 @@ mod tests {
         let info = Catalog::builtin().get("gpt-5.4").unwrap().clone();
         let r = ModelHandle::Resolved(Arc::new(info));
         assert_eq!(r.model_id(), "gpt-5.4");
-        assert_eq!(r.provider(), Provider::OpenAi);
+        assert_eq!(r.provider(), &Provider::OpenAi.id());
     }
 
     #[test]
     fn debug_format() {
         let r = ModelHandle::ByName {
-            provider: Provider::Gemini,
+            provider: Provider::Gemini.id(),
             model:    "gemini-3.1-pro-preview".to_string(),
         };
         let debug = format!("{r:?}");
         assert!(debug.contains("ByName"));
-        assert!(debug.contains("Gemini"));
+        assert!(debug.contains("gemini"));
     }
 }

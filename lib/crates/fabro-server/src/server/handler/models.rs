@@ -48,6 +48,7 @@ async fn list_models(
         },
         None => None,
     };
+    let provider_id = provider.map(Provider::id);
 
     let query = params.query.as_ref().map(|value| value.to_lowercase());
     let limit = params.limit.clamp(1, 100) as usize;
@@ -60,7 +61,7 @@ async fn list_models(
         .collect();
 
     let mut models = fabro_model::Catalog::builtin()
-        .list(provider)
+        .list(provider_id.as_ref())
         .into_iter()
         .filter(|model| match &query {
             Some(query) => {
@@ -75,7 +76,9 @@ async fn list_models(
         })
         .cloned()
         .map(|mut model| {
-            model.configured = configured.contains(&model.provider);
+            model.configured = model
+                .builtin_provider()
+                .is_some_and(|provider| configured.contains(&provider));
             model
         })
         .collect::<Vec<_>>();
@@ -130,11 +133,14 @@ async fn test_model(
     if let Some((_, issue)) = llm_result
         .auth_issues
         .iter()
-        .find(|(provider, _)| *provider == info.provider)
+        .find(|(provider, _)| info.builtin_provider() == Some(*provider))
     {
-        return ApiError::bad_request(auth_issue_message(info.provider, issue)).into_response();
+        let provider = info
+            .builtin_provider()
+            .expect("model test auth issue should reference a built-in provider");
+        return ApiError::bad_request(auth_issue_message(provider, issue)).into_response();
     }
-    let provider_name = <&'static str>::from(info.provider);
+    let provider_name = info.provider.as_str();
     if !llm_result.client.provider_names().contains(&provider_name) {
         return Json(serde_json::json!({
             "model_id": info.id,

@@ -20,8 +20,9 @@ pub fn billed_model_usage_from_llm(
     usage: &LlmTokenCounts,
 ) -> BilledModelUsage {
     let speed = parse_speed(requested_speed);
+    let provider_id = provider.id();
     let model = ModelRef {
-        provider,
+        provider: provider_id.clone(),
         model_id: model_id.to_string(),
         speed,
     };
@@ -37,7 +38,7 @@ pub fn billed_model_usage_from_llm(
 
     let total_usd_micros = Catalog::builtin()
         .get(model_id)
-        .filter(|candidate| candidate.provider == provider)
+        .filter(|candidate| candidate.provider == provider_id)
         .and_then(|candidate| candidate.pricing_for(speed))
         .and_then(|pricing| pricing.bill(&input))
         .map(|amount| amount.0);
