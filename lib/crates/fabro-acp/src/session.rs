@@ -134,6 +134,9 @@ pub async fn run_acp_turn(request: AcpRunRequest) -> Result<AcpRunResult, AcpErr
         }
         Err(error) => {
             state.terminate().await?;
+            if let Some(startup_error) = state.take_startup_error().await {
+                return Err(AcpError::Sandbox(startup_error));
+            }
             return Err(map_protocol_error(error));
         }
     };
@@ -261,7 +264,7 @@ mod tests {
             "update": {
                 "sessionUpdate": "usage_update",
                 "used": 26128,
-                "size": 258400
+                "size": 258_400
             }
         });
 

@@ -6,7 +6,9 @@ use std::time::Duration;
 use agent_client_protocol::schema::StopReason;
 use fabro_acp::{AcpError, AcpRunRequest, AcpRunResult, resolve_acp_command, run_acp_turn};
 use fabro_model::Provider;
+use fabro_sandbox::test_support::MockSandbox;
 use fabro_sandbox::{LocalSandbox, Sandbox, shell_quote};
+use fabro_util::error::collect_chain;
 use tokio::fs::{read_to_string, write};
 use tokio::process::Command;
 use tokio::time::sleep;
@@ -21,6 +23,42 @@ use tokio_util::sync::CancellationToken;
 mod test_support;
 
 use test_support::fake_acp_agent_script;
+
+#[tokio::test]
+async fn stdio_spawn_failure_returns_sandbox_error() {
+    const SANDBOX_FAILURE: &str = "ACP backend requires bidirectional stdio; the Daytona sandbox provider does not support it yet";
+
+    let command =
+        resolve_acp_command(Provider::OpenAi, Some("fake-acp-agent")).expect("resolve ACP command");
+    let mut sandbox = MockSandbox::linux();
+    sandbox.stdio_process_error = Some(SANDBOX_FAILURE.to_string());
+    let sandbox: Arc<dyn Sandbox> = Arc::new(sandbox);
+
+    let result = run_acp_turn(AcpRunRequest {
+        command,
+        prompt: "hello".to_string(),
+        cwd: "/workspace".to_string(),
+        timeout_ms: Some(5_000),
+        env: HashMap::new(),
+        sandbox,
+        cancel_token: CancellationToken::new(),
+        on_activity: None,
+    })
+    .await;
+    let Err(error) = result else {
+        panic!("stdio spawn failure should fail");
+    };
+
+    assert!(
+        matches!(error, AcpError::Sandbox(_)),
+        "expected sandbox error, got {error:?}"
+    );
+    let chain = collect_chain(&error);
+    assert!(
+        chain.iter().any(|cause| cause == SANDBOX_FAILURE),
+        "cause chain should contain sandbox failure, got: {chain:?}"
+    );
+}
 
 #[tokio::test]
 async fn session_lifecycle_initializes_sends_prompt_and_aggregates_text() {

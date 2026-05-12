@@ -33,4 +33,5 @@ uuid.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+fabro-sandbox = { path = "../fabro-sandbox", features = ["test-support"] }
 tempfile = "3"

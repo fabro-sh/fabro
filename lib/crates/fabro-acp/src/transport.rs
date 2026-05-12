@@ -8,7 +8,9 @@ use agent_client_protocol::util::internal_error;
 use agent_client_protocol::{
     Agent, Client, ConnectTo, Error as ProtocolError, Lines, Result as AcpProtocolResult,
 };
-use fabro_sandbox::{Result as SandboxResult, Sandbox, StderrCollector, StdioProcessHandle};
+use fabro_sandbox::{
+    Error as SandboxError, Result as SandboxResult, Sandbox, StderrCollector, StdioProcessHandle,
+};
 use futures::io::BufReader;
 use futures::sink::unfold;
 use futures::{AsyncBufReadExt, AsyncWriteExt, Stream};
@@ -21,21 +23,31 @@ use crate::command::AcpCommand;
 
 #[derive(Clone)]
 pub(crate) struct TransportState {
-    handle: Arc<TokioMutex<Option<StdioProcessHandle>>>,
-    stderr: Arc<TokioMutex<Option<StderrCollector>>>,
+    handle:        Arc<TokioMutex<Option<StdioProcessHandle>>>,
+    stderr:        Arc<TokioMutex<Option<StderrCollector>>>,
+    startup_error: Arc<TokioMutex<Option<SandboxError>>>,
 }
 
 impl TransportState {
     pub(crate) fn new() -> Self {
         Self {
-            handle: Arc::new(TokioMutex::new(None)),
-            stderr: Arc::new(TokioMutex::new(None)),
+            handle:        Arc::new(TokioMutex::new(None)),
+            stderr:        Arc::new(TokioMutex::new(None)),
+            startup_error: Arc::new(TokioMutex::new(None)),
         }
     }
 
     async fn set_process(&self, handle: StdioProcessHandle, stderr: StderrCollector) {
         *self.handle.lock().await = Some(handle);
         *self.stderr.lock().await = Some(stderr);
+    }
+
+    async fn set_startup_error(&self, error: SandboxError) {
+        *self.startup_error.lock().await = Some(error);
+    }
+
+    pub(crate) async fn take_startup_error(&self) -> Option<SandboxError> {
+        self.startup_error.lock().await.take()
     }
 
     pub(crate) async fn terminate(&self) -> SandboxResult<()> {
@@ -87,7 +99,7 @@ impl ConnectTo<Client> for SandboxAcpTransport {
         let mut env = self.command.env().clone();
         env.extend(self.env);
 
-        let process = self
+        let process = match self
             .sandbox
             .spawn_stdio_process(
                 &self.command.to_shell_command(),
@@ -96,7 +108,13 @@ impl ConnectTo<Client> for SandboxAcpTransport {
                 Some(self.cancel_token),
             )
             .await
-            .map_err(ProtocolError::into_internal_error)?;
+        {
+            Ok(process) => process,
+            Err(error) => {
+                self.state.set_startup_error(error).await;
+                return Err(internal_error("ACP process failed to start"));
+            }
+        };
 
         let handle = process.handle.clone();
         let stderr = process.stderr.clone();

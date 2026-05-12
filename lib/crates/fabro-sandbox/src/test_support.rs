@@ -42,6 +42,7 @@ pub struct MockSandbox {
     pub stop_calls:              Mutex<u32>,
     pub delete_calls:            Mutex<u32>,
     pub event_callback:          Option<SandboxEventCallback>,
+    pub stdio_process_error:     Option<String>,
 }
 
 impl MockSandbox {
@@ -106,6 +107,7 @@ impl Default for MockSandbox {
             stop_calls:              Mutex::new(0),
             delete_calls:            Mutex::new(0),
             event_callback:          None,
+            stdio_process_error:     None,
         }
     }
 }
@@ -226,6 +228,10 @@ impl Sandbox for MockSandbox {
             .captured_env_vars
             .lock()
             .expect("captured_env_vars lock poisoned") = env_vars.cloned();
+
+        if let Some(error) = &self.stdio_process_error {
+            return Err(crate::Error::message(error.clone()));
+        }
 
         let (stdin, _stdin_read) = duplex(1024);
         let (_stdout_write, stdout) = duplex(1024);

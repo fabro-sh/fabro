@@ -263,6 +263,7 @@ fn acp_error_to_workflow(error: AcpError) -> Error {
         AcpError::StopReason { stop_reason, text } => {
             Error::handler(format!("ACP prompt stopped with {stop_reason}: {text}"))
         }
+        AcpError::Sandbox(source) => Error::handler_with_source("ACP turn failed", &source),
         other => Error::handler_with_source("ACP turn failed", &other),
     }
 }
@@ -564,6 +565,66 @@ mod tests {
                 .expect("captured env lock poisoned")
                 .is_none(),
             "ACP process should not launch when acp_command is missing"
+        );
+    }
+
+    #[tokio::test]
+    async fn acp_backend_stdio_spawn_failure_preserves_sandbox_cause() {
+        const DAYTONA_UNSUPPORTED_ACP: &str = "ACP backend requires bidirectional stdio; the Daytona sandbox provider does not support it yet";
+
+        let mut sandbox = MockSandbox::linux();
+        sandbox.stdio_process_error = Some(DAYTONA_UNSUPPORTED_ACP.to_string());
+        let sandbox = Arc::new(sandbox);
+        let sandbox_dyn: Arc<dyn Sandbox> = sandbox.clone();
+
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "provider".to_string(),
+            AttrValue::String("openai".to_string()),
+        );
+        node.attrs
+            .insert("backend".to_string(), AttrValue::String("acp".to_string()));
+        node.attrs.insert(
+            "acp_command".to_string(),
+            AttrValue::String("fake-acp-agent".to_string()),
+        );
+
+        let backend =
+            AgentAcpBackend::new_from_env("fake-acp".to_string(), Provider::OpenAi).with_env(
+                HashMap::from([("OPENAI_API_KEY".to_string(), "test-key".to_string())]),
+            );
+        let emitter = Arc::new(Emitter::default());
+        let context = Context::new();
+        let result = backend
+            .run(CodergenRunRequest {
+                node:         &node,
+                prompt:       "write hello",
+                context:      &context,
+                thread_id:    None,
+                emitter:      &emitter,
+                sandbox:      &sandbox_dyn,
+                tool_hooks:   None,
+                cancel_token: CancellationToken::new(),
+            })
+            .await;
+        let Err(err) = result else {
+            panic!("stdio spawn failure should fail the ACP turn");
+        };
+
+        let rendered = err.display_with_causes();
+        assert!(
+            rendered.contains("ACP turn failed"),
+            "rendered error should keep ACP context: {rendered}"
+        );
+        assert!(
+            err.causes()
+                .iter()
+                .any(|cause| cause == DAYTONA_UNSUPPORTED_ACP),
+            "cause chain should include sandbox failure, got: {rendered}"
+        );
+        assert_eq!(
+            err.failure_category(),
+            crate::error::FailureCategory::Deterministic
         );
     }
 
