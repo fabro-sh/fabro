@@ -85,13 +85,29 @@ pub fn resolve_workflow_path(workflow_path: &Path, cwd: &Path) -> Result<Workflo
             Err(err) => Err(err),
         }
     } else {
+        let workflow_toml_path = sibling_workflow_toml_for(&path);
         Ok(WorkflowPathResolution {
             resolved_workflow_path: path.clone(),
             dot_path: path,
-            workflow_toml_path: None,
+            workflow_toml_path,
             workflow_slug,
         })
     }
+}
+
+/// If `dot_path` has a sibling `workflow.toml` whose `[workflow].graph`
+/// resolves to that same file, return the path to the toml. Otherwise return
+/// `None`. This lets `fabro validate path/to/workflow.fabro` find the inputs
+/// defined alongside the graph without the user having to pass the toml.
+fn sibling_workflow_toml_for(dot_path: &Path) -> Option<PathBuf> {
+    let candidate = dot_path.parent()?.join("workflow.toml");
+    if !candidate.is_file() {
+        return None;
+    }
+    let cfg = run::load_run_config(&candidate).ok()?;
+    let workflow = WorkflowSettingsBuilder::workflow_from_layer(&cfg).ok()?;
+    let toml_graph = run::resolve_graph_path(&candidate, &workflow.graph);
+    (toml_graph == dot_path).then_some(candidate)
 }
 
 pub fn resolve_working_directory_from_run(run: &RunNamespace, caller_cwd: &Path) -> PathBuf {
@@ -427,6 +443,45 @@ directory = "../custom"
             resolve_workflow_arg_impl(Path::new("demo"), tmp.path(), None).unwrap(),
             config_dir.join("workflows/demo/workflow.toml")
         );
+    }
+
+    #[test]
+    fn resolve_workflow_path_picks_up_sibling_workflow_toml() {
+        let tmp = TempDir::new().unwrap();
+        let wf_dir = tmp.path().join("wf");
+        fs::create_dir_all(&wf_dir).unwrap();
+        fs::write(wf_dir.join("workflow.fabro"), "digraph T {}\n").unwrap();
+        fs::write(
+            wf_dir.join("workflow.toml"),
+            "_version = 1\n[workflow]\ngraph = \"workflow.fabro\"\n",
+        )
+        .unwrap();
+
+        let resolution = resolve_workflow_path(&wf_dir.join("workflow.fabro"), tmp.path()).unwrap();
+
+        assert_eq!(resolution.dot_path, wf_dir.join("workflow.fabro"));
+        assert_eq!(
+            resolution.workflow_toml_path,
+            Some(wf_dir.join("workflow.toml"))
+        );
+    }
+
+    #[test]
+    fn resolve_workflow_path_ignores_sibling_toml_pointing_elsewhere() {
+        let tmp = TempDir::new().unwrap();
+        let wf_dir = tmp.path().join("wf");
+        fs::create_dir_all(&wf_dir).unwrap();
+        fs::write(wf_dir.join("workflow.fabro"), "digraph T {}\n").unwrap();
+        fs::write(wf_dir.join("other.fabro"), "digraph T {}\n").unwrap();
+        fs::write(
+            wf_dir.join("workflow.toml"),
+            "_version = 1\n[workflow]\ngraph = \"other.fabro\"\n",
+        )
+        .unwrap();
+
+        let resolution = resolve_workflow_path(&wf_dir.join("workflow.fabro"), tmp.path()).unwrap();
+
+        assert_eq!(resolution.workflow_toml_path, None);
     }
 
     #[test]

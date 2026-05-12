@@ -151,6 +151,22 @@ fn legacy_tool() {
 }
 
 #[test]
+fn bare_fabro_picks_up_sibling_workflow_toml_inputs() {
+    let context = test_context!();
+    let mut cmd = context.validate();
+    cmd.arg(fixture("templated_inputs/workflow.fabro"));
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    Workflow: TemplatedInputs (3 nodes, 2 edges)
+    Graph: [FIXTURES]/templated_inputs/workflow.fabro
+    Validation: OK
+    ");
+}
+
+#[test]
 fn invalid() {
     let context = test_context!();
     let mut cmd = context.validate();
