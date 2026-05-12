@@ -53,8 +53,118 @@ fn resolves_run_defaults_from_empty_settings() {
     assert_eq!(docker.image, "buildpack-deps:noble");
     assert_eq!(docker.memory_limit, Some(4_000_000_000));
     assert_eq!(docker.cpu_quota, Some(200_000));
-    assert!(!docker.skip_clone);
+    assert!(settings.clone.enabled);
+    assert!(settings.run_branch.enabled);
+    assert!(settings.run_branch.push);
+    assert!(settings.meta_branch.enabled);
+    assert!(settings.meta_branch.push);
     assert!(settings.pull_request.is_none());
+}
+
+#[test]
+fn resolves_run_level_clone_branch_controls() {
+    let settings = WorkflowSettingsBuilder::from_toml(
+        r"
+_version = 1
+
+[run.clone]
+enabled = false
+
+[run.run_branch]
+enabled = true
+push = false
+
+[run.meta_branch]
+enabled = true
+push = false
+",
+    )
+    .expect("run branch controls should resolve")
+    .run;
+
+    assert!(!settings.clone.enabled);
+    assert!(settings.run_branch.enabled);
+    assert!(!settings.run_branch.push);
+    assert!(settings.meta_branch.enabled);
+    assert!(!settings.meta_branch.push);
+}
+
+#[test]
+fn disabling_run_branch_forces_meta_branch_off() {
+    let settings = WorkflowSettingsBuilder::from_toml(
+        r"
+_version = 1
+
+[run.run_branch]
+enabled = false
+
+[run.meta_branch]
+enabled = true
+push = true
+",
+    )
+    .expect("run branch disabled should resolve")
+    .run;
+
+    assert!(!settings.run_branch.enabled);
+    assert!(!settings.meta_branch.enabled);
+    assert!(!settings.meta_branch.push);
+}
+
+#[test]
+fn pull_request_requires_pushed_run_branch() {
+    let disabled_branch = WorkflowSettingsBuilder::from_toml(
+        r"
+_version = 1
+
+[run.run_branch]
+enabled = false
+
+[run.pull_request]
+enabled = true
+",
+    )
+    .expect_err("pull requests require an enabled pushed run branch");
+    let message = disabled_branch.to_string();
+    assert!(
+        message.contains("run.pull_request.enabled requires run.run_branch.enabled"),
+        "expected run branch validation error, got: {message}"
+    );
+
+    let disabled_push = WorkflowSettingsBuilder::from_toml(
+        r"
+_version = 1
+
+[run.run_branch]
+push = false
+
+[run.pull_request]
+enabled = true
+",
+    )
+    .expect_err("pull requests require run branch push");
+    let message = disabled_push.to_string();
+    assert!(
+        message.contains("run.pull_request.enabled requires run.run_branch.enabled"),
+        "expected run branch push validation error, got: {message}"
+    );
+}
+
+#[test]
+fn provider_skip_clone_is_rejected() {
+    let err = r"
+_version = 1
+
+[run.sandbox.docker]
+skip_clone = true
+"
+    .parse::<SettingsLayer>()
+    .expect_err("provider-level skip_clone should be unknown");
+    let message = err.to_string();
+    assert!(
+        message.contains("skip_clone") || message.contains("unknown field"),
+        "expected unknown-field error mentioning skip_clone, got: {message}"
+    );
 }
 
 #[test]

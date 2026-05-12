@@ -287,13 +287,7 @@ impl RunSession {
             .state()
             .await
             .map_err(|err| Error::engine(err.to_string()))?;
-        let git = state.start.and_then(|start| {
-            start.run_branch.as_ref().map(|_| GitCheckpointOptions {
-                base_sha:    start.base_sha.clone(),
-                run_branch:  start.run_branch.clone(),
-                meta_branch: Some(metadata_branch_name(&record.run_id.to_string())),
-            })
-        });
+        let git = git_checkpoint_options_from_start(settings, &record.run_id, state.start);
         let definition_blob = state.spec.definition_blob;
         let accepted_definition = match definition_blob {
             Some(blob_id) => {
@@ -353,7 +347,7 @@ impl RunSession {
                 working_directory: working_directory.clone(),
             },
             SandboxProvider::Docker => SandboxSpec::Docker {
-                config:           resolve_docker_config(resolved).unwrap_or_default(),
+                config:           resolve_docker_config(resolved),
                 github_app:       services.github_app.clone(),
                 run_id:           Some(record.run_id),
                 clone_origin_url: record.repo_origin_url().map(str::to_string),
@@ -369,7 +363,7 @@ impl RunSession {
                     None => None,
                 };
                 SandboxSpec::Daytona {
-                    config: Box::new(resolve_daytona_config(resolved).unwrap_or_default()),
+                    config: Box::new(resolve_daytona_config(resolved)),
                     github_app: services.github_app.clone(),
                     run_id: Some(record.run_id),
                     clone_origin_url: record.repo_origin_url().map(str::to_string),
@@ -459,6 +453,27 @@ fn resolve_interp(value: &InterpString) -> String {
         .map_or_else(|_| value.as_source(), |resolved| resolved.value)
 }
 
+fn git_checkpoint_options_from_start(
+    settings: &fabro_types::WorkflowSettings,
+    run_id: &RunId,
+    start: Option<fabro_types::StartRecord>,
+) -> Option<GitCheckpointOptions> {
+    if !settings.run.run_branch.enabled {
+        return None;
+    }
+
+    let start = start?;
+    start.run_branch.as_ref().map(|_| GitCheckpointOptions {
+        base_sha:    start.base_sha.clone(),
+        run_branch:  start.run_branch.clone(),
+        meta_branch: settings
+            .run
+            .meta_branch
+            .enabled
+            .then(|| metadata_branch_name(&run_id.to_string())),
+    })
+}
+
 #[expect(
     clippy::disallowed_methods,
     reason = "Run startup interpolation owns a process-env lookup facade for {{ env.* }} values."
@@ -492,16 +507,26 @@ fn resolve_sandbox_provider(settings: &ResolvedRunSettings) -> Result<SandboxPro
     .map_or_else(|| Ok(SandboxProvider::default()), Ok)
 }
 
-fn resolve_daytona_config(settings: &ResolvedRunSettings) -> Option<DaytonaConfig> {
-    settings
+fn resolve_daytona_config(settings: &ResolvedRunSettings) -> DaytonaConfig {
+    let mut config = settings
         .sandbox
         .daytona
         .as_ref()
-        .map(runtime_daytona_config)
+        .map(|daytona| runtime_daytona_config(daytona, !settings.clone.enabled))
+        .unwrap_or_default();
+    config.skip_clone = !settings.clone.enabled;
+    config
 }
 
-fn resolve_docker_config(settings: &ResolvedRunSettings) -> Option<DockerSandboxOptions> {
-    settings.sandbox.docker.as_ref().map(runtime_docker_config)
+fn resolve_docker_config(settings: &ResolvedRunSettings) -> DockerSandboxOptions {
+    let mut config = settings
+        .sandbox
+        .docker
+        .as_ref()
+        .map(|docker| runtime_docker_config(docker, !settings.clone.enabled))
+        .unwrap_or_default();
+    config.skip_clone = !settings.clone.enabled;
+    config
 }
 
 fn resolve_fallback_chain(
@@ -554,11 +579,11 @@ fn runtime_mcp_server(settings: &ResolvedMcpServerSettings) -> McpServerSettings
     }
 }
 
-fn runtime_daytona_config(settings: &DaytonaSettings) -> DaytonaConfig {
+fn runtime_daytona_config(settings: &DaytonaSettings, skip_clone: bool) -> DaytonaConfig {
     DaytonaConfig {
         auto_stop_interval: settings.auto_stop_interval,
-        labels:             (!settings.labels.is_empty()).then_some(settings.labels.clone()),
-        snapshot:           settings
+        labels: (!settings.labels.is_empty()).then_some(settings.labels.clone()),
+        snapshot: settings
             .snapshot
             .as_ref()
             .map(|snapshot| DaytonaSnapshotSettings {
@@ -578,18 +603,18 @@ fn runtime_daytona_config(settings: &DaytonaSettings) -> DaytonaConfig {
                         }
                     }),
             }),
-        network:            settings.network.as_ref().map(|network| match network {
+        network: settings.network.as_ref().map(|network| match network {
             DaytonaNetworkLayer::Block => DaytonaNetwork::Block,
             DaytonaNetworkLayer::AllowAll => DaytonaNetwork::AllowAll,
             DaytonaNetworkLayer::AllowList { allow_list } => {
                 DaytonaNetwork::AllowList(allow_list.clone())
             }
         }),
-        skip_clone:         settings.skip_clone,
+        skip_clone,
     }
 }
 
-fn runtime_docker_config(settings: &DockerSettings) -> DockerSandboxOptions {
+fn runtime_docker_config(settings: &DockerSettings, skip_clone: bool) -> DockerSandboxOptions {
     let mut env_vars = settings
         .env_vars
         .iter()
@@ -603,7 +628,7 @@ fn runtime_docker_config(settings: &DockerSettings) -> DockerSandboxOptions {
         memory_limit: settings.memory_limit,
         cpu_quota: settings.cpu_quota,
         env_vars,
-        skip_clone: settings.skip_clone,
+        skip_clone,
         ..DockerSandboxOptions::default()
     }
 }
@@ -992,7 +1017,7 @@ mod tests {
     use std::time::Duration;
 
     use chrono::Utc;
-    use fabro_config::{RunExecutionLayer, RunLayer, WorkflowSettingsBuilder};
+    use fabro_config::{RunCloneLayer, RunExecutionLayer, RunLayer, WorkflowSettingsBuilder};
     use fabro_store::Database;
     use fabro_types::settings::run::RunMode;
     use fabro_types::{WorkflowSettings, fixtures};
@@ -1041,6 +1066,52 @@ mod tests {
             .run_overrides(run)
             .build()
             .expect("settings should resolve")
+    }
+
+    #[test]
+    fn runtime_clone_config_uses_run_level_clone_policy() {
+        let settings = settings_from_run_layer(RunLayer {
+            clone: Some(RunCloneLayer {
+                enabled: Some(false),
+            }),
+            ..RunLayer::default()
+        });
+
+        assert!(resolve_docker_config(&settings.run).skip_clone);
+        assert!(resolve_daytona_config(&settings.run).skip_clone);
+    }
+
+    #[test]
+    fn start_record_git_options_honor_disabled_run_branch() {
+        let mut settings = WorkflowSettings::default();
+        settings.run.run_branch.enabled = false;
+        let start = fabro_types::StartRecord {
+            start_time: Utc::now(),
+            run_branch: Some("fabro/run/test".to_string()),
+            base_sha:   Some("abc123".to_string()),
+        };
+
+        assert!(
+            git_checkpoint_options_from_start(&settings, &fixtures::RUN_1, Some(start)).is_none()
+        );
+    }
+
+    #[test]
+    fn start_record_git_options_honor_disabled_meta_branch() {
+        let mut settings = WorkflowSettings::default();
+        settings.run.meta_branch.enabled = false;
+        let start = fabro_types::StartRecord {
+            start_time: Utc::now(),
+            run_branch: Some("fabro/run/test".to_string()),
+            base_sha:   Some("abc123".to_string()),
+        };
+
+        let git = git_checkpoint_options_from_start(&settings, &fixtures::RUN_1, Some(start))
+            .expect("run branch should remain enabled");
+
+        assert_eq!(git.run_branch.as_deref(), Some("fabro/run/test"));
+        assert_eq!(git.base_sha.as_deref(), Some("abc123"));
+        assert_eq!(git.meta_branch, None);
     }
 
     async fn persisted_workflow(dot: &str, storage_root: &Path) -> (Persisted, Arc<Database>) {

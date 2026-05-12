@@ -14,10 +14,7 @@
 
 
 
-export interface DockerSettings {
-    'image': string;
-    'network_mode': string | null;
-    'memory_limit': number | null;
-    'cpu_quota': number | null;
-    'env_vars': { [key: string]: string; };
+export interface RunBranchSettings {
+    'enabled': boolean;
+    'push': boolean;
 }

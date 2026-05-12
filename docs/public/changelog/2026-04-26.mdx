@@ -8,7 +8,7 @@ date: "2026-04-26"
 
 To migrate:
 1. Use `--sandbox local` or `[run.sandbox] provider = "local"` when a run must operate directly on the host working tree.
-2. For Docker or Daytona runs without a GitHub origin, set `skip_clone = true` under the provider-specific sandbox section.
+2. For Docker or Daytona runs without a GitHub origin, set `[run.clone] enabled = false`.
 3. Make sure private GitHub repositories have GitHub App credentials configured before running clone-based sandboxes.
 </Warning>
 
@@ -20,8 +20,8 @@ This is a breaking sandbox change:
 
 - Docker no longer bind-mounts host workspaces.
 - Docker and Daytona accept GitHub origins only when cloning.
-- Present non-GitHub origins fail unless `skip_clone = true`.
-- Absent origins and `skip_clone = true` runs create empty workspaces without repository files.
+- Present non-GitHub origins fail unless `[run.clone] enabled = false`.
+- Absent origins and `[run.clone] enabled = false` runs create empty workspaces without repository files.
 
 The packaged Docker Compose service mounts the host Docker socket so the server can create sibling run containers. Operators remain responsible for Docker socket permissions, Docker Desktop behavior, `DOCKER_HOST`, TLS, and remote daemon security.
 

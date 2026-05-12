@@ -36,6 +36,12 @@ pub struct RunLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint:    Option<RunCheckpointLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clone:         Option<RunCloneLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_branch:    Option<RunRunBranchLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta_branch:   Option<RunMetaBranchLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox:       Option<RunSandboxLayer>,
     #[serde(default, skip_serializing_if = "MergeMap::is_empty")]
     pub notifications: MergeMap<NotificationRouteLayer>,
@@ -278,6 +284,34 @@ pub struct RunCheckpointLayer {
     pub exclude_globs: Vec<String>,
 }
 
+/// `[run.clone]` — source workspace clone policy.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[serde(deny_unknown_fields)]
+pub struct RunCloneLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+/// `[run.run_branch]` — Fabro-managed checkpoint branch policy.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[serde(deny_unknown_fields)]
+pub struct RunRunBranchLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub push:    Option<bool>,
+}
+
+/// `[run.meta_branch]` — Fabro-managed checkpoint metadata branch policy.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[serde(deny_unknown_fields)]
+pub struct RunMetaBranchLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub push:    Option<bool>,
+}
+
 /// `[run.sandbox]` — sandbox selection and execution-environment surface.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
@@ -312,8 +346,6 @@ pub struct DockerSandboxLayer {
     pub cpu_quota:    Option<i64>,
     #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
     pub env_vars:     StickyMap<InterpString>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub skip_clone:   Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
@@ -328,8 +360,6 @@ pub struct DaytonaSandboxLayer {
     pub snapshot:           Option<DaytonaSnapshotLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub network:            Option<DaytonaNetworkLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub skip_clone:         Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

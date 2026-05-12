@@ -1675,7 +1675,6 @@ mod runs {
                             dockerfile: None,
                         }),
                         network:            None,
-                        skip_clone:         false,
                     }),
                 },
                 ..RunNamespace::default()

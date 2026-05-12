@@ -8654,6 +8654,9 @@ components:
         - prepare
         - execution
         - checkpoint
+        - clone
+        - run_branch
+        - meta_branch
         - sandbox
         - notifications
         - interviews
@@ -8688,6 +8691,12 @@ components:
           $ref: "#/components/schemas/RunExecutionSettings"
         checkpoint:
           $ref: "#/components/schemas/RunCheckpointSettings"
+        clone:
+          $ref: "#/components/schemas/RunCloneSettings"
+        run_branch:
+          $ref: "#/components/schemas/RunBranchSettings"
+        meta_branch:
+          $ref: "#/components/schemas/RunMetaBranchSettings"
         sandbox:
           $ref: "#/components/schemas/RunSandboxSettings"
         notifications:
@@ -8826,6 +8835,31 @@ components:
           items:
             type: string
 
+    RunCloneSettings:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+
+    RunBranchSettings:
+      type: object
+      required: [enabled, push]
+      properties:
+        enabled:
+          type: boolean
+        push:
+          type: boolean
+
+    RunMetaBranchSettings:
+      type: object
+      required: [enabled, push]
+      properties:
+        enabled:
+          type: boolean
+        push:
+          type: boolean
+
     RunSandboxSettings:
       type: object
       required: [provider, preserve, stop_on_terminal, devcontainer, env, docker, daytona]
@@ -8853,7 +8887,7 @@ components:
 
     DockerSettings:
       type: object
-      required: [image, network_mode, memory_limit, cpu_quota, env_vars, skip_clone]
+      required: [image, network_mode, memory_limit, cpu_quota, env_vars]
       properties:
         image:
           type: string
@@ -8869,12 +8903,10 @@ components:
           type: object
           additionalProperties:
             $ref: "#/components/schemas/InterpString"
-        skip_clone:
-          type: boolean
 
     DaytonaSettings:
       type: object
-      required: [auto_stop_interval, labels, snapshot, network, skip_clone]
+      required: [auto_stop_interval, labels, snapshot, network]
       properties:
         auto_stop_interval:
           type: ["integer", "null"]
@@ -8889,8 +8921,6 @@ components:
           oneOf:
             - $ref: "#/components/schemas/DaytonaNetworkLayer"
             - type: "null"
-        skip_clone:
-          type: boolean
 
     DaytonaSnapshotSettings:
       type: object

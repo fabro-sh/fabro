@@ -44,7 +44,6 @@ preserve = false
 
 [run.sandbox.daytona]
 auto_stop_interval = 60
-skip_clone = false
 
 [run.sandbox.daytona.labels]
 project = "fabro"
@@ -104,14 +103,14 @@ If a snapshot is configured by name but doesn't exist and no `dockerfile` is pro
 
 Fabro automatically clones the run's GitHub origin into the sandbox at `/home/daytona/workspace`. Public repositories work without extra configuration. Private repositories require GitHub access. In `token` mode, Fabro uses the stored token directly. In `app` mode, Fabro uses short-lived Installation Access Tokens scoped to the specific repository.
 
-Set `skip_clone = true` in `[run.sandbox.daytona]` when a workflow should start with an empty Daytona workspace instead of cloning the run origin:
+Set `[run.clone] enabled = false` when a workflow should start with an empty Daytona workspace instead of cloning the run origin:
 
 ```toml title="run.toml"
 [run.sandbox]
 provider = "daytona"
 
-[run.sandbox.daytona]
-skip_clone = true
+[run.clone]
+enabled = false
 ```
 
 If the clone fails without GitHub access configured, Fabro suggests running the setup flow:

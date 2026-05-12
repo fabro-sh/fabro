@@ -157,6 +157,47 @@ script = "npm install"
 
 Each step must exit with status 0. If any step fails, the run aborts before the workflow starts. Prepare steps replace across layers — the higher-precedence layer wins wholesale.
 
+### `[run.clone]`
+
+Configure whether clone-based sandboxes clone the run's GitHub origin before execution.
+
+```toml title="run.toml"
+[run.clone]
+enabled = true
+```
+
+Set `enabled = false` to start Docker and Daytona runs with an empty provider workspace. Use [prepare steps](#runprepare) to clone or create any files the workflow needs.
+
+### `[run.run_branch]`
+
+Configure Fabro's managed `fabro/run/<id>` checkpoint branch.
+
+```toml title="run.toml"
+[run.run_branch]
+enabled = true
+push = true
+```
+
+| Field | Description |
+|---|---|
+| `enabled` | When `false`, Fabro does not create the managed run branch or checkpoint commits. This also disables metadata branch writes. |
+| `push` | When `false`, Fabro creates local checkpoint commits but does not push `fabro/run/<id>` to the remote. |
+
+### `[run.meta_branch]`
+
+Configure Fabro's managed `fabro/meta/<id>` metadata branch.
+
+```toml title="run.toml"
+[run.meta_branch]
+enabled = true
+push = true
+```
+
+| Field | Description |
+|---|---|
+| `enabled` | When `false`, Fabro skips metadata branch snapshots. |
+| `push` | When `false`, Fabro writes metadata snapshots locally but does not push `fabro/meta/<id>` to the remote. |
+
 ### `[run.sandbox]`
 
 Configure how agent tools (bash, file edits) are executed.
@@ -186,7 +227,6 @@ image = "buildpack-deps:noble"
 network_mode = "bridge"
 memory_limit = "4GB"
 cpu_quota = 200000
-skip_clone = false
 ```
 
 | Field | Description |
@@ -196,7 +236,6 @@ skip_clone = false
 | `memory_limit` | Memory limit using human-readable units such as `"4GB"` or `"512MiB"`. |
 | `cpu_quota` | Docker CPU quota in microseconds per 100ms period. Defaults to `200000`. |
 | `env_vars` | Provider-level environment variables passed to the Docker container. For workflow tool execution, prefer `[run.sandbox.env]`. |
-| `skip_clone` | When `true`, start with an empty container workspace instead of cloning the run's GitHub origin. |
 
 #### `[run.sandbox.daytona]`
 
@@ -230,7 +269,6 @@ dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update"
 | `snapshot.disk` | Disk size using the same units as `memory`. |
 | `snapshot.dockerfile` | Dockerfile content (inline string) or path (`{ path = "..." }`) for building the snapshot image. Paths are resolved relative to the TOML file's directory. |
 | `network` | Network access mode: `"allow_all"` (default), `"block"`, or `{ allow_list = ["..."] }`. See [Sandboxing](/administration/sandboxing#network-access-control). |
-| `skip_clone` | When `true`, start with an empty Daytona workspace instead of cloning the run's GitHub origin. |
 
 #### Local sandbox
 

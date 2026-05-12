@@ -3,10 +3,11 @@ use fabro_types::settings::run::{
     ArtifactsSettings, DaytonaSettings, DaytonaSnapshotSettings, DockerSettings, DockerfileSource,
     GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings, McpServerSettings,
     McpTransport, MergeStrategy, NotificationProviderSettings, NotificationRouteSettings,
-    PullRequestSettings, RunAgentSettings, RunCheckpointSettings, RunExecutionSettings,
-    RunGitSettings, RunGoal, RunIntegrationsGithubSettings, RunIntegrationsSettings,
-    RunInterviewsSettings, RunModelControls, RunModelSettings, RunNamespace, RunPrepareSettings,
-    RunSandboxSettings, RunScmSettings, ScmGitHubSettings, TlsMode,
+    PullRequestSettings, RunAgentSettings, RunBranchSettings, RunCheckpointSettings,
+    RunCloneSettings, RunExecutionSettings, RunGitSettings, RunGoal, RunIntegrationsGithubSettings,
+    RunIntegrationsSettings, RunInterviewsSettings, RunMetaBranchSettings, RunModelControls,
+    RunModelSettings, RunNamespace, RunPrepareSettings, RunSandboxSettings, RunScmSettings,
+    ScmGitHubSettings, TlsMode,
 };
 
 use super::ResolveError;
@@ -14,40 +15,68 @@ use crate::{
     DaytonaDockerfileLayer, DaytonaSandboxLayer, HookAgentMarker, HookEntry, HookTlsMode,
     InterviewProviderLayer, InterviewsLayer, McpEntryLayer, ModelRefOrSplice,
     NotificationProviderLayer, NotificationRouteLayer, RunAgentLayer, RunArtifactsLayer,
-    RunCheckpointLayer, RunExecutionLayer, RunGitLayer, RunGoalLayer, RunIntegrationsLayer,
-    RunLayer, RunModelLayer, RunPrepareLayer, RunPullRequestLayer, RunSandboxLayer, RunScmLayer,
-    StringOrSplice,
+    RunCheckpointLayer, RunCloneLayer, RunExecutionLayer, RunGitLayer, RunGoalLayer,
+    RunIntegrationsLayer, RunLayer, RunMetaBranchLayer, RunModelLayer, RunPrepareLayer,
+    RunPullRequestLayer, RunRunBranchLayer, RunSandboxLayer, RunScmLayer, StringOrSplice,
 };
 
 pub fn resolve_run(layer: &RunLayer, errors: &mut Vec<ResolveError>) -> RunNamespace {
+    let clone = resolve_clone(layer.clone.as_ref());
+    let run_branch = resolve_run_branch(layer.run_branch.as_ref());
+    let mut meta_branch = resolve_meta_branch(layer.meta_branch.as_ref());
+    if !run_branch.enabled {
+        if meta_branch.enabled || meta_branch.push {
+            tracing::debug!(
+                run_branch_enabled = run_branch.enabled,
+                "Disabling metadata branch because run branch is disabled"
+            );
+        }
+        meta_branch = RunMetaBranchSettings {
+            enabled: false,
+            push:    false,
+        };
+    }
+    let pull_request = resolve_pull_request(layer.pull_request.as_ref());
+    if pull_request.is_some() && (!run_branch.enabled || !run_branch.push) {
+        errors.push(ResolveError::Invalid {
+            path:   "run.pull_request".to_string(),
+            reason: "run.pull_request.enabled requires run.run_branch.enabled and \
+                     run.run_branch.push"
+                .to_string(),
+        });
+    }
+
     RunNamespace {
-        goal:          resolve_goal(layer.goal.as_ref()),
-        working_dir:   layer.working_dir.clone(),
-        metadata:      layer.metadata.clone().into_inner(),
-        inputs:        layer.inputs.clone().unwrap_or_default(),
-        model:         resolve_model(layer.model.as_ref()),
-        git:           resolve_git(layer.git.as_ref()),
-        prepare:       resolve_prepare(layer.prepare.as_ref(), errors),
-        execution:     resolve_execution(layer.execution.as_ref()),
-        checkpoint:    resolve_checkpoint(layer.checkpoint.as_ref()),
-        sandbox:       resolve_sandbox(layer.sandbox.as_ref(), errors),
+        goal: resolve_goal(layer.goal.as_ref()),
+        working_dir: layer.working_dir.clone(),
+        metadata: layer.metadata.clone().into_inner(),
+        inputs: layer.inputs.clone().unwrap_or_default(),
+        model: resolve_model(layer.model.as_ref()),
+        git: resolve_git(layer.git.as_ref()),
+        prepare: resolve_prepare(layer.prepare.as_ref(), errors),
+        execution: resolve_execution(layer.execution.as_ref()),
+        checkpoint: resolve_checkpoint(layer.checkpoint.as_ref()),
+        clone,
+        run_branch,
+        meta_branch,
+        sandbox: resolve_sandbox(layer.sandbox.as_ref(), errors),
         notifications: layer
             .notifications
             .iter()
             .map(|(name, route)| (name.clone(), resolve_notification_route(route)))
             .collect(),
-        interviews:    resolve_interviews(layer.interviews.as_ref()),
-        agent:         resolve_agent(layer.agent.as_ref()),
-        hooks:         layer
+        interviews: resolve_interviews(layer.interviews.as_ref()),
+        agent: resolve_agent(layer.agent.as_ref()),
+        hooks: layer
             .hooks
             .iter()
             .enumerate()
             .map(|(index, hook)| resolve_hook(hook, index, errors))
             .collect(),
-        scm:           resolve_scm(layer.scm.as_ref()),
-        pull_request:  resolve_pull_request(layer.pull_request.as_ref()),
-        artifacts:     resolve_artifacts(layer.artifacts.as_ref()),
-        integrations:  resolve_integrations(layer.integrations.as_ref()),
+        scm: resolve_scm(layer.scm.as_ref()),
+        pull_request,
+        artifacts: resolve_artifacts(layer.artifacts.as_ref()),
+        integrations: resolve_integrations(layer.integrations.as_ref()),
     }
 }
 
@@ -161,6 +190,34 @@ fn resolve_checkpoint(checkpoint: Option<&RunCheckpointLayer>) -> RunCheckpointS
     }
 }
 
+fn resolve_clone(clone: Option<&RunCloneLayer>) -> RunCloneSettings {
+    RunCloneSettings {
+        enabled: clone.and_then(|clone| clone.enabled).unwrap_or(true),
+    }
+}
+
+fn resolve_run_branch(run_branch: Option<&RunRunBranchLayer>) -> RunBranchSettings {
+    RunBranchSettings {
+        enabled: run_branch
+            .and_then(|run_branch| run_branch.enabled)
+            .unwrap_or(true),
+        push:    run_branch
+            .and_then(|run_branch| run_branch.push)
+            .unwrap_or(true),
+    }
+}
+
+fn resolve_meta_branch(meta_branch: Option<&RunMetaBranchLayer>) -> RunMetaBranchSettings {
+    RunMetaBranchSettings {
+        enabled: meta_branch
+            .and_then(|meta_branch| meta_branch.enabled)
+            .unwrap_or(true),
+        push:    meta_branch
+            .and_then(|meta_branch| meta_branch.push)
+            .unwrap_or(true),
+    }
+}
+
 fn resolve_sandbox(
     sandbox: Option<&RunSandboxLayer>,
     errors: &mut Vec<ResolveError>,
@@ -205,7 +262,6 @@ fn resolve_docker(docker: &crate::DockerSandboxLayer) -> DockerSettings {
             .and_then(|size| i64::try_from(size.as_bytes()).ok()),
         cpu_quota:    docker.cpu_quota,
         env_vars:     docker.env_vars.clone().into_inner(),
-        skip_clone:   docker.skip_clone.unwrap_or(false),
     }
 }
 
@@ -233,7 +289,6 @@ fn resolve_daytona(daytona: &DaytonaSandboxLayer) -> DaytonaSettings {
             })
         }),
         network:            daytona.network.clone(),
-        skip_clone:         daytona.skip_clone.unwrap_or(false),
     }
 }
 
