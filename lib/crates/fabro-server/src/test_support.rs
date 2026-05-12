@@ -15,6 +15,7 @@ use axum::{Router, middleware};
 use chrono::Duration as ChronoDuration;
 use fabro_config::{RunLayer, RunSettingsBuilder, ServerSettingsBuilder, envfile};
 use fabro_interview::Interviewer;
+use fabro_model::catalog::LlmCatalogSettings;
 use fabro_static::EnvVars;
 use fabro_store::{ArtifactStore, Database};
 use fabro_types::settings::ServerAuthMethod;
@@ -64,7 +65,7 @@ pub struct TestAppStateBuilder {
     server_env_path:           Option<PathBuf>,
     server_secret_env:         HashMap<String, String>,
     env_lookup:                EnvLookup,
-    llm_catalog_settings:      fabro_model::catalog::LlmCatalogSettings,
+    llm_catalog_settings:      LlmCatalogSettings,
 }
 
 impl Default for TestAppStateBuilder {
@@ -79,7 +80,7 @@ impl Default for TestAppStateBuilder {
             server_env_path:           None,
             server_secret_env:         HashMap::new(),
             env_lookup:                default_env_lookup(),
-            llm_catalog_settings:      fabro_model::catalog::LlmCatalogSettings::default(),
+            llm_catalog_settings:      LlmCatalogSettings::default(),
         }
     }
 }
@@ -123,10 +124,7 @@ impl TestAppStateBuilder {
         self
     }
 
-    pub fn llm_catalog_settings(
-        mut self,
-        settings: fabro_model::catalog::LlmCatalogSettings,
-    ) -> Self {
+    pub fn llm_catalog_settings(mut self, settings: LlmCatalogSettings) -> Self {
         self.llm_catalog_settings = settings;
         self
     }
@@ -230,7 +228,7 @@ pub fn test_app_state_with_options(
 pub(crate) fn resolved_runtime_settings_for_tests(
     server_settings: ServerSettings,
     manifest_run_defaults: RunLayer,
-    llm_catalog_settings: fabro_model::catalog::LlmCatalogSettings,
+    llm_catalog_settings: LlmCatalogSettings,
 ) -> ResolvedAppStateSettings {
     ResolvedAppStateSettings {
         manifest_run_settings: RunSettingsBuilder::from_run_layer(&manifest_run_defaults)

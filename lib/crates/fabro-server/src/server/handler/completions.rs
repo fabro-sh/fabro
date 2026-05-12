@@ -165,7 +165,7 @@ async fn create_completion(
         warn!(provider = %provider, error = %issue, "LLM provider unavailable due to auth issue");
     }
     let client = llm_result.client;
-    if let Some(provider) = provider_name.as_deref() {
+    if let Some(provider) = explicit_provider.as_deref() {
         if !client.has_provider(provider) {
             return ApiError::bad_request(format!("Provider \"{provider}\" is not configured"))
                 .into_response();

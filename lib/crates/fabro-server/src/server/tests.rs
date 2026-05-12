@@ -16,6 +16,7 @@ use fabro_interview::{
     AnswerValue, ControlInterviewer, Interviewer, Question, WorkerControlMessage,
 };
 use fabro_llm::types::{Message as LlmMessage, Request as LlmRequest};
+use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{ModelRef, Provider};
 use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{
@@ -72,7 +73,7 @@ fn resolved_runtime_settings_from_toml(source: &str) -> ResolvedAppStateSettings
     resolved_runtime_settings_for_tests(
         server_settings_from_toml(source),
         manifest_run_defaults_from_toml(source),
-        fabro_model::catalog::LlmCatalogSettings::default(),
+        LlmCatalogSettings::default(),
     )
 }
 
@@ -1757,7 +1758,7 @@ methods = ["dev-token"]
         resolved_settings: resolved_runtime_settings_for_tests(
             server_settings,
             RunLayer::default(),
-            fabro_model::catalog::LlmCatalogSettings::default(),
+            LlmCatalogSettings::default(),
         ),
         registry_factory_override: None,
         max_concurrent_runs: 5,
@@ -3457,7 +3458,7 @@ fn create_github_token_app_state_with_env_lookup(
         resolved_settings: resolved_runtime_settings_for_tests(
             github_token_settings(),
             RunLayer::default(),
-            fabro_model::catalog::LlmCatalogSettings::default(),
+            LlmCatalogSettings::default(),
         ),
         registry_factory_override: None,
         max_concurrent_runs: 5,
@@ -3842,7 +3843,7 @@ async fn list_models_unknown_provider_returns_empty_page() {
 
 #[tokio::test]
 async fn list_models_uses_app_state_catalog_overrides() {
-    let llm_catalog_settings: fabro_model::catalog::LlmCatalogSettings = toml::from_str(
+    let llm_catalog_settings: LlmCatalogSettings = toml::from_str(
         r#"
 [providers.venice]
 display_name = "Venice"
@@ -9177,7 +9178,7 @@ async fn create_completion_unknown_provider_returns_clear_error() {
 
 #[tokio::test]
 async fn create_completion_default_model_uses_app_state_catalog() {
-    let llm_catalog_settings: fabro_model::catalog::LlmCatalogSettings = toml::from_str(
+    let llm_catalog_settings: LlmCatalogSettings = toml::from_str(
         r#"
 [providers.venice]
 display_name = "Venice"
@@ -9227,10 +9228,13 @@ effort = false
         .unwrap();
 
     let response = app.oneshot(req).await.unwrap();
-    let body = response_json!(response, StatusCode::BAD_REQUEST).await;
-    assert_eq!(
-        body["errors"][0]["detail"],
-        "Provider \"venice\" is not configured"
+    let body = response_json!(response, StatusCode::BAD_GATEWAY).await;
+    assert!(
+        body["errors"][0]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("Provider 'venice' not registered"),
+        "unexpected error body: {body:?}"
     );
 }
 
