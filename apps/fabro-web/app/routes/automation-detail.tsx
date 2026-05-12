@@ -62,6 +62,9 @@ function sampleSettings({
       prepare: { commands: prepareCommands, timeout_ms: 120_000 },
       execution: { mode: "normal", approval: "prompt" },
       checkpoint: { exclude_globs: [] },
+      clone: { enabled: true },
+      run_branch: { enabled: true, push: true },
+      meta_branch: { enabled: true, push: true },
       sandbox: {
         provider: "daytona",
         preserve: false,
@@ -80,7 +83,6 @@ function sampleSettings({
             dockerfile: null,
           },
           network: null,
-          skip_clone: false,
         },
       },
       notifications: {},

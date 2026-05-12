@@ -148,6 +148,17 @@ fn inspect_resolves_selector_via_server_endpoint() {
               "checkpoint": {
                 "exclude_globs": []
               },
+              "clone": {
+                "enabled": true
+              },
+              "run_branch": {
+                "enabled": true,
+                "push": true
+              },
+              "meta_branch": {
+                "enabled": true,
+                "push": true
+              },
               "sandbox": {
                 "provider": "local",
                 "preserve": false,

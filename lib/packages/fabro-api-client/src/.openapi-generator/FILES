@@ -238,9 +238,11 @@ models/run-billing-stage.ts
 models/run-billing-summary.ts
 models/run-billing-totals.ts
 models/run-billing.ts
+models/run-branch-settings.ts
 models/run-checkpoint-settings.ts
 models/run-checkpoint.ts
 models/run-client-provenance.ts
+models/run-clone-settings.ts
 models/run-commit-parent.ts
 models/run-commit-person.ts
 models/run-commit.ts
@@ -261,6 +263,7 @@ models/run-interviews-settings.ts
 models/run-lifecycle.ts
 models/run-links.ts
 models/run-manifest.ts
+models/run-meta-branch-settings.ts
 models/run-mode.ts
 models/run-model-settings.ts
 models/run-model.ts

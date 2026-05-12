@@ -290,7 +290,9 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 };
 
                 // Push run branch (skip in dry-run mode)
-                if !self.run_options.dry_run_enabled() {
+                if !self.run_options.dry_run_enabled()
+                    && self.run_options.settings.run.run_branch.push
+                {
                     if let Some(branch) = self
                         .run_options
                         .git
@@ -1093,6 +1095,51 @@ mod tests {
         assert_eq!(diff_summary.files_changed, 1);
         assert_eq!(diff_summary.additions, 2);
         assert_eq!(diff_summary.deletions, 0);
+    }
+
+    #[tokio::test]
+    async fn checkpoint_git_result_omits_push_when_run_branch_push_disabled() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        let repo = repo_dir.path();
+        init_git_repo(repo);
+        tokio::fs::write(repo.join("notes.txt"), "checkpoint\n")
+            .await
+            .unwrap();
+
+        let mut options = run_options(repo, "fabro/metadata/run").as_ref().clone();
+        options.settings.run.run_branch.push = false;
+        options.git = Some(GitCheckpointOptions {
+            base_sha:    None,
+            run_branch:  Some("fabro/run/test".to_string()),
+            meta_branch: None,
+        });
+        let lifecycle = git_lifecycle_with_writer(
+            repo,
+            Arc::new(Emitter::new(fixtures::RUN_1)),
+            RunStoreHandle::local(run_store(fixtures::RUN_1).await),
+            Arc::new(options),
+            Arc::new(RunMetadataRuntime::new()),
+            None,
+        );
+        let graph = workflow_graph();
+        let node = graph.get_node("build").unwrap();
+        let mut state = ExecutionState::new(&graph).unwrap();
+        state.increment_visits("build");
+        let result = WfNodeResult::new(Outcome::success(), Duration::from_millis(10), 1, 1);
+
+        lifecycle
+            .on_checkpoint(&node, &result, Some("exit"), &state)
+            .await
+            .unwrap();
+
+        let git_result = lifecycle
+            .checkpoint_git_result
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap();
+        assert!(git_result.commit_sha.is_some());
+        assert!(git_result.push_results.is_empty());
     }
 
     #[tokio::test]

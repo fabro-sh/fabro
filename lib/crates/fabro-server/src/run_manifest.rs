@@ -564,16 +564,26 @@ fn resolve_sandbox_provider(settings: &RunNamespace) -> Result<SandboxProvider> 
     .unwrap_or_default())
 }
 
-fn resolve_daytona_config(settings: &RunNamespace) -> Option<DaytonaConfig> {
-    settings
+fn resolve_daytona_config(settings: &RunNamespace) -> DaytonaConfig {
+    let mut config = settings
         .sandbox
         .daytona
         .as_ref()
-        .map(runtime_daytona_config)
+        .map(|daytona| runtime_daytona_config(daytona, !settings.clone.enabled))
+        .unwrap_or_default();
+    config.skip_clone = !settings.clone.enabled;
+    config
 }
 
-fn resolve_docker_config(settings: &RunNamespace) -> Option<DockerSandboxOptions> {
-    settings.sandbox.docker.as_ref().map(runtime_docker_config)
+fn resolve_docker_config(settings: &RunNamespace) -> DockerSandboxOptions {
+    let mut config = settings
+        .sandbox
+        .docker
+        .as_ref()
+        .map(|docker| runtime_docker_config(docker, !settings.clone.enabled))
+        .unwrap_or_default();
+    config.skip_clone = !settings.clone.enabled;
+    config
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -584,16 +594,7 @@ struct GitRemoteRefCheck {
 
 fn clone_disabled_for_provider(provider: SandboxProvider, resolved_run: &RunNamespace) -> bool {
     match provider {
-        SandboxProvider::Docker => resolved_run
-            .sandbox
-            .docker
-            .as_ref()
-            .is_some_and(|docker| docker.skip_clone),
-        SandboxProvider::Daytona => resolved_run
-            .sandbox
-            .daytona
-            .as_ref()
-            .is_some_and(|daytona| daytona.skip_clone),
+        SandboxProvider::Docker | SandboxProvider::Daytona => !resolved_run.clone.enabled,
         SandboxProvider::Local => false,
     }
 }
@@ -759,7 +760,7 @@ fn preflight_sandbox_spec(
             working_directory: prepared.source_directory.clone(),
         },
         SandboxProvider::Docker => {
-            let mut config = resolve_docker_config(resolved_run).unwrap_or_default();
+            let mut config = resolve_docker_config(resolved_run);
             config.skip_clone = true;
             SandboxSpec::Docker {
                 config,
@@ -770,7 +771,7 @@ fn preflight_sandbox_spec(
             }
         }
         SandboxProvider::Daytona => {
-            let mut config = resolve_daytona_config(resolved_run).unwrap_or_default();
+            let mut config = resolve_daytona_config(resolved_run);
             config.skip_clone = true;
             SandboxSpec::Daytona {
                 config: Box::new(config),
@@ -1083,11 +1084,11 @@ fn resolve_model_provider(
     }
 }
 
-fn runtime_daytona_config(settings: &DaytonaSettings) -> DaytonaConfig {
+fn runtime_daytona_config(settings: &DaytonaSettings, skip_clone: bool) -> DaytonaConfig {
     DaytonaConfig {
         auto_stop_interval: settings.auto_stop_interval,
-        labels:             (!settings.labels.is_empty()).then_some(settings.labels.clone()),
-        snapshot:           settings
+        labels: (!settings.labels.is_empty()).then_some(settings.labels.clone()),
+        snapshot: settings
             .snapshot
             .as_ref()
             .map(|snapshot| DaytonaSnapshotSettings {
@@ -1107,18 +1108,18 @@ fn runtime_daytona_config(settings: &DaytonaSettings) -> DaytonaConfig {
                         }
                     }),
             }),
-        network:            settings.network.as_ref().map(|network| match network {
+        network: settings.network.as_ref().map(|network| match network {
             DaytonaNetworkLayer::Block => DaytonaNetwork::Block,
             DaytonaNetworkLayer::AllowAll => DaytonaNetwork::AllowAll,
             DaytonaNetworkLayer::AllowList { allow_list } => {
                 DaytonaNetwork::AllowList(allow_list.clone())
             }
         }),
-        skip_clone:         settings.skip_clone,
+        skip_clone,
     }
 }
 
-fn runtime_docker_config(settings: &DockerSettings) -> DockerSandboxOptions {
+fn runtime_docker_config(settings: &DockerSettings, skip_clone: bool) -> DockerSandboxOptions {
     let mut env_vars = settings
         .env_vars
         .iter()
@@ -1132,7 +1133,7 @@ fn runtime_docker_config(settings: &DockerSettings) -> DockerSandboxOptions {
         memory_limit: settings.memory_limit,
         cpu_quota: settings.cpu_quota,
         env_vars,
-        skip_clone: settings.skip_clone,
+        skip_clone,
         ..DockerSandboxOptions::default()
     }
 }
@@ -1377,7 +1378,7 @@ mod tests {
 
     fn prepared_and_resolved_for_sandbox(
         provider: SandboxProvider,
-        skip_clone: bool,
+        clone_enabled: bool,
         git: Option<types::GitContext>,
     ) -> (PreparedManifest, RunNamespace) {
         let mut manifest = minimal_manifest();
@@ -1391,8 +1392,8 @@ _version = 1
 [run.sandbox]
 provider = "{provider}"
 
-[run.sandbox.{provider}]
-skip_clone = {skip_clone}
+[run.clone]
+enabled = {clone_enabled}
 "#
             )),
             type_:  types::ManifestConfigType::Project,
@@ -1419,7 +1420,7 @@ skip_clone = {skip_clone}
     async fn repository_access_check_skips_when_clone_is_disabled() {
         let (prepared, resolved) = prepared_and_resolved_for_sandbox(
             SandboxProvider::Docker,
-            true,
+            false,
             Some(git_context("https://github.com/acme/widgets", "main")),
         );
         let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1448,7 +1449,7 @@ skip_clone = {skip_clone}
     async fn repository_access_check_rejects_non_github_origins_before_remote_probe() {
         let (prepared, resolved) = prepared_and_resolved_for_sandbox(
             SandboxProvider::Docker,
-            false,
+            true,
             Some(git_context("https://gitlab.com/acme/widgets", "main")),
         );
         let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1486,7 +1487,7 @@ skip_clone = {skip_clone}
     async fn repository_access_check_probes_normalized_github_branch() {
         let (prepared, resolved) = prepared_and_resolved_for_sandbox(
             SandboxProvider::Docker,
-            false,
+            true,
             Some(git_context(
                 "git@github.com:acme/widgets.git",
                 "feature/demo",
@@ -1523,7 +1524,7 @@ skip_clone = {skip_clone}
     async fn repository_access_check_surfaces_remote_probe_failure() {
         let (prepared, resolved) = prepared_and_resolved_for_sandbox(
             SandboxProvider::Docker,
-            false,
+            true,
             Some(git_context("https://github.com/acme/widgets", "missing")),
         );
         let mut checks = Vec::new();
@@ -1555,7 +1556,7 @@ skip_clone = {skip_clone}
     fn preflight_sandbox_spec_disables_docker_clone_but_preserves_clone_metadata() {
         let (prepared, resolved) = prepared_and_resolved_for_sandbox(
             SandboxProvider::Docker,
-            false,
+            true,
             Some(git_context("https://github.com/acme/widgets", "main")),
         );
 

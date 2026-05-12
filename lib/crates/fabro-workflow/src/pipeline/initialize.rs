@@ -519,7 +519,7 @@ pub async fn initialize(
         .as_ref()
         .and_then(|g| g.run_branch.as_ref())
         .is_some();
-    if !has_run_branch {
+    if options.run_options.settings.run.run_branch.enabled && !has_run_branch {
         let intent = git_setup_intent(&options.run_options);
         let sandbox_has_origin = sandbox.origin_url().is_some();
         if sandbox_has_origin {
@@ -540,9 +540,13 @@ pub async fn initialize(
                 options.run_options.git = Some(GitCheckpointOptions {
                     base_sha,
                     run_branch: Some(info.run_branch.clone()),
-                    meta_branch: Some(metadata_branch_name(
-                        &options.run_options.run_id.to_string(),
-                    )),
+                    meta_branch: options
+                        .run_options
+                        .settings
+                        .run
+                        .meta_branch
+                        .enabled
+                        .then(|| metadata_branch_name(&options.run_options.run_id.to_string())),
                 });
                 if options.run_options.base_branch.is_none() {
                     options.run_options.base_branch = info.base_branch;

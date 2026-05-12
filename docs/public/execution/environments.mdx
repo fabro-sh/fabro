@@ -65,7 +65,7 @@ The Docker sandbox runs all tool operations inside a Docker container. Docker is
 
 - **Container lifecycle** — On `initialize()`, Fabro pulls the image (if needed), creates a container with `sleep infinity`, and starts it. On `cleanup()`, Fabro stops and removes the container.
 - **Working directory** — Docker runs use a provider-owned workspace inside the container. When a run has a GitHub origin, Fabro clones that repository into the workspace instead of bind-mounting the host source tree.
-- **Git clone** — Docker and Daytona accept GitHub origins for automatic cloning. If the run has a present non-GitHub origin, set `skip_clone = true` or switch to `local`.
+- **Git clone** — Docker and Daytona accept GitHub origins for automatic cloning. If the run has a present non-GitHub origin, set `[run.clone] enabled = false` or switch to `local`.
 - **Commands** — Executed via `docker exec` with `/bin/bash -c` inside the container. Timeout and cancellation are supported.
 - **File writes** — Use the Docker API's tar upload to avoid shell escaping issues with special characters.
 - **Platform detection** — The container's `uname -r` is cached at startup.
@@ -83,7 +83,6 @@ image = "buildpack-deps:noble"
 network_mode = "bridge"
 memory_limit = "4GB"
 cpu_quota = 200000
-skip_clone = false
 ```
 
 | Setting | Default | Description |
@@ -92,9 +91,8 @@ skip_clone = false
 | `network_mode` | `bridge` | Docker network mode |
 | `memory_limit` | `4GB` | Memory limit |
 | `cpu_quota` | `200000` | CPU quota (microseconds per 100ms period) |
-| `skip_clone` | `false` | Create an empty workspace instead of cloning the run's GitHub origin |
 
-When `skip_clone = true`, the sandbox starts with an empty provider workspace. Use [prepare steps](/execution/run-configuration#runprepare) to clone or create any files the workflow needs.
+Set `[run.clone] enabled = false` to start with an empty provider workspace instead of cloning the run's GitHub origin. Use [prepare steps](/execution/run-configuration#runprepare) to clone or create any files the workflow needs.
 
 ### Preserving the container
 
@@ -129,7 +127,7 @@ The Daytona API key must include `write:snapshots`, `delete:snapshots`, `write:s
 
 - **Sandbox lifecycle** — On `initialize()`, Fabro creates a Daytona sandbox (from an image or a snapshot), clones the run's GitHub origin into it when one is available, and waits until it's ready. On `cleanup()`, the sandbox is deleted.
 - **Working directory** — Fixed at `/home/daytona/workspace`. GitHub-origin runs clone the repository there automatically.
-- **Git clone** — Fabro detects the run manifest's GitHub origin URL and branch, converts SSH URLs to HTTPS, and clones into the sandbox. For private repositories, Fabro uses a GitHub App Installation Access Token scoped to the specific repository. Public repositories are cloned without credentials. Set `skip_clone = true` to create an empty workspace instead.
+- **Git clone** — Fabro detects the run manifest's GitHub origin URL and branch, converts SSH URLs to HTTPS, and clones into the sandbox. For private repositories, Fabro uses a GitHub App Installation Access Token scoped to the specific repository. Public repositories are cloned without credentials. Set `[run.clone] enabled = false` to create an empty workspace instead.
 - **Commands** — Executed via the Daytona process API. Commands are base64-encoded and piped through `sh` to support pipes, environment variables, and other shell features.
 - **Ephemeral** — Sandboxes are created with `ephemeral: true` and a unique timestamped name (e.g. `fabro-20260305-142301-a3f2`).
 
@@ -143,7 +141,6 @@ provider = "daytona"
 
 [run.sandbox.daytona]
 auto_stop_interval = 60
-skip_clone = false
 
 [run.sandbox.daytona.snapshot]
 name = "rust-dev"

@@ -634,7 +634,13 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
         run_id: run_options.run_id,
         outcome,
         conclusion,
-        pushed_branch: run_options.run_branch().map(str::to_string),
+        pushed_branch: run_options
+            .settings
+            .run
+            .run_branch
+            .push
+            .then(|| run_options.run_branch().map(str::to_string))
+            .flatten(),
         pr_url,
     }
 }
@@ -665,10 +671,14 @@ mod tests {
     use httpmock::MockServer;
     use object_store::memory::InMemory;
     use tokio::sync::RwLock as AsyncRwLock;
+    use tokio_util::sync::CancellationToken;
 
     use super::*;
     use crate::event::{Event, append_event};
+    use crate::outcome::Outcome;
     use crate::records::StageSummary;
+    use crate::run_options::{GitCheckpointOptions, RunOptions};
+    use crate::services::EngineServices;
 
     struct MockProvider {
         name:          String,
@@ -867,6 +877,48 @@ mod tests {
             total_retries:        0,
             diff:                 fabro_types::RunDiff::default(),
         }
+    }
+
+    #[tokio::test]
+    async fn pull_request_omits_pushed_branch_when_run_branch_push_disabled() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = WorkflowSettings::default();
+        settings.run.run_branch.push = false;
+        let run_options = RunOptions {
+            settings,
+            run_dir: temp.path().to_path_buf(),
+            cancel_token: CancellationToken::new(),
+            run_id: fixtures::RUN_1,
+            labels: HashMap::new(),
+            workflow_slug: None,
+            github_app: None,
+            pre_run_git: None,
+            fork_source_ref: None,
+            base_branch: None,
+            display_base_sha: None,
+            git: Some(GitCheckpointOptions {
+                base_sha:    None,
+                run_branch:  Some("fabro/run/test".to_string()),
+                meta_branch: None,
+            }),
+        };
+        let concluded = Concluded {
+            outcome: Ok(Outcome::success()),
+            conclusion: make_test_conclusion(),
+            graph: Graph::new("test"),
+            run_options,
+            services: EngineServices::test_default().run,
+        };
+
+        let finalized = pull_request(concluded, &PullRequestOptions {
+            pr_config:  None,
+            github_app: None,
+            origin_url: None,
+            model:      "test-model".to_string(),
+        })
+        .await;
+
+        assert_eq!(finalized.pushed_branch, None);
     }
 
     // ── format_arc_details_section tests ────────────────────────────────

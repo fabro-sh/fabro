@@ -153,7 +153,7 @@ impl RunMetadataWriterHandle {
         author: GitAuthor,
         fetch_depth: Option<i32>,
     ) -> Result<Self, RunMetadataError> {
-        let writer = RunMetadataWriter::new(remote_url, branch, author, fetch_depth)?;
+        let writer = RunMetadataWriter::new(remote_url, branch, author, fetch_depth, true)?;
         Ok(Self::new(writer, Arc::new(NoAuth)))
     }
 
@@ -208,6 +208,9 @@ impl RunMetadataWriterHandle {
 pub(crate) fn build_metadata_writer(
     run_options: &RunOptions,
 ) -> Result<Option<RunMetadataWriterHandle>, RunMetadataError> {
+    if !run_options.settings.run.meta_branch.enabled {
+        return Ok(None);
+    }
     let Some(git) = run_options.pre_run_git.as_ref() else {
         return Ok(None);
     };
@@ -239,6 +242,7 @@ pub(crate) fn build_metadata_writer(
         meta_branch.clone(),
         run_options.git_author(),
         Some(1),
+        run_options.settings.run.meta_branch.push,
     )?;
     Ok(Some(RunMetadataWriterHandle::new(writer, auth)))
 }
@@ -266,14 +270,15 @@ pub(crate) async fn mint_token(
 }
 
 pub(crate) struct RunMetadataWriter {
-    store:       Store,
-    tempdir:     tempfile::TempDir,
-    remote_url:  String,
-    branch:      String,
-    author:      GitAuthor,
-    fetch_depth: Option<i32>,
-    parent_oid:  Option<Oid>,
-    discovered:  bool,
+    store:        Store,
+    tempdir:      tempfile::TempDir,
+    remote_url:   String,
+    branch:       String,
+    author:       GitAuthor,
+    fetch_depth:  Option<i32>,
+    push_enabled: bool,
+    parent_oid:   Option<Oid>,
+    discovered:   bool,
 }
 
 impl RunMetadataWriter {
@@ -282,6 +287,7 @@ impl RunMetadataWriter {
         branch: String,
         author: GitAuthor,
         fetch_depth: Option<i32>,
+        push_enabled: bool,
     ) -> Result<Self, RunMetadataError> {
         let tempdir = tempfile::tempdir()
             .map_err(|_| RunMetadataError::Init("failed to create writer tempdir".to_string()))?;
@@ -298,6 +304,7 @@ impl RunMetadataWriter {
             branch,
             author,
             fetch_depth,
+            push_enabled,
             parent_oid: None,
             discovered: false,
         })
@@ -341,7 +348,11 @@ impl RunMetadataWriter {
             .map_err(|err| RunMetadataError::Commit(self.redact_checkpoint(err)))?;
         self.parent_oid = Some(commit_oid);
 
-        let push_error = self.push(token).err();
+        let push_error = if self.push_enabled {
+            self.push(token).err()
+        } else {
+            None
+        };
         Ok(MetadataSnapshot {
             commit_sha: commit_oid.to_string(),
             push_error,
@@ -689,6 +700,7 @@ mod tests {
             branch.to_string(),
             GitAuthor::default(),
             None,
+            true,
         )
         .unwrap();
         let handle = RunMetadataWriterHandle::new(writer, Arc::new(NoAuth));
@@ -839,6 +851,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn metadata_writer_can_commit_without_pushing() {
+        let remote = tempfile::tempdir().unwrap();
+        init_git_repo(remote.path());
+        let branch_before = run_git(remote.path(), &["rev-parse", "main"]);
+        let writer = RunMetadataWriter::new(
+            file_url(remote.path()),
+            "main".to_string(),
+            GitAuthor::default(),
+            None,
+            false,
+        )
+        .unwrap();
+        let handle = RunMetadataWriterHandle::new(writer, Arc::new(NoAuth));
+
+        let snapshot = handle
+            .write_snapshot(&metadata_dump(), "checkpoint")
+            .await
+            .unwrap();
+
+        assert!(!snapshot.commit_sha.is_empty());
+        assert_eq!(snapshot.push_error, None);
+        assert_eq!(
+            run_git(remote.path(), &["rev-parse", "main"]),
+            branch_before
+        );
+    }
+
+    #[tokio::test]
     #[expect(
         clippy::disallowed_methods,
         reason = "metadata writer test uses a synchronous git command to inspect a temporary remote"
@@ -982,5 +1022,13 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn metadata_writer_factory_skips_disabled_meta_branch() {
+        let mut options = run_options_for_origin("https://github.com/owner/repo.git");
+        options.settings.run.meta_branch.enabled = false;
+
+        assert!(build_metadata_writer(&options).unwrap().is_none());
     }
 }

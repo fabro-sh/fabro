@@ -12,6 +12,17 @@ approval = "prompt"
 [run.prepare]
 timeout = "5m"
 
+[run.clone]
+enabled = true
+
+[run.run_branch]
+enabled = true
+push = true
+
+[run.meta_branch]
+enabled = true
+push = true
+
 [run.sandbox]
 provider = "docker"
 preserve = false
@@ -22,7 +33,6 @@ devcontainer = false
 image = "buildpack-deps:noble"
 memory_limit = "4GB"
 cpu_quota = 200000
-skip_clone = false
 
 [cli.output]
 format = "text"

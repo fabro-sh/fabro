@@ -17,7 +17,7 @@ use super::interp::InterpString;
 use super::model_ref::ModelRef;
 
 /// A structurally resolved `[run]` view for consumers.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunNamespace {
     pub goal:          Option<RunGoal>,
     pub working_dir:   Option<InterpString>,
@@ -28,6 +28,9 @@ pub struct RunNamespace {
     pub prepare:       RunPrepareSettings,
     pub execution:     RunExecutionSettings,
     pub checkpoint:    RunCheckpointSettings,
+    pub clone:         RunCloneSettings,
+    pub run_branch:    RunBranchSettings,
+    pub meta_branch:   RunMetaBranchSettings,
     pub sandbox:       RunSandboxSettings,
     pub notifications: HashMap<String, NotificationRouteSettings>,
     pub interviews:    RunInterviewsSettings,
@@ -37,6 +40,38 @@ pub struct RunNamespace {
     pub pull_request:  Option<PullRequestSettings>,
     pub artifacts:     ArtifactsSettings,
     pub integrations:  RunIntegrationsSettings,
+}
+
+#[expect(
+    clippy::derivable_impls,
+    reason = "run defaults are product policy; keep the true-valued branch defaults visible here"
+)]
+impl Default for RunNamespace {
+    fn default() -> Self {
+        Self {
+            goal:          None,
+            working_dir:   None,
+            metadata:      HashMap::new(),
+            inputs:        HashMap::new(),
+            model:         RunModelSettings::default(),
+            git:           RunGitSettings::default(),
+            prepare:       RunPrepareSettings::default(),
+            execution:     RunExecutionSettings::default(),
+            checkpoint:    RunCheckpointSettings::default(),
+            clone:         RunCloneSettings::default(),
+            run_branch:    RunBranchSettings::default(),
+            meta_branch:   RunMetaBranchSettings::default(),
+            sandbox:       RunSandboxSettings::default(),
+            notifications: HashMap::new(),
+            interviews:    RunInterviewsSettings::default(),
+            agent:         RunAgentSettings::default(),
+            hooks:         Vec::new(),
+            scm:           RunScmSettings::default(),
+            pull_request:  None,
+            artifacts:     ArtifactsSettings::default(),
+            integrations:  RunIntegrationsSettings::default(),
+        }
+    }
 }
 
 /// `[run.integrations]` — run-level integration knobs.
@@ -206,6 +241,47 @@ pub struct RunCheckpointSettings {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunCloneSettings {
+    pub enabled: bool,
+}
+
+impl Default for RunCloneSettings {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunBranchSettings {
+    pub enabled: bool,
+    pub push:    bool,
+}
+
+impl Default for RunBranchSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            push:    true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunMetaBranchSettings {
+    pub enabled: bool,
+    pub push:    bool,
+}
+
+impl Default for RunMetaBranchSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            push:    true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSandboxSettings {
     pub provider:         String,
     pub preserve:         bool,
@@ -242,7 +318,6 @@ pub struct DockerSettings {
     pub memory_limit: Option<i64>,
     pub cpu_quota:    Option<i64>,
     pub env_vars:     HashMap<String, InterpString>,
-    pub skip_clone:   bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -251,7 +326,6 @@ pub struct DaytonaSettings {
     pub labels:             HashMap<String, String>,
     pub snapshot:           Option<DaytonaSnapshotSettings>,
     pub network:            Option<DaytonaNetworkLayer>,
-    pub skip_clone:         bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
