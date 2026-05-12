@@ -29,7 +29,7 @@
 use std::collections::BTreeMap;
 
 use chrono::NaiveDate;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::maps::MergeMap;
 
@@ -314,6 +314,143 @@ impl TryFrom<String> for CredentialRef {
     }
 }
 
+// ---------------------------------------------------------------------------
+// HeaderValueRef - typed extra header value
+// ---------------------------------------------------------------------------
+
+/// A typed provider extra-header value.
+///
+/// Literal values are intended for non-secret routing metadata. Secret-bearing
+/// values must use `env` or `credential` references so settings never need to
+/// carry raw API keys as successful values.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HeaderValueRef {
+    Literal(String),
+    Env(String),
+    Credential(String),
+}
+
+impl Serialize for HeaderValueRef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeMap;
+
+        let mut map = serializer.serialize_map(Some(1))?;
+        match self {
+            Self::Literal(value) => map.serialize_entry("literal", value)?,
+            Self::Env(value) => map.serialize_entry("env", value)?,
+            Self::Credential(value) => map.serialize_entry("credential", value)?,
+        }
+        map.end()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum HeaderValueRefInput {
+    Table(HeaderValueRefSerde),
+    BareString(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+struct HeaderValueRefSerde {
+    #[serde(default)]
+    literal:    Option<String>,
+    #[serde(default)]
+    env:        Option<String>,
+    #[serde(default)]
+    credential: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for HeaderValueRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match HeaderValueRefInput::deserialize(deserializer)? {
+            HeaderValueRefInput::Table(value) => value.try_into().map_err(serde::de::Error::custom),
+            HeaderValueRefInput::BareString(value) => {
+                drop(value);
+                Err(serde::de::Error::custom(
+                    HeaderValueRefParseError::WrongFieldCount,
+                ))
+            }
+        }
+    }
+}
+
+impl TryFrom<HeaderValueRefSerde> for HeaderValueRef {
+    type Error = HeaderValueRefParseError;
+
+    fn try_from(value: HeaderValueRefSerde) -> Result<Self, Self::Error> {
+        let populated = [
+            value.literal.as_ref(),
+            value.env.as_ref(),
+            value.credential.as_ref(),
+        ]
+            .into_iter()
+            .filter(|value| value.is_some())
+            .count();
+
+        if populated != 1 {
+            return Err(HeaderValueRefParseError::WrongFieldCount);
+        }
+
+        if let Some(value) = value.literal {
+            if value.is_empty() {
+                return Err(HeaderValueRefParseError::EmptyValue);
+            }
+            return Ok(HeaderValueRef::Literal(value));
+        }
+        if let Some(value) = value.env {
+            if value.is_empty() {
+                return Err(HeaderValueRefParseError::EmptyValue);
+            }
+            return Ok(HeaderValueRef::Env(value));
+        }
+        if let Some(value) = value.credential {
+            if value.is_empty() {
+                return Err(HeaderValueRefParseError::EmptyValue);
+            }
+            return Ok(HeaderValueRef::Credential(value));
+        }
+
+        unreachable!("populated field count was already checked");
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HeaderValueRefParseError {
+    WrongFieldCount,
+    EmptyValue,
+}
+
+impl std::fmt::Display for HeaderValueRefParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WrongFieldCount => f.write_str(
+                "header value must be a table with exactly one of `literal`, `env`, or `credential`; bare strings are rejected",
+            ),
+            Self::EmptyValue => f.write_str("header value reference must not be empty"),
+        }
+    }
+}
+
+impl std::error::Error for HeaderValueRefParseError {}
+
+impl std::fmt::Display for HeaderValueRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Literal(_) => f.write_str("literal:<redacted>"),
+            Self::Env(name) => write!(f, "env:{name}"),
+            Self::Credential(id) => write!(f, "credential:{id}"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -404,6 +541,127 @@ mod tests {
         }
         let err: Result<Wrap, _> = toml::from_str(r#"v = ["sk-literal-secret"]"#);
         assert!(err.is_err(), "literal secret strings must fail to parse");
+    }
+
+    // ---- HeaderValueRef --------------------------------------------------
+
+    #[test]
+    fn header_value_ref_parses_literal_form() {
+        let parsed: HeaderValueRef = toml::from_str(r#"value = { literal = "@bedrock-prod" }"#)
+            .map(|v: toml::Value| {
+                v.as_table()
+                    .unwrap()
+                    .get("value")
+                    .unwrap()
+                    .clone()
+                    .try_into()
+                    .unwrap()
+            })
+            .unwrap();
+
+        assert_eq!(parsed, HeaderValueRef::Literal("@bedrock-prod".to_string()));
+        assert_eq!(parsed.to_string(), "literal:<redacted>");
+    }
+
+    #[test]
+    fn header_value_ref_parses_env_form() {
+        let parsed: HeaderValueRef = toml::from_str(r#"value = { env = "PORTKEY_API_KEY" }"#)
+            .map(|v: toml::Value| {
+                v.as_table()
+                    .unwrap()
+                    .get("value")
+                    .unwrap()
+                    .clone()
+                    .try_into()
+                    .unwrap()
+            })
+            .unwrap();
+
+        assert_eq!(parsed, HeaderValueRef::Env("PORTKEY_API_KEY".to_string()));
+        assert_eq!(parsed.to_string(), "env:PORTKEY_API_KEY");
+    }
+
+    #[test]
+    fn header_value_ref_parses_credential_form() {
+        let parsed: HeaderValueRef =
+            toml::from_str(r#"value = { credential = "portkey_config" }"#)
+                .map(|v: toml::Value| {
+                    v.as_table()
+                        .unwrap()
+                        .get("value")
+                        .unwrap()
+                        .clone()
+                        .try_into()
+                        .unwrap()
+                })
+                .unwrap();
+
+        assert_eq!(
+            parsed,
+            HeaderValueRef::Credential("portkey_config".to_string())
+        );
+        assert_eq!(parsed.to_string(), "credential:portkey_config");
+    }
+
+    #[test]
+    fn header_value_ref_rejects_bare_string() {
+        #[derive(Debug, Deserialize)]
+        struct Wrap {
+            #[expect(
+                dead_code,
+                reason = "field exists only to drive the deserializer; we assert on the parse error"
+            )]
+            value: HeaderValueRef,
+        }
+
+        let err = toml::from_str::<Wrap>(r#"value = "sk-portkey-literal""#).unwrap_err();
+        let message = err.message();
+
+        assert!(message.contains("header value"));
+        assert!(
+            !message.contains("sk-portkey-literal"),
+            "deserializer message must not echo a possible literal secret",
+        );
+    }
+
+    #[test]
+    fn header_value_ref_rejects_ambiguous_table() {
+        #[derive(Debug, Deserialize)]
+        struct Wrap {
+            #[expect(
+                dead_code,
+                reason = "field exists only to drive the deserializer; we assert on the parse error"
+            )]
+            value: HeaderValueRef,
+        }
+
+        let err = toml::from_str::<Wrap>(
+            r#"value = { env = "PORTKEY_API_KEY", literal = "@bedrock-prod" }"#,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("exactly one"));
+    }
+
+    #[test]
+    fn header_value_ref_rejects_empty_values() {
+        #[derive(Debug, Deserialize)]
+        struct Wrap {
+            #[expect(
+                dead_code,
+                reason = "field exists only to drive the deserializer; we assert on the parse error"
+            )]
+            value: HeaderValueRef,
+        }
+
+        for source in [
+            r#"value = { literal = "" }"#,
+            r#"value = { env = "" }"#,
+            r#"value = { credential = "" }"#,
+        ] {
+            let err = toml::from_str::<Wrap>(source).unwrap_err();
+            assert!(err.to_string().contains("must not be empty"));
+        }
     }
 
     // ---- LlmLayer parsing -------------------------------------------------
