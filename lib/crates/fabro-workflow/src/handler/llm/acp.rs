@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use fabro_acp::{AcpCommandError, AcpError, AcpRunRequest, resolve_acp_command};
+use fabro_acp::{
+    AcpCommandError, AcpError, AcpRunRequest, render_stop_reason, resolve_acp_command,
+};
 use fabro_agent::{Sandbox, StaticEnvProvider, ToolEnvProvider};
 use fabro_auth::CredentialResolver;
 use fabro_graphviz::graph::Node;
@@ -82,8 +84,8 @@ impl AgentAcpBackend {
             .provider()
             .and_then(|value| value.parse::<Provider>().ok())
             .unwrap_or(self.provider);
-        let command = resolve_acp_command(provider, node.acp_command())
-            .map_err(acp_command_error_to_workflow)?;
+        let command =
+            resolve_acp_command(node.acp_command()).map_err(acp_command_error_to_workflow)?;
 
         let launch_env = resolve_agent_launch_env(AgentLaunchEnvRequest {
             provider,
@@ -134,7 +136,7 @@ impl AgentAcpBackend {
                         node_id:     node.id.clone(),
                         stdout:      result.text.clone(),
                         stderr:      result.stderr.clone(),
-                        stop_reason: stop_reason_to_string(&result.stop_reason),
+                        stop_reason: render_stop_reason(&result.stop_reason),
                         duration_ms: result.duration_ms,
                     },
                     stage_scope,
@@ -226,13 +228,6 @@ impl CodergenBackend for AgentAcpBackend {
         )
         .await
     }
-}
-
-fn stop_reason_to_string(stop_reason: &(impl serde::Serialize + std::fmt::Debug)) -> String {
-    serde_json::to_value(stop_reason)
-        .ok()
-        .and_then(|value| value.as_str().map(str::to_string))
-        .unwrap_or_else(|| format!("{stop_reason:?}"))
 }
 
 fn acp_command_error_to_workflow(error: AcpCommandError) -> Error {

@@ -54,14 +54,7 @@ pub async fn run_acp_turn(request: AcpRunRequest) -> Result<AcpRunResult, AcpErr
     let run_cancel_token = cancel_token.clone();
     let permission_cancel_token = cancel_token.clone();
     let state_for_run = state.clone();
-    let transport = SandboxAcpTransport::new(
-        command,
-        cwd.clone(),
-        env,
-        sandbox,
-        CancellationToken::new(),
-        state.clone(),
-    );
+    let transport = SandboxAcpTransport::new(command, cwd.clone(), env, sandbox, state.clone());
 
     let run = Client
         .builder()
@@ -150,7 +143,7 @@ pub async fn run_acp_turn(request: AcpRunRequest) -> Result<AcpRunResult, AcpErr
         _ => {
             state.terminate().await?;
             return Err(AcpError::StopReason {
-                stop_reason: stop_reason_to_string(stop_reason),
+                stop_reason: render_stop_reason(&stop_reason),
                 text,
             });
         }
@@ -246,7 +239,8 @@ async fn read_turn(
     }
 }
 
-fn stop_reason_to_string(stop_reason: StopReason) -> String {
+#[must_use]
+pub fn render_stop_reason(stop_reason: &StopReason) -> String {
     serde_json::to_value(stop_reason)
         .ok()
         .and_then(|value| value.as_str().map(str::to_string))

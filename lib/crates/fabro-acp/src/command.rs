@@ -4,7 +4,6 @@ use std::str::FromStr;
 
 use agent_client_protocol::schema::McpServer;
 use agent_client_protocol_tokio::AcpAgent;
-use fabro_model::Provider;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpCommand {
@@ -67,10 +66,7 @@ impl From<agent_client_protocol::Error> for AcpCommandError {
     }
 }
 
-pub fn resolve_acp_command(
-    _provider: Provider,
-    override_command: Option<&str>,
-) -> Result<AcpCommand, AcpCommandError> {
+pub fn resolve_acp_command(override_command: Option<&str>) -> Result<AcpCommand, AcpCommandError> {
     if let Some(raw) = override_command {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
@@ -134,13 +130,11 @@ fn reject_non_stdio_json_transport(raw: &str) -> Result<(), AcpCommandError> {
 mod tests {
     use std::path::Path;
 
-    use fabro_model::Provider;
-
     use super::*;
 
     #[test]
     fn missing_acp_command_is_rejected() {
-        let err = resolve_acp_command(Provider::OpenAi, None).unwrap_err();
+        let err = resolve_acp_command(None).unwrap_err();
         assert!(
             err.to_string()
                 .contains("acp_command is required for backend=\"acp\"")
@@ -149,7 +143,7 @@ mod tests {
 
     #[test]
     fn explicit_acp_command_overrides_provider_default() {
-        let command = resolve_acp_command(Provider::OpenAi, Some("python fake_agent.py")).unwrap();
+        let command = resolve_acp_command(Some("python fake_agent.py")).unwrap();
         assert_eq!(command.to_string(), "python fake_agent.py");
         assert_eq!(command.program(), Path::new("python"));
         assert_eq!(command.args(), &["fake_agent.py".to_string()]);
@@ -157,14 +151,14 @@ mod tests {
 
     #[test]
     fn blank_acp_command_is_rejected() {
-        let err = resolve_acp_command(Provider::OpenAi, Some("   ")).unwrap_err();
+        let err = resolve_acp_command(Some("   ")).unwrap_err();
         assert!(err.to_string().contains("acp_command must not be empty"));
     }
 
     #[test]
     fn json_stdio_acp_command_is_supported() {
         let raw = r#"{"type":"stdio","name":"fake","command":"python","args":["fake agent.py"],"env":[{"name":"MODE","value":"test"}]}"#;
-        let command = resolve_acp_command(Provider::OpenAi, Some(raw)).unwrap();
+        let command = resolve_acp_command(Some(raw)).unwrap();
         assert_eq!(command.program(), Path::new("python"));
         assert_eq!(command.args(), &["fake agent.py".to_string()]);
         assert_eq!(command.env().get("MODE").map(String::as_str), Some("test"));
@@ -173,7 +167,7 @@ mod tests {
     #[test]
     fn json_stdio_acp_command_display_omits_env_contents() {
         let raw = r#"{"type":"stdio","name":"fake","command":"agent","args":["--flag","two words"],"env":[{"name":"OPENAI_API_KEY","value":"secret-key"}]}"#;
-        let command = resolve_acp_command(Provider::OpenAi, Some(raw)).unwrap();
+        let command = resolve_acp_command(Some(raw)).unwrap();
 
         assert_eq!(
             command.env().get("OPENAI_API_KEY").map(String::as_str),
@@ -187,7 +181,7 @@ mod tests {
     #[test]
     fn non_stdio_acp_command_is_rejected() {
         let raw = r#"{"type":"http","name":"remote","url":"https://example.test/acp"}"#;
-        let err = resolve_acp_command(Provider::OpenAi, Some(raw)).unwrap_err();
+        let err = resolve_acp_command(Some(raw)).unwrap_err();
         assert!(
             err.to_string()
                 .contains("only stdio ACP commands are supported")

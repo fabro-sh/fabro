@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use fabro_graphviz::graph::{AttrValue, Node};
 use fabro_llm::provider::Provider;
@@ -14,8 +13,7 @@ async fn run_real_cli_test(provider: Provider, model: &str) {
     let env: Arc<dyn fabro_agent::Sandbox> = Arc::new(fabro_agent::LocalSandbox::new(
         workspace.path().to_path_buf(),
     ));
-    let backend = AgentCliBackend::new_from_env(model.to_string(), provider)
-        .with_poll_interval(Duration::from_millis(10));
+    let backend = AgentCliBackend::new_from_env(model.to_string(), provider);
 
     let mut node = Node::new("real_cli_test");
     node.attrs.insert(

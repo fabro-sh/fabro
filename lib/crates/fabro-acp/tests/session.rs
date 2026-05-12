@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use agent_client_protocol::schema::StopReason;
 use fabro_acp::{AcpError, AcpRunRequest, AcpRunResult, resolve_acp_command, run_acp_turn};
-use fabro_model::Provider;
 use fabro_sandbox::test_support::MockSandbox;
 use fabro_sandbox::{LocalSandbox, Sandbox, shell_quote};
 use fabro_util::error::collect_chain;
@@ -28,8 +27,7 @@ use test_support::fake_acp_agent_script;
 async fn stdio_spawn_failure_returns_sandbox_error() {
     const SANDBOX_FAILURE: &str = "ACP backend requires bidirectional stdio; the Daytona sandbox provider does not support it yet";
 
-    let command =
-        resolve_acp_command(Provider::OpenAi, Some("fake-acp-agent")).expect("resolve ACP command");
+    let command = resolve_acp_command(Some("fake-acp-agent")).expect("resolve ACP command");
     let mut sandbox = MockSandbox::linux();
     sandbox.stdio_process_error = Some(SANDBOX_FAILURE.to_string());
     let sandbox: Arc<dyn Sandbox> = Arc::new(sandbox);
@@ -70,8 +68,7 @@ async fn session_lifecycle_initializes_sends_prompt_and_aggregates_text() {
         .expect("write fake ACP agent");
 
     let raw_command = format!("python3 {}", shell_quote(&script_path.to_string_lossy()));
-    let command =
-        resolve_acp_command(Provider::OpenAi, Some(&raw_command)).expect("resolve ACP command");
+    let command = resolve_acp_command(Some(&raw_command)).expect("resolve ACP command");
     let sandbox: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(tempdir.path().to_path_buf()));
 
     let result = run_acp_turn(AcpRunRequest {
@@ -390,8 +387,7 @@ async fn run_fake_agent(
         .await
         .expect("write fake ACP agent");
     let raw_command = format!("python3 {}", shell_quote(&script_path.to_string_lossy()));
-    let command =
-        resolve_acp_command(Provider::OpenAi, Some(&raw_command)).expect("resolve ACP command");
+    let command = resolve_acp_command(Some(&raw_command)).expect("resolve ACP command");
     let sandbox: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(tempdir.to_path_buf()));
 
     run_acp_turn(AcpRunRequest {

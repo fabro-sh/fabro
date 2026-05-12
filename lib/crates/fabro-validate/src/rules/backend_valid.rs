@@ -1,4 +1,4 @@
-use fabro_graphviz::graph::{AttrValue, Graph, Node};
+use fabro_graphviz::graph::{Graph, Node};
 use fabro_types::LlmBackend;
 
 use crate::{Diagnostic, LintRule, Severity};
@@ -17,22 +17,22 @@ impl LintRule for Rule {
     fn apply(&self, graph: &Graph) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
         for node in graph.nodes.values() {
-            if let Some(backend) = node.attrs.get("backend").and_then(AttrValue::as_str) {
-                match backend.parse::<LlmBackend>() {
-                    Err(_) => {
+            if let Some(backend) = node.backend() {
+                match node.llm_backend() {
+                    Some(Err(_)) => {
+                        let expected = LlmBackend::expected_values();
                         diagnostics.push(Diagnostic {
                             rule:     self.name().to_string(),
                             severity: Severity::Error,
                             message:  format!(
-                                "unsupported LLM backend \"{backend}\"; expected one of: {}",
-                                LlmBackend::EXPECTED
+                                "unsupported LLM backend \"{backend}\"; expected one of: {expected}"
                             ),
                             node_id:  Some(node.id.clone()),
                             edge:     None,
-                            fix:      Some(format!("Use one of: {}", LlmBackend::EXPECTED)),
+                            fix:      Some(format!("Use one of: {expected}")),
                         });
                     }
-                    Ok(LlmBackend::Acp) if acp_command_missing(node) => {
+                    Some(Ok(LlmBackend::Acp)) if acp_command_missing(node) => {
                         diagnostics.push(Diagnostic {
                             rule:     self.name().to_string(),
                             severity: Severity::Error,
@@ -47,7 +47,7 @@ impl LintRule for Rule {
                             ),
                         });
                     }
-                    Ok(_) => {}
+                    Some(Ok(_)) | None => {}
                 }
             }
         }
@@ -56,7 +56,7 @@ impl LintRule for Rule {
 }
 
 fn acp_command_missing(node: &Node) -> bool {
-    match node.attrs.get("acp_command").and_then(AttrValue::as_str) {
+    match node.acp_command() {
         Some(command) => command.trim().is_empty(),
         None => true,
     }

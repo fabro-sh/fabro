@@ -5,6 +5,7 @@ pub mod changed_files;
 pub mod cli;
 pub mod launch_env;
 pub mod preamble;
+pub mod routing;
 
 pub use acp::AgentAcpBackend;
 pub use api::AgentApiBackend;

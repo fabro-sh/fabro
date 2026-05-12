@@ -3,6 +3,7 @@
     reason = "integration test initializes an isolated git repository with the system git binary"
 )]
 
+use fabro_acp::test_support::fake_acp_agent_script;
 use fabro_auth::{AuthCredential, AuthDetails};
 use fabro_config::Storage;
 use fabro_model::Provider;
@@ -10,7 +11,7 @@ use fabro_test::test_context;
 use fabro_types::EventBody;
 use fabro_vault::{SecretType, Vault};
 
-use super::{find_run_dir, fixture, has_event, read_conclusion, run_events, run_state};
+use super::{find_run_dir, has_event, read_conclusion, run_events, run_state};
 
 #[test]
 fn acp_backend_workflow() {
@@ -21,7 +22,8 @@ fn acp_backend_workflow() {
     );
     context.isolated_server();
     seed_openai_vault(&context.storage_dir);
-    let fake_agent = fixture("fake_acp_agent.py");
+    let fake_agent = write_fake_acp_agent(&context);
+    let acp_command = fake_acp_command_attr(&fake_agent);
     let workflow = context.temp_dir.join("acp_backend.fabro");
     context.write_temp(
         "acp_backend.fabro",
@@ -29,12 +31,12 @@ fn acp_backend_workflow() {
             r#"digraph ACP {{
   graph [goal="Exercise ACP backend"]
   start [shape=Mdiamond]
-  work [type="agent", backend="acp", provider="openai", model="fake-acp", prompt="write hello.txt", acp_command="python3 {}"]
+  work [type="agent", backend="acp", provider="openai", model="fake-acp", prompt="write hello.txt", acp_command={}]
   exit [shape=Msquare]
   start -> work
   work -> exit
 }}"#,
-            fake_agent.display()
+            acp_command
         ),
     );
     init_git_repo(&context.temp_dir);
@@ -94,7 +96,8 @@ fn acp_prompt_workflow_uses_acp_backend() {
     );
     context.isolated_server();
     seed_openai_vault(&context.storage_dir);
-    let fake_agent = fixture("fake_acp_agent.py");
+    let fake_agent = write_fake_acp_agent(&context);
+    let acp_command = fake_acp_command_attr(&fake_agent);
     let workflow = context.temp_dir.join("acp_prompt_backend.fabro");
     context.write_temp(
         "acp_prompt_backend.fabro",
@@ -102,12 +105,12 @@ fn acp_prompt_workflow_uses_acp_backend() {
             r#"digraph ACP {{
   graph [goal="Exercise ACP prompt backend"]
   start [shape=Mdiamond]
-  prompt [type="prompt", backend="acp", provider="openai", model="fake-acp", project_memory=false, prompt="write hello.txt", acp_command="python3 {}"]
+  prompt [type="prompt", backend="acp", provider="openai", model="fake-acp", project_memory=false, prompt="write hello.txt", acp_command={}]
   exit [shape=Msquare]
   start -> prompt
   prompt -> exit
 }}"#,
-            fake_agent.display()
+            acp_command
         ),
     );
     init_git_repo(&context.temp_dir);
@@ -173,6 +176,23 @@ fn seed_openai_vault(storage_dir: &std::path::Path) {
             None,
         )
         .expect("OpenAI credential should store in test vault");
+}
+
+fn write_fake_acp_agent(context: &fabro_test::TestContext) -> std::path::PathBuf {
+    context.write_temp("fake_acp_agent.py", fake_acp_agent_script());
+    context.temp_dir.join("fake_acp_agent.py")
+}
+
+fn fake_acp_command_attr(script_path: &std::path::Path) -> String {
+    let command = serde_json::json!({
+        "type": "stdio",
+        "name": "fake",
+        "command": "python3",
+        "args": [script_path.to_string_lossy()],
+        "env": [{"name": "ACP_MODE", "value": "write_file"}],
+    })
+    .to_string();
+    format!("{command:?}")
 }
 
 fn init_git_repo(dir: &std::path::Path) {

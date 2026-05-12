@@ -40,8 +40,8 @@ fn cli_failure_detail(stdout: &str, stderr: &str, command: &str) -> String {
 
 use super::super::agent::{CodergenBackend, CodergenResult, CodergenRunRequest, OneShotRequest};
 use super::acp::AgentAcpBackend;
-use super::changed_files;
 use super::launch_env::{AgentLaunchEnvRequest, resolve_agent_launch_env};
+use super::{changed_files, routing};
 use crate::error::Error;
 use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::billed_model_usage_from_llm;
@@ -334,7 +334,6 @@ pub struct AgentCliBackend {
     provider: Provider,
     tool_env: Option<Arc<dyn ToolEnvProvider>>,
     github_token_refresh_managed: bool,
-    poll_interval: std::time::Duration,
     resolver: Option<CredentialResolver>,
 }
 
@@ -346,7 +345,6 @@ impl AgentCliBackend {
             provider,
             tool_env: None,
             github_token_refresh_managed: false,
-            poll_interval: std::time::Duration::from_secs(5),
             resolver: Some(resolver),
         }
     }
@@ -358,7 +356,6 @@ impl AgentCliBackend {
             provider,
             tool_env: None,
             github_token_refresh_managed: false,
-            poll_interval: std::time::Duration::from_secs(5),
             resolver: None,
         }
     }
@@ -377,12 +374,6 @@ impl AgentCliBackend {
     ) -> Self {
         self.tool_env = Some(provider);
         self.github_token_refresh_managed = github_token_refresh_managed;
-        self
-    }
-
-    #[must_use]
-    pub fn with_poll_interval(mut self, interval: std::time::Duration) -> Self {
-        self.poll_interval = interval;
         self
     }
 }
@@ -678,42 +669,17 @@ impl BackendRouter {
     }
 
     fn select_backend(node: &Node) -> Result<LlmBackend, Error> {
-        match node.llm_backend() {
-            None => {
-                if node.model().is_some_and(is_cli_only_model) {
-                    Ok(LlmBackend::Cli)
-                } else {
-                    Ok(LlmBackend::Api)
-                }
-            }
-            Some(Ok(backend)) => Ok(backend),
-            Some(Err(_)) => Err(unsupported_backend_error(
-                node.backend().unwrap_or_default(),
-            )),
-        }
+        routing::select_run_backend(node)
     }
 
     fn select_one_shot_backend(node: &Node) -> Result<LlmBackend, Error> {
-        match node.llm_backend() {
-            Some(Ok(LlmBackend::Acp)) => Ok(LlmBackend::Acp),
-            Some(Ok(LlmBackend::Api | LlmBackend::Cli)) | None => Ok(LlmBackend::Api),
-            Some(Err(_)) => Err(unsupported_backend_error(
-                node.backend().unwrap_or_default(),
-            )),
-        }
+        routing::select_one_shot_backend(node)
     }
 
     #[cfg(test)]
     fn should_use_cli(node: &Node) -> bool {
         matches!(Self::select_backend(node), Ok(LlmBackend::Cli))
     }
-}
-
-fn unsupported_backend_error(raw: &str) -> Error {
-    Error::Validation(format!(
-        "unsupported LLM backend \"{raw}\"; expected one of: {}",
-        LlmBackend::EXPECTED
-    ))
 }
 
 #[async_trait]

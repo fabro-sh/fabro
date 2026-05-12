@@ -15,7 +15,6 @@ use fabro_sandbox::{
     reconnect_for_run_with_callback,
 };
 use fabro_static::EnvVars;
-use fabro_types::LlmBackend;
 use fabro_vault::Vault;
 use futures::future::try_join_all;
 use shlex::try_quote;
@@ -29,8 +28,9 @@ use crate::devcontainer_bridge::{devcontainer_to_snapshot_config, run_devcontain
 use crate::error::Error;
 use crate::event::{Event, RunNoticeCode, RunNoticeLevel};
 use crate::github_token_source::{AppIatMinter, GitHubTokenSource};
-use crate::handler::llm::cli::is_cli_only_model;
-use crate::handler::llm::{AgentAcpBackend, AgentApiBackend, AgentCliBackend, BackendRouter};
+use crate::handler::llm::{
+    AgentAcpBackend, AgentApiBackend, AgentCliBackend, BackendRouter, routing,
+};
 use crate::handler::{HandlerRegistry, default_registry};
 use crate::run_metadata::{RunMetadataRuntime, build_metadata_writer, metadata_branch_name};
 use crate::run_options::{GitCheckpointOptions, RunOptions};
@@ -222,22 +222,7 @@ async fn build_registry(
 }
 
 fn graph_needs_api_backend(graph: &graph::Graph) -> bool {
-    graph.nodes.values().any(node_needs_api_backend)
-}
-
-fn node_needs_api_backend(node: &graph::Node) -> bool {
-    if !graph::is_llm_handler_type(node.handler_type()) {
-        return false;
-    }
-
-    match node.handler_type() {
-        Some("prompt" | "one_shot") => !matches!(node.llm_backend(), Some(Ok(LlmBackend::Acp))),
-        _ => match node.llm_backend() {
-            Some(Ok(LlmBackend::Api)) => true,
-            Some(Ok(LlmBackend::Cli | LlmBackend::Acp) | Err(_)) => false,
-            None => !node.model().is_some_and(is_cli_only_model),
-        },
-    }
+    graph.nodes.values().any(routing::node_needs_api_backend)
 }
 
 fn build_llm_source(vault: Option<Arc<AsyncRwLock<Vault>>>) -> Arc<dyn CredentialSource> {

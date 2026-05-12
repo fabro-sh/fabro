@@ -17,7 +17,6 @@ use futures::{AsyncBufReadExt, AsyncWriteExt, Stream};
 use tokio::sync::Mutex as TokioMutex;
 use tokio::time::timeout;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
-use tokio_util::sync::CancellationToken;
 
 use crate::command::AcpCommand;
 
@@ -66,12 +65,11 @@ impl TransportState {
 }
 
 pub(crate) struct SandboxAcpTransport {
-    command:      AcpCommand,
-    cwd:          String,
-    env:          HashMap<String, String>,
-    sandbox:      Arc<dyn Sandbox>,
-    cancel_token: CancellationToken,
-    state:        TransportState,
+    command: AcpCommand,
+    cwd:     String,
+    env:     HashMap<String, String>,
+    sandbox: Arc<dyn Sandbox>,
+    state:   TransportState,
 }
 
 impl SandboxAcpTransport {
@@ -80,7 +78,6 @@ impl SandboxAcpTransport {
         cwd: String,
         env: HashMap<String, String>,
         sandbox: Arc<dyn Sandbox>,
-        cancel_token: CancellationToken,
         state: TransportState,
     ) -> Self {
         Self {
@@ -88,7 +85,6 @@ impl SandboxAcpTransport {
             cwd,
             env,
             sandbox,
-            cancel_token,
             state,
         }
     }
@@ -105,7 +101,7 @@ impl ConnectTo<Client> for SandboxAcpTransport {
                 &self.command.to_shell_command(),
                 Some(&self.cwd),
                 Some(&env),
-                Some(self.cancel_token),
+                None,
             )
             .await
         {

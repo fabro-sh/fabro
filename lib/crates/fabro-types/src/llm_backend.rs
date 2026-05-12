@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use strum::{Display, EnumString, IntoStaticStr, VariantArray};
+use strum::{Display, EnumString, IntoStaticStr, VariantArray, VariantNames};
 
 #[derive(
     Debug,
@@ -14,6 +14,7 @@ use strum::{Display, EnumString, IntoStaticStr, VariantArray};
     EnumString,
     IntoStaticStr,
     VariantArray,
+    VariantNames,
 )]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
@@ -24,5 +25,8 @@ pub enum LlmBackend {
 }
 
 impl LlmBackend {
-    pub const EXPECTED: &'static str = "api, cli, acp";
+    #[must_use]
+    pub fn expected_values() -> String {
+        <Self as VariantNames>::VARIANTS.join(", ")
+    }
 }
