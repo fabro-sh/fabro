@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Context;
-use fabro_config::project::{resolve_workflow_path, resolve_working_directory_from_run};
+use fabro_config::project::{WorkflowLocation, resolve_working_directory_from_run};
 use fabro_config::run::resolve_run_goal_from_namespace;
 use fabro_types::WorkflowSettings;
 
@@ -65,25 +65,20 @@ fn workflow_slug_from_path(workflow_path: &Path) -> Option<String> {
 pub(crate) fn resolve_workflow(request: ResolveWorkflowInput) -> anyhow::Result<ResolvedWorkflow> {
     match request.workflow {
         WorkflowInput::Path(workflow_path) => {
-            let resolution = resolve_workflow_path(&workflow_path, &request.cwd)?;
+            let location = WorkflowLocation::resolve(&workflow_path, &request.cwd)?;
             let settings = request.settings;
-            let raw_source = std::fs::read_to_string(&resolution.dot_path)
-                .with_context(|| format!("Failed to read {}", resolution.dot_path.display()))?;
+            let raw_source = std::fs::read_to_string(&location.graph)
+                .with_context(|| format!("Failed to read {}", location.graph.display()))?;
             let working_directory = resolve_working_directory_from_run(&settings.run, &request.cwd);
             let goal_override = resolve_goal_override(&settings, &working_directory)?;
-            let current_dir = resolution
-                .dot_path
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .to_path_buf();
 
             Ok(ResolvedWorkflow {
                 raw_source,
                 settings,
-                workflow_slug: resolution.workflow_slug,
-                workflow_toml_path: resolution.workflow_toml_path,
-                dot_path: Some(resolution.dot_path.clone()),
-                current_dir: Some(current_dir),
+                workflow_slug: location.slug,
+                workflow_toml_path: location.toml,
+                dot_path: Some(location.graph),
+                current_dir: Some(location.dir),
                 file_resolver: Some(Arc::new(FilesystemFileResolver::new(Some(
                     fabro_util::Home::from_env().root().to_path_buf(),
                 )))),

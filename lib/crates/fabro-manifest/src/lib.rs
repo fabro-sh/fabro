@@ -8,7 +8,7 @@ use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use fabro_api::types;
-use fabro_config::project::{self, discover_project_config, resolve_workflow_path};
+use fabro_config::project::{self, WorkflowLocation, discover_project_config};
 use fabro_config::run::{resolve_run_goal_from_layer, resolve_run_goal_from_namespace};
 use fabro_config::{
     CliLayer, DaytonaDockerfileLayer, DockerSandboxLayer, ReplaceMap, RunExecutionLayer,
@@ -135,20 +135,14 @@ struct WorkflowScanInput {
 }
 
 pub fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
-    let root_resolution = resolve_workflow_path(&input.workflow, &input.cwd)?;
-    if root_resolution.workflow_toml_path.is_none()
-        && !root_resolution.resolved_workflow_path.is_file()
-    {
+    let root_location = WorkflowLocation::resolve(&input.workflow, &input.cwd)?;
+    if root_location.toml.is_none() && !root_location.graph.is_file() {
         return Err(fabro_config::Error::WorkflowNotFound(
-            root_resolution.resolved_workflow_path.display().to_string(),
+            root_location.graph.display().to_string(),
         )
         .into());
     }
-    let workflow_parent = root_resolution
-        .resolved_workflow_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
-    let project_config = discover_project_config(workflow_parent)?;
+    let project_config = discover_project_config(&root_location.dir)?;
     let mut workflow_settings_builder = WorkflowSettingsBuilder::new();
     if let Some(run) = input.run_overrides.clone() {
         workflow_settings_builder = workflow_settings_builder.run_overrides(run);
@@ -156,7 +150,7 @@ pub fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
     if let Some(cli) = input.cli_overrides.clone() {
         workflow_settings_builder = workflow_settings_builder.cli_overrides(cli);
     }
-    if let Some(path) = root_resolution.workflow_toml_path.as_ref() {
+    if let Some(path) = root_location.toml.as_ref() {
         workflow_settings_builder = workflow_settings_builder.workflow_file(path)?;
     }
     if let Some(path) = project_config.as_ref() {
@@ -173,7 +167,7 @@ pub fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
         .build()
         .context("failed to resolve manifest settings")?;
     workflow_settings.run.inputs.extend(input.input_overrides);
-    let target_path = root_resolution.dot_path.clone();
+    let target_path = root_location.graph.clone();
     let target_manifest_path = manifest_path_from_absolute(&target_path, &input.cwd)?;
     let target_key = target_manifest_path.to_string();
 
@@ -264,16 +258,16 @@ fn collect_workflow_entry(
     } else {
         workflow.to_path_buf()
     };
-    let resolution = resolve_workflow_path(&normalized_workflow, resolve_from)?;
-    let dot_path = manifest_path_from_absolute(&resolution.dot_path, context.cwd)?;
+    let location = WorkflowLocation::resolve(&normalized_workflow, resolve_from)?;
+    let dot_path = manifest_path_from_absolute(&location.graph, context.cwd)?;
     let dot_key = dot_path.to_string();
     if !context.visited_workflows.insert(dot_key.clone()) {
         return Ok(());
     }
 
-    let source = std::fs::read_to_string(&resolution.dot_path)
-        .with_context(|| format!("Failed to read {}", resolution.dot_path.display()))?;
-    let config = if let Some(workflow_toml_path) = resolution.workflow_toml_path.as_ref() {
+    let source = std::fs::read_to_string(&location.graph)
+        .with_context(|| format!("Failed to read {}", location.graph.display()))?;
+    let config = if let Some(workflow_toml_path) = location.toml.as_ref() {
         Some(types::ManifestWorkflowConfig {
             path:   manifest_path_from_absolute(workflow_toml_path, context.cwd)?.to_string(),
             source: std::fs::read_to_string(workflow_toml_path)
@@ -284,7 +278,7 @@ fn collect_workflow_entry(
     };
 
     let scan = WorkflowScanInput {
-        absolute_dot_path: resolution.dot_path,
+        absolute_dot_path: location.graph,
         dot_path,
         source: source.clone(),
     };

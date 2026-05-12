@@ -18,12 +18,75 @@ use serde::Serialize;
 use crate::{Error, Result, WorkflowSettingsBuilder, run};
 
 const CONFIG_FILENAME: &str = ".fabro/project.toml";
+
+/// A workflow's on-disk layout, resolved from any of the user-facing
+/// invocation forms (`<name>`, `<dir>/workflow.toml`, `<dir>/workflow.fabro`).
+///
+/// All three forms converge on the same value object: the workflow directory,
+/// the graph file we'll parse, and the run config we'll load settings from
+/// (when one is present). Callers don't need to reason about which form the
+/// user typed.
 #[derive(Clone, Debug)]
-pub struct WorkflowPathResolution {
-    pub resolved_workflow_path: PathBuf,
-    pub dot_path:               PathBuf,
-    pub workflow_toml_path:     Option<PathBuf>,
-    pub workflow_slug:          Option<String>,
+pub struct WorkflowLocation {
+    /// Directory containing the workflow's files. Always the parent of
+    /// `graph`. Used as the anchor for project-config discovery.
+    pub dir:   PathBuf,
+    /// The `.fabro` (or other graph) file to parse and validate.
+    pub graph: PathBuf,
+    /// `workflow.toml` providing `[run.*]` settings, when present.
+    pub toml:  Option<PathBuf>,
+    /// Display name for the workflow (e.g. `"hello"` for
+    /// `.fabro/workflows/hello/workflow.fabro`).
+    pub slug:  Option<String>,
+}
+
+impl WorkflowLocation {
+    /// Resolve a user-supplied argument to a workflow location. The argument
+    /// may be a workflow name, a path to `workflow.toml`, or a path to a
+    /// graph file (e.g. `workflow.fabro`); the three forms produce the same
+    /// shape.
+    pub fn resolve(arg: &Path, cwd: &Path) -> Result<Self> {
+        let resolved = resolve_workflow_arg_from(arg, cwd)?;
+        if resolved.extension().is_some_and(|ext| ext == "toml") {
+            Self::from_toml(resolved)
+        } else {
+            Ok(Self::from_graph(resolved))
+        }
+    }
+
+    fn from_toml(toml_path: PathBuf) -> Result<Self> {
+        let cfg = match run::load_run_config(&toml_path) {
+            Ok(cfg) => cfg,
+            Err(_) if !toml_path.exists() => {
+                return Err(Error::WorkflowNotFound(toml_path.display().to_string()));
+            }
+            Err(err) => return Err(err),
+        };
+        let workflow = WorkflowSettingsBuilder::workflow_from_layer(&cfg).map_err(|errors| {
+            Error::resolve("Failed to resolve workflow settings", errors.into())
+        })?;
+        let graph = run::resolve_graph_path(&toml_path, &workflow.graph);
+        let dir = graph_dir(&graph);
+        let slug = workflow_slug_from_path(&toml_path);
+        Ok(Self {
+            dir,
+            graph,
+            toml: Some(toml_path),
+            slug,
+        })
+    }
+
+    fn from_graph(graph: PathBuf) -> Self {
+        let dir = graph_dir(&graph);
+        let toml = sibling_workflow_toml_for(&graph);
+        let slug = workflow_slug_from_path(&graph);
+        Self {
+            dir,
+            graph,
+            toml,
+            slug,
+        }
+    }
 }
 
 /// Walk ancestor directories from `start` looking for `.fabro/project.toml`.
@@ -37,6 +100,12 @@ pub fn discover_project_config(start: &Path) -> Result<Option<PathBuf>> {
         }
     }
     Ok(None)
+}
+
+fn graph_dir(graph: &Path) -> PathBuf {
+    graph
+        .parent()
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
 }
 
 fn workflow_slug_from_path(workflow_path: &Path) -> Option<String> {
@@ -63,51 +132,19 @@ pub fn resolve_workflow_arg(arg: &Path) -> Result<PathBuf> {
     resolve_workflow_arg_from(arg, &start)
 }
 
-pub fn resolve_workflow_path(workflow_path: &Path, cwd: &Path) -> Result<WorkflowPathResolution> {
-    let path = resolve_workflow_arg_from(workflow_path, cwd)?;
-    let workflow_slug = workflow_slug_from_path(&path);
-    if path.extension().is_some_and(|ext| ext == "toml") {
-        match run::load_run_config(&path) {
-            Ok(cfg) => {
-                let workflow =
-                    WorkflowSettingsBuilder::workflow_from_layer(&cfg).map_err(|errors| {
-                        Error::resolve("Failed to resolve workflow settings", errors.into())
-                    })?;
-                let dot_path = run::resolve_graph_path(&path, &workflow.graph);
-                Ok(WorkflowPathResolution {
-                    resolved_workflow_path: path.clone(),
-                    dot_path,
-                    workflow_toml_path: Some(path),
-                    workflow_slug,
-                })
-            }
-            Err(_) if !path.exists() => Err(Error::WorkflowNotFound(path.display().to_string())),
-            Err(err) => Err(err),
-        }
-    } else {
-        let workflow_toml_path = sibling_workflow_toml_for(&path);
-        Ok(WorkflowPathResolution {
-            resolved_workflow_path: path.clone(),
-            dot_path: path,
-            workflow_toml_path,
-            workflow_slug,
-        })
-    }
-}
-
-/// If `dot_path` has a sibling `workflow.toml` whose `[workflow].graph`
-/// resolves to that same file, return the path to the toml. Otherwise return
-/// `None`. This lets `fabro validate path/to/workflow.fabro` find the inputs
+/// If `graph` has a sibling `workflow.toml` whose `[workflow].graph` resolves
+/// back to `graph`, return the path to the toml. Otherwise return `None`.
+/// This is what makes `fabro validate path/to/workflow.fabro` find the inputs
 /// defined alongside the graph without the user having to pass the toml.
-fn sibling_workflow_toml_for(dot_path: &Path) -> Option<PathBuf> {
-    let candidate = dot_path.parent()?.join("workflow.toml");
+fn sibling_workflow_toml_for(graph: &Path) -> Option<PathBuf> {
+    let candidate = graph.parent()?.join("workflow.toml");
     if !candidate.is_file() {
         return None;
     }
     let cfg = run::load_run_config(&candidate).ok()?;
     let workflow = WorkflowSettingsBuilder::workflow_from_layer(&cfg).ok()?;
     let toml_graph = run::resolve_graph_path(&candidate, &workflow.graph);
-    (toml_graph == dot_path).then_some(candidate)
+    (toml_graph == graph).then_some(candidate)
 }
 
 pub fn resolve_working_directory_from_run(run: &RunNamespace, caller_cwd: &Path) -> PathBuf {
@@ -331,11 +368,10 @@ fn find_closest_match(input: &str, candidates: &[String]) -> Option<String> {
         .map(|(name, _)| name.clone())
 }
 
-/// Resolve a workflow argument to a DOT path and optional run config.
+/// Resolve a workflow argument to a graph path.
 pub fn resolve_workflow(arg: &Path) -> Result<PathBuf> {
     let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let resolution = resolve_workflow_path(arg, &start)?;
-    Ok(resolution.dot_path)
+    Ok(WorkflowLocation::resolve(arg, &start)?.graph)
 }
 
 #[cfg(test)]
@@ -446,7 +482,7 @@ directory = "../custom"
     }
 
     #[test]
-    fn resolve_workflow_path_picks_up_sibling_workflow_toml() {
+    fn workflow_location_resolves_bare_fabro_with_sibling_workflow_toml() {
         let tmp = TempDir::new().unwrap();
         let wf_dir = tmp.path().join("wf");
         fs::create_dir_all(&wf_dir).unwrap();
@@ -457,17 +493,17 @@ directory = "../custom"
         )
         .unwrap();
 
-        let resolution = resolve_workflow_path(&wf_dir.join("workflow.fabro"), tmp.path()).unwrap();
+        let location =
+            WorkflowLocation::resolve(&wf_dir.join("workflow.fabro"), tmp.path()).unwrap();
 
-        assert_eq!(resolution.dot_path, wf_dir.join("workflow.fabro"));
-        assert_eq!(
-            resolution.workflow_toml_path,
-            Some(wf_dir.join("workflow.toml"))
-        );
+        assert_eq!(location.dir, wf_dir);
+        assert_eq!(location.graph, wf_dir.join("workflow.fabro"));
+        assert_eq!(location.toml, Some(wf_dir.join("workflow.toml")));
+        assert_eq!(location.slug.as_deref(), Some("wf"));
     }
 
     #[test]
-    fn resolve_workflow_path_ignores_sibling_toml_pointing_elsewhere() {
+    fn workflow_location_ignores_sibling_toml_pointing_elsewhere() {
         let tmp = TempDir::new().unwrap();
         let wf_dir = tmp.path().join("wf");
         fs::create_dir_all(&wf_dir).unwrap();
@@ -479,9 +515,37 @@ directory = "../custom"
         )
         .unwrap();
 
-        let resolution = resolve_workflow_path(&wf_dir.join("workflow.fabro"), tmp.path()).unwrap();
+        let location =
+            WorkflowLocation::resolve(&wf_dir.join("workflow.fabro"), tmp.path()).unwrap();
 
-        assert_eq!(resolution.workflow_toml_path, None);
+        assert_eq!(location.toml, None);
+    }
+
+    #[test]
+    fn workflow_location_converges_from_name_toml_and_graph_paths() {
+        let tmp = TempDir::new().unwrap();
+        let config_dir = tmp.path().join(".fabro");
+        let wf_dir = config_dir.join("workflows/demo");
+        fs::create_dir_all(&wf_dir).unwrap();
+        fs::write(config_dir.join("project.toml"), "_version = 1\n").unwrap();
+        fs::write(wf_dir.join("workflow.fabro"), "digraph T {}\n").unwrap();
+        fs::write(
+            wf_dir.join("workflow.toml"),
+            "_version = 1\n[workflow]\ngraph = \"workflow.fabro\"\n",
+        )
+        .unwrap();
+
+        let by_name = WorkflowLocation::resolve(Path::new("demo"), tmp.path()).unwrap();
+        let by_toml = WorkflowLocation::resolve(&wf_dir.join("workflow.toml"), tmp.path()).unwrap();
+        let by_graph =
+            WorkflowLocation::resolve(&wf_dir.join("workflow.fabro"), tmp.path()).unwrap();
+
+        for location in [&by_name, &by_toml, &by_graph] {
+            assert_eq!(location.dir, wf_dir);
+            assert_eq!(location.graph, wf_dir.join("workflow.fabro"));
+            assert_eq!(location.toml, Some(wf_dir.join("workflow.toml")));
+            assert_eq!(location.slug.as_deref(), Some("demo"));
+        }
     }
 
     #[test]
