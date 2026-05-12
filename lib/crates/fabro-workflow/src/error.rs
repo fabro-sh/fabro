@@ -419,7 +419,7 @@ impl From<GraphvizError> for Error {
 
 impl From<fabro_template::TemplateError> for Error {
     fn from(err: fabro_template::TemplateError) -> Self {
-        Self::Validation(err.to_string())
+        Self::Validation(collect_chain(&err).join(": "))
     }
 }
 

@@ -111,23 +111,73 @@ where
     }
 }
 
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
+/// Errors from rendering a template. Each variant carries the typed fields
+/// MiniJinja knows about (offending expression, line) plus the original
+/// `minijinja::Error` as `#[source]`, so the cause chain is preserved across
+/// boundaries that walk `Error::source()` (anyhow, miette, `collect_chain`).
+#[derive(Debug, Error)]
 pub enum TemplateError {
-    #[error("template syntax error: {message}")]
-    Syntax { message: String },
-    #[error("template referenced an undefined variable: {message}")]
-    UndefinedVariable { message: String },
-    #[error("template render error: {message}")]
-    Render { message: String },
+    #[error("template syntax error{location}", location = fmt_location(*line))]
+    Syntax {
+        line:   Option<u32>,
+        #[source]
+        source: minijinja::Error,
+    },
+    #[error(
+        "undefined template variable{expr}{location}",
+        expr = fmt_expr(expression.as_deref()),
+        location = fmt_location(*line),
+    )]
+    UndefinedVariable {
+        expression: Option<String>,
+        line:       Option<u32>,
+        #[source]
+        source:     minijinja::Error,
+    },
+    #[error("template render error{location}", location = fmt_location(*line))]
+    Render {
+        line:   Option<u32>,
+        #[source]
+        source: minijinja::Error,
+    },
+}
+
+fn fmt_expr(expression: Option<&str>) -> String {
+    expression.map(|e| format!(" `{e}`")).unwrap_or_default()
+}
+
+fn fmt_location(line: Option<u32>) -> String {
+    line.map(|l| format!(" at line {l}")).unwrap_or_default()
+}
+
+/// Extract the failing expression from the template source using the byte
+/// range MiniJinja attaches to errors when debug mode is on.
+fn extract_expression(error: &minijinja::Error) -> Option<String> {
+    let range = error.range()?;
+    let source = error.template_source()?;
+    Some(source.get(range)?.trim().to_owned())
 }
 
 impl From<minijinja::Error> for TemplateError {
     fn from(error: minijinja::Error) -> Self {
-        let message = error.to_string();
+        let line = error.line().and_then(|n| u32::try_from(n).ok());
         match error.kind() {
-            ErrorKind::SyntaxError => Self::Syntax { message },
-            ErrorKind::UndefinedError => Self::UndefinedVariable { message },
-            _ => Self::Render { message },
+            ErrorKind::SyntaxError => Self::Syntax {
+                line,
+                source: error,
+            },
+            ErrorKind::UndefinedError => {
+                let expression = extract_expression(&error);
+                Self::UndefinedVariable {
+                    expression,
+                    line,
+                    source: error,
+                }
+            }
+            _ => Self::Render {
+                line,
+                source: error,
+            },
         }
     }
 }
@@ -145,6 +195,7 @@ pub fn render(template: &str, ctx: &TemplateContext) -> Result<String, TemplateE
     let mut env = Environment::new();
     env.set_undefined_behavior(UndefinedBehavior::Strict);
     env.set_auto_escape_callback(|_| AutoEscape::None);
+    env.set_debug(true);
     env.render_str(template, ctx.clone().into_value())
         .map_err(TemplateError::from)
 }
@@ -238,6 +289,51 @@ mod tests {
         let err = render("{{ missing }}", &ctx).unwrap_err();
 
         assert!(matches!(err, TemplateError::UndefinedVariable { .. }));
+    }
+
+    #[test]
+    fn undefined_variable_error_captures_expression_and_line() {
+        let ctx = TemplateContext::new();
+
+        let err = render("hi\n{{ inputs.app_dir }}", &ctx).unwrap_err();
+
+        let TemplateError::UndefinedVariable {
+            expression, line, ..
+        } = &err
+        else {
+            panic!("expected UndefinedVariable, got {err:?}");
+        };
+        assert_eq!(expression.as_deref(), Some("inputs.app_dir"));
+        assert_eq!(*line, Some(2));
+    }
+
+    #[test]
+    fn undefined_variable_error_display_includes_expression_and_line() {
+        let ctx = TemplateContext::new();
+
+        let err = render("hi\n{{ inputs.app_dir }}", &ctx).unwrap_err();
+
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("inputs.app_dir"),
+            "missing variable name in: {rendered}"
+        );
+        assert!(rendered.contains("line 2"), "missing line in: {rendered}");
+    }
+
+    #[test]
+    fn template_error_preserves_minijinja_source_chain() {
+        use std::error::Error as _;
+
+        let ctx = TemplateContext::new();
+
+        let err = render("{{ missing }}", &ctx).unwrap_err();
+
+        let source = err.source().expect("source should be present");
+        assert!(
+            source.is::<minijinja::Error>(),
+            "expected minijinja::Error as source, got {source:?}"
+        );
     }
 
     #[test]

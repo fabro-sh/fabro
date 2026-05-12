@@ -16,6 +16,7 @@ use fabro_store::Database;
 use fabro_template::{TemplateContext, render as render_template};
 use fabro_types::settings::run::{RunMode, RunNamespace};
 use fabro_types::{ForkSourceRef, GitContext, RunId, RunProvenance, WorkflowSettings};
+use fabro_util::error::collect_chain;
 use fabro_util::json::normalize_json_value;
 use tokio::task::spawn_blocking;
 
@@ -306,7 +307,12 @@ pub(super) fn preprocess_and_validate(
 ) -> Result<Validated, Error> {
     let inputs = run_inputs(settings);
     let source = render_template(dot_source, &TemplateContext::for_input_scan(inputs.clone()))
-        .map_err(|error| Error::Parse(format!("template expansion failed: {error}")))?;
+        .map_err(|error| {
+            Error::Parse(format!(
+                "template expansion failed: {}",
+                collect_chain(&error).join(": ")
+            ))
+        })?;
 
     let mut parsed = pipeline::parse(&source)?;
     apply_goal_override(&mut parsed.graph, goal_override);
