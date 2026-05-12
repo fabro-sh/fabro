@@ -23,6 +23,13 @@ The foundation slice of this plan is implemented and shipped on the run branch:
 
 The remainder of the plan — replacing `fabro_model::Provider` with `ProviderId` across 80+ files, regenerating the OpenAPI clients, swapping the auth resolver to use `ProviderId`, replacing the 25 `Catalog::builtin()` production call sites with a settings-resolved `Arc<Catalog>` injected through server/workflow/CLI state, the `bootstrap_catalog` install hatch, the typed `Request.speed`/`GenerateParams.speed` swap, and the per-speed billing rows — is **deferred to follow-up sessions**. Each deferred step is marked individually below.
 
+## Phase 1 gateway header update (2026-05-12 session)
+
+Phase 1 gateway header work is motivated by @haroldolivieri's Portkey/Bedrock report on PR #207:
+https://github.com/fabro-sh/fabro/pull/207#issuecomment-4377929769
+
+This follow-up adds provider-level `extra_headers` with typed `literal`, `env`, and `credential` values, whole-map replacement semantics across settings layers, and adapter-registry pass-through coverage. It remains schema/seam work only; runtime credential resolution and settings-defined provider registration stay deferred to the resolved catalog/client phases.
+
 ---
 
 ## Summary
@@ -115,6 +122,9 @@ speed = "fast"
   - [x] Preserve sparse field-merge semantics for `[llm.providers.<id>]` and `[llm.models.<id>]`. Arrays such as `credentials`, `aliases`, `controls.reasoning_effort`, and `controls.speed` replace as whole arrays. (Backed by `MergeMap<V>` per-key field-merge; arrays are `Option<Vec<...>>` with `or` combine semantics.)
   - [x] Keep the targeted legacy `[llm]` migration error for old keys such as `provider` or `model`; accept only the new `[llm.providers]` and `[llm.models]` subtrees. (`LEGACY_LLM_KEYS` matched in `parse_settings` before the strict deserialize.)
   - [x] Parse adapter keys as strings in `fabro-config`. Do not make `fabro-config` depend on `fabro-llm`. (Adapter is `Option<String>`; resolution happens against `fabro_model::adapter` metadata.)
+  - [x] Add provider-level `extra_headers` with typed literal/env/credential values.
+  - [x] Make `extra_headers` replace as a whole map across settings layers.
+  - [x] Keep gateway headers as schema/seam work only; runtime credential resolution and provider registration remain deferred to the resolved catalog/client phases.
 
 - [~] **Catalog model** — partially landed. Remaining items are **deferred** because they require breaking changes across 80+ files and the OpenAPI regeneration step.
   - [x] Add `ProviderId` and `ModelId` string newtypes where they improve type clarity across crates. (`fabro_model::ids`.)
