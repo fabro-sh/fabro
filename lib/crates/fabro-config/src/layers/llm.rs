@@ -648,6 +648,22 @@ mod tests {
     }
 
     #[test]
+    fn header_value_ref_rejects_unknown_keys() {
+        #[derive(Deserialize)]
+        #[expect(
+            dead_code,
+            reason = "field exists only to drive the deserializer; we assert on the parse error"
+        )]
+        struct Wrap {
+            value: HeaderValueRef,
+        }
+
+        let err: Result<Wrap, _> = toml::from_str(r#"value = { secret = "PORTKEY_API_KEY" }"#);
+
+        assert!(err.is_err(), "unknown header value keys must fail");
+    }
+
+    #[test]
     fn header_value_ref_rejects_empty_values() {
         #[derive(Debug, Deserialize)]
         struct Wrap {
