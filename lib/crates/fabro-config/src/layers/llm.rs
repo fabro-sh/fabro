@@ -917,6 +917,78 @@ mystery = 1
     }
 
     #[test]
+    fn provider_extra_headers_map_replaces_wholesale() {
+        let high = ProviderSettings {
+            extra_headers: Some(HashMap::from([(
+                "x-portkey-provider".to_string(),
+                HeaderValueRef::Literal("@bedrock-prod".to_string()),
+            )])),
+            ..ProviderSettings::default()
+        };
+        let low = ProviderSettings {
+            extra_headers: Some(HashMap::from([
+                (
+                    "x-portkey-api-key".to_string(),
+                    HeaderValueRef::Env("PORTKEY_API_KEY".to_string()),
+                ),
+                (
+                    "x-portkey-provider".to_string(),
+                    HeaderValueRef::Literal("@bedrock-default".to_string()),
+                ),
+            ])),
+            ..ProviderSettings::default()
+        };
+
+        let merged = high.combine(low);
+
+        let headers = merged.extra_headers.unwrap();
+        assert_eq!(headers.len(), 1);
+        assert_eq!(
+            headers.get("x-portkey-provider"),
+            Some(&HeaderValueRef::Literal("@bedrock-prod".to_string())),
+        );
+        assert!(!headers.contains_key("x-portkey-api-key"));
+    }
+
+    #[test]
+    fn provider_extra_headers_inherit_when_unset() {
+        let high = ProviderSettings::default();
+        let low = ProviderSettings {
+            extra_headers: Some(HashMap::from([(
+                "x-portkey-api-key".to_string(),
+                HeaderValueRef::Env("PORTKEY_API_KEY".to_string()),
+            )])),
+            ..ProviderSettings::default()
+        };
+
+        let merged = high.combine(low);
+
+        assert_eq!(
+            merged.extra_headers.unwrap().get("x-portkey-api-key"),
+            Some(&HeaderValueRef::Env("PORTKEY_API_KEY".to_string())),
+        );
+    }
+
+    #[test]
+    fn provider_extra_headers_empty_map_clears_lower_layer() {
+        let high = ProviderSettings {
+            extra_headers: Some(HashMap::new()),
+            ..ProviderSettings::default()
+        };
+        let low = ProviderSettings {
+            extra_headers: Some(HashMap::from([(
+                "x-portkey-api-key".to_string(),
+                HeaderValueRef::Env("PORTKEY_API_KEY".to_string()),
+            )])),
+            ..ProviderSettings::default()
+        };
+
+        let merged = high.combine(low);
+
+        assert!(merged.extra_headers.unwrap().is_empty());
+    }
+
+    #[test]
     fn merge_map_field_merges_per_provider_id() {
         let mut high_map: std::collections::HashMap<String, ProviderSettings> =
             std::collections::HashMap::new();
