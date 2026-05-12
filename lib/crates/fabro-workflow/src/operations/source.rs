@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Context;
-use fabro_config::project::{WorkflowLocation, resolve_working_directory_from_run};
+use fabro_config::project::{
+    WorkflowLocation, resolve_working_directory_from_run, workflow_slug_from_path,
+};
 use fabro_config::run::resolve_run_goal_from_namespace;
 use fabro_types::WorkflowSettings;
 
@@ -42,24 +44,6 @@ pub(crate) struct ResolvedWorkflow {
     pub file_resolver:      Option<Arc<dyn FileResolver>>,
     pub goal_override:      Option<String>,
     pub working_directory:  PathBuf,
-}
-
-fn workflow_slug_from_path(workflow_path: &Path) -> Option<String> {
-    let file_name = workflow_path.file_name()?.to_string_lossy();
-    if workflow_path.extension().is_none() {
-        return Some(file_name.into_owned());
-    }
-
-    let file_stem = workflow_path.file_stem()?.to_string_lossy();
-    if file_stem == "workflow" {
-        return workflow_path
-            .parent()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().into_owned())
-            .or_else(|| Some(file_stem.into_owned()));
-    }
-
-    Some(file_stem.into_owned())
 }
 
 pub(crate) fn resolve_workflow(request: ResolveWorkflowInput) -> anyhow::Result<ResolvedWorkflow> {

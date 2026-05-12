@@ -328,32 +328,21 @@ pub(super) fn preprocess_and_validate(
     let template_ctx = TemplateContext::for_input_scan(inputs.clone());
     let (source, template_diagnostics) = match render_mode {
         RenderMode::Strict => {
-            let source = render_template(dot_source, &template_ctx).map_err(|error| {
-                Error::Parse(format!(
-                    "template expansion failed: {}",
-                    collect_chain(&error).join(": ")
-                ))
-            })?;
+            let source = render_template(dot_source, &template_ctx)
+                .map_err(|err| template_parse_error(&err))?;
             (source, Vec::new())
         }
         RenderMode::Structural => match render_template(dot_source, &template_ctx) {
             Ok(source) => (source, Vec::new()),
-            Err(error @ TemplateError::UndefinedVariable { .. }) => {
-                let diagnostic = template_diagnostic(&error);
-                let source = render_lenient(dot_source, &template_ctx).map_err(|error| {
-                    Error::Parse(format!(
-                        "template expansion failed: {}",
-                        collect_chain(&error).join(": ")
-                    ))
-                })?;
+            Err(TemplateError::UndefinedVariable {
+                expression, line, ..
+            }) => {
+                let diagnostic = template_diagnostic(expression.as_deref(), line);
+                let source = render_lenient(dot_source, &template_ctx)
+                    .map_err(|err| template_parse_error(&err))?;
                 (source, vec![diagnostic])
             }
-            Err(error) => {
-                return Err(Error::Parse(format!(
-                    "template expansion failed: {}",
-                    collect_chain(&error).join(": ")
-                )));
-            }
+            Err(error) => return Err(template_parse_error(&error)),
         },
     };
 
@@ -373,26 +362,22 @@ pub(super) fn preprocess_and_validate(
     Ok(validated)
 }
 
-fn template_diagnostic(error: &TemplateError) -> Diagnostic {
-    let TemplateError::UndefinedVariable {
-        expression, line, ..
-    } = error
-    else {
-        unreachable!("template_diagnostic only called for UndefinedVariable");
-    };
+const TEMPLATE_UNDEFINED_VARIABLE_RULE: &str = "template_undefined_variable";
+
+fn template_diagnostic(expression: Option<&str>, line: Option<u32>) -> Diagnostic {
     let location = line.map(|l| format!(" at line {l}")).unwrap_or_default();
-    let (name, message) = match expression.as_deref() {
+    let (name, message) = match expression {
         Some(expr) => (
-            expr.to_owned(),
+            expr,
             format!("undefined template variable `{expr}`{location}"),
         ),
         None => (
-            "<unknown>".to_owned(),
+            "<unknown>",
             format!("undefined template variable{location}"),
         ),
     };
     Diagnostic {
-        rule: "template_undefined_variable".to_owned(),
+        rule: TEMPLATE_UNDEFINED_VARIABLE_RULE.to_owned(),
         severity: Severity::Warning,
         message,
         node_id: None,
@@ -401,6 +386,13 @@ fn template_diagnostic(error: &TemplateError) -> Diagnostic {
             "bind `{name}` via `[run.inputs]` in workflow.toml, or pass `--input {name}=<value>`"
         )),
     }
+}
+
+fn template_parse_error(error: &TemplateError) -> Error {
+    Error::Parse(format!(
+        "template expansion failed: {}",
+        collect_chain(error).join(": ")
+    ))
 }
 
 fn run_inputs(settings: Option<&WorkflowSettings>) -> HashMap<String, toml::Value> {
@@ -562,7 +554,7 @@ mod tests {
         let diagnostic = validated
             .diagnostics()
             .iter()
-            .find(|d| d.rule == "template_undefined_variable")
+            .find(|d| d.rule == TEMPLATE_UNDEFINED_VARIABLE_RULE)
             .expect("expected a template_undefined_variable diagnostic");
         assert_eq!(diagnostic.severity, Severity::Warning);
         assert!(

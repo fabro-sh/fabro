@@ -108,7 +108,7 @@ fn graph_dir(graph: &Path) -> PathBuf {
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
 }
 
-fn workflow_slug_from_path(workflow_path: &Path) -> Option<String> {
+pub fn workflow_slug_from_path(workflow_path: &Path) -> Option<String> {
     let file_name = workflow_path.file_name()?.to_string_lossy();
     if workflow_path.extension().is_none() {
         return Some(file_name.into_owned());
@@ -138,9 +138,6 @@ pub fn resolve_workflow_arg(arg: &Path) -> Result<PathBuf> {
 /// defined alongside the graph without the user having to pass the toml.
 fn sibling_workflow_toml_for(graph: &Path) -> Option<PathBuf> {
     let candidate = graph.parent()?.join("workflow.toml");
-    if !candidate.is_file() {
-        return None;
-    }
     let cfg = run::load_run_config(&candidate).ok()?;
     let workflow = WorkflowSettingsBuilder::workflow_from_layer(&cfg).ok()?;
     let toml_graph = run::resolve_graph_path(&candidate, &workflow.graph);
