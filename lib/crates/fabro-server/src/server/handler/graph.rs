@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use fabro_workflow::operations::RenderMode;
+
 use super::super::{
     ApiError, AppState, AsyncWriteExt, Command, EnvVars, IntoResponse, Json, LazyLock, Path,
     PathBuf, Query, RenderWorkflowGraphDirection, RenderWorkflowGraphRequest, RequiredUser,
@@ -46,10 +48,11 @@ async fn render_graph_from_manifest(
             Ok(prepared) => prepared,
             Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
         };
-    let validated = match run_manifest::validate_prepared_manifest(&prepared) {
-        Ok(validated) => validated,
-        Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
-    };
+    let validated =
+        match run_manifest::validate_prepared_manifest(&prepared, RenderMode::Structural) {
+            Ok(validated) => validated,
+            Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
+        };
     if validated.has_errors() {
         return ApiError::bad_request("Validation failed").into_response();
     }

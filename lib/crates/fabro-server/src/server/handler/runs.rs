@@ -21,6 +21,7 @@ use fabro_types::{
 };
 use fabro_util::version::FABRO_VERSION;
 use fabro_workflow::command_log::{command_log_path, read_json_string_blob, read_log_slice};
+use fabro_workflow::operations::RenderMode;
 use fabro_workflow::run_status::RunStatus;
 use fabro_workflow::{Error as WorkflowError, operations};
 use tokio::fs;
@@ -512,7 +513,7 @@ async fn run_preflight(
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
-    let validated = match run_manifest::validate_prepared_manifest(&prepared) {
+    let validated = match run_manifest::validate_prepared_manifest(&prepared, RenderMode::Strict) {
         Ok(validated) => validated,
         Err(WorkflowError::Parse(_)) => {
             return ApiError::bad_request("Validation failed").into_response();
@@ -539,13 +540,14 @@ async fn validate_run_manifest(
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
-    let validated = match run_manifest::validate_prepared_manifest(&prepared) {
-        Ok(validated) => validated,
-        Err(WorkflowError::Parse(_)) => {
-            return ApiError::bad_request("Validation failed").into_response();
-        }
-        Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
-    };
+    let validated =
+        match run_manifest::validate_prepared_manifest(&prepared, RenderMode::Structural) {
+            Ok(validated) => validated,
+            Err(WorkflowError::Parse(_)) => {
+                return ApiError::bad_request("Validation failed").into_response();
+            }
+            Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
+        };
     (
         StatusCode::OK,
         Json(run_manifest::validate_response(&prepared, &validated)),

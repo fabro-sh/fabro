@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use fabro_api::types;
 use fabro_config::{CliLayer, RunLayer};
 use fabro_manifest::{self, ManifestBuildInput, RunOverrideInput};
-use fabro_server::manifest_validation;
+use fabro_server::manifest_validation::{self, RenderMode};
 use serde_json::Value;
 
 use super::common::{ToolError, ToolResult};
@@ -25,8 +25,12 @@ pub(super) fn build_mcp_run_manifest(
         user_settings_path: Some(user_settings_path.to_path_buf()),
     })
     .map_err(|err| ToolError::from_anyhow(&err))?;
-    let validation = manifest_validation::validate_manifest(&RunLayer::default(), &built.manifest)
-        .map_err(|err| ToolError::from_anyhow(&err))?;
+    let validation = manifest_validation::validate_manifest(
+        &RunLayer::default(),
+        &built.manifest,
+        RenderMode::Strict,
+    )
+    .map_err(|err| ToolError::from_anyhow(&err))?;
     if !validation.ok {
         return Err(ToolError::message("workflow manifest validation failed"));
     }

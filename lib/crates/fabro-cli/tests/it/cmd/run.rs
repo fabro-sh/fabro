@@ -604,6 +604,43 @@ fn remote_foreground_run_consumes_paginated_events_and_prints_server_backed_summ
 }
 
 #[test]
+fn run_rejects_unbound_template_inputs_before_creating_remote_run() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let create = server.mock(|when, then| {
+        when.method("POST").path("/api/v1/runs");
+        then.status(500)
+            .header("Content-Type", "application/json")
+            .body(serde_json::json!({ "error": "run should not be created" }).to_string());
+    });
+
+    let workflow = context.install_fixture("templated_unbound.fabro");
+    let output = context
+        .run_cmd()
+        .args([
+            "--server",
+            &format!("{}/api/v1", server.base_url()),
+            workflow.to_str().unwrap(),
+        ])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        !output.status.success(),
+        "run with unbound inputs should fail:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    create.assert_calls(0);
+
+    let stderr = output_stderr(&output);
+    assert!(
+        stderr.contains("inputs.app_dir"),
+        "stderr should name the unbound variable: {stderr}"
+    );
+}
+
+#[test]
 fn foreground_run_rejects_invalid_workflow_before_creating_remote_run() {
     let context = test_context!();
     let server = MockServer::start();

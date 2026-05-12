@@ -280,7 +280,7 @@ fn validate_sandbox_provider(run: &RunNamespace) -> Result<(), Error> {
 /// errors. Splitting the two lets validate work on a bare `.fabro` while
 /// run-start preserves its current hard-fail behavior.
 #[derive(Clone, Copy, Debug)]
-pub(super) enum RenderMode {
+pub enum RenderMode {
     /// Undefined inputs are hard errors. Used by run-create.
     Strict,
     /// Undefined inputs render as empty and become warning diagnostics on the
@@ -525,6 +525,7 @@ mod tests {
             settings,
             cwd: PathBuf::from("."),
             custom_transforms: Vec::new(),
+            mode: RenderMode::Structural,
         })
         .unwrap()
     }
@@ -701,6 +702,7 @@ mod tests {
             settings:          WorkflowSettings::default(),
             cwd:               PathBuf::from("."),
             custom_transforms: Vec::new(),
+            mode:              RenderMode::Strict,
         });
         assert!(result.is_err());
     }
@@ -744,6 +746,7 @@ mod tests {
             settings:          WorkflowSettings::default(),
             cwd:               PathBuf::from("."),
             custom_transforms: vec![Box::new(TagTransform)],
+            mode:              RenderMode::Strict,
         })
         .unwrap();
         validated.raise_on_errors().unwrap();
@@ -777,6 +780,7 @@ mod tests {
             settings:          WorkflowSettings::default(),
             cwd:               dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
+            mode:              RenderMode::Strict,
         })
         .unwrap();
         validated.raise_on_errors().unwrap();
@@ -817,6 +821,7 @@ mod tests {
             settings:          WorkflowSettings::default(),
             cwd:               PathBuf::from("."),
             custom_transforms: Vec::new(),
+            mode:              RenderMode::Strict,
         })
         .unwrap();
 

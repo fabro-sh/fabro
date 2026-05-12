@@ -33,7 +33,9 @@ use fabro_types::settings::run::{
 use fabro_types::{RunId, WorkflowSettings};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_validate::Severity;
-use fabro_workflow::operations::{CreateRunInput, ValidateInput, WorkflowInput, validate};
+use fabro_workflow::operations::{
+    CreateRunInput, RenderMode, ValidateInput, WorkflowInput, validate,
+};
 use fabro_workflow::pipeline::Validated;
 use fabro_workflow::run_materialization::materialize_run;
 use fabro_workflow::workflow_bundle::{BundledWorkflow, ParsedWorkflowConfig, WorkflowBundle};
@@ -155,12 +157,14 @@ pub(crate) fn prepare_manifest(
 
 pub(crate) fn validate_prepared_manifest(
     prepared: &PreparedManifest,
+    mode: RenderMode,
 ) -> Result<Validated, WorkflowError> {
     validate(ValidateInput {
-        workflow:          WorkflowInput::Bundled(prepared.workflow_input.clone()),
-        settings:          prepared.settings.clone(),
-        cwd:               prepared.cwd.clone(),
+        workflow: WorkflowInput::Bundled(prepared.workflow_input.clone()),
+        settings: prepared.settings.clone(),
+        cwd: prepared.cwd.clone(),
         custom_transforms: Vec::new(),
+        mode,
     })
 }
 
@@ -1403,7 +1407,7 @@ skip_clone = {skip_clone}
             &manifest,
         )
         .unwrap();
-        let validated = validate_prepared_manifest(&prepared).unwrap();
+        let validated = validate_prepared_manifest(&prepared, RenderMode::Strict).unwrap();
         let resolved = materialize_run(
             prepared.settings.clone(),
             validated.graph(),
@@ -1782,7 +1786,7 @@ app_id = "fixture-app-id"
             &invalid_manifest(),
         )
         .unwrap();
-        let validated = validate_prepared_manifest(&prepared).unwrap();
+        let validated = validate_prepared_manifest(&prepared, RenderMode::Strict).unwrap();
 
         assert!(validated.has_errors());
 
@@ -1827,7 +1831,7 @@ issues = "read"
             &manifest,
         )
         .unwrap();
-        let validated = validate_prepared_manifest(&prepared).unwrap();
+        let validated = validate_prepared_manifest(&prepared, RenderMode::Strict).unwrap();
         assert!(!validated.has_errors());
 
         let (response, _ok) = run_preflight(state.as_ref(), &prepared, &validated)
@@ -1875,7 +1879,7 @@ provider = "local"
             &manifest,
         )
         .unwrap();
-        let validated = validate_prepared_manifest(&prepared).unwrap();
+        let validated = validate_prepared_manifest(&prepared, RenderMode::Strict).unwrap();
 
         assert!(!validated.has_errors());
 
@@ -1916,7 +1920,7 @@ provider = "daytona"
             &manifest,
         )
         .unwrap();
-        let validated = validate_prepared_manifest(&prepared).unwrap();
+        let validated = validate_prepared_manifest(&prepared, RenderMode::Strict).unwrap();
 
         let (response, _ok) = run_preflight(state.as_ref(), &prepared, &validated)
             .await
@@ -1989,7 +1993,7 @@ digraph Demo {
             &manifest,
         )
         .unwrap();
-        let validated = validate_prepared_manifest(&prepared).unwrap();
+        let validated = validate_prepared_manifest(&prepared, RenderMode::Strict).unwrap();
 
         let (response, ok) = run_preflight(state.as_ref(), &prepared, &validated)
             .await

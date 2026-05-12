@@ -16,7 +16,7 @@ use crate::artifact_upload::ArtifactSink;
 use crate::condition::evaluate_condition;
 use crate::context::{Context, WorkflowContext, keys};
 use crate::error::Error;
-use crate::operations::{ValidateInput, WorkflowInput, validate};
+use crate::operations::{RenderMode, ValidateInput, WorkflowInput, validate};
 use crate::outcome::{Outcome, OutcomeExt, StageOutcome};
 use crate::pipeline::types::Initialized;
 use crate::run_dir::visit_from_context;
@@ -75,6 +75,7 @@ fn parse_child_graph(node: &Node, services: &EngineServices) -> Result<ParsedChi
             settings:          WorkflowSettings::default(),
             cwd:               cwd.clone(),
             custom_transforms: Vec::new(),
+            mode:              RenderMode::Strict,
         })?;
         validated.raise_on_errors()?;
         let (graph, _, _) = validated.into_parts();
@@ -116,6 +117,7 @@ fn parse_child_graph(node: &Node, services: &EngineServices) -> Result<ParsedChi
             settings: WorkflowSettings::default(),
             cwd,
             custom_transforms: Vec::new(),
+            mode: RenderMode::Strict,
         })?;
         validated.raise_on_errors()?;
         let (graph, _, _) = validated.into_parts();

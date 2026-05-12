@@ -13,16 +13,18 @@ pub struct ValidateInput {
     pub settings:          WorkflowSettings,
     pub cwd:               PathBuf,
     pub custom_transforms: Vec<Box<dyn Transform>>,
+    /// How undefined template inputs are treated. Validate-style callers
+    /// (`fabro validate`, the `/validate` API) pass [`RenderMode::Structural`]
+    /// so unbound inputs surface as warning diagnostics. Run-style callers
+    /// (`fabro run`, preflight) pass [`RenderMode::Strict`] so unbound inputs
+    /// hard-fail before a run is created.
+    pub mode:              RenderMode,
 }
 
 /// Parse, transform, and validate a DOT source string.
 ///
 /// Returns `Validated` even when validation produced errors. Call
 /// `validated.raise_on_errors()` if the caller wants to fail fast.
-///
-/// Uses [`RenderMode::Structural`]: undefined template inputs surface as
-/// warning diagnostics rather than hard failures, so `fabro validate` can
-/// type-check a bare `.fabro` graph before any inputs have been bound.
 pub fn validate(input: ValidateInput) -> Result<Validated, Error> {
     let resolved = resolve_workflow(ResolveWorkflowInput {
         workflow: input.workflow,
@@ -38,6 +40,6 @@ pub fn validate(input: ValidateInput) -> Result<Validated, Error> {
         input.custom_transforms,
         Some(&resolved.settings),
         resolved.goal_override.as_deref(),
-        RenderMode::Structural,
+        input.mode,
     )
 }
