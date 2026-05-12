@@ -1,5 +1,6 @@
 pub mod adapter;
 pub mod billing;
+pub mod bootstrap_catalog;
 pub mod catalog;
 pub mod ids;
 pub mod model_ref;

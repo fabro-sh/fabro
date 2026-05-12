@@ -1,0 +1,28 @@
+[providers.zai]
+display_name = "Z.ai"
+adapter = "openai_compatible"
+base_url = "https://api.z.ai/api/coding/paas/v4"
+credentials = ["credential:zai", "env:ZAI_API_KEY"]
+priority = 60
+
+[models."glm-4.7"]
+provider = "zai"
+api_id = "glm-4.7"
+display_name = "GLM 4.7"
+family = "glm-4"
+default = true
+estimated_output_tps = 100
+aliases = ["glm", "glm4"]
+
+[models."glm-4.7".limits]
+context_window = 202752
+max_output = 16384
+
+[models."glm-4.7".features]
+tools = true
+vision = false
+reasoning = false
+
+[models."glm-4.7".costs]
+input_cost_per_mtok = 0.6
+output_cost_per_mtok = 2.2

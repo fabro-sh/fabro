@@ -2131,9 +2131,12 @@ version = "0.231.0-nightly.3"
 dependencies = [
  "fabro-static",
  "insta",
+ "rust-embed",
  "serde",
  "serde_json",
  "strum",
+ "thiserror 2.0.18",
+ "toml 0.8.23",
 ]
 
 [[package]]

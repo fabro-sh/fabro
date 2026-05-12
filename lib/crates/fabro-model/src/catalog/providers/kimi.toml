@@ -1,0 +1,30 @@
+[providers.kimi]
+display_name = "Kimi"
+adapter = "openai_compatible"
+base_url = "https://api.moonshot.ai/v1"
+credentials = ["credential:kimi", "env:KIMI_API_KEY"]
+priority = 70
+
+[models."kimi-k2.5"]
+provider = "kimi"
+api_id = "kimi-k2.5"
+display_name = "Kimi K2.5"
+family = "kimi-k2"
+training = "2025-10-01"
+knowledge_cutoff = "October 2025"
+default = true
+estimated_output_tps = 50
+aliases = ["kimi"]
+
+[models."kimi-k2.5".limits]
+context_window = 262144
+max_output = 16000
+
+[models."kimi-k2.5".features]
+tools = true
+vision = true
+reasoning = false
+
+[models."kimi-k2.5".costs]
+input_cost_per_mtok = 0.6
+output_cost_per_mtok = 3.0

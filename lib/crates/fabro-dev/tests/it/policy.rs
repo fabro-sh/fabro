@@ -22,6 +22,8 @@ use crate::workspace_root;
 const BOOTSTRAP_CATALOG_ALLOWED_PATH_FRAGMENTS: &[&str] = &[
     // The bootstrap module itself.
     "lib/crates/fabro-model/src/bootstrap_catalog",
+    // Public module declaration for the bootstrap hatch.
+    "lib/crates/fabro-model/src/lib.rs",
     // Install / first-run / API-key validation flows that legitimately need
     // a built-in catalog before any project settings have been loaded.
     "lib/crates/fabro-install/",

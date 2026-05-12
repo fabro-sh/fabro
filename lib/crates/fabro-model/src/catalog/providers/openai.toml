@@ -1,0 +1,251 @@
+[providers.openai]
+display_name = "OpenAI"
+adapter = "openai"
+credentials = ["credential:openai", "credential:openai_codex", "env:OPENAI_API_KEY"]
+priority = 90
+aliases = ["open_ai"]
+
+[models."gpt-5.2"]
+provider = "openai"
+api_id = "gpt-5.2"
+display_name = "GPT-5.2"
+family = "gpt-5"
+training = "2025-08-31"
+knowledge_cutoff = "April 2025"
+estimated_output_tps = 65
+aliases = ["gpt5"]
+
+[models."gpt-5.2".limits]
+context_window = 1047576
+max_output = 128000
+
+[models."gpt-5.2".features]
+tools = true
+vision = true
+reasoning = true
+effort = true
+
+[models."gpt-5.2".costs]
+input_cost_per_mtok = 1.75
+output_cost_per_mtok = 14.0
+cache_input_cost_per_mtok = 0.175
+
+[models."gpt-5-mini"]
+provider = "openai"
+api_id = "gpt-5-mini"
+display_name = "GPT-5 Mini"
+family = "gpt-5"
+training = "2025-08-31"
+knowledge_cutoff = "April 2025"
+estimated_output_tps = 70
+aliases = ["gpt5-mini"]
+
+[models."gpt-5-mini".limits]
+context_window = 1047576
+max_output = 128000
+
+[models."gpt-5-mini".features]
+tools = true
+vision = true
+reasoning = true
+effort = true
+
+[models."gpt-5-mini".costs]
+input_cost_per_mtok = 0.25
+output_cost_per_mtok = 2.0
+cache_input_cost_per_mtok = 0.025
+
+[models."gpt-5.2-codex"]
+provider = "openai"
+api_id = "gpt-5.2-codex"
+display_name = "GPT-5.2 Codex"
+family = "gpt-5"
+training = "2025-08-31"
+knowledge_cutoff = "April 2025"
+estimated_output_tps = 100
+
+[models."gpt-5.2-codex".limits]
+context_window = 1047576
+max_output = 128000
+
+[models."gpt-5.2-codex".features]
+tools = true
+vision = true
+reasoning = true
+effort = true
+
+[models."gpt-5.2-codex".costs]
+input_cost_per_mtok = 1.75
+output_cost_per_mtok = 14.0
+cache_input_cost_per_mtok = 0.175
+
+[models."gpt-5.3-codex"]
+provider = "openai"
+api_id = "gpt-5.3-codex"
+display_name = "GPT-5.3 Codex"
+family = "gpt-5"
+training = "2025-08-31"
+knowledge_cutoff = "April 2025"
+estimated_output_tps = 100
+aliases = ["codex"]
+
+[models."gpt-5.3-codex".limits]
+context_window = 1047576
+max_output = 128000
+
+[models."gpt-5.3-codex".features]
+tools = true
+vision = true
+reasoning = true
+effort = true
+
+[models."gpt-5.3-codex".costs]
+input_cost_per_mtok = 1.75
+output_cost_per_mtok = 14.0
+cache_input_cost_per_mtok = 0.175
+
+[models."gpt-5.3-codex-spark"]
+provider = "openai"
+api_id = "gpt-5.3-codex-spark"
+display_name = "GPT-5.3 Codex Spark"
+family = "gpt-5"
+training = "2025-08-31"
+knowledge_cutoff = "April 2025"
+estimated_output_tps = 1000
+aliases = ["codex-spark"]
+
+[models."gpt-5.3-codex-spark".limits]
+context_window = 131072
+max_output = 128000
+
+[models."gpt-5.3-codex-spark".features]
+tools = true
+vision = false
+reasoning = true
+effort = true
+
+[models."gpt-5.4"]
+provider = "openai"
+api_id = "gpt-5.4"
+display_name = "GPT-5.4"
+family = "gpt-5"
+training = "2025-08-31"
+knowledge_cutoff = "April 2025"
+default = true
+estimated_output_tps = 70
+aliases = ["gpt54", "gpt-54"]
+
+[models."gpt-5.4".limits]
+context_window = 1047576
+max_output = 128000
+
+[models."gpt-5.4".features]
+tools = true
+vision = true
+reasoning = true
+effort = true
+
+[models."gpt-5.4".costs]
+input_cost_per_mtok = 2.5
+output_cost_per_mtok = 15.0
+cache_input_cost_per_mtok = 0.25
+
+[models."gpt-5.5"]
+provider = "openai"
+api_id = "gpt-5.5"
+display_name = "GPT-5.5"
+family = "gpt-5"
+training = "2025-12-01"
+knowledge_cutoff = "December 2025"
+estimated_output_tps = 70
+aliases = ["gpt55", "gpt-55"]
+
+[models."gpt-5.5".limits]
+context_window = 1050000
+max_output = 128000
+
+[models."gpt-5.5".features]
+tools = true
+vision = true
+reasoning = true
+effort = true
+
+[models."gpt-5.5".costs]
+input_cost_per_mtok = 5.0
+output_cost_per_mtok = 30.0
+cache_input_cost_per_mtok = 0.5
+
+[models."gpt-5.5-pro"]
+provider = "openai"
+api_id = "gpt-5.5-pro"
+display_name = "GPT-5.5 Pro"
+family = "gpt-5"
+training = "2025-12-01"
+knowledge_cutoff = "December 2025"
+estimated_output_tps = 20
+aliases = ["gpt55-pro", "gpt-55-pro"]
+
+[models."gpt-5.5-pro".limits]
+context_window = 1050000
+max_output = 128000
+
+[models."gpt-5.5-pro".features]
+tools = true
+vision = true
+reasoning = true
+effort = true
+
+[models."gpt-5.5-pro".costs]
+input_cost_per_mtok = 30.0
+output_cost_per_mtok = 180.0
+cache_input_cost_per_mtok = 3.0
+
+[models."gpt-5.4-pro"]
+provider = "openai"
+api_id = "gpt-5.4-pro"
+display_name = "GPT-5.4 Pro"
+family = "gpt-5"
+training = "2025-08-31"
+knowledge_cutoff = "April 2025"
+estimated_output_tps = 20
+aliases = ["gpt54-pro", "gpt-54-pro"]
+
+[models."gpt-5.4-pro".limits]
+context_window = 1047576
+max_output = 128000
+
+[models."gpt-5.4-pro".features]
+tools = true
+vision = true
+reasoning = true
+effort = true
+
+[models."gpt-5.4-pro".costs]
+input_cost_per_mtok = 30.0
+output_cost_per_mtok = 180.0
+cache_input_cost_per_mtok = 3.0
+
+[models."gpt-5.4-mini"]
+provider = "openai"
+api_id = "gpt-5.4-mini"
+display_name = "GPT-5.4 Mini"
+family = "gpt-5"
+training = "2025-08-31"
+knowledge_cutoff = "April 2025"
+estimated_output_tps = 140
+aliases = ["gpt54-mini", "gpt-54-mini"]
+
+[models."gpt-5.4-mini".limits]
+context_window = 400000
+max_output = 128000
+
+[models."gpt-5.4-mini".features]
+tools = true
+vision = true
+reasoning = true
+effort = true
+
+[models."gpt-5.4-mini".costs]
+input_cost_per_mtok = 0.75
+output_cost_per_mtok = 4.5
+cache_input_cost_per_mtok = 0.075

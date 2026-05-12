@@ -1,0 +1,28 @@
+[providers.minimax]
+display_name = "MiniMax"
+adapter = "openai_compatible"
+base_url = "https://api.minimax.io/v1"
+credentials = ["credential:minimax", "env:MINIMAX_API_KEY"]
+priority = 50
+
+[models."minimax-m2.5"]
+provider = "minimax"
+api_id = "minimax-m2.5"
+display_name = "Minimax M2.5"
+family = "minimax-m2"
+default = true
+estimated_output_tps = 45
+aliases = ["minimax"]
+
+[models."minimax-m2.5".limits]
+context_window = 196608
+max_output = 16384
+
+[models."minimax-m2.5".features]
+tools = true
+vision = false
+reasoning = false
+
+[models."minimax-m2.5".costs]
+input_cost_per_mtok = 0.3
+output_cost_per_mtok = 1.2

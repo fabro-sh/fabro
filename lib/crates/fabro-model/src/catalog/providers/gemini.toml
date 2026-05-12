@@ -1,0 +1,106 @@
+[providers.gemini]
+display_name = "Gemini"
+adapter = "gemini"
+credentials = ["credential:gemini", "env:GEMINI_API_KEY", "env:GOOGLE_API_KEY"]
+priority = 80
+
+[models."gemini-3.1-pro-preview"]
+provider = "gemini"
+api_id = "gemini-3.1-pro-preview"
+display_name = "Gemini 3.1 Pro (Preview)"
+family = "gemini-3"
+training = "2025-01-01"
+knowledge_cutoff = "January 2025"
+default = true
+estimated_output_tps = 85
+aliases = ["gemini-pro"]
+
+[models."gemini-3.1-pro-preview".limits]
+context_window = 1048576
+max_output = 65536
+
+[models."gemini-3.1-pro-preview".features]
+tools = true
+vision = true
+reasoning = true
+effort = true
+
+[models."gemini-3.1-pro-preview".costs]
+input_cost_per_mtok = 2.0
+output_cost_per_mtok = 12.0
+cache_input_cost_per_mtok = 0.5
+
+[models."gemini-3.1-pro-preview-customtools"]
+provider = "gemini"
+api_id = "gemini-3.1-pro-preview-customtools"
+display_name = "Gemini 3.1 Pro Custom Tools (Preview)"
+family = "gemini-3"
+training = "2025-01-01"
+knowledge_cutoff = "January 2025"
+estimated_output_tps = 85
+aliases = ["gemini-customtools"]
+
+[models."gemini-3.1-pro-preview-customtools".limits]
+context_window = 1048576
+max_output = 65536
+
+[models."gemini-3.1-pro-preview-customtools".features]
+tools = true
+vision = true
+reasoning = true
+effort = true
+
+[models."gemini-3.1-pro-preview-customtools".costs]
+input_cost_per_mtok = 2.0
+output_cost_per_mtok = 12.0
+cache_input_cost_per_mtok = 0.5
+
+[models."gemini-3-flash-preview"]
+provider = "gemini"
+api_id = "gemini-3-flash-preview"
+display_name = "Gemini 3 Flash (Preview)"
+family = "gemini-3"
+training = "2025-01-01"
+knowledge_cutoff = "January 2025"
+estimated_output_tps = 150
+aliases = ["gemini-flash"]
+
+[models."gemini-3-flash-preview".limits]
+context_window = 1048576
+max_output = 65536
+
+[models."gemini-3-flash-preview".features]
+tools = true
+vision = true
+reasoning = true
+effort = true
+
+[models."gemini-3-flash-preview".costs]
+input_cost_per_mtok = 0.5
+output_cost_per_mtok = 3.0
+cache_input_cost_per_mtok = 0.125
+
+[models."gemini-3.1-flash-lite-preview"]
+provider = "gemini"
+api_id = "gemini-3.1-flash-lite-preview"
+display_name = "Gemini 3.1 Flash Lite (Preview)"
+family = "gemini-3"
+training = "2025-01-01"
+knowledge_cutoff = "January 2025"
+estimated_output_tps = 200
+aliases = ["gemini-flash-lite"]
+
+[models."gemini-3.1-flash-lite-preview".limits]
+context_window = 1048576
+max_output = 65536
+
+[models."gemini-3.1-flash-lite-preview".features]
+tools = true
+vision = true
+reasoning = true
+effort = true
+
+[models."gemini-3.1-flash-lite-preview".costs]
+input_cost_per_mtok = 0.25
+output_cost_per_mtok = 1.5
+cache_input_cost_per_mtok = 0.0625

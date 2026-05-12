@@ -1,0 +1,30 @@
+[providers.inception]
+display_name = "Inception"
+adapter = "openai_compatible"
+base_url = "https://api.inceptionlabs.ai/v1"
+credentials = ["credential:inception", "env:INCEPTION_API_KEY"]
+priority = 40
+aliases = ["inception_labs"]
+
+[models."mercury-2"]
+provider = "inception"
+api_id = "mercury-2"
+display_name = "Mercury 2"
+family = "mercury"
+default = true
+estimated_output_tps = 1000
+aliases = ["mercury"]
+
+[models."mercury-2".limits]
+context_window = 131072
+max_output = 50000
+
+[models."mercury-2".features]
+tools = true
+vision = false
+reasoning = true
+effort = true
+
+[models."mercury-2".costs]
+input_cost_per_mtok = 0.25
+output_cost_per_mtok = 0.75

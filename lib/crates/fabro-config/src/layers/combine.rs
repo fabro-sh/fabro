@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
 
-use chrono::NaiveDate;
 use fabro_types::settings::cli::{CliAuthStrategy, OutputFormat, OutputVerbosity};
 use fabro_types::settings::run::{
     AgentPermissions, ApprovalMode, DaytonaNetworkLayer, MergeStrategy, RunMode,
@@ -80,7 +79,6 @@ impl_combine_or_option!(
     RunMode,
     GithubIntegrationStrategy,
     LogDestination,
-    NaiveDate,
     ObjectStoreProvider,
     ServerAuthMethod,
     WebhookStrategy,

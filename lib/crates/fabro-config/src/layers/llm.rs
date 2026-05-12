@@ -28,7 +28,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use chrono::NaiveDate;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::maps::MergeMap;
@@ -93,15 +92,18 @@ pub struct ModelSettings {
     pub display_name:         Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub family:               Option<String>,
-    /// Knowledge cutoff as an exact `YYYY-MM-DD` date. Lower-precision labels
-    /// (e.g. `May 2025`) migrate to the first of the month (`2025-05-01`);
-    /// presentation can render lower precision.
+    /// Training data cutoff label. Built-ins keep the exact public string
+    /// already exposed by the model API.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub training:             Option<String>,
+    /// Public knowledge cutoff label. Built-ins keep values such as
+    /// `"May 2025"` exactly; bare TOML dates are normalized to `YYYY-MM-DD`.
     #[serde(
         default,
         deserialize_with = "deserialize_knowledge_cutoff",
         skip_serializing_if = "Option::is_none"
     )]
-    pub knowledge_cutoff:     Option<NaiveDate>,
+    pub knowledge_cutoff:     Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default:              Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -183,11 +185,11 @@ pub struct CostRates {
     pub cache_input_cost_per_mtok: Option<f64>,
 }
 
-/// Accept either a TOML local-date (`2025-01-01` → `Datetime`) or a
-/// `YYYY-MM-DD` string for `knowledge_cutoff`. JSON has no native date
-/// literal; settings authors use the bare TOML date form, but JSON loaders
-/// (e.g. defaults bundled as JSON) supply a string.
-fn deserialize_knowledge_cutoff<'de, D>(deserializer: D) -> Result<Option<NaiveDate>, D::Error>
+/// Accept either a TOML local-date (`2025-01-01`) or a display string for
+/// `knowledge_cutoff`. The model API currently exposes this as a human label
+/// such as `"May 2025"`, so catalog TOML must preserve string labels exactly
+/// while still accepting bare TOML dates for custom settings.
+fn deserialize_knowledge_cutoff<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -204,16 +206,15 @@ where
     let value = Option::<Either>::deserialize(deserializer)?;
     match value {
         None => Ok(None),
-        Some(Either::Str(s)) => NaiveDate::parse_from_str(&s, "%Y-%m-%d")
-            .map(Some)
-            .map_err(D::Error::custom),
+        Some(Either::Str(s)) => Ok(Some(s)),
         Some(Either::Toml(dt)) => {
             let date = dt
                 .date
                 .ok_or_else(|| D::Error::custom("knowledge_cutoff requires a date component"))?;
-            NaiveDate::from_ymd_opt(date.year.into(), date.month.into(), date.day.into())
-                .ok_or_else(|| D::Error::custom("knowledge_cutoff is not a valid calendar date"))
-                .map(Some)
+            Ok(Some(format!(
+                "{:04}-{:02}-{:02}",
+                date.year, date.month, date.day
+            )))
         }
     }
 }
@@ -770,6 +771,7 @@ provider = "kimi"
 api_id = "kimi-k2.5"
 display_name = "Kimi K2.5"
 family = "kimi"
+training = "2025-01-01"
 knowledge_cutoff = 2025-01-01
 default = true
 enabled = true
@@ -797,10 +799,8 @@ cache_input_cost_per_mtok = 0.15
         assert_eq!(m.api_id.as_deref(), Some("kimi-k2.5"));
         assert_eq!(m.display_name.as_deref(), Some("Kimi K2.5"));
         assert_eq!(m.family.as_deref(), Some("kimi"));
-        assert_eq!(
-            m.knowledge_cutoff,
-            Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap())
-        );
+        assert_eq!(m.training.as_deref(), Some("2025-01-01"));
+        assert_eq!(m.knowledge_cutoff.as_deref(), Some("2025-01-01"));
         assert_eq!(m.default, Some(true));
         assert_eq!(m.enabled, Some(true));
         assert_eq!(m.aliases.as_deref(), Some(&["kimi".to_string()][..]));
@@ -821,6 +821,19 @@ cache_input_cost_per_mtok = 0.15
         assert_eq!(costs.base.output_cost_per_mtok, Some(2.50));
         assert_eq!(costs.base.cache_input_cost_per_mtok, Some(0.15));
         assert!(costs.speed.is_none());
+    }
+
+    #[test]
+    fn parses_knowledge_cutoff_display_label() {
+        let toml = r#"
+[models."claude-opus-4-7"]
+provider = "anthropic"
+knowledge_cutoff = "May 2025"
+"#;
+        let layer: LlmLayer = toml::from_str(toml).unwrap();
+        let m = layer.models.get("claude-opus-4-7").unwrap();
+
+        assert_eq!(m.knowledge_cutoff.as_deref(), Some("May 2025"));
     }
 
     #[test]
