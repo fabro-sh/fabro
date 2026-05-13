@@ -3,8 +3,7 @@ pub use fabro_core::outcome::{
 };
 use fabro_llm::types::TokenCounts as LlmTokenCounts;
 use fabro_model::{
-    AnthropicBillingFacts, Catalog, ModelBillingFacts, ModelBillingInput, ModelRef, ModelUsage,
-    Provider, Speed, TokenCounts,
+    Catalog, ModelBillingFacts, ModelBillingInput, ModelRef, ModelUsage, TokenCounts,
 };
 pub use fabro_types::BilledModelUsage;
 
@@ -14,20 +13,12 @@ pub type Outcome = fabro_core::Outcome<Option<BilledModelUsage>>;
 
 #[must_use]
 pub fn billed_model_usage_from_llm(
-    model_id: &str,
-    provider: Provider,
-    requested_speed: Option<&str>,
+    catalog: &Catalog,
+    model: &ModelRef,
     usage: &LlmTokenCounts,
 ) -> BilledModelUsage {
-    let speed = parse_speed(requested_speed);
-    let provider_id = provider.id();
-    let model = ModelRef {
-        provider: provider_id.clone(),
-        model_id: model_id.to_string(),
-        speed,
-    };
     let tokens = token_counts_from_llm_usage(usage);
-    let facts = billing_facts_for_stage_usage(provider, &tokens);
+    let facts = catalog.billing_facts_for(model, &tokens);
     let input = ModelBillingInput {
         usage: ModelUsage {
             model: model.clone(),
@@ -36,16 +27,27 @@ pub fn billed_model_usage_from_llm(
         facts,
     };
 
-    let total_usd_micros = Catalog::builtin()
-        .get(model_id)
-        .filter(|candidate| candidate.provider == provider_id)
-        .and_then(|candidate| candidate.pricing_for(speed))
+    let total_usd_micros = catalog
+        .pricing_for(model)
         .and_then(|pricing| pricing.bill(&input))
         .map(|amount| amount.0);
 
     BilledModelUsage {
         input,
         total_usd_micros,
+    }
+}
+
+#[must_use]
+pub fn unpriced_model_usage_from_llm(model: ModelRef, usage: &LlmTokenCounts) -> BilledModelUsage {
+    let tokens = token_counts_from_llm_usage(usage);
+    let facts = ModelBillingFacts::for_provider_id(&model.provider, &tokens);
+    BilledModelUsage {
+        input:            ModelBillingInput {
+            usage: ModelUsage { model, tokens },
+            facts,
+        },
+        total_usd_micros: None,
     }
 }
 
@@ -137,30 +139,25 @@ pub fn format_cost(cost: f64) -> String {
     format!("${cost:.2}")
 }
 
-fn parse_speed(speed: Option<&str>) -> Option<Speed> {
-    speed.and_then(|value| value.parse::<Speed>().ok())
-}
-
 fn token_counts_from_llm_usage(usage: &LlmTokenCounts) -> TokenCounts {
     usage.clone()
-}
-
-fn billing_facts_for_stage_usage(provider: Provider, tokens: &TokenCounts) -> ModelBillingFacts {
-    match provider {
-        Provider::Anthropic => ModelBillingFacts::Anthropic(AnthropicBillingFacts {
-            cache_write_5m_tokens: tokens.cache_write_tokens,
-            cache_write_1h_tokens: 0,
-        }),
-        other => ModelBillingFacts::for_provider(other),
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use fabro_llm::types::TokenCounts;
-    use fabro_model::Provider;
+    use fabro_model::catalog::LlmCatalogSettings;
+    use fabro_model::{Catalog, ModelRef, Provider, ProviderId, Speed};
 
     use super::{OutcomeExt, billed_model_usage_from_llm};
+
+    fn model_ref(provider: ProviderId, model_id: &str, speed: Option<Speed>) -> ModelRef {
+        ModelRef {
+            provider,
+            model_id: model_id.to_string(),
+            speed,
+        }
+    }
 
     #[test]
     fn billed_model_usage_from_llm_bills_openai_cached_input_and_reasoning_output() {
@@ -171,7 +168,11 @@ mod tests {
             cache_read_tokens: 250_000,
             ..TokenCounts::default()
         };
-        let billed = billed_model_usage_from_llm("gpt-5.4", Provider::OpenAi, None, &usage);
+        let billed = billed_model_usage_from_llm(
+            Catalog::builtin(),
+            &model_ref(Provider::OpenAi.id(), "gpt-5.4", None),
+            &usage,
+        );
 
         assert_eq!(billed.total_usd_micros, Some(3_562_500));
         assert_eq!(billed.tokens().output_tokens, 125_000);
@@ -198,13 +199,110 @@ mod tests {
             cache_write_tokens: 30_000,
         };
         let billed = billed_model_usage_from_llm(
-            "claude-opus-4-6",
-            Provider::Anthropic,
-            Some("fast"),
+            Catalog::builtin(),
+            &model_ref(
+                Provider::Anthropic.id(),
+                "claude-opus-4-6",
+                Some(Speed::Fast),
+            ),
             &usage,
         );
 
         assert_eq!(billed.total_usd_micros, Some(6_435_000));
+    }
+
+    #[test]
+    fn billed_model_usage_from_llm_uses_injected_custom_catalog() {
+        let settings: LlmCatalogSettings = toml::from_str(
+            r#"
+[providers.proxy]
+display_name = "Proxy"
+adapter = "openai_compatible"
+base_url = "https://proxy.example/v1"
+
+[models.canonical-model]
+provider = "proxy"
+api_id = "wire-model"
+display_name = "Canonical Model"
+family = "proxy"
+default = true
+
+[models.canonical-model.limits]
+context_window = 1000
+
+[models.canonical-model.features]
+tools = true
+vision = false
+reasoning = false
+
+[models.canonical-model.costs]
+input_cost_per_mtok = 1.0
+output_cost_per_mtok = 2.0
+"#,
+        )
+        .unwrap();
+        let catalog = Catalog::from_settings(&settings).unwrap();
+        let usage = TokenCounts {
+            input_tokens: 500_000,
+            output_tokens: 250_000,
+            ..TokenCounts::default()
+        };
+
+        let billed = billed_model_usage_from_llm(
+            &catalog,
+            &model_ref(ProviderId::new("proxy"), "canonical-model", None),
+            &usage,
+        );
+
+        assert_eq!(&billed.model().provider, &ProviderId::new("proxy"));
+        assert_eq!(billed.model_id(), "canonical-model");
+        assert_eq!(billed.total_usd_micros, Some(1_000_000));
+    }
+
+    #[test]
+    fn billed_model_usage_from_llm_does_not_bill_provider_api_id() {
+        let settings: LlmCatalogSettings = toml::from_str(
+            r#"
+[providers.proxy]
+display_name = "Proxy"
+adapter = "openai_compatible"
+base_url = "https://proxy.example/v1"
+
+[models.canonical-model]
+provider = "proxy"
+api_id = "wire-model"
+display_name = "Canonical Model"
+family = "proxy"
+default = true
+
+[models.canonical-model.limits]
+context_window = 1000
+
+[models.canonical-model.features]
+tools = true
+vision = false
+reasoning = false
+
+[models.canonical-model.costs]
+input_cost_per_mtok = 1.0
+output_cost_per_mtok = 2.0
+"#,
+        )
+        .unwrap();
+        let catalog = Catalog::from_settings(&settings).unwrap();
+
+        let billed = billed_model_usage_from_llm(
+            &catalog,
+            &model_ref(ProviderId::new("proxy"), "wire-model", None),
+            &TokenCounts {
+                input_tokens: 500_000,
+                output_tokens: 250_000,
+                ..TokenCounts::default()
+            },
+        );
+
+        assert_eq!(billed.model_id(), "wire-model");
+        assert_eq!(billed.total_usd_micros, None);
     }
 
     #[test]
@@ -216,8 +314,11 @@ mod tests {
             cache_read_tokens:  20,
             cache_write_tokens: 10,
         };
-        let billed =
-            billed_model_usage_from_llm("claude-opus-4-6", Provider::Anthropic, None, &usage);
+        let billed = billed_model_usage_from_llm(
+            Catalog::builtin(),
+            &model_ref(Provider::Anthropic.id(), "claude-opus-4-6", None),
+            &usage,
+        );
 
         assert_eq!(billed.tokens().clone(), usage);
     }

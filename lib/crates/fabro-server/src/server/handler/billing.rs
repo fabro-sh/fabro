@@ -6,9 +6,8 @@ use fabro_types::{RunProjection, StageHandler, StageProjection, StageState};
 
 use super::super::{
     ApiError, AppState, BillingByModel, BillingStageRef, IntoResponse, Json, ListResponse,
-    ModelReference, PaginationParams, Path, Query, RequiredUser, Response, Router, RunBilling,
-    RunBillingStage, RunBillingTotals, RunId, State, StatusCode, get, parse_run_id_path,
-    run_stage_from_stage_id,
+    PaginationParams, Path, Query, RequiredUser, Response, Router, RunBilling, RunBillingStage,
+    RunBillingTotals, RunId, State, StatusCode, get, parse_run_id_path, run_stage_from_stage_id,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -86,9 +85,7 @@ async fn get_run_billing(
         .iter()
         .map(|model| BillingByModel {
             billing: model.billing.clone(),
-            model:   ModelReference {
-                id: model.model.model_id.clone(),
-            },
+            model:   model.model.clone(),
             stages:  model.stages,
         })
         .collect::<Vec<_>>();
@@ -108,11 +105,7 @@ async fn get_run_billing(
                 billing:      rollup_stage
                     .map(|stage| stage.billing.clone())
                     .unwrap_or_default(),
-                model:        rollup_stage
-                    .and_then(|stage| stage.model.as_ref())
-                    .map(|model| ModelReference {
-                        id: model.model_id.clone(),
-                    }),
+                model:        rollup_stage.and_then(|stage| stage.model.as_ref()).cloned(),
                 runtime_secs: row.runtime_secs,
                 stage:        BillingStageRef {
                     id:   row.node_id.clone(),

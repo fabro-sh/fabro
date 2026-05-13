@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use super::Event;
 use super::stored_fields::stored_event_fields;
-use crate::outcome::billed_model_usage_from_llm;
+use crate::outcome::unpriced_model_usage_from_llm;
 use crate::stage_scope::StageScope;
 
 fn stage_status_from_string(status: &str) -> StageOutcome {
@@ -551,11 +551,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 usage,
                 tool_call_count,
             } => {
-                let requested_speed = model.speed.map(<&'static str>::from);
-                let provider = fabro_model::Provider::from_id(&model.provider)
-                    .expect("agent message billing currently requires a built-in provider ID");
-                let billed =
-                    billed_model_usage_from_llm(&model.model_id, provider, requested_speed, usage);
+                let billed = unpriced_model_usage_from_llm(model.clone(), usage);
                 let billing = BilledTokenCounts::from_billed_usage(std::slice::from_ref(&billed));
                 EventBody::AgentMessage(fabro_types::AgentMessageProps {
                     text: text.clone(),
@@ -1286,7 +1282,7 @@ mod tests {
     use chrono::Utc;
     use fabro_agent::{AgentEvent, SandboxEvent};
     use fabro_llm::types::TokenCounts as LlmTokenCounts;
-    use fabro_model::{ModelRef, Provider};
+    use fabro_model::{ModelRef, Provider, ProviderId};
 
     use super::*;
     use crate::error::Error;
@@ -1977,6 +1973,39 @@ mod tests {
             parent_session_id: None,
             model:             Some("claude-sonnet".to_string()),
         });
+    }
+
+    #[test]
+    fn agent_assistant_message_with_custom_provider_keeps_tokens_without_cost() {
+        let stored = to_run_event(&fixtures::RUN_1, &Event::Agent {
+            stage:             "code".to_string(),
+            visit:             1,
+            event:             AgentEvent::AssistantMessage {
+                text:            "ok".to_string(),
+                model:           ModelRef {
+                    provider: ProviderId::new("custom_proxy"),
+                    model_id: "proxy-model".to_string(),
+                    speed:    None,
+                },
+                usage:           LlmTokenCounts {
+                    input_tokens: 12,
+                    output_tokens: 34,
+                    ..LlmTokenCounts::default()
+                },
+                tool_call_count: 0,
+            },
+            session_id:        Some("ses_agent".to_string()),
+            parent_session_id: None,
+        });
+
+        let EventBody::AgentMessage(message) = stored.body else {
+            panic!("expected agent message body");
+        };
+        assert_eq!(message.model.provider, ProviderId::new("custom_proxy"));
+        assert_eq!(message.model.model_id, "proxy-model");
+        assert_eq!(message.billing.input_tokens, 12);
+        assert_eq!(message.billing.output_tokens, 34);
+        assert_eq!(message.billing.total_usd_micros, None);
     }
 
     #[test]

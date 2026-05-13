@@ -14,7 +14,10 @@ mod generated {
     include!(concat!(env!("OUT_DIR"), "/codegen.rs"));
 }
 pub mod types {
-    pub use fabro_model::{Model, ModelCosts, ModelFeatures, ModelLimits, ModelTestMode, Provider};
+    pub use fabro_model::{
+        Model, ModelCosts, ModelFeatures, ModelLimits, ModelRef as BillingModelRef, ModelTestMode,
+        Provider, Speed as BillingSpeed,
+    };
     pub use fabro_types::settings::server::{
         GithubIntegrationSettings, GithubIntegrationStrategy, IntegrationWebhooksSettings,
         IpAllowEntry, LogDestination, ObjectStoreSettings, ServerApiSettings,

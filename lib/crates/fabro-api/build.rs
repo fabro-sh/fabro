@@ -356,6 +356,8 @@ fn main() {
             &[],
         ),
         ("BilledTokenCounts", "fabro_types::BilledTokenCounts", &[]),
+        ("BillingModelRef", "fabro_model::ModelRef", &[]),
+        ("BillingSpeed", "fabro_model::Speed", &[]),
         ("ProviderId", "fabro_model::ProviderId", &[]),
         ("Model", "fabro_model::Model", &[]),
         ("ModelLimits", "fabro_model::ModelLimits", &[]),

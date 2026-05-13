@@ -57,7 +57,7 @@ use fabro_llm::types::{
     ToolDefinition,
 };
 use fabro_model::catalog::LlmCatalogSettings;
-use fabro_model::{BilledTokenCounts, Catalog, ModelTestMode, ProviderId};
+use fabro_model::{BilledTokenCounts, Catalog, ModelRef, ModelTestMode, ProviderId};
 use fabro_redact::redact_jsonl_line;
 use fabro_sandbox::daytona::{self, DaytonaSandbox};
 use fabro_sandbox::details::sandbox_details;
@@ -243,7 +243,7 @@ struct ModelBillingTotals {
 struct BillingAccumulator {
     total_runs:         i64,
     total_runtime_secs: f64,
-    by_model:           HashMap<String, ModelBillingTotals>,
+    by_model:           HashMap<ModelRef, ModelBillingTotals>,
 }
 
 pub(crate) type RegistryFactoryOverride =
@@ -614,10 +614,7 @@ fn accumulate_billing_rollup(
     accumulator.total_runs += 1;
     accumulator.total_runtime_secs += rollup.runtime_ms as f64 / 1000.0;
     for model in &rollup.by_model {
-        let entry = accumulator
-            .by_model
-            .entry(model.model.model_id.clone())
-            .or_default();
+        let entry = accumulator.by_model.entry(model.model.clone()).or_default();
         entry.stages += model.stages;
         entry.billing.add_counts(&model.billing);
     }

@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use super::super::{
     AggregateBilling, AggregateBillingTotals, ApiError, AppState, BilledTokenCounts,
-    BillingByModel, DfParams, FABRO_VERSION, GithubIntegrationStrategy, IntoResponse, Json,
-    ModelReference, Path, PruneRunsRequest, PruneRunsResponse, Query, RequiredUser, Response,
-    Router, RunStatus, State, StatusCode, SystemInfoResponse, SystemRepairRunIssue,
-    SystemRepairRunsResponse, SystemRunCounts, build_disk_usage_response, build_prune_plan,
-    delete_run_internal, diagnostics, get, post, resolve_interp_string, spawn_blocking,
-    system_features, system_sandbox_provider, to_i64,
+    BillingByModel, DfParams, FABRO_VERSION, GithubIntegrationStrategy, IntoResponse, Json, Path,
+    PruneRunsRequest, PruneRunsResponse, Query, RequiredUser, Response, Router, RunStatus, State,
+    StatusCode, SystemInfoResponse, SystemRepairRunIssue, SystemRepairRunsResponse,
+    SystemRunCounts, build_disk_usage_response, build_prune_plan, delete_run_internal, diagnostics,
+    get, post, resolve_interp_string, spawn_blocking, system_features, system_sandbox_provider,
+    to_i64,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -502,7 +502,7 @@ async fn get_aggregate_billing(
         .iter()
         .map(|(model, totals)| BillingByModel {
             billing: totals.billing.clone(),
-            model:   ModelReference { id: model.clone() },
+            model:   model.clone(),
             stages:  totals.stages,
         })
         .collect();

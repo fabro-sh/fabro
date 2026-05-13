@@ -114,7 +114,10 @@ describe("RunBilling", () => {
           },
           {
             stage: { id: "agent", name: "agent" },
-            model: { id: "claude-sonnet-4-5" },
+            model: {
+              provider: "anthropic",
+              model_id: "claude-sonnet-4-5",
+            },
             billing: zeroBilling({
               input_tokens: 1200,
               output_tokens: 300,
@@ -136,7 +139,10 @@ describe("RunBilling", () => {
         },
         by_model: [
           {
-            model: { id: "claude-sonnet-4-5" },
+            model: {
+              provider: "anthropic",
+              model_id: "claude-sonnet-4-5",
+            },
             stages: 1,
             billing: zeroBilling({
               input_tokens: 1200,
@@ -180,7 +186,11 @@ describe("RunBilling", () => {
           stages: [
             {
               stage: { id: "in-flight", name: "in-flight" },
-              model: { id: "claude-opus-4-6" },
+              model: {
+                provider: "anthropic",
+                model_id: "claude-opus-4-6",
+                speed: "fast",
+              },
               billing: zeroBilling({
                 input_tokens: 1200,
                 output_tokens: 300,
@@ -203,7 +213,11 @@ describe("RunBilling", () => {
           },
           by_model: [
             {
-              model: { id: "claude-opus-4-6" },
+              model: {
+                provider: "anthropic",
+                model_id: "claude-opus-4-6",
+                speed: "fast",
+              },
               stages: 1,
               billing: zeroBilling({
                 input_tokens: 1200,
@@ -221,7 +235,7 @@ describe("RunBilling", () => {
       // first stage starts.
       expect(text).not.toContain("No stages yet");
       expect(text).toContain("in-flight");
-      expect(text).toContain("claude-opus-4-6");
+      expect(text).toContain("anthropic:claude-opus-4-6 · fast");
       expect(text).toContain("1.2k");
       expect(text).toContain("0.3k");
       expect(text).toContain("$0.24");

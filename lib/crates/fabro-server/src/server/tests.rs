@@ -17,7 +17,7 @@ use fabro_interview::{
 };
 use fabro_llm::types::{Message as LlmMessage, Request as LlmRequest};
 use fabro_model::catalog::LlmCatalogSettings;
-use fabro_model::{Catalog, ModelRef, Provider};
+use fabro_model::{Catalog, ModelRef, Provider, Speed};
 use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{
     AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
@@ -3015,7 +3015,8 @@ async fn run_billing_sums_usage_across_retry_visits_and_uses_latest_model() {
     let stages = body["stages"].as_array().unwrap();
     assert_eq!(stages.len(), 1);
     assert_eq!(stages[0]["stage"]["id"], "verify");
-    assert_eq!(stages[0]["model"]["id"], "gpt-new");
+    assert_eq!(stages[0]["model"]["provider"], "openai");
+    assert_eq!(stages[0]["model"]["model_id"], "gpt-new");
     assert_eq!(stages[0]["billing"]["input_tokens"], 300);
     assert_eq!(stages[0]["billing"]["output_tokens"], 30);
     assert_eq!(stages[0]["billing"]["total_usd_micros"], 330);
@@ -3030,12 +3031,14 @@ async fn run_billing_sums_usage_across_retry_visits_and_uses_latest_model() {
     assert_eq!(by_model.len(), 2);
     let old_model = by_model
         .iter()
-        .find(|entry| entry["model"]["id"] == "gpt-old")
+        .find(|entry| entry["model"]["model_id"] == "gpt-old")
         .unwrap();
     let new_model = by_model
         .iter()
-        .find(|entry| entry["model"]["id"] == "gpt-new")
+        .find(|entry| entry["model"]["model_id"] == "gpt-new")
         .unwrap();
+    assert_eq!(old_model["model"]["provider"], "openai");
+    assert_eq!(new_model["model"]["provider"], "openai");
     assert_eq!(old_model["stages"], 1);
     assert_eq!(old_model["billing"]["input_tokens"], 100);
     assert_eq!(new_model["stages"], 1);
@@ -8209,6 +8212,86 @@ async fn get_aggregate_billing_returns_zeros_initially() {
     assert!(body["by_model"].as_array().unwrap().is_empty());
 }
 
+#[tokio::test]
+async fn get_aggregate_billing_returns_provider_model_speed_identity() {
+    let state = test_app_state();
+    {
+        let mut agg = state
+            .aggregate_billing
+            .lock()
+            .expect("aggregate billing lock");
+        agg.total_runs = 1;
+        agg.by_model.insert(
+            ModelRef {
+                provider: Provider::Anthropic.id(),
+                model_id: "claude-opus-4-6".to_string(),
+                speed:    None,
+            },
+            ModelBillingTotals {
+                stages:  1,
+                billing: BilledTokenCounts {
+                    input_tokens:       10,
+                    output_tokens:      1,
+                    total_tokens:       11,
+                    reasoning_tokens:   0,
+                    cache_read_tokens:  0,
+                    cache_write_tokens: 0,
+                    total_usd_micros:   Some(11),
+                },
+            },
+        );
+        agg.by_model.insert(
+            ModelRef {
+                provider: Provider::Anthropic.id(),
+                model_id: "claude-opus-4-6".to_string(),
+                speed:    Some(Speed::Fast),
+            },
+            ModelBillingTotals {
+                stages:  1,
+                billing: BilledTokenCounts {
+                    input_tokens:       20,
+                    output_tokens:      2,
+                    total_tokens:       22,
+                    reasoning_tokens:   0,
+                    cache_read_tokens:  0,
+                    cache_write_tokens: 0,
+                    total_usd_micros:   Some(22),
+                },
+            },
+        );
+    }
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api("/billing"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let by_model = body["by_model"].as_array().unwrap();
+
+    assert_eq!(by_model.len(), 2);
+    let standard = by_model
+        .iter()
+        .find(|entry| entry["model"]["speed"].is_null())
+        .unwrap();
+    let fast = by_model
+        .iter()
+        .find(|entry| entry["model"]["speed"] == "fast")
+        .unwrap();
+    assert_eq!(standard["model"]["provider"], "anthropic");
+    assert_eq!(standard["model"]["model_id"], "claude-opus-4-6");
+    assert_eq!(standard["billing"]["input_tokens"], 10);
+    assert_eq!(fast["model"]["provider"], "anthropic");
+    assert_eq!(fast["model"]["model_id"], "claude-opus-4-6");
+    assert_eq!(fast["billing"]["input_tokens"], 20);
+}
+
 #[test]
 fn aggregate_billing_counts_projection_rollup_usage_visits() {
     let mut accumulator = BillingAccumulator::default();
@@ -8227,7 +8310,7 @@ fn aggregate_billing_counts_projection_rollup_usage_visits() {
             fabro_workflow::ProjectionBillingByModel {
                 model:   ModelRef {
                     provider: Provider::OpenAi.id(),
-                    model_id: "gpt-old".to_string(),
+                    model_id: "gpt-5.4".to_string(),
                     speed:    None,
                 },
                 stages:  1,
@@ -8244,8 +8327,8 @@ fn aggregate_billing_counts_projection_rollup_usage_visits() {
             fabro_workflow::ProjectionBillingByModel {
                 model:   ModelRef {
                     provider: Provider::OpenAi.id(),
-                    model_id: "gpt-new".to_string(),
-                    speed:    None,
+                    model_id: "gpt-5.4".to_string(),
+                    speed:    Some(Speed::Fast),
                 },
                 stages:  1,
                 billing: BilledTokenCounts {
@@ -8267,10 +8350,45 @@ fn aggregate_billing_counts_projection_rollup_usage_visits() {
 
     assert_eq!(accumulator.total_runs, 1);
     assert_eq!(accumulator.total_runtime_secs, 2.0);
-    assert_eq!(accumulator.by_model["gpt-old"].stages, 1);
-    assert_eq!(accumulator.by_model["gpt-old"].billing.input_tokens, 100);
-    assert_eq!(accumulator.by_model["gpt-new"].stages, 1);
-    assert_eq!(accumulator.by_model["gpt-new"].billing.input_tokens, 200);
+    assert_eq!(accumulator.by_model.len(), 2);
+    assert_eq!(
+        accumulator.by_model[&ModelRef {
+            provider: Provider::OpenAi.id(),
+            model_id: "gpt-5.4".to_string(),
+            speed:    None,
+        }]
+            .stages,
+        1
+    );
+    assert_eq!(
+        accumulator.by_model[&ModelRef {
+            provider: Provider::OpenAi.id(),
+            model_id: "gpt-5.4".to_string(),
+            speed:    None,
+        }]
+            .billing
+            .input_tokens,
+        100
+    );
+    assert_eq!(
+        accumulator.by_model[&ModelRef {
+            provider: Provider::OpenAi.id(),
+            model_id: "gpt-5.4".to_string(),
+            speed:    Some(Speed::Fast),
+        }]
+            .stages,
+        1
+    );
+    assert_eq!(
+        accumulator.by_model[&ModelRef {
+            provider: Provider::OpenAi.id(),
+            model_id: "gpt-5.4".to_string(),
+            speed:    Some(Speed::Fast),
+        }]
+            .billing
+            .input_tokens,
+        200
+    );
 }
 
 #[tokio::test]

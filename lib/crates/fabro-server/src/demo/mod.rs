@@ -1008,6 +1008,14 @@ mod runs {
             .collect()
     }
 
+    fn billing_model(provider: fabro_model::Provider, model_id: &str) -> BillingModelRef {
+        BillingModelRef {
+            provider: provider.id(),
+            model_id: model_id.into(),
+            speed:    None,
+        }
+    }
+
     fn demo_run_ids() -> &'static [RunId; 7] {
         static IDS: OnceLock<[RunId; 7]> = OnceLock::new();
         IDS.get_or_init(|| {
@@ -1450,9 +1458,10 @@ mod runs {
                         id:   "detect-drift".into(),
                         name: "Detect Drift".into(),
                     },
-                    model:        Some(ModelReference {
-                        id: "Opus 4.6".into(),
-                    }),
+                    model:        Some(billing_model(
+                        fabro_model::Provider::Anthropic,
+                        "claude-opus-4-6",
+                    )),
                     billing:      BilledTokenCounts {
                         cache_read_tokens:  0,
                         cache_write_tokens: 0,
@@ -1471,9 +1480,10 @@ mod runs {
                         id:   "propose-changes".into(),
                         name: "Propose Changes".into(),
                     },
-                    model:        Some(ModelReference {
-                        id: "Gemini 3.1".into(),
-                    }),
+                    model:        Some(billing_model(
+                        fabro_model::Provider::Gemini,
+                        "gemini-3.1-pro-preview",
+                    )),
                     billing:      BilledTokenCounts {
                         cache_read_tokens:  0,
                         cache_write_tokens: 0,
@@ -1492,9 +1502,10 @@ mod runs {
                         id:   "review-changes".into(),
                         name: "Review Changes".into(),
                     },
-                    model:        Some(ModelReference {
-                        id: "Codex 5.3".into(),
-                    }),
+                    model:        Some(billing_model(
+                        fabro_model::Provider::OpenAi,
+                        "gpt-5.3-codex",
+                    )),
                     billing:      BilledTokenCounts {
                         cache_read_tokens:  0,
                         cache_write_tokens: 0,
@@ -1513,9 +1524,10 @@ mod runs {
                         id:   "apply-changes".into(),
                         name: "Apply Changes".into(),
                     },
-                    model:        Some(ModelReference {
-                        id: "Opus 4.6".into(),
-                    }),
+                    model:        Some(billing_model(
+                        fabro_model::Provider::Anthropic,
+                        "claude-opus-4-6",
+                    )),
                     billing:      BilledTokenCounts {
                         cache_read_tokens:  0,
                         cache_write_tokens: 0,
@@ -1551,9 +1563,7 @@ mod runs {
                         total_tokens:       43470,
                         total_usd_micros:   Some(1_350_000),
                     },
-                    model:   ModelReference {
-                        id: "Opus 4.6".into(),
-                    },
+                    model:   billing_model(fabro_model::Provider::Anthropic, "claude-opus-4-6"),
                     stages:  2,
                 },
                 BillingByModel {
@@ -1566,9 +1576,7 @@ mod runs {
                         total_tokens:       37390,
                         total_usd_micros:   Some(720_000),
                     },
-                    model:   ModelReference {
-                        id: "Gemini 3.1".into(),
-                    },
+                    model:   billing_model(fabro_model::Provider::Gemini, "gemini-3.1-pro-preview"),
                     stages:  1,
                 },
                 BillingByModel {
@@ -1581,9 +1589,7 @@ mod runs {
                         total_tokens:       11760,
                         total_usd_micros:   Some(190_000),
                     },
-                    model:   ModelReference {
-                        id: "Codex 5.3".into(),
-                    },
+                    model:   billing_model(fabro_model::Provider::OpenAi, "gpt-5.3-codex"),
                     stages:  1,
                 },
             ],
@@ -1902,6 +1908,14 @@ mod workflows {
 mod billing {
     use fabro_api::types::*;
 
+    fn billing_model(provider: fabro_model::Provider, model_id: &str) -> BillingModelRef {
+        BillingModelRef {
+            provider: provider.id(),
+            model_id: model_id.into(),
+            speed:    None,
+        }
+    }
+
     pub(super) fn aggregate() -> AggregateBilling {
         AggregateBilling {
             totals:   AggregateBillingTotals {
@@ -1926,9 +1940,7 @@ mod billing {
                         total_tokens:       391_230,
                         total_usd_micros:   Some(12_150_000),
                     },
-                    model:   ModelReference {
-                        id: "Opus 4.6".into(),
-                    },
+                    model:   billing_model(fabro_model::Provider::Anthropic, "claude-opus-4-6"),
                     stages:  18,
                 },
                 BillingByModel {
@@ -1941,9 +1953,7 @@ mod billing {
                         total_tokens:       336_510,
                         total_usd_micros:   Some(6_480_000),
                     },
-                    model:   ModelReference {
-                        id: "Gemini 3.1".into(),
-                    },
+                    model:   billing_model(fabro_model::Provider::Gemini, "gemini-3.1-pro-preview"),
                     stages:  9,
                 },
                 BillingByModel {
@@ -1956,9 +1966,7 @@ mod billing {
                         total_tokens:       105_840,
                         total_usd_micros:   Some(1_710_000),
                     },
-                    model:   ModelReference {
-                        id: "Codex 5.3".into(),
-                    },
+                    model:   billing_model(fabro_model::Provider::OpenAi, "gpt-5.3-codex"),
                     stages:  9,
                 },
             ],

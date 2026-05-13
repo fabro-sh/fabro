@@ -14,7 +14,9 @@ use fabro_llm::client::Client;
 use fabro_llm::types::{Message, ReasoningEffort, Request, Speed, TokenCounts};
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::catalog::LlmCatalogSettings;
-use fabro_model::{AgentProfileKind, Catalog, FallbackTarget, Provider, ProviderId, adapter};
+use fabro_model::{
+    AgentProfileKind, Catalog, FallbackTarget, ModelRef, Provider, ProviderId, adapter,
+};
 use fabro_types::settings::run::RunModelControls;
 use fabro_types::{SessionCapability, StageId};
 use tokio::sync::Mutex as TokioMutex;
@@ -108,9 +110,9 @@ struct ProviderContext {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct EffectiveRequestControls {
-    reasoning_effort: Option<ReasoningEffort>,
-    speed:            Option<Speed>,
+pub(super) struct EffectiveRequestControls {
+    pub(super) reasoning_effort: Option<ReasoningEffort>,
+    pub(super) speed:            Option<Speed>,
 }
 
 fn classify_agent_error(err: fabro_agent::Error, allow_failover: bool) -> AgentApiErrorDisposition {
@@ -203,7 +205,7 @@ fn default_profile_kind(provider: Provider) -> AgentProfileKind {
     }
 }
 
-fn effective_request_controls(
+pub(super) fn effective_request_controls(
     catalog: &Catalog,
     run_model_controls: &RunModelControls,
     model: &str,
@@ -752,7 +754,7 @@ impl CodergenBackend for AgentApiBackend {
 
         let default_provider = self.provider_id.to_string();
 
-        let (response, actual_model, actual_provider) = match result {
+        let (response, actual_model, actual_provider, actual_speed) = match result {
             Ok(resp) => (
                 resp,
                 request.model.clone(),
@@ -760,6 +762,7 @@ impl CodergenBackend for AgentApiBackend {
                     .provider
                     .clone()
                     .unwrap_or_else(|| default_provider.clone()),
+                controls.speed,
             ),
             Err(sdk_err) if sdk_err.failover_eligible() && !fallback_chain.is_empty() => {
                 let error_msg = sdk_err.to_string();
@@ -803,7 +806,12 @@ impl CodergenBackend for AgentApiBackend {
 
                     match client.complete(&fallback_request).await {
                         Ok(resp) => {
-                            found = Some((resp, target.model.clone(), target.provider.clone()));
+                            found = Some((
+                                resp,
+                                target.model.clone(),
+                                target.provider.clone(),
+                                fallback_controls.speed,
+                            ));
                             break;
                         }
                         Err(err) if err.failover_eligible() => {
@@ -821,11 +829,13 @@ impl CodergenBackend for AgentApiBackend {
             Err(sdk_err) => return Err(Error::Llm(sdk_err)),
         };
 
-        let actual_provider = actual_provider.parse::<Provider>().unwrap_or(self.provider);
         let stage_usage = billed_model_usage_from_llm(
-            &actual_model,
-            actual_provider,
-            node.speed(),
+            self.catalog.as_ref(),
+            &ModelRef {
+                provider: ProviderId::from(actual_provider),
+                model_id: actual_model,
+                speed:    actual_speed,
+            },
             &response.usage,
         );
 
@@ -846,12 +856,6 @@ impl CodergenBackend for AgentApiBackend {
         let sandbox = request.sandbox;
         let tool_hooks = request.tool_hooks;
         let cancel_token = request.cancel_token;
-
-        let actual_model = node.model().unwrap_or(&self.model).to_string();
-        let _actual_provider = node
-            .provider()
-            .and_then(|p| p.parse::<Provider>().ok())
-            .unwrap_or(self.provider);
 
         let fidelity = context.fidelity();
         let reuse_key = if fidelity == Fidelity::Full {
@@ -1132,10 +1136,14 @@ impl CodergenBackend for AgentApiBackend {
             }
         }
 
+        let billing_controls = self.effective_request_controls(session.model(), node)?;
         let stage_usage = billed_model_usage_from_llm(
-            &actual_model,
-            _actual_provider,
-            node.speed(),
+            self.catalog.as_ref(),
+            &ModelRef {
+                provider: session.provider_id(),
+                model_id: session.model().to_string(),
+                speed:    billing_controls.speed,
+            },
             &total_usage,
         );
 

@@ -7769,7 +7769,7 @@ components:
         model:
           description: Latest usage-bearing visit model for this node; null when no visit used an LLM model.
           oneOf:
-            - $ref: "#/components/schemas/ModelReference"
+            - $ref: "#/components/schemas/BillingModelRef"
             - type: "null"
         billing:
           $ref: "#/components/schemas/BilledTokenCounts"
@@ -7843,7 +7843,7 @@ components:
         - billing
       properties:
         model:
-          $ref: "#/components/schemas/ModelReference"
+          $ref: "#/components/schemas/BillingModelRef"
         stages:
           type: integer
           description: Number of usage-bearing stage visits that used this model.

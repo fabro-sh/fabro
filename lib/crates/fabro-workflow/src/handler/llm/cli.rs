@@ -11,7 +11,9 @@ use fabro_agent::{Sandbox, StaticEnvProvider, ToolEnvProvider, shell_quote};
 use fabro_auth::CredentialResolver;
 use fabro_graphviz::graph::Node;
 use fabro_llm::types::TokenCounts;
-use fabro_model::Provider;
+use fabro_model::catalog::LlmCatalogSettings;
+use fabro_model::{Catalog, ModelRef, Provider};
+use fabro_types::settings::run::RunModelControls;
 use fabro_types::{CommandOutputStream, CommandTermination, LlmBackend};
 use fabro_util::time::elapsed_ms;
 use tokio_util::sync::CancellationToken;
@@ -40,6 +42,7 @@ fn cli_failure_detail(stdout: &str, stderr: &str, command: &str) -> String {
 
 use super::super::agent::{CodergenBackend, CodergenResult, CodergenRunRequest, OneShotRequest};
 use super::acp::AgentAcpBackend;
+use super::api::effective_request_controls;
 use super::launch_env::{AgentLaunchEnvRequest, resolve_agent_launch_env};
 use super::{changed_files, routing};
 use crate::error::Error;
@@ -335,6 +338,8 @@ pub struct AgentCliBackend {
     tool_env: Option<Arc<dyn ToolEnvProvider>>,
     github_token_refresh_managed: bool,
     resolver: Option<CredentialResolver>,
+    run_model_controls: RunModelControls,
+    catalog: Arc<Catalog>,
 }
 
 impl AgentCliBackend {
@@ -346,6 +351,8 @@ impl AgentCliBackend {
             tool_env: None,
             github_token_refresh_managed: false,
             resolver: Some(resolver),
+            run_model_controls: RunModelControls::default(),
+            catalog: default_catalog(),
         }
     }
 
@@ -357,6 +364,8 @@ impl AgentCliBackend {
             tool_env: None,
             github_token_refresh_managed: false,
             resolver: None,
+            run_model_controls: RunModelControls::default(),
+            catalog: default_catalog(),
         }
     }
 
@@ -376,6 +385,25 @@ impl AgentCliBackend {
         self.github_token_refresh_managed = github_token_refresh_managed;
         self
     }
+
+    #[must_use]
+    pub fn with_run_model_controls(mut self, controls: RunModelControls) -> Self {
+        self.run_model_controls = controls;
+        self
+    }
+
+    #[must_use]
+    pub fn with_catalog(mut self, catalog: Arc<Catalog>) -> Self {
+        self.catalog = catalog;
+        self
+    }
+}
+
+fn default_catalog() -> Arc<Catalog> {
+    Arc::new(
+        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
+            .expect("default catalog should build"),
+    )
 }
 
 #[async_trait]
@@ -408,6 +436,12 @@ impl CodergenBackend for AgentCliBackend {
             .provider()
             .and_then(|s| s.parse::<Provider>().ok())
             .unwrap_or(self.provider);
+        let controls = effective_request_controls(
+            self.catalog.as_ref(),
+            &self.run_model_controls,
+            model,
+            node,
+        )?;
 
         let cli = AgentCli::for_provider(provider);
         verify_cli_available(cli, sandbox, &cancel_token).await?;
@@ -622,12 +656,19 @@ impl CodergenBackend for AgentCliBackend {
         let (files_touched, last_file_touched) =
             changed_files::files_touched_since(sandbox, &files_before).await;
 
-        let stage_usage =
-            billed_model_usage_from_llm(model, provider, node.speed(), &TokenCounts {
+        let stage_usage = billed_model_usage_from_llm(
+            self.catalog.as_ref(),
+            &ModelRef {
+                provider: provider.id(),
+                model_id: model.to_string(),
+                speed:    controls.speed,
+            },
+            &TokenCounts {
                 input_tokens: parsed.input_tokens,
                 output_tokens: parsed.output_tokens,
                 ..TokenCounts::default()
-            });
+            },
+        );
 
         Ok(CodergenResult::Text {
             text: parsed.text,

@@ -182,6 +182,8 @@ async fn build_registry(
                     || AgentCliBackend::new_from_env(model.clone(), provider),
                     |resolver| AgentCliBackend::new(model.clone(), provider, resolver),
                 )
+                .with_catalog(Arc::clone(&catalog_for_api))
+                .with_run_model_controls(model_controls.clone())
                 .with_tool_env_provider(tool_env_provider.clone(), github_token_refresh_managed);
             let acp = cli_resolver
                 .clone()

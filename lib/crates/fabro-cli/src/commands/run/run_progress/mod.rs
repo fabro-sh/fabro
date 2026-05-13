@@ -471,7 +471,7 @@ mod tests {
     use chrono::{DateTime, Utc};
     use fabro_agent::{AgentEvent, SandboxEvent};
     use fabro_llm::types::TokenCounts;
-    use fabro_model::{ModelRef, Provider};
+    use fabro_model::{Catalog, ModelRef, Provider};
     use fabro_types::run_event::CliEnsureCompletedProps;
     use fabro_types::{
         MetadataSnapshotFailureKind, MetadataSnapshotPhase, ParallelBranchId, SandboxProvider,
@@ -590,9 +590,12 @@ mod tests {
             preferred_label: None,
             suggested_next_ids: Vec::new(),
             billing: Some(billed_model_usage_from_llm(
-                "gpt-5-mini",
-                Provider::OpenAi,
-                None,
+                Catalog::builtin(),
+                &ModelRef {
+                    provider: Provider::OpenAi.id(),
+                    model_id: "gpt-5-mini".into(),
+                    speed:    None,
+                },
                 &TokenCounts {
                     input_tokens: 1200,
                     output_tokens: 300,

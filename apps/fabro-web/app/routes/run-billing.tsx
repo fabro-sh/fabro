@@ -5,7 +5,11 @@ import { formatDurationSecs } from "../lib/format";
 import { useRunBilling } from "../lib/queries";
 import { IN_FLIGHT_STAGE_STATES } from "../lib/stage-sidebar";
 import { useTickingNow } from "../lib/time";
-import type { RunBilling, RunBillingStage } from "@qltysh/fabro-api-client";
+import type {
+  BillingModelRef,
+  RunBilling,
+  RunBillingStage,
+} from "@qltysh/fabro-api-client";
 
 const EMPTY_VALUE = "—";
 
@@ -16,6 +20,12 @@ function formatTokens(n: number | null | undefined) {
 
 function formatUsdMicros(usdMicros?: number | null) {
   return usdMicros == null ? EMPTY_VALUE : `$${(usdMicros / 1_000_000).toFixed(2)}`;
+}
+
+function formatModelRef(model?: BillingModelRef | null): string | null {
+  if (!model) return null;
+  const speed = model.speed && model.speed !== "standard" ? ` · ${model.speed}` : "";
+  return `${model.provider}:${model.model_id}${speed}`;
 }
 
 function isInFlight(stage: RunBillingStage): boolean {
@@ -57,7 +67,7 @@ function mapStageRow(stage: RunBillingStage, runtimeSecs: number): MappedStageRo
   const hasModel = stage.model != null;
   return {
     stage:          stage.stage.name,
-    model:          stage.model?.id ?? null,
+    model:          formatModelRef(stage.model),
     inputTokens:    hasModel ? stage.billing.input_tokens : null,
     outputTokens:   hasModel
       ? stage.billing.output_tokens + stage.billing.reasoning_tokens
@@ -88,7 +98,7 @@ export default function RunBilling({ params }: { params: { id: string } }) {
     if (!billing) return [];
     return billing.by_model
       .map((entry) => ({
-        model:          entry.model.id,
+        model:          formatModelRef(entry.model) ?? EMPTY_VALUE,
         stages:         entry.stages,
         inputTokens:    entry.billing.input_tokens,
         outputTokens:   entry.billing.output_tokens + entry.billing.reasoning_tokens,
