@@ -356,10 +356,22 @@ pub struct DaytonaSandboxLayer {
     /// Sticky merge-by-key (provider-native labels).
     #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
     pub labels:             StickyMap<String>,
+    /// Existing Daytona volumes to mount when creating the sandbox.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volumes:            Option<Vec<DaytonaVolumeLayer>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snapshot:           Option<DaytonaSnapshotLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub network:            Option<DaytonaNetworkLayer>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DaytonaVolumeLayer {
+    pub volume_id:  String,
+    pub mount_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subpath:    Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

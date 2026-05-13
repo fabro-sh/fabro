@@ -160,6 +160,22 @@ dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update && apt-get instal
 
 If the snapshot already exists and is in `Active` state, Fabro uses it directly. If it's in `Building` or `Pending` state, Fabro polls with exponential backoff until it's ready.
 
+### Volumes
+
+Mount existing Daytona volumes into each sandbox at creation time:
+
+```toml title="run.toml"
+[run.sandbox]
+provider = "daytona"
+
+[[run.sandbox.daytona.volumes]]
+volume_id = "vol-agent-state"
+mount_path = "/home/daytona/agent-state"
+subpath = "agent-auth"
+```
+
+Fabro does not create or manage Daytona volumes. Create the volume in Daytona first, then reference its `volume_id` from the run config. Use `subpath` when a shared volume should expose only one prefix to the sandbox.
+
 ### Labels
 
 Attach key-value labels to sandboxes for filtering and identification in the Daytona dashboard:

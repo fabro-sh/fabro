@@ -17,7 +17,8 @@ use fabro_graphviz::render::apply_direction;
 use fabro_llm::model_test::{ModelTestStatus, run_basic_model_probe};
 use fabro_model::{Catalog, ProviderId};
 use fabro_sandbox::config::{
-    DaytonaNetwork, DaytonaSnapshotSettings, DockerfileSource as SandboxDockerfileSource,
+    DaytonaNetwork, DaytonaSnapshotSettings, DaytonaVolumeMount,
+    DockerfileSource as SandboxDockerfileSource,
 };
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::redact::redact_auth_url;
@@ -1114,6 +1115,15 @@ fn runtime_daytona_config(settings: &DaytonaSettings, skip_clone: bool) -> Dayto
     DaytonaConfig {
         auto_stop_interval: settings.auto_stop_interval,
         labels: (!settings.labels.is_empty()).then_some(settings.labels.clone()),
+        volumes: settings
+            .volumes
+            .iter()
+            .map(|volume| DaytonaVolumeMount {
+                volume_id:  volume.volume_id.clone(),
+                mount_path: volume.mount_path.clone(),
+                subpath:    volume.subpath.clone(),
+            })
+            .collect(),
         snapshot: settings
             .snapshot
             .as_ref()
@@ -1448,6 +1458,25 @@ enabled = {clone_enabled}
         .run;
 
         (prepared, resolved)
+    }
+
+    #[test]
+    fn runtime_daytona_config_preserves_volume_mounts() {
+        let settings = DaytonaSettings {
+            volumes: vec![fabro_types::settings::run::DaytonaVolumeSettings {
+                volume_id:  "vol_auth".to_string(),
+                mount_path: "/home/daytona/.config".to_string(),
+                subpath:    Some("agents".to_string()),
+            }],
+            ..DaytonaSettings::default()
+        };
+
+        let config = runtime_daytona_config(&settings, false);
+
+        assert_eq!(config.volumes.len(), 1);
+        assert_eq!(config.volumes[0].volume_id, "vol_auth");
+        assert_eq!(config.volumes[0].mount_path, "/home/daytona/.config");
+        assert_eq!(config.volumes[0].subpath.as_deref(), Some("agents"));
     }
 
     #[test]

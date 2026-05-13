@@ -16,10 +16,19 @@ use serde::{Deserialize, Serialize};
 pub struct DaytonaSettings {
     pub auto_stop_interval: Option<i32>,
     pub labels:             Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub volumes:            Vec<DaytonaVolumeMount>,
     pub snapshot:           Option<DaytonaSnapshotSettings>,
     pub network:            Option<DaytonaNetwork>,
     #[serde(default)]
     pub skip_clone:         bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct DaytonaVolumeMount {
+    pub volume_id:  String,
+    pub mount_path: String,
+    pub subpath:    Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

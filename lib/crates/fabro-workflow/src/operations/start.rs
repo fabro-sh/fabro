@@ -8,7 +8,8 @@ use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_model::{AgentProfileKind, Catalog, FallbackTarget, Provider, ProviderId, adapter};
 use fabro_sandbox::config::{
-    DaytonaNetwork, DaytonaSnapshotSettings, DockerfileSource as SandboxDockerfileSource,
+    DaytonaNetwork, DaytonaSnapshotSettings, DaytonaVolumeMount,
+    DockerfileSource as SandboxDockerfileSource,
 };
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::{DockerSandboxOptions, SandboxProvider, SandboxSpec};
@@ -637,6 +638,15 @@ fn runtime_daytona_config(settings: &DaytonaSettings, skip_clone: bool) -> Dayto
     DaytonaConfig {
         auto_stop_interval: settings.auto_stop_interval,
         labels: (!settings.labels.is_empty()).then_some(settings.labels.clone()),
+        volumes: settings
+            .volumes
+            .iter()
+            .map(|volume| DaytonaVolumeMount {
+                volume_id:  volume.volume_id.clone(),
+                mount_path: volume.mount_path.clone(),
+                subpath:    volume.subpath.clone(),
+            })
+            .collect(),
         snapshot: settings
             .snapshot
             .as_ref()
@@ -1074,7 +1084,10 @@ mod tests {
     use std::time::Duration;
 
     use chrono::Utc;
-    use fabro_config::{RunCloneLayer, RunExecutionLayer, RunLayer, WorkflowSettingsBuilder};
+    use fabro_config::{
+        DaytonaSandboxLayer, DaytonaVolumeLayer, RunCloneLayer, RunExecutionLayer, RunLayer,
+        RunSandboxLayer, WorkflowSettingsBuilder,
+    };
     use fabro_model::catalog::LlmCatalogSettings;
     use fabro_store::Database;
     use fabro_types::settings::run::RunMode;
@@ -1144,6 +1157,31 @@ mod tests {
 
         assert!(resolve_docker_config(&settings.run).skip_clone);
         assert!(resolve_daytona_config(&settings.run).skip_clone);
+    }
+
+    #[test]
+    fn runtime_daytona_config_preserves_volume_mounts() {
+        let settings = settings_from_run_layer(RunLayer {
+            sandbox: Some(RunSandboxLayer {
+                daytona: Some(DaytonaSandboxLayer {
+                    volumes: Some(vec![DaytonaVolumeLayer {
+                        volume_id:  "vol_auth".to_string(),
+                        mount_path: "/home/daytona/.config".to_string(),
+                        subpath:    Some("agents".to_string()),
+                    }]),
+                    ..DaytonaSandboxLayer::default()
+                }),
+                ..RunSandboxLayer::default()
+            }),
+            ..RunLayer::default()
+        });
+
+        let config = resolve_daytona_config(&settings.run);
+
+        assert_eq!(config.volumes.len(), 1);
+        assert_eq!(config.volumes[0].volume_id, "vol_auth");
+        assert_eq!(config.volumes[0].mount_path, "/home/daytona/.config");
+        assert_eq!(config.volumes[0].subpath.as_deref(), Some("agents"));
     }
 
     #[test]

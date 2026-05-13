@@ -15,9 +15,9 @@ use super::cli::{CliAuthLayer, CliLoggingLayer, CliTargetLayer};
 use super::features::FeaturesLayer;
 use super::llm::{CostRates, CredentialRef, HeaderValueRef, ReasoningEffortFeature};
 use super::run::{
-    DaytonaSnapshotLayer, HookAgentMarker, HookEntry, HookTlsMode, InterviewProviderLayer,
-    ModelRefOrSplice, NotificationProviderLayer, RunArtifactsLayer, RunCheckpointLayer,
-    RunGoalLayer, RunPrepareLayer, ScmGitHubLayer, StringOrSplice,
+    DaytonaSnapshotLayer, DaytonaVolumeLayer, HookAgentMarker, HookEntry, HookTlsMode,
+    InterviewProviderLayer, ModelRefOrSplice, NotificationProviderLayer, RunArtifactsLayer,
+    RunCheckpointLayer, RunGoalLayer, RunPrepareLayer, ScmGitHubLayer, StringOrSplice,
 };
 use super::server::{
     ObjectStoreLocalLayer, ObjectStoreS3Layer, ServerApiLayer, ServerAuthGithubLayer,
@@ -40,6 +40,12 @@ impl<T: Combine> Combine for Option<T> {
             (Some(this), Some(fallback)) => Some(this.combine(fallback)),
             (this, fallback) => this.or(fallback),
         }
+    }
+}
+
+impl Combine for Option<Vec<DaytonaVolumeLayer>> {
+    fn combine(self, other: Self) -> Self {
+        self.or(other)
     }
 }
 

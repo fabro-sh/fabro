@@ -62,6 +62,36 @@ fn resolves_run_defaults_from_empty_settings() {
 }
 
 #[test]
+fn resolves_daytona_volume_mounts() {
+    let settings = WorkflowSettingsBuilder::from_toml(
+        r#"
+_version = 1
+
+[run.sandbox]
+provider = "daytona"
+
+[[run.sandbox.daytona.volumes]]
+volume_id = "vol_auth"
+mount_path = "/home/daytona/.config"
+subpath = "agents"
+"#,
+    )
+    .expect("daytona volume mount should resolve")
+    .run;
+
+    let daytona = settings
+        .sandbox
+        .daytona
+        .as_ref()
+        .expect("daytona settings should resolve");
+
+    assert_eq!(daytona.volumes.len(), 1);
+    assert_eq!(daytona.volumes[0].volume_id, "vol_auth");
+    assert_eq!(daytona.volumes[0].mount_path, "/home/daytona/.config");
+    assert_eq!(daytona.volumes[0].subpath.as_deref(), Some("agents"));
+}
+
+#[test]
 fn resolves_run_level_clone_branch_controls() {
     let settings = WorkflowSettingsBuilder::from_toml(
         r"
