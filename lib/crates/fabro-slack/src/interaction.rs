@@ -1,12 +1,22 @@
 use fabro_interview::Answer;
 use serde_json::Value;
 
+use crate::blocks::ANSWER_ACTION_ID_PREFIX;
 use crate::payload::{self, SlackActionPayload, SlackAnswerSubmission};
 
 const MULTI_SELECT_BLOCK_ID: &str = "interview.checkboxes";
 const MULTI_SELECT_ACTION_ID: &str = "interview.select";
-const ANSWER_ACTION_ID: &str = "interview.answer";
 const MULTI_SELECT_SUBMIT_ACTION_ID: &str = "interview.submit";
+
+/// Buttons for the same question must each have a unique `action_id`, so the
+/// outbound side stamps `interview.answer.<suffix>` per element. This matches
+/// either the exact prefix (legacy compatibility for messages posted before
+/// the suffix scheme) or the suffixed form (current).
+const ANSWER_ACTION_ID_PREFIX_DOT: &str = "interview.answer.";
+
+fn is_answer_action(action_id: &str) -> bool {
+    action_id == ANSWER_ACTION_ID_PREFIX || action_id.starts_with(ANSWER_ACTION_ID_PREFIX_DOT)
+}
 
 /// Parses a Slack interaction payload and returns a server-routable answer
 /// submission.
@@ -25,7 +35,7 @@ pub fn parse_interaction(payload: &Value) -> Option<SlackAnswerSubmission> {
     let action_type = action["type"].as_str().unwrap_or("button");
 
     let answer = match action_type {
-        "button" if action_id == ANSWER_ACTION_ID => match routed {
+        "button" if is_answer_action(action_id) => match routed {
             SlackActionPayload::Yes { .. } => Answer::yes(),
             SlackActionPayload::No { .. } => Answer::no(),
             SlackActionPayload::Selected { key, .. } => Answer {
@@ -254,5 +264,89 @@ mod tests {
             }]
         });
         assert!(parse_interaction(&payload).is_none());
+    }
+
+    /// Suffixed `action_id`s (per-button uniqueness for Slack) must still
+    /// route to the correct answer.
+    #[test]
+    fn parse_suffixed_yes_action_id() {
+        let payload = serde_json::json!({
+            "type": "block_actions",
+            "team": { "id": "T123" },
+            "user": { "id": "U123", "name": "ada" },
+            "actions": [{
+                "action_id": "interview.answer.yes",
+                "type": "button",
+                "value": "{\"kind\":\"yes\",\"run_id\":\"run-1\",\"qid\":\"q-1\"}"
+            }]
+        });
+        let submission = parse_interaction(&payload).unwrap();
+        assert_eq!(submission.answer.value, AnswerValue::Yes);
+    }
+
+    #[test]
+    fn parse_suffixed_multiple_choice_action_id() {
+        // `interview.answer.<index>` is what `question_to_blocks` now produces
+        // for multiple_choice questions.
+        let payload = serde_json::json!({
+            "type": "block_actions",
+            "team": { "id": "T123" },
+            "user": { "id": "U123", "name": "ada" },
+            "actions": [{
+                "action_id": "interview.answer.2",
+                "type": "button",
+                "value": "{\"kind\":\"selected\",\"run_id\":\"run-1\",\"qid\":\"q-1\",\"key\":\"py\"}"
+            }]
+        });
+        let submission = parse_interaction(&payload).unwrap();
+        assert_eq!(
+            submission.answer.value,
+            AnswerValue::Selected("py".to_string())
+        );
+    }
+
+    /// Legacy `action_id` without a suffix must still parse so messages
+    /// posted by older Fabro builds remain clickable after upgrade.
+    #[test]
+    fn parse_legacy_unsuffixed_action_id() {
+        let payload = serde_json::json!({
+            "type": "block_actions",
+            "team": { "id": "T123" },
+            "user": { "id": "U123", "name": "ada" },
+            "actions": [{
+                "action_id": "interview.answer",
+                "type": "button",
+                "value": "{\"kind\":\"yes\",\"run_id\":\"run-1\",\"qid\":\"q-1\"}"
+            }]
+        });
+        let submission = parse_interaction(&payload).unwrap();
+        assert_eq!(submission.answer.value, AnswerValue::Yes);
+    }
+
+    /// Action ids that merely share a prefix but are not the answer family
+    /// must not be misrouted (no false-positive prefix match).
+    #[test]
+    fn rejects_lookalike_action_id() {
+        let payload = serde_json::json!({
+            "type": "block_actions",
+            "team": { "id": "T123" },
+            "user": { "id": "U123", "name": "ada" },
+            "actions": [{
+                "action_id": "interview.answers.yes",
+                "type": "button",
+                "value": "{\"kind\":\"yes\",\"run_id\":\"run-1\",\"qid\":\"q-1\"}"
+            }]
+        });
+        assert!(parse_interaction(&payload).is_none());
+    }
+
+    /// The dotted prefix constant must stay in sync with the canonical
+    /// prefix so outbound and inbound never drift.
+    #[test]
+    fn dotted_prefix_constant_matches_canonical_prefix() {
+        assert_eq!(
+            ANSWER_ACTION_ID_PREFIX_DOT,
+            format!("{ANSWER_ACTION_ID_PREFIX}.")
+        );
     }
 }

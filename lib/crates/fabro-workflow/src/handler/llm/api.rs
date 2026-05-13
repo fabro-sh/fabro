@@ -243,7 +243,7 @@ fn parse_reasoning_effort(node: &Node, value: &str) -> Result<ReasoningEffort, E
                 "Invalid reasoning_effort \"{value}\" for node \"{}\"; expected one of: low, medium, high, xhigh, max",
                 node.id
             ),
-            &source,
+            source,
         )
     })
 }
@@ -255,7 +255,7 @@ fn parse_speed(node: &Node, value: &str) -> Result<Speed, Error> {
                 "Invalid speed \"{value}\" for node \"{}\"; expected one of: standard, fast",
                 node.id
             ),
-            &source,
+            source,
         )
     })
 }
@@ -570,7 +570,7 @@ impl AgentApiBackend {
             effective_request_controls(catalog.as_ref(), run_model_controls, model, node)?;
         let client = Client::from_source_with_catalog(source, Arc::clone(&catalog))
             .await
-            .map_err(|e| Error::handler_with_source("Failed to create LLM client", &e))?;
+            .map_err(|e| Error::handler_with_source("Failed to create LLM client", e))?;
 
         let mut profile = build_profile(
             model,
@@ -715,7 +715,7 @@ impl CodergenBackend for AgentApiBackend {
         let client =
             Client::from_source_with_catalog(self.source.as_ref(), Arc::clone(&self.catalog))
                 .await
-                .map_err(|e| Error::handler_with_source("Failed to create LLM client", &e))?;
+                .map_err(|e| Error::handler_with_source("Failed to create LLM client", e))?;
 
         let model = node.model().unwrap_or(&self.model);
         let provider = self.resolve_provider_context(model, node.provider())?;

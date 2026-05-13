@@ -454,7 +454,10 @@ fn format_event_pretty_value(envelope: &serde_json::Value, styles: &Styles) -> O
             Some(lines.join("\n"))
         }
         "run.failed" => {
-            let error = prop_str_field(envelope, "error").unwrap_or("unknown error");
+            let error = prop_field(envelope, "failure")
+                .and_then(|failure| failure.get("message"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("unknown error");
             Some(format!(
                 "{} {} {}",
                 styles.dim.apply_to(&ts),
@@ -1260,7 +1263,7 @@ mod tests {
     #[test]
     fn pretty_workflow_run_failed() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"run.failed","properties":{"error":"sandbox timeout"}}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"run.failed","properties":{"failure":{"message":"sandbox timeout","reason":"workflow_error","category":"deterministic"}}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("Failed"), "got: {result}");
         assert!(result.contains("sandbox timeout"), "got: {result}");

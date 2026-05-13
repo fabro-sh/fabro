@@ -169,7 +169,7 @@ pub async fn create_with_catalog(
         )
     })
     .await
-    .map_err(|err| Error::engine_with_source("workflow create task failed", &err))??;
+    .map_err(|err| Error::engine_with_source("workflow create task failed", err))??;
 
     let workflow_config = resolved
         .workflow_toml_path

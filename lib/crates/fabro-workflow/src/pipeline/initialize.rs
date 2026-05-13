@@ -94,12 +94,12 @@ fn build_sandbox_env(
             };
             let https_url = fabro_github::ssh_url_to_https(origin_url);
             let (owner, repo) = fabro_github::parse_github_owner_repo(&https_url)
-                .map_err(|err| Error::engine_with_anyhow("Failed to parse GitHub origin", &err))?;
+                .map_err(|err| Error::engine_with_anyhow("Failed to parse GitHub origin", err))?;
             let permissions = serde_json::to_value(permissions).map_err(|err| {
-                Error::engine_with_source("Failed to serialize GitHub permissions", &err)
+                Error::engine_with_source("Failed to serialize GitHub permissions", err)
             })?;
             let http = fabro_http::http_client()
-                .map_err(|err| Error::engine_with_source("Failed to build HTTP client", &err))?;
+                .map_err(|err| Error::engine_with_source("Failed to build HTTP client", err))?;
             let install_url = app.installation_url(&owner);
             let minter = AppIatMinter::new(
                 app.clone(),
@@ -254,7 +254,7 @@ async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), Error> {
 
     let config = fabro_devcontainer::DevcontainerResolver::resolve(&devcontainer.resolve_dir)
         .await
-        .map_err(|e| Error::engine_with_source("Failed to resolve devcontainer", &e))?;
+        .map_err(|e| Error::engine_with_source("Failed to resolve devcontainer", e))?;
 
     let lifecycle_command_count = config.on_create_commands.len()
         + config.post_create_commands.len()
@@ -291,7 +291,7 @@ async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), Error> {
             .map_err(|e| {
                 Error::engine_with_source(
                     format!("Failed to execute devcontainer initializeCommand: {shell_command}"),
-                    &e,
+                    e,
                 )
             })?;
 
@@ -424,7 +424,7 @@ pub async fn initialize(
             Some(Arc::clone(&sandbox_event_callback)),
         )
         .await
-        .map_err(|err| Error::engine_with_anyhow("Failed to reconnect sandbox for resume", &err))?;
+        .map_err(|err| Error::engine_with_anyhow("Failed to reconnect sandbox for resume", err))?;
         sandbox_initialized = false;
         Arc::new(ReadBeforeWriteSandbox::new(Arc::from(sandbox)))
     } else {
@@ -433,7 +433,7 @@ pub async fn initialize(
                 .sandbox
                 .build(Some(Arc::clone(&sandbox_event_callback)))
                 .await
-                .map_err(|e| Error::engine_with_anyhow("Failed to build sandbox", &e))?,
+                .map_err(|e| Error::engine_with_anyhow("Failed to build sandbox", e))?,
         ))
     };
     let cleanup_guard = (!attach_existing).then(|| {
@@ -450,12 +450,12 @@ pub async fn initialize(
         sandbox
             .start()
             .await
-            .map_err(|e| Error::engine_with_source("Failed to start sandbox", &e))?;
+            .map_err(|e| Error::engine_with_source("Failed to start sandbox", e))?;
     } else {
         sandbox
             .initialize()
             .await
-            .map_err(|e| Error::engine_with_source("Failed to initialize sandbox", &e))?;
+            .map_err(|e| Error::engine_with_source("Failed to initialize sandbox", e))?;
     }
 
     let hook_ctx = HookContext::new(
@@ -541,7 +541,7 @@ pub async fn initialize(
             sandbox_git
                 .ensure_git_available(&*sandbox)
                 .await
-                .map_err(|err| Error::engine_with_source("sandbox git unavailable", &err))?;
+                .map_err(|err| Error::engine_with_source("sandbox git unavailable", err))?;
         }
         match sandbox.setup_git(&intent).await {
             Ok(Some(info)) => {
@@ -578,7 +578,7 @@ pub async fn initialize(
                 }
             }
             Err(e) => {
-                return Err(Error::engine_with_source("Sandbox git setup failed", &e));
+                return Err(Error::engine_with_source("Sandbox git setup failed", e));
             }
         }
     }
@@ -604,7 +604,7 @@ pub async fn initialize(
                     Some(cancel_token.clone()),
                 )
                 .await
-                .map_err(|e| Error::engine_with_source("Setup command failed", &e))?;
+                .map_err(|e| Error::engine_with_source("Setup command failed", e))?;
             if options.run_options.cancel_token.is_cancelled() {
                 return Err(Error::Cancelled);
             }

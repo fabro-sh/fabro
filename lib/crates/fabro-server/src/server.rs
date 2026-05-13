@@ -385,7 +385,7 @@ impl SlackService {
         }
     }
 
-    async fn handle_event(&self, event: &RunEvent) {
+    async fn handle_event(&self, event: &RunEvent, run_web_url: Option<&str>) {
         match &event.body {
             EventBody::InterviewStarted(props) => {
                 if props.question_id.is_empty() {
@@ -415,6 +415,7 @@ impl SlackService {
                     &event.run_id.to_string(),
                     &props.question_id,
                     &question,
+                    run_web_url,
                 );
 
                 if let Ok(posted) = self
@@ -923,7 +924,14 @@ fn start_optional_slack_service(state: &Arc<AppState>) {
         loop {
             match rx.recv().await {
                 Ok(envelope) => {
-                    event_service.handle_event(&envelope.event).await;
+                    // Resolve the run's web URL once per event so the Slack
+                    // message can deep-link back to Fabro. Returns None when
+                    // the web UI is disabled or `server.web.url` is unset, in
+                    // which case `question_to_blocks` simply omits the link.
+                    let run_web_url = event_state.run_web_url(&envelope.event.run_id);
+                    event_service
+                        .handle_event(&envelope.event, run_web_url.as_deref())
+                        .await;
                 }
                 Err(RecvError::Lagged(_)) => {}
                 Err(RecvError::Closed) => break,
@@ -2080,19 +2088,10 @@ pub(crate) async fn reconcile_incomplete_runs_on_startup(
             summary.lifecycle.pending_control,
             "Fabro server restarted before the run reached a terminal state.".to_string(),
         );
-        workflow_event::append_event(
-            &run_store,
-            &summary.id,
-            &workflow_event::Event::WorkflowRunFailed {
-                error,
-                duration_ms: 0,
-                reason,
-                git_commit_sha: None,
-                final_patch: None,
-                diff_summary: None,
-            },
-        )
-        .await?;
+        let failure_event = workflow_event::Event::workflow_run_failed_from_error(
+            &error, 0, reason, None, None, None, None,
+        );
+        workflow_event::append_event(&run_store, &summary.id, &failure_event).await?;
         reconciled += 1;
     }
 
@@ -2134,19 +2133,10 @@ async fn persist_shutdown_run_failures(
             run_state.pending_control,
             "Fabro server shut down before the run reached a terminal state.".to_string(),
         );
-        workflow_event::append_event(
-            &run_store,
-            &run_id,
-            &workflow_event::Event::WorkflowRunFailed {
-                error,
-                duration_ms: 0,
-                reason,
-                git_commit_sha: None,
-                final_patch: None,
-                diff_summary: None,
-            },
-        )
-        .await?;
+        let failure_event = workflow_event::Event::workflow_run_failed_from_error(
+            &error, 0, reason, None, None, None, None,
+        );
+        workflow_event::append_event(&run_store, &run_id, &failure_event).await?;
     }
 
     Ok(())
@@ -2214,19 +2204,16 @@ async fn persist_cancelled_run_status(state: &AppState, run_id: RunId) -> anyhow
         return Ok(());
     }
 
-    workflow_event::append_event(
-        &run_store,
-        &run_id,
-        &workflow_event::Event::WorkflowRunFailed {
-            error:          WorkflowError::Cancelled,
-            duration_ms:    0,
-            reason:         FailureReason::Cancelled,
-            git_commit_sha: None,
-            final_patch:    None,
-            diff_summary:   None,
-        },
-    )
-    .await
+    let failure_event = workflow_event::Event::workflow_run_failed_from_error(
+        &WorkflowError::Cancelled,
+        0,
+        FailureReason::Cancelled,
+        None,
+        None,
+        None,
+        None,
+    );
+    workflow_event::append_event(&run_store, &run_id, &failure_event).await
 }
 
 async fn finish_cancelled_run_before_execution(state: &Arc<AppState>, run_id: RunId) {
@@ -2253,19 +2240,17 @@ async fn fail_run_before_execution(
 ) {
     match state.store.open_run(&run_id).await {
         Ok(run_store) => {
-            if let Err(err) = workflow_event::append_event(
-                &run_store,
-                &run_id,
-                &workflow_event::Event::WorkflowRunFailed {
-                    error: WorkflowError::engine(message.clone()),
-                    duration_ms: 0,
-                    reason,
-                    git_commit_sha: None,
-                    final_patch: None,
-                    diff_summary: None,
-                },
-            )
-            .await
+            let failure_event = workflow_event::Event::workflow_run_failed_from_error(
+                &WorkflowError::engine(message.clone()),
+                0,
+                reason,
+                None,
+                None,
+                None,
+                None,
+            );
+            if let Err(err) =
+                workflow_event::append_event(&run_store, &run_id, &failure_event).await
             {
                 error!(run_id = %run_id, error = %err, "Failed to persist run failure status");
             }
@@ -2425,9 +2410,9 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
         }
         EventBody::RunFailed(props) => {
             managed_run.status = RunStatus::Failed {
-                reason: props.reason,
+                reason: props.failure.reason,
             };
-            managed_run.error = Some(props.error.clone());
+            managed_run.error = Some(props.failure.message.clone());
             managed_run.active_api_stages.clear();
             managed_run.active_non_steerable_agent_stages.clear();
         }
@@ -2538,21 +2523,11 @@ async fn append_worker_exit_failure(
         state.pending_control,
         format!("Worker exited before emitting a terminal run event: {wait_status}"),
     );
+    let failure_event = workflow_event::Event::workflow_run_failed_from_error(
+        &error, 0, reason, None, None, None, None,
+    );
 
-    if let Err(err) = workflow_event::append_event(
-        run_store,
-        &run_id,
-        &workflow_event::Event::WorkflowRunFailed {
-            error,
-            duration_ms: 0,
-            reason,
-            git_commit_sha: None,
-            final_patch: None,
-            diff_summary: None,
-        },
-    )
-    .await
-    {
+    if let Err(err) = workflow_event::append_event(run_store, &run_id, &failure_event).await {
         tracing::warn!(run_id = %run_id, error = %err, "Failed to append worker exit failure");
     }
 }
@@ -3202,25 +3177,18 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         Ok(child) => child,
         Err(err) => {
             tracing::error!(run_id = %run_id, error = %err, "Failed to spawn worker");
-            let _ = workflow_event::append_event(
-                &run_store,
-                &run_id,
-                &workflow_event::Event::WorkflowRunFailed {
-                    error:          WorkflowError::engine(err.to_string()),
-                    duration_ms:    0,
-                    reason:         FailureReason::LaunchFailed,
-                    git_commit_sha: None,
-                    final_patch:    None,
-                    diff_summary:   None,
-                },
-            )
-            .await;
-            fail_managed_run(
-                &state,
-                run_id,
+            let message = format!("Failed to spawn worker: {err}");
+            let failure_event = workflow_event::Event::workflow_run_failed_from_error(
+                &WorkflowError::engine_with_anyhow("Failed to spawn worker", err),
+                0,
                 FailureReason::LaunchFailed,
-                format!("Failed to spawn worker: {err}"),
+                None,
+                None,
+                None,
+                None,
             );
+            let _ = workflow_event::append_event(&run_store, &run_id, &failure_event).await;
+            fail_managed_run(&state, run_id, FailureReason::LaunchFailed, message);
             state.scheduler_notify.notify_one();
             return;
         }
@@ -3230,19 +3198,16 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         let message = "Worker process did not report a PID".to_string();
         tracing::error!(run_id = %run_id, "{message}");
         let _ = child.start_kill();
-        let _ = workflow_event::append_event(
-            &run_store,
-            &run_id,
-            &workflow_event::Event::WorkflowRunFailed {
-                error:          WorkflowError::engine(message.clone()),
-                duration_ms:    0,
-                reason:         FailureReason::LaunchFailed,
-                git_commit_sha: None,
-                final_patch:    None,
-                diff_summary:   None,
-            },
-        )
-        .await;
+        let failure_event = workflow_event::Event::workflow_run_failed_from_error(
+            &WorkflowError::engine(message.clone()),
+            0,
+            FailureReason::LaunchFailed,
+            None,
+            None,
+            None,
+            None,
+        );
+        let _ = workflow_event::append_event(&run_store, &run_id, &failure_event).await;
         fail_managed_run(&state, run_id, FailureReason::LaunchFailed, message);
         state.scheduler_notify.notify_one();
         return;
@@ -3261,19 +3226,16 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         let message = "Worker stdin pipe was unavailable".to_string();
         tracing::error!(run_id = %run_id, "{message}");
         let _ = child.start_kill();
-        let _ = workflow_event::append_event(
-            &run_store,
-            &run_id,
-            &workflow_event::Event::WorkflowRunFailed {
-                error:          WorkflowError::engine(message.clone()),
-                duration_ms:    0,
-                reason:         FailureReason::LaunchFailed,
-                git_commit_sha: None,
-                final_patch:    None,
-                diff_summary:   None,
-            },
-        )
-        .await;
+        let failure_event = workflow_event::Event::workflow_run_failed_from_error(
+            &WorkflowError::engine(message.clone()),
+            0,
+            FailureReason::LaunchFailed,
+            None,
+            None,
+            None,
+            None,
+        );
+        let _ = workflow_event::append_event(&run_store, &run_id, &failure_event).await;
         fail_managed_run(&state, run_id, FailureReason::LaunchFailed, message);
         state.scheduler_notify.notify_one();
         return;
@@ -3283,19 +3245,16 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         let message = "Worker stderr pipe was unavailable".to_string();
         tracing::error!(run_id = %run_id, "{message}");
         let _ = child.start_kill();
-        let _ = workflow_event::append_event(
-            &run_store,
-            &run_id,
-            &workflow_event::Event::WorkflowRunFailed {
-                error:          WorkflowError::engine(message.clone()),
-                duration_ms:    0,
-                reason:         FailureReason::LaunchFailed,
-                git_commit_sha: None,
-                final_patch:    None,
-                diff_summary:   None,
-            },
-        )
-        .await;
+        let failure_event = workflow_event::Event::workflow_run_failed_from_error(
+            &WorkflowError::engine(message.clone()),
+            0,
+            FailureReason::LaunchFailed,
+            None,
+            None,
+            None,
+            None,
+        );
+        let _ = workflow_event::append_event(&run_store, &run_id, &failure_event).await;
         fail_managed_run(&state, run_id, FailureReason::LaunchFailed, message);
         state.scheduler_notify.notify_one();
         return;
@@ -3316,26 +3275,19 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         Ok(status) => status,
         Err(err) => {
             tracing::error!(run_id = %run_id, error = %err, "Failed while waiting on worker");
+            let message = format!("Worker wait failed: {err}");
             let _ = child.start_kill();
-            let _ = workflow_event::append_event(
-                &run_store,
-                &run_id,
-                &workflow_event::Event::WorkflowRunFailed {
-                    error:          WorkflowError::engine(err.to_string()),
-                    duration_ms:    0,
-                    reason:         FailureReason::Terminated,
-                    git_commit_sha: None,
-                    final_patch:    None,
-                    diff_summary:   None,
-                },
-            )
-            .await;
-            fail_managed_run(
-                &state,
-                run_id,
+            let failure_event = workflow_event::Event::workflow_run_failed_from_error(
+                &WorkflowError::engine_with_source("Worker wait failed", err),
+                0,
                 FailureReason::Terminated,
-                format!("Worker wait failed: {err}"),
+                None,
+                None,
+                None,
+                None,
             );
+            let _ = workflow_event::append_event(&run_store, &run_id, &failure_event).await;
+            fail_managed_run(&state, run_id, FailureReason::Terminated, message);
             state.scheduler_notify.notify_one();
             return;
         }
@@ -3408,7 +3360,12 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         managed_run.error = final_state
             .conclusion
             .as_ref()
-            .and_then(|conclusion| conclusion.failure_reason.clone())
+            .and_then(|conclusion| {
+                conclusion
+                    .failure
+                    .as_ref()
+                    .map(|failure| failure.message.clone())
+            })
             .or_else(|| managed_run.error.clone());
         managed_run.checkpoint = final_state.current_checkpoint().cloned();
         managed_run.run_dir = Some(run_dir);

@@ -2,14 +2,14 @@ use std::collections::BTreeMap;
 
 use ::fabro_types::{
     BilledTokenCounts, BlockedReason, CommandTermination, DiffSummary, FailureReason,
-    ForkSourceRef, GitContext, ParallelBranchId, Principal, PullRequestRecord, RunBlobId, RunId,
-    RunNoticeLevel, RunProvenance, SandboxProvider, StageId, SuccessReason,
+    ForkSourceRef, GitContext, ParallelBranchId, Principal, PullRequestRecord, RunBlobId,
+    RunFailure, RunId, RunNoticeLevel, RunProvenance, SandboxProvider, StageId, SuccessReason,
     run_event as fabro_types,
 };
 use fabro_agent::{AgentEvent, SandboxEvent};
 use serde::{Deserialize, Serialize};
 
-use crate::error::Error;
+use crate::error::{Error, run_failure_from_error};
 use crate::outcome::{BilledModelUsage, FailureDetail, Outcome};
 
 /// Events emitted during workflow run execution for observability.
@@ -133,15 +133,16 @@ pub enum Event {
         billing:              Option<BilledTokenCounts>,
     },
     WorkflowRunFailed {
-        error:          Error,
-        duration_ms:    u64,
-        reason:         FailureReason,
+        failure:              RunFailure,
+        duration_ms:          u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        git_commit_sha: Option<String>,
+        final_git_commit_sha: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        final_patch:    Option<String>,
+        final_patch:          Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        diff_summary:   Option<DiffSummary>,
+        diff_summary:         Option<DiffSummary>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        billing:              Option<BilledTokenCounts>,
     },
     RunNotice {
         level:            RunNoticeLevel,
@@ -680,6 +681,26 @@ pub enum Event {
 }
 
 impl Event {
+    #[must_use]
+    pub fn workflow_run_failed_from_error(
+        error: &Error,
+        duration_ms: u64,
+        reason: FailureReason,
+        final_git_commit_sha: Option<String>,
+        final_patch: Option<String>,
+        diff_summary: Option<DiffSummary>,
+        billing: Option<BilledTokenCounts>,
+    ) -> Self {
+        Self::WorkflowRunFailed {
+            failure: run_failure_from_error(error, reason),
+            duration_ms,
+            final_git_commit_sha,
+            final_patch,
+            diff_summary,
+            billing,
+        }
+    }
+
     pub fn pull_request_created(record: &PullRequestRecord, draft: bool) -> Self {
         Self::PullRequestCreated {
             pr_url: record.html_url.clone(),
@@ -781,11 +802,24 @@ impl Event {
                 );
             }
             Self::WorkflowRunFailed {
-                error, duration_ms, ..
+                failure,
+                duration_ms,
+                ..
             } => {
+                let tail =
+                    fabro_types::ExecOutputTail::trace_summary(failure.exec_output_tail.as_ref());
                 error!(
-                    error = %error,
-                    causes = ?error.causes(),
+                    message = %failure.message,
+                    reason = %failure.reason,
+                    category = %failure.category,
+                    system_actor = ?failure.system_actor,
+                    signature = ?failure.signature,
+                    cause_count = failure.causes.len(),
+                    exec_output_tail_present = tail.present,
+                    exec_stdout_tail_bytes = tail.stdout_bytes,
+                    exec_stderr_tail_bytes = tail.stderr_bytes,
+                    exec_stdout_truncated = tail.stdout_truncated,
+                    exec_stderr_truncated = tail.stderr_truncated,
                     duration_ms,
                     "Workflow run failed"
                 );

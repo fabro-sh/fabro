@@ -2391,7 +2391,7 @@ index 1111111..2222222 160000
             timestamp:            chrono::Utc::now(),
             status:               fabro_types::StageOutcome::Succeeded,
             duration_ms:          1,
-            failure_reason:       None,
+            failure:              None,
             final_git_commit_sha: None,
             stages:               Vec::new(),
             billing:              None,

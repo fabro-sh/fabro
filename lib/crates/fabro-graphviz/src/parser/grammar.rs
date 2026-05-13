@@ -1,11 +1,11 @@
 use nom::IResult;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
-use nom::character::complete::{char, multispace0};
+use nom::character::complete::{char, multispace0, one_of};
 use nom::combinator::opt;
 use nom::error::{Error, ParseError};
-use nom::multi::{many0, separated_list0};
-use nom::sequence::{delimited, preceded, tuple};
+use nom::multi::many0;
+use nom::sequence::{delimited, preceded, terminated, tuple};
 
 use crate::parser::ast::{
     AstValue, AttrBlock, DotGraph, EdgeStmt, NodeStmt, Statement, SubgraphStmt,
@@ -19,11 +19,15 @@ fn attr(input: &str) -> IResult<&str, (String, AstValue)> {
     Ok((rest, (k, v)))
 }
 
-/// Parse an attribute block: `[ attr (, attr)* ]`.
+/// Parse an attribute block: `[ attr (sep? attr)* ]` where `sep` is `,` or `;`.
+///
+/// Per the DOT spec, the separator between attributes is optional — whitespace
+/// (including newlines) alone is enough. This accepts comma-separated,
+/// semicolon-separated, and newline-separated attribute lists interchangeably.
 fn attr_block(input: &str) -> IResult<&str, AttrBlock> {
     delimited(
         preceded(ws, char('[')),
-        separated_list0(preceded(ws, char(',')), attr),
+        many0(terminated(attr, opt(preceded(ws, one_of(",;"))))),
         preceded(ws, char(']')),
     )(input)
 }
@@ -188,6 +192,30 @@ mod tests {
         assert_eq!(attrs[0].1, AstValue::Ident("Mdiamond".into()));
         assert_eq!(attrs[1].0, "label");
         assert_eq!(attrs[1].1, AstValue::Str("Start".into()));
+        assert_eq!(rest, "");
+    }
+
+    // Regression test for https://github.com/fabro-sh/fabro/issues/179.
+    // Standard DOT allows newline (or any whitespace) as an attribute separator
+    // inside `[ ... ]`, with commas optional. The multi-line, comma-less form is
+    // what most DOT editors and formatters produce for long attribute lists.
+    #[test]
+    fn parse_attr_block_multiline_without_commas() {
+        let input = "[\n    label=\"Inspect Code\"\n    shape=tab\n    \
+                     prompt=\"@prompts/inspect.md\"\n    class=\"heavy\"\n    \
+                     reasoning_effort=\"high\"\n]";
+        let (rest, attrs) = attr_block(input).unwrap();
+        assert_eq!(attrs.len(), 5);
+        assert_eq!(attrs[0].0, "label");
+        assert_eq!(attrs[0].1, AstValue::Str("Inspect Code".into()));
+        assert_eq!(attrs[1].0, "shape");
+        assert_eq!(attrs[1].1, AstValue::Ident("tab".into()));
+        assert_eq!(attrs[2].0, "prompt");
+        assert_eq!(attrs[2].1, AstValue::Str("@prompts/inspect.md".into()));
+        assert_eq!(attrs[3].0, "class");
+        assert_eq!(attrs[3].1, AstValue::Str("heavy".into()));
+        assert_eq!(attrs[4].0, "reasoning_effort");
+        assert_eq!(attrs[4].1, AstValue::Str("high".into()));
         assert_eq!(rest, "");
     }
 

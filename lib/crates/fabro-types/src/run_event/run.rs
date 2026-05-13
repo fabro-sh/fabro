@@ -3,9 +3,9 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::{BilledTokenCounts, ExecOutputTail, RunNoticeLevel};
-use crate::status::{BlockedReason, FailureReason, SuccessReason};
+use crate::status::{BlockedReason, SuccessReason};
 use crate::{
-    DiffSummary, ForkSourceRef, GitContext, Graph, RunBlobId, RunControlAction, RunId,
+    DiffSummary, ForkSourceRef, GitContext, Graph, RunBlobId, RunControlAction, RunFailure, RunId,
     RunProvenance, WorkflowSettings,
 };
 
@@ -151,19 +151,16 @@ pub struct RunCompletedProps {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunFailedProps {
-    pub error:          String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub causes:         Vec<String>,
-    pub duration_ms:    u64,
-    pub reason:         FailureReason,
+    pub failure:              RunFailure,
+    pub duration_ms:          u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub git_commit_sha: Option<String>,
-    // Optional unified-patch text captured at run end. Additive for back-compat:
-    // pre-change events replay with `final_patch: None` via serde default.
+    pub final_git_commit_sha: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub final_patch:    Option<String>,
+    pub final_patch:          Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diff_summary:   Option<DiffSummary>,
+    pub diff_summary:         Option<DiffSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub billing:              Option<BilledTokenCounts>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

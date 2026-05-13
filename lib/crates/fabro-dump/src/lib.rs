@@ -549,7 +549,7 @@ mod tests {
                 .unwrap(),
             status:               StageOutcome::Succeeded,
             duration_ms:          5,
-            failure_reason:       None,
+            failure:              None,
             final_git_commit_sha: Some("abc123".to_string()),
             stages:               Vec::new(),
             billing:              None,

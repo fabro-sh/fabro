@@ -115,10 +115,10 @@ pub async fn read_json_string_blob(
     let bytes = run_store
         .read_blob(&blob_id)
         .await
-        .map_err(|err| Error::engine_with_anyhow("command log blob read failed", &err))?
+        .map_err(|err| Error::engine_with_anyhow("command log blob read failed", err))?
         .ok_or_else(|| Error::engine(format!("command log blob missing: {blob_id}")))?;
     let text = serde_json::from_slice::<String>(&bytes)
-        .map_err(|err| Error::engine_with_source("command log blob was not a JSON string", &err))?;
+        .map_err(|err| Error::engine_with_source("command log blob was not a JSON string", err))?;
     Ok(Some(text))
 }
 
@@ -154,10 +154,10 @@ async fn remove_if_exists(path: &Path) -> Result<()> {
 async fn write_json_string_blob(run_store: &RunStoreHandle, text: &str) -> Result<String> {
     let value = Value::String(text.to_string());
     let bytes = serde_json::to_vec(&value)
-        .map_err(|err| Error::engine_with_source("command log JSON serialization failed", &err))?;
+        .map_err(|err| Error::engine_with_source("command log JSON serialization failed", err))?;
     let blob_id = run_store
         .write_blob(&bytes)
         .await
-        .map_err(|err| Error::engine_with_anyhow("command log blob write failed", &err))?;
+        .map_err(|err| Error::engine_with_anyhow("command log blob write failed", err))?;
     Ok(format_blob_ref(&blob_id))
 }

@@ -1086,9 +1086,12 @@ mod tests {
             (
                 "run.failed",
                 json!({
-                    "error": "boom",
+                    "failure": {
+                        "message": "boom",
+                        "reason": "workflow_error",
+                        "category": "deterministic"
+                    },
                     "duration_ms": 42,
-                    "reason": "workflow_error",
                     "diff_summary": {
                         "files_changed": 2,
                         "additions": 10,

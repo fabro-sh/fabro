@@ -2,9 +2,9 @@ use fabro_graphviz::Error as GraphvizError;
 use fabro_llm::{Error as LlmError, ProviderErrorKind};
 pub use fabro_types::failure_signature::FailureSignature;
 pub use fabro_types::outcome::FailureCategory;
-use fabro_util::error::{collect_causes, collect_chain, render_with_causes};
+use fabro_types::{FailureReason, RunFailure};
+use fabro_util::error::{SharedError, collect_causes, collect_chain, render_with_causes};
 use fabro_validate::Diagnostic;
-use serde::{Deserialize, Serialize};
 use thiserror::Error as ThisError;
 
 use crate::outcome::{FailureDetail, Outcome, StageOutcome};
@@ -194,8 +194,7 @@ impl FailureSignatureExt for FailureSignature {
     }
 }
 
-#[derive(ThisError, Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+#[derive(ThisError, Debug, Clone)]
 pub enum Error {
     #[error("Parse error: {0}")]
     Parse(String),
@@ -210,16 +209,16 @@ pub enum Error {
     Engine {
         message:       String,
         failure_class: FailureCategory,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        causes:        Vec<String>,
+        #[source]
+        source:        Option<SharedError>,
     },
 
     #[error("Handler error: {message}")]
     Handler {
         message:       String,
         failure_class: FailureCategory,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        causes:        Vec<String>,
+        #[source]
+        source:        Option<SharedError>,
     },
 
     #[error("LLM error: {0}")]
@@ -256,27 +255,28 @@ impl Error {
         Self::Handler {
             message,
             failure_class,
-            causes: Vec::new(),
+            source: None,
         }
     }
 
     pub fn handler_with_source(
         message: impl Into<String>,
-        source: &(dyn std::error::Error + 'static),
+        source: impl Into<anyhow::Error>,
     ) -> Self {
         let message = message.into();
-        let causes = collect_chain(source);
+        let source = SharedError::new(source.into());
+        let causes = collect_chain(&source);
         let rendered = render_with_causes(&message, &causes);
         let failure_class = classify_failure_reason(&rendered);
         Self::Handler {
             message,
             failure_class,
-            causes,
+            source: Some(source),
         }
     }
 
-    pub fn handler_with_anyhow(message: impl Into<String>, source: &anyhow::Error) -> Self {
-        Self::handler_with_source(message, source.as_ref())
+    pub fn handler_with_anyhow(message: impl Into<String>, source: anyhow::Error) -> Self {
+        Self::handler_with_source(message, source)
     }
 
     /// Smart constructor for Engine errors. Classifies the failure reason
@@ -287,33 +287,36 @@ impl Error {
         Self::Engine {
             message,
             failure_class,
-            causes: Vec::new(),
+            source: None,
         }
     }
 
     pub fn engine_with_source(
         message: impl Into<String>,
-        source: &(dyn std::error::Error + 'static),
+        source: impl Into<anyhow::Error>,
     ) -> Self {
         let message = message.into();
-        let causes = collect_chain(source);
+        let source = SharedError::new(source.into());
+        let causes = collect_chain(&source);
         let rendered = render_with_causes(&message, &causes);
         let failure_class = classify_failure_reason(&rendered);
         Self::Engine {
             message,
             failure_class,
-            causes,
+            source: Some(source),
         }
     }
 
-    pub fn engine_with_anyhow(message: impl Into<String>, source: &anyhow::Error) -> Self {
-        Self::engine_with_source(message, source.as_ref())
+    pub fn engine_with_anyhow(message: impl Into<String>, source: anyhow::Error) -> Self {
+        Self::engine_with_source(message, source)
     }
 
     #[must_use]
     pub fn causes(&self) -> Vec<String> {
         match self {
-            Self::Engine { causes, .. } | Self::Handler { causes, .. } => causes.clone(),
+            Self::Engine { source, .. } | Self::Handler { source, .. } => source
+                .as_ref()
+                .map_or_else(Vec::new, |source| collect_chain(source)),
             Self::Llm(err) => collect_causes(err),
             _ => Vec::new(),
         }
@@ -396,6 +399,39 @@ impl Error {
     }
 }
 
+#[must_use]
+pub fn run_failure_from_error(error: &Error, reason: FailureReason) -> RunFailure {
+    let message = match error {
+        Error::Engine { message, .. } | Error::Handler { message, .. } => message.clone(),
+        _ => error.to_string(),
+    };
+    RunFailure {
+        message,
+        causes: error.causes(),
+        reason,
+        category: error.failure_category(),
+        system_actor: None,
+        signature: error.failure_signature_hint().map(FailureSignature),
+        exec_output_tail: fabro_sandbox::default_redacted_output_tail(error),
+    }
+}
+
+#[must_use]
+pub fn run_failure_from_outcome_failure(
+    failure: &FailureDetail,
+    reason: FailureReason,
+) -> RunFailure {
+    RunFailure {
+        message: failure.message.clone(),
+        causes: Vec::new(),
+        reason,
+        category: failure.category,
+        system_actor: failure.system_actor,
+        signature: failure.signature.clone().map(FailureSignature),
+        exec_output_tail: None,
+    }
+}
+
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
         Self::Io(err.to_string())
@@ -431,13 +467,15 @@ impl From<fabro_validate::ValidationError> for Error {
 
 impl From<fabro_checkpoint::MetadataError> for Error {
     fn from(err: fabro_checkpoint::MetadataError) -> Self {
-        let message = err.to_string();
         match err {
-            fabro_checkpoint::MetadataError::Deserialize {
+            err @ fabro_checkpoint::MetadataError::Deserialize {
                 entity: "checkpoint",
                 ..
-            } => Self::Checkpoint(message),
-            _ => Self::engine(message),
+            } => Self::Checkpoint(err.to_string()),
+            err => {
+                let message = err.to_string();
+                Self::engine_with_source(message, err)
+            }
         }
     }
 }
@@ -520,7 +558,7 @@ mod tests {
             message: "Failed to pull Docker image buildpack-deps:noble",
             source:  TestCause("connection refused"),
         };
-        let err = Error::engine_with_source("Failed to initialize sandbox", &source);
+        let err = Error::engine_with_source("Failed to initialize sandbox", source);
 
         assert_eq!(
             err.to_string(),
@@ -1707,14 +1745,10 @@ mod tests {
     }
 
     #[test]
-    fn handler_eager_classification_roundtrip() {
+    fn handler_eager_classification_survives_clone() {
         let err = Error::handler("connection refused");
-        let json = serde_json::to_string(&err).unwrap();
-        let deserialized: Error = serde_json::from_str(&json).unwrap();
-        assert_eq!(
-            deserialized.failure_category(),
-            FailureCategory::TransientInfra
-        );
+        let cloned = err.clone();
+        assert_eq!(cloned.failure_category(), FailureCategory::TransientInfra);
     }
 
     #[test]
@@ -1730,7 +1764,7 @@ mod tests {
     }
 
     #[test]
-    fn arc_error_serde_roundtrip_all_variants() {
+    fn error_clone_preserves_display_for_all_variants() {
         let errors: Vec<Error> = vec![
             Error::Parse("bad".into()),
             Error::Validation("bad".into()),
@@ -1755,10 +1789,8 @@ mod tests {
             Error::Io("io err".into()),
             Error::Cancelled,
         ];
-        for err in &errors {
-            let json = serde_json::to_string(err).unwrap();
-            let deserialized: Error = serde_json::from_str(&json).unwrap();
-            assert_eq!(err.to_string(), deserialized.to_string());
+        for err in errors {
+            assert_eq!(err.to_string(), err.clone().to_string());
         }
     }
 
@@ -1876,27 +1908,14 @@ mod tests {
     }
 
     #[test]
-    fn e2e_serde_stability_arc_error() {
+    fn e2e_run_failure_projection_uses_handler_error_shape() {
         let err = Error::handler("connection refused");
-        let json = serde_json::to_string(&err).unwrap();
-        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let failure = run_failure_from_error(&err, FailureReason::WorkflowError);
 
-        // Verify wire format
-        assert_eq!(v["type"], "handler");
-        assert!(
-            v["data"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("connection refused")
-        );
-        assert_eq!(v["data"]["failure_class"], "transient_infra");
-
-        // Round-trip
-        let deserialized: Error = serde_json::from_str(&json).unwrap();
-        assert_eq!(
-            deserialized.failure_category(),
-            FailureCategory::TransientInfra
-        );
+        assert_eq!(failure.message, "connection refused");
+        assert_eq!(failure.causes, Vec::<String>::new());
+        assert_eq!(failure.reason, FailureReason::WorkflowError);
+        assert_eq!(failure.category, FailureCategory::TransientInfra);
     }
 
     #[test]

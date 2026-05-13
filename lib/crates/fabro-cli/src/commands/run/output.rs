@@ -7,6 +7,7 @@ use cli_table::{Cell, CellStruct, Style, Table};
 use fabro_api::types;
 use fabro_types::{PullRequestRecord, RunBlobId, RunId, parse_blob_ref};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
+use fabro_util::error::render_with_causes;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_util::text::strip_goal_decoration;
@@ -242,8 +243,9 @@ pub(crate) fn print_run_conclusion(
         }
     }
 
-    if let Some(ref failure) = conclusion.failure_reason {
-        fabro_util::printerr!(printer, "Failure:   {}", styles.red.apply_to(failure));
+    if let Some(ref failure) = conclusion.failure {
+        let rendered = render_with_causes(&failure.message, &failure.causes);
+        fabro_util::printerr!(printer, "Failure:   {}", styles.red.apply_to(rendered));
     }
 
     if pushed_branch.is_some() || pr_url.is_some() {

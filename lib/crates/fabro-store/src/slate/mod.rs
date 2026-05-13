@@ -724,9 +724,12 @@ mod tests {
             "2026-03-27T12:00:07Z",
             "run.failed",
             &serde_json::json!({
-                "error": "cancelled",
+                "failure": {
+                    "message": "cancelled",
+                    "reason": "cancelled",
+                    "category": "canceled"
+                },
                 "duration_ms": 1,
-                "reason": "cancelled",
             }),
         ))
         .await
@@ -1122,9 +1125,12 @@ mod tests {
             "2026-03-27T12:00:04Z",
             "run.failed",
             &serde_json::json!({
-                "error": "workflow failed",
+                "failure": {
+                    "message": "workflow failed",
+                    "reason": "workflow_error",
+                    "category": "deterministic"
+                },
                 "duration_ms": 1,
-                "reason": "workflow_error",
             }),
         ))
         .await
