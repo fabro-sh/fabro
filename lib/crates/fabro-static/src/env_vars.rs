@@ -10,6 +10,7 @@ impl EnvVars {
     pub const FABRO_BUILD_DATE: &'static str = "FABRO_BUILD_DATE";
     pub const FABRO_BUILD_PROFILE: &'static str = "FABRO_BUILD_PROFILE";
     pub const FABRO_BUILD_PROFILE_SUFFIX: &'static str = "FABRO_BUILD_PROFILE_SUFFIX";
+    pub const FABRO_CLI_TRUST_HOST_AUTH: &'static str = "FABRO_CLI_TRUST_HOST_AUTH";
     pub const FABRO_CONFIG: &'static str = "FABRO_CONFIG";
     pub const FABRO_DEBUG: &'static str = "FABRO_DEBUG";
     pub const FABRO_DEV_TOKEN: &'static str = "FABRO_DEV_TOKEN";
@@ -151,6 +152,7 @@ mod tests {
             EnvVars::FABRO_BUILD_DATE,
             EnvVars::FABRO_BUILD_PROFILE,
             EnvVars::FABRO_BUILD_PROFILE_SUFFIX,
+            EnvVars::FABRO_CLI_TRUST_HOST_AUTH,
             EnvVars::FABRO_CONFIG,
             EnvVars::FABRO_DEBUG,
             EnvVars::FABRO_DEV_TOKEN,

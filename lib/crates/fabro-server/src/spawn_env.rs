@@ -13,6 +13,7 @@ const WORKER_ENV_ALLOWLIST: &[&str] = &[
     EnvVars::FABRO_LOG,
     EnvVars::FABRO_HOME,
     EnvVars::FABRO_STORAGE_ROOT,
+    EnvVars::FABRO_CLI_TRUST_HOST_AUTH,
     EnvVars::TERM,
     EnvVars::NO_COLOR,
     EnvVars::CLICOLOR,
