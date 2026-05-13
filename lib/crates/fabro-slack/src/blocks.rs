@@ -4,10 +4,22 @@ use serde_json::{Value, json};
 
 use crate::payload::{SlackActionPayload, encode_action_value};
 
-const ANSWER_ACTION_ID: &str = "interview.answer";
+pub(crate) const ANSWER_ACTION_ID_PREFIX: &str = "interview.answer";
 const MULTI_SELECT_BLOCK_ID: &str = "interview.checkboxes";
 const MULTI_SELECT_ACTION_ID: &str = "interview.select";
 const MULTI_SELECT_SUBMIT_ACTION_ID: &str = "interview.submit";
+
+/// Build a Slack-unique `action_id` for an interview button.
+///
+/// Slack requires `action_id`s to be unique within a single message and caps
+/// them at 255 characters. The selected option is carried in the button
+/// `value` payload, so the `action_id` only needs to be unique — it doesn't
+/// have to encode the selection. Suffixes are short, fixed-shape tokens
+/// (`yes`, `no`, or the option index) to avoid any character-set or length
+/// concerns when option keys are author-supplied.
+fn answer_action_id(suffix: &str) -> String {
+    format!("{ANSWER_ACTION_ID_PREFIX}.{suffix}")
+}
 
 fn text_block(text: &str) -> Value {
     json!({
@@ -48,11 +60,11 @@ pub fn question_to_blocks(run_id: &str, question_id: &str, question: &Question) 
                     button("Yes", &encode_action_value(&SlackActionPayload::Yes {
                         run_id: run_id.to_string(),
                         qid: question_id.to_string(),
-                    }), ANSWER_ACTION_ID),
+                    }), &answer_action_id("yes")),
                     button("No", &encode_action_value(&SlackActionPayload::No {
                         run_id: run_id.to_string(),
                         qid: question_id.to_string(),
-                    }), ANSWER_ACTION_ID),
+                    }), &answer_action_id("no")),
                 ]
             });
             vec![section, actions]
@@ -61,7 +73,8 @@ pub fn question_to_blocks(run_id: &str, question_id: &str, question: &Question) 
             let elements: Vec<Value> = question
                 .options
                 .iter()
-                .map(|opt| {
+                .enumerate()
+                .map(|(idx, opt)| {
                     button(
                         &opt.label,
                         &encode_action_value(&SlackActionPayload::Selected {
@@ -69,7 +82,7 @@ pub fn question_to_blocks(run_id: &str, question_id: &str, question: &Question) 
                             qid:    question_id.to_string(),
                             key:    opt.key.clone(),
                         }),
-                        ANSWER_ACTION_ID,
+                        &answer_action_id(&idx.to_string()),
                     )
                 })
                 .collect();
@@ -185,7 +198,23 @@ mod tests {
         let elements = actions["elements"].as_array().unwrap();
         assert_eq!(elements.len(), 3);
         assert_eq!(elements[0]["text"]["text"], "Rust");
-        assert_eq!(elements[0]["action_id"], ANSWER_ACTION_ID);
+        assert_eq!(elements[0]["action_id"], "interview.answer.0");
+        assert_eq!(elements[1]["action_id"], "interview.answer.1");
+        assert_eq!(elements[2]["action_id"], "interview.answer.2");
+        // Slack requires action_id to be unique within a message.
+        let ids: std::collections::HashSet<&str> = elements
+            .iter()
+            .map(|e| e["action_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids.len(), elements.len());
+        // The option key remains in the button `value` payload so the server
+        // can still route the answer regardless of suffix scheme.
+        assert!(
+            elements[0]["value"]
+                .as_str()
+                .unwrap()
+                .contains("\"key\":\"rs\"")
+        );
         assert!(
             elements[0]["value"]
                 .as_str()
@@ -217,7 +246,9 @@ mod tests {
 
         let actions = &blocks_json[1];
         let elements = actions["elements"].as_array().unwrap();
-        assert_eq!(elements[0]["action_id"], ANSWER_ACTION_ID);
+        assert_eq!(elements[0]["action_id"], "interview.answer.yes");
+        assert_eq!(elements[1]["action_id"], "interview.answer.no");
+        assert_ne!(elements[0]["action_id"], elements[1]["action_id"]);
         let value = elements[0]["value"].as_str().unwrap();
         assert!(value.contains("\"run_id\":\"run-7\""));
         assert!(value.contains("\"qid\":\"q-7\""));

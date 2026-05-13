@@ -225,7 +225,7 @@ mod tests {
                 "team": { "id": "T123" },
                 "user": { "id": "U123", "name": "ada" },
                 "actions": [{
-                    "action_id": "interview.answer",
+                    "action_id": "interview.answer.yes",
                     "type": "button",
                     "value": "{\"kind\":\"yes\",\"run_id\":\"run-1\",\"qid\":\"q-1\"}"
                 }]
