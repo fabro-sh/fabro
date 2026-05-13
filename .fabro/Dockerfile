@@ -1,0 +1,61 @@
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 \
+        xvfb xfce4 xfce4-terminal x11vnc novnc dbus-x11 \
+        libx11-6 libxrandr2 libxext6 libxrender1 libxfixes3 libxss1 libxtst6 libxi6 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install real Chromium (not the snap stub) via xtradeb PPA
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        software-properties-common curl gnupg \
+    && add-apt-repository -y ppa:xtradeb/apps \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends chromium \
+    && rm -rf /var/lib/apt/lists/*
+
+# Wrapper: Chromium needs --no-sandbox when running as root in a container,
+# and --disable-dev-shm-usage avoids crashes from small /dev/shm
+RUN printf '#!/bin/bash\nexec /usr/bin/chromium --no-sandbox --disable-dev-shm-usage "$@"\n' \
+        > /usr/local/bin/chromium-wrapper \
+    && chmod +x /usr/local/bin/chromium-wrapper
+
+# Make the wrapper the default in the system .desktop file and via alternatives
+RUN sed -i 's|^Exec=.*|Exec=/usr/local/bin/chromium-wrapper %U|' \
+        /usr/share/applications/chromium.desktop \
+    && update-alternatives --install /usr/bin/x-www-browser x-www-browser \
+        /usr/local/bin/chromium-wrapper 100
+
+# Tell XFCE's exo-open that Chromium is the WebBrowser helper (system-wide)
+RUN mkdir -p /etc/xdg/xfce4 /usr/share/xfce4/helpers \
+    && printf 'WebBrowser=custom-WebBrowser\n' > /etc/xdg/xfce4/helpers.rc \
+    && printf '[Desktop Entry]\n\
+Version=1.0\n\
+Type=X-XFCE-Helper\n\
+Name=Chromium\n\
+Icon=chromium\n\
+X-XFCE-Category=WebBrowser\n\
+X-XFCE-CommandsWithParameter=/usr/local/bin/chromium-wrapper "%%s"\n\
+X-XFCE-Commands=/usr/local/bin/chromium-wrapper\n' \
+        > /usr/share/xfce4/helpers/custom-WebBrowser.desktop
+
+# GitHub CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN rustup toolchain install nightly-2026-04-14 --profile minimal --component clippy,rustfmt
+RUN cargo install cargo-nextest --locked
+ENV CARGO_INCREMENTAL=0
+
+# Bun
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:${PATH}"
+
+WORKDIR /root

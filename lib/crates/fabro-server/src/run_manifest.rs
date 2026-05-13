@@ -110,7 +110,16 @@ pub(crate) fn prepare_manifest(
         .filter(|config| config.type_ == types::ManifestConfigType::Project)
     {
         if let Some(source) = config.source.as_deref() {
-            workflow_settings_builder = workflow_settings_builder.project_toml(source)?;
+            let mut run = parse_run_layer_from_settings_toml(source)
+                .context("Failed to parse project config TOML")?;
+            if run_has_path_dockerfile(&run) {
+                let config_path = manifest_project_config_path(config, &cwd)?;
+                resolve_manifest_dockerfile(&mut run, &config_path, &workflow_input.files)?;
+                workflow_settings_builder =
+                    workflow_settings_builder.project_toml_with_run_layer(source, run)?;
+            } else {
+                workflow_settings_builder = workflow_settings_builder.project_toml(source)?;
+            }
         }
     }
     for config in manifest
@@ -413,6 +422,34 @@ fn resolve_manifest_dockerfile(
         .ok_or_else(|| anyhow!("missing bundled dockerfile: {manifest_path}"))?;
     *source = DaytonaDockerfileLayer::Inline(content);
     Ok(())
+}
+
+fn run_has_path_dockerfile(run: &RunLayer) -> bool {
+    matches!(
+        run.sandbox
+            .as_ref()
+            .and_then(|sandbox| sandbox.daytona.as_ref())
+            .and_then(|daytona| daytona.snapshot.as_ref())
+            .and_then(|snapshot| snapshot.dockerfile.as_ref()),
+        Some(DaytonaDockerfileLayer::Path { .. })
+    )
+}
+
+fn manifest_project_config_path(
+    config: &types::ManifestConfig,
+    cwd: &Path,
+) -> Result<ManifestPath> {
+    let path = config
+        .path
+        .as_deref()
+        .ok_or_else(|| anyhow!("invalid manifest project config path: missing path"))?;
+    let path_ref = Path::new(path);
+    let manifest_path = if path_ref.is_absolute() {
+        ManifestPath::from_absolute(path_ref, cwd)
+    } else {
+        ManifestPath::from_wire(path)
+    };
+    manifest_path.ok_or_else(|| anyhow!("invalid manifest project config path: {path}"))
 }
 
 async fn build_preflight_report(
@@ -1400,6 +1437,92 @@ enabled = {clone_enabled}
         .run;
 
         (prepared, resolved)
+    }
+
+    #[test]
+    fn prepare_manifest_inlines_project_config_daytona_dockerfile_from_bundle() {
+        let mut manifest = minimal_manifest();
+        manifest.configs.push(types::ManifestConfig {
+            path:   Some(".fabro/project.toml".to_string()),
+            source: Some(
+                r#"_version = 1
+
+[run.sandbox]
+provider = "daytona"
+
+[run.sandbox.daytona.snapshot]
+name = "fabro-test"
+dockerfile = { path = "Dockerfile" }
+"#
+                .to_string(),
+            ),
+            type_:  types::ManifestConfigType::Project,
+        });
+        manifest
+            .workflows
+            .get_mut("workflow.fabro")
+            .unwrap()
+            .files
+            .insert(".fabro/Dockerfile".to_string(), types::ManifestFileEntry {
+                content: "FROM ubuntu:24.04\n".to_string(),
+                ref_:    types::ManifestFileRef {
+                    from:     Some(".fabro/project.toml".to_string()),
+                    original: "Dockerfile".to_string(),
+                    type_:    types::ManifestFileRefType::Dockerfile,
+                },
+            });
+
+        let prepared = prepare_manifest(
+            &manifest_run_defaults(Some(&default_settings_fixture())),
+            &manifest,
+        )
+        .unwrap();
+
+        let dockerfile = prepared
+            .settings
+            .run
+            .sandbox
+            .daytona
+            .as_ref()
+            .and_then(|daytona| daytona.snapshot.as_ref())
+            .and_then(|snapshot| snapshot.dockerfile.as_ref())
+            .expect("project Dockerfile should resolve");
+        match dockerfile {
+            DockerfileSource::Inline(value) => assert_eq!(value, "FROM ubuntu:24.04\n"),
+            DockerfileSource::Path { path } => {
+                panic!("project Dockerfile should be inline, got path {path}")
+            }
+        }
+    }
+
+    #[test]
+    fn prepare_manifest_errors_when_project_config_dockerfile_bundle_is_missing() {
+        let mut manifest = minimal_manifest();
+        manifest.configs.push(types::ManifestConfig {
+            path:   Some(".fabro/project.toml".to_string()),
+            source: Some(
+                r#"_version = 1
+
+[run.sandbox.daytona.snapshot]
+name = "fabro-test"
+dockerfile = { path = "Dockerfile" }
+"#
+                .to_string(),
+            ),
+            type_:  types::ManifestConfigType::Project,
+        });
+
+        let Err(err) = prepare_manifest(
+            &manifest_run_defaults(Some(&default_settings_fixture())),
+            &manifest,
+        ) else {
+            panic!("missing bundled Dockerfile should fail");
+        };
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("missing bundled dockerfile"),
+            "expected missing bundled dockerfile error, got: {message}"
+        );
     }
 
     #[tokio::test]
