@@ -4,17 +4,15 @@ Thanks for your interest in contributing to Fabro!
 
 ## How to contribute
 
-Fabro uses an **issue-based contribution model**. Instead of accepting outside pull requests, we accept bug reports and feature requests as GitHub Issues.
+Outside contributions are welcome! Whether it's a bug fix, a new feature, documentation, or a typo -- we'd love your help making Fabro better.
 
-1. **Open an issue** -- File an issue on [GitHub Issues](https://github.com/fabro-sh/fabro/issues) with a bug report or feature request. The more detail your issue contains, the easier it will be for us to address it quickly and successfully.
-2. **We build it** -- A Fabro maintainer will follow our software development process to create a patch, supervising AI coding agents and workflows.
-3. **You get credit** -- We will include you as a co-author on the commit which lands the change.
-
-See the [README](README.md#contributing-to-fabro) for more on why we use this model.
+- **Bug fixes and small improvements** -- Send a pull request directly. No need to open an issue first.
+- **Larger features or changes** -- Please open a [GitHub Issue](https://github.com/fabro-sh/fabro/issues) or start a [Discussion](https://github.com/fabro-sh/fabro/discussions) first so we can align on the approach before you invest significant time.
+- **Questions** -- Open a Discussion or email [bryan@qlty.sh](mailto:bryan@qlty.sh).
 
 ## Development setup
 
-If you are maintaining a fork, the instructions below will help you build and test locally.
+The instructions below will help you build and test Fabro locally.
 
 ### Prerequisites
 
