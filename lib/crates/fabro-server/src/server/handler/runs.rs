@@ -405,7 +405,7 @@ async fn create_run(
     let catalog = state.catalog();
     let configured_providers = state
         .llm_source
-        .configured_providers_for_catalog(catalog.as_ref())
+        .configured_providers(catalog.as_ref())
         .await;
     let mut create_input =
         run_manifest::create_run_input(prepared.clone(), configured_providers, web_url.clone());
@@ -423,7 +423,7 @@ async fn create_run(
             .into_response();
         }
     };
-    let created = match Box::pin(operations::create_with_catalog(
+    let created = match Box::pin(operations::create(
         state.store.as_ref(),
         create_input,
         storage_root,

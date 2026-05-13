@@ -488,7 +488,7 @@ async fn configured_providers_for_start(
         )),
         None => Arc::new(EnvCredentialSource::new()),
     };
-    source.configured_providers_for_catalog(catalog).await
+    source.configured_providers(catalog).await
 }
 
 fn profile_provider_for_custom_provider(profile_kind: AgentProfileKind, adapter: &str) -> Provider {
@@ -1126,6 +1126,13 @@ mod tests {
             .expect("settings should resolve")
     }
 
+    fn test_catalog() -> Arc<Catalog> {
+        Arc::new(
+            Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
+                .expect("default catalog should build"),
+        )
+    }
+
     #[test]
     fn runtime_clone_config_uses_run_level_clone_policy() {
         let settings = settings_from_run_layer(RunLayer {
@@ -1205,6 +1212,7 @@ mod tests {
                 web_url: None,
             },
             storage_root.to_path_buf(),
+            test_catalog(),
         )
         .await
         .unwrap();
@@ -1239,10 +1247,7 @@ mod tests {
             github_app: None,
             github_permissions: HashMap::new(),
             vault: None,
-            catalog: Arc::new(
-                Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-                    .expect("default catalog should build"),
-            ),
+            catalog: test_catalog(),
             on_node: None,
             registry_override: Some(registry),
         }
@@ -1398,6 +1403,7 @@ mod tests {
                 web_url: None,
             },
             storage_root,
+            test_catalog(),
         )
         .await
         .unwrap();

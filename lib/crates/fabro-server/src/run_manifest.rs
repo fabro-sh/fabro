@@ -477,7 +477,7 @@ async fn build_preflight_report(
     let catalog = state.catalog();
     let configured_providers = state
         .llm_source
-        .configured_providers_for_catalog(catalog.as_ref())
+        .configured_providers(catalog.as_ref())
         .await;
     let materialized = materialize_run(
         prepared.settings.clone(),

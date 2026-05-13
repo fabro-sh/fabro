@@ -351,7 +351,7 @@ pub async fn build_pr_content(
     conclusion: Option<&Conclusion>,
     run_state: Option<&RunProjection>,
 ) -> Result<PrContent, String> {
-    let client = Client::from_source_with_catalog(llm_source, Arc::clone(&catalog))
+    let client = Client::from_source(llm_source, Arc::clone(&catalog))
         .await
         .map_err(|e| format!("Failed to create LLM client: {e}"))?;
 

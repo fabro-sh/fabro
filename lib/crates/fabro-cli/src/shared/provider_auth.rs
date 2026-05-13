@@ -90,8 +90,8 @@ pub(crate) async fn validate_api_key(
     api_key: &str,
     catalog: Arc<Catalog>,
 ) -> Result<()> {
-    let client = LlmClient::from_credentials_with_catalog(
-        vec![ApiCredential::from_api_key_for_catalog(
+    let client = LlmClient::from_credentials(
+        vec![ApiCredential::from_api_key(
             provider,
             api_key.to_string(),
             catalog.as_ref(),

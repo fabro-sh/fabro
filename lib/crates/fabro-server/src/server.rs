@@ -870,10 +870,10 @@ async fn resolve_llm_client_from_source(
     catalog: Arc<Catalog>,
 ) -> anyhow::Result<LlmClientResult> {
     let resolved = source
-        .resolve_for_catalog(catalog.as_ref())
+        .resolve(catalog.as_ref())
         .await
         .context("resolving LLM credentials")?;
-    let client = LlmClient::from_credentials_with_catalog(resolved.credentials, catalog)
+    let client = LlmClient::from_credentials(resolved.credentials, catalog)
         .await
         .context("creating LLM client")?;
 

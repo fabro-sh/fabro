@@ -191,6 +191,7 @@ async fn build_registry(
                     || AgentAcpBackend::new_from_env(model.clone(), provider),
                     |resolver| AgentAcpBackend::new(model.clone(), provider, resolver),
                 )
+                .with_catalog(Arc::clone(&catalog_for_api))
                 .with_tool_env_provider(tool_env_provider.clone(), github_token_refresh_managed);
             Some(Box::new(BackendRouter::new(Box::new(api), cli, acp)))
         }))
@@ -200,7 +201,7 @@ async fn build_registry(
         return Ok((build_llm_registry(), false));
     }
 
-    match llm_source.resolve_for_catalog(catalog.as_ref()).await {
+    match llm_source.resolve(catalog.as_ref()).await {
         Ok(result) if result.credentials.is_empty() => {
             if graph_needs_llm {
                 let detail = (!result.auth_issues.is_empty()).then(|| {
@@ -1009,7 +1010,7 @@ mod tests {
                 .engine
                 .run
                 .llm_source
-                .resolve()
+                .resolve(&initialized.engine.run.catalog)
                 .await
                 .unwrap()
                 .credentials

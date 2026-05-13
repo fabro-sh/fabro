@@ -19,6 +19,7 @@ The `fabro-agent` crate provides a session-based AI agent that runs an LLM with 
 fabro-auth = { git = "https://github.com/fabro-sh/fabro" }
 fabro-agent = { git = "https://github.com/fabro-sh/fabro" }
 fabro-llm = { git = "https://github.com/fabro-sh/fabro" }
+fabro-model = { git = "https://github.com/fabro-sh/fabro" }
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -30,13 +31,16 @@ use fabro_agent::{
 };
 use fabro_auth::EnvCredentialSource;
 use fabro_llm::client::Client;
+use fabro_model::catalog::LlmCatalogSettings;
+use fabro_model::Catalog;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let source = EnvCredentialSource::new();
-    let client = Client::from_source(&source).await?.as_ref().clone();
+    let catalog = Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())?);
+    let client = Client::from_source(&source, Arc::clone(&catalog)).await?;
     let sandbox = Arc::new(LocalSandbox::new(PathBuf::from(".")));
     let profile = Arc::new(AnthropicProfile::new("claude-sonnet-4-5"));
     let config = SessionOptions::default();
@@ -304,23 +308,28 @@ You can use it independently of Fabro's workflow engine — add it as a dependen
 [dependencies]
 fabro-auth = { git = "https://github.com/fabro-sh/fabro" }
 fabro-llm = { git = "https://github.com/fabro-sh/fabro" }
+fabro-model = { git = "https://github.com/fabro-sh/fabro" }
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
 ```
 
 ### Quick start
 
-The simplest path is an environment-backed `CredentialSource`, then `Client::from_source(&source)`. That keeps credential resolution explicit while still auto-reading environment variables such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `GEMINI_API_KEY`.
+The simplest path is an environment-backed `CredentialSource`, an explicit `Arc<Catalog>`, then `Client::from_source(&source, catalog)`. That keeps credential and model resolution explicit while still auto-reading environment variables such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `GEMINI_API_KEY`.
 
 ```rust
 use fabro_auth::EnvCredentialSource;
 use fabro_llm::client::Client;
 use fabro_llm::generate::{generate, GenerateParams};
+use fabro_model::catalog::LlmCatalogSettings;
+use fabro_model::Catalog;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let source = EnvCredentialSource::new();
-    let client = Client::from_source(&source).await?;
+    let catalog = Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())?);
+    let client = Client::from_source(&source, Arc::clone(&catalog)).await?;
 
     let result = generate(
         GenerateParams::new("claude-sonnet-4-5", client.clone())
@@ -342,9 +351,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```rust
 use fabro_auth::EnvCredentialSource;
 use fabro_llm::client::Client;
+use fabro_model::catalog::LlmCatalogSettings;
+use fabro_model::Catalog;
+use std::sync::Arc;
 
 let source = EnvCredentialSource::new();
-let client = Client::from_source(&source).await?;
+let catalog = Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())?);
+let client = Client::from_source(&source, Arc::clone(&catalog)).await?;
 ```
 
 For env-backed usage, `EnvCredentialSource` checks for API key environment variables and registers adapters for each provider found:
@@ -407,7 +420,8 @@ use fabro_llm::client::Client;
 use fabro_llm::generate::{generate, GenerateParams};
 
 # let source = EnvCredentialSource::new();
-# let client = Client::from_source(&source).await?;
+# let catalog = std::sync::Arc::new(fabro_model::Catalog::from_builtin_with_overrides(&fabro_model::catalog::LlmCatalogSettings::default()).unwrap());
+# let client = Client::from_source(&source, catalog).await?;
 let result = generate(
     GenerateParams::new("claude-sonnet-4-5", client.clone())
         .system("You are a helpful assistant.")
@@ -428,7 +442,8 @@ use fabro_llm::client::Client;
 use fabro_llm::types::Message;
 
 # let source = EnvCredentialSource::new();
-# let client = Client::from_source(&source).await?;
+# let catalog = std::sync::Arc::new(fabro_model::Catalog::from_builtin_with_overrides(&fabro_model::catalog::LlmCatalogSettings::default()).unwrap());
+# let client = Client::from_source(&source, catalog).await?;
 let result = generate(
     GenerateParams::new("claude-sonnet-4-5", client.clone())
         .messages(vec![
@@ -523,7 +538,8 @@ let weather = Tool::active(
 # use fabro_auth::EnvCredentialSource;
 # use fabro_llm::client::Client;
 # let source = EnvCredentialSource::new();
-# let client = Client::from_source(&source).await?;
+# let catalog = std::sync::Arc::new(fabro_model::Catalog::from_builtin_with_overrides(&fabro_model::catalog::LlmCatalogSettings::default()).unwrap());
+# let client = Client::from_source(&source, catalog).await?;
 let result = generate(
     GenerateParams::new("claude-sonnet-4-5", client.clone())
         .prompt("What's the weather in San Francisco?")
@@ -551,7 +567,8 @@ use fabro_llm::types::ToolChoice;
 # use fabro_auth::EnvCredentialSource;
 # use fabro_llm::client::Client;
 # let source = EnvCredentialSource::new();
-# let client = Client::from_source(&source).await?;
+# let catalog = std::sync::Arc::new(fabro_model::Catalog::from_builtin_with_overrides(&fabro_model::catalog::LlmCatalogSettings::default()).unwrap());
+# let client = Client::from_source(&source, catalog).await?;
 GenerateParams::new("opus", client.clone()).tool_choice(ToolChoice::Auto);
 
 // Force a specific tool
@@ -574,7 +591,8 @@ Passive tools let you handle execution yourself:
 # use fabro_auth::EnvCredentialSource;
 # use fabro_llm::client::Client;
 # let source = EnvCredentialSource::new();
-# let client = Client::from_source(&source).await?;
+# let catalog = std::sync::Arc::new(fabro_model::Catalog::from_builtin_with_overrides(&fabro_model::catalog::LlmCatalogSettings::default()).unwrap());
+# let client = Client::from_source(&source, catalog).await?;
 let search = Tool::passive(
     "search",
     "Search the codebase",
@@ -612,7 +630,8 @@ use fabro_llm::generate::{stream, GenerateParams};
 use futures::StreamExt;
 
 # let source = EnvCredentialSource::new();
-# let client = Client::from_source(&source).await?;
+# let catalog = std::sync::Arc::new(fabro_model::Catalog::from_builtin_with_overrides(&fabro_model::catalog::LlmCatalogSettings::default()).unwrap());
+# let client = Client::from_source(&source, catalog).await?;
 let stream_result = stream(
     GenerateParams::new("claude-sonnet-4-5", client.clone())
         .prompt("Write a haiku about Rust")
@@ -636,7 +655,8 @@ use fabro_llm::types::StreamEvent;
 use futures::StreamExt;
 
 # let source = EnvCredentialSource::new();
-# let client = Client::from_source(&source).await?;
+# let catalog = std::sync::Arc::new(fabro_model::Catalog::from_builtin_with_overrides(&fabro_model::catalog::LlmCatalogSettings::default()).unwrap());
+# let client = Client::from_source(&source, catalog).await?;
 let mut stream_result = stream(
     GenerateParams::new("claude-sonnet-4-5", client.clone())
         .prompt("Explain monads")
@@ -689,7 +709,8 @@ use fabro_llm::generate::{generate_object, GenerateParams};
 use serde_json::json;
 
 # let source = EnvCredentialSource::new();
-# let client = Client::from_source(&source).await?;
+# let catalog = std::sync::Arc::new(fabro_model::Catalog::from_builtin_with_overrides(&fabro_model::catalog::LlmCatalogSettings::default()).unwrap());
+# let client = Client::from_source(&source, catalog).await?;
 let schema = json!({
     "type": "object",
     "properties": {
@@ -755,13 +776,13 @@ Add middleware to the client:
 ```rust
 use fabro_auth::EnvCredentialSource;
 use fabro_llm::client::Client;
-use std::sync::Arc;
+use fabro_model::catalog::LlmCatalogSettings;
+use fabro_model::Catalog;
 
 let source = EnvCredentialSource::new();
-let mut client = Client::from_source(&source).await?;
-Arc::get_mut(&mut client)
-    .expect("install middleware before sharing the client")
-    .add_middleware(Arc::new(LoggingMiddleware));
+let catalog = std::sync::Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())?);
+let mut client = Client::from_source(&source, catalog).await?;
+client.add_middleware(std::sync::Arc::new(LoggingMiddleware));
 ```
 
 ### Model catalog
@@ -873,7 +894,8 @@ use fabro_llm::client::Client;
 use tokio_util::sync::CancellationToken;
 
 # let source = EnvCredentialSource::new();
-# let client = Client::from_source(&source).await?;
+# let catalog = std::sync::Arc::new(fabro_model::Catalog::from_builtin_with_overrides(&fabro_model::catalog::LlmCatalogSettings::default()).unwrap());
+# let client = Client::from_source(&source, catalog).await?;
 let token = CancellationToken::new();
 let token_clone = token.clone();
 

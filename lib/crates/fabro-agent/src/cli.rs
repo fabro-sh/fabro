@@ -459,7 +459,11 @@ pub async fn run_with_args_and_source(
     mcp_servers: Vec<McpServerSettings>,
 ) -> anyhow::Result<()> {
     let provider = parse_provider(&args)?;
-    let client = Client::from_source(llm_source.as_ref())
+    let catalog = Arc::new(
+        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
+            .context("failed to build standalone agent LLM catalog")?,
+    );
+    let client = Client::from_source(llm_source.as_ref(), Arc::clone(&catalog))
         .await
         .context("Failed to create LLM client")?;
     ensure_provider_registered(&client, provider)?;

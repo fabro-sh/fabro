@@ -13,9 +13,7 @@ pub use archive::{
     ArchiveOutcome, UnarchiveOutcome, archive, archived_rejection_message, ensure_not_archived,
     unarchive,
 };
-pub use create::{
-    CreateRunInput, CreatedRun, RenderMode, create, create_with_catalog, make_run_dir,
-};
+pub use create::{CreateRunInput, CreatedRun, RenderMode, create, make_run_dir};
 pub use fork::{ForkOutcome, ForkRunInput, ResolvedForkTarget, fork_run};
 pub use resume::resume;
 pub use rewind::{RewindInput, RewindOutcome, rewind};

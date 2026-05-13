@@ -11,17 +11,7 @@ pub struct ResolvedCredentials {
 
 #[async_trait]
 pub trait CredentialSource: Send + Sync {
-    async fn resolve(&self) -> anyhow::Result<ResolvedCredentials>;
+    async fn resolve(&self, catalog: &Catalog) -> anyhow::Result<ResolvedCredentials>;
 
-    async fn configured_providers(&self) -> Vec<ProviderId>;
-
-    async fn resolve_for_catalog(&self, catalog: &Catalog) -> anyhow::Result<ResolvedCredentials> {
-        let _ = catalog;
-        self.resolve().await
-    }
-
-    async fn configured_providers_for_catalog(&self, catalog: &Catalog) -> Vec<ProviderId> {
-        let _ = catalog;
-        self.configured_providers().await
-    }
+    async fn configured_providers(&self, catalog: &Catalog) -> Vec<ProviderId>;
 }

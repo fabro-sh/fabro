@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use fabro_config::Storage;
 use fabro_graphviz::graph::{AttrValue, Graph};
+#[cfg(test)]
 use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{Catalog, ProviderId};
 use fabro_sandbox::SandboxProvider;
@@ -78,22 +79,9 @@ struct PersistCreateOptions {
     catalog:              Arc<Catalog>,
 }
 
-/// Resolve workflow inputs, normalize settings, and persist a run directory.
+/// Resolve workflow inputs, normalize settings using the caller-provided
+/// catalog, and persist a run directory.
 pub async fn create(
-    store: &Database,
-    request: CreateRunInput,
-    storage_root: PathBuf,
-) -> Result<CreatedRun, Error> {
-    let catalog = Arc::new(
-        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-            .map_err(|err| Error::engine(format!("building default LLM catalog: {err}")))?,
-    );
-    Box::pin(create_with_catalog(store, request, storage_root, catalog)).await
-}
-
-/// Resolve workflow inputs, normalize settings using a caller-provided catalog,
-/// and persist a run directory.
-pub async fn create_with_catalog(
     store: &Database,
     request: CreateRunInput,
     storage_root: PathBuf,
@@ -890,6 +878,7 @@ mod tests {
                 web_url: None,
             },
             storage_root,
+            test_catalog(),
         )
         .await
         .unwrap_err();
@@ -934,6 +923,7 @@ mod tests {
                 web_url: None,
             },
             storage_root,
+            test_catalog(),
         )
         .await
         .unwrap_err();
@@ -1000,6 +990,7 @@ mod tests {
                 web_url: None,
             },
             storage_root.clone(),
+            test_catalog(),
         )
         .await
         .unwrap();
@@ -1109,6 +1100,7 @@ mod tests {
                 web_url: None,
             },
             storage_root,
+            test_catalog(),
         )
         .await
         .unwrap();
@@ -1152,6 +1144,7 @@ mod tests {
                 web_url: None,
             },
             storage_root,
+            test_catalog(),
         )
         .await
         .unwrap();
@@ -1217,6 +1210,7 @@ mod tests {
                 web_url: None,
             },
             storage_dir.clone(),
+            test_catalog(),
         )
         .await
         .unwrap();
@@ -1275,6 +1269,7 @@ mod tests {
                 web_url: None,
             },
             storage_dir,
+            test_catalog(),
         )
         .await
         .unwrap();

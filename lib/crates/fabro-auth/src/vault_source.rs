@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use fabro_model::{Catalog, ProviderId, bootstrap_catalog};
+use fabro_model::{Catalog, ProviderId};
 use fabro_vault::Vault;
 use tokio::sync::RwLock as AsyncRwLock;
 
@@ -41,18 +41,14 @@ impl std::fmt::Debug for VaultCredentialSource {
 
 #[async_trait]
 impl CredentialSource for VaultCredentialSource {
-    async fn resolve(&self) -> anyhow::Result<ResolvedCredentials> {
-        self.resolve_for_catalog(bootstrap_catalog::catalog()).await
-    }
-
-    async fn resolve_for_catalog(&self, catalog: &Catalog) -> anyhow::Result<ResolvedCredentials> {
+    async fn resolve(&self, catalog: &Catalog) -> anyhow::Result<ResolvedCredentials> {
         let mut credentials = Vec::new();
         let mut auth_issues = Vec::new();
 
         for provider in catalog.providers() {
             match self
                 .resolver
-                .resolve_for_catalog(provider.id.clone(), CredentialUsage::ApiRequest, catalog)
+                .resolve(provider.id.clone(), CredentialUsage::ApiRequest, catalog)
                 .await
             {
                 Ok(ResolvedCredential::Api(credential)) => credentials.push(credential),
@@ -60,7 +56,7 @@ impl CredentialSource for VaultCredentialSource {
                 Err(ResolveError::NotConfigured(_)) => {
                     match self
                         .resolver
-                        .header_only_api_credential_for_catalog(provider, catalog)
+                        .header_only_api_credential(provider, catalog)
                         .await
                     {
                         Ok(Some(credential)) => credentials.push(credential),
@@ -78,15 +74,9 @@ impl CredentialSource for VaultCredentialSource {
         })
     }
 
-    async fn configured_providers(&self) -> Vec<ProviderId> {
-        self.configured_providers_for_catalog(bootstrap_catalog::catalog())
-            .await
-    }
-
-    async fn configured_providers_for_catalog(&self, catalog: &Catalog) -> Vec<ProviderId> {
+    async fn configured_providers(&self, catalog: &Catalog) -> Vec<ProviderId> {
         let vault = self.vault.read().await;
-        self.resolver
-            .configured_providers_for_catalog(&vault, catalog)
+        self.resolver.configured_providers(&vault, catalog)
     }
 }
 
@@ -95,7 +85,8 @@ mod tests {
     use std::sync::Arc;
 
     use chrono::{Duration, Utc};
-    use fabro_model::Provider;
+    use fabro_model::catalog::LlmCatalogSettings;
+    use fabro_model::{Catalog, Provider};
     use fabro_vault::{SecretType, Vault};
     use tokio::sync::RwLock as AsyncRwLock;
 
@@ -134,6 +125,10 @@ mod tests {
         }
     }
 
+    fn default_catalog() -> Catalog {
+        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap()
+    }
+
     #[tokio::test]
     async fn resolve_returns_credentials_and_auth_issues() {
         let dir = tempfile::tempdir().unwrap();
@@ -158,8 +153,9 @@ mod tests {
 
         let source =
             VaultCredentialSource::with_env_lookup(Arc::new(AsyncRwLock::new(vault)), |_| None);
+        let catalog = default_catalog();
 
-        let resolved = source.resolve().await.unwrap();
+        let resolved = source.resolve(&catalog).await.unwrap();
 
         assert_eq!(resolved.credentials.len(), 1);
         assert_eq!(resolved.credentials[0].provider, Provider::Anthropic.id());
@@ -197,8 +193,9 @@ mod tests {
             .unwrap();
         let source =
             VaultCredentialSource::with_env_lookup(Arc::new(AsyncRwLock::new(vault)), |_| None);
+        let catalog = default_catalog();
 
-        assert_eq!(source.configured_providers().await, vec![
+        assert_eq!(source.configured_providers(&catalog).await, vec![
             Provider::Anthropic.id(),
             Provider::OpenAi.id()
         ]);

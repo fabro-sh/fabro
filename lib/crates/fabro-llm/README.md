@@ -30,9 +30,13 @@ All adapters support streaming, tool calling, structured output (`response_forma
 use fabro_auth::EnvCredentialSource;
 use fabro_llm::client::Client;
 use fabro_llm::types::{Message, Request};
+use fabro_model::catalog::LlmCatalogSettings;
+use fabro_model::Catalog;
+use std::sync::Arc;
 
 let source = EnvCredentialSource::new();
-let client = Client::from_source(&source).await?;
+let catalog = Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())?);
+let client = Client::from_source(&source, Arc::clone(&catalog)).await?;
 
 let request = Request {
     model: "claude-sonnet-4-5".to_string(),
@@ -60,9 +64,13 @@ println!("{}", response.text());
 use fabro_auth::EnvCredentialSource;
 use fabro_llm::client::Client;
 use fabro_llm::generate::{generate, GenerateParams};
+use fabro_model::catalog::LlmCatalogSettings;
+use fabro_model::Catalog;
+use std::sync::Arc;
 
 let source = EnvCredentialSource::new();
-let client = Client::from_source(&source).await?;
+let catalog = Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())?);
+let client = Client::from_source(&source, Arc::clone(&catalog)).await?;
 let result = generate(
     GenerateParams::new("claude-sonnet-4-5", client.clone())
         .prompt("Explain monads in one sentence")
@@ -80,10 +88,13 @@ use fabro_auth::EnvCredentialSource;
 use fabro_llm::client::Client;
 use fabro_llm::generate::{generate, GenerateParams};
 use fabro_llm::tools::Tool;
+use fabro_model::catalog::LlmCatalogSettings;
+use fabro_model::Catalog;
 use std::sync::Arc;
 
 let source = EnvCredentialSource::new();
-let client = Client::from_source(&source).await?;
+let catalog = Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())?);
+let client = Client::from_source(&source, Arc::clone(&catalog)).await?;
 let weather_tool = Tool::active(
     "get_weather",
     "Get the current weather for a city",
@@ -114,10 +125,14 @@ let result = generate(
 use fabro_auth::EnvCredentialSource;
 use fabro_llm::client::Client;
 use fabro_llm::types::{Message, Request, StreamEvent};
+use fabro_model::catalog::LlmCatalogSettings;
+use fabro_model::Catalog;
 use futures::StreamExt;
+use std::sync::Arc;
 
 let source = EnvCredentialSource::new();
-let client = Client::from_source(&source).await?;
+let catalog = Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())?);
+let client = Client::from_source(&source, Arc::clone(&catalog)).await?;
 let request = Request {
     model: "claude-sonnet-4-5".to_string(),
     messages: vec![Message::user("Tell me a joke")],

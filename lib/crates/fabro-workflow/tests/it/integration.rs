@@ -6398,9 +6398,11 @@ mod real_llm {
 
         fabro_test::require_env("ANTHROPIC_API_KEY")?;
         let source = fabro_auth::EnvCredentialSource::new();
-        Some(Arc::new(Client::from_source(&source).await.expect(
-            "unified-llm client should initialize from env source",
-        )))
+        Some(Arc::new(
+            Client::from_source(&source, super::default_catalog())
+                .await
+                .expect("unified-llm client should initialize from env source"),
+        ))
     }
 
     fn make_llm_backend(client: Arc<Client>) -> Box<LlmCodergenBackend> {

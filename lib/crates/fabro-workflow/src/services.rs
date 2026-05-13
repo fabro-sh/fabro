@@ -190,14 +190,16 @@ impl EngineServices {
 
         #[async_trait::async_trait]
         impl CredentialSource for StubCredentialSource {
-            async fn resolve(&self) -> anyhow::Result<ResolvedCredentials> {
+            async fn resolve(&self, catalog: &Catalog) -> anyhow::Result<ResolvedCredentials> {
+                let _ = catalog;
                 Ok(ResolvedCredentials {
                     credentials: Vec::new(),
                     auth_issues: Vec::new(),
                 })
             }
 
-            async fn configured_providers(&self) -> Vec<ProviderId> {
+            async fn configured_providers(&self, catalog: &Catalog) -> Vec<ProviderId> {
+                let _ = catalog;
                 Vec::new()
             }
         }
@@ -297,7 +299,7 @@ mod tests {
             services
                 .run
                 .llm_source
-                .configured_providers()
+                .configured_providers(&services.run.catalog)
                 .await
                 .is_empty()
         );

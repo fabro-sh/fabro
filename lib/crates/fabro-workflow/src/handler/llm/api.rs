@@ -568,7 +568,7 @@ impl AgentApiBackend {
     ) -> Result<Session, Error> {
         let controls =
             effective_request_controls(catalog.as_ref(), run_model_controls, model, node)?;
-        let client = Client::from_source_with_catalog(source, Arc::clone(&catalog))
+        let client = Client::from_source(source, Arc::clone(&catalog))
             .await
             .map_err(|e| Error::handler_with_source("Failed to create LLM client", e))?;
 
@@ -712,10 +712,9 @@ impl CodergenBackend for AgentApiBackend {
         let emitter = request.emitter;
         let stage_scope = request.stage_scope;
 
-        let client =
-            Client::from_source_with_catalog(self.source.as_ref(), Arc::clone(&self.catalog))
-                .await
-                .map_err(|e| Error::handler_with_source("Failed to create LLM client", e))?;
+        let client = Client::from_source(self.source.as_ref(), Arc::clone(&self.catalog))
+            .await
+            .map_err(|e| Error::handler_with_source("Failed to create LLM client", e))?;
 
         let model = node.model().unwrap_or(&self.model);
         let provider = self.resolve_provider_context(model, node.provider())?;
@@ -1602,10 +1601,9 @@ effort = false
             SteeringHub::for_tests(),
         );
 
-        let client =
-            Client::from_source_with_catalog(backend.source.as_ref(), Arc::clone(&backend.catalog))
-                .await
-                .unwrap();
+        let client = Client::from_source(backend.source.as_ref(), Arc::clone(&backend.catalog))
+            .await
+            .unwrap();
 
         assert_eq!(client.provider_names(), vec!["anthropic"]);
     }

@@ -43,7 +43,7 @@ async fn list_models(
     let catalog = state.catalog();
     let configured: HashSet<ProviderId> = state
         .llm_source
-        .configured_providers_for_catalog(catalog.as_ref())
+        .configured_providers(catalog.as_ref())
         .await
         .into_iter()
         .collect();

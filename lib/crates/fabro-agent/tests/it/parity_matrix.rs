@@ -17,7 +17,8 @@ use fabro_auth::EnvCredentialSource;
 use fabro_llm::client::Client;
 use fabro_llm::provider::{Provider, ProviderAdapter};
 use fabro_llm::providers::OpenAiAdapter;
-use fabro_model::ModelHandle;
+use fabro_model::catalog::LlmCatalogSettings;
+use fabro_model::{Catalog, ModelHandle};
 use fabro_test::{TwinScenario, TwinScenarios, TwinToolCall, twin_openai};
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -150,7 +151,11 @@ async fn make_client(provider: Provider, twin: Option<&OpenAiTwinOptions>) -> Cl
     }
 
     let source = EnvCredentialSource::new();
-    Client::from_source(&source)
+    let catalog = Arc::new(
+        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
+            .expect("default catalog should build"),
+    );
+    Client::from_source(&source, catalog)
         .await
         .expect("Client::from_source failed")
 }

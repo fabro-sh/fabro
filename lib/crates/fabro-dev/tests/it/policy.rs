@@ -30,11 +30,6 @@ const BOOTSTRAP_CATALOG_ALLOWED_PATH_FRAGMENTS: &[&str] = &[
     "lib/crates/fabro-cli/src/commands/install/",
     "lib/crates/fabro-cli/src/shared/install_",
     "lib/crates/fabro-cli/src/shared/api_key_validation",
-    // Legacy no-catalog credential resolver wrappers. Request-serving paths
-    // use the corresponding catalog-aware methods.
-    "lib/crates/fabro-auth/src/env_source.rs",
-    "lib/crates/fabro-auth/src/resolve.rs",
-    "lib/crates/fabro-auth/src/vault_source.rs",
     // Test support modules.
     "tests/",
     "test_support",

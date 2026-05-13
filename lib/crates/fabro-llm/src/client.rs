@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use fabro_auth::{ApiCredential, ApiKeyHeader, CredentialSource};
-use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{Catalog, ProviderId};
 use tracing::debug;
 
@@ -43,27 +42,18 @@ impl Client {
     ///
     /// Returns `Error` if the source cannot resolve credentials or any provider
     /// adapter fails to initialize.
-    pub async fn from_source(source: &dyn CredentialSource) -> Result<Self, Error> {
-        let resolved = source.resolve().await.map_err(|err| Error::Configuration {
-            message: format!("Failed to resolve LLM credentials: {err}"),
-            source:  None,
-        })?;
-        Self::from_credentials(resolved.credentials).await
-    }
-
-    pub async fn from_source_with_catalog(
+    pub async fn from_source(
         source: &dyn CredentialSource,
         catalog: Arc<Catalog>,
     ) -> Result<Self, Error> {
-        let resolved =
-            source
-                .resolve_for_catalog(&catalog)
-                .await
-                .map_err(|err| Error::Configuration {
-                    message: format!("Failed to resolve LLM credentials: {err}"),
-                    source:  None,
-                })?;
-        Self::from_credentials_with_catalog(resolved.credentials, catalog).await
+        let resolved = source
+            .resolve(&catalog)
+            .await
+            .map_err(|err| Error::Configuration {
+                message: format!("Failed to resolve LLM credentials: {err}"),
+                source:  None,
+            })?;
+        Self::from_credentials(resolved.credentials, catalog).await
     }
 
     /// Create a Client from typed provider credentials.
@@ -71,19 +61,7 @@ impl Client {
     /// # Errors
     ///
     /// Returns `Error` if any provider adapter fails to initialize.
-    pub async fn from_credentials(credentials: Vec<ApiCredential>) -> Result<Self, Error> {
-        let catalog = Arc::new(
-            Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).map_err(
-                |err| Error::Configuration {
-                    message: "Failed to build bootstrap LLM catalog".to_string(),
-                    source:  Some(Arc::new(err)),
-                },
-            )?,
-        );
-        Self::from_credentials_with_catalog(credentials, catalog).await
-    }
-
-    pub async fn from_credentials_with_catalog(
+    pub async fn from_credentials(
         credentials: Vec<ApiCredential>,
         catalog: Arc<Catalog>,
     ) -> Result<Self, Error> {
@@ -474,14 +452,16 @@ mod tests {
 
     #[async_trait]
     impl CredentialSource for StubSource {
-        async fn resolve(&self) -> anyhow::Result<ResolvedCredentials> {
+        async fn resolve(&self, catalog: &Catalog) -> anyhow::Result<ResolvedCredentials> {
+            let _ = catalog;
             Ok(ResolvedCredentials {
                 credentials: self.credentials.clone(),
                 auth_issues: Vec::new(),
             })
         }
 
-        async fn configured_providers(&self) -> Vec<fabro_model::ProviderId> {
+        async fn configured_providers(&self, catalog: &Catalog) -> Vec<fabro_model::ProviderId> {
+            let _ = catalog;
             self.credentials
                 .iter()
                 .map(|credential| credential.provider.clone())
@@ -671,29 +651,33 @@ mod tests {
 
     #[tokio::test]
     async fn from_credentials_registers_multiple_providers() {
-        let client = Client::from_credentials(vec![
-            ApiCredential {
-                provider:      fabro_model::Provider::Anthropic.id(),
-                auth_header:   Some(ApiKeyHeader::Custom {
-                    name:  "x-api-key".to_string(),
-                    value: "anthropic-key".to_string(),
-                }),
-                extra_headers: HashMap::new(),
-                base_url:      None,
-                codex_mode:    false,
-                org_id:        None,
-                project_id:    None,
-            },
-            ApiCredential {
-                provider:      fabro_model::Provider::OpenAi.id(),
-                auth_header:   Some(ApiKeyHeader::Bearer("openai-key".to_string())),
-                extra_headers: HashMap::new(),
-                base_url:      None,
-                codex_mode:    false,
-                org_id:        None,
-                project_id:    None,
-            },
-        ])
+        let catalog = catalog_with("");
+        let client = Client::from_credentials(
+            vec![
+                ApiCredential {
+                    provider:      fabro_model::Provider::Anthropic.id(),
+                    auth_header:   Some(ApiKeyHeader::Custom {
+                        name:  "x-api-key".to_string(),
+                        value: "anthropic-key".to_string(),
+                    }),
+                    extra_headers: HashMap::new(),
+                    base_url:      None,
+                    codex_mode:    false,
+                    org_id:        None,
+                    project_id:    None,
+                },
+                ApiCredential {
+                    provider:      fabro_model::Provider::OpenAi.id(),
+                    auth_header:   Some(ApiKeyHeader::Bearer("openai-key".to_string())),
+                    extra_headers: HashMap::new(),
+                    base_url:      None,
+                    codex_mode:    false,
+                    org_id:        None,
+                    project_id:    None,
+                },
+            ],
+            catalog,
+        )
         .await
         .unwrap();
 
@@ -705,15 +689,19 @@ mod tests {
 
     #[tokio::test]
     async fn from_credentials_supports_openai_compatible_provider_constants() {
-        let client = Client::from_credentials(vec![ApiCredential {
-            provider:      fabro_model::Provider::Kimi.id(),
-            auth_header:   Some(ApiKeyHeader::Bearer("kimi-key".to_string())),
-            extra_headers: HashMap::new(),
-            base_url:      None,
-            codex_mode:    false,
-            org_id:        None,
-            project_id:    None,
-        }])
+        let catalog = catalog_with("");
+        let client = Client::from_credentials(
+            vec![ApiCredential {
+                provider:      fabro_model::Provider::Kimi.id(),
+                auth_header:   Some(ApiKeyHeader::Bearer("kimi-key".to_string())),
+                extra_headers: HashMap::new(),
+                base_url:      None,
+                codex_mode:    false,
+                org_id:        None,
+                project_id:    None,
+            }],
+            catalog,
+        )
         .await
         .unwrap();
 
@@ -723,15 +711,19 @@ mod tests {
 
     #[tokio::test]
     async fn from_credentials_rejects_custom_provider_id_without_adapter() {
-        let result = Client::from_credentials(vec![ApiCredential {
-            provider:      fabro_model::ProviderId::new("venice"),
-            auth_header:   Some(ApiKeyHeader::Bearer("venice-key".to_string())),
-            extra_headers: HashMap::new(),
-            base_url:      None,
-            codex_mode:    false,
-            org_id:        None,
-            project_id:    None,
-        }])
+        let catalog = catalog_with("");
+        let result = Client::from_credentials(
+            vec![ApiCredential {
+                provider:      fabro_model::ProviderId::new("venice"),
+                auth_header:   Some(ApiKeyHeader::Bearer("venice-key".to_string())),
+                extra_headers: HashMap::new(),
+                base_url:      None,
+                codex_mode:    false,
+                org_id:        None,
+                project_id:    None,
+            }],
+            catalog,
+        )
         .await;
         let Err(err) = result else {
             panic!("custom provider credentials should fail without a registered adapter");
@@ -762,14 +754,15 @@ mod tests {
                 project_id:    None,
             }],
         };
+        let catalog = catalog_with("");
 
-        let client = Client::from_source(&source).await.unwrap();
+        let client = Client::from_source(&source, catalog).await.unwrap();
 
         assert_eq!(client.provider_names(), vec!["anthropic"]);
     }
 
     #[tokio::test]
-    async fn from_credentials_with_catalog_registers_custom_openai_compatible_provider() {
+    async fn from_credentials_registers_custom_openai_compatible_provider() {
         let catalog = catalog_with(
             r#"
 [providers.venice]
@@ -796,7 +789,7 @@ effort = false
 "#,
         );
 
-        let client = Client::from_credentials_with_catalog(
+        let client = Client::from_credentials(
             vec![ApiCredential {
                 provider:      fabro_model::ProviderId::new("venice"),
                 auth_header:   Some(ApiKeyHeader::Bearer("venice-key".to_string())),
@@ -844,7 +837,7 @@ effort = false
 "#,
         );
 
-        let client = Client::from_credentials_with_catalog(
+        let client = Client::from_credentials(
             vec![ApiCredential {
                 provider:      fabro_model::ProviderId::new("venice"),
                 auth_header:   Some(ApiKeyHeader::Bearer("venice-key".to_string())),
@@ -867,7 +860,7 @@ effort = false
     }
 
     #[tokio::test]
-    async fn from_credentials_with_catalog_registers_header_only_provider() {
+    async fn from_credentials_registers_header_only_provider() {
         let catalog = catalog_with(
             r#"
 [providers.portkey]
@@ -895,7 +888,7 @@ effort = true
 "#,
         );
 
-        let client = Client::from_credentials_with_catalog(
+        let client = Client::from_credentials(
             vec![ApiCredential {
                 provider:      fabro_model::ProviderId::new("portkey"),
                 auth_header:   None,
@@ -921,8 +914,9 @@ effort = true
         let source = StubSource {
             credentials: Vec::new(),
         };
+        let catalog = catalog_with("");
 
-        let client = Client::from_source(&source).await.unwrap();
+        let client = Client::from_source(&source, catalog).await.unwrap();
 
         assert!(client.provider_names().is_empty());
     }

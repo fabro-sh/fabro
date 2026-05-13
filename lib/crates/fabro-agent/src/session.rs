@@ -302,11 +302,11 @@ impl Session {
         }
     }
 
-    /// Build a session from a credential source. Resolves the LLM client
-    /// once at construction and caches it for the session's lifetime.
+    /// Build a session from a credential source and catalog. Resolves the LLM
+    /// client once at construction and caches it for the session's lifetime.
     /// Sessions are bounded (≤ 1 hour); cached client is fine within that
-    /// window. For longer-lived contexts (workflow runs) hold a source,
-    /// not a session.
+    /// window. For longer-lived contexts (workflow runs) hold a source and
+    /// catalog, not a session.
     ///
     /// # Errors
     ///
@@ -314,30 +314,13 @@ impl Session {
     /// OAuth refresh failed).
     pub async fn from_source(
         source: &dyn CredentialSource,
-        provider_profile: Arc<dyn AgentProfile>,
-        sandbox: Arc<dyn Sandbox>,
-        config: SessionOptions,
-        subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
-    ) -> Result<Self, LlmError> {
-        let client = Client::from_source(source).await?;
-        Ok(Self::new(
-            client,
-            provider_profile,
-            sandbox,
-            config,
-            subagent_manager,
-        ))
-    }
-
-    pub async fn from_source_with_catalog(
-        source: &dyn CredentialSource,
         catalog: Arc<Catalog>,
         provider_profile: Arc<dyn AgentProfile>,
         sandbox: Arc<dyn Sandbox>,
         config: SessionOptions,
         subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
     ) -> Result<Self, LlmError> {
-        let client = Client::from_source_with_catalog(source, catalog).await?;
+        let client = Client::from_source(source, catalog).await?;
         Ok(Self::new(
             client,
             provider_profile,

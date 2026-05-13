@@ -463,6 +463,7 @@ impl CodergenBackend for AgentCliBackend {
         let launch_env = resolve_agent_launch_env(AgentLaunchEnvRequest {
             provider,
             cli,
+            catalog: self.catalog.as_ref(),
             resolver: self.resolver.as_ref(),
             tool_env: self.tool_env.as_ref(),
             github_token_refresh_managed: self.github_token_refresh_managed,

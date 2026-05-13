@@ -307,7 +307,7 @@ impl HookExecutorImpl {
         let user_msg = Self::build_hook_user_message(&prompt, context);
 
         Self::execute_llm_with_timeout(definition.timeout(), "prompt", || async move {
-            let client = match LlmClient::from_source_with_catalog(llm_source, catalog).await {
+            let client = match LlmClient::from_source(llm_source, catalog).await {
                 Ok(client) => Arc::new(client),
                 Err(e) => {
                     tracing::warn!(error = %e, "prompt hook client creation failed, proceeding");
@@ -371,7 +371,7 @@ impl HookExecutorImpl {
         let user_msg = Self::build_hook_user_message(&prompt, context);
 
         Self::execute_llm_with_timeout(definition.timeout(), "agent", || async move {
-            let client = match LlmClient::from_source_with_catalog(llm_source, catalog).await {
+            let client = match LlmClient::from_source(llm_source, catalog).await {
                 Ok(c) => c,
                 Err(e) => {
                     tracing::warn!(error = %e, "agent hook client creation failed, proceeding");

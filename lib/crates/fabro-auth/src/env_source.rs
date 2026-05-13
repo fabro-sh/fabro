@@ -2,9 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_model::catalog::CatalogProvider;
-use fabro_model::{
-    Catalog, CredentialRef, HeaderValueRef, Provider, ProviderId, adapter, bootstrap_catalog,
-};
+use fabro_model::{Catalog, CredentialRef, HeaderValueRef, Provider, ProviderId, adapter};
 use fabro_static::EnvVars;
 
 use crate::credential_source::{CredentialSource, ResolvedCredentials};
@@ -136,11 +134,7 @@ impl Default for EnvCredentialSource {
 
 #[async_trait]
 impl CredentialSource for EnvCredentialSource {
-    async fn resolve(&self) -> anyhow::Result<ResolvedCredentials> {
-        self.resolve_for_catalog(bootstrap_catalog::catalog()).await
-    }
-
-    async fn resolve_for_catalog(&self, catalog: &Catalog) -> anyhow::Result<ResolvedCredentials> {
+    async fn resolve(&self, catalog: &Catalog) -> anyhow::Result<ResolvedCredentials> {
         let mut credentials = Vec::new();
         let mut auth_issues = Vec::new();
 
@@ -159,12 +153,7 @@ impl CredentialSource for EnvCredentialSource {
         })
     }
 
-    async fn configured_providers(&self) -> Vec<ProviderId> {
-        self.configured_providers_for_catalog(bootstrap_catalog::catalog())
-            .await
-    }
-
-    async fn configured_providers_for_catalog(&self, catalog: &Catalog) -> Vec<ProviderId> {
+    async fn configured_providers(&self, catalog: &Catalog) -> Vec<ProviderId> {
         catalog
             .providers()
             .iter()
@@ -208,11 +197,16 @@ mod tests {
         Catalog::from_builtin_with_overrides(&settings).unwrap()
     }
 
+    fn default_catalog() -> Catalog {
+        catalog_with("")
+    }
+
     #[tokio::test]
     async fn configured_providers_reads_injected_env() {
         let source = test_source(&[("ANTHROPIC_API_KEY", "anthropic-key")]);
+        let catalog = default_catalog();
 
-        assert_eq!(source.configured_providers().await, vec![
+        assert_eq!(source.configured_providers(&catalog).await, vec![
             Provider::Anthropic.id()
         ]);
     }
@@ -220,8 +214,9 @@ mod tests {
     #[tokio::test]
     async fn resolve_returns_empty_when_no_keys_are_configured() {
         let source = test_source(&[]);
+        let catalog = default_catalog();
 
-        let resolved = source.resolve().await.unwrap();
+        let resolved = source.resolve(&catalog).await.unwrap();
 
         assert!(resolved.credentials.is_empty());
         assert!(resolved.auth_issues.is_empty());
@@ -234,8 +229,9 @@ mod tests {
             ("CHATGPT_ACCOUNT_ID", "acct_123"),
             ("OPENAI_PROJECT_ID", "project_123"),
         ]);
+        let catalog = default_catalog();
 
-        let resolved = source.resolve().await.unwrap();
+        let resolved = source.resolve(&catalog).await.unwrap();
         let credential = resolved.credentials.first().unwrap();
 
         assert_eq!(credential.provider, Provider::OpenAi.id());
@@ -254,8 +250,9 @@ mod tests {
     #[tokio::test]
     async fn resolve_uses_catalog_credentials_and_base_url_for_openai_compatible_providers() {
         let source = test_source(&[("KIMI_API_KEY", "kimi-key")]);
+        let catalog = default_catalog();
 
-        let resolved = source.resolve().await.unwrap();
+        let resolved = source.resolve(&catalog).await.unwrap();
         let credential = resolved.credentials.first().unwrap();
 
         assert_eq!(credential.provider, Provider::Kimi.id());
@@ -266,7 +263,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_for_catalog_registers_custom_env_backed_provider() {
+    async fn resolve_registers_custom_env_backed_provider() {
         let catalog = catalog_with(
             r#"
 [providers.venice]
@@ -293,7 +290,7 @@ effort = false
         );
         let source = test_source(&[("VENICE_API_KEY", "venice-key")]);
 
-        let resolved = source.resolve_for_catalog(&catalog).await.unwrap();
+        let resolved = source.resolve(&catalog).await.unwrap();
         let credential = resolved
             .credentials
             .iter()
@@ -311,7 +308,7 @@ effort = false
     }
 
     #[tokio::test]
-    async fn resolve_for_catalog_registers_header_only_provider() {
+    async fn resolve_registers_header_only_provider() {
         let catalog = catalog_with(
             r#"
 [providers.portkey]
@@ -341,7 +338,7 @@ effort = true
         );
         let source = test_source(&[("PORTKEY_API_KEY", "pk-live")]);
 
-        let resolved = source.resolve_for_catalog(&catalog).await.unwrap();
+        let resolved = source.resolve(&catalog).await.unwrap();
         let credential = resolved
             .credentials
             .iter()
@@ -360,7 +357,7 @@ effort = true
     }
 
     #[tokio::test]
-    async fn resolve_for_catalog_reports_missing_required_header() {
+    async fn resolve_reports_missing_required_header() {
         let catalog = catalog_with(
             r#"
 [providers.portkey]
@@ -389,7 +386,7 @@ effort = true
         );
         let source = test_source(&[]);
 
-        let resolved = source.resolve_for_catalog(&catalog).await.unwrap();
+        let resolved = source.resolve(&catalog).await.unwrap();
 
         assert!(
             !resolved

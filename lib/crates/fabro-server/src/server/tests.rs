@@ -1222,12 +1222,20 @@ struct FailingCredentialSource;
 
 #[async_trait::async_trait]
 impl CredentialSource for FailingCredentialSource {
-    async fn resolve(&self) -> anyhow::Result<fabro_auth::ResolvedCredentials> {
+    async fn resolve(
+        &self,
+        catalog: &fabro_model::Catalog,
+    ) -> anyhow::Result<fabro_auth::ResolvedCredentials> {
+        let _ = catalog;
         Err(anyhow::Error::new(std::io::Error::other("credential leaf"))
             .context("credential source context"))
     }
 
-    async fn configured_providers(&self) -> Vec<fabro_model::ProviderId> {
+    async fn configured_providers(
+        &self,
+        catalog: &fabro_model::Catalog,
+    ) -> Vec<fabro_model::ProviderId> {
+        let _ = catalog;
         Vec::new()
     }
 }
@@ -1276,7 +1284,7 @@ async fn llm_source_configured_providers_reads_openai_codex_from_vault() {
     assert_eq!(
         state
             .llm_source
-            .configured_providers_for_catalog(catalog.as_ref())
+            .configured_providers(catalog.as_ref())
             .await,
         vec![Provider::OpenAi.id()]
     );
