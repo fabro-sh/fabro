@@ -1,0 +1,44 @@
+---
+title: "Configurable LLM providers"
+date: "2026-05-13"
+---
+
+## Configurable LLM providers and models
+
+Fabro can now merge LLM provider and model catalog entries from settings. Teams can add OpenAI-compatible gateways, route through provider proxies, attach typed extra headers, map a Fabro model ID to a provider-specific `api_id`, and declare model controls and per-speed pricing without waiting for a new built-in catalog entry.
+
+```toml
+[llm.providers.proxy]
+adapter = "openai_compatible"
+base_url = "https://llm-gateway.example.com/v1"
+credentials = ["env:ACME_GATEWAY_API_KEY"]
+
+[llm.providers.proxy.extra_headers]
+x-portkey-api-key = { env = "PORTKEY_API_KEY" }
+x-portkey-config = { literal = "@bedrock-prod" }
+
+[llm.models."team-code-large"]
+provider = "proxy"
+api_id = "provider-wire-model-name"
+default = true
+```
+
+## Migration note
+
+Provider values exposed by configuration, model routing, and the API are provider ID strings. Built-in names like `anthropic`, `openai`, and `gemini` still work, and custom IDs such as `proxy` now work wherever the selected catalog defines them.
+
+Clients that generated closed provider enums from older API specs should regenerate against the current OpenAPI schema and treat model `provider` fields as strings.
+
+## More
+
+<Accordion title="LLM catalog">
+- Added settings-reference coverage for `[llm.providers.<id>]`, provider `extra_headers`, `[llm.models.<id>]`, model limits, features, controls, base costs, and per-speed cost overrides
+- Documented OpenAI-compatible provider configuration and gateway header examples
+- Documented `api_id` for provider wire-model names
+- Documented run-level model controls for reasoning effort and speed
+</Accordion>
+
+<Accordion title="Guardrails">
+- Added a workspace policy test preventing direct production `Catalog::builtin()` usage outside the catalog owner and tests
+- Clarified that `fabro_model::Provider` is a built-in compatibility enum, while open-ended provider identity is string-backed `ProviderId`
+</Accordion>

@@ -29,12 +29,13 @@ Files that omit `_version` are treated as version `1`. The legacy top-level `ver
 
 ## Who reads what
 
-`settings.toml` uses the same schema as `.fabro/project.toml` and `workflow.toml`, but each process only reads the fields it understands. The top-level schema is strictly namespaced — the only allowed domains are `[project]`, `[workflow]`, `[run]`, `[cli]`, `[server]`, and `[features]`.
+`settings.toml` uses the same schema as `.fabro/project.toml` and `workflow.toml`, but each process only reads the fields it understands. The top-level schema is strictly namespaced — the only allowed domains are `[project]`, `[workflow]`, `[run]`, `[llm]`, `[cli]`, `[server]`, and `[features]`.
 
 | Scope | Examples |
 |---|---|
 | CLI-only | `[cli.target]`, `[cli.auth]`, `[cli.exec]`, `[cli.output]`, `[cli.updates]`, `[cli.logging]` |
 | Shared run defaults | `[run.model]`, `[run.sandbox]`, `[run.checkpoint]`, `[run.inputs]`, `[run.prepare]`, `[run.pull_request]`, `[run.integrations.github.permissions]`, `[run.hooks]`, `[run.agent.mcps]` |
+| Shared LLM catalog | `[llm.providers.<id>]`, `[llm.models.<id>]`, model limits, features, controls, and costs |
 | Server-only | `[server.listen]`, `[server.api]`, `[server.web]`, `[server.auth]`, `[server.storage]`, `[server.artifacts]`, `[server.slatedb]`, `[server.scheduler]`, `[server.logging]`, `[server.integrations]` |
 
 `[cli.*]` and `[server.*]` stanzas are owner-specific: they are only consumed from `~/.fabro/settings.toml` (plus process-local flags and env overrides). The same stanzas in `.fabro/project.toml` or `workflow.toml` remain schema-valid but runtime-inert.
@@ -82,6 +83,36 @@ check = true
 
 [cli.logging]
 level = "info"
+
+[llm.providers.proxy]
+display_name = "Acme Gateway"
+adapter = "openai_compatible"
+base_url = "https://llm-gateway.example.com/v1"
+credentials = ["env:ACME_GATEWAY_API_KEY"]
+aliases = ["gateway"]
+
+[llm.providers.proxy.extra_headers]
+x-portkey-api-key = { env = "PORTKEY_API_KEY" }
+x-portkey-config = { literal = "@bedrock-prod" }
+
+[llm.models."team-code-large"]
+provider = "proxy"
+api_id = "provider-wire-model-name"
+display_name = "Team Code Large"
+default = true
+aliases = ["team-code"]
+
+[llm.models."team-code-large".controls]
+reasoning_effort = ["low", "medium", "high"]
+speed = ["fast"]
+
+[llm.models."team-code-large".costs]
+input_cost_per_mtok = 1.50
+output_cost_per_mtok = 8.00
+
+[llm.models."team-code-large".costs.speed.fast]
+input_cost_per_mtok = 3.00
+output_cost_per_mtok = 16.00
 
 [run.model]
 name = "claude-sonnet-4-5"
@@ -132,6 +163,134 @@ url = "https://fabro.example.com/api/v1"
 | `type` | `"http"` \| `"unix"` | None | Explicit transport selection. |
 | `url` | string | None | Required for `type = "http"`; the API base URL. |
 | `path` | string | None | Required for `type = "unix"`; the absolute Unix socket path. |
+
+## `[llm.providers.<id>]`
+
+Define or override an LLM provider. Provider IDs are strings, so custom
+providers can be added when they use an adapter Fabro already supports.
+
+```toml title="settings.toml"
+[llm.providers.proxy]
+display_name = "Acme Gateway"
+adapter = "openai_compatible"
+base_url = "https://llm-gateway.example.com/v1"
+credentials = ["env:ACME_GATEWAY_API_KEY"]
+priority = 50
+enabled = true
+aliases = ["gateway"]
+
+[llm.providers.proxy.extra_headers]
+x-portkey-api-key = { env = "PORTKEY_API_KEY" }
+x-portkey-config = { literal = "@bedrock-prod" }
+x-team-secret = { credential = "gateway_team_secret" }
+```
+
+| Key | Type / values | Default | Description |
+|---|---|---|---|
+| `display_name` | string | provider ID | Human-readable provider name. |
+| `adapter` | string | inferred for built-ins | Adapter registry key, such as `"anthropic"`, `"openai"`, `"gemini"`, or `"openai_compatible"`. Custom providers normally use `"openai_compatible"`. |
+| `base_url` | string | adapter default | Provider API base URL. Required for most custom OpenAI-compatible providers. |
+| `credentials` | array<string> | built-in env refs | Ordered credential refs. Accepted string forms are `credential:<id>` and `env:<NAME>`. Literal secret strings are rejected. |
+| `extra_headers` | table | `{}` | Additional headers attached to provider requests. Values must be typed refs: `{ literal = "..." }`, `{ env = "NAME" }`, or `{ credential = "id" }`. |
+| `priority` | integer | `0` | Higher-priority configured providers win default selection; ties use canonical provider ID. |
+| `enabled` | boolean | `true` | Set `false` to disable a provider after lower-precedence layers define it. |
+| `aliases` | array<string> | `[]` | Additional provider names accepted by model routing and fallback config. |
+
+## `[llm.models.<id>]`
+
+Define or override a model in the catalog. The table key is the canonical
+model ID Fabro users reference; `api_id` is the model string sent to the
+provider API.
+
+```toml title="settings.toml"
+[llm.models."team-code-large"]
+provider = "proxy"
+api_id = "provider-wire-model-name"
+display_name = "Team Code Large"
+family = "team-code"
+default = true
+enabled = true
+aliases = ["team-code"]
+estimated_output_tps = 80
+
+[llm.models."team-code-large".limits]
+context_window = 200000
+max_output = 32000
+
+[llm.models."team-code-large".features]
+tools = true
+vision = false
+reasoning = true
+reasoning_effort = "levels"
+prompt_cache = true
+effort = true
+
+[llm.models."team-code-large".controls]
+reasoning_effort = ["low", "medium", "high"]
+speed = ["fast"]
+
+[llm.models."team-code-large".costs]
+input_cost_per_mtok = 1.50
+output_cost_per_mtok = 8.00
+cache_input_cost_per_mtok = 0.30
+
+[llm.models."team-code-large".costs.speed.fast]
+input_cost_per_mtok = 3.00
+output_cost_per_mtok = 16.00
+cache_input_cost_per_mtok = 0.60
+```
+
+| Key | Type / values | Default | Description |
+|---|---|---|---|
+| `provider` | string | None | Provider ID this model belongs to. |
+| `api_id` | string | model ID | Identifier sent to the provider API. |
+| `display_name` | string | model ID | Human-readable model name. |
+| `family` | string | model ID | Family label used for catalog display and matching. |
+| `training` | string | None | Training data cutoff label. |
+| `knowledge_cutoff` | string or TOML date | None | Public knowledge cutoff label; TOML dates normalize to `YYYY-MM-DD`. |
+| `default` | boolean | `false` | Whether this is the provider default model. |
+| `enabled` | boolean | `true` | Set `false` to disable a model after lower-precedence layers define it. |
+| `aliases` | array<string> | `[]` | Additional model names accepted by routing and fallback config. |
+| `estimated_output_tps` | number | None | Estimated output tokens per second for catalog display and planning. |
+
+## `[llm.models.<id>.limits]`
+
+| Key | Type / values | Default | Description |
+|---|---|---|---|
+| `context_window` | integer | None | Maximum context window size in tokens. |
+| `max_output` | integer | None | Maximum output tokens, if known. |
+
+## `[llm.models.<id>.features]`
+
+| Key | Type / values | Default | Description |
+|---|---|---|---|
+| `tools` | boolean | `false` | Whether the model supports tool calls. |
+| `vision` | boolean | `false` | Whether the model accepts image inputs. |
+| `reasoning` | boolean | `false` | Whether the model has reasoning behavior. |
+| `reasoning_effort` | `"levels"` \| `"none"` | `"none"` | How Fabro may expose reasoning effort for this model. |
+| `prompt_cache` | boolean | `false` | Whether prompt cache pricing/usage applies. |
+| `effort` | boolean | `false` | Whether the provider exposes a native effort parameter. |
+
+## `[llm.models.<id>.controls]`
+
+| Key | Type / values | Default | Description |
+|---|---|---|---|
+| `reasoning_effort` | array<string> | adapter defaults | User-facing reasoning effort values Fabro may send for this model. |
+| `speed` | array<string> | `[]` | Additional speeds beyond implicit `standard`; do not list `standard`. |
+
+## `[llm.models.<id>.costs]`
+
+| Key | Type / values | Default | Description |
+|---|---|---|---|
+| `input_cost_per_mtok` | number | None | Input cost in USD per million tokens. |
+| `output_cost_per_mtok` | number | None | Output cost in USD per million tokens. |
+| `cache_input_cost_per_mtok` | number | None | Cached input/read cost in USD per million tokens. |
+
+## `[llm.models.<id>.costs.speed.<speed>]`
+
+Per-speed cost overrides use the same keys as `[llm.models.<id>.costs]`.
+Each `<speed>` key must be declared in `[llm.models.<id>.controls].speed`.
+The `standard` speed is implicit and always uses the base cost table.
 
 ## `[cli.updates]`
 

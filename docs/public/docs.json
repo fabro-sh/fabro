@@ -250,6 +250,7 @@
             "group": "May 2026",
             "icon": "clock-rotate-left",
             "pages": [
+              "changelog/2026-05-13",
               "changelog/2026-05-11",
               "changelog/2026-05-10",
               "changelog/2026-05-09",

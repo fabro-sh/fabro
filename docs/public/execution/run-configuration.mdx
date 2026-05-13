@@ -47,6 +47,9 @@ working_dir = "/tmp/workdir"
 name = "claude-sonnet-4-5"
 fallbacks = ["openai", "gemini"]
 
+[run.model.controls]
+reasoning_effort = "high"
+
 [[run.prepare.steps]]
 script = "git clone https://github.com/fabro-sh/fabro repo"
 
@@ -126,6 +129,27 @@ name = "claude-sonnet-4-5"
 | `name` | Model ID or alias (e.g. `claude-sonnet-4-5`, `opus`, `gemini-pro`). See [Models](/core-concepts/models). |
 | `provider` | Provider name (optional — auto-inferred from the model catalog). Only needed for models not in the catalog or to force a specific provider. |
 | `fallbacks` | Ordered list of model references to try when the primary is unavailable. Entries can be bare provider tokens (`"openai"`), bare model aliases, or qualified `"provider/model"` references. |
+
+Provider values are catalog provider ID strings. Built-in IDs like `anthropic` and `openai` work, and settings-defined IDs like `proxy` work after they are added under `[llm.providers.<id>]`.
+
+#### `[run.model.controls]`
+
+Set default model controls for all nodes that do not override them in the workflow stylesheet:
+
+```toml title="run.toml"
+[run.model]
+provider = "proxy"
+name = "team-code"
+
+[run.model.controls]
+reasoning_effort = "high"
+speed = "fast"
+```
+
+| Field | Description |
+|---|---|
+| `reasoning_effort` | Native reasoning-effort value to request when the selected model allows it, such as `"low"`, `"medium"`, `"high"`, `"xhigh"`, or `"max"`. |
+| `speed` | Native speed value to request when the selected model declares it, such as `"fast"`. The standard speed is implicit and does not need to be set. |
 
 #### Fallbacks with splice
 

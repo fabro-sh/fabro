@@ -5,10 +5,15 @@ use strum::{Display, EnumString, IntoStaticStr};
 use crate::ids::ProviderId;
 
 // ---------------------------------------------------------------------------
-// Provider enum — compile-time safe provider identity
+// Provider enum - built-in provider compatibility
 // ---------------------------------------------------------------------------
 
-/// Known LLM provider variants.
+/// Known built-in LLM providers.
+///
+/// Open-ended product identity is [`ProviderId`], because settings can define
+/// additional provider IDs. This enum remains for built-in compatibility
+/// paths: install/auth flows, legacy env var mappings, adapter defaults, and
+/// tests that intentionally iterate the shipped providers.
 #[derive(
     Debug,
     Clone,
