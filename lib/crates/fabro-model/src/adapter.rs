@@ -11,6 +11,8 @@
 use strum::VariantArray;
 
 use crate::Speed;
+use crate::ids::ProviderId;
+use crate::provider::Provider;
 use crate::reasoning::ReasoningEffort;
 
 /// Internal dispatch key that `fabro-agent` maps to a concrete agent profile.
@@ -135,6 +137,25 @@ pub fn get(key: &str) -> Option<&'static AdapterMetadata> {
 /// Iterate every registered adapter key.
 pub fn keys() -> impl Iterator<Item = &'static str> {
     ALL_ADAPTERS.iter().map(|a| a.key)
+}
+
+/// Default adapter key for a provider ID when no explicit catalog provider row
+/// is available.
+#[must_use]
+pub fn default_for_provider_id(provider: &ProviderId) -> &'static str {
+    match Provider::from_id(provider) {
+        Some(Provider::Anthropic) => ANTHROPIC.key,
+        Some(Provider::OpenAi) => OPENAI.key,
+        Some(Provider::Gemini) => GEMINI.key,
+        Some(
+            Provider::Kimi
+            | Provider::Zai
+            | Provider::Minimax
+            | Provider::Inception
+            | Provider::OpenAiCompatible,
+        )
+        | None => OPENAI_COMPATIBLE.key,
+    }
 }
 
 #[cfg(test)]

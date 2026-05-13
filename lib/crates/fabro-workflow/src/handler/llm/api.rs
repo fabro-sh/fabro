@@ -240,8 +240,9 @@ fn parse_reasoning_effort(node: &Node, value: &str) -> Result<ReasoningEffort, E
     value.parse::<ReasoningEffort>().map_err(|source| {
         Error::handler_with_source(
             format!(
-                "Invalid reasoning_effort \"{value}\" for node \"{}\"; expected one of: low, medium, high, xhigh, max",
-                node.id
+                "Invalid reasoning_effort \"{value}\" for node \"{}\"; expected one of: {}",
+                node.id,
+                expected_values(ReasoningEffort::variants()),
             ),
             source,
         )
@@ -252,12 +253,24 @@ fn parse_speed(node: &Node, value: &str) -> Result<Speed, Error> {
     value.parse::<Speed>().map_err(|source| {
         Error::handler_with_source(
             format!(
-                "Invalid speed \"{value}\" for node \"{}\"; expected one of: standard, fast",
-                node.id
+                "Invalid speed \"{value}\" for node \"{}\"; expected one of: {}",
+                node.id,
+                expected_values(Speed::variants()),
             ),
             source,
         )
     })
+}
+
+fn expected_values<T>(values: &[T]) -> String
+where
+    T: ToString,
+{
+    values
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn legacy_reasoning_effort_default(catalog: &Catalog, model: &str) -> Option<ReasoningEffort> {

@@ -638,7 +638,7 @@ impl Catalog {
             providers.push(CatalogProvider {
                 id:            model.provider.clone(),
                 display_name:  Provider::display_name_for_id(&model.provider),
-                adapter:       default_adapter_for_provider(&model.provider).to_string(),
+                adapter:       adapter::default_for_provider_id(&model.provider).to_string(),
                 base_url:      None,
                 credentials:   Vec::new(),
                 extra_headers: HashMap::new(),
@@ -1474,22 +1474,6 @@ fn validate_builtin_fragment(
         }
     }
     Ok(())
-}
-
-fn default_adapter_for_provider(provider: &ProviderId) -> &'static str {
-    match Provider::from_id(provider) {
-        Some(Provider::Anthropic) => adapter::ANTHROPIC.key,
-        Some(Provider::OpenAi) => adapter::OPENAI.key,
-        Some(Provider::Gemini) => adapter::GEMINI.key,
-        Some(
-            Provider::Kimi
-            | Provider::Zai
-            | Provider::Minimax
-            | Provider::Inception
-            | Provider::OpenAiCompatible,
-        )
-        | None => adapter::OPENAI_COMPATIBLE.key,
-    }
 }
 
 fn default_controls_for_model(model: &Model) -> CatalogModelControls {

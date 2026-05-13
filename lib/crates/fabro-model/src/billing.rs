@@ -115,6 +115,13 @@ pub enum Speed {
     Fast,
 }
 
+impl Speed {
+    #[must_use]
+    pub fn variants() -> &'static [Self] {
+        <Self as strum::VariantArray>::VARIANTS
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ModelRef {
     pub provider: ProviderId,
@@ -530,26 +537,14 @@ impl Model {
             return None;
         }
         let provider = self.builtin_provider()?;
+        let provider_id = provider.id();
         pricing_for_model_costs(
             self,
-            provider.id(),
-            adapter_key_for_builtin_provider(provider),
+            provider_id.clone(),
+            adapter::default_for_provider_id(&provider_id),
             speed,
             &self.costs,
         )
-    }
-}
-
-fn adapter_key_for_builtin_provider(provider: Provider) -> &'static str {
-    match provider {
-        Provider::Anthropic => adapter::ANTHROPIC.key,
-        Provider::OpenAi => adapter::OPENAI.key,
-        Provider::Gemini => adapter::GEMINI.key,
-        Provider::Kimi
-        | Provider::Zai
-        | Provider::Minimax
-        | Provider::Inception
-        | Provider::OpenAiCompatible => adapter::OPENAI_COMPATIBLE.key,
     }
 }
 

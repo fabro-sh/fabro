@@ -48,7 +48,7 @@ async fn list_models(
         .into_iter()
         .collect();
 
-    let mut models = catalog
+    let mut data = catalog
         .list(provider_id.as_ref())
         .into_iter()
         .filter(|model| match &query {
@@ -62,6 +62,8 @@ async fn list_models(
             }
             None => true,
         })
+        .skip(offset)
+        .take(limit + 1)
         .cloned()
         .map(|mut model| {
             model.configured = configured.contains(&model.provider);
@@ -69,13 +71,13 @@ async fn list_models(
         })
         .collect::<Vec<_>>();
 
-    let has_more = models.len() > offset.saturating_add(limit);
-    let data = models.drain(offset..models.len().min(offset.saturating_add(limit)));
+    let has_more = data.len() > limit;
+    data.truncate(limit);
 
     (
         StatusCode::OK,
         Json(serde_json::json!({
-            "data": data.collect::<Vec<_>>(),
+            "data": data,
             "meta": { "has_more": has_more }
         })),
     )

@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
-use fabro_config::{CliLayer, CliOutputLayer, RunGoalLayer, RunLayer, parse_input_overrides};
+use fabro_config::{
+    CliLayer, CliOutputLayer, RunGoalLayer, RunLayer, parse_input_overrides, parse_labels,
+};
 use fabro_manifest::{RunOverrideInput, build_run_overrides};
 use fabro_sandbox::SandboxProvider;
 use fabro_types::settings::cli::OutputVerbosity;
@@ -19,14 +21,6 @@ pub(crate) struct ManifestSettingsOverrides {
 
 fn sparse_flag(value: bool) -> Option<bool> {
     value.then_some(true)
-}
-
-pub(crate) fn parse_labels(labels: &[String]) -> HashMap<String, String> {
-    labels
-        .iter()
-        .filter_map(|label| label.split_once('='))
-        .map(|(key, value)| (key.to_string(), value.to_string()))
-        .collect()
 }
 
 fn cli_layer_for_verbose(verbose: bool) -> Option<CliLayer> {

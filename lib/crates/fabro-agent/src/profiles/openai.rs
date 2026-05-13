@@ -66,15 +66,15 @@ impl OpenAiProfile {
         self
     }
 
-    fn provider_display_name(&self) -> &str {
-        match self.base.provider {
-            Provider::OpenAi => "OpenAI",
-            Provider::Kimi => "Moonshot",
-            Provider::Zai => "Zhipu AI",
-            Provider::Minimax => "MiniMax",
-            Provider::Inception => "Inception",
-            other => <&'static str>::from(other),
-        }
+    fn provider_display_name(&self) -> String {
+        self.base
+            .catalog
+            .as_ref()
+            .and_then(|catalog| catalog.provider(&self.base.provider_id))
+            .map_or_else(
+                || self.base.provider.display_name().to_string(),
+                |provider| provider.display_name.clone(),
+            )
     }
 }
 

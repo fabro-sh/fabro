@@ -88,7 +88,14 @@ export function formatDurationMs(ms: number): string {
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
-export function formatTokenCount(value: number): string {
+export function formatTokenCount(
+  value: number,
+  options: { compactDecimal?: boolean } = {},
+): string {
+  if (options.compactDecimal) {
+    if (value < 1_000_000) return `${(value / 1000).toFixed(1)}k`;
+    return `${(value / 1_000_000).toFixed(1)}M`;
+  }
   if (value < 1000) return `${value}`;
   if (value < 1_000_000) return `${Math.round(value / 1000)}k`;
   return `${Math.round(value / 1_000_000)}M`;

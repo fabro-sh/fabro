@@ -10,7 +10,7 @@ use fabro_auth::auth_issue_message;
 use fabro_config::run::parse_run_layer_from_settings_toml;
 use fabro_config::{
     CliLayer, CliOutputLayer, DaytonaDockerfileLayer, RunLayer, WorkflowSettingsBuilder,
-    parse_input_overrides,
+    parse_input_overrides, parse_labels,
 };
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_graphviz::render::apply_direction;
@@ -357,14 +357,6 @@ fn manifest_args_overrides(
         cli,
         input_overrides: parse_input_overrides(&args.input)?,
     })
-}
-
-fn parse_labels(labels: &[String]) -> HashMap<String, String> {
-    labels
-        .iter()
-        .filter_map(|label| label.split_once('='))
-        .map(|(key, value)| (key.to_string(), value.to_string()))
-        .collect()
 }
 
 fn resolve_working_directory(settings: &WorkflowSettings, caller_cwd: &Path) -> PathBuf {
@@ -935,59 +927,43 @@ async fn run_llm_check(
 ) -> bool {
     let (model, provider) = resolve_model_provider(settings, graph, configured_providers, catalog);
     let default_provider = provider.as_deref().unwrap_or("anthropic");
+    let mut model_providers = std::collections::BTreeSet::new();
+    let mut has_llm_nodes = false;
+
+    for node in graph.nodes.values() {
+        if !is_llm_handler_type(node.handler_type()) {
+            continue;
+        }
+        has_llm_nodes = true;
+        let node_model = node.model().unwrap_or(&model);
+        let node_provider = node.provider().unwrap_or(default_provider);
+        let (resolved_model, resolved_provider) = if let Some(info) = catalog.get(node_model) {
+            (info.id.clone(), info.provider.to_string())
+        } else {
+            (node_model.to_string(), node_provider.to_string())
+        };
+        let final_provider = if node.provider().is_some() {
+            node_provider.to_string()
+        } else {
+            resolved_provider
+        };
+        model_providers.insert((resolved_model, final_provider));
+    }
+
+    if !has_llm_nodes {
+        return true;
+    }
 
     match state.resolve_llm_client().await {
         Ok(result) => {
-            let configured = result
-                .client
-                .provider_names()
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect::<Vec<_>>();
             let auth_issues = result.auth_issues;
             let client = Arc::new(result.client);
-            let mut model_providers = std::collections::BTreeSet::new();
-            let mut has_llm_nodes = false;
-
-            for node in graph.nodes.values() {
-                if !is_llm_handler_type(node.handler_type()) {
-                    continue;
-                }
-                has_llm_nodes = true;
-                let node_model = node.model().unwrap_or(&model);
-                let node_provider = node.provider().unwrap_or(default_provider);
-                let (resolved_model, resolved_provider) =
-                    if let Some(info) = catalog.get(node_model) {
-                        (info.id.clone(), info.provider.to_string())
-                    } else {
-                        (node_model.to_string(), node_provider.to_string())
-                    };
-                let final_provider = if node.provider().is_some() {
-                    node_provider.to_string()
-                } else {
-                    resolved_provider
-                };
-                model_providers.insert((resolved_model, final_provider));
-            }
-
-            if !has_llm_nodes {
-                return true;
-            }
-
-            if model_providers.is_empty() {
-                let (resolved_model, resolved_provider) = if let Some(info) = catalog.get(&model) {
-                    (info.id.clone(), info.provider.to_string())
-                } else {
-                    (model.clone(), default_provider.to_string())
-                };
-                model_providers.insert((resolved_model, resolved_provider));
-            }
 
             let mut all_ok = true;
             let mut completed_checks: Vec<(usize, CheckResult)> = Vec::new();
             let mut pending_probes = Vec::new();
             for (index, (model_id, provider_name)) in model_providers.iter().enumerate() {
-                let provider_id = ProviderId::from(provider_name.as_str());
+                let provider_id = canonical_provider_id(catalog, provider_name);
                 if let Some((_, issue)) = auth_issues
                     .iter()
                     .find(|(candidate, _)| candidate == &provider_id)
@@ -1000,7 +976,7 @@ async fn run_llm_check(
                         details:     vec![CheckDetail::new(format!("Provider: {provider_name}"))],
                         remediation: Some(auth_issue_message(&provider_id, issue)),
                     }));
-                } else if !configured.iter().any(|name| name == provider_name) {
+                } else if !client.has_provider(provider_name) {
                     all_ok = false;
                     completed_checks.push((index, CheckResult {
                         name:        "LLM".into(),
@@ -1078,6 +1054,13 @@ async fn run_llm_check(
             false
         }
     }
+}
+
+fn canonical_provider_id(catalog: &Catalog, provider_name: &str) -> ProviderId {
+    let provider_id = ProviderId::from(provider_name);
+    catalog
+        .provider(&provider_id)
+        .map_or(provider_id, |provider| provider.id.clone())
 }
 
 fn resolve_model_provider(

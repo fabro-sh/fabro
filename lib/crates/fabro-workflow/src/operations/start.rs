@@ -14,7 +14,6 @@ use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::{DockerSandboxOptions, SandboxProvider, SandboxSpec};
 use fabro_static::EnvVars;
 use fabro_types::RunId;
-use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
     ApprovalMode, DaytonaNetworkLayer, DaytonaSettings, DockerSettings,
     DockerfileSource as ResolvedDockerfileSource, HookDefinition as ResolvedHookDefinition,
@@ -23,6 +22,7 @@ use fabro_types::settings::run::{
     PullRequestSettings, RunMode, RunModelSettings as ResolvedRunModelSettings,
     RunNamespace as ResolvedRunSettings, TlsMode as ResolvedTlsMode,
 };
+use fabro_types::settings::{InterpString, ModelRegistry, ResolvedModelRef};
 use fabro_vault::Vault;
 use tokio::runtime::Handle;
 use tokio::sync::RwLock as AsyncRwLock;
@@ -584,28 +584,71 @@ fn resolve_docker_config(settings: &ResolvedRunSettings) -> DockerSandboxOptions
 
 fn resolve_fallback_chain(
     catalog: &Catalog,
-    provider: &ProviderId,
+    _provider: &ProviderId,
     model: &str,
     settings: &ResolvedRunModelSettings,
 ) -> Vec<FallbackTarget> {
     if settings.fallbacks.is_empty() {
         return Vec::new();
     }
-    // Group v2 ModelRef entries by provider name, preserving the legacy
-    // shape expected by `Catalog::build_fallback_chain`. The historical
-    // bridge grouped all fallback tokens under the empty-string key; we
-    // preserve that behavior here so `Catalog::build_fallback_chain`
-    // returns an empty chain unless a consumer has explicitly wired
-    // provider-keyed fallbacks. A proper provider-aware fallback chain
-    // is a follow-up along with the model registry work.
-    let mut by_provider: HashMap<String, Vec<String>> = HashMap::new();
-    for model_ref in &settings.fallbacks {
-        by_provider
-            .entry(String::new())
-            .or_default()
-            .push(model_ref.to_string());
+    let registry = CatalogModelRegistry { catalog };
+    let primary = catalog.get(model);
+
+    settings
+        .fallbacks
+        .iter()
+        .filter_map(|model_ref| match model_ref.resolve(&registry).ok()? {
+            ResolvedModelRef::Provider(provider_name) => {
+                let provider_id = canonical_provider_id(catalog, &provider_name);
+                let reference = primary?;
+                catalog
+                    .closest(&provider_id, reference)
+                    .map(|model| FallbackTarget {
+                        provider: provider_id.to_string(),
+                        model:    model.id.clone(),
+                    })
+            }
+            ResolvedModelRef::Model { provider, model } => {
+                let provider =
+                    provider.map(|provider| canonical_provider_id(catalog, &provider).to_string());
+                if let Some(info) = catalog.get(&model) {
+                    let provider = provider.unwrap_or_else(|| info.provider.to_string());
+                    return Some(FallbackTarget {
+                        provider,
+                        model: info.id.clone(),
+                    });
+                }
+                provider.map(|provider| FallbackTarget { provider, model })
+            }
+        })
+        .collect()
+}
+
+fn canonical_provider_id(catalog: &Catalog, provider_name: &str) -> ProviderId {
+    let provider_id = ProviderId::from(provider_name);
+    catalog
+        .provider(&provider_id)
+        .map_or(provider_id, |provider| provider.id.clone())
+}
+
+struct CatalogModelRegistry<'a> {
+    catalog: &'a Catalog,
+}
+
+impl ModelRegistry for CatalogModelRegistry<'_> {
+    fn is_provider(&self, token: &str) -> bool {
+        self.catalog.provider(&ProviderId::from(token)).is_some()
     }
-    catalog.build_fallback_chain(provider, model, &by_provider)
+
+    fn is_model(&self, token: &str) -> bool {
+        self.catalog.get(token).is_some()
+    }
+
+    fn provider_of(&self, token: &str) -> Option<String> {
+        self.catalog
+            .get(token)
+            .map(|model| model.provider.to_string())
+    }
 }
 
 fn runtime_mcp_server(settings: &ResolvedMcpServerSettings) -> McpServerSettings {
@@ -1077,6 +1120,7 @@ mod tests {
     use fabro_config::{RunCloneLayer, RunExecutionLayer, RunLayer, WorkflowSettingsBuilder};
     use fabro_model::catalog::LlmCatalogSettings;
     use fabro_store::Database;
+    use fabro_types::settings::ModelRef;
     use fabro_types::settings::run::RunMode;
     use fabro_types::{WorkflowSettings, fixtures};
     use object_store::memory::InMemory;
@@ -1131,6 +1175,48 @@ mod tests {
             Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
                 .expect("default catalog should build"),
         )
+    }
+
+    #[test]
+    fn resolve_fallback_chain_resolves_provider_fallbacks() {
+        let catalog = test_catalog();
+        let settings = ResolvedRunModelSettings {
+            fallbacks: vec!["openai".parse::<ModelRef>().unwrap()],
+            ..ResolvedRunModelSettings::default()
+        };
+
+        let chain = resolve_fallback_chain(
+            catalog.as_ref(),
+            &Provider::Anthropic.id(),
+            "claude-opus-4-6",
+            &settings,
+        );
+
+        assert_eq!(chain, vec![FallbackTarget {
+            provider: "openai".to_string(),
+            model:    "gpt-5.5".to_string(),
+        }]);
+    }
+
+    #[test]
+    fn resolve_fallback_chain_resolves_explicit_model_fallbacks() {
+        let catalog = test_catalog();
+        let settings = ResolvedRunModelSettings {
+            fallbacks: vec!["openai/gpt-5.4-mini".parse::<ModelRef>().unwrap()],
+            ..ResolvedRunModelSettings::default()
+        };
+
+        let chain = resolve_fallback_chain(
+            catalog.as_ref(),
+            &Provider::Anthropic.id(),
+            "claude-opus-4-6",
+            &settings,
+        );
+
+        assert_eq!(chain, vec![FallbackTarget {
+            provider: "openai".to_string(),
+            model:    "gpt-5.4-mini".to_string(),
+        }]);
     }
 
     #[test]

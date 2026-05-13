@@ -12,6 +12,8 @@ use tokio::sync::RwLock as AsyncRwLock;
 use tokio::task::spawn_blocking;
 
 use crate::credential::{ApiKeyHeader, AuthCredential, AuthDetails, credential_id_for};
+use crate::credential_source::CredentialSource;
+use crate::env_source::EnvCredentialSource;
 use crate::refresh::refresh_oauth_credential;
 use crate::vault_ext::{vault_get_credential, vault_set_credential};
 
@@ -267,14 +269,19 @@ impl CredentialResolver {
         provider: &CatalogProvider,
         catalog: &Catalog,
     ) -> bool {
-        provider.credentials.iter().any(|credential_ref| {
+        let has_declared_credential = provider.credentials.iter().any(|credential_ref| {
             self.credential_from_ref(vault, &provider.id, credential_ref)
                 .is_some()
-        }) || (!provider.extra_headers.is_empty()
+        });
+        let has_provider_id_credential =
+            vault_get_credential(vault, provider.id.as_str()).is_some();
+        let has_header_only_credentials = !provider.extra_headers.is_empty()
             && provider.credentials.is_empty()
             && self
                 .resolved_extra_headers_for_catalog(vault, &provider.id, catalog)
-                .is_ok())
+                .is_ok();
+
+        has_declared_credential || has_provider_id_credential || has_header_only_credentials
     }
 
     fn credential_from_ref(
@@ -482,26 +489,12 @@ pub async fn configured_providers_from_process_env(
             let guard = vault_arc.read().await;
             resolver.configured_providers(&guard, catalog)
         }
-        None => catalog
-            .providers()
-            .iter()
-            .filter(|provider| provider_has_process_env_api_key(provider))
-            .map(|provider| provider.id.clone())
-            .collect(),
+        None => {
+            EnvCredentialSource::new()
+                .configured_providers(catalog)
+                .await
+        }
     }
-}
-
-#[expect(
-    clippy::disallowed_methods,
-    reason = "Provider discovery intentionally checks documented API-key env names."
-)]
-fn provider_has_process_env_api_key(provider: &CatalogProvider) -> bool {
-    provider
-        .credentials
-        .iter()
-        .any(|credential_ref| {
-            matches!(credential_ref, CredentialRef::Env(name) if std::env::var(name).is_ok())
-        })
 }
 
 fn primary_api_key_env_var<'a>(provider: &ProviderId, catalog: &'a Catalog) -> Option<&'a str> {

@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 
 import { EmptyState } from "../components/state";
-import { formatDurationSecs } from "../lib/format";
+import { formatDurationSecs, formatTokenCount } from "../lib/format";
 import { useRunBilling } from "../lib/queries";
 import { IN_FLIGHT_STAGE_STATES } from "../lib/stage-sidebar";
 import { useTickingNow } from "../lib/time";
@@ -15,7 +15,7 @@ const EMPTY_VALUE = "—";
 
 function formatTokens(n: number | null | undefined) {
   if (n == null) return EMPTY_VALUE;
-  return `${(n / 1000).toFixed(1)}k`;
+  return formatTokenCount(n, { compactDecimal: true });
 }
 
 function formatUsdMicros(usdMicros?: number | null) {

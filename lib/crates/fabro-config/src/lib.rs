@@ -37,7 +37,7 @@ pub use builders::{
 pub use error::{Error, Result};
 pub use fabro_util::path::expand_tilde;
 pub use home::Home;
-pub use input_overrides::{InputOverrideParseError, parse_input_overrides};
+pub use input_overrides::{InputOverrideParseError, parse_input_overrides, parse_labels};
 pub use layers::{
     CliAuthLayer, CliExecAgentLayer, CliExecLayer, CliExecModelLayer, CliLayer, CliLoggingLayer,
     CliOutputLayer, CliTargetLayer, CliUpdatesLayer, CostRates, CredentialRef,

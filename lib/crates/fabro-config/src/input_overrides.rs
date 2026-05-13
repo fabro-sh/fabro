@@ -62,6 +62,15 @@ pub fn parse_input_overrides(
     Ok(parsed)
 }
 
+#[must_use]
+pub fn parse_labels(labels: &[String]) -> HashMap<String, String> {
+    labels
+        .iter()
+        .filter_map(|label| label.split_once('='))
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -69,6 +78,21 @@ mod tests {
     fn parse_one(key: &str, raw_value: &str) -> Result<toml::Value, InputOverrideParseError> {
         parse_input_overrides(&[format!("{key}={raw_value}")])
             .map(|mut parsed| parsed.remove(key).expect("input should be present"))
+    }
+
+    #[test]
+    fn parse_labels_keeps_key_value_pairs() {
+        assert_eq!(
+            parse_labels(&[
+                "environment=prod".to_string(),
+                "missing_equals".to_string(),
+                "owner=platform".to_string(),
+            ]),
+            HashMap::from([
+                ("environment".to_string(), "prod".to_string()),
+                ("owner".to_string(), "platform".to_string()),
+            ])
+        );
     }
 
     #[test]

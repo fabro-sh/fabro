@@ -32,6 +32,13 @@ pub enum ReasoningEffort {
     Max,
 }
 
+impl ReasoningEffort {
+    #[must_use]
+    pub fn variants() -> &'static [Self] {
+        <Self as strum::VariantArray>::VARIANTS
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
