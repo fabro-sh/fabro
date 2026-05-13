@@ -13,7 +13,7 @@ use crate::adapter::{self, AdapterMetadata};
 use crate::ids::ProviderId;
 use crate::provider::Provider;
 use crate::reasoning::ReasoningEffort;
-use crate::types::{Model, ModelCosts, ModelFeatures, ModelLimits};
+use crate::types::{Model, ModelCosts, ModelFeatures, ModelLimits, ReasoningEffortFeature};
 
 #[derive(RustEmbed)]
 #[folder = "src/catalog/providers"]
@@ -101,13 +101,17 @@ pub struct SettingsModelLimits {
 #[serde(deny_unknown_fields)]
 pub struct SettingsModelFeatures {
     #[serde(default)]
-    pub tools:     Option<bool>,
+    pub tools:            Option<bool>,
     #[serde(default)]
-    pub vision:    Option<bool>,
+    pub vision:           Option<bool>,
     #[serde(default)]
-    pub reasoning: Option<bool>,
+    pub reasoning:        Option<bool>,
     #[serde(default)]
-    pub effort:    Option<bool>,
+    pub reasoning_effort: Option<ReasoningEffortFeature>,
+    #[serde(default)]
+    pub prompt_cache:     Option<bool>,
+    #[serde(default)]
+    pub effort:           Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -465,10 +469,14 @@ pub enum CatalogBuildError {
         adapter: String,
         value:   ReasoningEffort,
     },
-    #[error("model '{model}' declares reasoning_effort controls but features.effort is false")]
-    ReasoningEffortWithoutFeature { model: String },
     #[error(
-        "model '{model}' must declare at least one reasoning_effort when features.effort is true"
+        "model '{model}' declares reasoning_effort controls but features.reasoning_effort is none"
+    )]
+    ReasoningEffortWithoutFeature { model: String },
+    #[error("model '{model}' declares reasoning_effort feature but features.reasoning is false")]
+    ReasoningEffortWithoutReasoning { model: String },
+    #[error(
+        "model '{model}' must declare at least one reasoning_effort when features.reasoning_effort is levels"
     )]
     EmptyReasoningEffortControls { model: String },
     #[error("model '{model}' has invalid speed '{value}'")]
@@ -1009,10 +1017,12 @@ fn merge_model_features_settings(
     fallback: &SettingsModelFeatures,
 ) -> SettingsModelFeatures {
     SettingsModelFeatures {
-        tools:     higher.tools.or(fallback.tools),
-        vision:    higher.vision.or(fallback.vision),
-        reasoning: higher.reasoning.or(fallback.reasoning),
-        effort:    higher.effort.or(fallback.effort),
+        tools:            higher.tools.or(fallback.tools),
+        vision:           higher.vision.or(fallback.vision),
+        reasoning:        higher.reasoning.or(fallback.reasoning),
+        reasoning_effort: higher.reasoning_effort.or(fallback.reasoning_effort),
+        prompt_cache:     higher.prompt_cache.or(fallback.prompt_cache),
+        effort:           higher.effort.or(fallback.effort),
     }
 }
 
@@ -1180,26 +1190,42 @@ fn build_model_features(
     model_id: &str,
     features: &SettingsModelFeatures,
 ) -> Result<ModelFeatures, CatalogBuildError> {
+    let reasoning = features
+        .reasoning
+        .ok_or_else(|| CatalogBuildError::MissingModelField {
+            model: model_id.to_string(),
+            field: "features.reasoning",
+        })?;
+    let reasoning_effort = features.reasoning_effort.unwrap_or_else(|| {
+        if features.effort.unwrap_or_default() {
+            ReasoningEffortFeature::Levels
+        } else {
+            ReasoningEffortFeature::None
+        }
+    });
+    if !reasoning && reasoning_effort == ReasoningEffortFeature::Levels {
+        return Err(CatalogBuildError::ReasoningEffortWithoutReasoning {
+            model: model_id.to_string(),
+        });
+    }
+
     Ok(ModelFeatures {
-        tools:     features
+        tools: features
             .tools
             .ok_or_else(|| CatalogBuildError::MissingModelField {
                 model: model_id.to_string(),
                 field: "features.tools",
             })?,
-        vision:    features
+        vision: features
             .vision
             .ok_or_else(|| CatalogBuildError::MissingModelField {
                 model: model_id.to_string(),
                 field: "features.vision",
             })?,
-        reasoning: features
-            .reasoning
-            .ok_or_else(|| CatalogBuildError::MissingModelField {
-                model: model_id.to_string(),
-                field: "features.reasoning",
-            })?,
-        effort:    features.effort.unwrap_or_default(),
+        reasoning,
+        reasoning_effort,
+        prompt_cache: features.prompt_cache.unwrap_or_default(),
+        effort: reasoning_effort == ReasoningEffortFeature::Levels,
     })
 }
 
@@ -1248,17 +1274,18 @@ fn build_model_controls(
     settings: &ModelCatalogSettings,
     adapter: &'static AdapterMetadata,
 ) -> Result<CatalogModelControls, CatalogBuildError> {
+    let supports_reasoning_effort = features.reasoning_effort == ReasoningEffortFeature::Levels;
     let reasoning_effort = match settings
         .controls
         .as_ref()
         .and_then(|controls| controls.reasoning_effort.as_ref())
     {
-        Some(values) if !features.effort && !values.is_empty() => {
+        Some(values) if !supports_reasoning_effort && !values.is_empty() => {
             return Err(CatalogBuildError::ReasoningEffortWithoutFeature {
                 model: model_id.to_string(),
             });
         }
-        Some(values) if values.is_empty() && features.effort => {
+        Some(values) if values.is_empty() && supports_reasoning_effort => {
             return Err(CatalogBuildError::EmptyReasoningEffortControls {
                 model: model_id.to_string(),
             });
@@ -1267,7 +1294,7 @@ fn build_model_controls(
             .iter()
             .map(|value| parse_reasoning_effort(model_id, value))
             .collect::<Result<Vec<_>, _>>()?,
-        None if features.effort => adapter.controls.native_reasoning_effort.to_vec(),
+        None if supports_reasoning_effort => adapter.controls.native_reasoning_effort.to_vec(),
         None => Vec::new(),
     };
     for value in &reasoning_effort {
@@ -1467,7 +1494,7 @@ fn default_adapter_for_provider(provider: &ProviderId) -> &'static str {
 
 fn default_controls_for_model(model: &Model) -> CatalogModelControls {
     CatalogModelControls {
-        reasoning_effort: if model.features.effort {
+        reasoning_effort: if model.features.reasoning_effort == ReasoningEffortFeature::Levels {
             ReasoningEffort::VARIANTS.to_vec()
         } else {
             Vec::new()
@@ -1777,10 +1804,12 @@ effort = false
             training:             None,
             knowledge_cutoff:     None,
             features:             ModelFeatures {
-                tools:     true,
-                vision:    false,
-                reasoning: false,
-                effort:    false,
+                tools:            true,
+                vision:           false,
+                reasoning:        false,
+                reasoning_effort: ReasoningEffortFeature::None,
+                prompt_cache:     false,
+                effort:           false,
             },
             costs:                ModelCosts {
                 input_cost_per_mtok:       Some(1.0),
@@ -2156,6 +2185,7 @@ adapter = "openai"
 provider = "test"
 display_name = "Model"
 family = "test"
+default = true
 
 [models.model.limits]
 context_window = 1000
@@ -2186,6 +2216,7 @@ adapter = "anthropic"
 provider = "test"
 display_name = "Model"
 family = "test"
+default = true
 
 [models.model.limits]
 context_window = 1000
@@ -2203,6 +2234,216 @@ input_cost_per_mtok = 1.0
             Catalog::from_settings(&undeclared_speed_cost).unwrap_err(),
             CatalogBuildError::UndeclaredSpeedCost { model, speed }
                 if model == "model" && speed == Speed::Fast
+        ));
+    }
+
+    #[test]
+    fn catalog_from_settings_accepts_reasoning_effort_feature_levels() {
+        let settings = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+
+[models.model]
+provider = "test"
+display_name = "Model"
+family = "test"
+default = true
+
+[models.model.limits]
+context_window = 1000
+
+[models.model.features]
+tools = true
+vision = false
+reasoning = true
+reasoning_effort = "levels"
+prompt_cache = true
+
+[models.model.controls]
+reasoning_effort = ["low", "medium"]
+"#,
+        );
+
+        let catalog = Catalog::from_settings(&settings).unwrap();
+        let model = catalog.get("model").unwrap();
+        assert_eq!(
+            model.features.reasoning_effort,
+            crate::ReasoningEffortFeature::Levels
+        );
+        assert!(model.features.prompt_cache);
+        assert!(model.features.effort);
+        assert_eq!(
+            catalog
+                .model_settings("model")
+                .unwrap()
+                .controls
+                .reasoning_effort,
+            vec![ReasoningEffort::Low, ReasoningEffort::Medium]
+        );
+    }
+
+    #[test]
+    fn catalog_from_settings_maps_legacy_effort_to_reasoning_effort_feature() {
+        let settings = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+
+[models.with_effort]
+provider = "test"
+display_name = "With Effort"
+family = "test"
+default = true
+
+[models.with_effort.limits]
+context_window = 1000
+
+[models.with_effort.features]
+tools = true
+vision = false
+reasoning = true
+effort = true
+
+[models.no_effort]
+provider = "test"
+display_name = "No Effort"
+family = "test"
+
+[models.no_effort.limits]
+context_window = 1000
+
+[models.no_effort.features]
+tools = true
+vision = false
+reasoning = true
+effort = false
+"#,
+        );
+
+        let catalog = Catalog::from_settings(&settings).unwrap();
+
+        let with_effort = catalog.get("with_effort").unwrap();
+        assert_eq!(
+            with_effort.features.reasoning_effort,
+            crate::ReasoningEffortFeature::Levels
+        );
+        assert!(with_effort.features.effort);
+
+        let no_effort = catalog.get("no_effort").unwrap();
+        assert_eq!(
+            no_effort.features.reasoning_effort,
+            crate::ReasoningEffortFeature::None
+        );
+        assert!(!no_effort.features.effort);
+    }
+
+    #[test]
+    fn catalog_merge_prefers_explicit_reasoning_effort_over_legacy_effort() {
+        let fallback = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+
+[models.model]
+provider = "test"
+display_name = "Model"
+family = "test"
+default = true
+
+[models.model.limits]
+context_window = 1000
+
+[models.model.features]
+tools = true
+vision = false
+reasoning = true
+reasoning_effort = "levels"
+"#,
+        );
+        let higher = minimal_settings(
+            r"
+[models.model.features]
+effort = false
+",
+        );
+
+        let merged = merge_catalog_settings(higher, fallback);
+        let catalog = Catalog::from_settings(&merged).unwrap();
+        let model = catalog.get("model").unwrap();
+
+        assert_eq!(
+            model.features.reasoning_effort,
+            crate::ReasoningEffortFeature::Levels
+        );
+        assert!(model.features.effort);
+    }
+
+    #[test]
+    fn catalog_from_settings_rejects_reasoning_effort_controls_when_feature_is_none() {
+        let settings = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+
+[models.model]
+provider = "test"
+display_name = "Model"
+family = "test"
+
+[models.model.limits]
+context_window = 1000
+
+[models.model.features]
+tools = true
+vision = false
+reasoning = true
+reasoning_effort = "none"
+
+[models.model.controls]
+reasoning_effort = ["low"]
+"#,
+        );
+
+        assert!(matches!(
+            Catalog::from_settings(&settings).unwrap_err(),
+            CatalogBuildError::ReasoningEffortWithoutFeature { model }
+                if model == "model"
+        ));
+    }
+
+    #[test]
+    fn catalog_from_settings_rejects_reasoning_effort_feature_without_reasoning() {
+        let settings = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+
+[models.model]
+provider = "test"
+display_name = "Model"
+family = "test"
+
+[models.model.limits]
+context_window = 1000
+
+[models.model.features]
+tools = true
+vision = false
+reasoning = false
+reasoning_effort = "levels"
+"#,
+        );
+
+        assert!(matches!(
+            Catalog::from_settings(&settings).unwrap_err(),
+            CatalogBuildError::ReasoningEffortWithoutReasoning { model }
+                if model == "model"
         ));
     }
 
@@ -2295,6 +2536,8 @@ input_cost_per_mtok = 1.0
                 tools: true,
                 vision: true,
                 reasoning: true,
+                reasoning_effort: Levels,
+                prompt_cache: true,
                 effort: true,
             },
             costs: ModelCosts {
@@ -2363,6 +2606,8 @@ input_cost_per_mtok = 1.0
                 tools: true,
                 vision: true,
                 reasoning: true,
+                reasoning_effort: Levels,
+                prompt_cache: false,
                 effort: true,
             },
             costs: ModelCosts {
@@ -2421,6 +2666,8 @@ input_cost_per_mtok = 1.0
                 tools: true,
                 vision: true,
                 reasoning: false,
+                reasoning_effort: None,
+                prompt_cache: false,
                 effort: false,
             },
             costs: ModelCosts {
@@ -2482,6 +2729,8 @@ input_cost_per_mtok = 1.0
                 tools: true,
                 vision: false,
                 reasoning: true,
+                reasoning_effort: Levels,
+                prompt_cache: false,
                 effort: true,
             },
             costs: ModelCosts {
@@ -2535,6 +2784,8 @@ input_cost_per_mtok = 1.0
                 tools: true,
                 vision: true,
                 reasoning: true,
+                reasoning_effort: Levels,
+                prompt_cache: false,
                 effort: true,
             },
             costs: ModelCosts {
@@ -2586,6 +2837,8 @@ input_cost_per_mtok = 1.0
                 tools: true,
                 vision: true,
                 reasoning: true,
+                reasoning_effort: Levels,
+                prompt_cache: false,
                 effort: true,
             },
             costs: ModelCosts {
@@ -2663,6 +2916,8 @@ input_cost_per_mtok = 1.0
                 tools: true,
                 vision: false,
                 reasoning: true,
+                reasoning_effort: Levels,
+                prompt_cache: false,
                 effort: true,
             },
             costs: ModelCosts {

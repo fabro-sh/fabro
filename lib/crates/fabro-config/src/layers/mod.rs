@@ -20,7 +20,7 @@ pub use features::FeaturesLayer;
 pub use llm::{
     CostRates, CredentialRef, CredentialRefParseError, HeaderValueRef, LlmLayer, ModelControls,
     ModelCostTable, ModelFeatures as LlmModelFeatures, ModelLimits as LlmModelLimits,
-    ModelSettings, ProviderSettings,
+    ModelSettings, ProviderSettings, ReasoningEffortFeature,
 };
 pub use log_filter::LogFilter;
 pub use maps::{MergeMap, ReplaceMap, StickyMap};

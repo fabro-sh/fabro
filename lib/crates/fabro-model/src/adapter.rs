@@ -42,9 +42,9 @@ pub enum ApiKeyHeaderPolicy {
 /// API.
 #[derive(Debug, Clone, Copy)]
 pub struct AdapterControlCapabilities {
-    /// Reasoning-effort values that can be sent through the provider's native
-    /// effort field. Models declaring `features.effort = true` may declare
-    /// `controls.reasoning_effort` only as a non-empty subset of this list.
+    /// Reasoning-effort values this adapter can accept for models declaring
+    /// `features.reasoning_effort = "levels"`. The adapter owns how those
+    /// levels are encoded on the provider wire API.
     pub native_reasoning_effort: &'static [ReasoningEffort],
     /// Additional speeds (beyond `Speed::Standard`, which is implicit) the
     /// adapter supports. Models may declare `controls.speed` only as a
@@ -116,8 +116,8 @@ pub const OPENAI_COMPATIBLE: AdapterMetadata = AdapterMetadata {
     api_key_header:  ApiKeyHeaderPolicy::Bearer,
     controls:        AdapterControlCapabilities {
         // `openai_compatible` providers vary widely; the catalog requires
-        // models declaring `features.effort = true` to enumerate exactly
-        // which effort values their endpoint accepts.
+        // models declaring `features.reasoning_effort = "levels"` to
+        // enumerate exactly which effort values their endpoint accepts.
         native_reasoning_effort: FULL_REASONING_EFFORTS,
         additional_speeds:       &[],
     },

@@ -23,7 +23,7 @@ max_output = 65536
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 
 [models."gemini-3.1-pro-preview".costs]
 input_cost_per_mtok = 2.0
@@ -48,7 +48,7 @@ max_output = 65536
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 
 [models."gemini-3.1-pro-preview-customtools".costs]
 input_cost_per_mtok = 2.0
@@ -73,7 +73,7 @@ max_output = 65536
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 
 [models."gemini-3-flash-preview".costs]
 input_cost_per_mtok = 0.5
@@ -98,7 +98,7 @@ max_output = 65536
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 
 [models."gemini-3.1-flash-lite-preview".costs]
 input_cost_per_mtok = 0.25

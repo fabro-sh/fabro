@@ -13,7 +13,7 @@ use fabro_types::settings::{Duration, InterpString, Size};
 use super::LogFilter;
 use super::cli::{CliAuthLayer, CliLoggingLayer, CliTargetLayer};
 use super::features::FeaturesLayer;
-use super::llm::{CostRates, CredentialRef, HeaderValueRef};
+use super::llm::{CostRates, CredentialRef, HeaderValueRef, ReasoningEffortFeature};
 use super::run::{
     DaytonaSnapshotLayer, HookAgentMarker, HookEntry, HookTlsMode, InterviewProviderLayer,
     ModelRefOrSplice, NotificationProviderLayer, RunArtifactsLayer, RunCheckpointLayer,
@@ -83,6 +83,7 @@ impl_combine_or_option!(
     ServerAuthMethod,
     WebhookStrategy,
     LogFilter,
+    ReasoningEffortFeature,
 );
 
 impl Combine for Option<Vec<String>> {

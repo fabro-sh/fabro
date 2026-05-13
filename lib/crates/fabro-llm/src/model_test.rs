@@ -169,7 +169,7 @@ fn validate_deep_result(result: &GenerateResult) -> Result<(), String> {
 mod tests {
     use std::collections::HashMap;
 
-    use fabro_model::{ModelCosts, ModelFeatures, ModelLimits, Provider};
+    use fabro_model::{ModelCosts, ModelFeatures, ModelLimits, Provider, ReasoningEffortFeature};
 
     use super::*;
     use crate::types::{FinishReason, Message, Response, StepResult, TokenCounts, ToolResult};
@@ -220,10 +220,12 @@ mod tests {
     #[tokio::test]
     async fn run_model_test_deep_errors_when_model_lacks_tools() {
         let info = test_model_with(ModelFeatures {
-            tools:     false,
-            vision:    false,
-            reasoning: true,
-            effort:    true,
+            tools:            false,
+            vision:           false,
+            reasoning:        true,
+            reasoning_effort: ReasoningEffortFeature::Levels,
+            prompt_cache:     false,
+            effort:           true,
         });
 
         let outcome = run_model_test(&info, ModelTestMode::Deep, empty_test_client()).await;

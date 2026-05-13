@@ -361,6 +361,11 @@ fn main() {
         ("ProviderId", "fabro_model::ProviderId", &[]),
         ("Model", "fabro_model::Model", &[]),
         ("ModelLimits", "fabro_model::ModelLimits", &[]),
+        (
+            "ReasoningEffortFeature",
+            "fabro_model::ReasoningEffortFeature",
+            &[],
+        ),
         ("ModelFeatures", "fabro_model::ModelFeatures", &[]),
         ("ModelCosts", "fabro_model::ModelCosts", &[]),
         ("ModelTestMode", "fabro_model::ModelTestMode", &[]),

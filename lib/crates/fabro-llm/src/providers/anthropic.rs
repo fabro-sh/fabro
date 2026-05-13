@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use fabro_model::Catalog;
+use fabro_model::{Catalog, ReasoningEffortFeature};
 use futures::stream;
 
 use crate::error::{Error, error_from_status_code};
@@ -1128,7 +1128,11 @@ async fn build_api_request(
         request.tools.as_ref().map(|t| translate_tools(t))
     };
 
-    let auto_cache = is_auto_cache_enabled(request.provider_options.as_ref());
+    let model_info = common::catalog_model(adapter.catalog.as_deref(), &request.model)
+        .or_else(|| Catalog::builtin().get(&request.model));
+    let supports_prompt_cache = model_info.is_some_and(|m| m.features.prompt_cache);
+    let auto_cache =
+        supports_prompt_cache && is_auto_cache_enabled(request.provider_options.as_ref());
 
     let mut system_value = system.and_then(|s| {
         if s.trim().is_empty() {
@@ -1161,9 +1165,8 @@ async fn build_api_request(
     // Check whether this model supports the `output_config.effort` parameter.
     // Older reasoning models (e.g. claude-sonnet-4-5) need `thinking` with
     // `budget_tokens` instead.
-    let model_info = common::catalog_model(adapter.catalog.as_deref(), &request.model)
-        .or_else(|| Catalog::builtin().get(&request.model));
-    let supports_effort = model_info.is_none_or(|m| m.features.effort);
+    let supports_effort =
+        model_info.is_none_or(|m| m.features.reasoning_effort == ReasoningEffortFeature::Levels);
 
     let mut resolved_max_tokens = request
         .max_tokens
@@ -1195,7 +1198,9 @@ async fn build_api_request(
         // Auto-set adaptive thinking for known effort-capable models when no
         // explicit thinking config or reasoning_effort is provided.
         let thinking = explicit_thinking.or_else(|| {
-            if model_info.is_some_and(|m| m.features.effort) {
+            if model_info
+                .is_some_and(|m| m.features.reasoning_effort == ReasoningEffortFeature::Levels)
+            {
                 Some(serde_json::json!({"type": "adaptive"}))
             } else {
                 None
@@ -1218,7 +1223,7 @@ async fn build_api_request(
         system: system_value,
         temperature: request.temperature,
         top_p: request.top_p,
-        stop_sequences: request.stop_sequences.clone(),
+        stop_sequences: Some(request.stop_sequences.clone().unwrap_or_default()),
         tools: api_tools,
         tool_choice: tool_choice_json,
         thinking,
@@ -1419,6 +1424,8 @@ impl ProviderAdapter for Adapter {
 
 #[cfg(test)]
 mod tests {
+    use fabro_model::catalog::LlmCatalogSettings;
+
     use super::*;
     use crate::types::{AudioData, DocumentData, ReasoningEffort, ResponseFormat};
 
@@ -1828,6 +1835,34 @@ mod tests {
             metadata:         None,
             provider_options: None,
         }
+    }
+
+    fn catalog_with_anthropic_model(features: &str) -> Arc<Catalog> {
+        let settings: LlmCatalogSettings = toml::from_str(&format!(
+            r#"
+[providers.anthropic]
+display_name = "Anthropic"
+adapter = "anthropic"
+
+[models."test-claude"]
+provider = "anthropic"
+display_name = "Test Claude"
+family = "claude"
+default = true
+
+[models."test-claude".limits]
+context_window = 200000
+max_output = 4096
+
+[models."test-claude".features]
+tools = true
+vision = true
+reasoning = true
+{features}
+"#
+        ))
+        .unwrap();
+        Arc::new(Catalog::from_settings(&settings).unwrap())
     }
 
     fn make_request_with_format(format: ResponseFormat) -> Request {
@@ -2295,6 +2330,73 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn build_api_request_disables_prompt_cache_when_model_feature_is_false() {
+        let adapter = Adapter::new("test-key").with_catalog(catalog_with_anthropic_model(
+            r#"
+reasoning_effort = "levels"
+prompt_cache = false
+"#,
+        ));
+        let request = Request {
+            model: "test-claude".to_string(),
+            messages: vec![
+                Message::system("Use the cache if supported."),
+                Message::user("Hello"),
+            ],
+            provider_options: Some(serde_json::json!({
+                "anthropic": {"auto_cache": true}
+            })),
+            ..make_base_request()
+        };
+
+        let (api_request, req_builder) = build_api_request(&adapter, &request, false).await;
+        assert_eq!(
+            api_request.system,
+            Some(serde_json::Value::String(
+                "Use the cache if supported.".to_string()
+            ))
+        );
+        let built = req_builder.build().expect("should build request");
+        let beta = built.headers().get("anthropic-beta");
+        assert!(
+            beta.is_none_or(|value| !value.to_str().unwrap().contains(CACHE_BETA_HEADER)),
+            "cache beta header must not be sent when the model disables prompt cache"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_api_request_enables_prompt_cache_when_model_feature_is_true() {
+        let adapter = Adapter::new("test-key").with_catalog(catalog_with_anthropic_model(
+            r#"
+reasoning_effort = "levels"
+prompt_cache = true
+"#,
+        ));
+        let request = Request {
+            model: "test-claude".to_string(),
+            messages: vec![
+                Message::system("Use the cache if supported."),
+                Message::user("Hello"),
+            ],
+            ..make_base_request()
+        };
+
+        let (api_request, req_builder) = build_api_request(&adapter, &request, false).await;
+        assert_eq!(
+            api_request.system.unwrap()[0]["cache_control"]["type"],
+            "ephemeral"
+        );
+        let built = req_builder.build().expect("should build request");
+        let beta = built
+            .headers()
+            .get("anthropic-beta")
+            .expect("cache beta header should be present")
+            .to_str()
+            .unwrap();
+        assert!(beta.contains(CACHE_BETA_HEADER));
+    }
+
+    #[tokio::test]
     async fn build_api_request_uses_adaptive_thinking_for_opus_4_7_without_forced_tools() {
         let adapter = Adapter::new("test-key");
         let request = Request {
@@ -2422,6 +2524,16 @@ mod tests {
 
         let (api_request, _req_builder) = build_api_request(&adapter, &request, false).await;
         assert_eq!(api_request.speed, Some("fast".to_string()));
+    }
+
+    #[tokio::test]
+    async fn build_api_request_serializes_absent_stop_sequences_as_empty_array() {
+        let adapter = Adapter::new("test-key");
+        let request = make_base_request();
+
+        let (api_request, _req_builder) = build_api_request(&adapter, &request, false).await;
+
+        assert_eq!(api_request.stop_sequences, Some(Vec::new()));
     }
 
     #[tokio::test]

@@ -352,10 +352,12 @@ fn model_limits_to_catalog(limits: &LlmModelLimits) -> model_catalog::SettingsMo
 
 fn model_features_to_catalog(features: &LlmModelFeatures) -> model_catalog::SettingsModelFeatures {
     model_catalog::SettingsModelFeatures {
-        tools:     features.tools,
-        vision:    features.vision,
-        reasoning: features.reasoning,
-        effort:    features.effort,
+        tools:            features.tools,
+        vision:           features.vision,
+        reasoning:        features.reasoning,
+        reasoning_effort: features.reasoning_effort,
+        prompt_cache:     features.prompt_cache,
+        effort:           features.effort,
     }
 }
 

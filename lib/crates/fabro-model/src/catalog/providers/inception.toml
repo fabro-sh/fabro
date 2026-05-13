@@ -23,7 +23,7 @@ max_output = 50000
 tools = true
 vision = false
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 
 [models."mercury-2".costs]
 input_cost_per_mtok = 0.25

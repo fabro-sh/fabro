@@ -465,7 +465,7 @@ impl Default for ModelsCommand {
 
 #[cfg(test)]
 mod tests {
-    use fabro_model::{ModelCosts, ModelFeatures, ModelLimits};
+    use fabro_model::{ModelCosts, ModelFeatures, ModelLimits, ReasoningEffortFeature};
 
     use super::*;
 
@@ -486,10 +486,12 @@ mod tests {
             training:             None,
             knowledge_cutoff:     None,
             features:             ModelFeatures {
-                tools:     true,
-                vision:    false,
-                reasoning: false,
-                effort:    false,
+                tools:            true,
+                vision:           false,
+                reasoning:        false,
+                reasoning_effort: ReasoningEffortFeature::None,
+                prompt_cache:     false,
+                effort:           false,
             },
             costs:                ModelCosts {
                 input_cost_per_mtok:       Some(1.0),

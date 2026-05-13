@@ -29,7 +29,9 @@
 use std::collections::{BTreeMap, HashMap};
 
 use fabro_model::catalog::deserialize_knowledge_cutoff;
-pub use fabro_model::{CredentialRef, CredentialRefParseError, HeaderValueRef};
+pub use fabro_model::{
+    CredentialRef, CredentialRefParseError, HeaderValueRef, ReasoningEffortFeature,
+};
 use serde::{Deserialize, Serialize};
 
 use super::maps::MergeMap;
@@ -134,13 +136,17 @@ pub struct ModelLimits {
 #[serde(deny_unknown_fields)]
 pub struct ModelFeatures {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tools:     Option<bool>,
+    pub tools:            Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vision:    Option<bool>,
+    pub vision:           Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<bool>,
+    pub reasoning:        Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effort:    Option<bool>,
+    pub reasoning_effort: Option<ReasoningEffortFeature>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_cache:     Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort:           Option<bool>,
 }
 
 /// User-facing allow-list for native control values Fabro accepts on this
@@ -548,6 +554,35 @@ cache_input_cost_per_mtok = 0.15
         assert_eq!(costs.base.output_cost_per_mtok, Some(2.50));
         assert_eq!(costs.base.cache_input_cost_per_mtok, Some(0.15));
         assert!(costs.speed.is_none());
+    }
+
+    #[test]
+    fn parses_model_reasoning_effort_and_prompt_cache_features() {
+        let toml = r#"
+[models."claude-bedrock"]
+provider = "bedrock"
+
+[models."claude-bedrock".features]
+tools = true
+vision = true
+reasoning = true
+reasoning_effort = "levels"
+prompt_cache = false
+"#;
+        let layer: LlmLayer = toml::from_str(toml).unwrap();
+        let features = layer
+            .models
+            .get("claude-bedrock")
+            .unwrap()
+            .features
+            .as_ref()
+            .unwrap();
+
+        assert_eq!(
+            features.reasoning_effort,
+            Some(fabro_model::ReasoningEffortFeature::Levels)
+        );
+        assert_eq!(features.prompt_cache, Some(false));
     }
 
     #[test]

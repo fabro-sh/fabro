@@ -1,7 +1,9 @@
 use std::any::{TypeId, type_name};
 
 use fabro_api::types::Model as ApiModel;
-use fabro_model::{Model, ModelCosts, ModelFeatures, ModelLimits, Provider, ProviderId};
+use fabro_model::{
+    Model, ModelCosts, ModelFeatures, ModelLimits, Provider, ProviderId, ReasoningEffortFeature,
+};
 use serde_json::json;
 
 #[test]
@@ -36,10 +38,12 @@ fn provider_id_json_matches_openapi_shape_through_model() {
         training:             None,
         knowledge_cutoff:     None,
         features:             ModelFeatures {
-            tools:     false,
-            vision:    false,
-            reasoning: false,
-            effort:    false,
+            tools:            false,
+            vision:           false,
+            reasoning:        false,
+            reasoning_effort: ReasoningEffortFeature::None,
+            prompt_cache:     false,
+            effort:           false,
         },
         costs:                ModelCosts {
             input_cost_per_mtok:       None,

@@ -22,7 +22,8 @@ max_output = 128000
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
+prompt_cache = true
 
 [models."claude-opus-4-7".controls]
 speed = ["fast"]
@@ -54,7 +55,8 @@ max_output = 128000
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
+prompt_cache = true
 
 [models."claude-opus-4-6".controls]
 speed = ["fast"]
@@ -86,6 +88,7 @@ max_output = 64000
 tools = true
 vision = true
 reasoning = true
+prompt_cache = true
 
 [models."claude-sonnet-4-5".costs]
 input_cost_per_mtok = 3.0
@@ -111,7 +114,8 @@ max_output = 64000
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
+prompt_cache = true
 
 [models."claude-sonnet-4-6".costs]
 input_cost_per_mtok = 3.0
@@ -136,6 +140,7 @@ max_output = 8192
 tools = true
 vision = true
 reasoning = false
+prompt_cache = true
 
 [models."claude-haiku-4-5".costs]
 input_cost_per_mtok = 0.8

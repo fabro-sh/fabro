@@ -26,4 +26,4 @@ pub use model_ref::ModelHandle;
 pub use model_test::ModelTestMode;
 pub use provider::Provider;
 pub use reasoning::ReasoningEffort;
-pub use types::{Model, ModelCosts, ModelFeatures, ModelLimits};
+pub use types::{Model, ModelCosts, ModelFeatures, ModelLimits, ReasoningEffortFeature};

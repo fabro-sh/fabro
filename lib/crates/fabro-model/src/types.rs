@@ -5,6 +5,27 @@ use crate::provider::Provider;
 
 // --- 2.9 Model ---
 
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr,
+)]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
+pub enum ReasoningEffortFeature {
+    Levels,
+    #[default]
+    None,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelLimits {
     pub context_window: i64,
@@ -13,16 +34,20 @@ pub struct ModelLimits {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelFeatures {
-    pub tools:     bool,
-    pub vision:    bool,
-    pub reasoning: bool,
-    /// Whether the model supports the `reasoning_effort` / `effort` parameter
-    /// directly (e.g. Anthropic `output_config.effort`, OpenAI
-    /// `reasoning.effort`). Models with `reasoning=true` but `effort=false`
-    /// (e.g. claude-sonnet-4-5) need the older `thinking` API with
-    /// `budget_tokens` instead.
+    pub tools:            bool,
+    pub vision:           bool,
+    pub reasoning:        bool,
+    /// Whether Fabro may expose abstract reasoning effort levels for this
+    /// model endpoint.
     #[serde(default)]
-    pub effort:    bool,
+    pub reasoning_effort: ReasoningEffortFeature,
+    /// Whether this model endpoint supports prompt caching annotations.
+    #[serde(default)]
+    pub prompt_cache:     bool,
+    /// Deprecated compatibility bool equivalent to
+    /// `reasoning_effort == "levels"`.
+    #[serde(default)]
+    pub effort:           bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -95,8 +120,16 @@ impl Model {
         self.features.reasoning
     }
 
+    pub fn supports_reasoning_effort(&self) -> bool {
+        self.features.reasoning_effort == ReasoningEffortFeature::Levels
+    }
+
     pub fn supports_effort(&self) -> bool {
-        self.features.effort
+        self.supports_reasoning_effort()
+    }
+
+    pub fn supports_prompt_cache(&self) -> bool {
+        self.features.prompt_cache
     }
 
     pub fn training(&self) -> Option<&str> {

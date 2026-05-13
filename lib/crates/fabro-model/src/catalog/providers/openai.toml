@@ -23,7 +23,7 @@ max_output = 128000
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 
 [models."gpt-5.2".costs]
 input_cost_per_mtok = 1.75
@@ -48,7 +48,7 @@ max_output = 128000
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 
 [models."gpt-5-mini".costs]
 input_cost_per_mtok = 0.25
@@ -72,7 +72,7 @@ max_output = 128000
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 
 [models."gpt-5.2-codex".costs]
 input_cost_per_mtok = 1.75
@@ -97,7 +97,7 @@ max_output = 128000
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 
 [models."gpt-5.3-codex".costs]
 input_cost_per_mtok = 1.75
@@ -122,7 +122,7 @@ max_output = 128000
 tools = true
 vision = false
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 
 [models."gpt-5.4"]
 provider = "openai"
@@ -143,7 +143,7 @@ max_output = 128000
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 
 [models."gpt-5.4".costs]
 input_cost_per_mtok = 2.5
@@ -168,7 +168,7 @@ max_output = 128000
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 
 [models."gpt-5.5".costs]
 input_cost_per_mtok = 5.0
@@ -193,7 +193,7 @@ max_output = 128000
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 
 [models."gpt-5.5-pro".costs]
 input_cost_per_mtok = 30.0
@@ -218,7 +218,7 @@ max_output = 128000
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 
 [models."gpt-5.4-pro".costs]
 input_cost_per_mtok = 30.0
@@ -243,7 +243,7 @@ max_output = 128000
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 
 [models."gpt-5.4-mini".costs]
 input_cost_per_mtok = 0.75

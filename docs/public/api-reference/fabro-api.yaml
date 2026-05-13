@@ -4400,6 +4400,13 @@ components:
           description: Maximum output tokens, if known.
           example: 128000
 
+    ReasoningEffortFeature:
+      description: Whether Fabro may expose reasoning effort levels for a model.
+      type: string
+      enum:
+        - levels
+        - none
+
     ModelFeatures:
       description: Capability flags for a model.
       type: object
@@ -4407,6 +4414,8 @@ components:
         - tools
         - vision
         - reasoning
+        - reasoning_effort
+        - prompt_cache
         - effort
       properties:
         tools:
@@ -4418,9 +4427,15 @@ components:
         reasoning:
           type: boolean
           description: Whether the model supports extended reasoning.
+        reasoning_effort:
+          $ref: "#/components/schemas/ReasoningEffortFeature"
+        prompt_cache:
+          type: boolean
+          description: Whether the model endpoint supports prompt caching.
         effort:
           type: boolean
-          description: Whether the model supports direct reasoning effort controls.
+          deprecated: true
+          description: Deprecated compatibility flag equivalent to reasoning_effort = levels.
 
     ModelCosts:
       description: Pricing per million tokens in USD.
