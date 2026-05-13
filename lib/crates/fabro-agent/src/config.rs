@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use fabro_llm::types::ReasoningEffort;
+use fabro_llm::types::{ReasoningEffort, Speed};
 use fabro_mcp::config::McpServerSettings;
 
 /// Callback invoked before each tool execution. Return `Ok(())` to allow,
@@ -65,7 +65,7 @@ pub struct SessionOptions {
     pub default_command_timeout_ms: u64,
     pub max_command_timeout_ms: u64,
     pub reasoning_effort: Option<ReasoningEffort>,
-    pub speed: Option<String>,
+    pub speed: Option<Speed>,
     pub tool_output_limits: HashMap<String, usize>,
     pub tool_line_limits: HashMap<String, usize>,
     /// Override the provider's default max_tokens when set.

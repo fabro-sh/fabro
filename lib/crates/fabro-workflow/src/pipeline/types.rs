@@ -9,7 +9,7 @@ use fabro_mcp::config::McpServerSettings;
 use fabro_model::{AgentProfileKind, Catalog, FallbackTarget, ProviderId};
 use fabro_sandbox::SandboxSpec;
 use fabro_types::RunId;
-use fabro_types::settings::run::PullRequestSettings;
+use fabro_types::settings::run::{PullRequestSettings, RunModelControls};
 use fabro_validate::{Diagnostic, Severity};
 use fabro_vault::Vault;
 use tokio::sync::RwLock as AsyncRwLock;
@@ -224,6 +224,7 @@ pub struct LlmSpec {
     pub profile_kind:   AgentProfileKind,
     pub fallback_chain: Vec<FallbackTarget>,
     pub mcp_servers:    Vec<McpServerSettings>,
+    pub model_controls: RunModelControls,
     pub dry_run:        bool,
 }
 

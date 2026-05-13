@@ -9,12 +9,13 @@ use fabro_agent::{
     ToolEnvProvider, Turn,
 };
 use fabro_auth::{CredentialSource, EnvCredentialSource};
-use fabro_graphviz::graph::Node;
+use fabro_graphviz::graph::{AttrValue, Node};
 use fabro_llm::client::Client;
-use fabro_llm::types::{Message, Request, TokenCounts};
+use fabro_llm::types::{Message, ReasoningEffort, Request, Speed, TokenCounts};
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{AgentProfileKind, Catalog, FallbackTarget, Provider, ProviderId, adapter};
+use fabro_types::settings::run::RunModelControls;
 use fabro_types::{SessionCapability, StageId};
 use tokio::sync::Mutex as TokioMutex;
 use tokio::task::JoinHandle;
@@ -106,6 +107,12 @@ struct ProviderContext {
     profile_kind: AgentProfileKind,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct EffectiveRequestControls {
+    reasoning_effort: Option<ReasoningEffort>,
+    speed:            Option<Speed>,
+}
+
 fn classify_agent_error(err: fabro_agent::Error, allow_failover: bool) -> AgentApiErrorDisposition {
     match err {
         fabro_agent::Error::Interrupted(fabro_agent::InterruptReason::Cancelled) => {
@@ -193,6 +200,72 @@ fn default_profile_kind(provider: Provider) -> AgentProfileKind {
         | Provider::Minimax
         | Provider::Inception
         | Provider::OpenAiCompatible => AgentProfileKind::OpenAi,
+    }
+}
+
+fn effective_request_controls(
+    catalog: &Catalog,
+    run_model_controls: &RunModelControls,
+    model: &str,
+    node: &Node,
+) -> Result<EffectiveRequestControls, Error> {
+    let reasoning_effort = match control_attr(node, "reasoning_effort")
+        .or(run_model_controls.reasoning_effort.as_deref())
+    {
+        Some(value) => Some(parse_reasoning_effort(node, value)?),
+        None => legacy_reasoning_effort_default(catalog, model),
+    };
+    let speed = control_attr(node, "speed")
+        .or(run_model_controls.speed.as_deref())
+        .map(|value| parse_speed(node, value))
+        .transpose()?;
+
+    Ok(EffectiveRequestControls {
+        reasoning_effort,
+        speed,
+    })
+}
+
+fn control_attr<'a>(node: &'a Node, key: &str) -> Option<&'a str> {
+    node.attrs.get(key).and_then(AttrValue::as_str)
+}
+
+fn parse_reasoning_effort(node: &Node, value: &str) -> Result<ReasoningEffort, Error> {
+    value.parse::<ReasoningEffort>().map_err(|source| {
+        Error::handler_with_source(
+            format!(
+                "Invalid reasoning_effort \"{value}\" for node \"{}\"; expected one of: low, medium, high, xhigh, max",
+                node.id
+            ),
+            &source,
+        )
+    })
+}
+
+fn parse_speed(node: &Node, value: &str) -> Result<Speed, Error> {
+    value.parse::<Speed>().map_err(|source| {
+        Error::handler_with_source(
+            format!(
+                "Invalid speed \"{value}\" for node \"{}\"; expected one of: standard, fast",
+                node.id
+            ),
+            &source,
+        )
+    })
+}
+
+fn legacy_reasoning_effort_default(catalog: &Catalog, model: &str) -> Option<ReasoningEffort> {
+    match catalog.model_settings(model) {
+        Some(settings)
+            if settings
+                .controls
+                .reasoning_effort
+                .contains(&ReasoningEffort::High) =>
+        {
+            Some(ReasoningEffort::High)
+        }
+        Some(_) => None,
+        None => Some(ReasoningEffort::High),
     }
 }
 
@@ -293,17 +366,18 @@ fn spawn_event_forwarder(
 /// For `full` fidelity nodes sharing a thread key, sessions are cached
 /// and reused so the LLM sees the full conversation history.
 pub struct AgentApiBackend {
-    model:          String,
-    provider:       Provider,
-    provider_id:    ProviderId,
-    profile_kind:   AgentProfileKind,
-    fallback_chain: Vec<FallbackTarget>,
-    sessions:       Mutex<HashMap<String, Session>>,
-    tool_env:       Option<Arc<dyn ToolEnvProvider>>,
-    mcp_servers:    Vec<McpServerSettings>,
-    source:         Arc<dyn CredentialSource>,
-    steering_hub:   Arc<SteeringHub>,
-    catalog:        Arc<Catalog>,
+    model:              String,
+    provider:           Provider,
+    provider_id:        ProviderId,
+    profile_kind:       AgentProfileKind,
+    fallback_chain:     Vec<FallbackTarget>,
+    sessions:           Mutex<HashMap<String, Session>>,
+    tool_env:           Option<Arc<dyn ToolEnvProvider>>,
+    mcp_servers:        Vec<McpServerSettings>,
+    run_model_controls: RunModelControls,
+    source:             Arc<dyn CredentialSource>,
+    steering_hub:       Arc<SteeringHub>,
+    catalog:            Arc<Catalog>,
 }
 
 impl AgentApiBackend {
@@ -351,6 +425,7 @@ impl AgentApiBackend {
             sessions: Mutex::new(HashMap::new()),
             tool_env: None,
             mcp_servers: Vec::new(),
+            run_model_controls: RunModelControls::default(),
             source,
             steering_hub,
             catalog,
@@ -389,6 +464,20 @@ impl AgentApiBackend {
     pub fn with_mcp_servers(mut self, servers: Vec<McpServerSettings>) -> Self {
         self.mcp_servers = servers;
         self
+    }
+
+    #[must_use]
+    pub fn with_run_model_controls(mut self, controls: RunModelControls) -> Self {
+        self.run_model_controls = controls;
+        self
+    }
+
+    fn effective_request_controls(
+        &self,
+        model: &str,
+        node: &Node,
+    ) -> Result<EffectiveRequestControls, Error> {
+        effective_request_controls(self.catalog.as_ref(), &self.run_model_controls, model, node)
     }
 
     fn resolve_provider_context(
@@ -451,6 +540,7 @@ impl AgentApiBackend {
             sandbox,
             self.source.as_ref(),
             Arc::clone(&self.catalog),
+            &self.run_model_controls,
             self.tool_env.as_ref(),
             tool_hooks,
             self.mcp_servers.clone(),
@@ -465,11 +555,14 @@ impl AgentApiBackend {
         sandbox: &Arc<dyn Sandbox>,
         source: &dyn CredentialSource,
         catalog: Arc<Catalog>,
+        run_model_controls: &RunModelControls,
         tool_env: Option<&Arc<dyn ToolEnvProvider>>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
         mcp_servers: Vec<McpServerSettings>,
     ) -> Result<Session, Error> {
-        let client = Client::from_source_with_catalog(source, catalog)
+        let controls =
+            effective_request_controls(catalog.as_ref(), run_model_controls, model, node)?;
+        let client = Client::from_source_with_catalog(source, Arc::clone(&catalog))
             .await
             .map_err(|e| Error::handler_with_source("Failed to create LLM client", &e))?;
 
@@ -482,8 +575,8 @@ impl AgentApiBackend {
 
         let config = SessionOptions {
             max_tokens: node.max_tokens(),
-            reasoning_effort: node.reasoning_effort().parse().ok(),
-            speed: node.speed().map(String::from),
+            reasoning_effort: controls.reasoning_effort,
+            speed: controls.speed,
             tool_hooks,
             mcp_servers,
             ..SessionOptions::default()
@@ -511,7 +604,11 @@ impl AgentApiBackend {
                 factory_client.clone(),
                 child_profile,
                 Arc::clone(&factory_env),
-                SessionOptions::default(),
+                SessionOptions {
+                    reasoning_effort: controls.reasoning_effort,
+                    speed: controls.speed,
+                    ..SessionOptions::default()
+                },
                 None,
             );
             if let Some(provider) = &factory_tool_env {
@@ -614,6 +711,7 @@ impl CodergenBackend for AgentApiBackend {
         let model = node.model().unwrap_or(&self.model);
         let provider = self.resolve_provider_context(model, node.provider())?;
         let provider_id = provider.provider_id.to_string();
+        let controls = self.effective_request_controls(model, node)?;
 
         let max_tokens = node
             .max_tokens()
@@ -629,8 +727,8 @@ impl CodergenBackend for AgentApiBackend {
             model: model.to_string(),
             messages,
             provider: Some(provider_id),
-            reasoning_effort: node.reasoning_effort().parse().ok(),
-            speed: node.speed().map(String::from),
+            reasoning_effort: controls.reasoning_effort,
+            speed: controls.speed,
             tools: None,
             tool_choice: None,
             response_format: None,
@@ -692,11 +790,14 @@ impl CodergenBackend for AgentApiBackend {
                             .get(&target.model)
                             .and_then(|m| m.limits.max_output)
                     });
+                    let fallback_controls = self.effective_request_controls(&target.model, node)?;
 
                     let fallback_request = Request {
                         model: target.model.clone(),
                         provider: Some(target.provider.clone()),
                         max_tokens,
+                        reasoning_effort: fallback_controls.reasoning_effort,
+                        speed: fallback_controls.speed,
                         ..request.clone()
                     };
 
@@ -920,6 +1021,7 @@ impl CodergenBackend for AgentApiBackend {
                             sandbox,
                             self.source.as_ref(),
                             Arc::clone(&self.catalog),
+                            &self.run_model_controls,
                             self.tool_env.as_ref(),
                             tool_hooks.clone(),
                             self.mcp_servers.clone(),
@@ -1384,6 +1486,75 @@ effort = false
         assert_eq!(provider.provider_id, ProviderId::from("venice"));
         assert_eq!(provider.profile_kind, AgentProfileKind::OpenAi);
         assert_eq!(provider.provider, Provider::OpenAiCompatible);
+    }
+
+    #[test]
+    fn run_model_controls_apply_when_node_omits_controls() {
+        let backend = AgentApiBackend::new_from_env(
+            "gpt-5.4".to_string(),
+            Provider::OpenAi,
+            Vec::new(),
+            SteeringHub::for_tests(),
+        )
+        .with_run_model_controls(fabro_types::settings::run::RunModelControls {
+            reasoning_effort: Some("low".to_string()),
+            speed:            Some("fast".to_string()),
+        });
+        let node = Node::new("work");
+
+        let controls = backend
+            .effective_request_controls("gpt-5.4", &node)
+            .unwrap();
+
+        assert_eq!(controls.reasoning_effort, Some(ReasoningEffort::Low));
+        assert_eq!(controls.speed, Some(Speed::Fast));
+    }
+
+    #[test]
+    fn node_controls_override_run_model_controls() {
+        let backend = AgentApiBackend::new_from_env(
+            "gpt-5.4".to_string(),
+            Provider::OpenAi,
+            Vec::new(),
+            SteeringHub::for_tests(),
+        )
+        .with_run_model_controls(fabro_types::settings::run::RunModelControls {
+            reasoning_effort: Some("low".to_string()),
+            speed:            Some("fast".to_string()),
+        });
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "reasoning_effort".to_string(),
+            fabro_graphviz::graph::AttrValue::String("high".to_string()),
+        );
+        node.attrs.insert(
+            "speed".to_string(),
+            fabro_graphviz::graph::AttrValue::String("standard".to_string()),
+        );
+
+        let controls = backend
+            .effective_request_controls("gpt-5.4", &node)
+            .unwrap();
+
+        assert_eq!(controls.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(controls.speed, Some(Speed::Standard));
+    }
+
+    #[test]
+    fn known_model_without_effort_omits_legacy_high_default() {
+        let backend = AgentApiBackend::new_from_env(
+            "kimi-k2.5".to_string(),
+            Provider::Kimi,
+            Vec::new(),
+            SteeringHub::for_tests(),
+        );
+        let node = Node::new("work");
+
+        let controls = backend
+            .effective_request_controls("kimi-k2.5", &node)
+            .unwrap();
+
+        assert_eq!(controls.reasoning_effort, None);
     }
 
     #[tokio::test]

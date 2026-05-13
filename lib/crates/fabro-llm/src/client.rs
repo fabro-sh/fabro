@@ -10,7 +10,7 @@ use crate::adapter_registry::{AdapterConfig, factory_for};
 use crate::error::Error;
 use crate::middleware::{Middleware, NextFn, NextStreamFn};
 use crate::provider::{ProviderAdapter, StreamEventStream};
-use crate::types::{Request, Response};
+use crate::types::{Request, Response, Speed};
 
 /// The core client that routes requests to provider adapters (Section 2.2, 3).
 #[derive(Clone)]
@@ -199,6 +199,44 @@ impl Client {
             })
     }
 
+    fn validate_request_controls(&self, request: &Request) -> Result<(), Error> {
+        let Some(catalog) = &self.catalog else {
+            return Ok(());
+        };
+        let Some(settings) = catalog.model_settings(&request.model) else {
+            return Ok(());
+        };
+        let model_id = catalog
+            .get(&request.model)
+            .map_or(request.model.as_str(), |model| model.id.as_str());
+
+        if let Some(effort) = request.reasoning_effort {
+            if !settings.controls.reasoning_effort.contains(&effort) {
+                return Err(Error::Configuration {
+                    message: format!(
+                        "model '{model_id}' does not support reasoning_effort '{effort}'; allowed values: {}",
+                        format_control_values(&settings.controls.reasoning_effort),
+                    ),
+                    source:  None,
+                });
+            }
+        }
+
+        if let Some(speed) = request.speed {
+            if speed != Speed::Standard && !settings.controls.speed.contains(&speed) {
+                return Err(Error::Configuration {
+                    message: format!(
+                        "model '{model_id}' does not support speed '{speed}'; allowed values: standard{}",
+                        format_additional_speeds(&settings.controls.speed),
+                    ),
+                    source:  None,
+                });
+            }
+        }
+
+        Ok(())
+    }
+
     /// Send a blocking request (Section 4.1).
     ///
     /// # Errors
@@ -207,6 +245,7 @@ impl Client {
     /// registered, or any provider/middleware error encountered during the
     /// request.
     pub async fn complete(&self, request: &Request) -> Result<Response, Error> {
+        self.validate_request_controls(request)?;
         let provider = self.resolve_provider(request)?;
 
         if self.middleware.is_empty() {
@@ -240,6 +279,7 @@ impl Client {
     /// registered, or any provider/middleware error encountered during the
     /// request.
     pub async fn stream(&self, request: &Request) -> Result<StreamEventStream, Error> {
+        self.validate_request_controls(request)?;
         let provider = self.resolve_provider(request)?;
 
         if self.middleware.is_empty() {
@@ -301,6 +341,26 @@ impl Client {
     #[must_use]
     pub fn default_provider(&self) -> Option<&str> {
         self.default_provider.as_deref()
+    }
+}
+
+fn format_control_values<T: ToString>(values: &[T]) -> String {
+    if values.is_empty() {
+        "none".to_string()
+    } else {
+        values
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+fn format_additional_speeds(values: &[Speed]) -> String {
+    if values.is_empty() {
+        String::new()
+    } else {
+        format!(", {}", format_control_values(values))
     }
 }
 
@@ -481,6 +541,132 @@ mod tests {
         let result = client.complete(&req).await;
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Error::Configuration { .. }));
+    }
+
+    #[tokio::test]
+    async fn complete_rejects_unsupported_reasoning_effort_before_dispatch() {
+        let catalog =
+            Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap());
+        let mut client = Client::new(HashMap::new(), None, vec![]);
+        client.catalog = Some(Arc::clone(&catalog));
+        client
+            .register_provider(Arc::new(MockProvider::new("kimi", "should not dispatch")))
+            .await
+            .unwrap();
+
+        let mut request = test_request();
+        request.model = "kimi-k2.5".to_string();
+        request.provider = Some("kimi".to_string());
+        request.reasoning_effort = Some(ReasoningEffort::High);
+
+        let err = client.complete(&request).await.unwrap_err();
+
+        assert!(matches!(
+            err,
+            Error::Configuration {
+                ref message,
+                ..
+            } if message.contains("model 'kimi-k2.5' does not support reasoning_effort 'high'")
+        ));
+    }
+
+    #[tokio::test]
+    async fn complete_rejects_unsupported_speed_before_dispatch() {
+        let catalog =
+            Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap());
+        let mut client = Client::new(HashMap::new(), None, vec![]);
+        client.catalog = Some(Arc::clone(&catalog));
+        client
+            .register_provider(Arc::new(MockProvider::new("openai", "should not dispatch")))
+            .await
+            .unwrap();
+
+        let mut request = test_request();
+        request.model = "gpt-5.4".to_string();
+        request.provider = Some("openai".to_string());
+        request.speed = Some(Speed::Fast);
+
+        let err = client.complete(&request).await.unwrap_err();
+
+        assert!(matches!(
+            err,
+            Error::Configuration {
+                ref message,
+                ..
+            } if message.contains("model 'gpt-5.4' does not support speed 'fast'")
+        ));
+    }
+
+    #[tokio::test]
+    async fn complete_accepts_standard_speed_without_catalog_declaration() {
+        let catalog =
+            Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap());
+        let mut client = Client::new(HashMap::new(), None, vec![]);
+        client.catalog = Some(Arc::clone(&catalog));
+        client
+            .register_provider(Arc::new(MockProvider::new("openai", "standard")))
+            .await
+            .unwrap();
+
+        let mut request = test_request();
+        request.model = "gpt-5.4".to_string();
+        request.provider = Some("openai".to_string());
+        request.speed = Some(Speed::Standard);
+
+        let response = client.complete(&request).await.unwrap();
+
+        assert_eq!(response.text(), "standard");
+    }
+
+    #[tokio::test]
+    async fn complete_skips_control_validation_for_unknown_model_passthrough() {
+        let catalog =
+            Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap());
+        let mut client = Client::new(HashMap::new(), None, vec![]);
+        client.catalog = Some(Arc::clone(&catalog));
+        client
+            .register_provider(Arc::new(MockProvider::new("openai", "passthrough")))
+            .await
+            .unwrap();
+
+        let mut request = test_request();
+        request.model = "custom-model".to_string();
+        request.provider = Some("openai".to_string());
+        request.reasoning_effort = Some(ReasoningEffort::High);
+        request.speed = Some(Speed::Fast);
+
+        let response = client.complete(&request).await.unwrap();
+
+        assert_eq!(response.text(), "passthrough");
+    }
+
+    #[tokio::test]
+    async fn stream_rejects_unsupported_speed_before_dispatch() {
+        let catalog =
+            Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap());
+        let mut client = Client::new(HashMap::new(), None, vec![]);
+        client.catalog = Some(Arc::clone(&catalog));
+        client
+            .register_provider(Arc::new(MockProvider::new("openai", "should not dispatch")))
+            .await
+            .unwrap();
+
+        let mut request = test_request();
+        request.model = "gpt-5.4".to_string();
+        request.provider = Some("openai".to_string());
+        request.speed = Some(Speed::Fast);
+
+        let Err(err) = client.stream(&request).await else {
+            panic!("unsupported speed should fail before stream dispatch");
+        };
+
+        assert!(matches!(
+            err,
+            Error::Configuration {
+                ref message,
+                ..
+            } if message.contains("model 'gpt-5.4' does not support speed 'fast'")
+        ));
     }
 
     #[tokio::test]

@@ -17,6 +17,7 @@ use fabro_hooks::HookSettings;
 use fabro_interview::AutoApproveInterviewer;
 use fabro_sandbox::SandboxSpec;
 use fabro_store::Database;
+use fabro_types::settings::run::RunModelControls;
 use fabro_types::{Principal, RunId, SystemActorKind, WorkflowSettings, fixtures, format_blob_ref};
 use object_store::memory::InMemory;
 
@@ -252,6 +253,7 @@ async fn execute_test_run_with_options(
                 profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
+                model_controls: RunModelControls::default(),
                 dry_run:        true,
             },
             interviewer: Arc::new(AutoApproveInterviewer::engine()),
@@ -316,6 +318,7 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
                 profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
+                model_controls: RunModelControls::default(),
                 dry_run:        true,
             },
             interviewer: Arc::new(AutoApproveInterviewer::engine()),
@@ -395,6 +398,7 @@ async fn run_with_lifecycle(
                 profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
+                model_controls: RunModelControls::default(),
                 dry_run:        true,
             },
             interviewer: Arc::new(AutoApproveInterviewer::engine()),

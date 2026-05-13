@@ -17,8 +17,8 @@ use crate::retry::retry;
 use crate::tools::{RepairToolCallFn, Tool, execute_all_tools_with_repair};
 use crate::types::{
     FinishReason, GenerateResult, Message, ObjectStreamEvent, ReasoningEffort, Request, Response,
-    ResponseFormat, ResponseFormatType, RetryPolicy, StepResult, StreamEvent, TimeoutOptions,
-    TokenCounts, ToolCall, ToolChoice, ToolDefinition,
+    ResponseFormat, ResponseFormatType, RetryPolicy, Speed, StepResult, StreamEvent,
+    TimeoutOptions, TokenCounts, ToolCall, ToolChoice, ToolDefinition,
 };
 
 fn build_initial_messages(params: &GenerateParams) -> Result<Vec<Message>, Error> {
@@ -57,7 +57,7 @@ fn build_request(
         max_tokens:       params.max_tokens,
         stop_sequences:   params.stop_sequences.clone(),
         reasoning_effort: params.reasoning_effort,
-        speed:            params.speed.clone(),
+        speed:            params.speed,
         metadata:         params.metadata.clone(),
         provider_options: params.provider_options.clone(),
     }
@@ -280,7 +280,7 @@ pub struct GenerateParams {
     pub max_tokens:       Option<i64>,
     pub stop_sequences:   Option<Vec<String>>,
     pub reasoning_effort: Option<ReasoningEffort>,
-    pub speed:            Option<String>,
+    pub speed:            Option<Speed>,
     pub provider:         Option<String>,
     pub provider_options: Option<serde_json::Value>,
     pub metadata:         Option<std::collections::HashMap<String, String>>,
@@ -399,6 +399,12 @@ impl GenerateParams {
     #[must_use]
     pub fn reasoning_effort(mut self, reasoning_effort: ReasoningEffort) -> Self {
         self.reasoning_effort = Some(reasoning_effort);
+        self
+    }
+
+    #[must_use]
+    pub const fn speed(mut self, speed: Speed) -> Self {
+        self.speed = Some(speed);
         self
     }
 
@@ -1480,6 +1486,7 @@ mod tests {
             .max_tokens(100)
             .stop_sequences(vec!["STOP".to_string()])
             .reasoning_effort(ReasoningEffort::High)
+            .speed(Speed::Fast)
             .provider("anthropic")
             .provider_options(serde_json::json!({"key": "value"}))
             .max_retries(5)
@@ -1499,6 +1506,7 @@ mod tests {
         assert_eq!(params.max_tokens, Some(100));
         assert_eq!(params.stop_sequences, Some(vec!["STOP".to_string()]));
         assert_eq!(params.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(params.speed, Some(Speed::Fast));
         assert_eq!(params.provider.as_deref(), Some("anthropic"));
         assert!(params.provider_options.is_some());
         assert_eq!(params.max_retries, 5);

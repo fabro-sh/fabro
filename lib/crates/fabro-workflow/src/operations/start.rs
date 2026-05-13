@@ -441,6 +441,7 @@ impl RunSession {
                 profile_kind,
                 fallback_chain,
                 mcp_servers,
+                model_controls: resolved.model.controls.clone(),
                 dry_run: resolved.execution.mode == RunMode::DryRun,
             },
             interviewer,

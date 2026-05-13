@@ -966,7 +966,7 @@ impl Session {
         self.config.reasoning_effort = effort;
     }
 
-    pub fn set_speed(&mut self, speed: Option<String>) {
+    pub fn set_speed(&mut self, speed: Option<Speed>) {
         self.config.speed = speed;
     }
 
@@ -1344,11 +1344,6 @@ impl Session {
             });
 
             // Emit AssistantMessage with enriched data from the response
-            let speed = self
-                .config
-                .speed
-                .as_deref()
-                .and_then(|value| value.parse::<Speed>().ok());
             let model = ModelRef {
                 provider: self.provider_profile.provider_id(),
                 model_id: if response.model.is_empty() {
@@ -1356,7 +1351,7 @@ impl Session {
                 } else {
                     response.model.clone()
                 },
-                speed,
+                speed:    self.config.speed,
             };
             self.event_emitter
                 .emit(self.id.clone(), AgentEvent::AssistantMessage {
@@ -1565,7 +1560,7 @@ impl Session {
             }),
             stop_sequences: None,
             reasoning_effort: self.config.reasoning_effort,
-            speed: self.config.speed.clone(),
+            speed: self.config.speed,
             metadata: None,
             provider_options: None,
         }

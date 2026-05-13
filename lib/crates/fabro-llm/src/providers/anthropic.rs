@@ -13,7 +13,7 @@ use crate::providers::common::{
 };
 use crate::types::{
     AdapterTimeout, ContentPart, FinishReason, Message, RateLimitInfo, ReasoningEffort, Request,
-    Response, ResponseFormatType, Role, StreamEvent, ThinkingData, TokenCounts, ToolCall,
+    Response, ResponseFormatType, Role, Speed, StreamEvent, ThinkingData, TokenCounts, ToolCall,
     ToolChoice, ToolDefinition,
 };
 
@@ -1209,7 +1209,7 @@ async fn build_api_request(
         output_config = None;
     }
 
-    let is_fast = request.speed.as_deref() == Some("fast");
+    let is_fast = request.speed == Some(Speed::Fast);
 
     let api_request = ApiRequest {
         model: common::api_model_id(adapter.catalog.as_deref(), &request.model),
@@ -1223,7 +1223,11 @@ async fn build_api_request(
         tool_choice: tool_choice_json,
         thinking,
         output_config,
-        speed: request.speed.clone(),
+        speed: request
+            .speed
+            .filter(|speed| *speed != Speed::Standard)
+            .map(<&'static str>::from)
+            .map(str::to_string),
         metadata: request.metadata.clone(),
         stream,
     };
@@ -2412,7 +2416,7 @@ mod tests {
     async fn build_api_request_sets_speed() {
         let adapter = Adapter::new("test-key");
         let request = Request {
-            speed: Some("fast".to_string()),
+            speed: Some(Speed::Fast),
             ..make_base_request()
         };
 
@@ -2424,7 +2428,7 @@ mod tests {
     async fn build_api_request_injects_fast_mode_beta_header() {
         let adapter = Adapter::new("test-key");
         let request = Request {
-            speed: Some("fast".to_string()),
+            speed: Some(Speed::Fast),
             ..make_base_request()
         };
 

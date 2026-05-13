@@ -156,6 +156,7 @@ async fn build_registry(
         let profile_kind = spec.profile_kind;
         let fallback_chain = spec.fallback_chain.clone();
         let mcp_servers = spec.mcp_servers.clone();
+        let model_controls = spec.model_controls.clone();
         let llm_source_for_api = Arc::clone(&llm_source);
         let catalog_for_api = Arc::clone(&catalog);
         let steering_hub_for_api = Arc::clone(&steering_hub);
@@ -172,6 +173,7 @@ async fn build_registry(
                 Arc::clone(&steering_hub_for_api),
                 Arc::clone(&catalog_for_api),
             )
+            .with_run_model_controls(model_controls.clone())
             .with_tool_env_provider(tool_env_provider.clone())
             .with_mcp_servers(mcp_servers.clone());
             let cli = cli_resolver
@@ -717,6 +719,7 @@ mod tests {
     use fabro_model::catalog::LlmCatalogSettings;
     use fabro_sandbox::SandboxSpec;
     use fabro_store::Database;
+    use fabro_types::settings::run::RunModelControls;
     use fabro_types::{EventBody, RunEvent, RunId, WorkflowSettings, fixtures};
     use fabro_vault::{SecretType, Vault};
     use object_store::memory::InMemory;
@@ -886,6 +889,7 @@ mod tests {
                 profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
+                model_controls: RunModelControls::default(),
                 dry_run:        true,
             },
             interviewer:       Arc::new(AutoApproveInterviewer::engine()),
@@ -948,6 +952,7 @@ mod tests {
                 profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
+                model_controls: RunModelControls::default(),
                 dry_run:        true,
             },
             interviewer:       Arc::new(AutoApproveInterviewer::engine()),
@@ -1044,6 +1049,7 @@ mod tests {
                 profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
+                model_controls: RunModelControls::default(),
                 dry_run:        false,
             },
             Arc::new(AutoApproveInterviewer::engine()),
@@ -1162,6 +1168,7 @@ mod tests {
                 profile_kind:   fabro_model::AgentProfileKind::OpenAi,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
+                model_controls: RunModelControls::default(),
                 dry_run:        false,
             },
             interviewer:       Arc::new(AutoApproveInterviewer::engine()),
@@ -1261,6 +1268,7 @@ mod tests {
                 profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
+                model_controls: RunModelControls::default(),
                 dry_run:        true,
             },
             interviewer:       Arc::new(AutoApproveInterviewer::engine()),
@@ -1378,6 +1386,7 @@ mod tests {
                 profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
+                model_controls: RunModelControls::default(),
                 dry_run:        true,
             },
             interviewer: Arc::new(AutoApproveInterviewer::engine()),
@@ -1444,6 +1453,7 @@ mod tests {
                 profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
+                model_controls: RunModelControls::default(),
                 dry_run:        true,
             },
             interviewer: Arc::new(AutoApproveInterviewer::engine()),
