@@ -45,7 +45,7 @@ git2 = { version = "0.20", default-features = false, features = ["vendored-libgi
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 tracing-appender = "0.2"
-rmcp = { version = "1.3", default-features = false }
+rmcp = { version = "1.4", default-features = false }
 walkdir = "2"
 regex = "1"
 semver = "1"
