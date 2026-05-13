@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use fabro_model::{Catalog, ProviderId};
+use fabro_model::{Catalog, ProviderId, bootstrap_catalog};
 use fabro_vault::Vault;
 use tokio::sync::RwLock as AsyncRwLock;
 
@@ -42,7 +42,7 @@ impl std::fmt::Debug for VaultCredentialSource {
 #[async_trait]
 impl CredentialSource for VaultCredentialSource {
     async fn resolve(&self) -> anyhow::Result<ResolvedCredentials> {
-        self.resolve_for_catalog(Catalog::builtin()).await
+        self.resolve_for_catalog(bootstrap_catalog::catalog()).await
     }
 
     async fn resolve_for_catalog(&self, catalog: &Catalog) -> anyhow::Result<ResolvedCredentials> {
@@ -79,7 +79,7 @@ impl CredentialSource for VaultCredentialSource {
     }
 
     async fn configured_providers(&self) -> Vec<ProviderId> {
-        self.configured_providers_for_catalog(Catalog::builtin())
+        self.configured_providers_for_catalog(bootstrap_catalog::catalog())
             .await
     }
 

@@ -17,11 +17,12 @@ pub(super) async fn login_command(
     let ctx = base_ctx.with_target(&args.target)?;
     let server = ctx.server().await?;
     let credential = if args.api_key_stdin {
-        provider_auth::authenticate_provider_with_api_key_source(
+        provider_auth::authenticate_provider_with_api_key_source_and_catalog(
             args.provider,
             provider_auth::ApiKeySource::Stdin,
             &s,
             printer,
+            ctx.catalog()?,
         )
         .await?
     } else {

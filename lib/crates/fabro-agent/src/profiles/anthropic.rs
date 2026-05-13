@@ -1,4 +1,6 @@
-use fabro_model::{Provider, ProviderId};
+use std::sync::Arc;
+
+use fabro_model::{Catalog, Provider, ProviderId};
 
 use super::EnvContext;
 use crate::agent_profile::AgentProfile;
@@ -38,6 +40,7 @@ impl AnthropicProfile {
                 provider: Provider::Anthropic,
                 provider_id: Provider::Anthropic.id(),
                 model: model.into(),
+                catalog: None,
                 registry,
             },
         }
@@ -58,6 +61,12 @@ impl AnthropicProfile {
         self.base.provider_id = provider_id;
         self
     }
+
+    #[must_use]
+    pub fn with_catalog(mut self, catalog: Arc<Catalog>) -> Self {
+        self.base.catalog = Some(catalog);
+        self
+    }
 }
 
 impl AgentProfile for AnthropicProfile {
@@ -71,6 +80,10 @@ impl AgentProfile for AnthropicProfile {
 
     fn model(&self) -> &str {
         &self.base.model
+    }
+
+    fn catalog(&self) -> Option<&Catalog> {
+        self.base.catalog.as_deref()
     }
 
     fn tool_registry(&self) -> &ToolRegistry {
@@ -180,11 +193,16 @@ in the project. Keep changes minimal and focused on the task.";
 mod tests {
     use std::sync::Arc;
 
+    use fabro_model::catalog::LlmCatalogSettings;
     use tokio::sync::Mutex as AsyncMutex;
 
     use super::*;
     use crate::subagent::{SessionFactory, SubAgentManager};
     use crate::test_support::MockSandbox;
+
+    fn test_catalog() -> Arc<Catalog> {
+        Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap())
+    }
 
     #[test]
     fn anthropic_profile_identity() {
@@ -195,16 +213,16 @@ mod tests {
 
     #[test]
     fn anthropic_context_window_from_catalog() {
-        let profile = AnthropicProfile::new("claude-opus-4-6");
+        let profile = AnthropicProfile::new("claude-opus-4-6").with_catalog(test_catalog());
         assert_eq!(profile.context_window_size(), 1_000_000);
 
-        let profile = AnthropicProfile::new("claude-sonnet-4-6");
+        let profile = AnthropicProfile::new("claude-sonnet-4-6").with_catalog(test_catalog());
         assert_eq!(profile.context_window_size(), 200_000);
     }
 
     #[test]
     fn anthropic_knowledge_cutoff_from_catalog() {
-        let profile = AnthropicProfile::new("claude-opus-4-6");
+        let profile = AnthropicProfile::new("claude-opus-4-6").with_catalog(test_catalog());
         assert_eq!(profile.knowledge_cutoff(), Some("May 2025".to_string()));
     }
 

@@ -54,6 +54,7 @@ pub(crate) async fn create_run(
         &RunLayer::default(),
         &built.manifest,
         RenderMode::Strict,
+        ctx.catalog()?,
     )?;
     let diagnostics = api_diagnostics_to_local(&validation.workflow.diagnostics);
     if !quiet {

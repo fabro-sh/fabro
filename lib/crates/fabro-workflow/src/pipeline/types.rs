@@ -321,6 +321,7 @@ pub struct TransformOptions {
     pub file_resolver:     Option<Arc<dyn FileResolver>>,
     pub inputs:            HashMap<String, toml::Value>,
     pub custom_transforms: Vec<Box<dyn Transform>>,
+    pub catalog:           Arc<fabro_model::Catalog>,
 }
 
 /// Options for the FINALIZE phase.

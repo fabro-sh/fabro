@@ -27,6 +27,7 @@ pub(crate) fn run(
         &RunLayer::default(),
         &built.manifest,
         RenderMode::Structural,
+        base_ctx.catalog()?,
     )?;
     let diagnostics = api_diagnostics_to_local(&response.workflow.diagnostics);
 

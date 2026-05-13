@@ -4,6 +4,7 @@ use std::sync::Arc;
 use fabro_model::catalog::CatalogProvider;
 use fabro_model::{
     ApiKeyHeaderPolicy, Catalog, CredentialRef, HeaderValueRef, Provider, ProviderId, adapter,
+    bootstrap_catalog,
 };
 use fabro_static::EnvVars;
 use fabro_vault::Vault;
@@ -49,12 +50,39 @@ impl ApiCredential {
     #[must_use]
     pub fn from_api_key(provider: impl Into<ProviderId>, key: String) -> Self {
         let provider = provider.into();
-        let auth_header = auth_header_for_provider(&provider, key);
+        let auth_header = default_auth_header_for_provider(&provider, key);
         Self {
             provider,
             auth_header: Some(auth_header),
             extra_headers: HashMap::new(),
             base_url: None,
+            codex_mode: false,
+            org_id: None,
+            project_id: None,
+        }
+    }
+
+    /// Build an `ApiCredential` from an API key using the supplied catalog for
+    /// auth header policy and provider base URL.
+    #[must_use]
+    pub fn from_api_key_for_catalog(
+        provider: impl Into<ProviderId>,
+        key: String,
+        catalog: &Catalog,
+    ) -> Self {
+        let provider_id = provider.into();
+        let (auth_header, base_url) = match catalog.provider(&provider_id) {
+            Some(provider) => (
+                auth_header_for_catalog_provider(provider, key),
+                provider.base_url.clone(),
+            ),
+            None => (default_auth_header_for_provider(&provider_id, key), None),
+        };
+        Self {
+            provider: provider_id,
+            auth_header: Some(auth_header),
+            extra_headers: HashMap::new(),
+            base_url,
             codex_mode: false,
             org_id: None,
             project_id: None,
@@ -73,8 +101,8 @@ pub fn build_api_key_header(policy: ApiKeyHeaderPolicy, key: String) -> ApiKeyHe
     }
 }
 
-fn auth_header_for_provider(provider: &ProviderId, key: String) -> ApiKeyHeader {
-    let policy = Catalog::builtin()
+fn default_auth_header_for_provider(provider: &ProviderId, key: String) -> ApiKeyHeader {
+    let policy = bootstrap_catalog::catalog()
         .provider(provider)
         .and_then(|provider| adapter::get(&provider.adapter))
         .map_or_else(
@@ -221,7 +249,7 @@ impl CredentialResolver {
 
     #[must_use]
     pub fn configured_providers(&self, vault: &Vault) -> Vec<ProviderId> {
-        self.configured_providers_for_catalog(vault, Catalog::builtin())
+        self.configured_providers_for_catalog(vault, bootstrap_catalog::catalog())
     }
 
     pub fn configured_providers_for_catalog(
@@ -253,7 +281,7 @@ impl CredentialResolver {
             }
         }
 
-        if let Some(catalog_provider) = Catalog::builtin().provider(provider) {
+        if let Some(catalog_provider) = bootstrap_catalog::catalog().provider(provider) {
             for credential_ref in &catalog_provider.credentials {
                 if let Some(credential) = self.credential_from_ref(vault, provider, credential_ref)
                 {
@@ -389,7 +417,7 @@ impl CredentialResolver {
         vault: &Vault,
         credential: &AuthCredential,
     ) -> Result<ApiCredential, ResolveError> {
-        self.to_api_credential_for_catalog(vault, credential, Catalog::builtin())
+        self.to_api_credential_for_catalog(vault, credential, bootstrap_catalog::catalog())
     }
 
     fn to_api_credential_for_catalog(
@@ -402,7 +430,7 @@ impl CredentialResolver {
         match &credential.details {
             AuthDetails::ApiKey { key } => {
                 let auth_header = catalog.provider(&credential.provider).map_or_else(
-                    || auth_header_for_provider(&credential.provider, key.clone()),
+                    || default_auth_header_for_provider(&credential.provider, key.clone()),
                     |provider| auth_header_for_catalog_provider(provider, key.clone()),
                 );
                 let mut cred = ApiCredential {
@@ -452,7 +480,7 @@ impl CredentialResolver {
     ) -> Result<ResolvedCredential, ResolveError> {
         let provider_id = provider.into();
         let Some(catalog_provider) = catalog.provider(&provider_id) else {
-            return self.resolve(provider_id, usage).await;
+            return Err(ResolveError::NotConfigured(provider_id));
         };
         let initial_credential = {
             let vault = self.vault.read().await;
@@ -565,7 +593,7 @@ pub async fn configured_providers_from_process_env(
             let guard = vault_arc.read().await;
             resolver.configured_providers(&guard)
         }
-        None => Catalog::builtin()
+        None => bootstrap_catalog::catalog()
             .providers()
             .iter()
             .filter(|provider| provider_has_process_env_api_key(&provider.id))
@@ -579,7 +607,7 @@ pub async fn configured_providers_from_process_env(
     reason = "Provider discovery intentionally checks documented API-key env names."
 )]
 fn provider_has_process_env_api_key(provider: &ProviderId) -> bool {
-    Catalog::builtin()
+    bootstrap_catalog::catalog()
         .provider(provider)
         .is_some_and(|catalog_provider| {
             catalog_provider.credentials.iter().any(|credential_ref| {
@@ -589,7 +617,7 @@ fn provider_has_process_env_api_key(provider: &ProviderId) -> bool {
 }
 
 fn primary_api_key_env_var(provider: &ProviderId) -> Option<&'static str> {
-    Catalog::builtin()
+    bootstrap_catalog::catalog()
         .provider(provider)?
         .credentials
         .iter()
@@ -613,6 +641,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use chrono::{Duration, Utc};
+    use fabro_model::catalog::LlmCatalogSettings;
     use httpmock::Method::POST;
     use httpmock::MockServer;
 
@@ -653,6 +682,11 @@ mod tests {
 
     fn test_resolver(vault: Vault, env_lookup: EnvLookup) -> CredentialResolver {
         CredentialResolver::with_env_lookup(Arc::new(AsyncRwLock::new(vault)), env_lookup)
+    }
+
+    fn catalog_with(overrides: &str) -> Catalog {
+        let settings: LlmCatalogSettings = toml::from_str(overrides).unwrap();
+        Catalog::from_builtin_with_overrides(&settings).unwrap()
     }
 
     #[tokio::test]
@@ -988,6 +1022,66 @@ mod tests {
         assert_eq!(resolver.configured_providers(&vault), vec![
             Provider::OpenAi.id()
         ]);
+    }
+
+    #[tokio::test]
+    async fn resolve_for_catalog_uses_custom_vault_backed_provider() {
+        let catalog = catalog_with(
+            r#"
+[providers.venice]
+display_name = "Venice"
+adapter = "openai_compatible"
+base_url = "https://api.venice.ai/api/v1"
+credentials = ["credential:venice"]
+
+[models."venice-large"]
+provider = "venice"
+display_name = "Venice Large"
+family = "venice"
+default = true
+
+[models."venice-large".limits]
+context_window = 128000
+
+[models."venice-large".features]
+tools = true
+vision = false
+reasoning = false
+effort = false
+"#,
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
+        vault_set_credential(&mut vault, "venice", &AuthCredential {
+            provider: ProviderId::new("venice"),
+            details:  AuthDetails::ApiKey {
+                key: "venice-key".to_string(),
+            },
+        })
+        .unwrap();
+        let resolver = test_resolver(vault, Arc::new(|_| None));
+
+        let resolved = resolver
+            .resolve_for_catalog(
+                ProviderId::new("venice"),
+                CredentialUsage::ApiRequest,
+                &catalog,
+            )
+            .await
+            .unwrap();
+
+        let ResolvedCredential::Api(api) = resolved else {
+            panic!("expected api credential");
+        };
+        assert_eq!(api.provider, ProviderId::new("venice"));
+        assert_eq!(
+            api.auth_header,
+            Some(ApiKeyHeader::Bearer("venice-key".to_string()))
+        );
+        assert_eq!(
+            api.base_url.as_deref(),
+            Some("https://api.venice.ai/api/v1")
+        );
     }
 
     #[tokio::test]

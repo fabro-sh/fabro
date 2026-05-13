@@ -1128,8 +1128,7 @@ async fn build_api_request(
         request.tools.as_ref().map(|t| translate_tools(t))
     };
 
-    let model_info = common::catalog_model(adapter.catalog.as_deref(), &request.model)
-        .or_else(|| Catalog::builtin().get(&request.model));
+    let model_info = common::catalog_model(adapter.catalog.as_deref(), &request.model);
     let supports_prompt_cache = model_info.is_some_and(|m| m.features.prompt_cache);
     let auto_cache =
         supports_prompt_cache && is_auto_cache_enabled(request.provider_options.as_ref());
@@ -2365,6 +2364,36 @@ prompt_cache = false
     }
 
     #[tokio::test]
+    async fn build_api_request_without_injected_catalog_does_not_use_builtin_model_metadata() {
+        let adapter = Adapter::new("test-key");
+        let request = Request {
+            model: "claude-sonnet-4-5".to_string(),
+            messages: vec![
+                Message::system("Do not infer cache support from built-ins."),
+                Message::user("Hello"),
+            ],
+            provider_options: Some(serde_json::json!({
+                "anthropic": {"auto_cache": true}
+            })),
+            ..make_base_request()
+        };
+
+        let (api_request, req_builder) = build_api_request(&adapter, &request, false).await;
+        assert_eq!(
+            api_request.system,
+            Some(serde_json::Value::String(
+                "Do not infer cache support from built-ins.".to_string()
+            ))
+        );
+        let built = req_builder.build().expect("should build request");
+        let beta = built.headers().get("anthropic-beta");
+        assert!(
+            beta.is_none_or(|value| !value.to_str().unwrap().contains(CACHE_BETA_HEADER)),
+            "cache beta header must require injected model metadata"
+        );
+    }
+
+    #[tokio::test]
     async fn build_api_request_enables_prompt_cache_when_model_feature_is_true() {
         let adapter = Adapter::new("test-key").with_catalog(catalog_with_anthropic_model(
             r#"
@@ -2397,10 +2426,15 @@ prompt_cache = true
     }
 
     #[tokio::test]
-    async fn build_api_request_uses_adaptive_thinking_for_opus_4_7_without_forced_tools() {
-        let adapter = Adapter::new("test-key");
+    async fn build_api_request_uses_adaptive_thinking_for_injected_effort_model_without_forced_tools()
+     {
+        let adapter = Adapter::new("test-key").with_catalog(catalog_with_anthropic_model(
+            r#"
+reasoning_effort = "levels"
+"#,
+        ));
         let request = Request {
-            model: "claude-opus-4-7".to_string(),
+            model: "test-claude".to_string(),
             ..make_base_request()
         };
 
@@ -2589,9 +2623,9 @@ prompt_cache = true
 
     #[tokio::test]
     async fn build_api_request_falls_back_to_thinking_budget_for_non_effort_model() {
-        let adapter = Adapter::new("test-key");
+        let adapter = Adapter::new("test-key").with_catalog(catalog_with_anthropic_model(""));
         let request = Request {
-            model: "claude-sonnet-4-5".to_string(),
+            model: "test-claude".to_string(),
             max_tokens: Some(16_000),
             reasoning_effort: Some(ReasoningEffort::XHigh),
             ..make_base_request()

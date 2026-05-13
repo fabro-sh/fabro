@@ -1,14 +1,13 @@
-use std::str::FromStr;
-
 use crate::{Diagnostic, Severity};
 
 pub(super) fn check_model_known(
     rule_name: &str,
+    catalog: &fabro_model::Catalog,
     model: &str,
     context: &str,
     node_id: Option<String>,
 ) -> Option<Diagnostic> {
-    if fabro_model::Catalog::builtin().get(model).is_some() {
+    if catalog.get(model).is_some() {
         return None;
     }
     Some(Diagnostic {
@@ -25,16 +24,21 @@ pub(super) fn check_model_known(
 
 pub(super) fn check_provider_known(
     rule_name: &str,
+    catalog: &fabro_model::Catalog,
     provider: &str,
     context: &str,
     node_id: Option<String>,
 ) -> Option<Diagnostic> {
-    if fabro_model::Provider::from_str(provider).is_ok() {
+    if catalog
+        .provider(&fabro_model::ProviderId::new(provider))
+        .is_some()
+    {
         return None;
     }
-    let valid: Vec<&str> = fabro_model::Provider::ALL
+    let valid: Vec<&str> = catalog
+        .providers()
         .iter()
-        .map(|&p| <&'static str>::from(p))
+        .map(|provider| provider.id.as_str())
         .collect();
     let valid_str = valid.join(", ");
     Some(Diagnostic {

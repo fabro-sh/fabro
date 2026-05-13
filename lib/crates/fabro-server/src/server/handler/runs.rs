@@ -518,7 +518,11 @@ async fn run_preflight(
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
-    let validated = match run_manifest::validate_prepared_manifest(&prepared, RenderMode::Strict) {
+    let validated = match run_manifest::validate_prepared_manifest(
+        &prepared,
+        RenderMode::Strict,
+        state.catalog(),
+    ) {
         Ok(validated) => validated,
         Err(WorkflowError::Parse(_)) => {
             return ApiError::bad_request("Validation failed").into_response();
@@ -545,14 +549,17 @@ async fn validate_run_manifest(
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
-    let validated =
-        match run_manifest::validate_prepared_manifest(&prepared, RenderMode::Structural) {
-            Ok(validated) => validated,
-            Err(WorkflowError::Parse(_)) => {
-                return ApiError::bad_request("Validation failed").into_response();
-            }
-            Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
-        };
+    let validated = match run_manifest::validate_prepared_manifest(
+        &prepared,
+        RenderMode::Structural,
+        state.catalog(),
+    ) {
+        Ok(validated) => validated,
+        Err(WorkflowError::Parse(_)) => {
+            return ApiError::bad_request("Validation failed").into_response();
+        }
+        Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
+    };
     (
         StatusCode::OK,
         Json(run_manifest::validate_response(&prepared, &validated)),

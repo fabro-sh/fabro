@@ -1,5 +1,7 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
+use fabro_model::Catalog;
 use fabro_types::WorkflowSettings;
 
 use super::create::{RenderMode, preprocess_and_validate};
@@ -13,6 +15,7 @@ pub struct ValidateInput {
     pub settings:          WorkflowSettings,
     pub cwd:               PathBuf,
     pub custom_transforms: Vec<Box<dyn Transform>>,
+    pub catalog:           Arc<Catalog>,
     /// How undefined template inputs are treated. Validate-style callers
     /// (`fabro validate`, the `/validate` API) pass [`RenderMode::Structural`]
     /// so unbound inputs surface as warning diagnostics. Run-style callers
@@ -41,5 +44,6 @@ pub fn validate(input: ValidateInput) -> Result<Validated, Error> {
         Some(&resolved.settings),
         resolved.goal_override.as_deref(),
         input.mode,
+        &input.catalog,
     )
 }

@@ -1,4 +1,6 @@
-use fabro_model::{Provider, ProviderId};
+use std::sync::Arc;
+
+use fabro_model::{Catalog, Provider, ProviderId};
 
 use super::EnvContext;
 use crate::agent_profile::AgentProfile;
@@ -36,6 +38,7 @@ impl OpenAiProfile {
                 provider: Provider::OpenAi,
                 provider_id: Provider::OpenAi.id(),
                 model: model.into(),
+                catalog: None,
                 registry,
             },
         }
@@ -54,6 +57,12 @@ impl OpenAiProfile {
     #[must_use]
     pub fn with_provider_id(mut self, provider_id: ProviderId) -> Self {
         self.base.provider_id = provider_id;
+        self
+    }
+
+    #[must_use]
+    pub fn with_catalog(mut self, catalog: Arc<Catalog>) -> Self {
+        self.base.catalog = Some(catalog);
         self
     }
 
@@ -80,6 +89,10 @@ impl AgentProfile for OpenAiProfile {
 
     fn model(&self) -> &str {
         &self.base.model
+    }
+
+    fn catalog(&self) -> Option<&Catalog> {
+        self.base.catalog.as_deref()
     }
 
     fn tool_registry(&self) -> &ToolRegistry {

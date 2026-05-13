@@ -225,6 +225,14 @@ pub fn load_server_runtime_settings(
     resolve_server_runtime_settings(layer, run_overrides, server_overrides)
 }
 
+pub fn load_llm_catalog_settings(path: Option<&Path>) -> Result<model_catalog::LlmCatalogSettings> {
+    let layer = match path {
+        Some(path) => load_settings_path(path)?,
+        None => load_settings_config(None)?,
+    };
+    Ok(llm_catalog_settings_from_layer(&layer))
+}
+
 #[cfg(test)]
 pub fn server_runtime_settings_from_toml(
     source: &str,

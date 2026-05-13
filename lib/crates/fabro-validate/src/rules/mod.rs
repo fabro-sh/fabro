@@ -55,12 +55,19 @@ pub fn built_in_rules() -> Vec<Box<dyn LintRule>> {
         all_conditional_edges::rule(),
         orphan_custom_outcome::rule(),
         script_absolute_cd::rule(),
-        stylesheet_model_known::rule(),
-        node_model_known::rule(),
         import_error::rule(),
         unresolved_file_ref::rule(),
         thread_id_requires_fidelity_full::rule(),
         selection_valid::rule(),
         random_selection_no_conditions::rule(),
+    ]
+}
+
+/// Returns lint rules that require the caller's resolved model catalog.
+#[must_use]
+pub fn catalog_rules(catalog: &fabro_model::Catalog) -> Vec<Box<dyn LintRule + '_>> {
+    vec![
+        stylesheet_model_known::rule(catalog),
+        node_model_known::rule(catalog),
     ]
 }

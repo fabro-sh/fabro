@@ -531,6 +531,7 @@ pub struct AppState {
     catalog: RwLock<Arc<Catalog>>,
     pub(crate) env_lookup: EnvLookup,
     pub(crate) github_api_base_url: String,
+    active_config_path: PathBuf,
     http_client: Option<fabro_http::HttpClient>,
     shutdown: CancellationToken,
     shutting_down: AtomicBool,
@@ -595,6 +596,7 @@ pub(crate) struct AppStateConfig {
     pub(crate) server_secrets:            ServerSecrets,
     pub(crate) env_lookup:                EnvLookup,
     pub(crate) github_api_base_url:       Option<String>,
+    pub(crate) active_config_path:        PathBuf,
     pub(crate) http_client:               Option<fabro_http::HttpClient>,
     pub(crate) shutdown:                  CancellationToken,
 }
@@ -662,6 +664,10 @@ impl AppState {
 
     pub(crate) fn catalog(&self) -> Arc<Catalog> {
         Arc::clone(&self.catalog.read().expect("catalog lock poisoned"))
+    }
+
+    pub(crate) fn active_config_path(&self) -> &std::path::Path {
+        &self.active_config_path
     }
 
     pub(crate) fn manifest_run_settings(&self) -> std::result::Result<RunNamespace, SharedError> {
@@ -1514,6 +1520,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         server_secrets,
         env_lookup,
         github_api_base_url,
+        active_config_path,
         http_client,
         shutdown,
     } = config;
@@ -1581,6 +1588,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         catalog: RwLock::new(current_catalog),
         env_lookup: Arc::clone(&env_lookup),
         github_api_base_url,
+        active_config_path,
         http_client,
         shutdown,
         shutting_down: AtomicBool::new(false),
@@ -2601,6 +2609,7 @@ fn worker_command(
     }
     let value: &'static str = server_destination.into();
     cmd.env(EnvVars::FABRO_LOG_DESTINATION, value);
+    cmd.env(EnvVars::FABRO_CONFIG, state.active_config_path());
     cmd.env_remove(EnvVars::FABRO_WORKER_TOKEN);
     cmd.env(EnvVars::FABRO_WORKER_TOKEN, worker_token);
     if let Some(pem) = state.server_secret(EnvVars::GITHUB_APP_PRIVATE_KEY) {

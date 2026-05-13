@@ -75,6 +75,7 @@ fn parse_child_graph(node: &Node, services: &EngineServices) -> Result<ParsedChi
             settings:          WorkflowSettings::default(),
             cwd:               cwd.clone(),
             custom_transforms: Vec::new(),
+            catalog:           Arc::clone(&services.run.catalog),
             mode:              RenderMode::Strict,
         })?;
         validated.raise_on_errors()?;
@@ -117,6 +118,7 @@ fn parse_child_graph(node: &Node, services: &EngineServices) -> Result<ParsedChi
             settings: WorkflowSettings::default(),
             cwd,
             custom_transforms: Vec::new(),
+            catalog: Arc::clone(&services.run.catalog),
             mode: RenderMode::Strict,
         })?;
         validated.raise_on_errors()?;

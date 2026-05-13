@@ -2116,6 +2116,7 @@ dependencies = [
  "fabro-client",
  "fabro-config",
  "fabro-manifest",
+ "fabro-model",
  "fabro-server",
  "fabro-types",
  "fabro-util",
@@ -2506,6 +2507,7 @@ dependencies = [
  "fabro-types",
  "serde",
  "thiserror 2.0.18",
+ "toml 0.8.23",
 ]
 
 [[package]]

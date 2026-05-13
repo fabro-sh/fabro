@@ -63,6 +63,7 @@ pub struct TestAppStateBuilder {
     store_bundle:              Option<(Arc<Database>, ArtifactStore)>,
     vault_path:                Option<PathBuf>,
     server_env_path:           Option<PathBuf>,
+    active_config_path:        Option<PathBuf>,
     server_secret_env:         HashMap<String, String>,
     env_lookup:                EnvLookup,
     llm_catalog_settings:      LlmCatalogSettings,
@@ -78,6 +79,7 @@ impl Default for TestAppStateBuilder {
             store_bundle:              None,
             vault_path:                None,
             server_env_path:           None,
+            active_config_path:        None,
             server_secret_env:         HashMap::new(),
             env_lookup:                default_env_lookup(),
             llm_catalog_settings:      LlmCatalogSettings::default(),
@@ -149,12 +151,20 @@ impl TestAppStateBuilder {
         self
     }
 
+    pub fn active_config_path(mut self, active_config_path: PathBuf) -> Self {
+        self.active_config_path = Some(active_config_path);
+        self
+    }
+
     pub fn build(self) -> Arc<AppState> {
         let (store, artifact_store) = self.store_bundle.unwrap_or_else(test_store_bundle);
         let vault_path = self.vault_path.unwrap_or_else(test_secret_store_path);
         let server_env_path = self
             .server_env_path
             .unwrap_or_else(|| vault_path.with_file_name("server.env"));
+        let active_config_path = self.active_config_path.unwrap_or_else(|| {
+            std::env::temp_dir().join(format!("fabro-test-settings-{}.toml", Ulid::new()))
+        });
         build_app_state(AppStateConfig {
             resolved_settings: resolved_runtime_settings_for_tests(
                 self.server_settings,
@@ -169,6 +179,7 @@ impl TestAppStateBuilder {
             server_secrets: load_test_server_secrets(server_env_path, self.server_secret_env),
             env_lookup: self.env_lookup,
             github_api_base_url: None,
+            active_config_path,
             http_client: Some(
                 fabro_http::test_http_client().expect("test HTTP client should build"),
             ),

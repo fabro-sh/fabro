@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_model::catalog::CatalogProvider;
-use fabro_model::{Catalog, CredentialRef, HeaderValueRef, Provider, ProviderId, adapter};
+use fabro_model::{
+    Catalog, CredentialRef, HeaderValueRef, Provider, ProviderId, adapter, bootstrap_catalog,
+};
 use fabro_static::EnvVars;
 
 use crate::credential_source::{CredentialSource, ResolvedCredentials};
@@ -135,7 +137,7 @@ impl Default for EnvCredentialSource {
 #[async_trait]
 impl CredentialSource for EnvCredentialSource {
     async fn resolve(&self) -> anyhow::Result<ResolvedCredentials> {
-        self.resolve_for_catalog(Catalog::builtin()).await
+        self.resolve_for_catalog(bootstrap_catalog::catalog()).await
     }
 
     async fn resolve_for_catalog(&self, catalog: &Catalog) -> anyhow::Result<ResolvedCredentials> {
@@ -158,7 +160,7 @@ impl CredentialSource for EnvCredentialSource {
     }
 
     async fn configured_providers(&self) -> Vec<ProviderId> {
-        self.configured_providers_for_catalog(Catalog::builtin())
+        self.configured_providers_for_catalog(bootstrap_catalog::catalog())
             .await
     }
 

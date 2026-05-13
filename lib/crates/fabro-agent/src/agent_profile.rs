@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use fabro_llm::types::ToolDefinition;
-use fabro_model::{Catalog, Provider, ProviderId};
+use fabro_model::{Catalog, Model, Provider, ProviderId};
 use tokio::sync::Mutex;
 
 use crate::profiles::EnvContext;
@@ -19,6 +19,9 @@ pub trait AgentProfile: Send + Sync {
         self.provider().id()
     }
     fn model(&self) -> &str;
+    fn catalog(&self) -> Option<&Catalog> {
+        None
+    }
     fn tool_registry(&self) -> &ToolRegistry;
     fn tool_registry_mut(&mut self) -> &mut ToolRegistry;
     fn build_system_prompt(
@@ -35,15 +38,23 @@ pub trait AgentProfile: Send + Sync {
     }
 
     fn knowledge_cutoff(&self) -> Option<String> {
-        Catalog::builtin()
-            .get(self.model())
+        self.catalog()
+            .and_then(|catalog| catalog.get(self.model()))
             .and_then(|m| m.knowledge_cutoff().map(str::to_string))
     }
 
+    fn catalog_model(&self) -> Option<&Model> {
+        self.catalog().and_then(|catalog| catalog.get(self.model()))
+    }
+
     fn context_window_size(&self) -> usize {
-        Catalog::builtin().get(self.model()).map_or(200_000, |m| {
+        self.catalog_model().map_or(200_000, |m| {
             usize::try_from(m.context_window()).unwrap_or(usize::MAX)
         })
+    }
+
+    fn max_output_tokens(&self) -> Option<i64> {
+        self.catalog_model().and_then(Model::max_output)
     }
 
     fn register_subagent_tools(

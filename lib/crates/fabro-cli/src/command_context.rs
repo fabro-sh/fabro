@@ -1,9 +1,10 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context as _, Result, bail};
 use fabro_auth::{CredentialSource, EnvCredentialSource, VaultCredentialSource};
-use fabro_config::{CliLayer, Storage};
+use fabro_config::{CliLayer, Storage, load_llm_catalog_settings};
+use fabro_model::Catalog;
 use fabro_types::UserSettings;
 use fabro_types::settings::RunNamespace;
 use fabro_types::settings::cli::{OutputFormat, OutputVerbosity};
@@ -43,6 +44,7 @@ pub(crate) struct CommandContext {
     server_mode:        ServerMode,
     server:             OnceCell<Arc<Client>>,
     llm_source:         OnceCell<Arc<dyn CredentialSource>>,
+    catalog:            OnceLock<Arc<Catalog>>,
 }
 
 struct ResolvedCommandSettings {
@@ -70,6 +72,7 @@ impl CommandContext {
             server_mode: ServerMode::None,
             server: OnceCell::new(),
             llm_source: OnceCell::new(),
+            catalog: OnceLock::new(),
         })
     }
 
@@ -180,6 +183,28 @@ impl CommandContext {
         Ok(Arc::clone(source))
     }
 
+    pub(crate) fn catalog(&self) -> Result<Arc<Catalog>> {
+        if let Some(catalog) = self.catalog.get() {
+            return Ok(Arc::clone(catalog));
+        }
+
+        let llm_catalog_settings =
+            load_llm_catalog_settings(None).context("loading LLM catalog")?;
+        let catalog = Arc::new(
+            Catalog::from_builtin_with_overrides(&llm_catalog_settings)
+                .context("building LLM catalog")?,
+        );
+        if self.catalog.set(Arc::clone(&catalog)).is_ok() {
+            return Ok(catalog);
+        }
+
+        Ok(Arc::clone(
+            self.catalog
+                .get()
+                .expect("catalog must exist after failed OnceLock set"),
+        ))
+    }
+
     fn with_server_mode(&self, server_mode: ServerMode) -> Result<Self> {
         // Always reload settings for the requested derivation mode so the result
         // depends only on the requested mode, not on whichever derived context
@@ -198,6 +223,7 @@ impl CommandContext {
             server_mode,
             server: OnceCell::new(),
             llm_source: OnceCell::new(),
+            catalog: OnceLock::new(),
         })
     }
 }
@@ -233,6 +259,7 @@ fn resolve_command_settings(loaded_settings: LoadedSettings) -> ResolvedCommandS
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::OnceLock;
 
     use fabro_config::{CliLayer, CliOutputLayer};
     use fabro_types::settings::cli::{OutputFormat, OutputVerbosity};
@@ -270,6 +297,7 @@ mod tests {
             server_mode: ServerMode::None,
             server: OnceCell::new(),
             llm_source: OnceCell::new(),
+            catalog: OnceLock::new(),
         }
     }
 

@@ -1553,11 +1553,10 @@ impl Session {
             response_format: None,
             temperature: None,
             top_p: None,
-            max_tokens: self.config.max_tokens.or_else(|| {
-                fabro_model::Catalog::builtin()
-                    .get(self.provider_profile.model())
-                    .and_then(fabro_model::Model::max_output)
-            }),
+            max_tokens: self
+                .config
+                .max_tokens
+                .or_else(|| self.provider_profile.max_output_tokens()),
             stop_sequences: None,
             reasoning_effort: self.config.reasoning_effort,
             speed: self.config.speed,

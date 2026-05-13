@@ -18,3 +18,6 @@ fabro-model = { path = "../fabro-model" }
 fabro-types = { path = "../fabro-types" }
 serde = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+toml = { workspace = true }

@@ -172,22 +172,26 @@ fn build_profile(
     provider: Provider,
     provider_id: ProviderId,
     profile_kind: AgentProfileKind,
+    catalog: Arc<Catalog>,
 ) -> Box<dyn AgentProfile> {
     match profile_kind {
         AgentProfileKind::OpenAi => Box::new(
             OpenAiProfile::new(model)
                 .with_provider(provider)
-                .with_provider_id(provider_id),
+                .with_provider_id(provider_id)
+                .with_catalog(catalog),
         ),
         AgentProfileKind::Gemini => Box::new(
             GeminiProfile::new(model)
                 .with_provider(provider)
-                .with_provider_id(provider_id),
+                .with_provider_id(provider_id)
+                .with_catalog(catalog),
         ),
         AgentProfileKind::Anthropic => Box::new(
             AnthropicProfile::new(model)
                 .with_provider(provider)
-                .with_provider_id(provider_id),
+                .with_provider_id(provider_id)
+                .with_catalog(catalog),
         ),
     }
 }
@@ -573,6 +577,7 @@ impl AgentApiBackend {
             provider.provider,
             provider.provider_id.clone(),
             provider.profile_kind,
+            Arc::clone(&catalog),
         );
 
         let config = SessionOptions {
@@ -593,6 +598,7 @@ impl AgentApiBackend {
         let factory_client = client.clone();
         let factory_model = model.to_string();
         let factory_provider = provider.clone();
+        let factory_catalog = Arc::clone(&catalog);
         let factory_env = Arc::clone(sandbox);
         let factory_tool_env = tool_env.cloned();
         let factory: SessionFactory = Arc::new(move || {
@@ -601,6 +607,7 @@ impl AgentApiBackend {
                 factory_provider.provider,
                 factory_provider.provider_id.clone(),
                 factory_provider.profile_kind,
+                Arc::clone(&factory_catalog),
             ));
             let mut session = Session::new(
                 factory_client.clone(),
@@ -1433,6 +1440,7 @@ mod tests {
             Provider::Anthropic,
             Provider::Anthropic.id(),
             AgentProfileKind::Anthropic,
+            Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap()),
         );
         let manager = Arc::new(TokioMutex::new(SubAgentManager::new(1)));
         let factory: SessionFactory = Arc::new(|| {

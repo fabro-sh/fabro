@@ -18,6 +18,7 @@ use fabro_llm::middleware::{Middleware, NextFn, NextStreamFn};
 use fabro_llm::provider::StreamEventStream;
 use fabro_llm::types::{Request, Response};
 use fabro_mcp::config::McpServerSettings;
+use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{Catalog, ModelHandle, Provider};
 use fabro_util::terminal::Styles;
 use fabro_vault::Vault;
@@ -231,18 +232,27 @@ fn build_profile(
     provider: Provider,
     model: &str,
     summarizer: Option<WebFetchSummarizer>,
+    catalog: Arc<Catalog>,
 ) -> Box<dyn AgentProfile> {
     match provider {
-        Provider::OpenAi => Box::new(OpenAiProfile::with_summarizer(model, summarizer)),
+        Provider::OpenAi => {
+            Box::new(OpenAiProfile::with_summarizer(model, summarizer).with_catalog(catalog))
+        }
         Provider::Kimi
         | Provider::Zai
         | Provider::Minimax
         | Provider::Inception
-        | Provider::OpenAiCompatible => {
-            Box::new(OpenAiProfile::with_summarizer(model, summarizer).with_provider(provider))
+        | Provider::OpenAiCompatible => Box::new(
+            OpenAiProfile::with_summarizer(model, summarizer)
+                .with_provider(provider)
+                .with_catalog(catalog),
+        ),
+        Provider::Gemini => {
+            Box::new(GeminiProfile::with_summarizer(model, summarizer).with_catalog(catalog))
         }
-        Provider::Gemini => Box::new(GeminiProfile::with_summarizer(model, summarizer)),
-        Provider::Anthropic => Box::new(AnthropicProfile::with_summarizer(model, summarizer)),
+        Provider::Anthropic => {
+            Box::new(AnthropicProfile::with_summarizer(model, summarizer).with_catalog(catalog))
+        }
     }
 }
 
@@ -480,10 +490,14 @@ pub async fn run_with_args_and_client(
     }
 
     // Resolve model and build profile
+    let catalog = Arc::new(
+        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
+            .context("failed to build standalone agent LLM catalog")?,
+    );
     let model = if let Some(model) = args.model.clone() {
         model
     } else {
-        Catalog::builtin()
+        catalog
             .default_for_provider(&provider.id())
             .map(|model| model.id.clone())
             .ok_or_else(|| {
@@ -497,6 +511,7 @@ pub async fn run_with_args_and_client(
         provider,
         &model,
         Some(build_summarizer(provider, client.clone())),
+        Arc::clone(&catalog),
     );
 
     // Build sandbox
@@ -530,32 +545,17 @@ pub async fn run_with_args_and_client(
     let manager_for_callback = manager.clone();
     let factory_client = client.clone();
     let factory_model = model.clone();
+    let factory_catalog = Arc::clone(&catalog);
     let factory_env = Arc::clone(&env);
     let factory_hooks = config.tool_hooks.clone();
     let factory: SessionFactory = Arc::new(move || {
         let child_summarizer = Some(build_summarizer(provider, factory_client.clone()));
-        let child_profile: Arc<dyn AgentProfile> = match provider {
-            Provider::OpenAi => Arc::new(OpenAiProfile::with_summarizer(
-                &factory_model,
-                child_summarizer,
-            )),
-            Provider::Kimi
-            | Provider::Zai
-            | Provider::Minimax
-            | Provider::Inception
-            | Provider::OpenAiCompatible => Arc::new(
-                OpenAiProfile::with_summarizer(&factory_model, child_summarizer)
-                    .with_provider(provider),
-            ),
-            Provider::Gemini => Arc::new(GeminiProfile::with_summarizer(
-                &factory_model,
-                child_summarizer,
-            )),
-            Provider::Anthropic => Arc::new(AnthropicProfile::with_summarizer(
-                &factory_model,
-                child_summarizer,
-            )),
-        };
+        let child_profile: Arc<dyn AgentProfile> = Arc::from(build_profile(
+            provider,
+            &factory_model,
+            child_summarizer,
+            Arc::clone(&factory_catalog),
+        ));
         Session::new(
             factory_client.clone(),
             child_profile,
@@ -852,15 +852,19 @@ mod tests {
 
     // build_profile tests
 
+    fn test_catalog() -> Arc<Catalog> {
+        Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap())
+    }
+
     #[test]
     fn build_profile_anthropic() {
-        let profile = build_profile(Provider::Anthropic, "model", None);
+        let profile = build_profile(Provider::Anthropic, "model", None, test_catalog());
         assert_eq!(profile.provider(), Provider::Anthropic);
     }
 
     #[test]
     fn build_profile_openai() {
-        let profile = build_profile(Provider::OpenAi, "model", None);
+        let profile = build_profile(Provider::OpenAi, "model", None, test_catalog());
         assert_eq!(profile.provider(), Provider::OpenAi);
     }
 
@@ -876,7 +880,7 @@ mod tests {
 
     #[test]
     fn build_profile_gemini() {
-        let profile = build_profile(Provider::Gemini, "model", None);
+        let profile = build_profile(Provider::Gemini, "model", None, test_catalog());
         assert_eq!(profile.provider(), Provider::Gemini);
     }
 
@@ -884,7 +888,7 @@ mod tests {
 
     #[test]
     fn build_profile_can_register_subagent_tools() {
-        let mut profile = build_profile(Provider::Anthropic, "model", None);
+        let mut profile = build_profile(Provider::Anthropic, "model", None, test_catalog());
         let manager = Arc::new(AsyncMutex::new(SubAgentManager::new(1)));
         let factory: SessionFactory = Arc::new(|| {
             panic!("factory should not be called in this test");

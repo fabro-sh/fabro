@@ -322,6 +322,7 @@ fn create_from_source(
         Some(&options.settings),
         goal_override,
         RenderMode::Strict,
+        &options.catalog,
     )?;
 
     if validated.has_errors() {
@@ -341,6 +342,7 @@ pub(super) fn preprocess_and_validate(
     settings: Option<&WorkflowSettings>,
     goal_override: Option<&str>,
     render_mode: RenderMode,
+    catalog: &Arc<Catalog>,
 ) -> Result<Validated, Error> {
     let inputs = run_inputs(settings);
     let template_ctx = TemplateContext::for_input_scan(inputs.clone());
@@ -372,8 +374,9 @@ pub(super) fn preprocess_and_validate(
         file_resolver,
         inputs,
         custom_transforms,
+        catalog: Arc::clone(catalog),
     })?;
-    let mut validated = pipeline::validate(transformed, &[]);
+    let mut validated = pipeline::validate(transformed, catalog.as_ref(), &[]);
     if !template_diagnostics.is_empty() {
         validated.prepend_diagnostics(template_diagnostics);
     }
@@ -527,6 +530,10 @@ mod tests {
             .expect("default settings should resolve")
     }
 
+    fn test_catalog() -> Arc<Catalog> {
+        Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap())
+    }
+
     fn validate_dot(dot_source: &str, settings: WorkflowSettings) -> Validated {
         validate(ValidateInput {
             workflow: WorkflowInput::DotSource {
@@ -536,6 +543,7 @@ mod tests {
             settings,
             cwd: PathBuf::from("."),
             custom_transforms: Vec::new(),
+            catalog: test_catalog(),
             mode: RenderMode::Structural,
         })
         .unwrap()
@@ -599,6 +607,7 @@ mod tests {
             Some(&WorkflowSettings::default()),
             None,
             RenderMode::Strict,
+            &test_catalog(),
         );
 
         let Err(err) = result else {
@@ -713,6 +722,7 @@ mod tests {
             settings:          WorkflowSettings::default(),
             cwd:               PathBuf::from("."),
             custom_transforms: Vec::new(),
+            catalog:           test_catalog(),
             mode:              RenderMode::Strict,
         });
         assert!(result.is_err());
@@ -757,6 +767,7 @@ mod tests {
             settings:          WorkflowSettings::default(),
             cwd:               PathBuf::from("."),
             custom_transforms: vec![Box::new(TagTransform)],
+            catalog:           test_catalog(),
             mode:              RenderMode::Strict,
         })
         .unwrap();
@@ -791,6 +802,7 @@ mod tests {
             settings:          WorkflowSettings::default(),
             cwd:               dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
+            catalog:           test_catalog(),
             mode:              RenderMode::Strict,
         })
         .unwrap();
@@ -832,6 +844,7 @@ mod tests {
             settings:          WorkflowSettings::default(),
             cwd:               PathBuf::from("."),
             custom_transforms: Vec::new(),
+            catalog:           test_catalog(),
             mode:              RenderMode::Strict,
         })
         .unwrap();

@@ -1,9 +1,12 @@
+use std::sync::Arc;
+
+use fabro_model::{Catalog, Provider, ProviderId};
+
 pub mod anthropic;
 pub mod gemini;
 pub mod openai;
 
 pub use anthropic::AnthropicProfile;
-use fabro_model::{Provider, ProviderId};
 pub use gemini::GeminiProfile;
 pub use openai::OpenAiProfile;
 
@@ -19,6 +22,7 @@ pub struct BaseProfile {
     pub provider:    Provider,
     pub provider_id: ProviderId,
     pub model:       String,
+    pub catalog:     Option<Arc<Catalog>>,
     pub registry:    ToolRegistry,
 }
 

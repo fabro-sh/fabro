@@ -31,7 +31,8 @@ use std::path::Path;
 
 pub use builders::{
     ResolveErrors, RunSettingsBuilder, ServerRuntimeSettings, ServerSettingsBuilder,
-    UserSettingsBuilder, WorkflowSettingsBuilder, load_server_runtime_settings,
+    UserSettingsBuilder, WorkflowSettingsBuilder, load_llm_catalog_settings,
+    load_server_runtime_settings,
 };
 pub use error::{Error, Result};
 pub use fabro_util::path::expand_tilde;

@@ -4272,6 +4272,12 @@ async fn import_e2e_through_engine() {
     use fabro_workflow::pipeline::{TransformOptions, transform, validate};
 
     let dir = tempfile::tempdir().unwrap();
+    let catalog = std::sync::Arc::new(
+        fabro_model::Catalog::from_builtin_with_overrides(
+            &fabro_model::catalog::LlmCatalogSettings::default(),
+        )
+        .unwrap(),
+    );
     std::fs::write(
         dir.path().join("val.fabro"),
         r#"digraph validate {
@@ -4313,9 +4319,10 @@ async fn import_e2e_through_engine() {
         )),
         inputs:            std::collections::HashMap::new(),
         custom_transforms: vec![],
+        catalog:           std::sync::Arc::clone(&catalog),
     })
     .unwrap();
-    let validated = validate(transformed, &[]);
+    let validated = validate(transformed, catalog.as_ref(), &[]);
     validated
         .raise_on_errors()
         .expect("validation should pass after imports expand");

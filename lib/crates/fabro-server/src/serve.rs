@@ -7,6 +7,7 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use clap::Args;
 use fabro_config::bind::{self, Bind, BindRequest};
+use fabro_config::user::active_settings_path;
 use fabro_config::{
     RunLayer, RunModelLayer, RunSandboxLayer, ServerLayer, ServerWebLayer, Storage,
     load_config_file, load_server_runtime_settings,
@@ -610,6 +611,16 @@ fn resolve_interp_path(value: &InterpString) -> anyhow::Result<PathBuf> {
     Ok(PathBuf::from(resolve_interp(value)?))
 }
 
+fn absolute_path(path: PathBuf) -> anyhow::Result<PathBuf> {
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(std::env::current_dir()
+            .context("resolving current directory for config path")?
+            .join(path))
+    }
+}
+
 fn load_server_secrets_for_settings(settings: &ServerNamespace) -> anyhow::Result<ServerSecrets> {
     let storage_root = resolve_interp_path(&settings.storage.root)?;
     let server_env_path = Storage::new(&storage_root).runtime_directory().env_path();
@@ -687,6 +698,7 @@ where
     #[cfg(debug_assertions)]
     let watch_web = args.watch_web;
     let config_path = args.config.clone();
+    let active_config_path = absolute_path(active_settings_path(config_path.as_deref()))?;
     let disk_document: toml::Table = load_config_file(config_path.as_deref(), "settings.toml")?;
     let (run_overrides, server_overrides) = serve_overrides(&args);
     let mut runtime_settings = load_server_runtime_settings(
@@ -789,6 +801,7 @@ where
         server_secrets,
         env_lookup,
         github_api_base_url: None,
+        active_config_path,
         http_client: None,
         shutdown: shutdown.clone(),
     })?;

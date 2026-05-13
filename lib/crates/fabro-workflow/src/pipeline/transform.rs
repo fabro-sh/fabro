@@ -41,7 +41,7 @@ pub fn transform(parsed: Parsed, options: &TransformOptions) -> Result<Transform
     }
     .apply(graph)?;
     let graph = StylesheetApplicationTransform.apply(graph)?;
-    let graph = ModelResolutionTransform.apply(graph)?;
+    let graph = ModelResolutionTransform::new(Arc::clone(&options.catalog)).apply(graph)?;
 
     // Custom transforms
     let graph = options
@@ -60,6 +60,8 @@ mod tests {
     use std::sync::Arc;
 
     use fabro_graphviz::graph::AttrValue;
+    use fabro_model::Catalog;
+    use fabro_model::catalog::LlmCatalogSettings;
 
     use super::*;
     use crate::file_resolver::FilesystemFileResolver;
@@ -72,6 +74,20 @@ mod tests {
         std::fs::write(path, contents).unwrap();
     }
 
+    fn test_catalog() -> Arc<Catalog> {
+        Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap())
+    }
+
+    fn transform_options() -> TransformOptions {
+        TransformOptions {
+            current_dir:       None,
+            file_resolver:     None,
+            inputs:            HashMap::new(),
+            custom_transforms: vec![],
+            catalog:           test_catalog(),
+        }
+    }
+
     #[test]
     fn transform_applies_variable_expansion() {
         let dot = r#"digraph Test {
@@ -82,13 +98,7 @@ mod tests {
             start -> work -> exit
         }"#;
         let parsed = parse(dot).unwrap();
-        let transformed = transform(parsed, &TransformOptions {
-            current_dir:       None,
-            file_resolver:     None,
-            inputs:            HashMap::new(),
-            custom_transforms: vec![],
-        })
-        .unwrap();
+        let transformed = transform(parsed, &transform_options()).unwrap();
         let prompt = transformed.graph.nodes["work"]
             .attrs
             .get("prompt")
@@ -107,13 +117,7 @@ mod tests {
             start -> work -> exit
         }"#;
         let parsed = parse(dot).unwrap();
-        let transformed = transform(parsed, &TransformOptions {
-            current_dir:       None,
-            file_resolver:     None,
-            inputs:            HashMap::new(),
-            custom_transforms: vec![],
-        })
-        .unwrap();
+        let transformed = transform(parsed, &transform_options()).unwrap();
         assert_eq!(
             transformed.graph.nodes["work"].attrs.get("model"),
             Some(&AttrValue::String("claude-sonnet-4-6".into()))
@@ -140,6 +144,7 @@ mod tests {
             file_resolver:     Some(Arc::new(FilesystemFileResolver::new(None))),
             inputs:            HashMap::new(),
             custom_transforms: vec![],
+            catalog:           test_catalog(),
         })
         .unwrap();
 
@@ -187,6 +192,7 @@ mod tests {
                 toml::Value::String("Launch".to_string()),
             )]),
             custom_transforms: vec![],
+            catalog:           test_catalog(),
         })
         .unwrap();
 

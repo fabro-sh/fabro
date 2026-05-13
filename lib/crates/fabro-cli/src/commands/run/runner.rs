@@ -11,12 +11,11 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
-use fabro_config::{ServerSettingsBuilder, Storage};
+use fabro_config::{ServerSettingsBuilder, Storage, load_llm_catalog_settings};
 use fabro_interview::{
     AnswerSubmission, ControlInterviewer, WorkerControlEnvelope, WorkerControlMessage,
 };
 use fabro_model::Catalog;
-use fabro_model::catalog::LlmCatalogSettings;
 use fabro_store::{EventEnvelope, RunProjection, RunProjectionReducer};
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{RunMode, RunNamespace};
@@ -95,9 +94,11 @@ pub(crate) async fn execute(
     let run_control = RunControlState::new();
     install_signal_handlers(Arc::clone(&run_control), cancel_token.clone())?;
     let vault = load_worker_vault(storage_dir.as_deref())?;
+    let llm_catalog_settings =
+        load_llm_catalog_settings(None).context("failed to load worker LLM catalog settings")?;
     let catalog = Arc::new(
-        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-            .context("failed to build default LLM catalog")?,
+        Catalog::from_builtin_with_overrides(&llm_catalog_settings)
+            .context("failed to build worker LLM catalog")?,
     );
     let github_app = {
         let vault_guard = match &vault {

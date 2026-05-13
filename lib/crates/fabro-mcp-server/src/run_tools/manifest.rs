@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use fabro_api::types;
-use fabro_config::{CliLayer, RunLayer};
+use fabro_config::{CliLayer, RunLayer, load_llm_catalog_settings};
 use fabro_manifest::{self, ManifestBuildInput, RunOverrideInput};
+use fabro_model::Catalog;
 use fabro_server::manifest_validation::{self, RenderMode};
 use serde_json::Value;
 
@@ -25,10 +26,17 @@ pub(super) fn build_mcp_run_manifest(
         user_settings_path: Some(user_settings_path.to_path_buf()),
     })
     .map_err(|err| ToolError::from_anyhow(&err))?;
+    let llm_catalog_settings = load_llm_catalog_settings(Some(user_settings_path))
+        .map_err(|err| ToolError::message(err.to_string()))?;
+    let catalog = std::sync::Arc::new(
+        Catalog::from_builtin_with_overrides(&llm_catalog_settings)
+            .map_err(|err| ToolError::message(err.to_string()))?,
+    );
     let validation = manifest_validation::validate_manifest(
         &RunLayer::default(),
         &built.manifest,
         RenderMode::Strict,
+        catalog,
     )
     .map_err(|err| ToolError::from_anyhow(&err))?;
     if !validation.ok {
