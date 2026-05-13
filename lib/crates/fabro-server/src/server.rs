@@ -385,7 +385,7 @@ impl SlackService {
         }
     }
 
-    async fn handle_event(&self, event: &RunEvent) {
+    async fn handle_event(&self, event: &RunEvent, run_web_url: Option<&str>) {
         match &event.body {
             EventBody::InterviewStarted(props) => {
                 if props.question_id.is_empty() {
@@ -415,6 +415,7 @@ impl SlackService {
                     &event.run_id.to_string(),
                     &props.question_id,
                     &question,
+                    run_web_url,
                 );
 
                 if let Ok(posted) = self
@@ -919,7 +920,14 @@ fn start_optional_slack_service(state: &Arc<AppState>) {
         loop {
             match rx.recv().await {
                 Ok(envelope) => {
-                    event_service.handle_event(&envelope.event).await;
+                    // Resolve the run's web URL once per event so the Slack
+                    // message can deep-link back to Fabro. Returns None when
+                    // the web UI is disabled or `server.web.url` is unset, in
+                    // which case `question_to_blocks` simply omits the link.
+                    let run_web_url = event_state.run_web_url(&envelope.event.run_id);
+                    event_service
+                        .handle_event(&envelope.event, run_web_url.as_deref())
+                        .await;
                 }
                 Err(RecvError::Lagged(_)) => {}
                 Err(RecvError::Closed) => break,
