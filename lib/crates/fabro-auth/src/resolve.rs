@@ -373,18 +373,31 @@ impl CredentialResolver {
         let provider = Provider::from_id(&credential.provider);
         let login_command = match (provider, &credential.details, kind) {
             // Opt-in: when FABRO_CLI_TRUST_HOST_AUTH is set, do not inject
-            // ANTHROPIC_API_KEY into the claude subprocess environment. claude
-            // CLI then falls back to its own credentials on the host (e.g. a
-            // Max subscription's OAuth session), so the registered API key is
-            // not billed for CLI-backend runs. A registered credential is
-            // still required to satisfy the resolver gate; the key value
-            // itself is never propagated to the subprocess.
+            // provider credentials into the CLI agent subprocess for the
+            // (provider, agent) pairs that support a host-side credential
+            // fallback (currently Anthropic+claude and OpenAI+codex). The CLI
+            // then resolves auth using whatever it finds on the host (e.g.
+            // ~/.claude/ for claude Max OAuth, ~/.codex/auth.json for a Codex
+            // ChatGPT Pro session). A registered credential is still required
+            // to satisfy the resolver gate; the secret material is never
+            // propagated to the subprocess and the codex_login_command
+            // (which would clobber ~/.codex/auth.json) is skipped.
             //
             // The flag must reach the worker subprocess that runs the
             // credential resolver; see WORKER_ENV_ALLOWLIST in
             // `lib/crates/fabro-server/src/spawn_env.rs`.
             (Some(Provider::Anthropic), AuthDetails::ApiKey { .. }, CliAgentKind::Claude)
-                if claude_cli_trust_host_auth() =>
+                if cli_trust_host_auth() =>
+            {
+                None
+            }
+            (Some(Provider::OpenAi), AuthDetails::ApiKey { .. }, CliAgentKind::Codex)
+                if cli_trust_host_auth() =>
+            {
+                None
+            }
+            (Some(Provider::OpenAi), AuthDetails::CodexOAuth { .. }, CliAgentKind::Codex)
+                if cli_trust_host_auth() =>
             {
                 None
             }
@@ -475,18 +488,26 @@ fn primary_api_key_env_var(provider: &ProviderId) -> Option<&'static str> {
 
 /// Read the opt-in `FABRO_CLI_TRUST_HOST_AUTH` flag.
 ///
-/// When set to a truthy value, Fabro skips injecting provider API-key env vars
-/// into the CLI agent subprocess for providers that support a host-side
-/// credential fallback (currently: Anthropic + claude). The CLI then resolves
-/// auth using whatever it finds on the host (for example, a Max subscription
-/// OAuth session under `~/.claude/`).
+/// When set to a truthy value, Fabro skips injecting provider credentials into
+/// the CLI agent subprocess for (provider, agent) pairs that support a
+/// host-side credential fallback. Currently covered:
+///
+/// - Anthropic + claude: skip `ANTHROPIC_API_KEY` injection. claude CLI then
+///   resolves auth from `~/.claude/` (e.g. a Max subscription OAuth session).
+/// - OpenAI + codex: skip `OPENAI_API_KEY` injection AND skip the
+///   `codex login --with-api-key` step that would clobber `~/.codex/auth.json`.
+///   codex CLI then resolves auth from `~/.codex/auth.json` (e.g. a ChatGPT
+///   Pro OAuth session).
+///
+/// A registered credential is still required in both cases to satisfy the
+/// resolver gate; the secret material is never propagated to the subprocess.
 ///
 /// Truthy: any non-empty value except `0` / `false` (case-insensitive).
 #[expect(
     clippy::disallowed_methods,
     reason = "Opt-in env flag for trusting host-side CLI credentials instead of injecting API keys into subprocesses."
 )]
-fn claude_cli_trust_host_auth() -> bool {
+fn cli_trust_host_auth() -> bool {
     std::env::var(EnvVars::FABRO_CLI_TRUST_HOST_AUTH)
         .ok()
         .is_some_and(|value| {
