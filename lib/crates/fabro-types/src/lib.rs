@@ -21,6 +21,7 @@ pub mod repository;
 pub mod run;
 pub mod run_blob_id;
 pub mod run_event;
+pub mod run_failure;
 pub mod run_id;
 pub mod run_projection;
 pub mod run_sandbox;
@@ -78,6 +79,7 @@ pub use run_event::{
     EventBody, ExecOutputTail, InterviewOption, MetadataSnapshotFailureKind, MetadataSnapshotPhase,
     RunEvent, RunNoticeCode, RunNoticeLevel, SessionCapability,
 };
+pub use run_failure::RunFailure;
 pub use run_id::{RunId, fixtures};
 pub use run_projection::{
     CheckpointRecord, PendingInterviewRecord, RunProjection, StageProjection, first_event_seq,

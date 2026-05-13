@@ -1210,7 +1210,7 @@ mod tests {
             timestamp:            chrono::Utc::now(),
             status:               StageOutcome::Succeeded,
             duration_ms:          10,
-            failure_reason:       None,
+            failure:              None,
             final_git_commit_sha: None,
             stages:               Vec::new(),
             billing:              None,

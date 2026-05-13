@@ -183,16 +183,18 @@ mod tests {
         event::append_event(&run_store, run_id, &Event::RunRunning)
             .await
             .unwrap();
-        event::append_event(&run_store, run_id, &Event::WorkflowRunFailed {
-            error:          crate::error::Error::engine("boom"),
-            duration_ms:    10,
-            reason:         FailureReason::WorkflowError,
-            git_commit_sha: None,
-            final_patch:    None,
-            diff_summary:   None,
-        })
-        .await
-        .unwrap();
+        let failure_event = Event::workflow_run_failed_from_error(
+            &crate::error::Error::engine("boom"),
+            10,
+            FailureReason::WorkflowError,
+            None,
+            None,
+            None,
+            None,
+        );
+        event::append_event(&run_store, run_id, &failure_event)
+            .await
+            .unwrap();
     }
 
     async fn seed_running(store: &Database, run_id: &RunId) {

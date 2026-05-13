@@ -4904,6 +4904,67 @@ components:
         - bootstrap_failed
         - sandbox_init_failed
 
+    FailureCategory:
+      description: Product-level classification for grouping and retry policy.
+      type: string
+      enum:
+        - transient_infra
+        - deterministic
+        - budget_exhausted
+        - compilation_loop
+        - canceled
+        - structural
+
+    FailureSignature:
+      description: Stable normalized signature for grouping related failures.
+      type: string
+
+    ExecOutputTail:
+      description: Redacted tail of command stdout/stderr captured for diagnostics.
+      type: object
+      properties:
+        stdout:
+          type: ["string", "null"]
+        stderr:
+          type: ["string", "null"]
+        stdout_truncated:
+          type: boolean
+          default: false
+        stderr_truncated:
+          type: boolean
+          default: false
+
+    RunFailure:
+      description: Rich terminal run failure diagnostics.
+      type: object
+      required:
+        - message
+        - reason
+        - category
+      properties:
+        message:
+          type: string
+        causes:
+          type: array
+          items:
+            type: string
+        reason:
+          $ref: "#/components/schemas/FailureReason"
+        category:
+          $ref: "#/components/schemas/FailureCategory"
+        system_actor:
+          oneOf:
+            - $ref: "#/components/schemas/SystemActorKind"
+            - type: "null"
+        signature:
+          oneOf:
+            - $ref: "#/components/schemas/FailureSignature"
+            - type: "null"
+        exec_output_tail:
+          oneOf:
+            - $ref: "#/components/schemas/ExecOutputTail"
+            - type: "null"
+
     RunManifest:
       description: Self-contained workflow run manifest.
       type: object
@@ -6402,8 +6463,10 @@ components:
           type: integer
           format: uint64
           minimum: 0
-        failure_reason:
-          type: ["string", "null"]
+        failure:
+          oneOf:
+            - $ref: "#/components/schemas/RunFailure"
+            - type: "null"
         final_git_commit_sha:
           type: ["string", "null"]
         stages:

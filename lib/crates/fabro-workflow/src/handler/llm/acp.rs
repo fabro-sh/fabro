@@ -240,7 +240,7 @@ fn acp_command_error_to_workflow(error: AcpCommandError) -> Error {
             Error::handler("only stdio ACP commands are supported")
         }
         AcpCommandError::Parse(source) => {
-            Error::handler_with_source("Failed to resolve ACP command", &source)
+            Error::handler_with_source("Failed to resolve ACP command", source)
         }
     }
 }
@@ -258,8 +258,8 @@ fn acp_error_to_workflow(error: AcpError) -> Error {
         AcpError::StopReason { stop_reason, text } => {
             Error::handler(format!("ACP prompt stopped with {stop_reason}: {text}"))
         }
-        AcpError::Sandbox(source) => Error::handler_with_source("ACP turn failed", &source),
-        other => Error::handler_with_source("ACP turn failed", &other),
+        AcpError::Sandbox(source) => Error::handler_with_source("ACP turn failed", source),
+        other => Error::handler_with_source("ACP turn failed", other),
     }
 }
 

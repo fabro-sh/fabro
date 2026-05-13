@@ -38,7 +38,7 @@ pub(crate) async fn resolve_agent_launch_env(
             .map_err(|err| {
                 Error::handler_with_source(
                     format!("Failed to resolve {} credential", request.stage_label),
-                    &err,
+                    err,
                 )
             })?;
         let ResolvedCredential::Cli(cli_credential) = resolved else {
@@ -58,7 +58,7 @@ pub(crate) async fn resolve_agent_launch_env(
                 .map_err(|err| {
                     Error::handler_with_source(
                         format!("{} credential login failed", request.stage_label),
-                        &err,
+                        err,
                     )
                 })?;
             if !login_result.is_success() {
@@ -97,7 +97,7 @@ pub(crate) async fn resolve_agent_launch_env(
         let tool_env = provider.resolve().await.map_err(|err| {
             Error::handler_with_anyhow(
                 format!("Failed to resolve {} agent env", request.stage_label),
-                &err,
+                err,
             )
         })?;
         launch_env.extend(tool_env);

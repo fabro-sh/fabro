@@ -508,7 +508,7 @@ fn worker_title_phase_for_event(body: &EventBody) -> Option<WorkerTitlePhase> {
         }
         EventBody::RunPaused(_) => Some(WorkerTitlePhase::Paused),
         EventBody::RunCompleted(_) => Some(WorkerTitlePhase::Succeeded),
-        EventBody::RunFailed(props) => Some(if props.reason == FailureReason::Cancelled {
+        EventBody::RunFailed(props) => Some(if props.failure.reason == FailureReason::Cancelled {
             WorkerTitlePhase::Cancelled
         } else {
             WorkerTitlePhase::Failed
@@ -651,8 +651,8 @@ mod tests {
         RunFailedProps, RunStatusTransitionProps,
     };
     use fabro_types::{
-        AuthMethod, EventBody, FailureReason, IdpIdentity, Principal, QuestionType, SuccessReason,
-        fixtures,
+        AuthMethod, EventBody, FailureCategory, FailureReason, IdpIdentity, Principal,
+        QuestionType, RunFailure, SuccessReason, fixtures,
     };
     use fabro_vault::{SecretType, Vault};
     use fabro_workflow::event::RunEventSink;
@@ -777,25 +777,39 @@ mod tests {
         );
         assert_eq!(
             worker_title_phase_for_event(&EventBody::RunFailed(RunFailedProps {
-                error:          "cancelled".to_string(),
-                causes:         Vec::new(),
-                duration_ms:    10,
-                reason:         FailureReason::Cancelled,
-                git_commit_sha: None,
-                final_patch:    None,
-                diff_summary:   None,
+                failure:              RunFailure {
+                    message:          "cancelled".to_string(),
+                    causes:           Vec::new(),
+                    reason:           FailureReason::Cancelled,
+                    category:         FailureCategory::Canceled,
+                    system_actor:     None,
+                    signature:        None,
+                    exec_output_tail: None,
+                },
+                duration_ms:          10,
+                final_git_commit_sha: None,
+                final_patch:          None,
+                diff_summary:         None,
+                billing:              None,
             })),
             Some(WorkerTitlePhase::Cancelled)
         );
         assert_eq!(
             worker_title_phase_for_event(&EventBody::RunFailed(RunFailedProps {
-                error:          "boom".to_string(),
-                causes:         Vec::new(),
-                duration_ms:    10,
-                reason:         FailureReason::Terminated,
-                git_commit_sha: None,
-                final_patch:    None,
-                diff_summary:   None,
+                failure:              RunFailure {
+                    message:          "boom".to_string(),
+                    causes:           Vec::new(),
+                    reason:           FailureReason::Terminated,
+                    category:         FailureCategory::Deterministic,
+                    system_actor:     None,
+                    signature:        None,
+                    exec_output_tail: None,
+                },
+                duration_ms:          10,
+                final_git_commit_sha: None,
+                final_patch:          None,
+                diff_summary:         None,
+                billing:              None,
             })),
             Some(WorkerTitlePhase::Failed)
         );

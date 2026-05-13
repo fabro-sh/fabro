@@ -6997,7 +6997,7 @@ async fn workflow_run_with_vault_only_openai_codex_builds_pr_body() {
             timestamp:            Utc::now(),
             status:               StageOutcome::Succeeded,
             duration_ms:          1,
-            failure_reason:       None,
+            failure:              None,
             final_git_commit_sha: None,
             stages:               Vec::new(),
             billing:              None,

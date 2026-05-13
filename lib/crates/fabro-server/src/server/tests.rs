@@ -2332,7 +2332,7 @@ async fn persist_cancelled_run_status_ignores_already_terminal_runs() {
     assert!(!run_store.list_events().await.unwrap().iter().any(|event| {
         matches!(
             event.event.body,
-            EventBody::RunFailed(ref props) if props.reason == FailureReason::Cancelled
+            EventBody::RunFailed(ref props) if props.failure.reason == FailureReason::Cancelled
         )
     }));
 }

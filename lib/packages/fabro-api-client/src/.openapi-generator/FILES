@@ -95,9 +95,11 @@ models/error-response-entry.ts
 models/error-response.ts
 models/event-envelope.ts
 models/event-seq.ts
+models/exec-output-tail.ts
 models/execute-query-request.ts
 models/execute-query-response-rows-inner-inner.ts
 models/execute-query-response.ts
+models/failure-category.ts
 models/failure-reason.ts
 models/features-namespace.ts
 models/file-checkpoint.ts
@@ -251,6 +253,7 @@ models/run-diff.ts
 models/run-error.ts
 models/run-event.ts
 models/run-execution-settings.ts
+models/run-failure.ts
 models/run-files-meta.ts
 models/run-git-settings.ts
 models/run-goal-file.ts

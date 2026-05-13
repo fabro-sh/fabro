@@ -845,7 +845,7 @@ mod tests {
             timestamp:            Utc::now(),
             status:               crate::outcome::StageOutcome::Succeeded,
             duration_ms:          150_000,
-            failure_reason:       None,
+            failure:              None,
             final_git_commit_sha: None,
             stages:               vec![
                 StageSummary {

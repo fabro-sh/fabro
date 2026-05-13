@@ -21,6 +21,9 @@ import type { BilledTokenCounts } from './billed-token-counts';
 import type { RunDiff } from './run-diff';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { RunFailure } from './run-failure';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { StageOutcome } from './stage-outcome';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -33,7 +36,7 @@ export interface Conclusion {
     'timestamp': string;
     'status': StageOutcome;
     'duration_ms': number;
-    'failure_reason'?: string | null;
+    'failure'?: RunFailure | null;
     'final_git_commit_sha'?: string | null;
     'stages': Array<StageSummary>;
     'billing'?: BilledTokenCounts | null;

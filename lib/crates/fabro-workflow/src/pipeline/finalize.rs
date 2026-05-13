@@ -5,14 +5,14 @@ use std::time::Instant;
 use fabro_dump::RunDump;
 use fabro_hooks::{HookContext, HookEvent};
 use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
-use fabro_types::{BilledTokenCounts, DiffSummary, EventBody, RunProjection};
+use fabro_types::{BilledTokenCounts, DiffSummary, EventBody, RunFailure, RunProjection};
 use fabro_util::error::collect_causes;
 use fabro_util::time::elapsed_ms;
 
 use super::types::{Concluded, Executed, FinalizeOptions};
-use crate::error::Error;
+use crate::error::{Error, run_failure_from_error, run_failure_from_outcome_failure};
 use crate::event::{Event, RunNoticeCode, RunNoticeLevel};
-use crate::outcome::{Outcome, OutcomeExt, StageOutcome};
+use crate::outcome::{Outcome, StageOutcome};
 use crate::records::{Checkpoint, Conclusion, StageSummary};
 use crate::run_metadata::MetadataSnapshot;
 use crate::run_options::RunOptions;
@@ -24,11 +24,13 @@ use crate::{ProjectionBillingRollup, billing_rollup_from_projection};
 
 pub fn classify_engine_result(
     engine_result: &Result<Outcome, Error>,
-) -> (StageOutcome, Option<String>, RunStatus) {
+) -> (StageOutcome, Option<RunFailure>, RunStatus) {
     match engine_result {
         Ok(outcome) => {
             let status = outcome.status;
-            let failure_reason = outcome.failure_reason().map(String::from);
+            let failure = outcome.failure.as_ref().map(|failure| {
+                run_failure_from_outcome_failure(failure, FailureReason::WorkflowError)
+            });
             let run_status = match status {
                 StageOutcome::Succeeded | StageOutcome::Skipped => RunStatus::Succeeded {
                     reason: SuccessReason::Completed,
@@ -40,13 +42,16 @@ pub fn classify_engine_result(
                     reason: FailureReason::WorkflowError,
                 },
             };
-            (status, failure_reason, run_status)
+            (status, failure, run_status)
         }
         Err(Error::Cancelled) => (
             StageOutcome::Failed {
                 retry_requested: false,
             },
-            Some("Cancelled".to_string()),
+            Some(run_failure_from_error(
+                &Error::Cancelled,
+                FailureReason::Cancelled,
+            )),
             RunStatus::Failed {
                 reason: FailureReason::Cancelled,
             },
@@ -55,7 +60,7 @@ pub fn classify_engine_result(
             StageOutcome::Failed {
                 retry_requested: false,
             },
-            Some(err.display_with_causes()),
+            Some(run_failure_from_error(err, FailureReason::WorkflowError)),
             RunStatus::Failed {
                 reason: FailureReason::WorkflowError,
             },
@@ -66,7 +71,7 @@ pub fn classify_engine_result(
 pub(crate) async fn build_conclusion_from_store(
     run_store: &RunStoreHandle,
     status: StageOutcome,
-    failure_reason: Option<String>,
+    failure: Option<RunFailure>,
     run_duration_ms: u64,
     final_git_commit_sha: Option<String>,
 ) -> Conclusion {
@@ -88,7 +93,7 @@ pub(crate) async fn build_conclusion_from_store(
         &projection_billing,
         &projection_order,
         status,
-        failure_reason,
+        failure,
         run_duration_ms,
         final_git_commit_sha,
     )
@@ -99,7 +104,7 @@ fn build_conclusion_from_parts(
     projection_billing: &ProjectionBillingRollup,
     projection_order: &HashMap<String, u32>,
     status: StageOutcome,
-    failure_reason: Option<String>,
+    failure: Option<RunFailure>,
     run_duration_ms: u64,
     final_git_commit_sha: Option<String>,
 ) -> Conclusion {
@@ -178,7 +183,7 @@ fn build_conclusion_from_parts(
         timestamp: chrono::Utc::now(),
         status,
         duration_ms: run_duration_ms,
-        failure_reason,
+        failure,
         final_git_commit_sha,
         stages,
         billing: projection_billing.billing_if_present(),
@@ -445,17 +450,6 @@ pub(crate) fn build_terminal_event(
     diff_summary: Option<DiffSummary>,
     billing: Option<BilledTokenCounts>,
 ) -> Event {
-    if matches!(outcome, Err(Error::Cancelled)) {
-        return Event::WorkflowRunFailed {
-            error: Error::Cancelled,
-            duration_ms,
-            reason: FailureReason::Cancelled,
-            git_commit_sha: final_git_commit_sha,
-            final_patch,
-            diff_summary,
-        };
-    }
-
     let outcome_status = outcome.as_ref().map_or(
         StageOutcome::Failed {
             retry_requested: false,
@@ -483,21 +477,27 @@ pub(crate) fn build_terminal_event(
         };
     }
 
-    let error = match outcome {
-        Err(err) => err.clone(),
-        Ok(o) => Error::engine(
-            o.failure
-                .as_ref()
-                .map_or_else(|| "run failed".to_string(), |f| f.message.clone()),
-        ),
+    let failure = match outcome {
+        Err(Error::Cancelled) => {
+            run_failure_from_error(&Error::Cancelled, FailureReason::Cancelled)
+        }
+        Err(err) => run_failure_from_error(err, FailureReason::WorkflowError),
+        Ok(outcome) => {
+            if let Some(failure) = outcome.failure.as_ref() {
+                run_failure_from_outcome_failure(failure, FailureReason::WorkflowError)
+            } else {
+                let fallback = Error::engine("run failed");
+                run_failure_from_error(&fallback, FailureReason::WorkflowError)
+            }
+        }
     };
     Event::WorkflowRunFailed {
-        error,
+        failure,
         duration_ms,
-        reason: FailureReason::WorkflowError,
-        git_commit_sha: final_git_commit_sha,
+        final_git_commit_sha,
         final_patch,
         diff_summary,
+        billing,
     }
 }
 
@@ -1091,7 +1091,7 @@ mod tests {
             timestamp:            chrono::Utc::now(),
             status:               StageOutcome::Succeeded,
             duration_ms:          10,
-            failure_reason:       None,
+            failure:              None,
             final_git_commit_sha: None,
             stages:               Vec::new(),
             billing:              None,
@@ -1154,7 +1154,7 @@ mod tests {
             timestamp:            chrono::Utc::now(),
             status:               StageOutcome::Succeeded,
             duration_ms:          10,
-            failure_reason:       None,
+            failure:              None,
             final_git_commit_sha: None,
             stages:               Vec::new(),
             billing:              None,
@@ -1206,7 +1206,7 @@ mod tests {
             timestamp:            chrono::Utc::now(),
             status:               StageOutcome::Succeeded,
             duration_ms:          10,
-            failure_reason:       None,
+            failure:              None,
             final_git_commit_sha: None,
             stages:               Vec::new(),
             billing:              None,

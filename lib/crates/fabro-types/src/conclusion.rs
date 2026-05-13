@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::outcome::StageOutcome;
-use crate::{BilledTokenCounts, RunDiff};
+use crate::{BilledTokenCounts, RunDiff, RunFailure};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StageSummary {
@@ -20,7 +20,7 @@ pub struct Conclusion {
     pub status:               StageOutcome,
     pub duration_ms:          u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failure_reason:       Option<String>,
+    pub failure:              Option<RunFailure>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_git_commit_sha: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

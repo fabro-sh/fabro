@@ -184,7 +184,7 @@ async fn run_single_lifecycle_command(
         .exec_command(command, timeout_ms, None, None, Some(child_token.clone()))
         .await
         .map_err(|e| {
-            Error::engine_with_source(format!("Devcontainer {phase} command failed"), &e)
+            Error::engine_with_source(format!("Devcontainer {phase} command failed"), e)
         })?;
     if cancel_token.is_cancelled() {
         return Err(Error::Cancelled);

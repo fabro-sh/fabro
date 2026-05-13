@@ -286,7 +286,7 @@ impl Handler for AgentHandler {
         let run_id = context
             .run_id()
             .parse::<RunId>()
-            .map_err(|err| Error::handler_with_source("invalid internal run_id", &err))?;
+            .map_err(|err| Error::handler_with_source("invalid internal run_id", err))?;
         let tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>> =
             services.run.hook_runner.as_ref().map(|hr| {
                 Arc::new(fabro_hooks::WorkflowToolHookCallback {

@@ -135,7 +135,8 @@ fn print_human_output(
 #[cfg(test)]
 mod tests {
     use fabro_types::{
-        BilledTokenCounts, RunDiff, RunStatus, StageOutcome, SuccessReason, fixtures,
+        BilledTokenCounts, FailureCategory, FailureReason, RunDiff, RunFailure, RunStatus,
+        StageOutcome, SuccessReason, fixtures,
     };
     use fabro_workflow::records::Conclusion;
 
@@ -152,7 +153,7 @@ mod tests {
             timestamp:            chrono::Utc::now(),
             status:               StageOutcome::Succeeded,
             duration_ms:          12345,
-            failure_reason:       None,
+            failure:              None,
             final_git_commit_sha: None,
             stages:               vec![],
             billing:              Some(BilledTokenCounts {
@@ -211,7 +212,15 @@ mod tests {
                 retry_requested: false,
             },
             duration_ms:          500,
-            failure_reason:       Some("error".into()),
+            failure:              Some(RunFailure {
+                message:          "error".into(),
+                causes:           Vec::new(),
+                reason:           FailureReason::WorkflowError,
+                category:         FailureCategory::Deterministic,
+                system_actor:     None,
+                signature:        None,
+                exec_output_tail: None,
+            }),
             final_git_commit_sha: None,
             stages:               vec![],
             billing:              None,
@@ -237,7 +246,7 @@ mod tests {
             timestamp:            chrono::Utc::now(),
             status:               StageOutcome::Succeeded,
             duration_ms:          8000,
-            failure_reason:       None,
+            failure:              None,
             final_git_commit_sha: None,
             stages:               vec![],
             billing:              Some(BilledTokenCounts {

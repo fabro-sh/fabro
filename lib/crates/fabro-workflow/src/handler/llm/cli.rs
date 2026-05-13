@@ -96,7 +96,7 @@ async fn verify_cli_available(
         )
         .await
         .map_err(|e| {
-            Error::handler_with_source(format!("Failed to check {cli_name} availability"), &e)
+            Error::handler_with_source(format!("Failed to check {cli_name} availability"), e)
         })?;
 
     if availability_check.is_success() {
@@ -400,7 +400,7 @@ impl CodergenBackend for AgentCliBackend {
         sandbox
             .write_file(&prompt_path, prompt)
             .await
-            .map_err(|e| Error::handler_with_source("Failed to write prompt file", &e))?;
+            .map_err(|e| Error::handler_with_source("Failed to write prompt file", e))?;
 
         // 3. Build CLI command
         let model = node.model().unwrap_or(&self.model);
@@ -451,7 +451,7 @@ impl CodergenBackend for AgentCliBackend {
         sandbox
             .write_file(&env_path, &env_lines.join("\n"))
             .await
-            .map_err(|e| Error::handler_with_source("Failed to write env file", &e))?;
+            .map_err(|e| Error::handler_with_source("Failed to write env file", e))?;
 
         // Disable auto-stop so the sandbox stays alive during long CLI runs.
         if let Err(e) = sandbox.set_autostop_interval(0).await {
@@ -522,10 +522,7 @@ impl CodergenBackend for AgentCliBackend {
             Ok(streaming) => streaming,
             Err(err) => {
                 cleanup_temp_files().await;
-                return Err(Error::handler_with_source(
-                    "Failed to run CLI command",
-                    &err,
-                ));
+                return Err(Error::handler_with_source("Failed to run CLI command", err));
             }
         };
         let result = streaming.result;

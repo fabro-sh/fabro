@@ -105,7 +105,7 @@ impl Handler for CommandHandler {
         let env = services
             .env_for_stage()
             .await
-            .map_err(|err| Error::handler_with_anyhow("Failed to resolve stage env", &err))?;
+            .map_err(|err| Error::handler_with_anyhow("Failed to resolve stage env", err))?;
         let env_vars = if env.is_empty() { None } else { Some(&env) };
         let cancel_token = services.run.cancel_token().child_token();
         let stage_id = stage_scope.stage_id();
@@ -140,7 +140,7 @@ impl Handler for CommandHandler {
             Ok(streaming) => streaming,
             Err(err) => {
                 recorder.discard().await?;
-                return Err(Error::handler_with_source("Failed to spawn script", &err));
+                return Err(Error::handler_with_source("Failed to spawn script", err));
             }
         };
         let result = streaming.result;

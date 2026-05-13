@@ -350,10 +350,12 @@ async fn cancel_at_human_gate_persists_cancelled_terminal_event() {
         .filter(|&event| event["event"] == "run.failed")
         .map(|event| {
             (
-                event["properties"]["reason"]
+                event["properties"]["failure"]["reason"]
                     .as_str()
                     .map(ToOwned::to_owned),
-                event["properties"]["error"].as_str().map(ToOwned::to_owned),
+                event["properties"]["failure"]["message"]
+                    .as_str()
+                    .map(ToOwned::to_owned),
             )
         })
         .collect::<Vec<_>>();

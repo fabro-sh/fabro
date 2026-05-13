@@ -166,20 +166,19 @@ fn event_body_from_event(event: &Event) -> EventBody {
             billing:              billing.clone(),
         }),
         Event::WorkflowRunFailed {
-            error,
+            failure,
             duration_ms,
-            reason,
-            git_commit_sha,
+            final_git_commit_sha,
             final_patch,
             diff_summary,
+            billing,
         } => EventBody::RunFailed(fabro_types::RunFailedProps {
-            error:          error.to_string(),
-            causes:         error.causes(),
-            duration_ms:    *duration_ms,
-            reason:         *reason,
-            git_commit_sha: git_commit_sha.clone(),
-            final_patch:    final_patch.clone(),
-            diff_summary:   *diff_summary,
+            failure:              failure.clone(),
+            duration_ms:          *duration_ms,
+            final_git_commit_sha: final_git_commit_sha.clone(),
+            final_patch:          final_patch.clone(),
+            diff_summary:         *diff_summary,
+            billing:              billing.clone(),
         }),
         Event::RunNotice {
             level,
@@ -1528,42 +1527,80 @@ mod tests {
 
     #[test]
     fn run_event_workflow_failure_uses_display_error() {
-        let stored = to_run_event(&fixtures::RUN_6, &Event::WorkflowRunFailed {
-            error:          Error::handler("boom"),
-            duration_ms:    900,
-            reason:         FailureReason::WorkflowError,
-            git_commit_sha: Some("abc123".to_string()),
-            final_patch:    None,
-            diff_summary:   None,
-        });
+        let event = Event::workflow_run_failed_from_error(
+            &Error::handler("boom"),
+            900,
+            FailureReason::WorkflowError,
+            Some("abc123".to_string()),
+            None,
+            None,
+            None,
+        );
+        let stored = to_run_event(&fixtures::RUN_6, &event);
 
         assert_eq!(stored.event_name(), "run.failed");
         let properties = stored.properties().unwrap();
-        assert_eq!(properties["error"], "Handler error: boom");
+        assert_eq!(properties["failure"]["message"], "boom");
         assert_eq!(properties["duration_ms"], 900);
     }
 
     #[test]
     fn run_event_workflow_failure_serializes_causes() {
         let source = EventTestCause;
-        let stored = to_run_event(&fixtures::RUN_6, &Event::WorkflowRunFailed {
-            error:          Error::engine_with_source("Failed to initialize sandbox", &source),
-            duration_ms:    900,
-            reason:         FailureReason::WorkflowError,
-            git_commit_sha: None,
-            final_patch:    None,
-            diff_summary:   None,
-        });
+        let event = Event::workflow_run_failed_from_error(
+            &Error::engine_with_source("Failed to initialize sandbox", source),
+            900,
+            FailureReason::WorkflowError,
+            None,
+            None,
+            None,
+            None,
+        );
+        let stored = to_run_event(&fixtures::RUN_6, &event);
 
         let properties = stored.properties().unwrap();
         assert_eq!(
-            properties["error"],
-            "Engine error: Failed to initialize sandbox"
+            properties["failure"]["message"],
+            "Failed to initialize sandbox"
         );
         assert_eq!(
-            properties["causes"],
+            properties["failure"]["causes"],
             serde_json::json!(["connection refused"])
         );
+    }
+
+    #[test]
+    fn run_event_workflow_failure_projects_nested_failure_contract() {
+        let source = EventTestCause;
+        let event = Event::workflow_run_failed_from_error(
+            &Error::engine_with_source("Failed to initialize sandbox", source),
+            900,
+            FailureReason::SandboxInitFailed,
+            Some("abc123".to_string()),
+            None,
+            None,
+            None,
+        );
+        let stored = to_run_event(&fixtures::RUN_6, &event);
+
+        assert_eq!(stored.event_name(), "run.failed");
+        let properties = stored.properties().unwrap();
+        assert_eq!(
+            properties["failure"]["message"],
+            "Failed to initialize sandbox"
+        );
+        assert_eq!(
+            properties["failure"]["causes"],
+            serde_json::json!(["connection refused"])
+        );
+        assert_eq!(properties["failure"]["reason"], "sandbox_init_failed");
+        assert_eq!(properties["failure"]["category"], "transient_infra");
+        assert_eq!(properties["duration_ms"], 900);
+        assert_eq!(properties["final_git_commit_sha"], "abc123");
+        assert!(properties.get("error").is_none());
+        assert!(properties.get("causes").is_none());
+        assert!(properties.get("reason").is_none());
+        assert!(properties.get("git_commit_sha").is_none());
     }
 
     #[test]

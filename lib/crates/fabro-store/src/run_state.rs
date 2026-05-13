@@ -16,7 +16,6 @@ use fabro_types::{
     RunStatus, RunSummary, RunTimestamps, SandboxProvider, StageCompletion, StageHandler, StageId,
     StageOutcome, StageProjection, StageState, StartRecord, WorkflowRef, first_event_seq,
 };
-use fabro_util::error::render_with_causes;
 use serde_json::Value;
 
 use crate::{Error, EventEnvelope, Result};
@@ -149,7 +148,7 @@ impl RunProjectionReducer for RunProjection {
             EventBody::RunFailed(props) => {
                 self.try_apply_status(
                     RunStatus::Failed {
-                        reason: props.reason,
+                        reason: props.failure.reason,
                     },
                     ts,
                 )?;
@@ -779,7 +778,7 @@ fn conclusion_from_completed(
         status: StageOutcome::from_str(&props.status)
             .map_err(|err| Error::InvalidEvent(format!("invalid completed stage status: {err}")))?,
         duration_ms: props.duration_ms,
-        failure_reason: None,
+        failure: None,
         final_git_commit_sha: props.final_git_commit_sha.clone(),
         stages: Vec::new(),
         billing: props.billing.clone(),
@@ -798,10 +797,10 @@ fn conclusion_from_failed(props: &RunFailedProps, timestamp: DateTime<Utc>) -> C
             retry_requested: false,
         },
         duration_ms: props.duration_ms,
-        failure_reason: Some(render_with_causes(&props.error, &props.causes)),
-        final_git_commit_sha: props.git_commit_sha.clone(),
+        failure: Some(props.failure.clone()),
+        final_git_commit_sha: props.final_git_commit_sha.clone(),
         stages: Vec::new(),
-        billing: None,
+        billing: props.billing.clone(),
         total_retries: 0,
         diff: RunDiff {
             patch:   props.final_patch.clone(),
@@ -2181,13 +2180,20 @@ mod tests {
             .apply_event(&test_event(
                 1,
                 EventBody::RunFailed(RunFailedProps {
-                    error:          "boom".to_string(),
-                    causes:         Vec::new(),
-                    duration_ms:    42,
-                    reason:         FailureReason::WorkflowError,
-                    git_commit_sha: Some("abc123".to_string()),
-                    final_patch:    Some(patch.to_string()),
-                    diff_summary:   None,
+                    failure:              fabro_types::RunFailure {
+                        message:          "boom".to_string(),
+                        causes:           Vec::new(),
+                        reason:           FailureReason::WorkflowError,
+                        category:         FailureCategory::Deterministic,
+                        system_actor:     None,
+                        signature:        None,
+                        exec_output_tail: None,
+                    },
+                    duration_ms:          42,
+                    final_git_commit_sha: Some("abc123".to_string()),
+                    final_patch:          Some(patch.to_string()),
+                    diff_summary:         None,
+                    billing:              None,
                 }),
                 None,
             ))
@@ -2294,9 +2300,12 @@ mod tests {
                 3,
                 "run.failed",
                 &json!({
-                    "error": "boom",
+                    "failure": {
+                        "message": "boom",
+                        "reason": "workflow_error",
+                        "category": "deterministic"
+                    },
                     "duration_ms": 42,
-                    "reason": "workflow_error",
                     "diff_summary": {
                         "files_changed": 5,
                         "additions": 20,
@@ -2323,27 +2332,71 @@ mod tests {
             .apply_event(&test_event(
                 1,
                 EventBody::RunFailed(RunFailedProps {
-                    error:          "Engine error: Failed to initialize sandbox".to_string(),
-                    causes:         vec![
-                        "Failed to pull Docker image buildpack-deps:noble".to_string(),
-                        "connection refused".to_string(),
-                    ],
-                    duration_ms:    42,
-                    reason:         FailureReason::WorkflowError,
-                    git_commit_sha: None,
-                    final_patch:    None,
-                    diff_summary:   None,
+                    failure:              fabro_types::RunFailure {
+                        message:          "Failed to initialize sandbox".to_string(),
+                        causes:           vec![
+                            "Failed to pull Docker image buildpack-deps:noble".to_string(),
+                            "connection refused".to_string(),
+                        ],
+                        reason:           FailureReason::WorkflowError,
+                        category:         FailureCategory::TransientInfra,
+                        system_actor:     None,
+                        signature:        None,
+                        exec_output_tail: None,
+                    },
+                    duration_ms:          42,
+                    final_git_commit_sha: None,
+                    final_patch:          None,
+                    diff_summary:         None,
+                    billing:              None,
                 }),
                 None,
             ))
             .unwrap();
 
-        assert_eq!(
-            state.conclusion.unwrap().failure_reason.as_deref(),
-            Some(
-                "Engine error: Failed to initialize sandbox\n  caused by: Failed to pull Docker image buildpack-deps:noble\n  caused by: connection refused"
-            )
-        );
+        let failure = state.conclusion.unwrap().failure.unwrap();
+        assert_eq!(failure.message, "Failed to initialize sandbox");
+        assert_eq!(failure.causes, vec![
+            "Failed to pull Docker image buildpack-deps:noble".to_string(),
+            "connection refused".to_string(),
+        ]);
+    }
+
+    #[test]
+    fn run_failed_projection_uses_nested_failure_reason_and_conclusion() {
+        let mut state = running_projection();
+        let failure = fabro_types::RunFailure {
+            message:          "Failed to initialize sandbox".to_string(),
+            causes:           vec!["connection refused".to_string()],
+            reason:           FailureReason::SandboxInitFailed,
+            category:         FailureCategory::TransientInfra,
+            system_actor:     Some(fabro_types::SystemActorKind::Engine),
+            signature:        Some(fabro_types::FailureSignature(
+                "init|transient_infra|docker".to_string(),
+            )),
+            exec_output_tail: None,
+        };
+        state
+            .apply_event(&test_event(
+                1,
+                EventBody::RunFailed(RunFailedProps {
+                    failure:              failure.clone(),
+                    duration_ms:          42,
+                    final_git_commit_sha: Some("abc123".to_string()),
+                    final_patch:          None,
+                    diff_summary:         None,
+                    billing:              None,
+                }),
+                None,
+            ))
+            .unwrap();
+
+        assert_eq!(state.status, RunStatus::Failed {
+            reason: FailureReason::SandboxInitFailed,
+        });
+        let conclusion = state.conclusion.unwrap();
+        assert_eq!(conclusion.failure, Some(failure));
+        assert_eq!(conclusion.final_git_commit_sha.as_deref(), Some("abc123"));
     }
 
     #[test]
