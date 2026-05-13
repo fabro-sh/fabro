@@ -12,12 +12,14 @@
  * Do not edit the class manually.
  */
 
-
-
 export interface RunSandboxRuntime {
     'id': string;
     'working_directory': string;
     'repo_cloned': boolean | null;
     'clone_origin_url': string | null;
     'clone_branch': string | null;
+    'workspace_root'?: string | null;
+    'repos_root'?: string | null;
+    'primary_repo_path'?: string | null;
+    'primary_repo_link'?: string | null;
 }

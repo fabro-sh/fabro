@@ -87,3 +87,63 @@ async fn streaming_timeout_terminates_docker_exec_before_returning() {
         probe.stdout
     );
 }
+
+#[tokio::test]
+#[ignore = "requires real Docker container lifecycle, image, network, and a public GitHub clone"]
+async fn cloned_docker_sandbox_uses_repos_checkout_and_workspace_symlink() {
+    let image = "buildpack-deps:noble";
+    let Ok(docker) = Docker::connect_with_local_defaults() else {
+        return;
+    };
+    if docker.inspect_image(image).await.is_err() {
+        return;
+    }
+
+    let sandbox = DockerSandbox::new(
+        DockerSandboxOptions {
+            image: image.to_string(),
+            auto_pull: false,
+            skip_clone: false,
+            ..DockerSandboxOptions::default()
+        },
+        None,
+        None,
+        Some("https://github.com/brynary/rack-test".to_string()),
+        None,
+    )
+    .expect("docker sandbox should construct");
+    sandbox
+        .initialize()
+        .await
+        .expect("docker sandbox should initialize");
+
+    assert_eq!(sandbox.working_directory(), "/workspace/rack-test");
+
+    let result = sandbox
+        .exec_command(
+            "test -d /repos/brynary/rack-test/.git && \
+             test -L /workspace/rack-test && \
+             test \"$(readlink /workspace/rack-test)\" = /repos/brynary/rack-test && \
+             test \"$(git -C /repos/brynary/rack-test rev-parse HEAD)\" = \
+                  \"$(git -C /workspace/rack-test rev-parse HEAD)\" && \
+             git rev-parse --is-inside-work-tree",
+            10_000,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("layout verification command should run");
+    sandbox
+        .cleanup()
+        .await
+        .expect("docker cleanup should succeed");
+
+    assert!(
+        result.is_success(),
+        "layout verification failed: stdout={} stderr={}",
+        result.stdout,
+        result.stderr
+    );
+    assert!(result.stdout.contains("true"));
+}

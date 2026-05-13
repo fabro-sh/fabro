@@ -7217,6 +7217,14 @@ components:
           type: ["string", "null"]
         clone_branch:
           type: ["string", "null"]
+        workspace_root:
+          type: ["string", "null"]
+        repos_root:
+          type: ["string", "null"]
+        primary_repo_path:
+          type: ["string", "null"]
+        primary_repo_link:
+          type: ["string", "null"]
 
     RunQuestion:
       description: A pending human-in-the-loop question summary.
@@ -7946,7 +7954,7 @@ components:
         command:
           type: string
           description: Command to connect to the sandbox.
-          example: docker exec -it fabro-run-01HY0000000000000000000000 sh -lc 'cd /workspace && exec sh -l'
+          example: docker exec -it fabro-run-01HY0000000000000000000000 sh -lc 'cd /workspace/fabro && exec sh -l'
 
     SandboxState:
       description: Normalized sandbox lifecycle state used by the control plane and UI. The original provider-specific state string is preserved in `native_state`.

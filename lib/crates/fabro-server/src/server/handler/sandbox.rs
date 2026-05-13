@@ -892,6 +892,7 @@ async fn reconnect_daytona_sandbox(
         &runtime.id,
         daytona_api_key,
         repo_cloned,
+        runtime.working_directory.clone(),
         runtime.clone_origin_url.clone(),
         runtime.clone_branch.clone(),
     )

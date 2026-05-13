@@ -35,6 +35,10 @@ fn local_record(working_directory: &std::path::Path) -> RunSandbox {
             repo_cloned:       None,
             clone_origin_url:  None,
             clone_branch:      None,
+            workspace_root:    None,
+            repos_root:        None,
+            primary_repo_path: None,
+            primary_repo_link: None,
         }),
     }
 }
@@ -142,6 +146,10 @@ fn docker_record(container_id: &str) -> RunSandbox {
             repo_cloned:       Some(false),
             clone_origin_url:  None,
             clone_branch:      None,
+            workspace_root:    Some("/workspace".to_string()),
+            repos_root:        Some("/repos".to_string()),
+            primary_repo_path: None,
+            primary_repo_link: None,
         }),
     }
 }

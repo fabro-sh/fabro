@@ -445,6 +445,14 @@ pub enum Event {
         clone_origin_url:  Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         clone_branch:      Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace_root:    Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        repos_root:        Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        primary_repo_path: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        primary_repo_link: Option<String>,
     },
     SetupStarted {
         command_count: usize,

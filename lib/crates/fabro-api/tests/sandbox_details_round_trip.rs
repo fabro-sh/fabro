@@ -36,6 +36,10 @@ fn sandbox_details_json_matches_openapi_shape() {
                 repo_cloned:       None,
                 clone_origin_url:  None,
                 clone_branch:      None,
+                workspace_root:    Some("/workspace".to_string()),
+                repos_root:        Some("/repos".to_string()),
+                primary_repo_path: Some("/repos/fabro-sh/fabro".to_string()),
+                primary_repo_link: Some("/workspace/fabro".to_string()),
             }),
         },
         state:        SandboxState::Running,
@@ -61,7 +65,11 @@ fn sandbox_details_json_matches_openapi_shape() {
                 "image": "ghcr.io/fabro/sandbox:latest",
                 "runtime": {
                     "id": "container-abc123",
-                    "working_directory": "/workspace"
+                    "working_directory": "/workspace",
+                    "workspace_root": "/workspace",
+                    "repos_root": "/repos",
+                    "primary_repo_path": "/repos/fabro-sh/fabro",
+                    "primary_repo_link": "/workspace/fabro"
                 }
             },
             "state": "running",

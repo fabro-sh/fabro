@@ -19,6 +19,10 @@ fn run_sandbox_serializes_canonical_identity_without_identifier() {
             repo_cloned:       Some(true),
             clone_origin_url:  Some("https://github.com/fabro-sh/fabro.git".to_string()),
             clone_branch:      Some("main".to_string()),
+            workspace_root:    Some("/workspace".to_string()),
+            repos_root:        Some("/repos".to_string()),
+            primary_repo_path: Some("/repos/fabro-sh/fabro".to_string()),
+            primary_repo_link: Some("/workspace/fabro".to_string()),
         }),
     };
 
@@ -33,7 +37,11 @@ fn run_sandbox_serializes_canonical_identity_without_identifier() {
                 "working_directory": "/workspace",
                 "repo_cloned": true,
                 "clone_origin_url": "https://github.com/fabro-sh/fabro.git",
-                "clone_branch": "main"
+                "clone_branch": "main",
+                "workspace_root": "/workspace",
+                "repos_root": "/repos",
+                "primary_repo_path": "/repos/fabro-sh/fabro",
+                "primary_repo_link": "/workspace/fabro"
             }
         })
     );
@@ -53,6 +61,10 @@ fn sandbox_details_requires_canonical_id_and_working_directory() {
                 repo_cloned:       None,
                 clone_origin_url:  None,
                 clone_branch:      None,
+                workspace_root:    Some("/home/daytona/workspace".to_string()),
+                repos_root:        Some("/repos".to_string()),
+                primary_repo_path: None,
+                primary_repo_link: None,
             }),
         },
         state:        SandboxState::Running,
@@ -78,6 +90,11 @@ fn sandbox_details_requires_canonical_id_and_working_directory() {
         value["sandbox"]["runtime"]["working_directory"],
         "/workspace"
     );
+    assert_eq!(
+        value["sandbox"]["runtime"]["workspace_root"],
+        "/home/daytona/workspace"
+    );
+    assert_eq!(value["sandbox"]["runtime"]["repos_root"], "/repos");
     assert!(value.get("name").is_none());
     assert!(value.get("identifier").is_none());
 }

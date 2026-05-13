@@ -14,9 +14,9 @@ use fabro_types::{RunId, RunSandbox, RunSandboxRuntime, SandboxProvider};
 #[cfg(any(feature = "docker", feature = "daytona"))]
 use crate::clone_source;
 #[cfg(feature = "daytona")]
-use crate::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
+use crate::daytona::{self, DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
 #[cfg(feature = "docker")]
-use crate::docker::{DockerSandbox, DockerSandboxOptions};
+use crate::docker::{self, DockerSandbox, DockerSandboxOptions};
 use crate::local::LocalSandbox;
 use crate::{Sandbox, SandboxEventCallback};
 
@@ -82,49 +82,83 @@ impl SandboxSpec {
                 clone_origin_url,
                 clone_branch,
                 ..
-            } => RunSandbox {
-                provider: self.provider(),
-                image:    (!config.image.is_empty()).then(|| config.image.clone()),
-                snapshot: None,
-                runtime:  Some(RunSandboxRuntime {
-                    id,
-                    working_directory: working_directory.clone(),
-                    repo_cloned: clone_source::repo_cloned_for_record(
-                        config.skip_clone,
-                        clone_origin_url.as_deref(),
-                    ),
-                    clone_origin_url: clone_source::clean_clone_origin_for_record(
-                        clone_origin_url.as_deref(),
-                    ),
-                    clone_branch: clone_branch.clone(),
-                }),
-            },
+            } => {
+                let repo_cloned = clone_source::repo_cloned_for_record(
+                    config.skip_clone,
+                    clone_origin_url.as_deref(),
+                );
+                let layout = runtime_layout_metadata(
+                    repo_cloned,
+                    clone_origin_url.as_deref(),
+                    docker::WORKING_DIRECTORY,
+                    docker::REPOS_ROOT,
+                );
+                RunSandbox {
+                    provider: self.provider(),
+                    image:    (!config.image.is_empty()).then(|| config.image.clone()),
+                    snapshot: None,
+                    runtime:  Some(RunSandboxRuntime {
+                        id,
+                        working_directory: working_directory.clone(),
+                        repo_cloned,
+                        clone_origin_url: clone_source::clean_clone_origin_for_record(
+                            clone_origin_url.as_deref(),
+                        ),
+                        clone_branch: clone_branch.clone(),
+                        workspace_root: Some(docker::WORKING_DIRECTORY.to_string()),
+                        repos_root: Some(docker::REPOS_ROOT.to_string()),
+                        primary_repo_path: layout
+                            .as_ref()
+                            .map(|layout| layout.primary_repo_path.clone()),
+                        primary_repo_link: layout
+                            .as_ref()
+                            .map(|layout| layout.primary_repo_link.clone()),
+                    }),
+                }
+            }
             #[cfg(feature = "daytona")]
             Self::Daytona {
                 config,
                 clone_origin_url,
                 clone_branch,
                 ..
-            } => RunSandbox {
-                provider: self.provider(),
-                image:    None,
-                snapshot: config
-                    .snapshot
-                    .as_ref()
-                    .map(|snapshot| snapshot.name.clone()),
-                runtime:  Some(RunSandboxRuntime {
-                    id,
-                    working_directory: working_directory.clone(),
-                    repo_cloned: clone_source::repo_cloned_for_record(
-                        config.skip_clone,
-                        clone_origin_url.as_deref(),
-                    ),
-                    clone_origin_url: clone_source::clean_clone_origin_for_record(
-                        clone_origin_url.as_deref(),
-                    ),
-                    clone_branch: clone_branch.clone(),
-                }),
-            },
+            } => {
+                let repo_cloned = clone_source::repo_cloned_for_record(
+                    config.skip_clone,
+                    clone_origin_url.as_deref(),
+                );
+                let layout = runtime_layout_metadata(
+                    repo_cloned,
+                    clone_origin_url.as_deref(),
+                    daytona::WORKING_DIRECTORY,
+                    daytona::REPOS_ROOT,
+                );
+                RunSandbox {
+                    provider: self.provider(),
+                    image:    None,
+                    snapshot: config
+                        .snapshot
+                        .as_ref()
+                        .map(|snapshot| snapshot.name.clone()),
+                    runtime:  Some(RunSandboxRuntime {
+                        id,
+                        working_directory: working_directory.clone(),
+                        repo_cloned,
+                        clone_origin_url: clone_source::clean_clone_origin_for_record(
+                            clone_origin_url.as_deref(),
+                        ),
+                        clone_branch: clone_branch.clone(),
+                        workspace_root: Some(daytona::WORKING_DIRECTORY.to_string()),
+                        repos_root: Some(daytona::REPOS_ROOT.to_string()),
+                        primary_repo_path: layout
+                            .as_ref()
+                            .map(|layout| layout.primary_repo_path.clone()),
+                        primary_repo_link: layout
+                            .as_ref()
+                            .map(|layout| layout.primary_repo_link.clone()),
+                    }),
+                }
+            }
             _ => RunSandbox {
                 provider: self.provider(),
                 image:    None,
@@ -135,6 +169,10 @@ impl SandboxSpec {
                     repo_cloned: None,
                     clone_origin_url: None,
                     clone_branch: None,
+                    workspace_root: None,
+                    repos_root: None,
+                    primary_repo_path: None,
+                    primary_repo_link: None,
                 }),
             },
         }
@@ -210,5 +248,89 @@ impl SandboxSpec {
                 Ok(Arc::new(sandbox))
             }
         }
+    }
+}
+
+#[cfg(any(feature = "docker", feature = "daytona"))]
+fn runtime_layout_metadata(
+    repo_cloned: Option<bool>,
+    clone_origin_url: Option<&str>,
+    workspace_root: &str,
+    repos_root: &str,
+) -> Option<clone_source::GitHubRepoLayout> {
+    if repo_cloned != Some(true) {
+        return None;
+    }
+    clone_source::github_repo_layout(clone_origin_url?, workspace_root, repos_root).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use fabro_types::RunId;
+
+    use super::*;
+    use crate::test_support::MockSandbox;
+
+    #[cfg(feature = "docker")]
+    #[test]
+    fn docker_run_sandbox_persists_layout_metadata_for_cloned_repo() {
+        let spec = SandboxSpec::Docker {
+            config:           DockerSandboxOptions::default(),
+            github_app:       None,
+            run_id:           None,
+            clone_origin_url: Some("git@github.com:brynary/rack-test.git".to_string()),
+            clone_branch:     Some("main".to_string()),
+        };
+        let mut sandbox = MockSandbox::linux();
+        sandbox.working_dir = "/workspace/rack-test";
+
+        let run_id: RunId = "01HY0000000000000000000000".parse().unwrap();
+        let record = spec.to_run_sandbox(&sandbox, run_id);
+        let runtime = record.runtime.expect("runtime");
+
+        assert_eq!(runtime.working_directory, "/workspace/rack-test");
+        assert_eq!(runtime.repo_cloned, Some(true));
+        assert_eq!(
+            runtime.clone_origin_url.as_deref(),
+            Some("https://github.com/brynary/rack-test")
+        );
+        assert_eq!(runtime.workspace_root.as_deref(), Some("/workspace"));
+        assert_eq!(runtime.repos_root.as_deref(), Some("/repos"));
+        assert_eq!(
+            runtime.primary_repo_path.as_deref(),
+            Some("/repos/brynary/rack-test")
+        );
+        assert_eq!(
+            runtime.primary_repo_link.as_deref(),
+            Some("/workspace/rack-test")
+        );
+    }
+
+    #[cfg(feature = "docker")]
+    #[test]
+    fn docker_run_sandbox_omits_primary_repo_metadata_for_empty_workspace() {
+        let spec = SandboxSpec::Docker {
+            config:           DockerSandboxOptions {
+                skip_clone: true,
+                ..DockerSandboxOptions::default()
+            },
+            github_app:       None,
+            run_id:           None,
+            clone_origin_url: Some("https://gitlab.com/acme/widgets".to_string()),
+            clone_branch:     None,
+        };
+        let mut sandbox = MockSandbox::linux();
+        sandbox.working_dir = "/workspace";
+
+        let run_id: RunId = "01HY0000000000000000000000".parse().unwrap();
+        let record = spec.to_run_sandbox(&sandbox, run_id);
+        let runtime = record.runtime.expect("runtime");
+
+        assert_eq!(runtime.working_directory, "/workspace");
+        assert_eq!(runtime.repo_cloned, Some(false));
+        assert_eq!(runtime.workspace_root.as_deref(), Some("/workspace"));
+        assert_eq!(runtime.repos_root.as_deref(), Some("/repos"));
+        assert!(runtime.primary_repo_path.is_none());
+        assert!(runtime.primary_repo_link.is_none());
     }
 }

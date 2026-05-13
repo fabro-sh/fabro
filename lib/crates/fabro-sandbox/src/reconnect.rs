@@ -72,6 +72,7 @@ pub async fn reconnect_for_run_with_callback(
             let mut sandbox = DockerSandbox::reconnect(
                 &runtime.id,
                 repo_cloned,
+                runtime.working_directory.clone(),
                 runtime.clone_origin_url.clone(),
                 runtime.clone_branch.clone(),
                 run_id,
@@ -95,6 +96,7 @@ pub async fn reconnect_for_run_with_callback(
                 &runtime.id,
                 daytona_api_key,
                 repo_cloned,
+                runtime.working_directory.clone(),
                 runtime.clone_origin_url.clone(),
                 runtime.clone_branch.clone(),
             )

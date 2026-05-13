@@ -894,6 +894,10 @@ fn event_body_from_event(event: &Event) -> EventBody {
             repo_cloned,
             clone_origin_url,
             clone_branch,
+            workspace_root,
+            repos_root,
+            primary_repo_path,
+            primary_repo_link,
         } => EventBody::SandboxInitialized(fabro_types::SandboxInitializedProps {
             working_directory: working_directory.clone(),
             provider:          *provider,
@@ -901,6 +905,10 @@ fn event_body_from_event(event: &Event) -> EventBody {
             repo_cloned:       *repo_cloned,
             clone_origin_url:  clone_origin_url.clone(),
             clone_branch:      clone_branch.clone(),
+            workspace_root:    workspace_root.clone(),
+            repos_root:        repos_root.clone(),
+            primary_repo_path: primary_repo_path.clone(),
+            primary_repo_link: primary_repo_link.clone(),
         }),
         Event::SetupStarted { command_count } => {
             EventBody::SetupStarted(fabro_types::SetupStartedProps {

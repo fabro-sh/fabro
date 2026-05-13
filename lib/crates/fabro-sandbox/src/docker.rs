@@ -34,7 +34,8 @@ use crate::{
     StdioProcess, StdioProcessHandle, StdioProcessTermination, format_lines_numbered, shell_quote,
 };
 
-const WORKING_DIRECTORY: &str = "/workspace";
+pub(crate) const WORKING_DIRECTORY: &str = "/workspace";
+pub(crate) const REPOS_ROOT: &str = "/repos";
 const GIT_CLONE_DEPTH: usize = 10;
 #[cfg(test)]
 const EXEC_STOP_POLL_SLEEP_SECONDS: &str = "0.005";
@@ -49,8 +50,8 @@ const MANAGED_LABEL: &str = "sh.fabro.managed";
 const RUN_ID_LABEL: &str = "sh.fabro.run_id";
 static EXEC_CONTROL_COUNTER: AtomicU64 = AtomicU64::new(1);
 
-pub fn docker_access_command(container_id: &str) -> String {
-    let shell = format!("cd {} && exec sh -l", shell_quote(WORKING_DIRECTORY));
+pub fn docker_access_command(container_id: &str, working_directory: &str) -> String {
+    let shell = format!("cd {} && exec sh -l", shell_quote(working_directory));
     format!(
         "docker exec -it {} sh -lc {}",
         shell_quote(container_id),
@@ -99,6 +100,7 @@ pub struct DockerSandbox {
     clone_branch:      Option<String>,
     container_id:      OnceCell<String>,
     repo_cloned:       OnceCell<bool>,
+    working_directory: OnceCell<String>,
     origin_url:        OnceCell<String>,
     cached_platform:   std::sync::OnceLock<String>,
     cached_os_version: std::sync::OnceLock<String>,
@@ -130,6 +132,7 @@ impl DockerSandbox {
             clone_branch,
             container_id: OnceCell::new(),
             repo_cloned: OnceCell::new(),
+            working_directory: OnceCell::new(),
             origin_url: OnceCell::new(),
             cached_platform: std::sync::OnceLock::new(),
             cached_os_version: std::sync::OnceLock::new(),
@@ -141,6 +144,7 @@ impl DockerSandbox {
     pub async fn reconnect(
         container_id: &str,
         repo_cloned: bool,
+        working_directory: String,
         clone_origin_url: Option<String>,
         clone_branch: Option<String>,
         run_id: Option<RunId>,
@@ -161,6 +165,10 @@ impl DockerSandbox {
             .repo_cloned
             .set(repo_cloned)
             .map_err(|_| "Clone state already initialized".to_string())?;
+        sandbox
+            .working_directory
+            .set(working_directory)
+            .map_err(|_| "Working directory already initialized".to_string())?;
         if repo_cloned {
             if let Some(origin) = clone_origin_url {
                 let _ = sandbox.origin_url.set(origin);
@@ -194,12 +202,18 @@ impl DockerSandbox {
         self.docker.clone()
     }
 
-    fn resolve_container_path(path: &str) -> String {
-        resolve_path(path, WORKING_DIRECTORY)
+    fn resolve_container_path(&self, path: &str) -> String {
+        resolve_path(path, self.working_directory())
     }
 
     fn repo_cloned(&self) -> bool {
         self.repo_cloned.get().copied().unwrap_or(false)
+    }
+
+    fn set_working_directory(&self, working_directory: impl Into<String>) -> crate::Result<()> {
+        self.working_directory
+            .set(working_directory.into())
+            .map_err(|_| crate::Error::message("Docker working directory already initialized"))
     }
 
     async fn docker_exec(
@@ -332,7 +346,9 @@ impl DockerSandbox {
         cancel_token: Option<CancellationToken>,
     ) -> crate::Result<ExecResult> {
         let start = Instant::now();
-        let effective_dir = working_dir.unwrap_or(WORKING_DIRECTORY).to_string();
+        let effective_dir = working_dir
+            .unwrap_or_else(|| self.working_directory())
+            .to_string();
         let env: Option<Vec<String>> =
             env_vars.map(|vars| vars.iter().map(|(k, v)| format!("{k}={v}")).collect());
         let cmd = vec![
@@ -389,7 +405,9 @@ impl DockerSandbox {
         output_callback: CommandOutputCallback,
     ) -> crate::Result<ExecStreamingResult> {
         let start = Instant::now();
-        let effective_dir = working_dir.unwrap_or(WORKING_DIRECTORY).to_string();
+        let effective_dir = working_dir
+            .unwrap_or_else(|| self.working_directory())
+            .to_string();
         let env: Option<Vec<String>> =
             env_vars.map(|vars| vars.iter().map(|(k, v)| format!("{k}={v}")).collect());
         let (stop_file, pid_file) = docker_exec_control_paths();
@@ -511,6 +529,7 @@ impl DockerSandbox {
                 result.stderr
             )));
         }
+        self.set_working_directory(WORKING_DIRECTORY)?;
         Ok(())
     }
 
@@ -533,6 +552,7 @@ impl DockerSandbox {
         branch: Option<String>,
     ) -> crate::Result<()> {
         self.verify_git_available().await?;
+        let layout = clone_source::github_repo_layout(&origin_url, WORKING_DIRECTORY, REPOS_ROOT)?;
 
         self.emit(SandboxEvent::GitCloneStarted {
             url:    origin_url.clone(),
@@ -559,7 +579,7 @@ impl DockerSandbox {
             .as_ref()
             .map_or(origin_url.as_str(), |url| url.as_raw_url().as_str());
 
-        let command = git_clone_command(clone_url, branch.as_deref());
+        let command = git_clone_and_link_command(clone_url, branch.as_deref(), &layout);
 
         let result = self
             .docker_exec_shell(&command, 300_000, Some("/"), None, None)
@@ -583,6 +603,7 @@ impl DockerSandbox {
 
         let _ = self.repo_cloned.set(true);
         let _ = self.origin_url.set(origin_url.clone());
+        self.set_working_directory(layout.execution_directory.clone())?;
 
         if let Some(auth_url) = auth_url.as_ref() {
             let command = format!(
@@ -590,7 +611,13 @@ impl DockerSandbox {
                 shell_quote(auth_url.as_raw_url().as_str())
             );
             let result = self
-                .docker_exec_shell(&command, 10_000, Some(WORKING_DIRECTORY), None, None)
+                .docker_exec_shell(
+                    &command,
+                    10_000,
+                    Some(&layout.execution_directory),
+                    None,
+                    None,
+                )
                 .await?;
             if !result.is_success() {
                 let err = result
@@ -659,7 +686,7 @@ impl DockerSandbox {
     }
 
     async fn upload_bytes_to_container(&self, path: &str, bytes: &[u8]) -> crate::Result<()> {
-        let container_path = Self::resolve_container_path(path);
+        let container_path = self.resolve_container_path(path);
         let container_id = self.container_id()?;
         let parent_dir = std::path::Path::new(&container_path)
             .parent()
@@ -1001,7 +1028,7 @@ async fn cache_docker_stdio_completion(
     }
 }
 
-fn git_clone_command(clone_url: &str, branch: Option<&str>) -> String {
+fn git_clone_command(clone_url: &str, branch: Option<&str>, checkout_path: &str) -> String {
     let mut command = "git -c maintenance.auto=0 -c gc.auto=0 clone".to_string();
     if let Some(branch) = branch {
         command.push_str(" --branch ");
@@ -1014,8 +1041,23 @@ fn git_clone_command(clone_url: &str, branch: Option<&str>) -> String {
     command.push_str(" -- ");
     command.push_str(&shell_quote(clone_url));
     command.push(' ');
-    command.push_str(&shell_quote(WORKING_DIRECTORY));
+    command.push_str(&shell_quote(checkout_path));
     command
+}
+
+fn git_clone_and_link_command(
+    clone_url: &str,
+    branch: Option<&str>,
+    layout: &clone_source::GitHubRepoLayout,
+) -> String {
+    format!(
+        "mkdir -p {} {} && {} && ln -s {} {}",
+        shell_quote(WORKING_DIRECTORY),
+        shell_quote(&layout.repos_owner_path),
+        git_clone_command(clone_url, branch, &layout.primary_repo_path),
+        shell_quote(&layout.primary_repo_path),
+        shell_quote(&layout.primary_repo_link),
+    )
 }
 
 fn container_labels(run_id: Option<&RunId>) -> HashMap<String, String> {
@@ -1129,7 +1171,7 @@ impl Sandbox for DockerSandbox {
         local_path: &std::path::Path,
     ) -> crate::Result<()> {
         let container_id = self.container_id()?;
-        let container_path = Self::resolve_container_path(remote_path);
+        let container_path = self.resolve_container_path(remote_path);
         let opts = DownloadFromContainerOptions {
             path: container_path.clone(),
         };
@@ -1504,7 +1546,7 @@ impl Sandbox for DockerSandbox {
         env_vars: Option<&HashMap<String, String>>,
         cancel_token: Option<CancellationToken>,
     ) -> crate::Result<ExecResult> {
-        let dir = working_dir.map(Self::resolve_container_path);
+        let dir = working_dir.map(|path| self.resolve_container_path(path));
         self.docker_exec_shell(command, timeout_ms, dir.as_deref(), env_vars, cancel_token)
             .await
     }
@@ -1518,7 +1560,7 @@ impl Sandbox for DockerSandbox {
         cancel_token: Option<CancellationToken>,
         output_callback: CommandOutputCallback,
     ) -> crate::Result<ExecStreamingResult> {
-        let dir = working_dir.map(Self::resolve_container_path);
+        let dir = working_dir.map(|path| self.resolve_container_path(path));
         self.docker_exec_shell_streaming(
             command,
             timeout_ms,
@@ -1538,8 +1580,8 @@ impl Sandbox for DockerSandbox {
         cancel_token: Option<CancellationToken>,
     ) -> crate::Result<StdioProcess> {
         let effective_dir = working_dir.map_or_else(
-            || WORKING_DIRECTORY.to_string(),
-            Self::resolve_container_path,
+            || self.working_directory().to_string(),
+            |path| self.resolve_container_path(path),
         );
         let env: Option<Vec<String>> =
             env_vars.map(|vars| vars.iter().map(|(k, v)| format!("{k}={v}")).collect());
@@ -1628,7 +1670,7 @@ impl Sandbox for DockerSandbox {
         offset: Option<usize>,
         limit: Option<usize>,
     ) -> crate::Result<String> {
-        let container_path = Self::resolve_container_path(path);
+        let container_path = self.resolve_container_path(path);
         let (stdout, stderr, exit_code) = self
             .docker_exec(vec!["cat".to_string(), container_path.clone()], None, None)
             .await?;
@@ -1648,7 +1690,7 @@ impl Sandbox for DockerSandbox {
     }
 
     async fn delete_file(&self, path: &str) -> crate::Result<()> {
-        let container_path = Self::resolve_container_path(path);
+        let container_path = self.resolve_container_path(path);
         let (_, stderr, exit_code) = self
             .docker_exec(
                 vec!["rm".to_string(), "-f".to_string(), container_path.clone()],
@@ -1666,7 +1708,7 @@ impl Sandbox for DockerSandbox {
     }
 
     async fn file_exists(&self, path: &str) -> crate::Result<bool> {
-        let container_path = Self::resolve_container_path(path);
+        let container_path = self.resolve_container_path(path);
         let (_, _, exit_code) = self
             .docker_exec(
                 vec!["test".to_string(), "-e".to_string(), container_path],
@@ -1683,7 +1725,7 @@ impl Sandbox for DockerSandbox {
         path: &str,
         depth: Option<usize>,
     ) -> crate::Result<Vec<DirEntry>> {
-        let container_path = Self::resolve_container_path(path);
+        let container_path = self.resolve_container_path(path);
         let max_depth = depth.unwrap_or(1);
         let (stdout, stderr, exit_code) = self
             .docker_exec(
@@ -1738,7 +1780,7 @@ impl Sandbox for DockerSandbox {
         path: &str,
         options: &GrepOptions,
     ) -> crate::Result<Vec<String>> {
-        let container_path = Self::resolve_container_path(path);
+        let container_path = self.resolve_container_path(path);
         let use_rg = *self
             .rg_available
             .get_or_init(|| async {
@@ -1809,8 +1851,8 @@ impl Sandbox for DockerSandbox {
 
     async fn glob(&self, pattern: &str, path: Option<&str>) -> crate::Result<Vec<String>> {
         let base_dir = path.map_or_else(
-            || WORKING_DIRECTORY.to_string(),
-            Self::resolve_container_path,
+            || self.working_directory().to_string(),
+            |path| self.resolve_container_path(path),
         );
         let command = format!(
             "find {} -name {} -type f | sort",
@@ -1837,11 +1879,16 @@ impl Sandbox for DockerSandbox {
     }
 
     fn working_directory(&self) -> &str {
-        WORKING_DIRECTORY
+        self.working_directory
+            .get()
+            .map_or(WORKING_DIRECTORY, String::as_str)
     }
 
     async fn ssh_access_command(&self) -> crate::Result<Option<String>> {
-        Ok(Some(docker_access_command(self.container_id()?)))
+        Ok(Some(docker_access_command(
+            self.container_id()?,
+            self.working_directory(),
+        )))
     }
 
     fn platform(&self) -> &str {
@@ -1935,7 +1982,7 @@ impl Sandbox for DockerSandbox {
             shell_quote(auth_url.as_raw_url().as_str())
         );
         let result = self
-            .docker_exec_shell(&command, 10_000, Some(WORKING_DIRECTORY), None, None)
+            .docker_exec_shell(&command, 10_000, Some(self.working_directory()), None, None)
             .await?;
         if !result.is_success() {
             return Err(result.into_exec_error_with_redactor(
@@ -1973,10 +2020,31 @@ mod tests {
 
     #[test]
     fn clone_command_uses_depth_ten_without_tags_for_branch_clone() {
-        let command = git_clone_command("https://github.com/fabro-sh/fabro", Some("main"));
+        let command = git_clone_command(
+            "https://github.com/fabro-sh/fabro",
+            Some("main"),
+            "/repos/fabro-sh/fabro",
+        );
         assert_eq!(
             command,
-            "git -c maintenance.auto=0 -c gc.auto=0 clone --branch main --single-branch --depth 10 --no-tags -- https://github.com/fabro-sh/fabro /workspace"
+            "git -c maintenance.auto=0 -c gc.auto=0 clone --branch main --single-branch --depth 10 --no-tags -- https://github.com/fabro-sh/fabro /repos/fabro-sh/fabro"
+        );
+    }
+
+    #[test]
+    fn clone_and_link_command_creates_workspace_symlink_to_repos_checkout() {
+        let layout = clone_source::github_repo_layout(
+            "https://github.com/fabro-sh/fabro",
+            "/workspace",
+            "/repos",
+        )
+        .unwrap();
+        let command =
+            git_clone_and_link_command("https://github.com/fabro-sh/fabro", Some("main"), &layout);
+
+        assert_eq!(
+            command,
+            "mkdir -p /workspace /repos/fabro-sh && git -c maintenance.auto=0 -c gc.auto=0 clone --branch main --single-branch --depth 10 --no-tags -- https://github.com/fabro-sh/fabro /repos/fabro-sh/fabro && ln -s /repos/fabro-sh/fabro /workspace/fabro"
         );
     }
 
@@ -2022,16 +2090,19 @@ mod tests {
     #[test]
     fn docker_access_command_uses_exec_in_workspace() {
         assert_eq!(
-            docker_access_command("fabro-run-01HY0000000000000000000000"),
-            "docker exec -it fabro-run-01HY0000000000000000000000 sh -lc 'cd /workspace && exec sh -l'"
+            docker_access_command(
+                "fabro-run-01HY0000000000000000000000",
+                "/workspace/rack-test"
+            ),
+            "docker exec -it fabro-run-01HY0000000000000000000000 sh -lc 'cd /workspace/rack-test && exec sh -l'"
         );
     }
 
     #[test]
     fn docker_access_command_quotes_container_identifier() {
         assert_eq!(
-            docker_access_command("container with spaces"),
-            "docker exec -it 'container with spaces' sh -lc 'cd /workspace && exec sh -l'"
+            docker_access_command("container with spaces", "/workspace/repo with spaces"),
+            "docker exec -it 'container with spaces' sh -lc \"cd '/workspace/repo with spaces' && exec sh -l\""
         );
     }
 

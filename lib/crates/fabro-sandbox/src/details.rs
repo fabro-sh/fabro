@@ -190,6 +190,10 @@ mod docker {
                     repo_cloned:       Some(true),
                     clone_origin_url:  None,
                     clone_branch:      None,
+                    workspace_root:    None,
+                    repos_root:        None,
+                    primary_repo_path: None,
+                    primary_repo_link: None,
                 }),
             }
         }
@@ -368,6 +372,7 @@ mod daytona {
             &runtime.id,
             daytona_api_key,
             repo_cloned,
+            runtime.working_directory.clone(),
             runtime.clone_origin_url.clone(),
             runtime.clone_branch.clone(),
         )
@@ -554,6 +559,10 @@ mod tests {
                 repo_cloned:       None,
                 clone_origin_url:  None,
                 clone_branch:      None,
+                workspace_root:    None,
+                repos_root:        None,
+                primary_repo_path: None,
+                primary_repo_link: None,
             }),
         };
         let details = local_details(&record);

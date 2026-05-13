@@ -63,6 +63,7 @@ pub async fn open_terminal_for_run(
                 &runtime.id,
                 daytona_api_key.clone(),
                 repo_cloned,
+                runtime.working_directory.clone(),
                 runtime.clone_origin_url.clone(),
                 runtime.clone_branch.clone(),
             )
@@ -92,6 +93,7 @@ pub async fn open_terminal_for_run(
             let sandbox = DockerSandbox::reconnect(
                 &runtime.id,
                 repo_cloned,
+                runtime.working_directory.clone(),
                 runtime.clone_origin_url.clone(),
                 runtime.clone_branch.clone(),
                 run_id,

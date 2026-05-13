@@ -52,6 +52,66 @@ mod daytona_streaming_live {
         Ok(())
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires live Daytona credentials and provisions a sandbox"]
+    async fn daytona_clone_layout_live_smoke() -> Result<()> {
+        ensure!(
+            daytona_api_key_present(),
+            "DAYTONA_API_KEY must be set to run this live smoke test"
+        );
+
+        let sandbox = DaytonaSandbox::new(
+            DaytonaConfig {
+                skip_clone: false,
+                ..Default::default()
+            },
+            None,
+            None,
+            Some("https://github.com/brynary/rack-test".to_string()),
+            None,
+            None,
+        )
+        .await?;
+
+        sandbox.initialize().await?;
+        ensure_eq(
+            &sandbox.working_directory(),
+            &"/home/daytona/workspace/rack-test",
+            "working directory should be the workspace symlink",
+        )?;
+
+        let result = sandbox
+            .exec_command(
+                "test -d /repos/brynary/rack-test/.git && \
+                 test -L /home/daytona/workspace/rack-test && \
+                 test \"$(readlink /home/daytona/workspace/rack-test)\" = /repos/brynary/rack-test && \
+                 test \"$(git -C /repos/brynary/rack-test rev-parse HEAD)\" = \
+                      \"$(git -C /home/daytona/workspace/rack-test rev-parse HEAD)\" && \
+                 git rev-parse --is-inside-work-tree",
+                30_000,
+                None,
+                None,
+                None,
+            )
+            .await?;
+        let cleanup_result = sandbox.cleanup().await.context("clean up Daytona sandbox");
+
+        ensure!(
+            result.is_success(),
+            "layout verification failed: stdout={} stderr={}",
+            result.stdout,
+            result.stderr
+        );
+        ensure_contains(
+            &result.stdout,
+            "true",
+            "default cwd should be inside the work tree",
+        )?;
+        cleanup_result?;
+
+        Ok(())
+    }
+
     async fn run_smoke(sandbox: Arc<DaytonaSandbox>) -> Result<()> {
         let chunks = Arc::new(Mutex::new(Vec::new()));
         let cancel_token = CancellationToken::new();

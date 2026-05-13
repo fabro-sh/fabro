@@ -476,6 +476,10 @@ pub async fn initialize(
             repo_cloned:       runtime.repo_cloned,
             clone_origin_url:  runtime.clone_origin_url.clone(),
             clone_branch:      runtime.clone_branch.clone(),
+            workspace_root:    runtime.workspace_root.clone(),
+            repos_root:        runtime.repos_root.clone(),
+            primary_repo_path: runtime.primary_repo_path.clone(),
+            primary_repo_link: runtime.primary_repo_link.clone(),
         });
     }
 

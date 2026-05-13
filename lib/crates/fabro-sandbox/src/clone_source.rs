@@ -9,6 +9,56 @@ pub(crate) enum CloneDecision {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct GitHubRepoLayout {
+    pub(crate) owner:               String,
+    pub(crate) repo:                String,
+    pub(crate) repos_owner_path:    String,
+    pub(crate) primary_repo_path:   String,
+    pub(crate) primary_repo_link:   String,
+    pub(crate) execution_directory: String,
+}
+
+pub(crate) fn github_repo_layout(
+    origin_url: &str,
+    workspace_root: &str,
+    repos_root: &str,
+) -> crate::Result<GitHubRepoLayout> {
+    let origin_url = fabro_github::normalize_repo_origin_url(origin_url);
+    let (owner, repo) = fabro_github::parse_github_owner_repo(&origin_url).map_err(|err| {
+        crate::Error::message(format!(
+            "Clone-based sandboxes currently support GitHub repository origins only: {err}"
+        ))
+    })?;
+    let workspace_root = trim_root(workspace_root);
+    let repos_root = trim_root(repos_root);
+    let repos_owner_path = join_remote_path(repos_root, &owner);
+    let primary_repo_path = join_remote_path(&repos_owner_path, &repo);
+    let primary_repo_link = join_remote_path(workspace_root, &repo);
+
+    Ok(GitHubRepoLayout {
+        owner,
+        repo,
+        repos_owner_path,
+        primary_repo_path,
+        execution_directory: primary_repo_link.clone(),
+        primary_repo_link,
+    })
+}
+
+fn trim_root(root: &str) -> &str {
+    let trimmed = root.trim_end_matches('/');
+    if trimmed.is_empty() { "/" } else { trimmed }
+}
+
+fn join_remote_path(root: &str, name: &str) -> String {
+    if root == "/" {
+        format!("/{name}")
+    } else {
+        format!("{root}/{name}")
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum EmptyWorkspaceReason {
     SkipClone,
@@ -124,6 +174,40 @@ mod tests {
         let error = decide_clone(false, Some("https://gitlab.com/acme/widgets.git"), None)
             .expect_err("non-GitHub origins should fail");
         assert!(error.to_string().contains("GitHub repository origins only"));
+    }
+
+    #[test]
+    fn github_layout_maps_ssh_origin_to_repos_checkout_and_workspace_link() {
+        let layout = github_repo_layout(
+            "git@github.com:brynary/rack-test.git",
+            "/workspace",
+            "/repos",
+        )
+        .unwrap();
+
+        assert_eq!(layout.owner, "brynary");
+        assert_eq!(layout.repo, "rack-test");
+        assert_eq!(layout.repos_owner_path, "/repos/brynary");
+        assert_eq!(layout.primary_repo_path, "/repos/brynary/rack-test");
+        assert_eq!(layout.primary_repo_link, "/workspace/rack-test");
+        assert_eq!(layout.execution_directory, "/workspace/rack-test");
+    }
+
+    #[test]
+    fn github_layout_normalizes_https_origin_and_trims_roots() {
+        let layout = github_repo_layout(
+            "https://github.com/fabro-sh/fabro.git/",
+            "/workspace/",
+            "/repos/",
+        )
+        .unwrap();
+
+        assert_eq!(layout.owner, "fabro-sh");
+        assert_eq!(layout.repo, "fabro");
+        assert_eq!(layout.repos_owner_path, "/repos/fabro-sh");
+        assert_eq!(layout.primary_repo_path, "/repos/fabro-sh/fabro");
+        assert_eq!(layout.primary_repo_link, "/workspace/fabro");
+        assert_eq!(layout.execution_directory, "/workspace/fabro");
     }
 
     #[test]

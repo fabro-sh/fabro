@@ -337,6 +337,14 @@ pub struct SandboxInitializedProps {
     pub clone_origin_url:  Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clone_branch:      Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_root:    Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repos_root:        Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_repo_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_repo_link: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

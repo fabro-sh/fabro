@@ -22,6 +22,10 @@ fn run_sandbox_json_matches_openapi_shape() {
             repo_cloned:       Some(false),
             clone_origin_url:  Some("https://github.com/fabro-sh/fabro.git".to_string()),
             clone_branch:      Some("main".to_string()),
+            workspace_root:    Some("/workspace".to_string()),
+            repos_root:        Some("/repos".to_string()),
+            primary_repo_path: None,
+            primary_repo_link: None,
         }),
     };
 
@@ -37,7 +41,9 @@ fn run_sandbox_json_matches_openapi_shape() {
                 "working_directory": "/workspace",
                 "repo_cloned": false,
                 "clone_origin_url": "https://github.com/fabro-sh/fabro.git",
-                "clone_branch": "main"
+                "clone_branch": "main",
+                "workspace_root": "/workspace",
+                "repos_root": "/repos"
             }
         })
     );

@@ -734,6 +734,10 @@ mod tests {
                 repo_cloned:       None,
                 clone_origin_url:  None,
                 clone_branch:      None,
+                workspace_root:    None,
+                repos_root:        None,
+                primary_repo_path: None,
+                primary_repo_link: None,
             },
             agent_event("code", AgentEvent::ToolCallStarted {
                 tool_name:    "read_file".into(),
@@ -1112,6 +1116,10 @@ mod tests {
             repo_cloned:       None,
             clone_origin_url:  None,
             clone_branch:      None,
+            workspace_root:    None,
+            repos_root:        None,
+            primary_repo_path: None,
+            primary_repo_link: None,
         });
         emit(
             &mut ui,

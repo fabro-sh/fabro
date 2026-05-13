@@ -109,6 +109,10 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
             repo_cloned:       None,
             clone_origin_url:  None,
             clone_branch:      None,
+            workspace_root:    None,
+            repos_root:        None,
+            primary_repo_path: None,
+            primary_repo_link: None,
         }),
     });
     projection.pending_interviews = BTreeMap::new();

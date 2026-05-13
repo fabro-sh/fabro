@@ -32,7 +32,8 @@ use crate::{
     SandboxEvent, SandboxEventCallback, StdioProcess, format_lines_numbered, shell_quote,
 };
 
-const WORKING_DIRECTORY: &str = "/home/daytona/workspace";
+pub(crate) const WORKING_DIRECTORY: &str = "/home/daytona/workspace";
+pub(crate) const REPOS_ROOT: &str = "/repos";
 const DEFAULT_SNAPSHOT: &str = "daytona-medium";
 pub const DEFAULT_DAYTONA_API_URL: &str = "https://app.daytona.io/api";
 const FABRO_SANDBOX_USER_AGENT: &str = concat!("fabro-sandbox/", env!("CARGO_PKG_VERSION"));
@@ -223,21 +224,22 @@ fn command_kind(command: &str) -> &'static str {
 
 /// Sandbox that runs all operations inside a Daytona cloud sandbox.
 pub struct DaytonaSandbox {
-    config:           DaytonaConfig,
-    client:           daytona_sdk::Client,
-    github_app:       Option<GitHubCredentials>,
-    sandbox:          OnceCell<daytona_sdk::Sandbox>,
-    rg_available:     OnceCell<bool>,
-    event_callback:   Option<SandboxEventCallback>,
+    config:            DaytonaConfig,
+    client:            daytona_sdk::Client,
+    github_app:        Option<GitHubCredentials>,
+    sandbox:           OnceCell<daytona_sdk::Sandbox>,
+    rg_available:      OnceCell<bool>,
+    event_callback:    Option<SandboxEventCallback>,
     /// HTTPS origin URL stored after clone so we can refresh push credentials
     /// later.
-    origin_url:       OnceCell<String>,
-    repo_cloned:      OnceCell<bool>,
-    run_id:           Option<RunId>,
-    clone_origin_url: Option<String>,
+    origin_url:        OnceCell<String>,
+    repo_cloned:       OnceCell<bool>,
+    working_directory: OnceCell<String>,
+    run_id:            Option<RunId>,
+    clone_origin_url:  Option<String>,
     /// Explicit branch to clone. When set, overrides the branch detected by
     /// the submitted run spec.
-    clone_branch:     Option<String>,
+    clone_branch:      Option<String>,
 }
 
 impl DaytonaSandbox {
@@ -265,6 +267,7 @@ impl DaytonaSandbox {
             event_callback: None,
             origin_url: OnceCell::new(),
             repo_cloned: OnceCell::new(),
+            working_directory: OnceCell::new(),
             run_id,
             clone_origin_url,
             clone_branch,
@@ -279,6 +282,7 @@ impl DaytonaSandbox {
         sandbox_name: &str,
         api_key: Option<String>,
         repo_cloned: bool,
+        working_directory: String,
         clone_origin_url: Option<String>,
         clone_branch: Option<String>,
     ) -> crate::Result<Self> {
@@ -301,6 +305,8 @@ impl DaytonaSandbox {
         }
         let repo_cloned_cell = OnceCell::new();
         let _ = repo_cloned_cell.set(repo_cloned);
+        let working_directory_cell = OnceCell::new();
+        let _ = working_directory_cell.set(working_directory);
         Ok(Self {
             config: DaytonaConfig::default(),
             client,
@@ -310,6 +316,7 @@ impl DaytonaSandbox {
             event_callback: None,
             origin_url,
             repo_cloned: repo_cloned_cell,
+            working_directory: working_directory_cell,
             run_id: None,
             clone_origin_url,
             clone_branch,
@@ -385,12 +392,8 @@ impl DaytonaSandbox {
         err
     }
 
-    #[allow(
-        clippy::unused_self,
-        reason = "Path resolution stays on the sandbox type even though it only uses constants."
-    )]
     fn resolve_path(&self, path: &str) -> String {
-        resolve_path(path, WORKING_DIRECTORY)
+        resolve_path(path, self.working_directory())
     }
 
     /// Get the sandbox, returning an error if not yet initialized.
@@ -412,6 +415,12 @@ impl DaytonaSandbox {
 
     fn repo_cloned(&self) -> bool {
         self.repo_cloned.get().copied().unwrap_or(false)
+    }
+
+    fn set_working_directory(&self, working_directory: impl Into<String>) -> crate::Result<()> {
+        self.working_directory
+            .set(working_directory.into())
+            .map_err(|_| crate::Error::message("Daytona working directory already initialized"))
     }
 
     /// Build `SandboxBaseParams` from config, generating a unique sandbox name.
@@ -724,8 +733,13 @@ impl Sandbox for DaytonaSandbox {
                     .await
                     .map_err(|e| crate::Error::context("Failed to create working directory", e))?;
                 let _ = self.repo_cloned.set(false);
+                self.set_working_directory(WORKING_DIRECTORY)
+                    .map_err(|err| self.fail_init(init_start, err))?;
             }
             CloneDecision::GitHub { origin_url, branch } => {
+                let layout =
+                    clone_source::github_repo_layout(&origin_url, WORKING_DIRECTORY, REPOS_ROOT)
+                        .map_err(|err| self.fail_init(init_start, err))?;
                 self.emit(SandboxEvent::GitCloneStarted {
                     url:    origin_url.clone(),
                     branch: branch.clone(),
@@ -770,6 +784,53 @@ impl Sandbox for DaytonaSandbox {
                     None => (None, None),
                 };
 
+                let fs_svc = sandbox.fs().await.map_err(|e| {
+                    let err = crate::Error::context("Failed to get Daytona fs service", e);
+                    self.emit(SandboxEvent::GitCloneFailed {
+                        url:    origin_url.clone(),
+                        error:  err.to_string(),
+                        causes: err.causes(),
+                    });
+                    self.fail_init(init_start, err)
+                })?;
+                fs_svc
+                    .create_folder(WORKING_DIRECTORY, None)
+                    .await
+                    .map_err(|e| {
+                        let err =
+                            crate::Error::context("Failed to create Daytona workspace root", e);
+                        self.emit(SandboxEvent::GitCloneFailed {
+                            url:    origin_url.clone(),
+                            error:  err.to_string(),
+                            causes: err.causes(),
+                        });
+                        self.fail_init(init_start, err)
+                    })?;
+                fs_svc.create_folder(REPOS_ROOT, None).await.map_err(|e| {
+                    let err = crate::Error::context("Failed to create Daytona repos root", e);
+                    self.emit(SandboxEvent::GitCloneFailed {
+                        url:    origin_url.clone(),
+                        error:  err.to_string(),
+                        causes: err.causes(),
+                    });
+                    self.fail_init(init_start, err)
+                })?;
+                fs_svc
+                    .create_folder(&layout.repos_owner_path, None)
+                    .await
+                    .map_err(|e| {
+                        let err = crate::Error::context(
+                            "Failed to create Daytona repos owner directory",
+                            e,
+                        );
+                        self.emit(SandboxEvent::GitCloneFailed {
+                            url:    origin_url.clone(),
+                            error:  err.to_string(),
+                            causes: err.causes(),
+                        });
+                        self.fail_init(init_start, err)
+                    })?;
+
                 let git_svc = sandbox.git().await.map_err(|e| {
                     let err = crate::Error::context("Failed to get Daytona git service", e);
                     self.emit(SandboxEvent::GitCloneFailed {
@@ -784,7 +845,7 @@ impl Sandbox for DaytonaSandbox {
                 let clone_result = git_svc
                     .clone(
                         &origin_url,
-                        WORKING_DIRECTORY,
+                        &layout.primary_repo_path,
                         daytona_sdk::GitCloneOptions {
                             branch,
                             username,
@@ -796,6 +857,57 @@ impl Sandbox for DaytonaSandbox {
 
                 match clone_result {
                     Ok(()) => {
+                        let process_svc = sandbox.process().await.map_err(|e| {
+                            let err =
+                                crate::Error::context("Failed to get Daytona process service", e);
+                            self.emit(SandboxEvent::GitCloneFailed {
+                                url:    origin_url.clone(),
+                                error:  err.to_string(),
+                                causes: err.causes(),
+                            });
+                            self.fail_init(init_start, err)
+                        })?;
+                        let symlink_cmd = daytona_symlink_command(&layout);
+                        let symlink_result = process_svc
+                            .execute_command(
+                                &wrap_bash_command(&symlink_cmd),
+                                daytona_sdk::ExecuteCommandOptions {
+                                    cwd: Some("/".to_string()),
+                                    ..Default::default()
+                                },
+                            )
+                            .await
+                            .map_err(|e| {
+                                let err = crate::Error::context(
+                                    "Failed to create Daytona workspace repo symlink",
+                                    e,
+                                );
+                                self.emit(SandboxEvent::GitCloneFailed {
+                                    url:    origin_url.clone(),
+                                    error:  err.to_string(),
+                                    causes: err.causes(),
+                                });
+                                self.fail_init(init_start, err)
+                            })?;
+                        if symlink_result.exit_code != 0 {
+                            let err = crate::Error::exec(
+                                "create Daytona workspace repo symlink",
+                                ExecResult {
+                                    stdout:      symlink_result.result.clone(),
+                                    stderr:      String::new(),
+                                    exit_code:   Some(symlink_result.exit_code),
+                                    termination: CommandTermination::Exited,
+                                    duration_ms: 0,
+                                },
+                            );
+                            self.emit(SandboxEvent::GitCloneFailed {
+                                url:    origin_url.clone(),
+                                error:  err.to_string(),
+                                causes: err.causes(),
+                            });
+                            return Err(self.fail_init(init_start, err));
+                        }
+
                         let clone_duration =
                             u64::try_from(clone_start.elapsed().as_millis()).unwrap_or(u64::MAX);
                         self.emit(SandboxEvent::GitCloneCompleted {
@@ -805,61 +917,60 @@ impl Sandbox for DaytonaSandbox {
 
                         let _ = self.repo_cloned.set(true);
                         let _ = self.origin_url.set(origin_url.clone());
+                        self.set_working_directory(layout.execution_directory.clone())
+                            .map_err(|err| self.fail_init(init_start, err))?;
                         if let Some(token) = clone_token {
-                            let process_svc = sandbox.process().await.ok();
-                            if let Some(ps) = process_svc {
-                                match fabro_github::embed_token_in_url(&origin_url, &token) {
-                                    Ok(auth_url) => {
-                                        let cmd = format!(
-                                            "git -c maintenance.auto=0 remote set-url origin {}",
-                                            shell_quote(auth_url.as_raw_url().as_str()),
-                                        );
-                                        let opts = daytona_sdk::ExecuteCommandOptions {
-                                            cwd: Some(WORKING_DIRECTORY.to_string()),
-                                            ..Default::default()
-                                        };
-                                        let wrapped = wrap_bash_command(&cmd);
-                                        match ps.execute_command(&wrapped, opts).await {
-                                            Ok(r) if r.exit_code != 0 => {
-                                                let err = crate::Error::exec(
-                                                    "git remote set-url origin (Daytona post-clone)",
-                                                    ExecResult {
-                                                        stdout:      String::new(),
-                                                        stderr:      redact_auth_url(
-                                                            &r.result,
-                                                            Some(&auth_url),
-                                                        ),
-                                                        exit_code:   Some(r.exit_code),
-                                                        termination: CommandTermination::Exited,
-                                                        duration_ms: 0,
-                                                    },
-                                                );
-                                                tracing::warn!(
-                                                    error = %crate::display_for_log(&err),
-                                                    "Failed to set Daytona sandbox push credentials \
-                                                     on origin — subsequent git push from this \
-                                                     sandbox will fail"
-                                                );
-                                            }
-                                            Ok(_) => {}
-                                            Err(_) => {
-                                                tracing::warn!(
-                                                    error_class = "daytona_set_url_exec_failed",
-                                                    "Daytona exec failed while setting push credentials \
-                                                     on origin — subsequent git push from this \
-                                                     sandbox will fail"
-                                                );
-                                            }
+                            match fabro_github::embed_token_in_url(&origin_url, &token) {
+                                Ok(auth_url) => {
+                                    let cmd = format!(
+                                        "git -c maintenance.auto=0 remote set-url origin {}",
+                                        shell_quote(auth_url.as_raw_url().as_str()),
+                                    );
+                                    let opts = daytona_sdk::ExecuteCommandOptions {
+                                        cwd: Some(layout.execution_directory.clone()),
+                                        ..Default::default()
+                                    };
+                                    let wrapped = wrap_bash_command(&cmd);
+                                    match process_svc.execute_command(&wrapped, opts).await {
+                                        Ok(r) if r.exit_code != 0 => {
+                                            let err = crate::Error::exec(
+                                                "git remote set-url origin (Daytona post-clone)",
+                                                ExecResult {
+                                                    stdout:      String::new(),
+                                                    stderr:      redact_auth_url(
+                                                        &r.result,
+                                                        Some(&auth_url),
+                                                    ),
+                                                    exit_code:   Some(r.exit_code),
+                                                    termination: CommandTermination::Exited,
+                                                    duration_ms: 0,
+                                                },
+                                            );
+                                            tracing::warn!(
+                                                error = %crate::display_for_log(&err),
+                                                "Failed to set Daytona sandbox push credentials \
+                                                 on origin — subsequent git push from this \
+                                                 sandbox will fail"
+                                            );
+                                        }
+                                        Ok(_) => {}
+                                        Err(_) => {
+                                            tracing::warn!(
+                                                error_class = "daytona_set_url_exec_failed",
+                                                "Daytona exec failed while setting push credentials \
+                                                 on origin — subsequent git push from this \
+                                                 sandbox will fail"
+                                            );
                                         }
                                     }
-                                    Err(e) => {
-                                        tracing::warn!(
-                                            origin = %origin_url,
-                                            error = %e,
-                                            "Failed to build authenticated origin URL — \
-                                             subsequent git push from this sandbox will fail"
-                                        );
-                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        origin = %origin_url,
+                                        error = %e,
+                                        "Failed to build authenticated origin URL — \
+                                         subsequent git push from this sandbox will fail"
+                                    );
                                 }
                             }
                         }
@@ -989,7 +1100,9 @@ impl Sandbox for DaytonaSandbox {
     }
 
     fn working_directory(&self) -> &str {
-        WORKING_DIRECTORY
+        self.working_directory
+            .get()
+            .map_or(WORKING_DIRECTORY, String::as_str)
     }
 
     fn platform(&self) -> &'static str {
@@ -1272,8 +1385,10 @@ impl Sandbox for DaytonaSandbox {
         let sandbox = self.sandbox()?;
         let start = Instant::now();
 
-        let cwd =
-            working_dir.map_or_else(|| WORKING_DIRECTORY.to_string(), |d| self.resolve_path(d));
+        let cwd = working_dir.map_or_else(
+            || self.working_directory().to_string(),
+            |d| self.resolve_path(d),
+        );
 
         let process_svc = sandbox
             .process()
@@ -1379,8 +1494,10 @@ impl Sandbox for DaytonaSandbox {
     ) -> crate::Result<ExecStreamingResult> {
         let sandbox = self.sandbox()?;
         let start = Instant::now();
-        let cwd =
-            working_dir.map_or_else(|| WORKING_DIRECTORY.to_string(), |d| self.resolve_path(d));
+        let cwd = working_dir.map_or_else(
+            || self.working_directory().to_string(),
+            |d| self.resolve_path(d),
+        );
 
         let mut session = DaytonaSession::create(sandbox).await?;
 
@@ -1622,7 +1739,10 @@ impl Sandbox for DaytonaSandbox {
     }
 
     async fn glob(&self, pattern: &str, path: Option<&str>) -> crate::Result<Vec<String>> {
-        let base = path.map_or_else(|| WORKING_DIRECTORY.to_string(), |p| self.resolve_path(p));
+        let base = path.map_or_else(
+            || self.working_directory().to_string(),
+            |p| self.resolve_path(p),
+        );
 
         let cmd = format!(
             "find {} -name {} -type f | sort",
@@ -1965,6 +2085,14 @@ fn build_session_command(
     lines.join("\n")
 }
 
+fn daytona_symlink_command(layout: &clone_source::GitHubRepoLayout) -> String {
+    format!(
+        "ln -s {} {}",
+        shell_quote(&layout.primary_repo_path),
+        shell_quote(&layout.primary_repo_link),
+    )
+}
+
 /// Wrap a command string with `bash -c '...'`, escaping single quotes.
 ///
 /// The Daytona API uses direct exec (not a shell), so pipes, env vars,
@@ -2076,6 +2204,21 @@ mod tests {
         assert_eq!(
             command_kind("https://x-access-token:ghs_FAKE@github.com/owner/repo.git"),
             "other"
+        );
+    }
+
+    #[test]
+    fn daytona_symlink_command_links_workspace_repo_to_repos_checkout() {
+        let layout = clone_source::github_repo_layout(
+            "https://github.com/fabro-sh/fabro",
+            WORKING_DIRECTORY,
+            REPOS_ROOT,
+        )
+        .unwrap();
+
+        assert_eq!(
+            daytona_symlink_command(&layout),
+            "ln -s /repos/fabro-sh/fabro /home/daytona/workspace/fabro"
         );
     }
 

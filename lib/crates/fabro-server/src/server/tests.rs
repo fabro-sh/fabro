@@ -7997,6 +7997,10 @@ async fn delete_run_with_preserved_sandbox_returns_handoff() {
             repo_cloned:       None,
             clone_origin_url:  None,
             clone_branch:      None,
+            workspace_root:    None,
+            repos_root:        None,
+            primary_repo_path: None,
+            primary_repo_link: None,
         },
     ])
     .await;
@@ -8061,6 +8065,10 @@ async fn delete_run_retry_after_missing_provider_resource_removes_metadata() {
             repo_cloned:       Some(false),
             clone_origin_url:  None,
             clone_branch:      None,
+            workspace_root:    None,
+            repos_root:        None,
+            primary_repo_path: None,
+            primary_repo_link: None,
         },
         workflow_event::Event::WorkflowRunCompleted {
             duration_ms:          1,
@@ -9823,6 +9831,10 @@ async fn boards_runs_includes_live_board_metadata_from_run_state() {
             repo_cloned:       None,
             clone_origin_url:  None,
             clone_branch:      None,
+            workspace_root:    None,
+            repos_root:        None,
+            primary_repo_path: None,
+            primary_repo_link: None,
         },
         workflow_event::Event::PullRequestCreated {
             pr_url:      "https://github.com/acme/repo/pull/42".to_string(),
@@ -9898,6 +9910,10 @@ async fn boards_runs_page_limit_preserves_metadata_for_paged_items() {
                 repo_cloned:       None,
                 clone_origin_url:  None,
                 clone_branch:      None,
+                workspace_root:    None,
+                repos_root:        None,
+                primary_repo_path: None,
+                primary_repo_link: None,
             },
         ] {
             workflow_event::append_event(&run_store, &run_id, &event)

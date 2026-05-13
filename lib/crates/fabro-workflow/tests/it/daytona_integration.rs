@@ -1862,6 +1862,10 @@ async fn daytona_cp_upload_download_round_trip() {
             repo_cloned:       Some(false),
             clone_origin_url:  None,
             clone_branch:      None,
+            workspace_root:    Some("/home/daytona/workspace".to_string()),
+            repos_root:        Some("/repos".to_string()),
+            primary_repo_path: None,
+            primary_repo_link: None,
         }),
     };
 
