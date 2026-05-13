@@ -135,7 +135,12 @@ fn single_model_skip_exits_nonzero() {
 
 #[test]
 fn bulk_skip_exits_zero_and_prints_summary() {
-    let context = test_context!();
+    let mut context = test_context!();
+    context.write_home(
+        ".fabro/settings.toml",
+        "[server.auth]\nmethods = [\"dev-token\"]\n",
+    );
+    context.isolated_server();
     let mut cmd = context.command();
     cmd.args(["model", "test"]);
     remove_provider_env(&mut cmd);
