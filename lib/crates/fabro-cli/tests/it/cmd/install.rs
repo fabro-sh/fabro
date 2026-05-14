@@ -181,6 +181,43 @@ fn hidden_non_interactive_args_require_non_interactive() {
 }
 
 #[test]
+fn skip_llm_requires_non_interactive() {
+    let context = test_context!();
+    let output = context
+        .command()
+        .args(["install", "--skip-llm"])
+        .output()
+        .expect("command should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("--skip-llm requires --non-interactive"));
+}
+
+#[test]
+fn skip_llm_conflicts_with_llm_credential_flags() {
+    let context = test_context!();
+    let output = context
+        .command()
+        .args([
+            "install",
+            "--non-interactive",
+            "--skip-llm",
+            "--llm-provider",
+            "anthropic",
+        ])
+        .output()
+        .expect("command should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("--skip-llm") && stderr.contains("--llm-provider"),
+        "expected a conflict error between --skip-llm and --llm-provider: {stderr}"
+    );
+}
+
+#[test]
 fn github_requires_prior_install() {
     let context = test_context!();
     std::fs::remove_file(context.home_dir.join(".fabro/settings.toml")).unwrap();

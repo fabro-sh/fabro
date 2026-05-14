@@ -1561,6 +1561,14 @@ pub(crate) struct InstallNonInteractiveArgs {
     #[arg(long, hide = true)]
     pub(crate) llm_api_key_env: Option<String>,
 
+    /// Skip LLM setup entirely; install completes with zero LLM credentials
+    #[arg(
+        long,
+        hide = true,
+        conflicts_with_all = ["llm_provider", "llm_api_key_stdin", "llm_api_key_env"]
+    )]
+    pub(crate) skip_llm: bool,
+
     #[arg(long, hide = true)]
     pub(crate) github_strategy: Option<InstallGitHubStrategyArg>,
 

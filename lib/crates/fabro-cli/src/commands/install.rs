@@ -181,6 +181,7 @@ impl InstallNonInteractiveArgs {
         self.llm_provider.is_some()
             || self.llm_api_key_stdin
             || self.llm_api_key_env.is_some()
+            || self.skip_llm
             || self.github_strategy.is_some()
             || self.github_owner.is_some()
             || self.github_username.is_some()
@@ -196,6 +197,8 @@ impl InstallNonInteractiveArgs {
             Some("--llm-api-key-stdin")
         } else if self.llm_api_key_env.is_some() {
             Some("--llm-api-key-env")
+        } else if self.skip_llm {
+            Some("--skip-llm")
         } else if self.github_strategy.is_some() {
             Some("--github-strategy")
         } else if self.github_owner.is_some() {
@@ -236,10 +239,16 @@ Non-interactive usage:
     --github-strategy app \
     --github-owner personal
 
+  fabro install --non-interactive \
+    --skip-llm \
+    --github-strategy token \
+    --github-username brynary
+
 Hidden non-interactive flags:
   --llm-provider <PROVIDER>
   --llm-api-key-stdin
   --llm-api-key-env <ENV_VAR>
+  --skip-llm
   --github-strategy <token|app>
   --github-owner <personal|org:SLUG>
   --github-username <USERNAME>
@@ -249,6 +258,8 @@ Hidden non-interactive flags:
 
 Notes:
   - Only one API-key-based LLM provider is supported in non-interactive mode.
+  - Pass --skip-llm to finish install without configuring any LLM provider;
+    it cannot be combined with the --llm-provider or --llm-api-key-* flags.
   - GitHub App setup prints a local handoff URL and waits for the browser callback."#
 }
 
@@ -354,6 +365,19 @@ impl InstallInputSource for InteractiveInstallInputSource {
         s: &Styles,
         printer: Printer,
     ) -> Result<LlmInstallSelection> {
+        let configure_llm =
+            spawn_blocking(|| prompt_confirm("Configure LLM providers now?", true)).await??;
+        if !configure_llm {
+            fabro_util::printerr!(
+                printer,
+                "  {} Skipping LLM setup — configure providers later with `fabro provider login`",
+                s.green.apply_to("✔")
+            );
+            return Ok(LlmInstallSelection {
+                credentials: Vec::new(),
+            });
+        }
+
         let mut credentials = Vec::new();
         let mut configured_providers: Vec<Provider> = Vec::new();
         let mut openai_configured = false;
@@ -514,10 +538,14 @@ impl NonInteractiveInstallInputSource {
             bail!("{}", non_interactive_install_usage());
         }
 
-        anyhow::ensure!(
-            args.scripted.llm_api_key_stdin ^ args.scripted.llm_api_key_env.is_some(),
-            "non-interactive install requires exactly one of --llm-api-key-stdin or --llm-api-key-env"
-        );
+        // `--skip-llm` opts out of LLM setup entirely, so the API-key flags are
+        // neither required nor allowed (clap enforces the conflict).
+        if !args.scripted.skip_llm {
+            anyhow::ensure!(
+                args.scripted.llm_api_key_stdin ^ args.scripted.llm_api_key_env.is_some(),
+                "non-interactive install requires exactly one of --llm-api-key-stdin or --llm-api-key-env"
+            );
+        }
         anyhow::ensure!(
             !(args.scripted.overwrite_settings && args.scripted.keep_existing_settings),
             "--overwrite-settings and --keep-existing-settings cannot be used together"
@@ -530,8 +558,8 @@ impl NonInteractiveInstallInputSource {
 
     fn validate(&self, config_exists: bool) -> Result<()> {
         anyhow::ensure!(
-            self.args.llm_provider.is_some(),
-            "non-interactive install requires --llm-provider"
+            self.args.skip_llm || self.args.llm_provider.is_some(),
+            "non-interactive install requires --llm-provider (or --skip-llm)"
         );
 
         match self.args.github_strategy {
@@ -599,6 +627,11 @@ impl InstallInputSource for NonInteractiveInstallInputSource {
         s: &Styles,
         printer: Printer,
     ) -> Result<LlmInstallSelection> {
+        if self.args.skip_llm {
+            return Ok(LlmInstallSelection {
+                credentials: Vec::new(),
+            });
+        }
         let provider = self
             .args
             .llm_provider
@@ -3042,6 +3075,66 @@ root = "{}"
             err.to_string()
                 .contains("non-interactive install requires --llm-provider")
         );
+    }
+
+    #[test]
+    fn non_interactive_source_accepts_skip_llm_without_credential_flags() {
+        let args = install_args(true, InstallNonInteractiveArgs {
+            skip_llm: true,
+            github_strategy: Some(InstallGitHubStrategyArg::Token),
+            github_username: Some("brynary".to_string()),
+            ..InstallNonInteractiveArgs::default()
+        });
+
+        // `--skip-llm` alone is enough scripted input; the API-key flags are
+        // neither required nor allowed when skipping LLM setup.
+        NonInteractiveInstallInputSource::new(&args)
+            .unwrap()
+            .expect("--skip-llm should be accepted as non-interactive input");
+    }
+
+    #[test]
+    fn non_interactive_source_validate_allows_skip_llm_without_provider() {
+        let source = NonInteractiveInstallInputSource {
+            args: InstallNonInteractiveArgs {
+                skip_llm: true,
+                github_strategy: Some(InstallGitHubStrategyArg::Token),
+                github_username: Some("brynary".to_string()),
+                ..InstallNonInteractiveArgs::default()
+            },
+        };
+
+        source.validate(false).unwrap();
+    }
+
+    #[tokio::test]
+    async fn non_interactive_source_skip_llm_collects_no_credentials() {
+        let source = NonInteractiveInstallInputSource {
+            args: InstallNonInteractiveArgs {
+                skip_llm: true,
+                github_strategy: Some(InstallGitHubStrategyArg::Token),
+                github_username: Some("brynary".to_string()),
+                ..InstallNonInteractiveArgs::default()
+            },
+        };
+
+        let facts = InstallFacts {
+            codex_detected: false,
+        };
+        let selection = source
+            .collect_llm_selection(&facts, &Styles::detect_stderr(), Printer::Silent)
+            .await
+            .unwrap();
+        assert!(
+            selection.credentials.is_empty(),
+            "--skip-llm should collect zero LLM credentials"
+        );
+    }
+
+    #[test]
+    fn non_interactive_install_usage_documents_skip_llm() {
+        let usage = non_interactive_install_usage();
+        assert!(usage.contains("--skip-llm"));
     }
 
     #[test]
