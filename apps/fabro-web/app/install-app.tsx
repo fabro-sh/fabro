@@ -304,6 +304,11 @@ export default function InstallApp() {
     fallback: string;
     next?:    string;
   }) => {
+    // Re-entrancy guard: the StepPanel form guards its own onSubmit, but the
+    // LLM step's "Skip LLM setup" button calls this directly, so a fast
+    // double-click could otherwise fire two requests before `submitting`
+    // re-renders the disabled state.
+    if (submitting) return;
     setSubmitting(true);
     setSaveError(null);
     try {

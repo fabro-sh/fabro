@@ -197,7 +197,8 @@ fn skip_llm_requires_non_interactive() {
 #[test]
 fn skip_llm_conflicts_with_llm_credential_flags() {
     let context = test_context!();
-    let output = context
+
+    let provider_conflict = context
         .command()
         .args([
             "install",
@@ -208,12 +209,46 @@ fn skip_llm_conflicts_with_llm_credential_flags() {
         ])
         .output()
         .expect("command should run");
-
-    assert!(!output.status.success());
-    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(!provider_conflict.status.success());
+    let stderr = String::from_utf8(provider_conflict.stderr).unwrap();
     assert!(
         stderr.contains("--skip-llm") && stderr.contains("--llm-provider"),
         "expected a conflict error between --skip-llm and --llm-provider: {stderr}"
+    );
+
+    let stdin_conflict = context
+        .command()
+        .args([
+            "install",
+            "--non-interactive",
+            "--skip-llm",
+            "--llm-api-key-stdin",
+        ])
+        .output()
+        .expect("command should run");
+    assert!(!stdin_conflict.status.success());
+    let stderr = String::from_utf8(stdin_conflict.stderr).unwrap();
+    assert!(
+        stderr.contains("--skip-llm") && stderr.contains("--llm-api-key-stdin"),
+        "expected a conflict error between --skip-llm and --llm-api-key-stdin: {stderr}"
+    );
+
+    let env_conflict = context
+        .command()
+        .args([
+            "install",
+            "--non-interactive",
+            "--skip-llm",
+            "--llm-api-key-env",
+            "ANTHROPIC_API_KEY",
+        ])
+        .output()
+        .expect("command should run");
+    assert!(!env_conflict.status.success());
+    let stderr = String::from_utf8(env_conflict.stderr).unwrap();
+    assert!(
+        stderr.contains("--skip-llm") && stderr.contains("--llm-api-key-env"),
+        "expected a conflict error between --skip-llm and --llm-api-key-env: {stderr}"
     );
 }
 

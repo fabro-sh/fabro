@@ -1136,4 +1136,150 @@ describe("InstallApp", () => {
       console.error = originalConsoleError;
     }
   });
+
+  test("shows an incomplete LLM step as Not configured on the review step", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const originalConsoleError = console.error;
+    console.error = ((...args: unknown[]) => {
+      if (
+        typeof args[0] === "string" &&
+        args[0].startsWith("react-test-renderer is deprecated")
+      ) {
+        return;
+      }
+      originalConsoleError(...args);
+    }) as typeof console.error;
+    try {
+      const fetchMock = mock((input: RequestInfo | URL) => {
+        expect(String(input)).toBe("/install/session");
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              completed_steps: ["server", "object_store", "sandbox", "github"],
+              llm: null,
+              server: { canonical_url: "https://fabro.example.com" },
+              object_store: { provider: "local" },
+              sandbox: { provider: "docker" },
+              github: { strategy: "token", username: "octocat" },
+              prefill: INSTALL_PREFILL,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      });
+      useInstallFetchMock(fetchMock as typeof fetch);
+
+      const testWindow = createTestWindow("https://fabro.example.com/install/review");
+      testWindow.sessionStorage.setItem("fabro-install-token", "test-install-token");
+      (globalThis as { window?: unknown }).window = testWindow;
+
+      let renderer: TestRenderer.ReactTestRenderer | null = null;
+      await act(async () => {
+        renderer = TestRenderer.create(
+          <MemoryRouter initialEntries={["/install/review"]}>
+            <Routes>
+              <Route path="/install/*" element={<InstallApp />} />
+            </Routes>
+          </MemoryRouter>,
+        );
+      });
+
+      await waitFor(() => {
+        const text = renderTreeText(renderer!.toJSON());
+        expect(text).toContain("LLM providers");
+        expect(text).toContain("Not configured");
+      });
+      expect(renderTreeText(renderer!.toJSON())).not.toContain("Skipped");
+
+      await act(async () => {
+        renderer?.unmount();
+      });
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
+  test("keeps the user on the LLM step when skipping fails", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const originalConsoleError = console.error;
+    console.error = ((...args: unknown[]) => {
+      if (
+        typeof args[0] === "string" &&
+        args[0].startsWith("react-test-renderer is deprecated")
+      ) {
+        return;
+      }
+      originalConsoleError(...args);
+    }) as typeof console.error;
+    try {
+      const fetchCalls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+      const fetchMock = mock((input: RequestInfo | URL, init?: RequestInit) => {
+        fetchCalls.push({ input, init });
+        if (String(input) === "/install/session") {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                completed_steps: ["server", "object_store", "sandbox"],
+                llm: null,
+                server: { canonical_url: "https://fabro.example.com" },
+                object_store: { provider: "local" },
+                sandbox: { provider: "docker" },
+                github: null,
+                prefill: INSTALL_PREFILL,
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            ),
+          );
+        }
+        if (String(input) === "/install/llm") {
+          return Promise.resolve(new Response(null, { status: 500 }));
+        }
+        throw new Error(`unexpected fetch: ${String(input)}`);
+      });
+      useInstallFetchMock(fetchMock as typeof fetch);
+
+      const testWindow = createTestWindow("https://fabro.example.com/install/llm");
+      testWindow.sessionStorage.setItem("fabro-install-token", "test-install-token");
+      (globalThis as { window?: unknown }).window = testWindow;
+
+      let renderer: TestRenderer.ReactTestRenderer | null = null;
+      await act(async () => {
+        renderer = TestRenderer.create(
+          <MemoryRouter initialEntries={["/install/llm"]}>
+            <Routes>
+              <Route path="/install/*" element={<InstallApp />} />
+            </Routes>
+          </MemoryRouter>,
+        );
+      });
+
+      await waitFor(() => {
+        expect(renderTreeText(renderer!.toJSON())).toContain("Add your LLM credentials");
+      });
+
+      const skipButton = renderer!.root.findAll(
+        (node) => node.type === "button" && node.children.includes("Skip LLM setup"),
+      )[0];
+      await act(async () => {
+        skipButton!.props.onClick();
+      });
+
+      // The failed PUT must not advance to GitHub or refresh the session.
+      await waitFor(() => {
+        expect(fetchCalls.map((call) => String(call.input))).toContain("/install/llm");
+      });
+      const text = renderTreeText(renderer!.toJSON());
+      expect(text).toContain("Add your LLM credentials");
+      expect(text).not.toContain("Connect GitHub");
+      expect(
+        fetchCalls.filter((call) => String(call.input) === "/install/session"),
+      ).toHaveLength(1);
+
+      await act(async () => {
+        renderer?.unmount();
+      });
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
 });

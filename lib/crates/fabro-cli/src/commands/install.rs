@@ -557,10 +557,17 @@ impl NonInteractiveInstallInputSource {
     }
 
     fn validate(&self, config_exists: bool) -> Result<()> {
-        anyhow::ensure!(
-            self.args.skip_llm || self.args.llm_provider.is_some(),
-            "non-interactive install requires --llm-provider (or --skip-llm)"
-        );
+        if !self.args.skip_llm && self.args.llm_provider.is_none() {
+            // Only suggest --skip-llm when no LLM credential flag is present;
+            // it conflicts with the credential flags, so suggesting it
+            // alongside one would just send the caller into a conflict error.
+            let has_api_key_flag =
+                self.args.llm_api_key_stdin || self.args.llm_api_key_env.is_some();
+            if has_api_key_flag {
+                bail!("non-interactive install requires --llm-provider");
+            }
+            bail!("non-interactive install requires --llm-provider (or --skip-llm)");
+        }
 
         match self.args.github_strategy {
             Some(InstallGitHubStrategyArg::Token) => {
