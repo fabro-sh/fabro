@@ -51,7 +51,7 @@ pub const REQUIRED_DAYTONA_PERMISSIONS: &[Permissions] = &[
 
 pub use crate::config::{
     DaytonaNetwork, DaytonaSettings as DaytonaConfig,
-    DaytonaSnapshotSettings as DaytonaSnapshotConfig, DockerfileSource,
+    DaytonaSnapshotSettings as DaytonaSnapshotConfig, DaytonaVolumeMount, DockerfileSource,
 };
 
 #[derive(Debug)]
@@ -100,6 +100,20 @@ fn perm_wire_str(permission: Permissions) -> &'static str {
         Permissions::DeleteColonSandboxes => "delete:sandboxes",
         _ => "unknown",
     }
+}
+
+fn volume_mounts_for_create(config: &DaytonaConfig) -> Option<Vec<daytona_sdk::VolumeMount>> {
+    (!config.volumes.is_empty()).then(|| {
+        config
+            .volumes
+            .iter()
+            .map(|volume| daytona_sdk::VolumeMount {
+                volume_id:  volume.volume_id.clone(),
+                mount_path: volume.mount_path.clone(),
+                subpath:    volume.subpath.clone(),
+            })
+            .collect()
+    })
 }
 
 /// Build a [`daytona_sdk::Client`], forwarding an optional API key from the
@@ -439,6 +453,7 @@ impl DaytonaSandbox {
             ephemeral: Some(false),
             network_block_all,
             network_allow_list,
+            volumes: volume_mounts_for_create(&self.config),
             ..Default::default()
         }
     }
@@ -2040,6 +2055,45 @@ mod tests {
         assert!(config.snapshot.is_none());
         assert!(config.auto_stop_interval.is_none());
         assert!(config.labels.is_none());
+        assert!(config.volumes.is_empty());
+    }
+
+    #[test]
+    fn parses_volume_mounts_from_config() {
+        let config: DaytonaConfig = toml::from_str(
+            r#"
+[[volumes]]
+volume_id = "vol_auth"
+mount_path = "/home/daytona/.config"
+subpath = "agents"
+"#,
+        )
+        .expect("volume config should parse");
+
+        assert_eq!(config.volumes, vec![DaytonaVolumeMount {
+            volume_id:  "vol_auth".to_string(),
+            mount_path: "/home/daytona/.config".to_string(),
+            subpath:    Some("agents".to_string()),
+        }]);
+    }
+
+    #[test]
+    fn maps_volume_mounts_to_daytona_create_params() {
+        let config = DaytonaConfig {
+            volumes: vec![DaytonaVolumeMount {
+                volume_id:  "vol_auth".to_string(),
+                mount_path: "/home/daytona/.config".to_string(),
+                subpath:    Some("agents".to_string()),
+            }],
+            ..DaytonaConfig::default()
+        };
+
+        let volumes = volume_mounts_for_create(&config).expect("volumes should map");
+
+        assert_eq!(volumes.len(), 1);
+        assert_eq!(volumes[0].volume_id, "vol_auth");
+        assert_eq!(volumes[0].mount_path, "/home/daytona/.config");
+        assert_eq!(volumes[0].subpath.as_deref(), Some("agents"));
     }
 
     #[tokio::test]

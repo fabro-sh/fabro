@@ -26,14 +26,14 @@ pub use log_filter::LogFilter;
 pub use maps::{MergeMap, ReplaceMap, StickyMap};
 pub use project::ProjectLayer;
 pub use run::{
-    DaytonaDockerfileLayer, DaytonaSandboxLayer, DaytonaSnapshotLayer, DockerSandboxLayer,
-    GitAuthorLayer, HookAgentMarker, HookEntry, HookTlsMode, InterviewProviderLayer,
-    InterviewsLayer, McpEntryLayer, ModelRefOrSplice, NotificationProviderLayer,
-    NotificationRouteLayer, PrepareStep, RunAgentLayer, RunArtifactsLayer, RunCheckpointLayer,
-    RunCloneLayer, RunExecutionLayer, RunGitLayer, RunGoalLayer, RunIntegrationsGithubLayer,
-    RunIntegrationsLayer, RunLayer, RunMetaBranchLayer, RunModelControlsLayer, RunModelLayer,
-    RunPrepareLayer, RunPullRequestLayer, RunRunBranchLayer, RunSandboxLayer, RunScmLayer,
-    ScmGitHubLayer, StringOrSplice,
+    DaytonaDockerfileLayer, DaytonaSandboxLayer, DaytonaSnapshotLayer, DaytonaVolumeLayer,
+    DockerSandboxLayer, GitAuthorLayer, HookAgentMarker, HookEntry, HookTlsMode,
+    InterviewProviderLayer, InterviewsLayer, McpEntryLayer, ModelRefOrSplice,
+    NotificationProviderLayer, NotificationRouteLayer, PrepareStep, RunAgentLayer,
+    RunArtifactsLayer, RunCheckpointLayer, RunCloneLayer, RunExecutionLayer, RunGitLayer,
+    RunGoalLayer, RunIntegrationsGithubLayer, RunIntegrationsLayer, RunLayer, RunMetaBranchLayer,
+    RunModelControlsLayer, RunModelLayer, RunPrepareLayer, RunPullRequestLayer, RunRunBranchLayer,
+    RunSandboxLayer, RunScmLayer, ScmGitHubLayer, StringOrSplice,
 };
 pub use server::{
     GithubIntegrationLayer, IntegrationWebhooksLayer, ObjectStoreLocalLayer, ObjectStoreS3Layer,

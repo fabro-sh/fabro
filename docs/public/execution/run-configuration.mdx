@@ -273,6 +273,11 @@ auto_stop_interval = 60
 project = "fabro"
 env = "staging"
 
+[[run.sandbox.daytona.volumes]]
+volume_id = "vol-agent-state"
+mount_path = "/home/daytona/agent-state"
+subpath = "agent-auth"
+
 [run.sandbox.daytona.snapshot]
 name = "my-snapshot"
 cpu = 4
@@ -287,6 +292,7 @@ dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update"
 |---|---|
 | `auto_stop_interval` | Minutes of inactivity before the sandbox auto-stops. |
 | `labels` | Key-value labels attached to the sandbox for filtering and identification. Labels merge across layers (sticky merge-by-key). |
+| `volumes` | Existing Daytona volumes to mount at sandbox creation. Each entry requires `volume_id` and `mount_path`; `subpath` is optional. Fabro does not create or manage volume lifecycle. |
 | `snapshot.name` | Snapshot name to create or use for the sandbox. |
 | `snapshot.cpu` | CPU cores for the snapshot (integer). |
 | `snapshot.memory` | Memory size using human-readable units: `"8GB"`, `"16GiB"`, or bare integers that default to GB. |

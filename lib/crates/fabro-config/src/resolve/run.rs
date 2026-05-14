@@ -1,13 +1,13 @@
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
-    ArtifactsSettings, DaytonaSettings, DaytonaSnapshotSettings, DockerSettings, DockerfileSource,
-    GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings, McpServerSettings,
-    McpTransport, MergeStrategy, NotificationProviderSettings, NotificationRouteSettings,
-    PullRequestSettings, RunAgentSettings, RunBranchSettings, RunCheckpointSettings,
-    RunCloneSettings, RunExecutionSettings, RunGitSettings, RunGoal, RunIntegrationsGithubSettings,
-    RunIntegrationsSettings, RunInterviewsSettings, RunMetaBranchSettings, RunModelControls,
-    RunModelSettings, RunNamespace, RunPrepareSettings, RunSandboxSettings, RunScmSettings,
-    ScmGitHubSettings, TlsMode,
+    ArtifactsSettings, DaytonaSettings, DaytonaSnapshotSettings, DaytonaVolumeSettings,
+    DockerSettings, DockerfileSource, GitAuthorSettings, HookDefinition, HookType,
+    InterviewProviderSettings, McpServerSettings, McpTransport, MergeStrategy,
+    NotificationProviderSettings, NotificationRouteSettings, PullRequestSettings, RunAgentSettings,
+    RunBranchSettings, RunCheckpointSettings, RunCloneSettings, RunExecutionSettings,
+    RunGitSettings, RunGoal, RunIntegrationsGithubSettings, RunIntegrationsSettings,
+    RunInterviewsSettings, RunMetaBranchSettings, RunModelControls, RunModelSettings, RunNamespace,
+    RunPrepareSettings, RunSandboxSettings, RunScmSettings, ScmGitHubSettings, TlsMode,
 };
 
 use super::ResolveError;
@@ -269,6 +269,17 @@ fn resolve_daytona(daytona: &DaytonaSandboxLayer) -> DaytonaSettings {
     DaytonaSettings {
         auto_stop_interval: daytona.auto_stop_interval,
         labels:             daytona.labels.clone().into_inner(),
+        volumes:            daytona
+            .volumes
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .map(|volume| DaytonaVolumeSettings {
+                volume_id:  volume.volume_id.clone(),
+                mount_path: volume.mount_path.clone(),
+                subpath:    volume.subpath.clone(),
+            })
+            .collect(),
         snapshot:           daytona.snapshot.as_ref().and_then(|snapshot| {
             snapshot.name.as_ref().map(|name| DaytonaSnapshotSettings {
                 name:       name.clone(),

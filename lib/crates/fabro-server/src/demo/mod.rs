@@ -1673,6 +1673,7 @@ mod runs {
                             "project".to_string(),
                             "api-server".to_string(),
                         )]),
+                        volumes:            Vec::new(),
                         snapshot:           Some(DaytonaSnapshotSettings {
                             name:       "api-server-dev".into(),
                             cpu:        Some(4),
