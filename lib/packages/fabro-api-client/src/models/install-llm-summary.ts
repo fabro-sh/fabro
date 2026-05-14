@@ -18,7 +18,7 @@
 import type { InstallLlmSummaryProvidersInner } from './install-llm-summary-providers-inner';
 
 /**
- * Redacted summary of persisted LLM install choices.
+ * Redacted summary of persisted LLM install choices. Present with an empty `providers` list when the LLM step was explicitly skipped; `null` on the install session means the step is still incomplete.
  */
 export interface InstallLlmSummary {
     'providers'?: Array<InstallLlmSummaryProvidersInner>;

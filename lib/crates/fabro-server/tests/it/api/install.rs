@@ -162,6 +162,23 @@ async fn put_install_llm(app: &axum::Router, token: &str) {
     response_status(response, StatusCode::NO_CONTENT, "PUT /install/llm").await;
 }
 
+async fn put_install_llm_skipped(app: &axum::Router, token: &str) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/install/llm")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"providers":[]}"#))
+                .expect("skipped LLM install request should build"),
+        )
+        .await
+        .unwrap();
+    response_status(response, StatusCode::NO_CONTENT, "PUT /install/llm").await;
+}
+
 async fn put_install_github_token(app: &axum::Router, token: &str, username: &str) {
     let response = app
         .clone()
@@ -882,6 +899,99 @@ async fn token_install_finish_persists_settings_env_and_vault() {
     let vault = Vault::load(fabro_config::Storage::new(temp_dir.path()).secrets_path()).unwrap();
     assert!(vault.get("anthropic").is_some());
     assert_eq!(vault.get("GITHUB_TOKEN"), Some("ghp_test_token"));
+}
+
+#[tokio::test]
+async fn install_llm_accepts_empty_providers_as_explicit_skip() {
+    let app = build_install_router(InstallAppState::for_test("test-install-token"));
+
+    put_install_llm_skipped(&app, "test-install-token").await;
+
+    let session_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/install/session")
+                .header("authorization", "Bearer test-install-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let session_body =
+        response_json(session_response, StatusCode::OK, "GET /install/session").await;
+    assert!(
+        session_body["completed_steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "llm"),
+        "skipped LLM step should still count as completed"
+    );
+    assert_eq!(
+        session_body["llm"]["providers"],
+        serde_json::json!([]),
+        "skipped LLM step should expose an empty providers list"
+    );
+}
+
+#[tokio::test]
+async fn browser_install_finish_with_skipped_llm_persists_no_llm_credentials() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let config_path = temp_dir.path().join("settings.toml");
+    let app = build_install_router(InstallAppState::for_test_with_paths(
+        "test-install-token",
+        temp_dir.path(),
+        &config_path,
+    ));
+    put_install_server(&app, "test-install-token", "https://fabro.example.com").await;
+    put_install_object_store_local(&app, "test-install-token").await;
+    put_install_sandbox_docker(&app, "test-install-token").await;
+    put_install_llm_skipped(&app, "test-install-token").await;
+    put_install_github_token(&app, "test-install-token", "brynary").await;
+
+    let finish_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/install/finish")
+                .header("authorization", "Bearer test-install-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let finish_body = response_json(
+        finish_response,
+        StatusCode::ACCEPTED,
+        "POST /install/finish",
+    )
+    .await;
+    assert_eq!(finish_body["status"], "completing");
+
+    let settings = std::fs::read_to_string(&config_path).unwrap();
+    assert!(settings.contains("https://fabro.example.com"));
+    assert!(settings.contains("strategy = \"token\""));
+
+    let server_env = std::fs::read_to_string(
+        fabro_config::Storage::new(temp_dir.path())
+            .runtime_directory()
+            .env_path(),
+    )
+    .unwrap();
+    assert!(server_env.contains("SESSION_SECRET="));
+    assert!(server_env.contains("FABRO_DEV_TOKEN="));
+
+    let vault = Vault::load(fabro_config::Storage::new(temp_dir.path()).secrets_path()).unwrap();
+    assert!(
+        vault.credential_entries().is_empty(),
+        "skipped LLM install should not write any credential vault entries"
+    );
+    assert_eq!(
+        vault.get("GITHUB_TOKEN"),
+        Some("ghp_test_token"),
+        "GitHub secrets still persist when the LLM step is skipped"
+    );
 }
 
 #[tokio::test]

@@ -18,9 +18,12 @@
 import type { InstallLlmProviderInput } from './install-llm-provider-input';
 
 /**
- * LLM providers selected during browser install.
+ * LLM providers selected during browser install. An empty `providers` list explicitly marks the LLM step as completed and skipped.
  */
 export interface InstallLlmProvidersInput {
+    /**
+     * LLM providers to persist. An empty list records an explicit skip: the LLM step is marked complete with zero credentials.
+     */
     'providers': Array<InstallLlmProviderInput>;
 }
 

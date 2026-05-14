@@ -233,7 +233,7 @@ export const InstallApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
-         * Records the LLM providers and API keys chosen during the browser install. Requires the one-time install token.
+         * Records the LLM providers and API keys chosen during the browser install. An empty `providers` list marks the LLM step as completed and explicitly skipped. Requires the one-time install token.
          * @summary Save install LLM settings
          * @param {InstallLlmProvidersInput} installLlmProvidersInput 
          * @param {*} [options] Override http request option.
@@ -586,7 +586,7 @@ export const InstallApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Records the LLM providers and API keys chosen during the browser install. Requires the one-time install token.
+         * Records the LLM providers and API keys chosen during the browser install. An empty `providers` list marks the LLM step as completed and explicitly skipped. Requires the one-time install token.
          * @summary Save install LLM settings
          * @param {InstallLlmProvidersInput} installLlmProvidersInput 
          * @param {*} [options] Override http request option.
@@ -748,7 +748,7 @@ export const InstallApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.putInstallGithubToken(installGithubTokenInput, options).then((request) => request(axios, basePath));
         },
         /**
-         * Records the LLM providers and API keys chosen during the browser install. Requires the one-time install token.
+         * Records the LLM providers and API keys chosen during the browser install. An empty `providers` list marks the LLM step as completed and explicitly skipped. Requires the one-time install token.
          * @summary Save install LLM settings
          * @param {InstallLlmProvidersInput} installLlmProvidersInput 
          * @param {*} [options] Override http request option.
@@ -889,7 +889,7 @@ export class InstallApi extends BaseAPI {
     }
 
     /**
-     * Records the LLM providers and API keys chosen during the browser install. Requires the one-time install token.
+     * Records the LLM providers and API keys chosen during the browser install. An empty `providers` list marks the LLM step as completed and explicitly skipped. Requires the one-time install token.
      * @summary Save install LLM settings
      * @param {InstallLlmProvidersInput} installLlmProvidersInput 
      * @param {*} [options] Override http request option.

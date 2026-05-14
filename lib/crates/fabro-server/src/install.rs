@@ -800,14 +800,9 @@ async fn put_install_llm(
     }
     observe_operator(&state, &headers);
 
-    if input.providers.is_empty() {
-        return (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(serde_json::json!({ "error": "at least one LLM provider is required" })),
-        )
-            .into_response();
-    }
-
+    // An empty providers list is an explicit skip: the LLM step is recorded as
+    // completed with zero credentials. `/install/finish` still requires the
+    // step to be present, just not populated.
     for provider in &input.providers {
         if let Some(error) = unsupported_install_provider_error(provider.provider) {
             return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, error);

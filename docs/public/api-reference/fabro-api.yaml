@@ -143,7 +143,10 @@ paths:
       operationId: putInstallLlm
       tags: [Install]
       summary: Save install LLM settings
-      description: Records the LLM providers and API keys chosen during the browser install. Requires the one-time install token.
+      description: >-
+        Records the LLM providers and API keys chosen during the browser
+        install. An empty `providers` list marks the LLM step as completed
+        and explicitly skipped. Requires the one-time install token.
       security: []
       requestBody:
         required: true
@@ -3978,14 +3981,18 @@ components:
           type: string
 
     InstallLlmProvidersInput:
-      description: LLM providers selected during browser install.
+      description: >-
+        LLM providers selected during browser install. An empty `providers`
+        list explicitly marks the LLM step as completed and skipped.
       type: object
       required:
         - providers
       properties:
         providers:
           type: array
-          minItems: 1
+          description: >-
+            LLM providers to persist. An empty list records an explicit skip:
+            the LLM step is marked complete with zero credentials.
           items:
             $ref: "#/components/schemas/InstallLlmProviderInput"
 
@@ -4003,7 +4010,10 @@ components:
           type: string
 
     InstallLlmSummary:
-      description: Redacted summary of persisted LLM install choices.
+      description: >-
+        Redacted summary of persisted LLM install choices. Present with an
+        empty `providers` list when the LLM step was explicitly skipped;
+        `null` on the install session means the step is still incomplete.
       type: object
       properties:
         providers:
