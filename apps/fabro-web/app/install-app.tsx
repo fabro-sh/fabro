@@ -359,10 +359,26 @@ export default function InstallApp() {
       ) : location.pathname === "/install/llm" ? (
         <StepPanel
           title="Add your LLM credentials"
-          description="Each key you enter is validated before it's saved. Skip a provider by leaving it blank."
+          description="Each key you enter is validated before it's saved. Skip a provider by leaving it blank, or skip LLM setup entirely and configure providers later."
           error={saveError}
           submitting={submitting}
           backHref="/install/sandbox"
+          secondaryAction={
+            <button
+              type="button"
+              disabled={submitting}
+              className={SECONDARY_BUTTON_CLASS}
+              onClick={() => {
+                void runStepSubmit({
+                  action:   () => putInstallLlm(installToken, []),
+                  fallback: "Failed to skip LLM setup.",
+                  next:     "/install/github",
+                });
+              }}
+            >
+              Skip LLM setup
+            </button>
+          }
           onSubmit={async () => {
             const providers = INSTALL_PROVIDERS.map(({ id }) => {
               const current = llmSelection[id] ?? { apiKey: "" };
@@ -1164,6 +1180,7 @@ function StepPanel({
   submitLabel = "Continue",
   submittingLabel = "Saving...",
   backHref,
+  secondaryAction,
   onSubmit,
 }: {
   title: string;
@@ -1174,6 +1191,7 @@ function StepPanel({
   submitLabel?: string;
   submittingLabel?: string;
   backHref?: string;
+  secondaryAction?: ReactNode;
   onSubmit: () => Promise<void>;
 }) {
   return (
@@ -1204,19 +1222,22 @@ function StepPanel({
         ) : (
           <span />
         )}
-        <button type="submit" disabled={submitting} className={PRIMARY_BUTTON_CLASS}>
-          {submitting ? (
-            <>
-              <Spinner />
-              {submittingLabel}
-            </>
-          ) : (
-            <>
-              {submitLabel}
-              <ArrowRightIcon className="size-4 shrink-0" />
-            </>
-          )}
-        </button>
+        <div className="flex items-center gap-3">
+          {secondaryAction}
+          <button type="submit" disabled={submitting} className={PRIMARY_BUTTON_CLASS}>
+            {submitting ? (
+              <>
+                <Spinner />
+                {submittingLabel}
+              </>
+            ) : (
+              <>
+                {submitLabel}
+                <ArrowRightIcon className="size-4 shrink-0" />
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </form>
   );
@@ -1233,9 +1254,7 @@ function ReviewScreen({
   submitting: boolean;
   onInstall: () => Promise<void>;
 }) {
-  const providers = (session?.llm?.providers ?? [])
-    .map((provider) => describeProvider(provider.provider))
-    .join(", ");
+  const llmSummary = describeLlmSummary(session?.llm);
   const serverUrl =
     session?.server?.canonical_url || session?.prefill.canonical_url || "Unknown";
   return (
@@ -1265,7 +1284,7 @@ function ReviewScreen({
         />
         {renderObjectStoreSummaryRows(session?.object_store)}
         {renderSandboxSummaryRows(session?.sandbox)}
-        <SummaryRow label="LLM providers" value={providers || "Not configured"} />
+        <SummaryRow label="LLM providers" value={llmSummary} />
         {renderGithubSummaryRows(session?.github, serverUrl)}
       </dl>
       {error ? <ErrorMessage message={error} /> : null}
@@ -1870,6 +1889,18 @@ function focusInput(ref: { current: HTMLInputElement | null }): void {
 function describeProvider(id: string): string {
   const match = INSTALL_PROVIDERS.find((provider) => provider.id === id);
   return match?.label ?? id;
+}
+
+function describeLlmSummary(llm: InstallSessionResponse["llm"]): string {
+  // `null` means the LLM step has not been completed. A present summary with
+  // an empty providers list is an explicit skip.
+  if (!llm) {
+    return "Not configured";
+  }
+  const providers = (llm.providers ?? []).map((provider) =>
+    describeProvider(provider.provider),
+  );
+  return providers.length > 0 ? providers.join(", ") : "Skipped";
 }
 
 function renderGithubSummaryRows(
