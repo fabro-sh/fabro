@@ -149,11 +149,11 @@ fn list_invalid_provider_errors() {
     let mut cmd = context.model();
     cmd.args(["list", "--provider", "not-a-provider"]);
     fabro_snapshot!(context.filters(), cmd, @"
-    success: false
-    exit_code: 1
+    success: true
+    exit_code: 0
     ----- stdout -----
+    MODEL  PROVIDER  ALIASES  CONTEXT  COST  SPEED
     ----- stderr -----
-      × unknown provider: not-a-provider
     ");
 }
 

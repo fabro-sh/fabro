@@ -41,7 +41,7 @@ fn help() {
     Options:
           --json                           Output as JSON [env: FABRO_JSON=]
           --server <SERVER>                Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
-          --provider <PROVIDER>            LLM provider (anthropic, openai, gemini, kimi, zai, minimax, inception)
+          --provider <PROVIDER>            LLM provider (built-in or configured provider ID)
           --model <MODEL>                  Model name (defaults per provider)
           --no-upgrade-check               Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --permissions <PERMISSIONS>      Permission level for tool execution [possible values: read-only, read-write, full]
@@ -113,6 +113,32 @@ fn exec_uses_user_config_defaults() {
     ----- stdout -----
     ----- stderr -----
       × LLM credentials not configured for provider 'openai'
+    ");
+}
+
+#[test]
+fn exec_accepts_configured_custom_provider_from_settings() {
+    let context = test_context!();
+    context.write_home(
+        ".fabro/settings.toml",
+        "_version = 1\n\n[llm.providers.bedrock]\nadapter = \"openai_compatible\"\nbase_url = \"https://bedrock.example.invalid/v1\"\n\n[cli.exec.model]\nprovider = \"bedrock\"\nname = \"bedrock-claude-sonnet-4-6\"\n",
+    );
+
+    let mut cmd = context.exec_cmd();
+    cmd.arg("test prompt");
+    cmd.env_clear();
+    preserve_coverage_env!(cmd);
+    cmd.env("HOME", &context.home_dir);
+    cmd.env("FABRO_STORAGE_DIR", &context.storage_dir);
+    cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled");
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+      × LLM credentials not configured for provider 'bedrock'
     ");
 }
 

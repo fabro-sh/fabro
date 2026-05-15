@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result as AnyResult};
-use fabro_agent::cli::{OutputFormat, run_with_args_and_client, run_with_args_and_source};
+use fabro_agent::cli::{
+    OutputFormat, run_with_args_and_client, run_with_args_and_source_and_catalog,
+};
 use fabro_llm::client::Client;
 use fabro_llm::error::{
     Error as LlmError, ProviderErrorDetail, ProviderErrorKind, error_from_status_code,
@@ -336,7 +338,8 @@ pub(crate) async fn execute(mut args: ExecArgs, ctx: &CommandContext) -> AnyResu
     } else {
         tracing::info!(transport = "direct", "Agent session starting");
         let llm_source = ctx.llm_source().await?;
-        run_with_args_and_source(args.agent, llm_source, mcp_servers).await?;
+        let catalog = ctx.catalog()?;
+        run_with_args_and_source_and_catalog(args.agent, llm_source, mcp_servers, catalog).await?;
     }
 
     Ok(())

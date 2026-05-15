@@ -9,7 +9,7 @@ use bytes::Bytes;
 use fabro_api::types;
 use fabro_http::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE};
 use fabro_http::multipart::{Form, Part};
-use fabro_model::{Model, ModelTestMode, Provider};
+use fabro_model::{Model, ModelTestMode};
 use fabro_types::settings::run::MergeStrategy;
 use fabro_types::{
     ArtifactUpload, EventEnvelope, RunBlobId, RunEvent, RunId, RunProjection, RunSummary, StageId,
@@ -608,13 +608,6 @@ impl Client {
         provider: Option<&str>,
         query: Option<&str>,
     ) -> Result<Vec<Model>> {
-        let provider = provider
-            .map(|provider| {
-                provider
-                    .parse::<Provider>()
-                    .map_err(|_| anyhow!("unknown provider: {provider}"))
-            })
-            .transpose()?;
         let mut offset = 0u64;
         let mut models = Vec::new();
 
@@ -623,7 +616,7 @@ impl Client {
                 .send_api(|client| async move {
                     let mut request = client.list_models().page_limit(100u64).page_offset(offset);
                     if let Some(provider) = provider {
-                        request = request.provider(provider);
+                        request = request.provider(provider.to_string());
                     }
                     if let Some(query) = query {
                         request = request.query(query.to_string());
@@ -1683,7 +1676,7 @@ mod tests {
 
     use chrono::Duration as ChronoDuration;
     use fabro_util::exit;
-    use httpmock::Method::POST;
+    use httpmock::Method::{GET, POST};
     use httpmock::MockServer;
     use serde_json::json;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -1814,6 +1807,33 @@ mod tests {
 
         assert_eq!(chunk, Bytes::from_static(b"data: hello\n\n"));
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn list_models_allows_custom_provider_filters() {
+        let server = MockServer::start_async().await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path("/api/v1/models")
+                    .query_param("provider", "bedrock");
+                then.status(200)
+                    .header("Content-Type", "application/json")
+                    .body(
+                        serde_json::json!({
+                            "data": [],
+                            "meta": { "has_more": false }
+                        })
+                        .to_string(),
+                    );
+            })
+            .await;
+
+        let client = Client::new_no_proxy(&server.url("")).unwrap();
+        let models = client.list_models(Some("bedrock"), None).await.unwrap();
+
+        mock.assert_async().await;
+        assert!(models.is_empty());
     }
 
     async fn oauth_client(
