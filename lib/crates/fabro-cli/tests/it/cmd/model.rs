@@ -8,7 +8,8 @@ use httpmock::MockServer;
 
 fn successful_stdout(mut cmd: assert_cmd::Command) -> String {
     let assert = cmd.assert().success().stderr("");
-    String::from_utf8(assert.get_output().stdout.clone()).unwrap()
+    String::from_utf8(assert.get_output().stdout.clone())
+        .expect("model list stdout should be UTF-8")
 }
 
 fn assert_model_list_table(stdout: &str) {
