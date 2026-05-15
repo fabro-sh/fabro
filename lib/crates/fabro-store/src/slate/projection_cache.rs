@@ -48,6 +48,12 @@ impl RunProjectionCache {
         let mut entries = cache
             .values()
             .filter(|entry| {
+                if query
+                    .parent_id
+                    .is_some_and(|parent_id| entry.summary.parent_id != Some(parent_id))
+                {
+                    return false;
+                }
                 let created_at = entry.run_id.created_at();
                 if query.start.is_some_and(|start| created_at < start) {
                     return false;

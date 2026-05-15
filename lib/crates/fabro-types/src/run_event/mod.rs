@@ -90,6 +90,10 @@ pub enum EventBody {
     RunUnarchived(RunUnarchivedProps),
     #[serde(rename = "run.title.updated")]
     RunTitleUpdated(RunTitleUpdatedProps),
+    #[serde(rename = "run.parent.linked")]
+    RunParentLinked(RunParentLinkedProps),
+    #[serde(rename = "run.parent.unlinked")]
+    RunParentUnlinked(RunParentUnlinkedProps),
     #[serde(rename = "run.completed")]
     RunCompleted(RunCompletedProps),
     #[serde(rename = "run.failed")]
@@ -392,6 +396,8 @@ impl EventBody {
             Self::RunArchived(_) => "run.archived",
             Self::RunUnarchived(_) => "run.unarchived",
             Self::RunTitleUpdated(_) => "run.title.updated",
+            Self::RunParentLinked(_) => "run.parent.linked",
+            Self::RunParentUnlinked(_) => "run.parent.unlinked",
             Self::RunCompleted(_) => "run.completed",
             Self::RunFailed(_) => "run.failed",
             Self::RunNotice(_) => "run.notice",
@@ -543,6 +549,8 @@ fn is_known_event_name(event: &str) -> bool {
             | "run.superseded_by"
             | "run.archived"
             | "run.unarchived"
+            | "run.parent.linked"
+            | "run.parent.unlinked"
             | "run.completed"
             | "run.failed"
             | "run.notice"

@@ -30,6 +30,7 @@ pub use types::EventPayload;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ListRunsQuery {
-    pub start: Option<DateTime<Utc>>,
-    pub end:   Option<DateTime<Utc>>,
+    pub start:     Option<DateTime<Utc>>,
+    pub end:       Option<DateTime<Utc>>,
+    pub parent_id: Option<fabro_types::RunId>,
 }

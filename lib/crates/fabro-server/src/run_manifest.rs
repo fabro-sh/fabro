@@ -52,6 +52,7 @@ pub(crate) struct PreparedManifest {
     pub git:              Option<types::GitContext>,
     pub root_source:      String,
     pub run_id:           Option<RunId>,
+    pub parent_id:        Option<RunId>,
     pub title:            Option<String>,
     pub settings:         WorkflowSettings,
     pub target_path:      ManifestPath,
@@ -155,6 +156,12 @@ pub(crate) fn prepare_manifest(
             .map(str::parse::<RunId>)
             .transpose()
             .context("invalid run ID")?,
+        parent_id: manifest
+            .parent_id
+            .as_deref()
+            .map(str::parse::<RunId>)
+            .transpose()
+            .context("invalid parent run ID")?,
         title,
         settings: settings.clone(),
         target_path,
@@ -196,6 +203,7 @@ pub(crate) fn create_run_input(
         title: prepared.title,
         git: prepared.git,
         fork_source_ref: None,
+        parent_id: prepared.parent_id,
         provenance: None,
         configured_providers,
         web_url,
@@ -1325,6 +1333,7 @@ mod tests {
             cwd:       "/tmp/project".to_string(),
             git:       None,
             goal:      None,
+            parent_id: None,
             run_id:    None,
             title:     None,
             target:    types::ManifestTarget {

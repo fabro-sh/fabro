@@ -128,6 +128,7 @@ async fn initialized(
         manifest_blob:    None,
         git:              run_options.pre_run_git.clone(),
         fork_source_ref:  run_options.fork_source_ref.clone(),
+        parent_id:        None,
         web_url:          None,
     })
     .await

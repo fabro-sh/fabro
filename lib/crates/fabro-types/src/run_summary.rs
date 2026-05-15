@@ -11,6 +11,8 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Run {
     pub id:               RunId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id:        Option<RunId>,
     pub title:            String,
     pub goal:             String,
     pub workflow:         WorkflowRef,

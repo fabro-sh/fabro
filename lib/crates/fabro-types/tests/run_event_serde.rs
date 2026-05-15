@@ -39,6 +39,7 @@ fn run_created_props_round_trip_templated_settings() {
             source_run_id:  fixtures::RUN_2,
             checkpoint_sha: "def456".to_string(),
         }),
+        parent_id:        Some(fixtures::RUN_2),
         web_url:          Some("http://localhost:3000/runs/01JNQVR7M0EJ5GKAT2SC4ERS1Z".to_string()),
     };
 
@@ -57,6 +58,7 @@ fn run_created_props_round_trip_templated_settings() {
         json["web_url"],
         "http://localhost:3000/runs/01JNQVR7M0EJ5GKAT2SC4ERS1Z"
     );
+    assert_eq!(json["parent_id"], fixtures::RUN_2.to_string());
 
     let round_trip: RunCreatedProps =
         serde_json::from_value(json.clone()).expect("props should deserialize");
@@ -88,6 +90,7 @@ fn run_created_props_omits_web_url_when_absent() {
         manifest_blob:    None,
         git:              None,
         fork_source_ref:  None,
+        parent_id:        None,
         web_url:          None,
     };
 
@@ -96,8 +99,50 @@ fn run_created_props_omits_web_url_when_absent() {
         json.get("web_url").is_none(),
         "web_url must be omitted when None, got {json}"
     );
+    assert!(
+        json.get("parent_id").is_none(),
+        "parent_id must be omitted when None, got {json}"
+    );
 
     let round_trip: RunCreatedProps =
         serde_json::from_value(json.clone()).expect("props should deserialize");
     assert_eq!(round_trip.web_url, None);
+    assert_eq!(round_trip.parent_id, None);
+}
+
+#[test]
+fn run_parent_events_round_trip_parent_ids() {
+    let linked = fabro_types::EventBody::RunParentLinked(
+        fabro_types::run_event::run::RunParentLinkedProps {
+            previous_parent_id: None,
+            parent_id:          fixtures::RUN_2,
+        },
+    );
+    let linked_json = serde_json::to_value(&linked).expect("linked event should serialize");
+    assert_eq!(linked_json["event"], "run.parent.linked");
+    assert_eq!(
+        linked_json["properties"]["parent_id"],
+        fixtures::RUN_2.to_string()
+    );
+
+    let linked_round_trip: fabro_types::EventBody =
+        serde_json::from_value(linked_json).expect("linked event should deserialize");
+    assert_eq!(linked_round_trip.event_name(), "run.parent.linked");
+
+    let unlinked = fabro_types::EventBody::RunParentUnlinked(
+        fabro_types::run_event::run::RunParentUnlinkedProps {
+            previous_parent_id: fixtures::RUN_2,
+            parent_id:          None,
+        },
+    );
+    let unlinked_json = serde_json::to_value(&unlinked).expect("unlinked event should serialize");
+    assert_eq!(unlinked_json["event"], "run.parent.unlinked");
+    assert_eq!(
+        unlinked_json["properties"]["previous_parent_id"],
+        fixtures::RUN_2.to_string()
+    );
+
+    let unlinked_round_trip: fabro_types::EventBody =
+        serde_json::from_value(unlinked_json).expect("unlinked event should deserialize");
+    assert_eq!(unlinked_round_trip.event_name(), "run.parent.unlinked");
 }

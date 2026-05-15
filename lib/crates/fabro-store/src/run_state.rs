@@ -159,6 +159,12 @@ impl RunProjectionReducer for RunProjection {
             EventBody::RunSupersededBy(props) => {
                 self.superseded_by = Some(props.new_run_id);
             }
+            EventBody::RunParentLinked(props) => {
+                self.parent_id = Some(props.parent_id);
+            }
+            EventBody::RunParentUnlinked(_props) => {
+                self.parent_id = None;
+            }
             EventBody::RunArchived(_props) => {
                 if self.archived_at.is_some() {
                     return Ok(());
@@ -522,6 +528,7 @@ fn projection_from_created(event: &EventEnvelope) -> Result<RunProjection> {
     };
 
     let mut projection = RunProjection::new(title, spec, stored.ts);
+    projection.parent_id = props.parent_id;
     projection.web_url.clone_from(&props.web_url);
     projection.sandbox = Some(planned_sandbox(&projection.spec.settings.run.sandbox));
     Ok(projection)
@@ -669,6 +676,7 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> RunSummary
 
     RunSummary {
         id: *run_id,
+        parent_id: state.parent_id,
         title: state.title().into_owned(),
         goal,
         workflow: WorkflowRef {

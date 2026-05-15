@@ -245,6 +245,7 @@ pub fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
             cwd: input.cwd.display().to_string(),
             git,
             goal,
+            parent_id: None,
             run_id: input.run_id.map(|run_id| run_id.to_string()),
             title: None,
             target: types::ManifestTarget {

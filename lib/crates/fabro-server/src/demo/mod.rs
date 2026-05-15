@@ -1056,6 +1056,7 @@ mod runs {
         let duration_ms = elapsed_secs.and_then(duration_ms_from_secs);
         RunSummary {
             id: run_id,
+            parent_id: None,
             title: fabro_types::infer_run_title(goal),
             goal: goal.into(),
             workflow: WorkflowRef {

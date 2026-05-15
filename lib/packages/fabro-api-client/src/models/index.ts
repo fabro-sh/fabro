@@ -337,6 +337,7 @@ export * from './system-repair-runs-response';
 export * from './system-run-counts';
 export * from './timeline-entry-response';
 export * from './tls-mode';
+export * from './update-run-parent-request';
 export * from './update-run-request';
 export * from './user-response';
 export * from './validate-response';

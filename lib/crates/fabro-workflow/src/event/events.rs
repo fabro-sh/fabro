@@ -45,6 +45,8 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fork_source_ref:  Option<ForkSourceRef>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_id:        Option<RunId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         web_url:          Option<String>,
     },
     WorkflowRunStarted {
@@ -114,6 +116,20 @@ pub enum Event {
         title: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         actor: Option<Principal>,
+    },
+    RunParentLinked {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        previous_parent_id: Option<RunId>,
+        parent_id:          RunId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor:              Option<Principal>,
+    },
+    RunParentUnlinked {
+        previous_parent_id: RunId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_id:          Option<RunId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor:              Option<Principal>,
     },
     WorkflowRunCompleted {
         duration_ms:          u64,
@@ -797,6 +813,20 @@ impl Event {
             }
             Self::RunTitleUpdated { title, actor } => {
                 info!(title, ?actor, "Run title updated");
+            }
+            Self::RunParentLinked {
+                previous_parent_id,
+                parent_id,
+                actor,
+            } => {
+                info!(?previous_parent_id, %parent_id, ?actor, "Run parent linked");
+            }
+            Self::RunParentUnlinked {
+                previous_parent_id,
+                parent_id,
+                actor,
+            } => {
+                info!(%previous_parent_id, ?parent_id, ?actor, "Run parent unlinked");
             }
             Self::WorkflowRunCompleted {
                 duration_ms,

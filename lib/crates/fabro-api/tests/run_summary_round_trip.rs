@@ -24,6 +24,7 @@ fn run_summary_json_matches_openapi_shape() {
     let archived_at = Utc.with_ymd_and_hms(2026, 4, 20, 12, 1, 0).unwrap();
     let summary = RunSummary {
         id:               run_id,
+        parent_id:        None,
         title:            "API title".to_string(),
         goal:             String::new(),
         workflow:         WorkflowRef {
