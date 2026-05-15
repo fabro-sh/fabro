@@ -25,9 +25,10 @@ pub(super) async fn view_command(args: PrViewArgs, base_ctx: &CommandContext) ->
 
     let printer = ctx.printer();
     let title = pull_request.title.as_deref().unwrap_or("Pull request");
-    match pull_request.number {
-        Some(number) => fabro_util::printout!(printer, "#{number} {title}"),
-        None => fabro_util::printout!(printer, "Pull request {title}"),
+    if let Some(number) = pull_request.number {
+        fabro_util::printout!(printer, "#{number} {title}");
+    } else {
+        fabro_util::printout!(printer, "Pull request {title}");
     }
     let state_display = if detail.merged.unwrap_or(false) {
         "merged"

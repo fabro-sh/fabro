@@ -93,7 +93,7 @@ fn github_pull_request_coordinates_for_link(url: &str) -> Result<(String, String
 }
 
 fn pull_request_record_from_link_request(
-    body: LinkRunPullRequestRequest,
+    body: &LinkRunPullRequestRequest,
 ) -> Result<PullRequestRecord, ApiError> {
     let html_url = body.html_url.trim().to_string();
     let (owner, repo, number) = github_pull_request_coordinates_for_link(&html_url)?;
@@ -473,7 +473,7 @@ async fn link_run_pull_request(
     Json(body): Json<LinkRunPullRequestRequest>,
 ) -> Response {
     let _create_guard = lock_pull_request_create(&state.pull_request_create_locks, &id).await;
-    let pull_request = match pull_request_record_from_link_request(body) {
+    let pull_request = match pull_request_record_from_link_request(&body) {
         Ok(record) => record,
         Err(err) => return err.into_response(),
     };
@@ -506,18 +506,13 @@ async fn unlink_run_pull_request(
                 .into_response();
         }
     };
-    let pull_request = match run_state.pull_request {
-        Some(record) => record,
-        None => {
-            return ApiError::with_code(
-                StatusCode::NOT_FOUND,
-                format!(
-                    "No pull request found in store. Create one first with: fabro pr create {id}"
-                ),
-                "no_stored_record",
-            )
-            .into_response();
-        }
+    let Some(pull_request) = run_state.pull_request else {
+        return ApiError::with_code(
+            StatusCode::NOT_FOUND,
+            format!("No pull request found in store. Create one first with: fabro pr create {id}"),
+            "no_stored_record",
+        )
+        .into_response();
     };
     let event = workflow_event::Event::PullRequestUnlinked {
         pull_request: pull_request.clone(),

@@ -641,7 +641,9 @@ fabro pr [OPTIONS] <COMMAND>
 | --- | --- |
 | `fabro pr close` | Close a pull request |
 | `fabro pr create` | Create a pull request from a completed run |
+| `fabro pr link` | Link or replace the GitHub pull request associated with a run |
 | `fabro pr merge` | Merge a pull request |
+| `fabro pr unlink` | Unlink the pull request associated with a run |
 | `fabro pr view` | View pull request details |
 
 #### `fabro pr close`
@@ -686,6 +688,27 @@ fabro pr create [OPTIONS] <RUN_ID>
 | `--model <model>` | LLM model for generating PR description |
 | `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
 
+#### `fabro pr link`
+
+Link or replace the GitHub pull request associated with a run
+
+```bash
+fabro pr link [OPTIONS] <RUN_ID> <URL>
+```
+
+#### Arguments
+
+| Name | Description |
+| --- | --- |
+| `RUN_ID` | Run ID or prefix |
+| `URL` | GitHub pull request URL to associate with the run |
+
+#### Options
+
+| Option | Description |
+| --- | --- |
+| `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
+
 #### `fabro pr merge`
 
 Merge a pull request
@@ -705,6 +728,26 @@ fabro pr merge [OPTIONS] <RUN_ID>
 | Option | Description |
 | --- | --- |
 | `--method <method>` | Merge method: merge, squash, or rebase<br />Values: `merge`, `squash`, `rebase`<br />Default: `squash` |
+| `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
+
+#### `fabro pr unlink`
+
+Unlink the pull request associated with a run
+
+```bash
+fabro pr unlink [OPTIONS] <RUN_ID>
+```
+
+#### Arguments
+
+| Name | Description |
+| --- | --- |
+| `RUN_ID` | Run ID or prefix |
+
+#### Options
+
+| Option | Description |
+| --- | --- |
 | `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
 
 #### `fabro pr view`
