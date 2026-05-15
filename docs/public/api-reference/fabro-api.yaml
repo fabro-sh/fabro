@@ -8081,6 +8081,55 @@ components:
           minimum: 0
           description: Disk size in bytes. Null when unavailable.
 
+    SandboxNetworkRuleSetMode:
+      description: How a sandbox network allow/block rule set is represented.
+      type: string
+      enum:
+        - unknown
+        - none
+        - all
+        - cidrs
+        - essentials
+
+    SandboxNetworkRuleSet:
+      description: A provider-neutral public-network rule set.
+      type: object
+      required:
+        - mode
+        - cidrs
+      properties:
+        mode:
+          $ref: "#/components/schemas/SandboxNetworkRuleSetMode"
+        cidrs:
+          type: array
+          items:
+            type: string
+          description: CIDR entries when `mode` is `cidrs`; empty for other modes.
+
+    SandboxNetworkPolicy:
+      description: Allow and block policy for one network direction.
+      type: object
+      required:
+        - allow
+        - block
+      properties:
+        allow:
+          $ref: "#/components/schemas/SandboxNetworkRuleSet"
+        block:
+          $ref: "#/components/schemas/SandboxNetworkRuleSet"
+
+    SandboxNetwork:
+      description: Provider-neutral public-network policy for sandbox egress and ingress.
+      type: object
+      required:
+        - egress
+        - ingress
+      properties:
+        egress:
+          $ref: "#/components/schemas/SandboxNetworkPolicy"
+        ingress:
+          $ref: "#/components/schemas/SandboxNetworkPolicy"
+
     SandboxTimestamps:
       description: Lifecycle timestamps for a sandbox. Fields are nullable when the provider does not surface a value.
       type: object
@@ -8101,6 +8150,7 @@ components:
         - sandbox
         - state
         - resources
+        - network
         - labels
         - timestamps
       properties:
@@ -8119,6 +8169,8 @@ components:
           description: Provider dashboard URL for this sandbox when available.
         resources:
           $ref: "#/components/schemas/SandboxResources"
+        network:
+          $ref: "#/components/schemas/SandboxNetwork"
         labels:
           type: object
           additionalProperties:

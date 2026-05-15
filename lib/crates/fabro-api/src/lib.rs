@@ -37,10 +37,12 @@ pub mod types {
         IdpIdentity, InterviewOption, InterviewQuestionRecord, PendingInterviewRecord,
         PreRunPushOutcome, Principal, PullRequest, PullRequestDetails, QuestionType, RepositoryRef,
         Run, RunClientProvenance, RunEvent, RunFailure, RunProjection, RunProvenance, RunSandbox,
-        RunSandboxRuntime, RunServerProvenance, SandboxDetails, SandboxProvider, SandboxResources,
-        SandboxService, SandboxServiceListResponse, SandboxState, SandboxTimestamps,
-        SecretMetadata, SecretType, ServerSettings, StageCompletion, StageHandler, StageOutcome,
-        StageProjection, StageState, SystemActorKind, UserPrincipal, WorkflowSettings,
+        RunSandboxRuntime, RunServerProvenance, SandboxDetails, SandboxNetwork,
+        SandboxNetworkPolicy, SandboxNetworkRuleSet, SandboxNetworkRuleSetMode, SandboxProvider,
+        SandboxResources, SandboxService, SandboxServiceListResponse, SandboxState,
+        SandboxTimestamps, SecretMetadata, SecretType, ServerSettings, StageCompletion,
+        StageHandler, StageOutcome, StageProjection, StageState, SystemActorKind, UserPrincipal,
+        WorkflowSettings,
     };
 
     pub use crate::generated::types::*;

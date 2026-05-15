@@ -113,10 +113,41 @@ function sandboxDetails(
     native_state: null,
     region:       null,
     resources:    { cpu_cores: null, memory_bytes: null, disk_bytes: null },
+    network:      networkDetails(),
     labels:       {},
     timestamps:   { created_at: null, last_activity_at: null },
     ...overrides,
   };
+}
+
+function networkDetails(
+  overrides: Partial<SandboxDetails["network"]> = {},
+): SandboxDetails["network"] {
+  return {
+    egress:  networkPolicy("unknown", "unknown"),
+    ingress: networkPolicy("unknown", "unknown"),
+    ...overrides,
+  };
+}
+
+function networkPolicy(
+  allowMode: SandboxDetails["network"]["egress"]["allow"]["mode"],
+  blockMode: SandboxDetails["network"]["egress"]["block"]["mode"],
+  allowCidrs: string[] = [],
+  blockCidrs: string[] = [],
+): SandboxDetails["network"]["egress"] {
+  return {
+    allow: { mode: allowMode, cidrs: allowCidrs },
+    block: { mode: blockMode, cidrs: blockCidrs },
+  };
+}
+
+function textContent(renderer: TestRenderer.ReactTestRenderer): string {
+  return renderer.root
+    .findAll((node) => typeof node.type === "string")
+    .flatMap((node) => node.children)
+    .filter((child): child is string => typeof child === "string")
+    .join(" ");
 }
 
 function renderRoute(initialPath: string = "/runs/run_1/sandbox") {
@@ -176,6 +207,10 @@ describe("RunSandbox route", () => {
         memory_bytes: 4 * 1024 * 1024 * 1024,
         disk_bytes:   undefined,
       },
+      network:           networkDetails({
+        egress:  networkPolicy("all", "none"),
+        ingress: networkPolicy("none", "all"),
+      }),
       labels:            { run: "abc" },
       timestamps:        {
         created_at:       "2026-05-09T12:00:00Z",
@@ -188,7 +223,10 @@ describe("RunSandbox route", () => {
       .findAll((node) => node.type === "h3")
       .map((node) => node.children.find((child) => typeof child === "string"))
       .filter((text): text is string => typeof text === "string");
-    expect(panelHeadings).toEqual(["Overview", "Resources", "Labels", "Timestamps"]);
+    expect(panelHeadings).toEqual(["Overview", "Resources", "Network", "Labels", "Timestamps"]);
+    const copy = textContent(renderer);
+    expect(copy).toContain("Open");
+    expect(copy).toContain("Blocked");
   });
 
   test("links to the provider dashboard when a sandbox web URL is present", () => {
@@ -259,6 +297,41 @@ describe("RunSandbox route", () => {
     expect(noLabelsCopy).toHaveLength(1);
   });
 
+  test("renders unknown network policies", () => {
+    currentDetails = sandboxDetails({
+      network: networkDetails({
+        egress:  networkPolicy("unknown", "unknown"),
+        ingress: networkPolicy("unknown", "unknown"),
+      }),
+    });
+    const renderer = renderRoute();
+
+    const copy = textContent(renderer);
+    expect(copy).toContain("Network");
+    expect(copy).toContain("Egress");
+    expect(copy).toContain("Ingress");
+    expect(copy).toContain("Unknown");
+  });
+
+  test("renders blocked, essentials, and CIDR network policies", () => {
+    currentDetails = sandboxDetails({
+      network: networkDetails({
+        egress:  networkPolicy(
+          "cidrs",
+          "all",
+          ["10.0.0.0/8", "192.168.0.0/16"],
+        ),
+        ingress: networkPolicy("essentials", "all"),
+      }),
+    });
+    const renderer = renderRoute();
+
+    const copy = textContent(renderer);
+    expect(copy).toContain("CIDR allow list");
+    expect(copy).toContain("10.0.0.0/8, 192.168.0.0/16");
+    expect(copy).toContain("Essentials only");
+  });
+
   test("shows the empty state when no sandbox is reported", () => {
     currentDetails = null;
     const renderer = renderRoute();
@@ -327,7 +400,7 @@ describe("RunSandbox route", () => {
       .findAll((node) => node.type === "h3")
       .map((node) => node.children.find((child) => typeof child === "string"))
       .filter((text): text is string => typeof text === "string");
-    expect(panelHeadings).toEqual(["Overview", "Resources", "Labels", "Timestamps"]);
+    expect(panelHeadings).toEqual(["Overview", "Resources", "Network", "Labels", "Timestamps"]);
 
     const tabs = renderer.root.findAll(
       (node) => node.type === "button" && node.props.role === "tab",

@@ -6,7 +6,12 @@ import TerminalView, { TERMINAL_DOCK_CLEARANCE_CLASS } from "../components/termi
 import { EmptyState, ErrorState } from "../components/state";
 import { formatAbsoluteTs } from "../lib/format";
 import { useRunSandboxDetails } from "../lib/queries";
-import type { SandboxDetails, SandboxResources, SandboxState } from "@qltysh/fabro-api-client";
+import type {
+  SandboxDetails,
+  SandboxNetwork,
+  SandboxResources,
+  SandboxState,
+} from "@qltysh/fabro-api-client";
 import FilesystemPanel from "./run-sandbox/filesystem-panel";
 import ServicesPanel from "./run-sandbox/services-panel";
 import VncPanel from "./run-sandbox/vnc-panel";
@@ -80,6 +85,34 @@ function nullableMemory(bytes: number | null | undefined): string {
 
 function nullableCpu(cores: number | null | undefined): string {
   return cores != null ? formatCpuCores(cores) : EMPTY_VALUE;
+}
+
+type SandboxNetworkPolicy = SandboxNetwork["egress"];
+type SandboxNetworkRuleSet = SandboxNetworkPolicy["allow"];
+type SandboxNetworkRuleSetMode = SandboxNetworkRuleSet["mode"];
+
+const NETWORK_MODE_DISPLAY: Record<SandboxNetworkRuleSetMode, string> = {
+  unknown:    "Unknown",
+  none:       "None",
+  all:        "All",
+  cidrs:      "CIDRs",
+  essentials: "Essentials",
+};
+
+function networkModeLabel(mode: SandboxNetworkRuleSetMode): string {
+  return NETWORK_MODE_DISPLAY[mode] ?? mode;
+}
+
+function networkPolicySummary(policy: SandboxNetworkPolicy): string {
+  const allow = policy.allow.mode;
+  const block = policy.block.mode;
+
+  if (allow === "unknown" && block === "unknown") return "Unknown";
+  if (allow === "all" && block === "none") return "Open";
+  if (allow === "none" && block === "all") return "Blocked";
+  if (allow === "essentials") return "Essentials only";
+  if (allow === "cidrs") return "CIDR allow list";
+  return `Allow: ${networkModeLabel(allow)} · Block: ${networkModeLabel(block)}`;
 }
 
 interface RowProps {
@@ -197,6 +230,25 @@ function ResourcesPanel({ resources }: { resources: SandboxResources }) {
   );
 }
 
+function NetworkPanel({ network }: { network: SandboxNetwork }) {
+  const cidrRows: Array<{ label: string; ruleSet: SandboxNetworkRuleSet }> = [
+    { label: "Egress allow CIDRs", ruleSet: network.egress.allow },
+    { label: "Egress block CIDRs", ruleSet: network.egress.block },
+    { label: "Ingress allow CIDRs", ruleSet: network.ingress.allow },
+    { label: "Ingress block CIDRs", ruleSet: network.ingress.block },
+  ].filter(({ ruleSet }) => ruleSet.mode === "cidrs");
+
+  return (
+    <Panel title="Network">
+      <Row label="Egress" value={networkPolicySummary(network.egress)} />
+      <Row label="Ingress" value={networkPolicySummary(network.ingress)} />
+      {cidrRows.map(({ label, ruleSet }) => (
+        <Row key={label} label={label} value={ruleSet.cidrs.join(", ") || EMPTY_VALUE} />
+      ))}
+    </Panel>
+  );
+}
+
 function LabelsPanel({ labels }: { labels: { [key: string]: string } | null | undefined }) {
   const entries = labels ? Object.entries(labels) : [];
   return (
@@ -238,6 +290,7 @@ function DetailsColumn({ details }: { details: SandboxDetails | null }) {
       <StatusStrip details={details} />
       <OverviewPanel details={details} />
       <ResourcesPanel resources={details.resources} />
+      <NetworkPanel network={details.network} />
       <LabelsPanel labels={details.labels} />
       <TimestampsPanel details={details} />
     </div>

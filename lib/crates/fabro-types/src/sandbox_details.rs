@@ -16,6 +16,8 @@ pub struct SandboxDetails {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web_url:      Option<String>,
     pub resources:    SandboxResources,
+    #[serde(default)]
+    pub network:      SandboxNetwork,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub labels:       BTreeMap<String, String>,
     pub timestamps:   SandboxTimestamps,
@@ -47,6 +49,113 @@ pub struct SandboxResources {
     pub memory_bytes: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disk_bytes:   Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct SandboxNetwork {
+    pub egress:  SandboxNetworkPolicy,
+    pub ingress: SandboxNetworkPolicy,
+}
+
+impl SandboxNetwork {
+    pub fn unknown() -> Self {
+        Self::default()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct SandboxNetworkPolicy {
+    pub allow: SandboxNetworkRuleSet,
+    pub block: SandboxNetworkRuleSet,
+}
+
+impl SandboxNetworkPolicy {
+    pub fn unknown() -> Self {
+        Self::default()
+    }
+
+    pub fn open() -> Self {
+        Self {
+            allow: SandboxNetworkRuleSet::all(),
+            block: SandboxNetworkRuleSet::none(),
+        }
+    }
+
+    pub fn blocked() -> Self {
+        Self {
+            allow: SandboxNetworkRuleSet::none(),
+            block: SandboxNetworkRuleSet::all(),
+        }
+    }
+
+    pub fn allow_cidrs<I, S>(cidrs: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self {
+            allow: SandboxNetworkRuleSet::cidrs(cidrs),
+            block: SandboxNetworkRuleSet::all(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct SandboxNetworkRuleSet {
+    pub mode:  SandboxNetworkRuleSetMode,
+    pub cidrs: Vec<String>,
+}
+
+impl SandboxNetworkRuleSet {
+    pub fn unknown() -> Self {
+        Self {
+            mode:  SandboxNetworkRuleSetMode::Unknown,
+            cidrs: Vec::new(),
+        }
+    }
+
+    pub fn none() -> Self {
+        Self {
+            mode:  SandboxNetworkRuleSetMode::None,
+            cidrs: Vec::new(),
+        }
+    }
+
+    pub fn all() -> Self {
+        Self {
+            mode:  SandboxNetworkRuleSetMode::All,
+            cidrs: Vec::new(),
+        }
+    }
+
+    pub fn cidrs<I, S>(cidrs: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self {
+            mode:  SandboxNetworkRuleSetMode::Cidrs,
+            cidrs: cidrs.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    pub fn essentials() -> Self {
+        Self {
+            mode:  SandboxNetworkRuleSetMode::Essentials,
+            cidrs: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxNetworkRuleSetMode {
+    #[default]
+    Unknown,
+    None,
+    All,
+    Cidrs,
+    Essentials,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
@@ -95,6 +204,13 @@ mod tests {
                 memory_bytes: Some(4 * 1024 * 1024 * 1024),
                 disk_bytes:   None,
             },
+            network:      SandboxNetwork {
+                egress:  SandboxNetworkPolicy {
+                    allow: SandboxNetworkRuleSet::cidrs(["10.0.0.0/8"]),
+                    block: SandboxNetworkRuleSet::all(),
+                },
+                ingress: SandboxNetworkPolicy::unknown(),
+            },
             labels:       BTreeMap::from([("run".to_string(), "abc".to_string())]),
             timestamps:   SandboxTimestamps {
                 created_at:       Some(Utc.with_ymd_and_hms(2026, 5, 9, 12, 0, 0).unwrap()),
@@ -119,6 +235,28 @@ mod tests {
                 "resources": {
                     "cpu_cores": 2.0,
                     "memory_bytes": 4_294_967_296_u64,
+                },
+                "network": {
+                    "egress": {
+                        "allow": {
+                            "mode": "cidrs",
+                            "cidrs": ["10.0.0.0/8"]
+                        },
+                        "block": {
+                            "mode": "all",
+                            "cidrs": []
+                        }
+                    },
+                    "ingress": {
+                        "allow": {
+                            "mode": "unknown",
+                            "cidrs": []
+                        },
+                        "block": {
+                            "mode": "unknown",
+                            "cidrs": []
+                        }
+                    }
                 },
                 "labels": {
                     "run": "abc"
@@ -169,7 +307,35 @@ mod tests {
         assert!(details.sandbox.image.is_none());
         assert!(details.labels.is_empty());
         assert_eq!(details.resources, SandboxResources::default());
+        assert_eq!(details.network, SandboxNetwork::unknown());
         assert_eq!(details.timestamps, SandboxTimestamps::default());
+    }
+
+    #[test]
+    fn network_rule_set_helpers_cover_supported_modes() {
+        assert_eq!(SandboxNetworkRuleSet::unknown(), SandboxNetworkRuleSet {
+            mode:  SandboxNetworkRuleSetMode::Unknown,
+            cidrs: Vec::new(),
+        });
+        assert_eq!(SandboxNetworkRuleSet::none(), SandboxNetworkRuleSet {
+            mode:  SandboxNetworkRuleSetMode::None,
+            cidrs: Vec::new(),
+        });
+        assert_eq!(SandboxNetworkRuleSet::all(), SandboxNetworkRuleSet {
+            mode:  SandboxNetworkRuleSetMode::All,
+            cidrs: Vec::new(),
+        });
+        assert_eq!(
+            SandboxNetworkRuleSet::cidrs(["192.168.0.0/16", "10.0.0.0/8"]),
+            SandboxNetworkRuleSet {
+                mode:  SandboxNetworkRuleSetMode::Cidrs,
+                cidrs: vec!["192.168.0.0/16".to_string(), "10.0.0.0/8".to_string()],
+            }
+        );
+        assert_eq!(SandboxNetworkRuleSet::essentials(), SandboxNetworkRuleSet {
+            mode:  SandboxNetworkRuleSetMode::Essentials,
+            cidrs: Vec::new(),
+        });
     }
 
     #[test]

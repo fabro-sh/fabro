@@ -395,6 +395,22 @@ fn main() {
         ("SandboxProvider", "fabro_types::SandboxProvider", &[]),
         ("RunSandbox", "fabro_types::RunSandbox", &[]),
         ("SandboxDetails", "fabro_types::SandboxDetails", &[]),
+        ("SandboxNetwork", "fabro_types::SandboxNetwork", &[]),
+        (
+            "SandboxNetworkPolicy",
+            "fabro_types::SandboxNetworkPolicy",
+            &[],
+        ),
+        (
+            "SandboxNetworkRuleSet",
+            "fabro_types::SandboxNetworkRuleSet",
+            &[],
+        ),
+        (
+            "SandboxNetworkRuleSetMode",
+            "fabro_types::SandboxNetworkRuleSetMode",
+            &[],
+        ),
         ("SandboxService", "fabro_types::SandboxService", &[]),
         (
             "SandboxServiceDiscoverySource",

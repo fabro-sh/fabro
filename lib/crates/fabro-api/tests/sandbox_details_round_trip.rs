@@ -3,13 +3,17 @@ use std::collections::BTreeMap;
 
 use chrono::{TimeZone, Utc};
 use fabro_api::types::{
-    SandboxDetails as ApiSandboxDetails, SandboxProvider as ApiSandboxProvider,
-    SandboxResources as ApiSandboxResources, SandboxState as ApiSandboxState,
-    SandboxTimestamps as ApiSandboxTimestamps,
+    SandboxDetails as ApiSandboxDetails, SandboxNetwork as ApiSandboxNetwork,
+    SandboxNetworkPolicy as ApiSandboxNetworkPolicy,
+    SandboxNetworkRuleSet as ApiSandboxNetworkRuleSet,
+    SandboxNetworkRuleSetMode as ApiSandboxNetworkRuleSetMode,
+    SandboxProvider as ApiSandboxProvider, SandboxResources as ApiSandboxResources,
+    SandboxState as ApiSandboxState, SandboxTimestamps as ApiSandboxTimestamps,
 };
 use fabro_types::{
-    RunSandbox, RunSandboxRuntime, SandboxDetails, SandboxProvider, SandboxResources, SandboxState,
-    SandboxTimestamps,
+    RunSandbox, RunSandboxRuntime, SandboxDetails, SandboxNetwork, SandboxNetworkPolicy,
+    SandboxNetworkRuleSet, SandboxNetworkRuleSetMode, SandboxProvider, SandboxResources,
+    SandboxState, SandboxTimestamps,
 };
 use serde_json::json;
 
@@ -20,6 +24,10 @@ fn sandbox_details_reuses_domain_types() {
     assert_same_type::<ApiSandboxState, SandboxState>();
     assert_same_type::<ApiSandboxResources, SandboxResources>();
     assert_same_type::<ApiSandboxTimestamps, SandboxTimestamps>();
+    assert_same_type::<ApiSandboxNetwork, SandboxNetwork>();
+    assert_same_type::<ApiSandboxNetworkPolicy, SandboxNetworkPolicy>();
+    assert_same_type::<ApiSandboxNetworkRuleSet, SandboxNetworkRuleSet>();
+    assert_same_type::<ApiSandboxNetworkRuleSetMode, SandboxNetworkRuleSetMode>();
 }
 
 #[test]
@@ -54,6 +62,13 @@ fn sandbox_details_json_matches_openapi_shape() {
             memory_bytes: Some(4 * 1024 * 1024 * 1024),
             disk_bytes:   None,
         },
+        network:      SandboxNetwork {
+            egress:  SandboxNetworkPolicy {
+                allow: SandboxNetworkRuleSet::all(),
+                block: SandboxNetworkRuleSet::none(),
+            },
+            ingress: SandboxNetworkPolicy::blocked(),
+        },
         labels:       BTreeMap::from([("run".to_string(), "abc".to_string())]),
         timestamps:   SandboxTimestamps {
             created_at:       Some(created_at),
@@ -82,6 +97,28 @@ fn sandbox_details_json_matches_openapi_shape() {
             "resources": {
                 "cpu_cores": 2.0,
                 "memory_bytes": 4_294_967_296_u64,
+            },
+            "network": {
+                "egress": {
+                    "allow": {
+                        "mode": "all",
+                        "cidrs": []
+                    },
+                    "block": {
+                        "mode": "none",
+                        "cidrs": []
+                    }
+                },
+                "ingress": {
+                    "allow": {
+                        "mode": "none",
+                        "cidrs": []
+                    },
+                    "block": {
+                        "mode": "all",
+                        "cidrs": []
+                    }
+                }
             },
             "labels": {
                 "run": "abc"
@@ -133,6 +170,7 @@ fn sandbox_details_deserializes_when_optional_fields_are_absent() {
     assert!(details.native_state.is_none());
     assert!(details.labels.is_empty());
     assert_eq!(details.resources, SandboxResources::default());
+    assert_eq!(details.network, SandboxNetwork::unknown());
     assert_eq!(details.timestamps, SandboxTimestamps::default());
 }
 

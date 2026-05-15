@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use chrono::{TimeZone, Utc};
 use fabro_types::{
-    RunSandbox, RunSandboxRuntime, SandboxDetails, SandboxProvider, SandboxResources, SandboxState,
-    SandboxTimestamps,
+    RunSandbox, RunSandboxRuntime, SandboxDetails, SandboxNetwork, SandboxProvider,
+    SandboxResources, SandboxState, SandboxTimestamps,
 };
 use serde_json::json;
 
@@ -79,6 +79,7 @@ fn sandbox_details_requires_canonical_id_and_working_directory() {
             memory_bytes: Some(4 * 1024 * 1024 * 1024),
             disk_bytes:   None,
         },
+        network:      SandboxNetwork::unknown(),
         labels:       BTreeMap::from([("run".to_string(), "abc".to_string())]),
         timestamps:   SandboxTimestamps {
             created_at:       Some(Utc.with_ymd_and_hms(2026, 5, 9, 12, 0, 0).unwrap()),
@@ -103,6 +104,8 @@ fn sandbox_details_requires_canonical_id_and_working_directory() {
         value["web_url"],
         "https://app.daytona.io/dashboard/sandboxes?sandboxId=ad65029a-2d01-421e-8936-49451653fcd9"
     );
+    assert_eq!(value["network"]["egress"]["allow"]["mode"], "unknown");
+    assert_eq!(value["network"]["ingress"]["block"]["mode"], "unknown");
     assert!(value.get("name").is_none());
     assert!(value.get("identifier").is_none());
 }
