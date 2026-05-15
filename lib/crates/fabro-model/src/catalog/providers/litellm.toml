@@ -1,0 +1,29 @@
+[providers.litellm]
+display_name = "LiteLLM"
+adapter = "openai_compatible"
+base_url = "http://localhost:4000/v1"
+credentials = ["credential:litellm", "env:LITELLM_API_KEY"]
+priority = 50
+enabled = false
+
+# To enable LiteLLM, add entries like these to settings.toml:
+#
+# [llm.providers.litellm]
+# enabled = true
+# base_url = "http://localhost:4000/v1"
+#
+# [llm.models."litellm-gpt-5"]
+# provider = "litellm"
+# api_id = "gpt-5"
+# display_name = "LiteLLM GPT-5"
+# family = "litellm"
+# default = true
+#
+# [llm.models."litellm-gpt-5".limits]
+# context_window = 128000
+# max_output = 8192
+#
+# [llm.models."litellm-gpt-5".features]
+# tools = true
+# vision = false
+# reasoning = false

@@ -90,6 +90,30 @@ output_cost_per_mtok = 16.00
 cache_input_cost_per_mtok = 0.60
 ```
 
+For [LiteLLM](/integrations/litellm), Fabro ships a disabled provider entry. Enable it in settings and declare the models your proxy exposes:
+
+```toml title="settings.toml"
+[llm.providers.litellm]
+enabled = true
+base_url = "http://localhost:4000/v1"
+
+[llm.models."litellm-gpt-5"]
+provider = "litellm"
+api_id = "gpt-5"
+display_name = "LiteLLM GPT-5"
+family = "litellm"
+default = true
+
+[llm.models."litellm-gpt-5".limits]
+context_window = 128000
+max_output = 8192
+
+[llm.models."litellm-gpt-5".features]
+tools = true
+vision = false
+reasoning = false
+```
+
 `api_id` is the model name sent to the provider API. Omit it when the Fabro model ID and provider model ID are the same.
 
 Header values and credentials are typed references, not raw secrets. Use `env:<NAME>` or `credential:<id>` for provider credentials, and `{ env = "NAME" }`, `{ credential = "id" }`, or `{ literal = "value" }` for extra headers.
