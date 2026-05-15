@@ -50,6 +50,7 @@ fn local_details(record: &RunSandbox) -> SandboxDetails {
         state:        SandboxState::Running,
         native_state: None,
         region:       None,
+        web_url:      None,
         resources:    SandboxResources::default(),
         labels:       BTreeMap::new(),
         timestamps:   SandboxTimestamps::default(),
@@ -136,6 +137,7 @@ mod docker {
             state: normalized_state,
             native_state,
             region: None,
+            web_url: None,
             resources,
             labels,
             timestamps: SandboxTimestamps {
@@ -418,6 +420,7 @@ mod daytona {
             state: normalized_state,
             native_state,
             region,
+            web_url: Some(daytona_dashboard_url(&sandbox.id)),
             resources,
             labels,
             timestamps: SandboxTimestamps {
@@ -441,6 +444,10 @@ mod daytona {
         )]
         let bytes = (value * 1024.0 * 1024.0 * 1024.0) as u64;
         Some(bytes)
+    }
+
+    fn daytona_dashboard_url(sandbox_id: &str) -> String {
+        format!("https://app.daytona.io/dashboard/sandboxes?sandboxId={sandbox_id}")
     }
 
     pub(super) fn normalize_daytona_state(state: DaytonaState) -> SandboxState {
@@ -539,6 +546,14 @@ mod daytona {
         #[test]
         fn gibibytes_to_bytes_returns_none_for_zero() {
             assert_eq!(gibibytes_to_bytes(0.0), None);
+        }
+
+        #[test]
+        fn daytona_dashboard_url_uses_sandbox_id_query_param() {
+            assert_eq!(
+                daytona_dashboard_url("ad65029a-2d01-421e-8936-49451653fcd9"),
+                "https://app.daytona.io/dashboard/sandboxes?sandboxId=ad65029a-2d01-421e-8936-49451653fcd9",
+            );
         }
     }
 }

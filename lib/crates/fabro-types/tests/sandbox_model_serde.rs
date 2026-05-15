@@ -70,6 +70,10 @@ fn sandbox_details_requires_canonical_id_and_working_directory() {
         state:        SandboxState::Running,
         native_state: Some("started".to_string()),
         region:       Some("us".to_string()),
+        web_url:      Some(
+            "https://app.daytona.io/dashboard/sandboxes?sandboxId=ad65029a-2d01-421e-8936-49451653fcd9"
+                .to_string(),
+        ),
         resources:    SandboxResources {
             cpu_cores:    Some(2.0),
             memory_bytes: Some(4 * 1024 * 1024 * 1024),
@@ -95,6 +99,10 @@ fn sandbox_details_requires_canonical_id_and_working_directory() {
         "/home/daytona/workspace"
     );
     assert_eq!(value["sandbox"]["runtime"]["repos_root"], "/repos");
+    assert_eq!(
+        value["web_url"],
+        "https://app.daytona.io/dashboard/sandboxes?sandboxId=ad65029a-2d01-421e-8936-49451653fcd9"
+    );
     assert!(value.get("name").is_none());
     assert!(value.get("identifier").is_none());
 }

@@ -40,6 +40,10 @@ export interface SandboxDetails {
      * Provider region or target. Null for local-style providers.
      */
     'region'?: string | null;
+    /**
+     * Provider dashboard URL for this sandbox when available.
+     */
+    'web_url'?: string | null;
     'resources': SandboxResources;
     /**
      * Provider-reported labels.

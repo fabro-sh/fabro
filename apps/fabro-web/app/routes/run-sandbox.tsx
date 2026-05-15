@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useSearchParams } from "react-router";
+import { ArrowTopRightOnSquareIcon } from "@heroicons/react/20/solid";
 
 import TerminalView, { TERMINAL_DOCK_CLEARANCE_CLASS } from "../components/terminal-view";
 import { EmptyState, ErrorState } from "../components/state";
@@ -102,6 +103,23 @@ function Row({ label, value, valueClassName }: RowProps) {
   );
 }
 
+function LinkRow({ label, href, text }: { label: string; href: string; text: string }) {
+  return (
+    <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-sm">
+      <span className="text-fg-3">{label}</span>
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex min-w-0 items-center gap-1.5 text-right font-mono text-xs text-teal-500 transition-colors hover:text-teal-300 focus-visible:rounded-sm focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500"
+      >
+        <span className="truncate">{text}</span>
+        <ArrowTopRightOnSquareIcon className="size-3.5 shrink-0" aria-hidden="true" />
+      </a>
+    </div>
+  );
+}
+
 interface PanelProps {
   title: string;
   children: React.ReactNode;
@@ -154,6 +172,17 @@ function OverviewPanel({ details }: { details: SandboxDetails }) {
         value={details.region ? details.region : sandbox.provider === "docker" ? "local" : EMPTY_VALUE}
       />
       <Row label="Image" value={nullable(sandbox.image ?? sandbox.snapshot)} />
+      {details.web_url && (
+        <LinkRow
+          label="Provider"
+          href={details.web_url}
+          text={
+            sandbox.provider === "daytona"
+              ? "Open in Daytona"
+              : `Open in ${sandbox.provider}`
+          }
+        />
+      )}
     </Panel>
   );
 }

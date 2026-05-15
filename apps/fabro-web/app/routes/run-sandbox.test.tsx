@@ -191,6 +191,33 @@ describe("RunSandbox route", () => {
     expect(panelHeadings).toEqual(["Overview", "Resources", "Labels", "Timestamps"]);
   });
 
+  test("links to the provider dashboard when a sandbox web URL is present", () => {
+    currentDetails = sandboxDetails({
+      sandbox: {
+        provider: "daytona",
+        runtime:  {
+          id:                "ad65029a-2d01-421e-8936-49451653fcd9",
+          working_directory: "/workspace",
+        },
+      },
+      web_url:
+        "https://app.daytona.io/dashboard/sandboxes?sandboxId=ad65029a-2d01-421e-8936-49451653fcd9",
+    });
+    const renderer = renderRoute();
+
+    const providerLinks = renderer.root.findAll(
+      (node) =>
+        node.type === "a" &&
+        node.props.href ===
+          "https://app.daytona.io/dashboard/sandboxes?sandboxId=ad65029a-2d01-421e-8936-49451653fcd9",
+    );
+    expect(providerLinks).toHaveLength(1);
+    expect(providerLinks[0]?.props.target).toBe("_blank");
+    expect(providerLinks[0]?.props.rel).toBe("noopener noreferrer");
+    const linkText = providerLinks[0]?.findByType("span");
+    expect(linkText?.children).toContain("Open in Daytona");
+  });
+
   test("renders without crashing when most fields are null", () => {
     currentDetails = sandboxDetails({
       sandbox:           {

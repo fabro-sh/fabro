@@ -8114,6 +8114,9 @@ components:
         region:
           type: ["string", "null"]
           description: Provider region or target. Null for local-style providers.
+        web_url:
+          type: ["string", "null"]
+          description: Provider dashboard URL for this sandbox when available.
         resources:
           $ref: "#/components/schemas/SandboxResources"
         labels:

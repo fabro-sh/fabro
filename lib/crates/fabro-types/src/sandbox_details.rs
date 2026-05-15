@@ -13,6 +13,8 @@ pub struct SandboxDetails {
     pub native_state: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region:       Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_url:      Option<String>,
     pub resources:    SandboxResources,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub labels:       BTreeMap<String, String>,
@@ -84,6 +86,10 @@ mod tests {
             state:        SandboxState::Running,
             native_state: Some("running".to_string()),
             region:       None,
+            web_url:      Some(
+                "https://app.daytona.io/dashboard/sandboxes?sandboxId=ad65029a-2d01-421e-8936-49451653fcd9"
+                    .to_string(),
+            ),
             resources:    SandboxResources {
                 cpu_cores:    Some(2.0),
                 memory_bytes: Some(4 * 1024 * 1024 * 1024),
@@ -109,6 +115,7 @@ mod tests {
                 },
                 "state": "running",
                 "native_state": "running",
+                "web_url": "https://app.daytona.io/dashboard/sandboxes?sandboxId=ad65029a-2d01-421e-8936-49451653fcd9",
                 "resources": {
                     "cpu_cores": 2.0,
                     "memory_bytes": 4_294_967_296_u64,
