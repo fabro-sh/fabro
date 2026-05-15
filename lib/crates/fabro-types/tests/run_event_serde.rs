@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 
 use fabro_types::graph::Graph;
 use fabro_types::run::{DirtyStatus, ForkSourceRef, GitContext, PreRunPushOutcome};
-use fabro_types::run_event::run::RunCreatedProps;
+use fabro_types::run_event::run::{RunCreatedProps, RunParentLinkedProps, RunParentUnlinkedProps};
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::RunGoal;
-use fabro_types::{WorkflowSettings, fixtures};
+use fabro_types::{EventBody, WorkflowSettings, fixtures};
 
 fn templated_settings() -> WorkflowSettings {
     let mut settings = WorkflowSettings::default();
@@ -112,12 +112,10 @@ fn run_created_props_omits_web_url_when_absent() {
 
 #[test]
 fn run_parent_events_round_trip_parent_ids() {
-    let linked = fabro_types::EventBody::RunParentLinked(
-        fabro_types::run_event::run::RunParentLinkedProps {
-            previous_parent_id: None,
-            parent_id:          fixtures::RUN_2,
-        },
-    );
+    let linked = EventBody::RunParentLinked(RunParentLinkedProps {
+        previous_parent_id: None,
+        parent_id:          fixtures::RUN_2,
+    });
     let linked_json = serde_json::to_value(&linked).expect("linked event should serialize");
     assert_eq!(linked_json["event"], "run.parent.linked");
     assert_eq!(
@@ -125,16 +123,14 @@ fn run_parent_events_round_trip_parent_ids() {
         fixtures::RUN_2.to_string()
     );
 
-    let linked_round_trip: fabro_types::EventBody =
+    let linked_round_trip: EventBody =
         serde_json::from_value(linked_json).expect("linked event should deserialize");
     assert_eq!(linked_round_trip.event_name(), "run.parent.linked");
 
-    let unlinked = fabro_types::EventBody::RunParentUnlinked(
-        fabro_types::run_event::run::RunParentUnlinkedProps {
-            previous_parent_id: fixtures::RUN_2,
-            parent_id:          None,
-        },
-    );
+    let unlinked = EventBody::RunParentUnlinked(RunParentUnlinkedProps {
+        previous_parent_id: fixtures::RUN_2,
+        parent_id:          None,
+    });
     let unlinked_json = serde_json::to_value(&unlinked).expect("unlinked event should serialize");
     assert_eq!(unlinked_json["event"], "run.parent.unlinked");
     assert_eq!(
@@ -142,7 +138,7 @@ fn run_parent_events_round_trip_parent_ids() {
         fixtures::RUN_2.to_string()
     );
 
-    let unlinked_round_trip: fabro_types::EventBody =
+    let unlinked_round_trip: EventBody =
         serde_json::from_value(unlinked_json).expect("unlinked event should deserialize");
     assert_eq!(unlinked_round_trip.event_name(), "run.parent.unlinked");
 }

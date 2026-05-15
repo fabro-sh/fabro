@@ -17,8 +17,10 @@ async fn create_run(app: &axum::Router, mut manifest: serde_json::Value) -> serd
         .method("POST")
         .uri(api("/runs"))
         .header("content-type", "application/json")
-        .body(Body::from(serde_json::to_string(&manifest).unwrap()))
-        .unwrap();
+        .body(Body::from(
+            serde_json::to_string(&manifest).expect("manifest should serialize"),
+        ))
+        .expect("create run request should build");
     response_json(
         app.clone().oneshot(request).await.unwrap(),
         StatusCode::CREATED,
@@ -38,8 +40,10 @@ async fn request_json(
         .method(method)
         .uri(api(&path))
         .header("content-type", "application/json")
-        .body(Body::from(serde_json::to_string(&body).unwrap()))
-        .unwrap();
+        .body(Body::from(
+            serde_json::to_string(&body).expect("request body should serialize"),
+        ))
+        .expect("JSON request should build");
     response_json(
         app.clone().oneshot(request).await.unwrap(),
         expected,

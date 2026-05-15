@@ -242,9 +242,8 @@ async fn link_run_parent(
         return err.into_response();
     }
 
-    let run_store = match state.store.open_run(&child_id).await {
-        Ok(run_store) => run_store,
-        Err(_) => return ApiError::not_found("Run not found.").into_response(),
+    let Ok(run_store) = state.store.open_run(&child_id).await else {
+        return ApiError::not_found("Run not found.").into_response();
     };
     if let Err(err) = workflow_event::append_event(
         &run_store,
@@ -287,9 +286,8 @@ async fn unlink_run_parent(
         return (StatusCode::OK, Json(child)).into_response();
     };
 
-    let run_store = match state.store.open_run(&child_id).await {
-        Ok(run_store) => run_store,
-        Err(_) => return ApiError::not_found("Run not found.").into_response(),
+    let Ok(run_store) = state.store.open_run(&child_id).await else {
+        return ApiError::not_found("Run not found.").into_response();
     };
     if let Err(err) = workflow_event::append_event(
         &run_store,
