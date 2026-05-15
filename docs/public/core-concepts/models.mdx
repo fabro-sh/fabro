@@ -98,6 +98,17 @@ Header values and credentials are typed references, not raw secrets. Use `env:<N
 Provider fields in configuration, APIs, and model routing are provider ID strings. Built-in names like `anthropic`, `openai`, and `gemini` still work, but custom IDs like `proxy` work anywhere a provider ID is accepted.
 </Note>
 
+### Ollama
+
+Fabro ships an Ollama provider definition that is disabled by default. Enable it in settings when you want Fabro to route through a local Ollama server:
+
+```toml title="settings.toml"
+[llm.providers.ollama]
+enabled = true
+```
+
+The built-in Ollama catalog includes `qwen3-coder` as a sample model. Until #267 adds model auto-discovery, add explicit `[llm.models.<id>]` blocks for any other Ollama models you have pulled locally. Ollama's OpenAI-compatible endpoint accepts any bearer token, so local users can set `OLLAMA_API_KEY=ollama`.
+
 ## Default models
 
 When no model or provider is specified, Fabro checks configured provider credentials and chooses the first configured provider by catalog priority. If no provider credentials are configured, it uses the catalog's global default model. Each provider has a default model:

@@ -1,0 +1,23 @@
+[providers.ollama]
+display_name = "Ollama"
+adapter = "openai_compatible"
+base_url = "http://localhost:11434/v1"
+credentials = ["credential:ollama", "env:OLLAMA_API_KEY"]
+priority = 30
+enabled = false
+
+[models."qwen3-coder"]
+provider = "ollama"
+api_id = "qwen3-coder"
+display_name = "Qwen3 Coder"
+family = "qwen3-coder"
+default = true
+aliases = ["ollama-qwen3-coder"]
+
+[models."qwen3-coder".limits]
+context_window = 262144
+
+[models."qwen3-coder".features]
+tools = true
+vision = false
+reasoning = false
