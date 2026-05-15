@@ -1,0 +1,48 @@
+[providers.venice]
+display_name = "Venice"
+adapter = "openai_compatible"
+base_url = "https://api.venice.ai/api/v1"
+credentials = ["credential:venice", "env:VENICE_API_KEY"]
+priority = 35
+aliases = ["venice-ai"]
+
+[models."venice-uncensored-1-2"]
+provider = "venice"
+api_id = "venice-uncensored-1-2"
+display_name = "Venice Uncensored 1.2"
+family = "venice-uncensored"
+default = true
+aliases = ["venice-uncensored", "vu"]
+
+[models."venice-uncensored-1-2".limits]
+context_window = 128000
+max_output = 8192
+
+[models."venice-uncensored-1-2".features]
+tools = true
+vision = true
+reasoning = false
+
+[models."venice-uncensored-1-2".costs]
+input_cost_per_mtok = 0.2
+output_cost_per_mtok = 0.9
+
+[models."venice-uncensored-role-play"]
+provider = "venice"
+api_id = "venice-uncensored-role-play"
+display_name = "Venice Uncensored Role Play"
+family = "venice-uncensored"
+aliases = ["venice-roleplay", "vrp"]
+
+[models."venice-uncensored-role-play".limits]
+context_window = 128000
+max_output = 4096
+
+[models."venice-uncensored-role-play".features]
+tools = true
+vision = true
+reasoning = false
+
+[models."venice-uncensored-role-play".costs]
+input_cost_per_mtok = 0.5
+output_cost_per_mtok = 2.0
