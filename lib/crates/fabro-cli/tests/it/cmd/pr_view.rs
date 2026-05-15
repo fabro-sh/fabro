@@ -103,11 +103,13 @@ fn pr_view_reads_pull_request_from_store_without_pull_request_json() {
     cmd.args(["pr", "view", &run.run_id]);
 
     fabro_snapshot!(context.filters(), cmd, @"
-    success: false
-    exit_code: 1
+    success: true
+    exit_code: 0
     ----- stdout -----
+    #123 Map the constellations
+    URL:     https://github.com/fabro-sh/fabro/pull/123
+    Branch:  fabro/run/demo -> main
     ----- stderr -----
-      × GitHub integration unavailable on server.
     ");
 }
 
@@ -179,6 +181,65 @@ fn pr_view_uses_server_pull_request_endpoint_and_renders_merged_state() {
     Branch:  fabro/run/demo -> main
     Author:  testuser
     Changes: +10 -3 (2 files)
+    ----- stderr -----
+    ");
+
+    resolve_mock.assert();
+    detail_mock.assert();
+}
+
+#[test]
+fn pr_view_renders_external_stored_only_association() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+
+    let resolve_mock = mock_resolved_run(&server, "nightly-build", &run_id);
+    let detail_mock = server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{run_id}/pull_request"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "pull_request": {
+                        "provider": "external",
+                        "html_url": "https://gitlab.com/acme/widgets/-/merge_requests/42",
+                        "title": "Review deployment chart"
+                    },
+                    "state": null,
+                    "draft": null,
+                    "merged": null,
+                    "merged_at": null,
+                    "mergeable": null,
+                    "additions": null,
+                    "deletions": null,
+                    "changed_files": null,
+                    "comments": null,
+                    "checks": null,
+                    "author": null,
+                    "timestamps": null
+                })
+                .to_string(),
+            );
+    });
+
+    let mut cmd = context.command();
+    cmd.args([
+        "pr",
+        "view",
+        "--server",
+        &server.base_url(),
+        "nightly-build",
+    ]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    Pull request Review deployment chart
+    Provider: external
+    URL:      https://gitlab.com/acme/widgets/-/merge_requests/42
     ----- stderr -----
     ");
 

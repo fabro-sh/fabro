@@ -390,6 +390,8 @@ fn denied_lifecycle_event_name(body: &EventBody) -> Option<&'static str> {
         EventBody::RunCancelRequested(_) => Some("run.cancel.requested"),
         EventBody::RunPauseRequested(_) => Some("run.pause.requested"),
         EventBody::RunUnpauseRequested(_) => Some("run.unpause.requested"),
+        EventBody::PullRequestLinked(_) => Some("pull_request.linked"),
+        EventBody::PullRequestUnlinked(_) => Some("pull_request.unlinked"),
         _ => None,
     }
 }

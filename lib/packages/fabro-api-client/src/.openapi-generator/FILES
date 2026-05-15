@@ -146,6 +146,7 @@ models/interview-option.ts
 models/interview-provider-settings.ts
 models/interview-question-record.ts
 models/ip-allow-entry.ts
+models/link-run-pull-request-request.ts
 models/literal-ip-allow-entry.ts
 models/log-destination.ts
 models/manifest-args.ts

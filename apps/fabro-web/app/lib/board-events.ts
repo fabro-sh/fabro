@@ -39,6 +39,9 @@ const BOARD_STATUS_EVENTS = new Set([
   "interview.completed",
   "interview.timeout",
   "interview.interrupted",
+  "pull_request.created",
+  "pull_request.linked",
+  "pull_request.unlinked",
 ]);
 
 const subscriptions = new Map<string, SharedEventSubscription>();

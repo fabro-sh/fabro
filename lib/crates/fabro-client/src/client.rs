@@ -1050,6 +1050,43 @@ impl Client {
         Ok(response.into_inner())
     }
 
+    pub async fn link_run_pull_request(
+        &self,
+        run_id: &RunId,
+        html_url: String,
+    ) -> Result<fabro_types::PullRequestRecord> {
+        let body = types::LinkRunPullRequestRequest { html_url };
+        let response = self
+            .send_api(|client| async move {
+                client
+                    .link_run_pull_request()
+                    .id(run_id.to_string())
+                    .body(body.clone())
+                    .send()
+                    .await
+            })
+            .await
+            .map_err(add_pr_upgrade_hint)?;
+        convert_type(response.into_inner())
+    }
+
+    pub async fn unlink_run_pull_request(
+        &self,
+        run_id: &RunId,
+    ) -> Result<fabro_types::PullRequestRecord> {
+        let response = self
+            .send_api(|client| async move {
+                client
+                    .unlink_run_pull_request()
+                    .id(run_id.to_string())
+                    .send()
+                    .await
+            })
+            .await
+            .map_err(add_pr_upgrade_hint)?;
+        convert_type(response.into_inner())
+    }
+
     pub async fn merge_run_pull_request(
         &self,
         run_id: &RunId,

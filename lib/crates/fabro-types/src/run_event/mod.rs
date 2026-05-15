@@ -300,6 +300,10 @@ pub enum EventBody {
     AgentAcpTimedOut(AgentAcpTimedOutProps),
     #[serde(rename = "pull_request.created")]
     PullRequestCreated(PullRequestCreatedProps),
+    #[serde(rename = "pull_request.linked")]
+    PullRequestLinked(PullRequestLinkedProps),
+    #[serde(rename = "pull_request.unlinked")]
+    PullRequestUnlinked(PullRequestUnlinkedProps),
     #[serde(rename = "pull_request.failed")]
     PullRequestFailed(PullRequestFailedProps),
     #[serde(rename = "devcontainer.resolved")]
@@ -497,6 +501,8 @@ impl EventBody {
             Self::AgentAcpCancelled(_) => "agent.acp.cancelled",
             Self::AgentAcpTimedOut(_) => "agent.acp.timed_out",
             Self::PullRequestCreated(_) => "pull_request.created",
+            Self::PullRequestLinked(_) => "pull_request.linked",
+            Self::PullRequestUnlinked(_) => "pull_request.unlinked",
             Self::PullRequestFailed(_) => "pull_request.failed",
             Self::DevcontainerResolved(_) => "devcontainer.resolved",
             Self::DevcontainerLifecycleStarted(_) => "devcontainer.lifecycle.started",
@@ -648,6 +654,8 @@ fn is_known_event_name(event: &str) -> bool {
             | "agent.acp.cancelled"
             | "agent.acp.timed_out"
             | "pull_request.created"
+            | "pull_request.linked"
+            | "pull_request.unlinked"
             | "pull_request.failed"
             | "devcontainer.resolved"
             | "devcontainer.lifecycle.started"
@@ -1486,6 +1494,90 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn pull_request_linked_round_trips_json() {
+        let event = RunEvent {
+            id:                 "evt_pr_linked".to_string(),
+            ts:                 DateTime::parse_from_rfc3339("2026-05-15T12:00:00.000Z")
+                .unwrap()
+                .with_timezone(&Utc),
+            run_id:             fixtures::RUN_1,
+            node_id:            None,
+            node_label:         None,
+            stage_id:           None,
+            parallel_group_id:  None,
+            parallel_branch_id: None,
+            session_id:         None,
+            parent_session_id:  None,
+            tool_call_id:       None,
+            actor:              None,
+            body:               EventBody::PullRequestLinked(PullRequestLinkedProps {
+                pull_request: crate::PullRequest {
+                    provider:    "github".to_string(),
+                    html_url:    "https://github.com/acme/widgets/pull/42".to_string(),
+                    number:      Some(42),
+                    owner:       Some("acme".to_string()),
+                    repo:        Some("widgets".to_string()),
+                    base_branch: None,
+                    head_branch: None,
+                    title:       Some("Review deployment chart".to_string()),
+                },
+            }),
+        };
+
+        let value = event.to_value().unwrap();
+        assert_eq!(value["event"], "pull_request.linked");
+        assert_eq!(
+            value["properties"]["pull_request"]["html_url"],
+            "https://github.com/acme/widgets/pull/42"
+        );
+
+        let parsed = RunEvent::from_value(value).unwrap();
+        assert_eq!(parsed, event);
+    }
+
+    #[test]
+    fn pull_request_unlinked_round_trips_json() {
+        let event = RunEvent {
+            id:                 "evt_pr_unlinked".to_string(),
+            ts:                 DateTime::parse_from_rfc3339("2026-05-15T12:05:00.000Z")
+                .unwrap()
+                .with_timezone(&Utc),
+            run_id:             fixtures::RUN_1,
+            node_id:            None,
+            node_label:         None,
+            stage_id:           None,
+            parallel_group_id:  None,
+            parallel_branch_id: None,
+            session_id:         None,
+            parent_session_id:  None,
+            tool_call_id:       None,
+            actor:              None,
+            body:               EventBody::PullRequestUnlinked(PullRequestUnlinkedProps {
+                pull_request: crate::PullRequest {
+                    provider:    "github".to_string(),
+                    html_url:    "https://github.com/acme/widgets/pull/42".to_string(),
+                    number:      Some(42),
+                    owner:       Some("acme".to_string()),
+                    repo:        Some("widgets".to_string()),
+                    base_branch: Some("main".to_string()),
+                    head_branch: Some("feature".to_string()),
+                    title:       Some("Fix the bug".to_string()),
+                },
+            }),
+        };
+
+        let value = event.to_value().unwrap();
+        assert_eq!(value["event"], "pull_request.unlinked");
+        assert_eq!(
+            value["properties"]["pull_request"]["number"],
+            serde_json::json!(42)
+        );
+
+        let parsed = RunEvent::from_value(value).unwrap();
+        assert_eq!(parsed, event);
     }
 
     #[test]

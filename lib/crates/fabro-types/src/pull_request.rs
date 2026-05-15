@@ -1,17 +1,23 @@
 use serde::{Deserialize, Serialize};
 
-/// Record of a pull request created for a workflow run.
+/// Record of a pull request associated with a workflow run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PullRequest {
     #[serde(default = "github_provider")]
     pub provider:    String,
     pub html_url:    String,
-    pub number:      u64,
-    pub owner:       String,
-    pub repo:        String,
-    pub base_branch: String,
-    pub head_branch: String,
-    pub title:       String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number:      Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner:       Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo:        Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title:       Option<String>,
 }
 
 fn github_provider() -> String {
@@ -60,18 +66,18 @@ pub struct PullRequestGithubDetail {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PullRequestDetails {
     pub pull_request:  PullRequest,
-    pub state:         String,
-    pub draft:         bool,
-    pub merged:        bool,
+    pub state:         Option<String>,
+    pub draft:         Option<bool>,
+    pub merged:        Option<bool>,
     pub merged_at:     Option<String>,
     pub mergeable:     Option<bool>,
-    pub additions:     u64,
-    pub deletions:     u64,
-    pub changed_files: u64,
-    pub comments:      u64,
-    pub checks:        Vec<CheckRun>,
-    pub author:        PullRequestUser,
-    pub timestamps:    PullRequestTimestamps,
+    pub additions:     Option<u64>,
+    pub deletions:     Option<u64>,
+    pub changed_files: Option<u64>,
+    pub comments:      Option<u64>,
+    pub checks:        Option<Vec<CheckRun>>,
+    pub author:        Option<PullRequestUser>,
+    pub timestamps:    Option<PullRequestTimestamps>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

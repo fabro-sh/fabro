@@ -123,6 +123,7 @@ export * from './interview-option';
 export * from './interview-provider-settings';
 export * from './interview-question-record';
 export * from './ip-allow-entry';
+export * from './link-run-pull-request-request';
 export * from './literal-ip-allow-entry';
 export * from './log-destination';
 export * from './manifest-args';

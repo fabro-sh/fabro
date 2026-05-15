@@ -96,6 +96,20 @@ describe("mapRunListItem", () => {
 
     expect(mapRunListItem(summary).title).toBe("Untitled run");
   });
+
+  test("preserves stored pull request links without numbers", () => {
+    const summary = makeRun({
+      pull_request: {
+        provider: "external",
+        html_url: "https://gitlab.com/acme/widgets/-/merge_requests/42",
+        title: "Review deployment chart",
+      },
+    });
+    const item = mapRunListItem(summary);
+
+    expect(item.number).toBeUndefined();
+    expect(item.pullRequestUrl).toBe("https://gitlab.com/acme/widgets/-/merge_requests/42");
+  });
 });
 
 describe("mapRunSummaryToRunItem", () => {

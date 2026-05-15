@@ -15,6 +15,8 @@ fn help() {
 
     Commands:
       create  Create a pull request from a completed run
+      link    Link or replace the GitHub pull request associated with a run
+      unlink  Unlink the pull request associated with a run
       view    View pull request details
       merge   Merge a pull request
       close   Close a pull request

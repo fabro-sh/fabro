@@ -240,13 +240,19 @@ impl RunProjectionReducer for RunProjection {
                 self.pull_request = Some(PullRequestRecord {
                     provider:    "github".to_string(),
                     html_url:    props.pr_url.clone(),
-                    number:      props.pr_number,
-                    owner:       props.owner.clone(),
-                    repo:        props.repo.clone(),
-                    base_branch: props.base_branch.clone(),
-                    head_branch: props.head_branch.clone(),
-                    title:       props.title.clone(),
+                    number:      Some(props.pr_number),
+                    owner:       Some(props.owner.clone()),
+                    repo:        Some(props.repo.clone()),
+                    base_branch: Some(props.base_branch.clone()),
+                    head_branch: Some(props.head_branch.clone()),
+                    title:       Some(props.title.clone()),
                 });
+            }
+            EventBody::PullRequestLinked(props) => {
+                self.pull_request = Some(props.pull_request.clone());
+            }
+            EventBody::PullRequestUnlinked(_) => {
+                self.pull_request = None;
             }
             EventBody::InterviewStarted(props) => {
                 if props.question_id.is_empty() {
@@ -951,8 +957,9 @@ mod tests {
     use fabro_types::{
         BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint, CheckpointRecord,
         CommandTermination, EventBody, FailureCategory, FailureDetail, FailureReason, Graph,
-        Outcome, QuestionType, RunBlobId, RunControlAction, RunDiff, RunEvent, RunSpec, RunStatus,
-        StageOutcome, StageState, SuccessReason, WorkflowSettings, first_event_seq, fixtures,
+        Outcome, PullRequestRecord, QuestionType, RunBlobId, RunControlAction, RunDiff, RunEvent,
+        RunSpec, RunStatus, StageOutcome, StageState, SuccessReason, WorkflowSettings,
+        first_event_seq, fixtures,
     };
     use serde_json::json;
 
@@ -2493,10 +2500,90 @@ mod tests {
             pull_request.html_url,
             "https://github.com/fabro-sh/fabro/pull/123"
         );
-        assert_eq!(pull_request.number, 123);
+        assert_eq!(pull_request.number, Some(123));
 
         let summary = build_summary(&state, &fixtures::RUN_1);
         assert_eq!(summary.pull_request, state.pull_request);
+    }
+
+    #[test]
+    fn pull_request_linked_replaces_and_unlinked_clears_projection() {
+        use fabro_types::run_event::{
+            PullRequestCreatedProps, PullRequestLinkedProps, PullRequestUnlinkedProps,
+        };
+
+        let mut state = running_projection();
+        let github_pull_request = PullRequestRecord {
+            provider:    "github".to_string(),
+            html_url:    "https://github.com/fabro-sh/fabro/pull/123".to_string(),
+            number:      Some(123),
+            owner:       Some("fabro-sh".to_string()),
+            repo:        Some("fabro".to_string()),
+            base_branch: Some("main".to_string()),
+            head_branch: Some("fabro/run/demo".to_string()),
+            title:       Some("Add run PR chip".to_string()),
+        };
+        let external_pull_request = PullRequestRecord {
+            provider:    "external".to_string(),
+            html_url:    "https://gitlab.com/acme/widgets/-/merge_requests/42".to_string(),
+            number:      None,
+            owner:       None,
+            repo:        None,
+            base_branch: None,
+            head_branch: None,
+            title:       Some("Review deployment chart".to_string()),
+        };
+
+        state
+            .apply_event(&test_event(
+                1,
+                EventBody::PullRequestCreated(PullRequestCreatedProps {
+                    pr_url:      github_pull_request.html_url.clone(),
+                    pr_number:   github_pull_request.number.unwrap(),
+                    owner:       github_pull_request.owner.clone().unwrap(),
+                    repo:        github_pull_request.repo.clone().unwrap(),
+                    base_branch: github_pull_request.base_branch.clone().unwrap(),
+                    head_branch: github_pull_request.head_branch.clone().unwrap(),
+                    title:       github_pull_request.title.clone().unwrap(),
+                    draft:       false,
+                }),
+                None,
+            ))
+            .unwrap();
+        assert_eq!(state.pull_request, Some(github_pull_request.clone()));
+
+        state
+            .apply_event(&test_event(
+                2,
+                EventBody::PullRequestLinked(PullRequestLinkedProps {
+                    pull_request: external_pull_request.clone(),
+                }),
+                None,
+            ))
+            .unwrap();
+        assert_eq!(state.pull_request, Some(external_pull_request.clone()));
+
+        state
+            .apply_event(&test_event(
+                3,
+                EventBody::PullRequestUnlinked(PullRequestUnlinkedProps {
+                    pull_request: external_pull_request.clone(),
+                }),
+                None,
+            ))
+            .unwrap();
+        assert_eq!(state.pull_request, None);
+
+        state
+            .apply_event(&test_event(
+                4,
+                EventBody::PullRequestLinked(PullRequestLinkedProps {
+                    pull_request: github_pull_request.clone(),
+                }),
+                None,
+            ))
+            .unwrap();
+        assert_eq!(state.pull_request, Some(github_pull_request));
     }
 
     #[test]

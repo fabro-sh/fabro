@@ -15,15 +15,11 @@
 
 
 /**
- * Persisted record of a pull request associated with a run.
+ * Request body for linking an existing GitHub pull request to a run.
  */
-export interface PullRequest {
-    'provider': string;
+export interface LinkRunPullRequestRequest {
+    /**
+     * GitHub pull request URL to associate with the run. Must use the form `https://github.com/{owner}/{repo}/pull/{number}`.
+     */
     'html_url': string;
-    'number'?: number | null;
-    'owner'?: string | null;
-    'repo'?: string | null;
-    'base_branch'?: string | null;
-    'head_branch'?: string | null;
-    'title'?: string | null;
 }

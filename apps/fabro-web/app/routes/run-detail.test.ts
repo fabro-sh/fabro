@@ -470,6 +470,26 @@ describe("RunDetail full-height child routes", () => {
     expect(links[0].children.filter((child) => typeof child !== "object").join("")).toBe("#123");
   });
 
+  test("shows a stored-only pull request chip when no number is available", async () => {
+    const renderer = await renderRunDetail({
+      initialEntry: "/runs/run_1",
+      pullRequest: {
+        provider: "external",
+        html_url: "https://gitlab.com/acme/widgets/-/merge_requests/42",
+        title: "Review deployment chart",
+      },
+    });
+
+    const links = renderer.root.findAll(
+      (node) =>
+        node.type === "a" &&
+        node.props.href === "https://gitlab.com/acme/widgets/-/merge_requests/42",
+    );
+
+    expect(links).toHaveLength(1);
+    expect(links[0].children.filter((child) => typeof child !== "object").join("")).toBe("PR");
+  });
+
   test("keeps blocked full-height children clear of the interview dock without an h-72 sibling", async () => {
     const renderer = await renderRunDetail({
       initialEntry: "/runs/run_1/files",

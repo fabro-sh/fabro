@@ -542,14 +542,14 @@ pub async fn maybe_open_pull_request(
     }
 
     let record = PullRequestRecord {
-        provider: "github".to_string(),
-        html_url: created.html_url,
-        number: created.number,
-        owner,
-        repo,
-        base_branch: req.base_branch.to_string(),
-        head_branch: req.head_branch.to_string(),
-        title,
+        provider:    "github".to_string(),
+        html_url:    created.html_url,
+        number:      Some(created.number),
+        owner:       Some(owner),
+        repo:        Some(repo),
+        base_branch: Some(req.base_branch.to_string()),
+        head_branch: Some(req.head_branch.to_string()),
+        title:       Some(title),
     };
 
     Ok(Some(record))
@@ -1940,7 +1940,7 @@ mod tests {
         .expect("PR creation should succeed");
 
         let record = result.expect("PR record should be Some");
-        assert_eq!(record.title, "Fix telemetry leak");
+        assert_eq!(record.title.as_deref(), Some("Fix telemetry leak"));
         harness.assert_mocks_called_once().await;
     }
 
@@ -1977,8 +1977,12 @@ mod tests {
         .expect("PR creation should succeed");
 
         let record = result.expect("PR record should be Some");
-        assert_eq!(record.title.chars().count(), 72);
-        assert!(record.title.ends_with('\u{2026}'));
+        let title = record
+            .title
+            .as_deref()
+            .expect("record should include title");
+        assert_eq!(title.chars().count(), 72);
+        assert!(title.ends_with('\u{2026}'));
         harness.assert_mocks_called_once().await;
     }
 }

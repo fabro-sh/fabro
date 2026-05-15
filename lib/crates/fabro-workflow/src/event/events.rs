@@ -648,6 +648,12 @@ pub enum Event {
         title:       String,
         draft:       bool,
     },
+    PullRequestLinked {
+        pull_request: PullRequestRecord,
+    },
+    PullRequestUnlinked {
+        pull_request: PullRequestRecord,
+    },
     PullRequestFailed {
         error: String,
     },
@@ -712,12 +718,29 @@ impl Event {
     pub fn pull_request_created(record: &PullRequestRecord, draft: bool) -> Self {
         Self::PullRequestCreated {
             pr_url: record.html_url.clone(),
-            pr_number: record.number,
-            owner: record.owner.clone(),
-            repo: record.repo.clone(),
-            base_branch: record.base_branch.clone(),
-            head_branch: record.head_branch.clone(),
-            title: record.title.clone(),
+            pr_number: record
+                .number
+                .expect("created pull request record should include a number"),
+            owner: record
+                .owner
+                .clone()
+                .expect("created pull request record should include an owner"),
+            repo: record
+                .repo
+                .clone()
+                .expect("created pull request record should include a repo"),
+            base_branch: record
+                .base_branch
+                .clone()
+                .expect("created pull request record should include a base branch"),
+            head_branch: record
+                .head_branch
+                .clone()
+                .expect("created pull request record should include a head branch"),
+            title: record
+                .title
+                .clone()
+                .expect("created pull request record should include a title"),
             draft,
         }
     }
@@ -1425,6 +1448,22 @@ impl Event {
                 ..
             } => {
                 info!(pr_url = %pr_url, pr_number, draft, owner, repo, "Pull request created");
+            }
+            Self::PullRequestLinked { pull_request } => {
+                info!(
+                    pr_url = %pull_request.html_url,
+                    provider = %pull_request.provider,
+                    pr_number = ?pull_request.number,
+                    "Pull request linked"
+                );
+            }
+            Self::PullRequestUnlinked { pull_request } => {
+                info!(
+                    pr_url = %pull_request.html_url,
+                    provider = %pull_request.provider,
+                    pr_number = ?pull_request.number,
+                    "Pull request unlinked"
+                );
             }
             Self::PullRequestFailed { error, .. } => {
                 error!(error = %error, "Pull request creation failed");

@@ -9,7 +9,7 @@ export function PullRequestChip({
   iconClassName = "size-3",
   children,
 }: {
-  number: number;
+  number?: number | null;
   url?: string;
   className?: string;
   iconClassName?: string;
@@ -18,7 +18,7 @@ export function PullRequestChip({
   const content = (
     <>
       <GitPullRequestIcon className={iconClassName} />
-      #{number}
+      {number != null ? `#${number}` : "PR"}
       {children}
     </>
   );

@@ -1776,22 +1776,28 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-    get:
-      operationId: getRunPullRequest
+    put:
+      operationId: linkRunPullRequest
       tags: [Runs]
-      summary: Get Run Pull Request
-      description: Returns the stored pull request record for a run plus live GitHub details.
+      summary: Link Run Pull Request
+      description: Links or replaces the GitHub pull request association for a run without modifying the remote pull request. The server captures live GitHub metadata, including the title, when credentials are configured and the lookup succeeds.
       parameters:
         - $ref: "#/components/parameters/RunId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinkRunPullRequestRequest"
       responses:
         "200":
-          description: Pull request detail
+          description: Pull request linked
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PullRequestDetails"
+                $ref: "#/components/schemas/PullRequest"
         "400":
-          description: Pull request lookup does not apply to this run
+          description: Pull request link request is invalid
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -1799,6 +1805,29 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: unlinkRunPullRequest
+      tags: [Runs]
+      summary: Unlink Run Pull Request
+      description: Removes Fabro's stored pull request association for a run without modifying the remote pull request.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Pull request unlinked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PullRequest"
         "404":
           description: Run or stored pull request record not found
           headers:
@@ -1808,17 +1837,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-        "502":
-          description: Stored pull request record exists but GitHub could not find it
-          headers:
-            x-request-id:
-              $ref: "#/components/headers/XRequestId"
+    get:
+      operationId: getRunPullRequest
+      tags: [Runs]
+      summary: Get Run Pull Request
+      description: Returns the stored pull request record for a run plus live GitHub details when available.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Pull request detail
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "503":
-          description: GitHub integration is unavailable on the server
+                $ref: "#/components/schemas/PullRequestDetails"
+        "404":
+          description: Run or stored pull request record not found
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -7055,42 +7089,36 @@ components:
           example: "Stage 'apply-changes' exceeded maximum retries."
 
     PullRequest:
-      description: Persisted record of a pull request created for a run.
+      description: Persisted record of a pull request associated with a run.
       type: object
       required:
         - provider
         - html_url
-        - number
-        - owner
-        - repo
-        - base_branch
-        - head_branch
-        - title
       properties:
         provider:
           type: string
-          enum: [github]
+          example: github
         html_url:
           type: string
           format: uri
           example: https://github.com/fabro-sh/fabro/pull/123
         number:
-          type: integer
+          type: ["integer", "null"]
           example: 123
         owner:
-          type: string
+          type: ["string", "null"]
           example: fabro-sh
         repo:
-          type: string
+          type: ["string", "null"]
           example: fabro
         base_branch:
-          type: string
+          type: ["string", "null"]
           example: main
         head_branch:
-          type: string
+          type: ["string", "null"]
           example: fabro/run/demo
         title:
-          type: string
+          type: ["string", "null"]
           example: Move PR commands server-side
 
     PullRequestUser:
@@ -7114,33 +7142,21 @@ components:
           example: fabro/run/demo
 
     PullRequestDetails:
-      description: Stored pull request record plus live GitHub-enriched fields.
+      description: Stored pull request record plus live GitHub-enriched fields when available.
       type: object
       required:
         - pull_request
-        - state
-        - draft
-        - merged
-        - merged_at
-        - mergeable
-        - additions
-        - deletions
-        - changed_files
-        - comments
-        - checks
-        - author
-        - timestamps
       properties:
         pull_request:
           $ref: "#/components/schemas/PullRequest"
         state:
-          type: string
+          type: ["string", "null"]
           example: open
         draft:
-          type: boolean
+          type: ["boolean", "null"]
           example: false
         merged:
-          type: boolean
+          type: ["boolean", "null"]
           example: false
         merged_at:
           type: ["string", "null"]
@@ -7150,33 +7166,39 @@ components:
           type: ["boolean", "null"]
           example: true
         additions:
-          type: integer
+          type: ["integer", "null"]
           example: 234
         deletions:
-          type: integer
+          type: ["integer", "null"]
           example: 67
         changed_files:
-          type: integer
+          type: ["integer", "null"]
           example: 5
         comments:
-          type: integer
+          type: ["integer", "null"]
           example: 4
         checks:
-          type: array
-          items:
-            $ref: "#/components/schemas/CheckRun"
+          oneOf:
+            - type: array
+              items:
+                $ref: "#/components/schemas/CheckRun"
+            - type: "null"
         author:
-          $ref: "#/components/schemas/PullRequestUser"
+          oneOf:
+            - $ref: "#/components/schemas/PullRequestUser"
+            - type: "null"
         timestamps:
-          type: object
-          required: [created_at, updated_at]
-          properties:
-            created_at:
-              type: string
-              format: date-time
-            updated_at:
-              type: string
-              format: date-time
+          oneOf:
+            - type: object
+              required: [created_at, updated_at]
+              properties:
+                created_at:
+                  type: string
+                  format: date-time
+                updated_at:
+                  type: string
+                  format: date-time
+            - type: "null"
 
     CreateRunPullRequestRequest:
       description: Request body for creating a run pull request.
@@ -7192,6 +7214,18 @@ components:
           type: ["string", "null"]
           description: Optional model override for generating the pull request description.
           example: claude-sonnet-4-6
+
+    LinkRunPullRequestRequest:
+      description: Request body for linking an existing GitHub pull request to a run.
+      type: object
+      required:
+        - html_url
+      properties:
+        html_url:
+          type: string
+          format: uri
+          description: GitHub pull request URL to associate with the run. Must use the form `https://github.com/{owner}/{repo}/pull/{number}`.
+          example: https://github.com/fabro-sh/fabro/pull/123
 
     MergeMethod:
       description: GitHub merge method for a pull request.

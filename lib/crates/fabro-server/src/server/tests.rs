@@ -3721,6 +3721,17 @@ async fn create_run_with_pull_request_record(
     .await;
 }
 
+async fn create_run_with_linked_pull_request_record(
+    state: &Arc<AppState>,
+    run_id: RunId,
+    pull_request: PullRequestRecord,
+) {
+    create_durable_run_with_events(state, run_id, &[workflow_event::Event::PullRequestLinked {
+        pull_request,
+    }])
+    .await;
+}
+
 async fn create_completed_run_ready_for_pull_request(
     state: &Arc<AppState>,
     run_id: RunId,
@@ -5002,16 +5013,186 @@ async fn get_run_pull_request_returns_not_found_when_record_missing() {
 }
 
 #[tokio::test]
-async fn get_run_pull_request_rejects_non_github_record_url() {
-    let (state, app, run_id) = pr_test_app(Some("ghu_test"), None);
+async fn link_run_pull_request_links_github_pr_from_any_repo_and_updates_state() {
+    let github = MockServer::start();
+    let github_mock = github.mock(|when, then| {
+        when.method("GET")
+            .path("/repos/other/repo/pulls/987")
+            .header("authorization", "Bearer ghu_test");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(
+                json!({
+                    "number": 987,
+                    "title": "Cross repo fix",
+                    "body": "Detailed description",
+                    "state": "open",
+                    "draft": false,
+                    "merged": false,
+                    "merged_at": null,
+                    "mergeable": true,
+                    "additions": 10,
+                    "deletions": 3,
+                    "changed_files": 2,
+                    "html_url": "https://github.com/other/repo/pull/987",
+                    "user": { "login": "testuser" },
+                    "head": { "ref": "feature" },
+                    "base": { "ref": "main" },
+                    "created_at": "2026-04-23T15:40:00Z",
+                    "updated_at": "2026-04-23T15:45:00Z"
+                })
+                .to_string(),
+            );
+    });
+    let (_state, app, run_id) =
+        pr_test_app_with_minimal_run(Some("ghu_test"), Some(github.base_url())).await;
 
-    create_run_with_pull_request_record(
-        &state,
-        run_id,
-        "https://gitlab.com/acme/widgets/-/merge_requests/42",
-        42,
-        "Fix the bug",
-    )
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(api(&format!("/runs/{run_id}/pull_request")))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "html_url": "https://github.com/other/repo/pull/987"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+
+    assert_eq!(body["provider"], "github");
+    assert_eq!(body["html_url"], "https://github.com/other/repo/pull/987");
+    assert_eq!(body["owner"], "other");
+    assert_eq!(body["repo"], "repo");
+    assert_eq!(body["number"], 987);
+    assert_eq!(body["title"], "Cross repo fix");
+
+    let state_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}/state")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let state_body = response_json!(state_response, StatusCode::OK).await;
+    assert_eq!(
+        state_body["pull_request"]["html_url"],
+        "https://github.com/other/repo/pull/987"
+    );
+    assert_eq!(state_body["pull_request"]["title"], "Cross repo fix");
+    github_mock.assert();
+}
+
+#[tokio::test]
+async fn link_run_pull_request_rejects_non_github_url() {
+    let (_state, app, run_id) = pr_test_app_with_minimal_run(None, None).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(api(&format!("/runs/{run_id}/pull_request")))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "html_url": "https://gitlab.com/acme/widgets/-/merge_requests/42"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::BAD_REQUEST).await;
+
+    assert_eq!(
+        body["errors"][0]["code"],
+        "unsupported_pull_request_provider"
+    );
+}
+
+#[tokio::test]
+async fn unlink_run_pull_request_appends_event_and_clears_projected_state() {
+    let (state, app, run_id) = pr_test_app_with_minimal_run(None, None).await;
+    let link_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(api(&format!("/runs/{run_id}/pull_request")))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "html_url": "https://github.com/acme/widgets/pull/42"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    response_json!(link_response, StatusCode::OK).await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(api(&format!("/runs/{run_id}/pull_request")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+
+    assert_eq!(body["html_url"], "https://github.com/acme/widgets/pull/42");
+
+    let state_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}/state")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let state_body = response_json!(state_response, StatusCode::OK).await;
+    assert!(state_body["pull_request"].is_null());
+
+    let run_id = run_id.parse::<RunId>().unwrap();
+    let run_store = state.store.open_run_reader(&run_id).await.unwrap();
+    let events = run_store.list_events().await.unwrap();
+    assert!(events.iter().any(|event| {
+        event.event.event_name() == "pull_request.unlinked"
+            && event.event.properties().unwrap()["pull_request"]["html_url"]
+                == "https://github.com/acme/widgets/pull/42"
+    }));
+}
+
+#[tokio::test]
+async fn get_run_pull_request_returns_stored_external_association_without_live_github() {
+    let (state, app, run_id) = pr_test_app(None, None);
+    create_run_with_linked_pull_request_record(&state, run_id, PullRequestRecord {
+        provider:    "external".to_string(),
+        html_url:    "https://gitlab.com/acme/widgets/-/merge_requests/42".to_string(),
+        number:      None,
+        owner:       None,
+        repo:        None,
+        base_branch: None,
+        head_branch: None,
+        title:       Some("Review deployment chart".to_string()),
+    })
     .await;
 
     let response = app
@@ -5024,13 +5205,56 @@ async fn get_run_pull_request_rejects_non_github_record_url() {
         )
         .await
         .unwrap();
-    let body = response_json!(response, StatusCode::BAD_REQUEST).await;
+    let body = response_json!(response, StatusCode::OK).await;
 
-    assert_eq!(body["errors"][0]["code"], "unsupported_host");
+    assert_eq!(body["pull_request"]["provider"], "external");
+    assert_eq!(
+        body["pull_request"]["html_url"],
+        "https://gitlab.com/acme/widgets/-/merge_requests/42"
+    );
+    assert!(body["state"].is_null());
+    assert!(body["author"].is_null());
 }
 
 #[tokio::test]
-async fn get_run_pull_request_returns_service_unavailable_without_github_credentials() {
+async fn get_run_pull_request_returns_stored_non_github_record_url() {
+    let (state, app, run_id) = pr_test_app(Some("ghu_test"), None);
+
+    create_run_with_linked_pull_request_record(&state, run_id, PullRequestRecord {
+        provider:    "external".to_string(),
+        html_url:    "https://gitlab.com/acme/widgets/-/merge_requests/42".to_string(),
+        number:      None,
+        owner:       None,
+        repo:        None,
+        base_branch: None,
+        head_branch: None,
+        title:       Some("Fix the bug".to_string()),
+    })
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}/pull_request")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+
+    assert_eq!(body["pull_request"]["provider"], "external");
+    assert_eq!(
+        body["pull_request"]["html_url"],
+        "https://gitlab.com/acme/widgets/-/merge_requests/42"
+    );
+    assert!(body["state"].is_null());
+    assert!(body["author"].is_null());
+}
+
+#[tokio::test]
+async fn get_run_pull_request_returns_stored_github_association_without_github_credentials() {
     let (state, app, run_id) = pr_test_app(None, None);
 
     create_run_with_pull_request_record(
@@ -5052,13 +5276,20 @@ async fn get_run_pull_request_returns_service_unavailable_without_github_credent
         )
         .await
         .unwrap();
-    let body = response_json!(response, StatusCode::SERVICE_UNAVAILABLE).await;
+    let body = response_json!(response, StatusCode::OK).await;
 
-    assert_eq!(body["errors"][0]["code"], "integration_unavailable");
+    assert_eq!(body["pull_request"]["provider"], "github");
+    assert_eq!(body["pull_request"]["number"], 42);
+    assert_eq!(
+        body["pull_request"]["html_url"],
+        "https://github.com/acme/widgets/pull/42"
+    );
+    assert!(body["state"].is_null());
+    assert!(body["checks"].is_null());
 }
 
 #[tokio::test]
-async fn get_run_pull_request_returns_bad_gateway_when_github_pr_is_missing() {
+async fn get_run_pull_request_returns_stored_github_association_when_github_pr_is_missing() {
     let github = MockServer::start();
     let github_mock = github.mock(|when, then| {
         when.method("GET")
@@ -5089,9 +5320,16 @@ async fn get_run_pull_request_returns_bad_gateway_when_github_pr_is_missing() {
         )
         .await
         .unwrap();
-    let body = response_json!(response, StatusCode::BAD_GATEWAY).await;
+    let body = response_json!(response, StatusCode::OK).await;
 
-    assert_eq!(body["errors"][0]["code"], "github_not_found");
+    assert_eq!(body["pull_request"]["provider"], "github");
+    assert_eq!(body["pull_request"]["number"], 42);
+    assert_eq!(
+        body["pull_request"]["html_url"],
+        "https://github.com/acme/widgets/pull/42"
+    );
+    assert!(body["state"].is_null());
+    assert!(body["author"].is_null());
     github_mock.assert();
 }
 
@@ -5469,6 +5707,40 @@ async fn merge_run_pull_request_rejects_non_github_record_url() {
 }
 
 #[tokio::test]
+async fn merge_run_pull_request_rejects_external_association() {
+    let (state, app, run_id) = pr_test_app(Some("ghu_test"), None);
+    create_run_with_linked_pull_request_record(&state, run_id, PullRequestRecord {
+        provider:    "external".to_string(),
+        html_url:    "https://gitlab.com/acme/widgets/-/merge_requests/42".to_string(),
+        number:      None,
+        owner:       None,
+        repo:        None,
+        base_branch: None,
+        head_branch: None,
+        title:       Some("Review deployment chart".to_string()),
+    })
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/runs/{run_id}/pull_request/merge")))
+                .header("content-type", "application/json")
+                .body(Body::from(json!({ "method": "squash" }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::BAD_REQUEST).await;
+
+    assert_eq!(
+        body["errors"][0]["code"],
+        "unsupported_pull_request_provider"
+    );
+}
+
+#[tokio::test]
 async fn merge_run_pull_request_returns_service_unavailable_without_github_credentials() {
     let (state, app, run_id) = pr_test_app(None, None);
 
@@ -5542,6 +5814,39 @@ async fn close_run_pull_request_rejects_non_github_record_url() {
     let body = response_json!(response, StatusCode::BAD_REQUEST).await;
 
     assert_eq!(body["errors"][0]["code"], "unsupported_host");
+}
+
+#[tokio::test]
+async fn close_run_pull_request_rejects_external_association() {
+    let (state, app, run_id) = pr_test_app(Some("ghu_test"), None);
+    create_run_with_linked_pull_request_record(&state, run_id, PullRequestRecord {
+        provider:    "external".to_string(),
+        html_url:    "https://gitlab.com/acme/widgets/-/merge_requests/42".to_string(),
+        number:      None,
+        owner:       None,
+        repo:        None,
+        base_branch: None,
+        head_branch: None,
+        title:       Some("Review deployment chart".to_string()),
+    })
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/runs/{run_id}/pull_request/close")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::BAD_REQUEST).await;
+
+    assert_eq!(
+        body["errors"][0]["code"],
+        "unsupported_pull_request_provider"
+    );
 }
 
 #[tokio::test]

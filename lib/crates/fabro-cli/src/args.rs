@@ -889,6 +889,26 @@ pub(crate) struct PrViewArgs {
 }
 
 #[derive(Args)]
+pub(crate) struct PrLinkArgs {
+    #[command(flatten)]
+    pub(crate) server: ServerTargetArgs,
+
+    /// Run ID or prefix
+    pub(crate) run_id: String,
+    /// GitHub pull request URL to associate with the run
+    pub(crate) url:    String,
+}
+
+#[derive(Args)]
+pub(crate) struct PrUnlinkArgs {
+    #[command(flatten)]
+    pub(crate) server: ServerTargetArgs,
+
+    /// Run ID or prefix
+    pub(crate) run_id: String,
+}
+
+#[derive(Args)]
 pub(crate) struct PrMergeArgs {
     #[command(flatten)]
     pub(crate) server: ServerTargetArgs,
@@ -1284,6 +1304,8 @@ impl Commands {
             },
             Self::Pr(ns) => match &ns.command {
                 PrCommand::Create(_) => "pr create",
+                PrCommand::Link(_) => "pr link",
+                PrCommand::Unlink(_) => "pr unlink",
                 PrCommand::View(_) => "pr view",
                 PrCommand::Merge(_) => "pr merge",
                 PrCommand::Close(_) => "pr close",
@@ -1335,6 +1357,10 @@ pub(crate) struct PrNamespace {
 pub(crate) enum PrCommand {
     /// Create a pull request from a completed run
     Create(PrCreateArgs),
+    /// Link or replace the GitHub pull request associated with a run
+    Link(PrLinkArgs),
+    /// Unlink the pull request associated with a run
+    Unlink(PrUnlinkArgs),
     /// View pull request details
     View(PrViewArgs),
     /// Merge a pull request

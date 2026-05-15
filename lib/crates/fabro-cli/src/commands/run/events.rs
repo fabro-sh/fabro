@@ -766,6 +766,34 @@ fn format_event_pretty_value(envelope: &serde_json::Value, styles: &Styles) -> O
                 url,
             ))
         }
+        "pull_request.linked" => {
+            let url = envelope
+                .get("properties")
+                .and_then(|props| props.get("pull_request"))
+                .and_then(|record| record.get("html_url"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("?");
+            Some(format!(
+                "{} {} {}",
+                styles.dim.apply_to(&ts),
+                styles.bold.apply_to("PR linked:"),
+                url,
+            ))
+        }
+        "pull_request.unlinked" => {
+            let url = envelope
+                .get("properties")
+                .and_then(|props| props.get("pull_request"))
+                .and_then(|record| record.get("html_url"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("?");
+            Some(format!(
+                "{} {} {}",
+                styles.dim.apply_to(&ts),
+                styles.bold.apply_to("PR unlinked:"),
+                url,
+            ))
+        }
         "pull_request.failed" => {
             let error = prop_str_field(envelope, "error").unwrap_or("unknown error");
             Some(format!(
@@ -1117,6 +1145,26 @@ mod tests {
         let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"pull_request.created","properties":{"pr_url":"https://github.com/owner/repo/pull/42","pr_number":42,"draft":true}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("Draft PR:"), "got: {result}");
+    }
+
+    #[test]
+    fn pretty_pull_request_linked() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"pull_request.linked","properties":{"pull_request":{"provider":"external","html_url":"https://gitlab.com/owner/repo/-/merge_requests/42"}}}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("PR linked:"), "got: {result}");
+        assert!(
+            result.contains("https://gitlab.com/owner/repo/-/merge_requests/42"),
+            "got: {result}"
+        );
+    }
+
+    #[test]
+    fn pretty_pull_request_unlinked() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"pull_request.unlinked","properties":{"pull_request":{"provider":"github","html_url":"https://github.com/owner/repo/pull/42","number":42}}}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("PR unlinked:"), "got: {result}");
     }
 
     #[test]

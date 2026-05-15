@@ -1168,6 +1168,16 @@ fn event_body_from_event(event: &Event) -> EventBody {
             title:       title.clone(),
             draft:       *draft,
         }),
+        Event::PullRequestLinked { pull_request } => {
+            EventBody::PullRequestLinked(fabro_types::PullRequestLinkedProps {
+                pull_request: pull_request.clone(),
+            })
+        }
+        Event::PullRequestUnlinked { pull_request } => {
+            EventBody::PullRequestUnlinked(fabro_types::PullRequestUnlinkedProps {
+                pull_request: pull_request.clone(),
+            })
+        }
         Event::PullRequestFailed { error } => {
             EventBody::PullRequestFailed(fabro_types::PullRequestFailedProps {
                 error: error.clone(),

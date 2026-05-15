@@ -337,7 +337,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
                 </span>
               </Tooltip>
             )}
-            {run.number != null && run.pullRequestUrl && (
+            {run.pullRequestUrl && (
               <PullRequestChip
                 number={run.number}
                 url={run.pullRequestUrl}

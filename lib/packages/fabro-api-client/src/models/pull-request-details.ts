@@ -27,20 +27,20 @@ import type { PullRequestDetailsTimestamps } from './pull-request-details-timest
 import type { PullRequestUser } from './pull-request-user';
 
 /**
- * Stored pull request record plus live GitHub-enriched fields.
+ * Stored pull request record plus live GitHub-enriched fields when available.
  */
 export interface PullRequestDetails {
     'pull_request': PullRequest;
-    'state': string;
-    'draft': boolean;
-    'merged': boolean;
-    'merged_at': string | null;
-    'mergeable': boolean | null;
-    'additions': number;
-    'deletions': number;
-    'changed_files': number;
-    'comments': number;
-    'checks': Array<CheckRun>;
-    'author': PullRequestUser;
-    'timestamps': PullRequestDetailsTimestamps;
+    'state'?: string | null;
+    'draft'?: boolean | null;
+    'merged'?: boolean | null;
+    'merged_at'?: string | null;
+    'mergeable'?: boolean | null;
+    'additions'?: number | null;
+    'deletions'?: number | null;
+    'changed_files'?: number | null;
+    'comments'?: number | null;
+    'checks'?: Array<CheckRun> | null;
+    'author'?: PullRequestUser | null;
+    'timestamps'?: PullRequestDetailsTimestamps | null;
 }
