@@ -266,44 +266,44 @@ mod tests {
     async fn resolve_registers_custom_env_backed_provider() {
         let catalog = catalog_with(
             r#"
-[providers.venice]
-display_name = "Venice"
+[providers.acme]
+display_name = "Acme"
 adapter = "openai_compatible"
-base_url = "https://api.venice.ai/api/v1"
-credentials = ["env:VENICE_API_KEY"]
+base_url = "https://api.acme.test/v1"
+credentials = ["env:ACME_API_KEY"]
 
-[models."venice-large"]
-provider = "venice"
-display_name = "Venice Large"
-family = "venice"
+[models."acme-large"]
+provider = "acme"
+display_name = "Acme Large"
+family = "acme"
 default = true
 
-[models."venice-large".limits]
+[models."acme-large".limits]
 context_window = 128000
 
-[models."venice-large".features]
+[models."acme-large".features]
 tools = true
 vision = false
 reasoning = false
 effort = false
 "#,
         );
-        let source = test_source(&[("VENICE_API_KEY", "venice-key")]);
+        let source = test_source(&[("ACME_API_KEY", "acme-key")]);
 
         let resolved = source.resolve(&catalog).await.unwrap();
         let credential = resolved
             .credentials
             .iter()
-            .find(|credential| credential.provider == ProviderId::new("venice"))
+            .find(|credential| credential.provider == ProviderId::new("acme"))
             .expect("custom provider should resolve from the supplied catalog");
 
         assert_eq!(
             credential.auth_header.as_ref().unwrap(),
-            &crate::ApiKeyHeader::Bearer("venice-key".to_string(),)
+            &crate::ApiKeyHeader::Bearer("acme-key".to_string(),)
         );
         assert_eq!(
             credential.base_url.as_deref(),
-            Some("https://api.venice.ai/api/v1")
+            Some("https://api.acme.test/v1")
         );
     }
 

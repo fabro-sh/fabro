@@ -2158,7 +2158,7 @@ digraph Demo {
 digraph Demo {
     start [shape=Mdiamond]
     exit  [shape=Msquare]
-    work  [prompt="Do work", model="venice-model", provider="venice"]
+    work  [prompt="Do work", model="missing-model", provider="missing-provider"]
     start -> work -> exit
 }
 "#
@@ -2179,18 +2179,18 @@ digraph Demo {
         let llm_check = response.checks.sections[0]
             .checks
             .iter()
-            .find(|check| check.name == "LLM" && check.summary == "venice-model")
+            .find(|check| check.name == "LLM" && check.summary == "missing-model")
             .expect("preflight should include the requested custom LLM provider");
         assert_eq!(llm_check.status, types::PreflightCheckResultStatus::Warning);
         assert_eq!(
             llm_check.remediation.as_deref(),
-            Some("Provider \"venice\" is not configured")
+            Some("Provider \"missing-provider\" is not configured")
         );
         assert!(
             llm_check
                 .details
                 .iter()
-                .any(|detail| detail.text == "Provider: venice")
+                .any(|detail| detail.text == "Provider: missing-provider")
         );
     }
 
@@ -2198,23 +2198,23 @@ digraph Demo {
     async fn preflight_resolves_model_aliases_from_app_state_catalog() {
         let llm_catalog_settings: fabro_model::catalog::LlmCatalogSettings = toml::from_str(
             r#"
-[providers.venice]
-display_name = "Venice"
+[providers.acme]
+display_name = "Acme"
 adapter = "openai_compatible"
-base_url = "https://api.venice.ai/api/v1"
-credentials = ["env:VENICE_API_KEY"]
+base_url = "https://api.acme.test/v1"
+credentials = ["env:ACME_API_KEY"]
 
-[models."venice-large"]
-provider = "venice"
-display_name = "Venice Large"
-family = "venice"
+[models."acme-large"]
+provider = "acme"
+display_name = "Acme Large"
+family = "acme"
 default = true
 aliases = ["vl"]
 
-[models."venice-large".limits]
+[models."acme-large".limits]
 context_window = 128000
 
-[models."venice-large".features]
+[models."acme-large".features]
 tools = true
 vision = false
 reasoning = false
@@ -2251,18 +2251,18 @@ digraph Demo {
         let llm_check = response.checks.sections[0]
             .checks
             .iter()
-            .find(|check| check.name == "LLM" && check.summary == "venice-large")
+            .find(|check| check.name == "LLM" && check.summary == "acme-large")
             .expect("preflight should resolve the catalog alias");
         assert_eq!(llm_check.status, types::PreflightCheckResultStatus::Warning);
         assert_eq!(
             llm_check.remediation.as_deref(),
-            Some("Provider \"venice\" is not configured")
+            Some("Provider \"acme\" is not configured")
         );
         assert!(
             llm_check
                 .details
                 .iter()
-                .any(|detail| detail.text == "Provider: venice")
+                .any(|detail| detail.text == "Provider: acme")
         );
     }
 

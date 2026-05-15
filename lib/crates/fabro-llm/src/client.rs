@@ -714,8 +714,8 @@ mod tests {
         let catalog = catalog_with("");
         let result = Client::from_credentials(
             vec![ApiCredential {
-                provider:      fabro_model::ProviderId::new("venice"),
-                auth_header:   Some(ApiKeyHeader::Bearer("venice-key".to_string())),
+                provider:      fabro_model::ProviderId::new("custom"),
+                auth_header:   Some(ApiKeyHeader::Bearer("custom-key".to_string())),
                 extra_headers: HashMap::new(),
                 base_url:      None,
                 codex_mode:    false,
@@ -734,7 +734,7 @@ mod tests {
             Error::Configuration {
                 ref message,
                 ..
-            } if message == "Provider \"venice\" is not supported by credential-only registration"
+            } if message == "Provider \"custom\" is not supported by credential-only registration"
         ));
     }
 
@@ -765,23 +765,23 @@ mod tests {
     async fn from_credentials_registers_custom_openai_compatible_provider() {
         let catalog = catalog_with(
             r#"
-[providers.venice]
-display_name = "Venice"
+[providers.acme]
+display_name = "Acme"
 adapter = "openai_compatible"
-base_url = "https://api.venice.ai/api/v1"
-credentials = ["env:VENICE_API_KEY"]
-aliases = ["venice-ai"]
+base_url = "https://api.acme.test/v1"
+credentials = ["env:ACME_API_KEY"]
+aliases = ["acme-ai"]
 
-[models."venice-large"]
-provider = "venice"
-display_name = "Venice Large"
-family = "venice"
+[models."acme-large"]
+provider = "acme"
+display_name = "Acme Large"
+family = "acme"
 default = true
 
-[models."venice-large".limits]
+[models."acme-large".limits]
 context_window = 128000
 
-[models."venice-large".features]
+[models."acme-large".features]
 tools = true
 vision = false
 reasoning = false
@@ -791,8 +791,8 @@ effort = false
 
         let client = Client::from_credentials(
             vec![ApiCredential {
-                provider:      fabro_model::ProviderId::new("venice"),
-                auth_header:   Some(ApiKeyHeader::Bearer("venice-key".to_string())),
+                provider:      fabro_model::ProviderId::new("acme"),
+                auth_header:   Some(ApiKeyHeader::Bearer("acme-key".to_string())),
                 extra_headers: HashMap::new(),
                 base_url:      None,
                 codex_mode:    false,
@@ -804,32 +804,32 @@ effort = false
         .await
         .unwrap();
 
-        assert_eq!(client.provider_names(), vec!["venice"]);
-        assert!(client.has_provider("venice"));
-        assert!(client.has_provider("venice-ai"));
+        assert_eq!(client.provider_names(), vec!["acme"]);
+        assert!(client.has_provider("acme"));
+        assert!(client.has_provider("acme-ai"));
     }
 
     #[tokio::test]
     async fn resolve_provider_accepts_catalog_provider_alias() {
         let catalog = catalog_with(
             r#"
-[providers.venice]
-display_name = "Venice"
+[providers.acme]
+display_name = "Acme"
 adapter = "openai_compatible"
-base_url = "https://api.venice.ai/api/v1"
-credentials = ["env:VENICE_API_KEY"]
-aliases = ["venice-ai"]
+base_url = "https://api.acme.test/v1"
+credentials = ["env:ACME_API_KEY"]
+aliases = ["acme-ai"]
 
-[models."venice-large"]
-provider = "venice"
-display_name = "Venice Large"
-family = "venice"
+[models."acme-large"]
+provider = "acme"
+display_name = "Acme Large"
+family = "acme"
 default = true
 
-[models."venice-large".limits]
+[models."acme-large".limits]
 context_window = 128000
 
-[models."venice-large".features]
+[models."acme-large".features]
 tools = true
 vision = false
 reasoning = false
@@ -839,8 +839,8 @@ effort = false
 
         let client = Client::from_credentials(
             vec![ApiCredential {
-                provider:      fabro_model::ProviderId::new("venice"),
-                auth_header:   Some(ApiKeyHeader::Bearer("venice-key".to_string())),
+                provider:      fabro_model::ProviderId::new("acme"),
+                auth_header:   Some(ApiKeyHeader::Bearer("acme-key".to_string())),
                 extra_headers: HashMap::new(),
                 base_url:      None,
                 codex_mode:    false,
@@ -852,11 +852,11 @@ effort = false
         .await
         .unwrap();
         let mut request = test_request();
-        request.provider = Some("venice-ai".to_string());
+        request.provider = Some("acme-ai".to_string());
 
         let provider = client.resolve_provider(&request).unwrap();
 
-        assert_eq!(provider.name(), "venice");
+        assert_eq!(provider.name(), "acme");
     }
 
     #[tokio::test]

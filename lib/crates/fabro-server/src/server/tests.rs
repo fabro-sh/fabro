@@ -2263,22 +2263,22 @@ async fn validate_endpoint_returns_workflow_summary_without_preflight_checks() {
 async fn validate_endpoint_uses_app_state_catalog_for_model_diagnostics() {
     let llm_catalog_settings: LlmCatalogSettings = toml::from_str(
         r#"
-[providers.venice]
-display_name = "Venice"
+[providers.acme]
+display_name = "Acme"
 adapter = "openai_compatible"
-base_url = "https://api.venice.ai/api/v1"
-credentials = ["env:VENICE_API_KEY"]
+base_url = "https://api.acme.test/v1"
+credentials = ["env:ACME_API_KEY"]
 
-[models."venice-large"]
-provider = "venice"
-display_name = "Venice Large"
-family = "venice"
+[models."acme-large"]
+provider = "acme"
+display_name = "Acme Large"
+family = "acme"
 default = true
 
-[models."venice-large".limits]
+[models."acme-large".limits]
 context_window = 128000
 
-[models."venice-large".features]
+[models."acme-large".features]
 tools = true
 vision = false
 reasoning = false
@@ -2293,7 +2293,7 @@ effort = false
     let dot = r#"digraph Test {
         graph [goal="Test"]
         start [shape=Mdiamond]
-        work [model="venice-large", provider="venice", prompt="Do it"]
+        work [model="acme-large", provider="acme", prompt="Do it"]
         exit  [shape=Msquare]
         start -> work -> exit
     }"#;
@@ -3998,7 +3998,7 @@ async fn list_models_unknown_provider_returns_empty_page() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(api("/models?provider=venice"))
+        .uri(api("/models?provider=missing-provider"))
         .body(Body::empty())
         .unwrap();
 
@@ -4012,23 +4012,23 @@ async fn list_models_unknown_provider_returns_empty_page() {
 async fn list_models_uses_app_state_catalog_overrides() {
     let llm_catalog_settings: LlmCatalogSettings = toml::from_str(
         r#"
-[providers.venice]
-display_name = "Venice"
+[providers.acme]
+display_name = "Acme"
 adapter = "openai_compatible"
-base_url = "https://api.venice.ai/api/v1"
-credentials = ["env:VENICE_API_KEY"]
+base_url = "https://api.acme.test/v1"
+credentials = ["env:ACME_API_KEY"]
 priority = 120
 
-[models."venice-large"]
-provider = "venice"
-display_name = "Venice Large"
-family = "venice"
+[models."acme-large"]
+provider = "acme"
+display_name = "Acme Large"
+family = "acme"
 default = true
 
-[models."venice-large".limits]
+[models."acme-large".limits]
 context_window = 128000
 
-[models."venice-large".features]
+[models."acme-large".features]
 tools = true
 vision = false
 reasoning = false
@@ -4043,7 +4043,7 @@ effort = false
 
     let req = Request::builder()
         .method("GET")
-        .uri(api("/models?provider=venice"))
+        .uri(api("/models?provider=acme"))
         .body(Body::empty())
         .unwrap();
 
@@ -4051,8 +4051,8 @@ effort = false
     let body = response_json!(response, StatusCode::OK).await;
     let models = body["data"].as_array().unwrap();
     assert_eq!(models.len(), 1);
-    assert_eq!(models[0]["id"], "venice-large");
-    assert_eq!(models[0]["provider"], "venice");
+    assert_eq!(models[0]["id"], "acme-large");
+    assert_eq!(models[0]["provider"], "acme");
 }
 
 #[tokio::test]
@@ -9444,7 +9444,7 @@ async fn create_completion_unknown_provider_returns_clear_error() {
         .header("content-type", "application/json")
         .body(Body::from(
             serde_json::json!({
-                "provider": "venice",
+                "provider": "missing-provider",
                 "model": "gpt-5.4",
                 "stream": false,
                 "messages": [
@@ -9462,7 +9462,7 @@ async fn create_completion_unknown_provider_returns_clear_error() {
     let body = response_json!(response, StatusCode::BAD_REQUEST).await;
     assert_eq!(
         body["errors"][0]["detail"],
-        "Provider \"venice\" is not configured"
+        "Provider \"missing-provider\" is not configured"
     );
 }
 
@@ -9470,23 +9470,23 @@ async fn create_completion_unknown_provider_returns_clear_error() {
 async fn create_completion_default_model_uses_app_state_catalog() {
     let llm_catalog_settings: LlmCatalogSettings = toml::from_str(
         r#"
-[providers.venice]
-display_name = "Venice"
+[providers.acme]
+display_name = "Acme"
 adapter = "openai_compatible"
-base_url = "https://api.venice.ai/api/v1"
-credentials = ["env:VENICE_API_KEY"]
+base_url = "https://api.acme.test/v1"
+credentials = ["env:ACME_API_KEY"]
 priority = 120
 
-[models."venice-large"]
-provider = "venice"
-display_name = "Venice Large"
-family = "venice"
+[models."acme-large"]
+provider = "acme"
+display_name = "Acme Large"
+family = "acme"
 default = true
 
-[models."venice-large".limits]
+[models."acme-large".limits]
 context_window = 128000
 
-[models."venice-large".features]
+[models."acme-large".features]
 tools = true
 vision = false
 reasoning = false
@@ -9523,7 +9523,7 @@ effort = false
         body["errors"][0]["detail"]
             .as_str()
             .unwrap()
-            .contains("Provider 'venice' not registered"),
+            .contains("Provider 'acme' not registered"),
         "unexpected error body: {body:?}"
     );
 }

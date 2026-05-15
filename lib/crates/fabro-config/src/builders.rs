@@ -686,22 +686,22 @@ _version = 1
 [server.auth]
 methods = ["dev-token"]
 
-[llm.providers.venice]
-display_name = "Venice"
+[llm.providers.acme]
+display_name = "Acme"
 adapter = "openai_compatible"
-base_url = "https://api.venice.ai/api/v1"
-credentials = ["env:VENICE_API_KEY"]
+base_url = "https://api.acme.test/v1"
+credentials = ["env:ACME_API_KEY"]
 
-[llm.models."venice-large"]
-provider = "venice"
-display_name = "Venice Large"
-family = "venice"
+[llm.models."acme-large"]
+provider = "acme"
+display_name = "Acme Large"
+family = "acme"
 default = true
 
-[llm.models."venice-large".limits]
+[llm.models."acme-large".limits]
 context_window = 128000
 
-[llm.models."venice-large".features]
+[llm.models."acme-large".features]
 tools = true
 vision = false
 reasoning = false
@@ -718,9 +718,9 @@ effort = false
 
         assert_eq!(
             catalog
-                .get("venice-large")
+                .get("acme-large")
                 .map(|model| model.provider.clone()),
-            Some(fabro_model::ProviderId::new("venice"))
+            Some(fabro_model::ProviderId::new("acme"))
         );
     }
 }

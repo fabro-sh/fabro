@@ -1471,23 +1471,23 @@ mod tests {
     fn api_backend_resolves_custom_catalog_provider_profile() {
         let settings: LlmCatalogSettings = toml::from_str(
             r#"
-[providers.venice]
+[providers.acme]
 adapter = "openai_compatible"
-base_url = "https://api.venice.ai/api/v1"
-credentials = ["env:VENICE_API_KEY"]
+base_url = "https://api.acme.test/v1"
+credentials = ["env:ACME_API_KEY"]
 
-[models.venice-llama]
-provider = "venice"
-display_name = "Venice Llama"
+[models.acme-llama]
+provider = "acme"
+display_name = "Acme Llama"
 family = "llama"
 training = "2026-01"
 default = true
 
-[models.venice-llama.limits]
+[models.acme-llama.limits]
 context_window = 131072
 max_output = 8192
 
-[models.venice-llama.features]
+[models.acme-llama.features]
 tools = true
 vision = false
 reasoning = false
@@ -1497,9 +1497,9 @@ effort = false
         .unwrap();
         let catalog = Arc::new(Catalog::from_builtin_with_overrides(&settings).unwrap());
         let backend = AgentApiBackend::new_with_catalog(
-            "venice-llama".to_string(),
+            "acme-llama".to_string(),
             Provider::OpenAiCompatible,
-            ProviderId::from("venice"),
+            ProviderId::from("acme"),
             AgentProfileKind::OpenAi,
             Vec::new(),
             Arc::new(EnvCredentialSource::new()),
@@ -1508,10 +1508,10 @@ effort = false
         );
 
         let provider = backend
-            .resolve_provider_context("venice-llama", None)
+            .resolve_provider_context("acme-llama", None)
             .unwrap();
 
-        assert_eq!(provider.provider_id, ProviderId::from("venice"));
+        assert_eq!(provider.provider_id, ProviderId::from("acme"));
         assert_eq!(provider.profile_kind, AgentProfileKind::OpenAi);
         assert_eq!(provider.provider, Provider::OpenAiCompatible);
     }

@@ -952,22 +952,22 @@ effort = false
     async fn resolve_uses_custom_vault_backed_provider() {
         let catalog = catalog_with(
             r#"
-[providers.venice]
-display_name = "Venice"
+[providers.acme]
+display_name = "Acme"
 adapter = "openai_compatible"
-base_url = "https://api.venice.ai/api/v1"
-credentials = ["credential:venice"]
+base_url = "https://api.acme.test/v1"
+credentials = ["credential:acme"]
 
-[models."venice-large"]
-provider = "venice"
-display_name = "Venice Large"
-family = "venice"
+[models."acme-large"]
+provider = "acme"
+display_name = "Acme Large"
+family = "acme"
 default = true
 
-[models."venice-large".limits]
+[models."acme-large".limits]
 context_window = 128000
 
-[models."venice-large".features]
+[models."acme-large".features]
 tools = true
 vision = false
 reasoning = false
@@ -976,10 +976,10 @@ effort = false
         );
         let dir = tempfile::tempdir().unwrap();
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
-        vault_set_credential(&mut vault, "venice", &AuthCredential {
-            provider: ProviderId::new("venice"),
+        vault_set_credential(&mut vault, "acme", &AuthCredential {
+            provider: ProviderId::new("acme"),
             details:  AuthDetails::ApiKey {
-                key: "venice-key".to_string(),
+                key: "acme-key".to_string(),
             },
         })
         .unwrap();
@@ -987,7 +987,7 @@ effort = false
 
         let resolved = resolver
             .resolve(
-                ProviderId::new("venice"),
+                ProviderId::new("acme"),
                 CredentialUsage::ApiRequest,
                 &catalog,
             )
@@ -997,15 +997,12 @@ effort = false
         let ResolvedCredential::Api(api) = resolved else {
             panic!("expected api credential");
         };
-        assert_eq!(api.provider, ProviderId::new("venice"));
+        assert_eq!(api.provider, ProviderId::new("acme"));
         assert_eq!(
             api.auth_header,
-            Some(ApiKeyHeader::Bearer("venice-key".to_string()))
+            Some(ApiKeyHeader::Bearer("acme-key".to_string()))
         );
-        assert_eq!(
-            api.base_url.as_deref(),
-            Some("https://api.venice.ai/api/v1")
-        );
+        assert_eq!(api.base_url.as_deref(), Some("https://api.acme.test/v1"));
     }
 
     #[tokio::test]

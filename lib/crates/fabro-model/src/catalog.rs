@@ -1558,25 +1558,25 @@ enabled = false
     fn builtin_overrides_add_custom_openai_compatible_provider_and_model() {
         let catalog = Catalog::from_builtin_with_overrides(&minimal_settings(
             r#"
-[providers.venice]
-display_name = "Venice"
+[providers.acme]
+display_name = "Acme"
 adapter = "openai_compatible"
-base_url = "https://api.venice.ai/api/v1"
-credentials = ["env:VENICE_API_KEY"]
+base_url = "https://api.acme.test/v1"
+credentials = ["env:ACME_API_KEY"]
 priority = 120
-aliases = ["venice-ai"]
+aliases = ["acme-ai"]
 
-[models."venice-large"]
-provider = "venice"
-display_name = "Venice Large"
-family = "venice"
+[models."acme-large"]
+provider = "acme"
+display_name = "Acme Large"
+family = "acme"
 default = true
-aliases = ["vl"]
+aliases = ["al"]
 
-[models."venice-large".limits]
+[models."acme-large".limits]
 context_window = 128000
 
-[models."venice-large".features]
+[models."acme-large".features]
 tools = true
 vision = false
 reasoning = false
@@ -1586,14 +1586,14 @@ effort = false
         .expect("custom provider overlay should build");
 
         let provider = catalog
-            .provider(&ProviderId::new("venice-ai"))
+            .provider(&ProviderId::new("acme-ai"))
             .expect("provider alias should resolve");
-        assert_eq!(provider.id, ProviderId::new("venice"));
+        assert_eq!(provider.id, ProviderId::new("acme"));
         assert_eq!(provider.adapter, "openai_compatible");
 
-        let model = catalog.get("vl").expect("model alias should resolve");
-        assert_eq!(model.id, "venice-large");
-        assert_eq!(model.provider, ProviderId::new("venice"));
+        let model = catalog.get("al").expect("model alias should resolve");
+        assert_eq!(model.id, "acme-large");
+        assert_eq!(model.provider, ProviderId::new("acme"));
     }
 
     #[test]
@@ -1849,8 +1849,8 @@ effort = false
     fn catalog_from_settings_rejects_unknown_adapter() {
         let layer = minimal_settings(
             r#"
-[providers.venice]
-display_name = "Venice"
+[providers.test-provider]
+display_name = "Test Provider"
 adapter = "not_real"
 enabled = true
 "#,
@@ -1861,7 +1861,7 @@ enabled = true
         assert!(matches!(
             err,
             CatalogBuildError::UnknownAdapter { provider, adapter }
-                if provider == ProviderId::new("venice") && adapter == "not_real"
+                if provider == ProviderId::new("test-provider") && adapter == "not_real"
         ));
     }
 
@@ -2464,19 +2464,14 @@ reasoning_effort = "levels"
     }
 
     #[test]
-    fn catalog_providers_roundtrip_through_static_str() {
-        for model in Catalog::builtin().list(None) {
-            let roundtripped = Provider::from_id(&model.provider);
-            assert_eq!(
-                roundtripped,
-                Some(
-                    model
-                        .builtin_provider()
-                        .expect("catalog model provider should be a built-in provider")
-                ),
-                "catalog model '{}' provider {:?} does not roundtrip through ProviderId",
+    fn every_catalog_model_provider_has_catalog_provider() {
+        let catalog = Catalog::builtin();
+        for model in catalog.list(None) {
+            assert!(
+                catalog.provider(&model.provider).is_some(),
+                "catalog model '{}' provider {:?} has no provider metadata",
                 model.id,
-                model.provider
+                model.provider,
             );
         }
     }

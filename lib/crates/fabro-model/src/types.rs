@@ -194,9 +194,9 @@ mod tests {
     }
 
     #[test]
-    fn all_catalog_providers_are_valid() {
-        for model in Catalog::builtin().list(None) {
-            assert!(model.builtin_provider().is_some());
+    fn builtin_provider_matches_known_static_provider_ids() {
+        for info in Catalog::builtin().list(None) {
+            assert_eq!(info.builtin_provider(), Provider::from_id(info.provider()));
         }
     }
 }

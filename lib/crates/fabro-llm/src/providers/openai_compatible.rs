@@ -1358,23 +1358,23 @@ mod tests {
     fn catalog_api_id_is_used_for_provider_request_body() {
         let settings: LlmCatalogSettings = toml::from_str(
             r#"
-[providers.venice]
-display_name = "Venice"
+[providers.acme]
+display_name = "Acme"
 adapter = "openai_compatible"
-base_url = "https://api.venice.ai/api/v1"
-credentials = ["env:VENICE_API_KEY"]
+base_url = "https://api.acme.test/v1"
+credentials = ["env:ACME_API_KEY"]
 
-[models."venice-large"]
-provider = "venice"
-api_id = "venice/model-large"
-display_name = "Venice Large"
-family = "venice"
+[models."acme-large"]
+provider = "acme"
+api_id = "acme/model-large"
+display_name = "Acme Large"
+family = "acme"
 default = true
 
-[models."venice-large".limits]
+[models."acme-large".limits]
 context_window = 128000
 
-[models."venice-large".features]
+[models."acme-large".features]
 tools = true
 vision = false
 reasoning = false
@@ -1384,12 +1384,12 @@ effort = false
         .unwrap();
         let catalog = Catalog::from_builtin_with_overrides(&settings).unwrap();
         let mut request = minimal_request();
-        request.model = "venice-large".to_string();
+        request.model = "acme-large".to_string();
 
-        let body = build_api_request_with_catalog(&request, None, "venice", Some(&catalog));
+        let body = build_api_request_with_catalog(&request, None, "acme", Some(&catalog));
 
-        assert_eq!(request.model, "venice-large");
-        assert_eq!(body["model"], "venice/model-large");
+        assert_eq!(request.model, "acme-large");
+        assert_eq!(body["model"], "acme/model-large");
     }
 
     #[test]
