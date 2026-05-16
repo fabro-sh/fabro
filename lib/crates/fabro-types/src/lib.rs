@@ -94,8 +94,8 @@ pub type PullRequestRecord = PullRequest;
 pub type PullRequestDetail = PullRequestDetails;
 pub use run_title::{RunTitleError, infer_run_title, normalize_explicit_run_title};
 pub use sandbox_details::{
-    SandboxDetails, SandboxNetwork, SandboxNetworkPolicy, SandboxNetworkRuleSet,
-    SandboxNetworkRuleSetMode, SandboxResources, SandboxState, SandboxTimestamps,
+    SandboxDetails, SandboxNetwork, SandboxNetworkPolicy, SandboxNetworkPolicyMode,
+    SandboxResources, SandboxState, SandboxTimestamps,
 };
 pub use sandbox_provider::SandboxProvider;
 pub use sandbox_services::{

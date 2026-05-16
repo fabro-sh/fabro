@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
+use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
 
 use crate::RunSandbox;
@@ -63,10 +64,10 @@ impl SandboxNetwork {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct SandboxNetworkPolicy {
-    pub allow: SandboxNetworkRuleSet,
-    pub block: SandboxNetworkRuleSet,
+    mode:  SandboxNetworkPolicyMode,
+    cidrs: Vec<String>,
 }
 
 impl SandboxNetworkPolicy {
@@ -74,17 +75,25 @@ impl SandboxNetworkPolicy {
         Self::default()
     }
 
+    pub fn mode(&self) -> SandboxNetworkPolicyMode {
+        self.mode
+    }
+
+    pub fn cidrs(&self) -> &[String] {
+        &self.cidrs
+    }
+
     pub fn open() -> Self {
         Self {
-            allow: SandboxNetworkRuleSet::all(),
-            block: SandboxNetworkRuleSet::none(),
+            mode:  SandboxNetworkPolicyMode::Open,
+            cidrs: Vec::new(),
         }
     }
 
     pub fn blocked() -> Self {
         Self {
-            allow: SandboxNetworkRuleSet::none(),
-            block: SandboxNetworkRuleSet::all(),
+            mode:  SandboxNetworkPolicyMode::Blocked,
+            cidrs: Vec::new(),
         }
     }
 
@@ -93,69 +102,71 @@ impl SandboxNetworkPolicy {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
+        let cidrs: Vec<String> = cidrs.into_iter().map(Into::into).collect();
+        if cidrs.is_empty() {
+            return Self::unknown();
+        }
         Self {
-            allow: SandboxNetworkRuleSet::cidrs(cidrs),
-            block: SandboxNetworkRuleSet::all(),
+            mode: SandboxNetworkPolicyMode::CidrAllowList,
+            cidrs,
+        }
+    }
+
+    pub fn essentials_only() -> Self {
+        Self {
+            mode:  SandboxNetworkPolicyMode::EssentialsOnly,
+            cidrs: Vec::new(),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-pub struct SandboxNetworkRuleSet {
-    pub mode:  SandboxNetworkRuleSetMode,
-    pub cidrs: Vec<String>,
-}
-
-impl SandboxNetworkRuleSet {
-    pub fn unknown() -> Self {
-        Self {
-            mode:  SandboxNetworkRuleSetMode::Unknown,
-            cidrs: Vec::new(),
-        }
-    }
-
-    pub fn none() -> Self {
-        Self {
-            mode:  SandboxNetworkRuleSetMode::None,
-            cidrs: Vec::new(),
-        }
-    }
-
-    pub fn all() -> Self {
-        Self {
-            mode:  SandboxNetworkRuleSetMode::All,
-            cidrs: Vec::new(),
-        }
-    }
-
-    pub fn cidrs<I, S>(cidrs: I) -> Self
+impl<'de> Deserialize<'de> for SandboxNetworkPolicy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
+        D: serde::Deserializer<'de>,
     {
-        Self {
-            mode:  SandboxNetworkRuleSetMode::Cidrs,
-            cidrs: cidrs.into_iter().map(Into::into).collect(),
+        #[derive(Deserialize)]
+        struct Wire {
+            #[serde(default)]
+            mode:  SandboxNetworkPolicyMode,
+            #[serde(default)]
+            cidrs: Vec<String>,
         }
-    }
 
-    pub fn essentials() -> Self {
-        Self {
-            mode:  SandboxNetworkRuleSetMode::Essentials,
-            cidrs: Vec::new(),
+        let wire = Wire::deserialize(deserializer)?;
+        match wire.mode {
+            SandboxNetworkPolicyMode::CidrAllowList => {
+                if wire.cidrs.is_empty() {
+                    return Err(D::Error::custom(
+                        "cidr_allow_list network policy requires at least one CIDR",
+                    ));
+                }
+                Ok(Self::allow_cidrs(wire.cidrs))
+            }
+            mode => {
+                if !wire.cidrs.is_empty() {
+                    return Err(D::Error::custom(
+                        "network policy CIDRs are only valid for cidr_allow_list mode",
+                    ));
+                }
+                Ok(Self {
+                    mode,
+                    cidrs: Vec::new(),
+                })
+            }
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SandboxNetworkRuleSetMode {
+pub enum SandboxNetworkPolicyMode {
     #[default]
     Unknown,
-    None,
-    All,
-    Cidrs,
-    Essentials,
+    Open,
+    Blocked,
+    CidrAllowList,
+    EssentialsOnly,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
@@ -205,10 +216,7 @@ mod tests {
                 disk_bytes:   None,
             },
             network:      SandboxNetwork {
-                egress:  SandboxNetworkPolicy {
-                    allow: SandboxNetworkRuleSet::cidrs(["10.0.0.0/8"]),
-                    block: SandboxNetworkRuleSet::all(),
-                },
+                egress:  SandboxNetworkPolicy::allow_cidrs(["10.0.0.0/8"]),
                 ingress: SandboxNetworkPolicy::unknown(),
             },
             labels:       BTreeMap::from([("run".to_string(), "abc".to_string())]),
@@ -238,24 +246,12 @@ mod tests {
                 },
                 "network": {
                     "egress": {
-                        "allow": {
-                            "mode": "cidrs",
-                            "cidrs": ["10.0.0.0/8"]
-                        },
-                        "block": {
-                            "mode": "all",
-                            "cidrs": []
-                        }
+                        "mode": "cidr_allow_list",
+                        "cidrs": ["10.0.0.0/8"]
                     },
                     "ingress": {
-                        "allow": {
-                            "mode": "unknown",
-                            "cidrs": []
-                        },
-                        "block": {
-                            "mode": "unknown",
-                            "cidrs": []
-                        }
+                        "mode": "unknown",
+                        "cidrs": []
                     }
                 },
                 "labels": {
@@ -312,30 +308,49 @@ mod tests {
     }
 
     #[test]
-    fn network_rule_set_helpers_cover_supported_modes() {
-        assert_eq!(SandboxNetworkRuleSet::unknown(), SandboxNetworkRuleSet {
-            mode:  SandboxNetworkRuleSetMode::Unknown,
-            cidrs: Vec::new(),
-        });
-        assert_eq!(SandboxNetworkRuleSet::none(), SandboxNetworkRuleSet {
-            mode:  SandboxNetworkRuleSetMode::None,
-            cidrs: Vec::new(),
-        });
-        assert_eq!(SandboxNetworkRuleSet::all(), SandboxNetworkRuleSet {
-            mode:  SandboxNetworkRuleSetMode::All,
-            cidrs: Vec::new(),
-        });
+    fn network_policy_helpers_cover_supported_modes() {
         assert_eq!(
-            SandboxNetworkRuleSet::cidrs(["192.168.0.0/16", "10.0.0.0/8"]),
-            SandboxNetworkRuleSet {
-                mode:  SandboxNetworkRuleSetMode::Cidrs,
-                cidrs: vec!["192.168.0.0/16".to_string(), "10.0.0.0/8".to_string()],
-            }
+            SandboxNetworkPolicy::unknown().mode(),
+            SandboxNetworkPolicyMode::Unknown
         );
-        assert_eq!(SandboxNetworkRuleSet::essentials(), SandboxNetworkRuleSet {
-            mode:  SandboxNetworkRuleSetMode::Essentials,
-            cidrs: Vec::new(),
-        });
+        assert_eq!(
+            SandboxNetworkPolicy::open().mode(),
+            SandboxNetworkPolicyMode::Open
+        );
+        assert_eq!(
+            SandboxNetworkPolicy::blocked().mode(),
+            SandboxNetworkPolicyMode::Blocked
+        );
+        assert_eq!(
+            SandboxNetworkPolicy::allow_cidrs(["192.168.0.0/16", "10.0.0.0/8"]).cidrs(),
+            ["192.168.0.0/16".to_string(), "10.0.0.0/8".to_string()]
+        );
+        assert_eq!(
+            SandboxNetworkPolicy::essentials_only().mode(),
+            SandboxNetworkPolicyMode::EssentialsOnly,
+        );
+    }
+
+    #[test]
+    fn network_policy_deserialization_rejects_empty_cidr_allow_list() {
+        assert!(
+            serde_json::from_value::<SandboxNetworkPolicy>(json!({
+                "mode": "cidr_allow_list",
+                "cidrs": []
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn network_policy_deserialization_rejects_cidrs_for_non_cidr_mode() {
+        assert!(
+            serde_json::from_value::<SandboxNetworkPolicy>(json!({
+                "mode": "open",
+                "cidrs": ["10.0.0.0/8"]
+            }))
+            .is_err()
+        );
     }
 
     #[test]

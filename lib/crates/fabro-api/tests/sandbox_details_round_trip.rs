@@ -5,15 +5,13 @@ use chrono::{TimeZone, Utc};
 use fabro_api::types::{
     SandboxDetails as ApiSandboxDetails, SandboxNetwork as ApiSandboxNetwork,
     SandboxNetworkPolicy as ApiSandboxNetworkPolicy,
-    SandboxNetworkRuleSet as ApiSandboxNetworkRuleSet,
-    SandboxNetworkRuleSetMode as ApiSandboxNetworkRuleSetMode,
-    SandboxProvider as ApiSandboxProvider, SandboxResources as ApiSandboxResources,
-    SandboxState as ApiSandboxState, SandboxTimestamps as ApiSandboxTimestamps,
+    SandboxNetworkPolicyMode as ApiSandboxNetworkPolicyMode, SandboxProvider as ApiSandboxProvider,
+    SandboxResources as ApiSandboxResources, SandboxState as ApiSandboxState,
+    SandboxTimestamps as ApiSandboxTimestamps,
 };
 use fabro_types::{
     RunSandbox, RunSandboxRuntime, SandboxDetails, SandboxNetwork, SandboxNetworkPolicy,
-    SandboxNetworkRuleSet, SandboxNetworkRuleSetMode, SandboxProvider, SandboxResources,
-    SandboxState, SandboxTimestamps,
+    SandboxNetworkPolicyMode, SandboxProvider, SandboxResources, SandboxState, SandboxTimestamps,
 };
 use serde_json::json;
 
@@ -26,8 +24,7 @@ fn sandbox_details_reuses_domain_types() {
     assert_same_type::<ApiSandboxTimestamps, SandboxTimestamps>();
     assert_same_type::<ApiSandboxNetwork, SandboxNetwork>();
     assert_same_type::<ApiSandboxNetworkPolicy, SandboxNetworkPolicy>();
-    assert_same_type::<ApiSandboxNetworkRuleSet, SandboxNetworkRuleSet>();
-    assert_same_type::<ApiSandboxNetworkRuleSetMode, SandboxNetworkRuleSetMode>();
+    assert_same_type::<ApiSandboxNetworkPolicyMode, SandboxNetworkPolicyMode>();
 }
 
 #[test]
@@ -63,10 +60,7 @@ fn sandbox_details_json_matches_openapi_shape() {
             disk_bytes:   None,
         },
         network:      SandboxNetwork {
-            egress:  SandboxNetworkPolicy {
-                allow: SandboxNetworkRuleSet::all(),
-                block: SandboxNetworkRuleSet::none(),
-            },
+            egress:  SandboxNetworkPolicy::open(),
             ingress: SandboxNetworkPolicy::blocked(),
         },
         labels:       BTreeMap::from([("run".to_string(), "abc".to_string())]),
@@ -100,24 +94,12 @@ fn sandbox_details_json_matches_openapi_shape() {
             },
             "network": {
                 "egress": {
-                    "allow": {
-                        "mode": "all",
-                        "cidrs": []
-                    },
-                    "block": {
-                        "mode": "none",
-                        "cidrs": []
-                    }
+                    "mode": "open",
+                    "cidrs": []
                 },
                 "ingress": {
-                    "allow": {
-                        "mode": "none",
-                        "cidrs": []
-                    },
-                    "block": {
-                        "mode": "all",
-                        "cidrs": []
-                    }
+                    "mode": "blocked",
+                    "cidrs": []
                 }
             },
             "labels": {

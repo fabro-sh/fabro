@@ -104,8 +104,8 @@ fn sandbox_details_requires_canonical_id_and_working_directory() {
         value["web_url"],
         "https://app.daytona.io/dashboard/sandboxes?sandboxId=ad65029a-2d01-421e-8936-49451653fcd9"
     );
-    assert_eq!(value["network"]["egress"]["allow"]["mode"], "unknown");
-    assert_eq!(value["network"]["ingress"]["block"]["mode"], "unknown");
+    assert_eq!(value["network"]["egress"]["mode"], "unknown");
+    assert_eq!(value["network"]["ingress"]["mode"], "unknown");
     assert!(value.get("name").is_none());
     assert!(value.get("identifier").is_none());
 }

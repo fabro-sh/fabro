@@ -88,43 +88,38 @@ function nullableCpu(cores: number | null | undefined): string {
 }
 
 type SandboxNetworkPolicy = SandboxNetwork["egress"];
-type SandboxNetworkRuleSet = SandboxNetworkPolicy["allow"];
-type SandboxNetworkRuleSetMode = SandboxNetworkRuleSet["mode"];
+type SandboxNetworkPolicyMode = SandboxNetworkPolicy["mode"];
 
-const NETWORK_MODE_DISPLAY: Record<SandboxNetworkRuleSetMode, string> = {
-  unknown:    "Unknown",
-  none:       "None",
-  all:        "All",
-  cidrs:      "CIDRs",
-  essentials: "Essentials",
+const NETWORK_POLICY_DISPLAY: Record<SandboxNetworkPolicyMode, string> = {
+  unknown:          "Unknown",
+  open:             "Open",
+  blocked:          "Blocked",
+  cidr_allow_list:  "CIDR allow list",
+  essentials_only:  "Essentials only",
 };
 
-function networkModeLabel(mode: SandboxNetworkRuleSetMode): string {
-  return NETWORK_MODE_DISPLAY[mode] ?? mode;
-}
-
 function networkPolicySummary(policy: SandboxNetworkPolicy): string {
-  const allow = policy.allow.mode;
-  const block = policy.block.mode;
-
-  if (allow === "unknown" && block === "unknown") return "Unknown";
-  if (allow === "all" && block === "none") return "Open";
-  if (allow === "none" && block === "all") return "Blocked";
-  if (allow === "essentials") return "Essentials only";
-  if (allow === "cidrs") return "CIDR allow list";
-  return `Allow: ${networkModeLabel(allow)} · Block: ${networkModeLabel(block)}`;
+  return NETWORK_POLICY_DISPLAY[policy.mode] ?? policy.mode;
 }
 
 interface RowProps {
   label: string;
-  value: string;
+  value: React.ReactNode;
   valueClassName?: string;
+}
+
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-sm">
+      <span className="text-fg-3">{label}</span>
+      {children}
+    </div>
+  );
 }
 
 function Row({ label, value, valueClassName }: RowProps) {
   return (
-    <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-sm">
-      <span className="text-fg-3">{label}</span>
+    <DetailRow label={label}>
       <span
         className={`text-right font-mono text-xs text-fg-2 ${
           valueClassName ?? ""
@@ -132,14 +127,13 @@ function Row({ label, value, valueClassName }: RowProps) {
       >
         {value}
       </span>
-    </div>
+    </DetailRow>
   );
 }
 
 function LinkRow({ label, href, text }: { label: string; href: string; text: string }) {
   return (
-    <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-sm">
-      <span className="text-fg-3">{label}</span>
+    <DetailRow label={label}>
       <a
         href={href}
         target="_blank"
@@ -149,7 +143,7 @@ function LinkRow({ label, href, text }: { label: string; href: string; text: str
         <span className="truncate">{text}</span>
         <ArrowTopRightOnSquareIcon className="size-3.5 shrink-0" aria-hidden="true" />
       </a>
-    </div>
+    </DetailRow>
   );
 }
 
@@ -231,19 +225,17 @@ function ResourcesPanel({ resources }: { resources: SandboxResources }) {
 }
 
 function NetworkPanel({ network }: { network: SandboxNetwork }) {
-  const cidrRows: Array<{ label: string; ruleSet: SandboxNetworkRuleSet }> = [
-    { label: "Egress allow CIDRs", ruleSet: network.egress.allow },
-    { label: "Egress block CIDRs", ruleSet: network.egress.block },
-    { label: "Ingress allow CIDRs", ruleSet: network.ingress.allow },
-    { label: "Ingress block CIDRs", ruleSet: network.ingress.block },
-  ].filter(({ ruleSet }) => ruleSet.mode === "cidrs");
+  const cidrRows: Array<{ label: string; policy: SandboxNetworkPolicy }> = [
+    { label: "Egress CIDRs", policy: network.egress },
+    { label: "Ingress CIDRs", policy: network.ingress },
+  ].filter(({ policy }) => policy.mode === "cidr_allow_list");
 
   return (
     <Panel title="Network">
       <Row label="Egress" value={networkPolicySummary(network.egress)} />
       <Row label="Ingress" value={networkPolicySummary(network.ingress)} />
-      {cidrRows.map(({ label, ruleSet }) => (
-        <Row key={label} label={label} value={ruleSet.cidrs.join(", ") || EMPTY_VALUE} />
+      {cidrRows.map(({ label, policy }) => (
+        <Row key={label} label={label} value={policy.cidrs.join(", ") || EMPTY_VALUE} />
       ))}
     </Panel>
   );

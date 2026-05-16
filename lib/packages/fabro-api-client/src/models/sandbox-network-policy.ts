@@ -15,12 +15,15 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { SandboxNetworkRuleSet } from './sandbox-network-rule-set';
+import type { SandboxNetworkPolicyMode } from './sandbox-network-policy-mode';
 
 /**
- * Allow and block policy for one network direction.
+ * Public-network policy for one direction.
  */
 export interface SandboxNetworkPolicy {
-    'allow': SandboxNetworkRuleSet;
-    'block': SandboxNetworkRuleSet;
+    'mode': SandboxNetworkPolicyMode;
+    /**
+     * CIDR entries when `mode` is `cidr_allow_list`; empty for other modes.
+     */
+    'cidrs': Array<string>;
 }

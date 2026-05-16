@@ -124,22 +124,17 @@ function networkDetails(
   overrides: Partial<SandboxDetails["network"]> = {},
 ): SandboxDetails["network"] {
   return {
-    egress:  networkPolicy("unknown", "unknown"),
-    ingress: networkPolicy("unknown", "unknown"),
+    egress:  networkPolicy("unknown"),
+    ingress: networkPolicy("unknown"),
     ...overrides,
   };
 }
 
 function networkPolicy(
-  allowMode: SandboxDetails["network"]["egress"]["allow"]["mode"],
-  blockMode: SandboxDetails["network"]["egress"]["block"]["mode"],
-  allowCidrs: string[] = [],
-  blockCidrs: string[] = [],
+  mode: SandboxDetails["network"]["egress"]["mode"],
+  cidrs: string[] = [],
 ): SandboxDetails["network"]["egress"] {
-  return {
-    allow: { mode: allowMode, cidrs: allowCidrs },
-    block: { mode: blockMode, cidrs: blockCidrs },
-  };
+  return { mode, cidrs };
 }
 
 function textContent(renderer: TestRenderer.ReactTestRenderer): string {
@@ -208,8 +203,8 @@ describe("RunSandbox route", () => {
         disk_bytes:   undefined,
       },
       network:           networkDetails({
-        egress:  networkPolicy("all", "none"),
-        ingress: networkPolicy("none", "all"),
+        egress:  networkPolicy("open"),
+        ingress: networkPolicy("blocked"),
       }),
       labels:            { run: "abc" },
       timestamps:        {
@@ -300,8 +295,8 @@ describe("RunSandbox route", () => {
   test("renders unknown network policies", () => {
     currentDetails = sandboxDetails({
       network: networkDetails({
-        egress:  networkPolicy("unknown", "unknown"),
-        ingress: networkPolicy("unknown", "unknown"),
+        egress:  networkPolicy("unknown"),
+        ingress: networkPolicy("unknown"),
       }),
     });
     const renderer = renderRoute();
@@ -316,12 +311,8 @@ describe("RunSandbox route", () => {
   test("renders blocked, essentials, and CIDR network policies", () => {
     currentDetails = sandboxDetails({
       network: networkDetails({
-        egress:  networkPolicy(
-          "cidrs",
-          "all",
-          ["10.0.0.0/8", "192.168.0.0/16"],
-        ),
-        ingress: networkPolicy("essentials", "all"),
+        egress:  networkPolicy("cidr_allow_list", ["10.0.0.0/8", "192.168.0.0/16"]),
+        ingress: networkPolicy("essentials_only"),
       }),
     });
     const renderer = renderRoute();

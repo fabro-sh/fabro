@@ -1405,10 +1405,8 @@ mod retrieve_sandbox_tests {
         assert!(body.get("name").is_none());
         assert!(body.get("identifier").is_none());
         assert!(body["resources"].is_object());
-        assert_eq!(body["network"]["egress"]["allow"]["mode"], "unknown");
-        assert_eq!(body["network"]["egress"]["block"]["mode"], "unknown");
-        assert_eq!(body["network"]["ingress"]["allow"]["mode"], "unknown");
-        assert_eq!(body["network"]["ingress"]["block"]["mode"], "unknown");
+        assert_eq!(body["network"]["egress"]["mode"], "unknown");
+        assert_eq!(body["network"]["ingress"]["mode"], "unknown");
         assert!(body["timestamps"].is_object());
     }
 

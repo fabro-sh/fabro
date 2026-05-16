@@ -402,13 +402,8 @@ fn main() {
             &[],
         ),
         (
-            "SandboxNetworkRuleSet",
-            "fabro_types::SandboxNetworkRuleSet",
-            &[],
-        ),
-        (
-            "SandboxNetworkRuleSetMode",
-            "fabro_types::SandboxNetworkRuleSetMode",
+            "SandboxNetworkPolicyMode",
+            "fabro_types::SandboxNetworkPolicyMode",
             &[],
         ),
         ("SandboxService", "fabro_types::SandboxService", &[]),

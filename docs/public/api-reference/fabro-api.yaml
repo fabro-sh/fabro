@@ -8081,42 +8081,30 @@ components:
           minimum: 0
           description: Disk size in bytes. Null when unavailable.
 
-    SandboxNetworkRuleSetMode:
-      description: How a sandbox network allow/block rule set is represented.
+    SandboxNetworkPolicyMode:
+      description: Provider-neutral public-network policy for one direction.
       type: string
       enum:
         - unknown
-        - none
-        - all
-        - cidrs
-        - essentials
+        - open
+        - blocked
+        - cidr_allow_list
+        - essentials_only
 
-    SandboxNetworkRuleSet:
-      description: A provider-neutral public-network rule set.
+    SandboxNetworkPolicy:
+      description: Public-network policy for one direction.
       type: object
       required:
         - mode
         - cidrs
       properties:
         mode:
-          $ref: "#/components/schemas/SandboxNetworkRuleSetMode"
+          $ref: "#/components/schemas/SandboxNetworkPolicyMode"
         cidrs:
           type: array
           items:
             type: string
-          description: CIDR entries when `mode` is `cidrs`; empty for other modes.
-
-    SandboxNetworkPolicy:
-      description: Allow and block policy for one network direction.
-      type: object
-      required:
-        - allow
-        - block
-      properties:
-        allow:
-          $ref: "#/components/schemas/SandboxNetworkRuleSet"
-        block:
-          $ref: "#/components/schemas/SandboxNetworkRuleSet"
+          description: CIDR entries when `mode` is `cidr_allow_list`; empty for other modes.
 
     SandboxNetwork:
       description: Provider-neutral public-network policy for sandbox egress and ingress.

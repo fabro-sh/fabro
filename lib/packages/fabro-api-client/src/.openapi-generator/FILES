@@ -302,9 +302,8 @@ models/run.ts
 models/sandbox-details.ts
 models/sandbox-file-entry.ts
 models/sandbox-file-list-response.ts
+models/sandbox-network-policy-mode.ts
 models/sandbox-network-policy.ts
-models/sandbox-network-rule-set-mode.ts
-models/sandbox-network-rule-set.ts
 models/sandbox-network.ts
 models/sandbox-provider.ts
 models/sandbox-resources.ts

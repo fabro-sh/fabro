@@ -15,15 +15,15 @@
 
 
 /**
- * How a sandbox network allow/block rule set is represented.
+ * Provider-neutral public-network policy for one direction.
  */
 
-export const SandboxNetworkRuleSetMode = {
+export const SandboxNetworkPolicyMode = {
     UNKNOWN: 'unknown',
-    NONE: 'none',
-    ALL: 'all',
-    CIDRS: 'cidrs',
-    ESSENTIALS: 'essentials'
+    OPEN: 'open',
+    BLOCKED: 'blocked',
+    CIDR_ALLOW_LIST: 'cidr_allow_list',
+    ESSENTIALS_ONLY: 'essentials_only'
 } as const;
 
-export type SandboxNetworkRuleSetMode = typeof SandboxNetworkRuleSetMode[keyof typeof SandboxNetworkRuleSetMode];
+export type SandboxNetworkPolicyMode = typeof SandboxNetworkPolicyMode[keyof typeof SandboxNetworkPolicyMode];

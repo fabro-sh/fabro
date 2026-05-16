@@ -403,7 +403,7 @@ mod daytona {
     };
 
     use super::parse_rfc3339_utc;
-    use crate::daytona::DaytonaSandbox;
+    use crate::daytona::{DAYTONA_DASHBOARD_SANDBOXES_URL, DaytonaSandbox};
 
     pub(super) async fn daytona_details(
         record: &RunSandbox,
@@ -498,7 +498,7 @@ mod daytona {
     }
 
     fn daytona_dashboard_url(sandbox_id: &str) -> String {
-        format!("https://app.daytona.io/dashboard/sandboxes?sandboxId={sandbox_id}")
+        format!("{DAYTONA_DASHBOARD_SANDBOXES_URL}?sandboxId={sandbox_id}")
     }
 
     fn daytona_network(
