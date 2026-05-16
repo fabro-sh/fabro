@@ -353,7 +353,6 @@ models/session-message.ts
 models/session-record.ts
 models/session-status.ts
 models/session-summary.ts
-models/session-tools-response.ts
 models/slack-integration-settings.ts
 models/ssh-access-request.ts
 models/ssh-access-response.ts
@@ -372,7 +371,6 @@ models/submit-answer-request.ts
 models/submit-answer-selected-request.ts
 models/submit-answer-text-request.ts
 models/submit-answer-yes-request.ts
-models/submit-turn-queued-response.ts
 models/submit-turn-request.ts
 models/success-reason.ts
 models/system-actor-kind.ts

@@ -36,10 +36,6 @@ import type { SessionEventEnvelope } from '../models';
 // @ts-ignore
 import type { SessionRecord } from '../models';
 // @ts-ignore
-import type { SessionToolsResponse } from '../models';
-// @ts-ignore
-import type { SubmitTurnQueuedResponse } from '../models';
-// @ts-ignore
 import type { SubmitTurnRequest } from '../models';
 // @ts-ignore
 import type { TurnRecord } from '../models';
@@ -259,8 +255,8 @@ export const SessionsApiAxiosParamCreator = function (configuration?: Configurat
             };
         },
         /**
-         *
-         * @summary List durable session events
+         * Returns JSON replay by default. When the `Accept` header includes `text/event-stream`, replays durable events from `since_seq` or `Last-Event-ID`, then stays attached for live events.
+         * @summary List or stream session events
          * @param {string} id
          * @param {number} [sinceSeq]
          * @param {*} [options] Override http request option.
@@ -292,47 +288,7 @@ export const SessionsApiAxiosParamCreator = function (configuration?: Configurat
                 localVarQueryParameter['since_seq'] = sinceSeq;
             }
 
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary List tools available to a session
-         * @param {string} id
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        listSessionTools: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'id' is not null or undefined
-            assertParamExists('listSessionTools', 'id', id)
-            const localVarPath = `/api/v1/sessions/{id}/tools`
-                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            // authentication SessionCookie required
-
-            // authentication BearerAuth required
-            // http bearer authentication required
-            await setBearerAuthToObject(localVarHeaderParameter, configuration)
-
-            localVarHeaderParameter['Accept'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json,text/event-stream';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -420,11 +376,11 @@ export const SessionsApiAxiosParamCreator = function (configuration?: Configurat
             };
         },
         /**
-         *
+         * Starts a streamed turn immediately. Queued/background turns are not supported in this API version; `stream=false` returns 400.
          * @summary Submit a session turn
          * @param {string} id
          * @param {SubmitTurnRequest} submitTurnRequest
-         * @param {boolean} [stream]
+         * @param {boolean} [stream] Must be true when supplied.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -591,8 +547,8 @@ export const SessionsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         *
-         * @summary List durable session events
+         * Returns JSON replay by default. When the `Accept` header includes `text/event-stream`, replays durable events from `since_seq` or `Last-Event-ID`, then stays attached for live events.
+         * @summary List or stream session events
          * @param {string} id
          * @param {number} [sinceSeq]
          * @param {*} [options] Override http request option.
@@ -602,19 +558,6 @@ export const SessionsApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.listSessionEvents(id, sinceSeq, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['SessionsApi.listSessionEvents']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary List tools available to a session
-         * @param {string} id
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async listSessionTools(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SessionToolsResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.listSessionTools(id, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['SessionsApi.listSessionTools']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -643,11 +586,11 @@ export const SessionsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         *
+         * Starts a streamed turn immediately. Queued/background turns are not supported in this API version; `stream=false` returns 400.
          * @summary Submit a session turn
          * @param {string} id
          * @param {SubmitTurnRequest} submitTurnRequest
-         * @param {boolean} [stream]
+         * @param {boolean} [stream] Must be true when supplied.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -733,8 +676,8 @@ export const SessionsApiFactory = function (configuration?: Configuration, baseP
             return localVarFp.interruptSessionTurn(id, turnId, options).then((request) => request(axios, basePath));
         },
         /**
-         *
-         * @summary List durable session events
+         * Returns JSON replay by default. When the `Accept` header includes `text/event-stream`, replays durable events from `since_seq` or `Last-Event-ID`, then stays attached for live events.
+         * @summary List or stream session events
          * @param {string} id
          * @param {number} [sinceSeq]
          * @param {*} [options] Override http request option.
@@ -742,16 +685,6 @@ export const SessionsApiFactory = function (configuration?: Configuration, baseP
          */
         listSessionEvents(id: string, sinceSeq?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedSessionEventList> {
             return localVarFp.listSessionEvents(id, sinceSeq, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary List tools available to a session
-         * @param {string} id
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        listSessionTools(id: string, options?: RawAxiosRequestConfig): AxiosPromise<SessionToolsResponse> {
-            return localVarFp.listSessionTools(id, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -773,11 +706,11 @@ export const SessionsApiFactory = function (configuration?: Configuration, baseP
             return localVarFp.listSessions(options).then((request) => request(axios, basePath));
         },
         /**
-         *
+         * Starts a streamed turn immediately. Queued/background turns are not supported in this API version; `stream=false` returns 400.
          * @summary Submit a session turn
          * @param {string} id
          * @param {SubmitTurnRequest} submitTurnRequest
-         * @param {boolean} [stream]
+         * @param {boolean} [stream] Must be true when supplied.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -860,8 +793,8 @@ export class SessionsApi extends BaseAPI {
     }
 
     /**
-     *
-     * @summary List durable session events
+     * Returns JSON replay by default. When the `Accept` header includes `text/event-stream`, replays durable events from `since_seq` or `Last-Event-ID`, then stays attached for live events.
+     * @summary List or stream session events
      * @param {string} id
      * @param {number} [sinceSeq]
      * @param {*} [options] Override http request option.
@@ -869,17 +802,6 @@ export class SessionsApi extends BaseAPI {
      */
     public listSessionEvents(id: string, sinceSeq?: number, options?: RawAxiosRequestConfig) {
         return SessionsApiFp(this.configuration).listSessionEvents(id, sinceSeq, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary List tools available to a session
-     * @param {string} id
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public listSessionTools(id: string, options?: RawAxiosRequestConfig) {
-        return SessionsApiFp(this.configuration).listSessionTools(id, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -904,11 +826,11 @@ export class SessionsApi extends BaseAPI {
     }
 
     /**
-     *
+     * Starts a streamed turn immediately. Queued/background turns are not supported in this API version; `stream=false` returns 400.
      * @summary Submit a session turn
      * @param {string} id
      * @param {SubmitTurnRequest} submitTurnRequest
-     * @param {boolean} [stream]
+     * @param {boolean} [stream] Must be true when supplied.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */

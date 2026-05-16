@@ -3,12 +3,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
+use fabro_agent::cli::PermissionLevel;
 use fabro_agent::config::ToolApprovalFn;
 use fabro_agent::{
     AgentEvent, AgentProfile, AnthropicProfile, Error as AgentError, GeminiProfile, LocalSandbox,
@@ -25,14 +26,17 @@ use serde_json::json;
 use tokio::fs;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, warn};
 
-use super::super::{ActiveSessionTurnGuard, AppState, ListResponse};
+use super::super::session_runtime::{InterruptTurnError, SessionTurnLease, StartTurnError};
+use super::super::{AppState, ListResponse};
 use crate::error::ApiError;
 use crate::principal_middleware::RequiredUser;
 
-type SessionSseSender = mpsc::UnboundedSender<Result<Event, Infallible>>;
+const SESSION_SSE_BUFFER_CAPACITY: usize = 1024;
+
+type SessionSseSender = mpsc::Sender<Result<Event, Infallible>>;
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -50,7 +54,6 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             post(interrupt_turn),
         )
         .route("/sessions/{id}/events", get(list_events))
-        .route("/sessions/{id}/tools", get(list_tools))
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -119,16 +122,17 @@ async fn create_session(
 
     match state.session_store().create_session(record).await {
         Ok(record) => {
-            let _ = state
-                .session_store()
-                .append_event(SessionEventEnvelope::new(
+            let _ = append_session_event(
+                state.as_ref(),
+                SessionEventEnvelope::new(
                     session_id,
                     None,
                     "session.created",
                     json!({ "title": record.title }),
                     now,
-                ))
-                .await;
+                ),
+            )
+            .await;
             (StatusCode::CREATED, Json(record)).into_response()
         }
         Err(err) => {
@@ -194,8 +198,14 @@ async fn delete_session(
         Ok(id) => id,
         Err(err) => return err.into_response(),
     };
+    if state.session_runtimes().has_active_turn(session_id) {
+        return ApiError::new(StatusCode::CONFLICT, "Session has an active turn.").into_response();
+    }
     match state.session_store().delete_session(session_id).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Ok(()) => {
+            state.session_runtimes().unload_idle(session_id).await;
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(err) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
@@ -222,19 +232,21 @@ async fn submit_turn(
     }) else {
         return ApiError::not_found("Session not found.").into_response();
     };
-    let active_guard = if query.stream {
-        match state.try_lock_session_turn(session_id) {
-            Some(guard) => Some(guard),
-            None => {
-                return ApiError::new(StatusCode::CONFLICT, "Session already has an active turn.")
-                    .into_response();
-            }
-        }
-    } else {
-        None
-    };
+    if !query.stream {
+        return ApiError::bad_request(
+            "Queued session turns are not supported yet; use stream=true.",
+        )
+        .into_response();
+    }
 
     let turn_id = TurnId::new();
+    let turn_lease = match state.session_runtimes().reserve_turn(session_id, turn_id) {
+        Ok(lease) => lease,
+        Err(StartTurnError::ActiveTurn) => {
+            return ApiError::new(StatusCode::CONFLICT, "Session already has an active turn.")
+                .into_response();
+        }
+    };
     let now = Utc::now();
     let turn = TurnRecord {
         id: turn_id,
@@ -250,33 +262,33 @@ async fn submit_turn(
     if let Err(err) = state.session_store().append_turn(turn).await {
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
-    match state
-        .session_store()
-        .append_event(SessionEventEnvelope::new(
+    match append_session_event(
+        state.as_ref(),
+        SessionEventEnvelope::new(
             session_id,
             Some(turn_id),
             "turn.queued",
             json!({ "turn_id": turn_id }),
             now,
-        ))
-        .await
+        ),
+    )
+    .await
     {
-        Ok(event) if query.stream => {
-            let (sender, receiver) = mpsc::unbounded_channel();
-            send_sse_event(&sender, &event);
+        Ok(event) => {
+            let (sender, receiver) = mpsc::channel(SESSION_SSE_BUFFER_CAPACITY);
+            send_sse_event(&sender, &event).await;
             tokio::spawn(run_streaming_turn(
                 state,
                 session_record,
                 turn_id,
                 request.input,
                 sender,
-                active_guard.expect("streaming turn should hold active guard"),
+                turn_lease,
             ));
-            Sse::new(UnboundedReceiverStream::new(receiver))
+            Sse::new(ReceiverStream::new(receiver))
                 .keep_alive(KeepAlive::default())
                 .into_response()
         }
-        Ok(_) => (StatusCode::ACCEPTED, Json(json!({ "turn_id": turn_id }))).into_response(),
         Err(err) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
@@ -344,27 +356,52 @@ async fn interrupt_turn(
         Err(err) => return err.into_response(),
     };
     match state.session_store().get_turn(session_id, turn_id).await {
-        Ok(Some(_)) => {}
+        Ok(Some(turn)) => {
+            if matches!(
+                turn.status,
+                TurnStatus::Succeeded | TurnStatus::Failed | TurnStatus::Interrupted
+            ) {
+                return ApiError::new(StatusCode::CONFLICT, "Turn is already terminal.")
+                    .into_response();
+            }
+        }
         Ok(None) => return ApiError::not_found("Turn not found.").into_response(),
         Err(err) => {
             return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
                 .into_response();
         }
     }
+    let pending_interrupt = match state
+        .session_runtimes()
+        .request_interrupt(session_id, turn_id)
+    {
+        Ok(pending_interrupt) => pending_interrupt,
+        Err(err) => match err {
+            InterruptTurnError::NotActive => {
+                return ApiError::new(StatusCode::CONFLICT, "Turn is not active for this session.")
+                    .into_response();
+            }
+        },
+    };
     let now = Utc::now();
-    match state
-        .session_store()
-        .append_event(SessionEventEnvelope::new(
+    match append_session_event(
+        state.as_ref(),
+        SessionEventEnvelope::new(
             session_id,
             Some(turn_id),
             "turn.interrupt_requested",
             json!({ "turn_id": turn_id }),
             now,
-        ))
-        .await
+        ),
+    )
+    .await
     {
-        Ok(event) => (StatusCode::ACCEPTED, Json(event)).into_response(),
+        Ok(event) => {
+            pending_interrupt.cancel();
+            (StatusCode::ACCEPTED, Json(event)).into_response()
+        }
         Err(err) => {
+            pending_interrupt.rollback();
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
     }
@@ -389,16 +426,10 @@ async fn list_events(
                 .into_response();
         }
     }
-    let since_seq = query
-        .since_seq
-        .or_else(|| {
-            headers
-                .get("last-event-id")
-                .and_then(|value| value.to_str().ok())
-                .and_then(|value| value.parse::<u32>().ok())
-                .map(|seq| seq.saturating_add(1))
-        })
-        .unwrap_or(1);
+    let since_seq = session_event_since_seq(&query, &headers);
+    if wants_session_event_stream(&headers) {
+        return stream_events(state, session_id, since_seq).await;
+    }
     match state
         .session_store()
         .list_events(session_id, Some(since_seq))
@@ -411,24 +442,117 @@ async fn list_events(
     }
 }
 
-async fn list_tools(
-    _auth: RequiredUser,
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Response {
-    let session_id = match parse_session_id(&id) {
-        Ok(id) => id,
-        Err(err) => return err.into_response(),
-    };
-    match state.session_store().get_session(session_id).await {
-        Ok(Some(_)) => {}
-        Ok(None) => return ApiError::not_found("Session not found.").into_response(),
+fn session_event_since_seq(query: &EventQuery, headers: &HeaderMap) -> u32 {
+    query
+        .since_seq
+        .or_else(|| {
+            headers
+                .get("last-event-id")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u32>().ok())
+                .map(|seq| seq.saturating_add(1))
+        })
+        .unwrap_or(1)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionEventResponse {
+    Json,
+    Stream,
+}
+
+fn wants_session_event_stream(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .and_then(preferred_session_event_response)
+        == Some(SessionEventResponse::Stream)
+}
+
+fn preferred_session_event_response(accept: &str) -> Option<SessionEventResponse> {
+    accept.split(',').find_map(|part| {
+        let media_type = part.trim().split(';').next().unwrap_or_default().trim();
+        match media_type {
+            "text/event-stream" => Some(SessionEventResponse::Stream),
+            "application/json" | "application/*" | "*/*" => Some(SessionEventResponse::Json),
+            _ => None,
+        }
+    })
+}
+
+async fn stream_events(state: Arc<AppState>, session_id: SessionId, since_seq: u32) -> Response {
+    let mut live_rx = state.session_runtimes().subscribe_events(session_id);
+    let persisted = match state
+        .session_store()
+        .list_events(session_id, Some(since_seq))
+        .await
+    {
+        Ok(events) => events,
         Err(err) => {
             return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
                 .into_response();
         }
-    }
-    Json(ListResponse::new(Vec::<serde_json::Value>::new())).into_response()
+    };
+
+    let (sender, receiver) = mpsc::channel(SESSION_SSE_BUFFER_CAPACITY);
+    let stream_state = Arc::clone(&state);
+    tokio::spawn(async move {
+        let mut last_seq = since_seq.saturating_sub(1);
+        for event in persisted {
+            last_seq = last_seq.max(event.seq);
+            if !send_sse_event(&sender, &event).await {
+                return;
+            }
+        }
+
+        loop {
+            let event = tokio::select! {
+                () = sender.closed() => break,
+                event = live_rx.recv() => event,
+            };
+            match event {
+                Ok(event) => {
+                    if event.seq > last_seq {
+                        last_seq = event.seq;
+                        if !send_sse_event(&sender, &event).await {
+                            break;
+                        }
+                    }
+                }
+                Err(RecvError::Lagged(_)) => {
+                    match stream_state
+                        .session_store()
+                        .list_events(session_id, Some(last_seq.saturating_add(1)))
+                        .await
+                    {
+                        Ok(events) => {
+                            for event in events {
+                                if event.seq > last_seq {
+                                    last_seq = event.seq;
+                                    if !send_sse_event(&sender, &event).await {
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            error!(
+                                error = ?err,
+                                session_id = %session_id,
+                                "Failed to replay lagged session events"
+                            );
+                            break;
+                        }
+                    }
+                }
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
+
+    Sse::new(ReceiverStream::new(receiver))
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 async fn run_streaming_turn(
@@ -437,36 +561,89 @@ async fn run_streaming_turn(
     turn_id: TurnId,
     input: String,
     sender: SessionSseSender,
-    _guard: ActiveSessionTurnGuard,
+    turn_lease: SessionTurnLease,
 ) {
+    let runtime_entry = turn_lease.entry();
     if let Err(err) = mark_turn_running(&state, &mut record, turn_id, &sender).await {
         error!(error = ?err, session_id = %record.id, turn_id = %turn_id, "Failed to mark session turn running");
         mark_turn_failed(&state, &mut record, turn_id, err.to_string(), &sender).await;
         return;
     }
 
-    let mut session = match build_agent_session(&state, &record).await {
-        Ok(session) => session,
-        Err(err) => {
-            error!(error = ?err, session_id = %record.id, turn_id = %turn_id, "Failed to build session runtime");
-            mark_turn_failed(&state, &mut record, turn_id, err.to_string(), &sender).await;
-            return;
+    if turn_lease.interrupt_requested() {
+        record.status = SessionStatus::Idle;
+        if let Err(err) = mark_turn_finished(
+            &state,
+            record,
+            turn_id,
+            TurnStatus::Interrupted,
+            Vec::new(),
+            Some("Interrupted.".to_string()),
+            &sender,
+        )
+        .await
+        {
+            error!(error = ?err, turn_id = %turn_id, "Failed to persist interrupted session turn");
+        }
+        return;
+    }
+
+    let outcome = {
+        let mut session_slot = runtime_entry.lock_session().await;
+        if session_slot.is_none() {
+            match build_agent_session(&state, &record).await {
+                Ok(session) => {
+                    *session_slot = Some(session);
+                }
+                Err(err) => {
+                    error!(error = ?err, session_id = %record.id, turn_id = %turn_id, "Failed to build session runtime");
+                    drop(session_slot);
+                    mark_turn_failed(&state, &mut record, turn_id, err.to_string(), &sender).await;
+                    return;
+                }
+            }
+        }
+        let session = session_slot
+            .as_mut()
+            .expect("session runtime slot should be loaded");
+        let cancel_token = session.cancel_token();
+        turn_lease.attach_cancel_token(&cancel_token);
+        let initialize = !runtime_entry.is_initialized();
+        let mut messages = Vec::new();
+        let result = drive_agent_session(
+            &state,
+            session,
+            record.id,
+            turn_id,
+            &input,
+            initialize,
+            &sender,
+            &mut messages,
+        )
+        .await;
+        if initialize && matches!(result, Ok(Ok(()))) {
+            runtime_entry.mark_initialized();
+        }
+        let final_record = session.to_record(record);
+        ensure_turn_has_user_message(&mut messages, &input);
+        TurnExecutionOutcome {
+            result,
+            final_record,
+            messages,
         }
     };
 
-    let result =
-        drive_agent_session(&state, &mut session, record.id, turn_id, &input, &sender).await;
-    let mut final_record = session.to_record(record);
-    let messages = session.history().to_session_messages();
-    match result {
+    let should_unload_runtime = !matches!(&outcome.result, Ok(Ok(())));
+    match outcome.result {
         Ok(Ok(())) => {
+            let mut final_record = outcome.final_record;
             final_record.status = SessionStatus::Idle;
             if let Err(err) = mark_turn_finished(
                 &state,
                 final_record,
                 turn_id,
                 TurnStatus::Succeeded,
-                messages,
+                outcome.messages,
                 None,
                 &sender,
             )
@@ -481,6 +658,7 @@ async fn run_streaming_turn(
             } else {
                 TurnStatus::Failed
             };
+            let mut final_record = outcome.final_record;
             final_record.status = if status == TurnStatus::Interrupted {
                 SessionStatus::Idle
             } else {
@@ -491,7 +669,7 @@ async fn run_streaming_turn(
                 final_record,
                 turn_id,
                 status,
-                messages,
+                outcome.messages,
                 Some(err.to_string()),
                 &sender,
             )
@@ -501,13 +679,14 @@ async fn run_streaming_turn(
             }
         }
         Err(err) => {
+            let mut final_record = outcome.final_record;
             final_record.status = SessionStatus::Failed;
             if let Err(update_err) = mark_turn_finished(
                 &state,
                 final_record,
                 turn_id,
                 TurnStatus::Failed,
-                messages,
+                outcome.messages,
                 Some(err.to_string()),
                 &sender,
             )
@@ -516,6 +695,48 @@ async fn run_streaming_turn(
                 error!(error = ?update_err, turn_id = %turn_id, "Failed to persist errored session turn");
             }
         }
+    }
+    if should_unload_runtime {
+        runtime_entry.clear_session().await;
+    }
+}
+
+struct TurnExecutionOutcome {
+    result:       anyhow::Result<Result<(), AgentError>>,
+    final_record: SessionRecord,
+    messages:     Vec<SessionMessage>,
+}
+
+fn ensure_turn_has_user_message(messages: &mut Vec<SessionMessage>, input: &str) {
+    if messages
+        .iter()
+        .any(|message| matches!(message, SessionMessage::User { .. }))
+    {
+        return;
+    }
+    messages.insert(0, SessionMessage::user(input.to_string(), Utc::now()));
+}
+
+fn record_turn_message(messages: &mut Vec<SessionMessage>, event: &SessionEvent) {
+    let timestamp = event.timestamp.into();
+    match &event.event {
+        AgentEvent::UserInput { text } => {
+            messages.push(SessionMessage::User {
+                content: text.clone(),
+                timestamp,
+            });
+        }
+        AgentEvent::AssistantMessage { text, usage, .. } => {
+            messages.push(SessionMessage::Assistant {
+                content: text.clone(),
+                tool_calls: Vec::new(),
+                provider_parts: Vec::new(),
+                usage: serde_json::to_value(usage).unwrap_or(serde_json::Value::Null),
+                response_id: String::new(),
+                timestamp,
+            });
+        }
+        _ => {}
     }
 }
 
@@ -761,13 +982,6 @@ fn build_tool_approval(raw: Option<&str>) -> ToolApprovalFn {
     })
 }
 
-#[derive(Clone, Copy)]
-enum PermissionLevel {
-    ReadOnly,
-    ReadWrite,
-    Full,
-}
-
 fn tool_category(name: &str) -> &'static str {
     match name {
         "read_file" | "read_many_files" | "grep" | "glob" | "list_dir" => "read",
@@ -792,11 +1006,15 @@ async fn drive_agent_session(
     session_id: SessionId,
     turn_id: TurnId,
     input: &str,
+    initialize: bool,
     sender: &SessionSseSender,
+    messages: &mut Vec<SessionMessage>,
 ) -> anyhow::Result<Result<(), AgentError>> {
     let mut receiver = session.subscribe();
     let process = async {
-        session.initialize().await?;
+        if initialize {
+            session.initialize().await?;
+        }
         session.process_input(input).await
     };
     tokio::pin!(process);
@@ -805,13 +1023,17 @@ async fn drive_agent_session(
         tokio::select! {
             result = &mut process => {
                 while let Ok(event) = receiver.try_recv() {
+                    record_turn_message(messages, &event);
                     persist_agent_event(state, session_id, turn_id, event, sender).await?;
                 }
                 return Ok(result);
             }
             event = receiver.recv() => {
                 match event {
-                    Ok(event) => persist_agent_event(state, session_id, turn_id, event, sender).await?,
+                    Ok(event) => {
+                        record_turn_message(messages, &event);
+                        persist_agent_event(state, session_id, turn_id, event, sender).await?;
+                    }
                     Err(RecvError::Lagged(_) | RecvError::Closed) => {}
                 }
             }
@@ -839,18 +1061,31 @@ async fn append_and_send_event(
     sender: &SessionSseSender,
     event: SessionEventEnvelope,
 ) -> anyhow::Result<()> {
-    let event = state.session_store().append_event(event).await?;
-    send_sse_event(sender, &event);
+    let event = append_session_event(state, event).await?;
+    send_sse_event(sender, &event).await;
     Ok(())
 }
 
-fn send_sse_event(sender: &SessionSseSender, event: &SessionEventEnvelope) {
-    if let Ok(data) = serde_json::to_string(event) {
-        let _ = sender.send(Ok(Event::default()
+async fn append_session_event(
+    state: &AppState,
+    event: SessionEventEnvelope,
+) -> anyhow::Result<SessionEventEnvelope> {
+    let event = state.session_store().append_event(event).await?;
+    state.session_runtimes().broadcast_event(&event);
+    Ok(event)
+}
+
+async fn send_sse_event(sender: &SessionSseSender, event: &SessionEventEnvelope) -> bool {
+    let Ok(data) = serde_json::to_string(event) else {
+        return true;
+    };
+    sender
+        .send(Ok(Event::default()
             .id(event.seq.to_string())
             .event(event.event.clone())
-            .data(data)));
-    }
+            .data(data)))
+        .await
+        .is_ok()
 }
 
 fn agent_event_envelope(

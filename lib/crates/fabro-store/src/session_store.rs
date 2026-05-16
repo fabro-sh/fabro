@@ -1,11 +1,12 @@
+use std::fs as std_fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use fabro_types::{
     SessionEventEnvelope, SessionId, SessionRecord, SessionStatus, SessionSummary, TurnId,
-    TurnRecord,
+    TurnRecord, TurnStatus,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -116,6 +117,97 @@ impl SessionStore {
         record.updated_at = now;
         record.deleted_at = Some(now);
         write_json(&self.session_path(id), &record).await
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Server startup recovery runs from synchronous AppState construction before routes are served."
+    )]
+    pub fn recover_stale_running_state(&self, recovered_at: DateTime<Utc>) -> Result<()> {
+        let entries = match std_fs::read_dir(&self.root) {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == ErrorKind::NotFound => return Ok(()),
+            Err(err) => return Err(err.into()),
+        };
+        for entry in entries {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let Some(name) = entry.file_name().to_str().map(ToOwned::to_owned) else {
+                continue;
+            };
+            let Ok(session_id) = name.parse::<SessionId>() else {
+                continue;
+            };
+            let session_path = self.session_path(session_id);
+            let mut session: SessionRecord = match read_json_sync(&session_path) {
+                Ok(session) => session,
+                Err(Error::Io(err)) if err.kind() == ErrorKind::NotFound => continue,
+                Err(Error::Serde(_)) => continue,
+                Err(err) => return Err(err),
+            };
+            if session.deleted_at.is_some() {
+                continue;
+            }
+            if session.status == SessionStatus::Running {
+                session.status = SessionStatus::Idle;
+                session.updated_at = recovered_at;
+                write_json_sync(&session_path, &session)?;
+            }
+            self.recover_stale_turns(session_id, recovered_at)?;
+        }
+        Ok(())
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Server startup recovery runs from synchronous AppState construction before routes are served."
+    )]
+    fn recover_stale_turns(
+        &self,
+        session_id: SessionId,
+        recovered_at: DateTime<Utc>,
+    ) -> Result<()> {
+        let entries = match std_fs::read_dir(self.turns_dir(session_id)) {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == ErrorKind::NotFound => return Ok(()),
+            Err(err) => return Err(err.into()),
+        };
+        for entry in entries {
+            let entry = entry?;
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+            let path = entry.path();
+            if !path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+            {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            if stem.parse::<TurnId>().is_err() {
+                continue;
+            }
+            let mut turn: TurnRecord = match read_json_sync(&path) {
+                Ok(turn) => turn,
+                Err(Error::Io(err)) if err.kind() == ErrorKind::NotFound => continue,
+                Err(Error::Serde(_)) => continue,
+                Err(err) => return Err(err),
+            };
+            if !matches!(turn.status, TurnStatus::Queued | TurnStatus::Running) {
+                continue;
+            }
+            turn.status = TurnStatus::Interrupted;
+            turn.updated_at = recovered_at;
+            turn.completed_at = Some(recovered_at);
+            turn.error = Some("Server restarted before the turn completed.".to_string());
+            write_json_sync(&path, &turn)?;
+        }
+        Ok(())
     }
 
     pub async fn append_turn(&self, record: TurnRecord) -> Result<TurnRecord> {
@@ -286,4 +378,27 @@ async fn read_optional_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T
         Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
         Err(err) => Err(err.into()),
     }
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Used only by synchronous server startup recovery before routes are served."
+)]
+fn write_json_sync<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std_fs::create_dir_all(parent)?;
+    }
+    let mut bytes = serde_json::to_vec_pretty(value)?;
+    bytes.push(b'\n');
+    std_fs::write(path, bytes)?;
+    Ok(())
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Used only by synchronous server startup recovery before routes are served."
+)]
+fn read_json_sync<T: DeserializeOwned>(path: &Path) -> Result<T> {
+    let bytes = std_fs::read(path)?;
+    Ok(serde_json::from_slice(&bytes)?)
 }

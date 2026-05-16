@@ -83,7 +83,7 @@ use fabro_types::settings::server::{
 use fabro_types::settings::{InterpString, RunNamespace};
 use fabro_types::{
     EventBody, InterviewQuestionRecord, Principal, PullRequestRecord, QuestionType, RunBlobId,
-    RunControlAction, RunEvent, RunId, ServerSettings, SessionCapability, SessionId,
+    RunControlAction, RunEvent, RunId, ServerSettings, SessionCapability,
 };
 use fabro_util::error::{
     SharedError, collect_causes, render_compact_with_causes, render_with_causes,
@@ -143,6 +143,7 @@ use crate::{
 };
 
 mod handler;
+mod session_runtime;
 
 pub(crate) use handler::events::EventListParams;
 #[cfg(test)]
@@ -154,6 +155,7 @@ pub(in crate::server) use handler::graph::{
 };
 #[cfg(test)]
 pub(in crate::server) use handler::system::validate_github_slug;
+use session_runtime::SessionRuntimeManager;
 
 pub(crate) type EnvLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
@@ -515,7 +517,7 @@ pub struct AppState {
     aggregate_billing: Mutex<BillingAccumulator>,
     store: Arc<Database>,
     session_store: SessionStore,
-    active_session_turns: ActiveSessionTurns,
+    session_runtimes: SessionRuntimeManager,
     artifact_store: ArtifactStore,
     worker_tokens: WorkerTokenKeys,
     started_at: Instant,
@@ -548,21 +550,6 @@ pub struct AppState {
 }
 
 type PullRequestCreateLocks = Arc<Mutex<HashMap<RunId, Arc<AsyncMutex<()>>>>>;
-type ActiveSessionTurns = Arc<Mutex<HashSet<SessionId>>>;
-
-pub(crate) struct ActiveSessionTurnGuard {
-    active:     ActiveSessionTurns,
-    session_id: SessionId,
-}
-
-impl Drop for ActiveSessionTurnGuard {
-    fn drop(&mut self) {
-        self.active
-            .lock()
-            .expect("active session turn set poisoned")
-            .remove(&self.session_id);
-    }
-}
 
 struct PullRequestCreateGuard {
     locks:  PullRequestCreateLocks,
@@ -772,21 +759,8 @@ impl AppState {
         &self.session_store
     }
 
-    pub(crate) fn try_lock_session_turn(
-        &self,
-        session_id: SessionId,
-    ) -> Option<ActiveSessionTurnGuard> {
-        let mut active = self
-            .active_session_turns
-            .lock()
-            .expect("active session turn set poisoned");
-        if !active.insert(session_id) {
-            return None;
-        }
-        Some(ActiveSessionTurnGuard {
-            active: Arc::clone(&self.active_session_turns),
-            session_id,
-        })
+    pub(crate) fn session_runtimes(&self) -> &SessionRuntimeManager {
+        &self.session_runtimes
     }
 
     pub(crate) fn server_secret(&self, name: &str) -> Option<String> {
@@ -1591,6 +1565,9 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         )?)
         .join("sessions"),
     );
+    session_store
+        .recover_stale_running_state(chrono::Utc::now())
+        .context("recovering stale session runtime state")?;
     let current_manifest_run_defaults = Arc::new(resolved_settings.manifest_run_defaults);
     let current_manifest_run_settings = resolved_settings.manifest_run_settings;
     let current_catalog = Arc::new(
@@ -1628,7 +1605,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         aggregate_billing: Mutex::new(BillingAccumulator::default()),
         store,
         session_store,
-        active_session_turns: Arc::new(Mutex::new(HashSet::new())),
+        session_runtimes: SessionRuntimeManager::new(),
         artifact_store,
         worker_tokens,
         started_at: Instant::now(),

@@ -166,4 +166,67 @@ mod session_store_contract_tests {
         assert!("not-a-ulid".parse::<TurnId>().is_err());
         assert_eq!(SessionStatus::Idle.as_str(), "idle");
     }
+
+    #[tokio::test]
+    async fn stale_running_sessions_and_turns_recover_to_idle_and_interrupted() {
+        let root = tempfile::tempdir().expect("temp store root should exist");
+        let store = SessionStore::new(root.path().join("sessions"));
+        let session_id = SessionId::new();
+        let running_turn_id = TurnId::new();
+        let queued_turn_id = TurnId::new();
+        let now = Utc::now();
+        let mut session = SessionRecord::new(session_id, now);
+        session.status = SessionStatus::Running;
+        store
+            .create_session(session)
+            .await
+            .expect("session should persist");
+
+        for (turn_id, status) in [
+            (running_turn_id, TurnStatus::Running),
+            (queued_turn_id, TurnStatus::Queued),
+        ] {
+            store
+                .append_turn(TurnRecord {
+                    id: turn_id,
+                    session_id,
+                    input: "hello".to_string(),
+                    status,
+                    messages: vec![SessionMessage::user("hello", now)],
+                    error: None,
+                    created_at: now,
+                    updated_at: now,
+                    completed_at: None,
+                })
+                .await
+                .expect("turn should persist");
+        }
+
+        let recovered_at = now + chrono::Duration::seconds(5);
+        store
+            .recover_stale_running_state(recovered_at)
+            .expect("stale runtime state should recover");
+
+        let recovered = store
+            .get_session(session_id)
+            .await
+            .expect("session read should succeed")
+            .expect("session should exist");
+        assert_eq!(recovered.status, SessionStatus::Idle);
+        assert_eq!(recovered.updated_at, recovered_at);
+
+        let turns = store
+            .list_turns(session_id)
+            .await
+            .expect("turn list should succeed");
+        assert_eq!(turns.len(), 2);
+        for turn in turns {
+            assert_eq!(turn.status, TurnStatus::Interrupted);
+            assert_eq!(turn.completed_at, Some(recovered_at));
+            assert_eq!(
+                turn.error.as_deref(),
+                Some("Server restarted before the turn completed.")
+            );
+        }
+    }
 }

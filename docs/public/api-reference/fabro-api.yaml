@@ -928,10 +928,12 @@ paths:
       operationId: submitSessionTurn
       tags: [Sessions]
       summary: Submit a session turn
+      description: Starts a streamed turn immediately. Queued/background turns are not supported in this API version; `stream=false` returns 400.
       parameters:
         - name: stream
           in: query
           required: false
+          description: Must be true when supplied.
           schema:
             type: boolean
             default: true
@@ -948,12 +950,15 @@ paths:
             text/event-stream:
               schema:
                 type: string
-        "202":
-          description: Turn accepted for asynchronous execution
+        "400":
+          description: Unsupported queued turn mode or invalid input
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SubmitTurnQueuedResponse"
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Session not found
           headers:
@@ -1029,6 +1034,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SessionEventEnvelope"
+        "404":
+          description: Session turn not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Turn is already terminal or is not active for this session
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/v1/sessions/{id}/events:
     parameters:
@@ -1040,7 +1063,8 @@ paths:
     get:
       operationId: listSessionEvents
       tags: [Sessions]
-      summary: List durable session events
+      summary: List or stream session events
+      description: Returns JSON replay by default. When the `Accept` header includes `text/event-stream`, replays durable events from `since_seq` or `Last-Event-ID`, then stays attached for live events.
       parameters:
         - name: since_seq
           in: query
@@ -1050,30 +1074,14 @@ paths:
             minimum: 1
       responses:
         "200":
-          description: Durable session events
+          description: Durable session events or live SSE stream
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/PaginatedSessionEventList"
-
-  /api/v1/sessions/{id}/tools:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          $ref: "#/components/schemas/SessionId"
-    get:
-      operationId: listSessionTools
-      tags: [Sessions]
-      summary: List tools available to a session
-      responses:
-        "200":
-          description: Session tools
-          content:
-            application/json:
+            text/event-stream:
               schema:
-                $ref: "#/components/schemas/SessionToolsResponse"
+                type: string
 
   # ── Runs ──────────────────────────────────────────────────────────────
 
@@ -4775,7 +4783,7 @@ components:
           format: date-time
 
     TurnRecord:
-      description: One externally submitted input and its persisted transcript messages.
+      description: One externally submitted input plus display-level output metadata. Full resumable context is stored on SessionRecord.runtime_context.
       type: object
       required:
         - id
@@ -4865,14 +4873,6 @@ components:
         input:
           type: string
 
-    SubmitTurnQueuedResponse:
-      type: object
-      required:
-        - turn_id
-      properties:
-        turn_id:
-          $ref: "#/components/schemas/TurnId"
-
     PaginatedSessionList:
       description: Paginated list of sessions.
       type: object
@@ -4912,21 +4912,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SessionEventEnvelope"
-        meta:
-          $ref: "#/components/schemas/PaginationMeta"
-
-    SessionToolsResponse:
-      description: Tools available to a session.
-      type: object
-      required:
-        - data
-        - meta
-      properties:
-        data:
-          type: array
-          items:
-            type: object
-            additionalProperties: true
         meta:
           $ref: "#/components/schemas/PaginationMeta"
 

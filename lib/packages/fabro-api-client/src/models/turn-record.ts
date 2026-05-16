@@ -21,7 +21,7 @@ import type { SessionMessage } from './session-message';
 import type { TurnStatus } from './turn-status';
 
 /**
- * One externally submitted input and its persisted transcript messages.
+ * One externally submitted input plus display-level output metadata. Full resumable context is stored on SessionRecord.runtime_context.
  */
 export interface TurnRecord {
     /**
