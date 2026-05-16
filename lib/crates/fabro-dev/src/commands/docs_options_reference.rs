@@ -221,6 +221,7 @@ providers can be added when they use an adapter Fabro already supports.
 [llm.providers.proxy]
 display_name = "Acme Gateway"
 adapter = "openai_compatible"
+agent_profile = "openai"
 base_url = "https://llm-gateway.example.com/v1"
 credentials = ["env:ACME_GATEWAY_API_KEY"]
 priority = 50
@@ -237,6 +238,7 @@ x-team-secret = { credential = "gateway_team_secret" }
 |---|---|---|---|
 | `display_name` | string | provider ID | Human-readable provider name. |
 | `adapter` | string | inferred for built-ins | Adapter registry key, such as `"anthropic"`, `"openai"`, `"gemini"`, or `"openai_compatible"`. Custom providers normally use `"openai_compatible"`. |
+| `agent_profile` | `"anthropic"` \| `"openai"` \| `"gemini"` | adapter default | Agent profile used for project memory, CLI/ACP command selection, and native session routing. |
 | `base_url` | string | adapter default | Provider API base URL. Required for most custom OpenAI-compatible providers. |
 | `credentials` | array<string> | built-in env refs | Ordered credential refs. Accepted string forms are `credential:<id>` and `env:<NAME>`. Literal secret strings are rejected. |
 | `extra_headers` | table | `{}` | Additional headers attached to provider requests. Values must be typed refs: `{ literal = "..." }`, `{ env = "NAME" }`, or `{ credential = "id" }`. |
@@ -254,6 +256,7 @@ provider API.
 [llm.models."team-code-large"]
 provider = "proxy"
 api_id = "provider-wire-model-name"
+agent_profile = "anthropic"
 display_name = "Team Code Large"
 family = "team-code"
 default = true
@@ -291,6 +294,7 @@ cache_input_cost_per_mtok = 0.60
 |---|---|---|---|
 | `provider` | string | None | Provider ID this model belongs to. |
 | `api_id` | string | model ID | Identifier sent to the provider API. |
+| `agent_profile` | `"anthropic"` \| `"openai"` \| `"gemini"` | provider profile | Agent profile override for this model. Model overrides take precedence over provider overrides. |
 | `display_name` | string | model ID | Human-readable model name. |
 | `family` | string | model ID | Family label used for catalog display and matching. |
 | `training` | string | None | Training data cutoff label. |

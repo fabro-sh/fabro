@@ -133,6 +133,22 @@ impl RunServices {
             ..self.as_ref().clone()
         })
     }
+
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_catalog_context(
+        self: &Arc<Self>,
+        catalog: Arc<Catalog>,
+        provider_id: ProviderId,
+        profile_kind: AgentProfileKind,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            provider_id,
+            profile_kind,
+            catalog,
+            ..self.as_ref().clone()
+        })
+    }
 }
 
 /// Services available only while executing workflow nodes.

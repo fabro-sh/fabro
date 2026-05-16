@@ -272,6 +272,18 @@ fn parse_provider(args: &AgentArgs) -> anyhow::Result<ProviderId> {
     Ok(provider_str.parse()?)
 }
 
+fn resolve_provider_id(catalog: &Catalog, args: &AgentArgs) -> anyhow::Result<ProviderId> {
+    if args.provider.is_some() {
+        return parse_provider(args);
+    }
+    if let Some(model_id) = args.model.as_deref() {
+        if let Some(model) = catalog.get(model_id) {
+            return Ok(model.provider.clone());
+        }
+    }
+    parse_provider(args)
+}
+
 fn standalone_llm_source() -> Arc<dyn CredentialSource> {
     let storage_dir = default_storage_dir();
     match Vault::load(Storage::new(storage_dir).secrets_path()) {
@@ -285,11 +297,11 @@ fn standalone_llm_source() -> Arc<dyn CredentialSource> {
 fn profile_kind_for_provider(
     catalog: &Catalog,
     provider_id: &ProviderId,
+    model: Option<&str>,
 ) -> anyhow::Result<AgentProfileKind> {
-    let provider = catalog
-        .provider(provider_id)
-        .ok_or_else(|| anyhow::anyhow!("provider '{provider_id}' is not configured"))?;
-    Ok(provider.adapter.metadata().default_profile)
+    catalog
+        .effective_agent_profile(provider_id, model)
+        .ok_or_else(|| anyhow::anyhow!("provider '{provider_id}' is not configured"))
 }
 
 fn ensure_provider_registered(client: &Client, provider_id: &ProviderId) -> anyhow::Result<()> {
@@ -531,7 +543,7 @@ pub async fn run_with_args_and_client_and_catalog(
     // threads
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
 
-    let provider_id = parse_provider(&args)?;
+    let provider_id = resolve_provider_id(&catalog, &args)?;
     ensure_provider_registered(&client, &provider_id)?;
 
     if args.verbose {
@@ -552,7 +564,7 @@ pub async fn run_with_args_and_client_and_catalog(
                 )
             })?
     };
-    let profile_kind = profile_kind_for_provider(&catalog, &provider_id)?;
+    let profile_kind = profile_kind_for_provider(&catalog, &provider_id, Some(&model))?;
     eprintln!("{}", styles.dim.apply_to(format!("Using model: {model}")));
     let mut profile = build_profile(
         profile_kind,
@@ -814,7 +826,9 @@ pub async fn run() -> anyhow::Result<()> {
 mod tests {
     use std::collections::HashMap;
 
-    use fabro_model::catalog::ProviderCatalogSettings;
+    use fabro_model::catalog::{
+        ModelCatalogSettings, ProviderCatalogSettings, SettingsModelFeatures, SettingsModelLimits,
+    };
     use serde_json::json;
 
     use super::*;
@@ -995,8 +1009,104 @@ mod tests {
         let provider_id = parse_provider(&args).unwrap();
         assert_eq!(provider_id, ProviderId::new("bedrock"));
         assert_eq!(
-            profile_kind_for_provider(&catalog, &provider_id).unwrap(),
+            profile_kind_for_provider(&catalog, &provider_id, None).unwrap(),
             AgentProfileKind::OpenAi
+        );
+    }
+
+    #[test]
+    fn standalone_provider_resolution_uses_catalog_model_provider_when_provider_omitted() {
+        let mut settings = LlmCatalogSettings::default();
+        settings
+            .providers
+            .insert("bedrock".to_string(), ProviderCatalogSettings {
+                display_name: Some("Bedrock".to_string()),
+                adapter: Some("openai_compatible".to_string()),
+                base_url: Some("https://example.invalid/v1".to_string()),
+                ..ProviderCatalogSettings::default()
+            });
+        settings
+            .models
+            .insert("bedrock-claude".to_string(), ModelCatalogSettings {
+                provider: Some("bedrock".to_string()),
+                display_name: Some("Bedrock Claude".to_string()),
+                family: Some("claude".to_string()),
+                default: Some(true),
+                limits: Some(SettingsModelLimits {
+                    context_window: Some(1000),
+                    max_output:     None,
+                }),
+                features: Some(SettingsModelFeatures {
+                    tools:            Some(true),
+                    vision:           Some(false),
+                    reasoning:        Some(false),
+                    reasoning_effort: None,
+                    prompt_cache:     None,
+                }),
+                ..ModelCatalogSettings::default()
+            });
+        let catalog = Catalog::from_builtin_with_overrides(&settings).unwrap();
+        let args = AgentArgs {
+            prompt:        "test".to_string(),
+            provider:      None,
+            model:         Some("bedrock-claude".to_string()),
+            permissions:   None,
+            auto_approve:  false,
+            debug:         false,
+            verbose:       false,
+            skills_dir:    None,
+            output_format: None,
+        };
+
+        assert_eq!(
+            resolve_provider_id(&catalog, &args).unwrap(),
+            ProviderId::new("bedrock")
+        );
+    }
+
+    #[test]
+    fn standalone_profile_kind_uses_model_agent_profile_override() {
+        let mut settings = LlmCatalogSettings::default();
+        settings
+            .providers
+            .insert("bedrock".to_string(), ProviderCatalogSettings {
+                display_name: Some("Bedrock".to_string()),
+                adapter: Some("openai_compatible".to_string()),
+                base_url: Some("https://example.invalid/v1".to_string()),
+                agent_profile: Some(AgentProfileKind::OpenAi),
+                ..ProviderCatalogSettings::default()
+            });
+        settings
+            .models
+            .insert("bedrock-claude".to_string(), ModelCatalogSettings {
+                provider: Some("bedrock".to_string()),
+                display_name: Some("Bedrock Claude".to_string()),
+                family: Some("claude".to_string()),
+                default: Some(true),
+                agent_profile: Some(AgentProfileKind::Anthropic),
+                limits: Some(SettingsModelLimits {
+                    context_window: Some(1000),
+                    max_output:     None,
+                }),
+                features: Some(SettingsModelFeatures {
+                    tools:            Some(true),
+                    vision:           Some(false),
+                    reasoning:        Some(false),
+                    reasoning_effort: None,
+                    prompt_cache:     None,
+                }),
+                ..ModelCatalogSettings::default()
+            });
+        let catalog = Catalog::from_builtin_with_overrides(&settings).unwrap();
+
+        assert_eq!(
+            profile_kind_for_provider(
+                &catalog,
+                &ProviderId::new("bedrock"),
+                Some("bedrock-claude")
+            )
+            .unwrap(),
+            AgentProfileKind::Anthropic
         );
     }
 

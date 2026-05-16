@@ -40,7 +40,8 @@ impl AgentAcpBackend {
     ) -> Self {
         let provider_id = provider_id.into();
         let catalog = default_catalog();
-        let profile_kind = routing::default_profile_kind(catalog.as_ref(), &provider_id);
+        let profile_kind =
+            routing::effective_profile_kind(catalog.as_ref(), &provider_id, Some(&model));
         Self {
             model,
             provider_id,
@@ -56,7 +57,8 @@ impl AgentAcpBackend {
     pub fn new_from_env(model: String, provider_id: impl Into<ProviderId>) -> Self {
         let provider_id = provider_id.into();
         let catalog = default_catalog();
-        let profile_kind = routing::default_profile_kind(catalog.as_ref(), &provider_id);
+        let profile_kind =
+            routing::effective_profile_kind(catalog.as_ref(), &provider_id, Some(&model));
         Self {
             model,
             provider_id,

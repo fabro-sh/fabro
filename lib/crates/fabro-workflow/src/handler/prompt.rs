@@ -3,12 +3,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
-use fabro_model::ProviderId;
 
 use super::agent::{
     CodergenBackend, CodergenResult, OneShotRequest, expand_variables, extract_status_fields,
     truncate,
 };
+use super::llm::routing;
 use super::{EngineServices, Handler};
 use crate::context::{Context, WorkflowContext, keys};
 use crate::error::Error;
@@ -70,17 +70,19 @@ impl Handler for PromptHandler {
         // 1b. Discover project docs for system prompt when project_memory is enabled
         let system_prompt = if node.project_memory() {
             let working_dir = services.run.sandbox.working_directory();
-            let profile_kind = node
-                .provider()
-                .map(ProviderId::from)
-                .and_then(|provider_id| {
-                    services
-                        .run
-                        .catalog
-                        .provider(&provider_id)
-                        .map(|provider| provider.adapter.metadata().default_profile)
-                })
-                .unwrap_or(services.run.profile_kind);
+            let profile_kind = match (node.provider(), node.model()) {
+                (None, None) => services.run.profile_kind,
+                (provider_attr, model_attr) => {
+                    let model = model_attr.unwrap_or_default();
+                    routing::resolve_provider_context(
+                        services.run.catalog.as_ref(),
+                        &services.run.provider_id,
+                        model,
+                        provider_attr,
+                    )?
+                    .profile_kind
+                }
+            };
             let docs = match fabro_agent::discover_memory(
                 &*services.run.sandbox,
                 working_dir,
@@ -501,6 +503,82 @@ mod tests {
         // captured)
         let sys = captured_sys.lock().unwrap().clone();
         assert!(sys.is_some(), "one_shot should have been called");
+    }
+
+    #[tokio::test]
+    async fn prompt_handler_project_memory_uses_model_agent_profile_override() {
+        use std::sync::Mutex;
+
+        let captured_sys = Arc::new(Mutex::new(None));
+        let backend = OneShotCapturingBackend {
+            captured_prompt:        Arc::new(Mutex::new(None)),
+            captured_system_prompt: captured_sys.clone(),
+        };
+        let handler = PromptHandler::new(Some(Box::new(backend)));
+        let workspace = TempDir::new().unwrap();
+        tokio::fs::write(workspace.path().join("CLAUDE.md"), "anthropic memory")
+            .await
+            .unwrap();
+        let overrides: fabro_model::catalog::LlmCatalogSettings = toml::from_str(
+            r#"
+[providers.acme]
+adapter = "openai_compatible"
+base_url = "https://api.acme.test/v1"
+agent_profile = "openai"
+
+[models.acme-claude]
+provider = "acme"
+display_name = "Acme Claude"
+family = "claude"
+default = true
+agent_profile = "anthropic"
+aliases = ["ac"]
+
+[models.acme-claude.limits]
+context_window = 1000
+
+[models.acme-claude.features]
+tools = true
+vision = false
+reasoning = false
+"#,
+        )
+        .unwrap();
+        let catalog =
+            Arc::new(fabro_model::Catalog::from_builtin_with_overrides(&overrides).unwrap());
+        let mut services = make_services();
+        services.run = services
+            .run
+            .with_sandbox(Arc::new(fabro_agent::LocalSandbox::new(
+                workspace.path().to_path_buf(),
+            )))
+            .with_catalog_context(
+                Arc::clone(&catalog),
+                fabro_model::ProviderId::new("acme"),
+                fabro_model::AgentProfileKind::OpenAi,
+            );
+
+        let mut node = Node::new("classify");
+        node.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("Classify this".to_string()),
+        );
+        node.attrs
+            .insert("model".to_string(), AttrValue::String("ac".to_string()));
+        let context = Context::new();
+        let graph = Graph::new("test");
+
+        handler
+            .execute(&node, &context, &graph, workspace.path(), &services)
+            .await
+            .unwrap();
+
+        let sys = captured_sys.lock().unwrap().clone();
+        assert!(
+            sys.flatten()
+                .is_some_and(|system_prompt| system_prompt.contains("anthropic memory")),
+            "project memory should use model-level Anthropic profile and read CLAUDE.md"
+        );
     }
 
     #[tokio::test]

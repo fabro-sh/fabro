@@ -47,6 +47,7 @@ Fabro's catalog starts with the built-in providers and models, then merges any `
 [llm.providers.proxy]
 display_name = "Acme Gateway"
 adapter = "openai_compatible"
+agent_profile = "openai"
 base_url = "https://llm-gateway.example.com/v1"
 credentials = ["env:ACME_GATEWAY_API_KEY"]
 aliases = ["gateway"]
@@ -58,6 +59,7 @@ x-portkey-config = { literal = "@bedrock-prod" }
 [llm.models."team-code-large"]
 provider = "proxy"
 api_id = "provider-wire-model-name"
+agent_profile = "anthropic"
 display_name = "Team Code Large"
 family = "team-code"
 default = true
@@ -117,6 +119,8 @@ reasoning = false
 `api_id` is the model name sent to the provider API. Omit it when the Fabro model ID and provider model ID are the same.
 
 Header values and credentials are typed references, not raw secrets. Use `env:<NAME>` or `credential:<id>` for provider credentials, and `{ env = "NAME" }`, `{ credential = "id" }`, or `{ literal = "value" }` for extra headers.
+
+`agent_profile` controls profile-specific behavior such as project-memory filenames, CLI/ACP command selection, and native session routing. Valid values are `anthropic`, `openai`, and `gemini`; model-level values override provider-level values, which override the adapter default.
 
 <Note>
 Provider fields in configuration, APIs, and model routing are provider ID strings. Built-in names like `anthropic`, `openai`, and `gemini` still work, but custom IDs like `proxy` work anywhere a provider ID is accepted.

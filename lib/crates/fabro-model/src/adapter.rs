@@ -65,12 +65,26 @@ impl AsRef<str> for AdapterKind {
 }
 
 /// Internal dispatch key that `fabro-agent` maps to a concrete agent profile.
-///
-/// This is **not** a settings field. The agent profile is inferred from the
-/// adapter, never set directly in TOML.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    IntoStaticStr,
+    VariantArray,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum AgentProfileKind {
     Anthropic,
+    #[serde(rename = "openai")]
+    #[strum(to_string = "openai")]
     OpenAi,
     Gemini,
 }
@@ -188,6 +202,22 @@ mod tests {
             let parsed: AdapterKind = serde_json::from_str(&json).unwrap();
             assert_eq!(parsed, *kind);
             assert_eq!(kind.as_str().parse::<AdapterKind>().unwrap(), *kind);
+        }
+    }
+
+    #[test]
+    fn agent_profile_kind_round_trips_as_settings_strings() {
+        for (kind, expected) in [
+            (AgentProfileKind::Anthropic, "anthropic"),
+            (AgentProfileKind::OpenAi, "openai"),
+            (AgentProfileKind::Gemini, "gemini"),
+        ] {
+            let json = serde_json::to_string(&kind).unwrap();
+            assert_eq!(json, format!("\"{expected}\""));
+            let parsed: AgentProfileKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, kind);
+            assert_eq!(expected.parse::<AgentProfileKind>().unwrap(), kind);
+            assert_eq!(kind.to_string(), expected);
         }
     }
 

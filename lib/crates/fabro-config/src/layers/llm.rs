@@ -28,6 +28,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use fabro_model::AgentProfileKind;
 use fabro_model::catalog::deserialize_knowledge_cutoff;
 pub use fabro_model::{
     CredentialRef, CredentialRefParseError, HeaderValueRef, ReasoningEffortFeature,
@@ -57,6 +58,9 @@ pub struct ProviderSettings {
     /// Adapter registry key (e.g. `"openai_compatible"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adapter:       Option<String>,
+    /// Agent profile used for routing/profile-specific behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_profile: Option<AgentProfileKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key_url:   Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -91,6 +95,9 @@ pub struct ModelSettings {
     /// when omitted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_id:               Option<String>,
+    /// Agent profile used for routing/profile-specific behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_profile:        Option<AgentProfileKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_name:         Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -280,6 +287,40 @@ mod tests {
         }
         let err: Result<Wrap, _> = toml::from_str(r#"v = ["sk-literal-secret"]"#);
         assert!(err.is_err(), "literal secret strings must fail to parse");
+    }
+
+    #[test]
+    fn provider_agent_profile_parses_from_toml() {
+        let parsed: LlmLayer = toml::from_str(
+            r#"
+[providers.acme]
+adapter = "openai_compatible"
+agent_profile = "anthropic"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            parsed.providers.get("acme").unwrap().agent_profile,
+            Some(fabro_model::AgentProfileKind::Anthropic)
+        );
+    }
+
+    #[test]
+    fn model_agent_profile_parses_from_toml() {
+        let parsed: LlmLayer = toml::from_str(
+            r#"
+[models.acme_large]
+provider = "acme"
+agent_profile = "gemini"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            parsed.models.get("acme_large").unwrap().agent_profile,
+            Some(fabro_model::AgentProfileKind::Gemini)
+        );
     }
 
     // ---- HeaderValueRef --------------------------------------------------
@@ -654,6 +695,7 @@ mystery = 1
         let high = ProviderSettings {
             adapter: Some("openai_compatible".to_string()),
             base_url: Some("https://override.example".to_string()),
+            agent_profile: Some(fabro_model::AgentProfileKind::Anthropic),
             ..ProviderSettings::default()
         };
         let low = ProviderSettings {
@@ -661,6 +703,7 @@ mystery = 1
             base_url: Some("https://defaults.example".to_string()),
             display_name: Some("Default".to_string()),
             priority: Some(10),
+            agent_profile: Some(fabro_model::AgentProfileKind::OpenAi),
             ..ProviderSettings::default()
         };
         let merged = high.combine(low);
@@ -668,6 +711,10 @@ mystery = 1
         assert_eq!(merged.base_url.as_deref(), Some("https://override.example"));
         assert_eq!(merged.display_name.as_deref(), Some("Default"));
         assert_eq!(merged.priority, Some(10));
+        assert_eq!(
+            merged.agent_profile,
+            Some(fabro_model::AgentProfileKind::Anthropic)
+        );
     }
 
     #[test]
@@ -819,5 +866,22 @@ mystery = 1
             Some(&["high".to_string()][..])
         );
         assert_eq!(merged.speed.as_deref(), Some(&["fast".to_string()][..]));
+    }
+
+    #[test]
+    fn model_agent_profile_merges_as_scalar() {
+        let high = ModelSettings {
+            agent_profile: Some(fabro_model::AgentProfileKind::Gemini),
+            ..ModelSettings::default()
+        };
+        let low = ModelSettings {
+            agent_profile: Some(fabro_model::AgentProfileKind::Anthropic),
+            ..ModelSettings::default()
+        };
+
+        assert_eq!(
+            high.combine(low).agent_profile,
+            Some(fabro_model::AgentProfileKind::Gemini)
+        );
     }
 }

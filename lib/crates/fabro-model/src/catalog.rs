@@ -8,7 +8,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use toml::de::Error as TomlDeError;
 
 use crate::Speed;
-use crate::adapter::{AdapterKind, AdapterMetadata};
+use crate::adapter::{AdapterKind, AdapterMetadata, AgentProfileKind};
 use crate::ids::ProviderId;
 use crate::reasoning::ReasoningEffort;
 use crate::types::{Model, ModelCosts, ModelFeatures, ModelLimits, ReasoningEffortFeature};
@@ -40,6 +40,8 @@ pub struct ProviderCatalogSettings {
     #[serde(default)]
     pub adapter:       Option<String>,
     #[serde(default)]
+    pub agent_profile: Option<AgentProfileKind>,
+    #[serde(default)]
     pub api_key_url:   Option<String>,
     #[serde(default)]
     pub base_url:      Option<String>,
@@ -62,6 +64,8 @@ pub struct ModelCatalogSettings {
     pub provider:             Option<String>,
     #[serde(default)]
     pub api_id:               Option<String>,
+    #[serde(default)]
+    pub agent_profile:        Option<AgentProfileKind>,
     #[serde(default)]
     pub display_name:         Option<String>,
     #[serde(default)]
@@ -361,6 +365,7 @@ pub struct CatalogProvider {
     pub id:            ProviderId,
     pub display_name:  String,
     pub adapter:       AdapterKind,
+    pub agent_profile: AgentProfileKind,
     pub api_key_url:   Option<String>,
     pub base_url:      Option<String>,
     pub credentials:   Vec<CredentialRef>,
@@ -377,9 +382,10 @@ pub struct CatalogModelControls {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CatalogModelSettings {
-    pub api_id:      String,
-    pub controls:    CatalogModelControls,
-    pub speed_costs: HashMap<Speed, ModelCosts>,
+    pub api_id:        String,
+    pub agent_profile: AgentProfileKind,
+    pub controls:      CatalogModelControls,
+    pub speed_costs:   HashMap<Speed, ModelCosts>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -694,6 +700,21 @@ impl Catalog {
         self.model_settings.get(&model.id)
     }
 
+    #[must_use]
+    pub fn effective_agent_profile(
+        &self,
+        provider_id: &ProviderId,
+        model_id_or_alias: Option<&str>,
+    ) -> Option<AgentProfileKind> {
+        let provider = self.provider(provider_id)?;
+        let model_profile = model_id_or_alias
+            .and_then(|model_id| self.get(model_id))
+            .filter(|model| model.provider == provider.id)
+            .and_then(|model| self.model_settings.get(&model.id))
+            .map(|settings| settings.agent_profile);
+        Some(model_profile.unwrap_or(provider.agent_profile))
+    }
+
     /// List all models, optionally filtered by provider.
     #[must_use]
     pub fn list(&self, provider: Option<&ProviderId>) -> Vec<&Model> {
@@ -894,6 +915,7 @@ fn merge_provider_settings(
     ProviderCatalogSettings {
         display_name:  higher.display_name.or(fallback.display_name),
         adapter:       higher.adapter.or(fallback.adapter),
+        agent_profile: higher.agent_profile.or(fallback.agent_profile),
         api_key_url:   higher.api_key_url.or(fallback.api_key_url),
         base_url:      higher.base_url.or(fallback.base_url),
         credentials:   higher.credentials.or(fallback.credentials),
@@ -911,6 +933,7 @@ fn merge_model_settings(
     ModelCatalogSettings {
         provider:             higher.provider.or(fallback.provider),
         api_id:               higher.api_id.or(fallback.api_id),
+        agent_profile:        higher.agent_profile.or(fallback.agent_profile),
         display_name:         higher.display_name.or(fallback.display_name),
         family:               higher.family.or(fallback.family),
         training:             higher.training.or(fallback.training),
@@ -1040,6 +1063,9 @@ fn build_providers(
             id: provider_id,
             display_name: settings.display_name.clone().unwrap_or_else(|| id.clone()),
             adapter,
+            agent_profile: settings
+                .agent_profile
+                .unwrap_or_else(|| adapter.metadata().default_profile),
             api_key_url: settings.api_key_url.clone(),
             base_url: settings.base_url.clone(),
             credentials: settings.credentials.clone().unwrap_or_default(),
@@ -1127,6 +1153,7 @@ fn build_model(
             .api_id
             .clone()
             .unwrap_or_else(|| model_id.to_string()),
+        agent_profile: settings.agent_profile.unwrap_or(provider.agent_profile),
         controls,
         speed_costs,
     };
@@ -1436,7 +1463,7 @@ mod tests {
     use super::*;
     use crate::adapter::AdapterKind;
     use crate::reasoning::ReasoningEffort;
-    use crate::{ProviderId, Speed};
+    use crate::{AgentProfileKind, ProviderId, Speed};
 
     fn minimal_settings(source: &str) -> LlmCatalogSettings {
         toml::from_str(source).expect("fixture should parse as an LLM settings layer")
@@ -2073,6 +2100,175 @@ reasoning = false
         assert_eq!(
             catalog.closest(&alias, reference).unwrap().id,
             "default_model"
+        );
+    }
+
+    #[test]
+    fn provider_agent_profile_overrides_adapter_default() {
+        let layer = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai_compatible"
+base_url = "https://api.test/v1"
+agent_profile = "anthropic"
+
+[models.default_model]
+provider = "test"
+display_name = "Default Model"
+family = "test"
+default = true
+
+[models.default_model.limits]
+context_window = 1000
+
+[models.default_model.features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        );
+
+        let catalog = Catalog::from_settings(&layer).unwrap();
+
+        assert_eq!(
+            catalog
+                .provider(&ProviderId::new("test"))
+                .unwrap()
+                .agent_profile,
+            AgentProfileKind::Anthropic
+        );
+        assert_eq!(
+            catalog.effective_agent_profile(&ProviderId::new("test"), Some("default_model")),
+            Some(AgentProfileKind::Anthropic)
+        );
+    }
+
+    #[test]
+    fn model_agent_profile_overrides_provider_profile_for_same_provider() {
+        let layer = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "anthropic"
+aliases = ["alias"]
+
+[models.default_model]
+provider = "test"
+display_name = "Default Model"
+family = "test"
+default = true
+agent_profile = "gemini"
+aliases = ["default-alias"]
+
+[models.default_model.limits]
+context_window = 1000
+
+[models.default_model.features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        );
+
+        let catalog = Catalog::from_settings(&layer).unwrap();
+
+        assert_eq!(
+            catalog
+                .model_settings("default-alias")
+                .unwrap()
+                .agent_profile,
+            AgentProfileKind::Gemini
+        );
+        assert_eq!(
+            catalog.effective_agent_profile(&ProviderId::new("alias"), Some("default-alias")),
+            Some(AgentProfileKind::Gemini)
+        );
+    }
+
+    #[test]
+    fn effective_agent_profile_does_not_leak_unrelated_model_override() {
+        let layer = minimal_settings(
+            r#"
+[providers.one]
+display_name = "One"
+adapter = "openai"
+agent_profile = "openai"
+
+[providers.two]
+display_name = "Two"
+adapter = "openai"
+agent_profile = "anthropic"
+
+[models.one_model]
+provider = "one"
+display_name = "One Model"
+family = "test"
+default = true
+
+[models.one_model.limits]
+context_window = 1000
+
+[models.one_model.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.two_model]
+provider = "two"
+display_name = "Two Model"
+family = "test"
+default = true
+agent_profile = "gemini"
+
+[models.two_model.limits]
+context_window = 1000
+
+[models.two_model.features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        );
+
+        let catalog = Catalog::from_settings(&layer).unwrap();
+
+        assert_eq!(
+            catalog.effective_agent_profile(&ProviderId::new("one"), Some("two_model")),
+            Some(AgentProfileKind::OpenAi)
+        );
+    }
+
+    #[test]
+    fn omitted_agent_profile_preserves_adapter_default() {
+        let layer = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "gemini"
+
+[models.default_model]
+provider = "test"
+display_name = "Default Model"
+family = "test"
+default = true
+
+[models.default_model.limits]
+context_window = 1000
+
+[models.default_model.features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        );
+
+        let catalog = Catalog::from_settings(&layer).unwrap();
+
+        assert_eq!(
+            catalog.effective_agent_profile(&ProviderId::new("test"), Some("default_model")),
+            Some(AgentProfileKind::Gemini)
         );
     }
 

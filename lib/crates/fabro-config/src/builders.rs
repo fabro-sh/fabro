@@ -307,6 +307,7 @@ fn provider_settings_to_catalog(
     model_catalog::ProviderCatalogSettings {
         display_name:  settings.display_name,
         adapter:       settings.adapter,
+        agent_profile: settings.agent_profile,
         api_key_url:   settings.api_key_url,
         base_url:      settings.base_url,
         credentials:   settings.credentials,
@@ -321,6 +322,7 @@ fn model_settings_to_catalog(settings: ModelSettings) -> model_catalog::ModelCat
     let ModelSettings {
         provider,
         api_id,
+        agent_profile,
         display_name,
         family,
         training,
@@ -337,6 +339,7 @@ fn model_settings_to_catalog(settings: ModelSettings) -> model_catalog::ModelCat
     model_catalog::ModelCatalogSettings {
         provider,
         api_id,
+        agent_profile,
         display_name,
         family,
         training,
@@ -691,12 +694,14 @@ display_name = "Acme"
 adapter = "openai_compatible"
 base_url = "https://api.acme.test/v1"
 credentials = ["env:ACME_API_KEY"]
+agent_profile = "anthropic"
 
 [llm.models."acme-large"]
 provider = "acme"
 display_name = "Acme Large"
 family = "acme"
 default = true
+agent_profile = "gemini"
 
 [llm.models."acme-large".limits]
 context_window = 128000
@@ -720,6 +725,11 @@ reasoning = false
                 .get("acme-large")
                 .map(|model| model.provider.clone()),
             Some(fabro_model::ProviderId::new("acme"))
+        );
+        assert_eq!(
+            catalog
+                .effective_agent_profile(&fabro_model::ProviderId::new("acme"), Some("acme-large")),
+            Some(fabro_model::AgentProfileKind::Gemini)
         );
     }
 }
