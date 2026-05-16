@@ -48,16 +48,6 @@ pub(crate) struct ProviderContext {
     pub(crate) profile_kind: AgentProfileKind,
 }
 
-pub(crate) fn effective_profile_kind(
-    catalog: &Catalog,
-    provider_id: &ProviderId,
-    model: Option<&str>,
-) -> AgentProfileKind {
-    catalog
-        .effective_agent_profile(provider_id, model)
-        .unwrap_or_else(|| panic!("Provider \"{provider_id}\" is not configured"))
-}
-
 pub(crate) fn resolve_provider_context(
     catalog: &Catalog,
     default_provider_id: &ProviderId,
@@ -89,6 +79,16 @@ pub(crate) fn resolve_provider_context(
         provider_id: provider.id.clone(),
         profile_kind,
     })
+}
+
+pub(crate) fn resolve_node_provider_context(
+    catalog: &Catalog,
+    default_provider_id: &ProviderId,
+    default_model: &str,
+    node: &Node,
+) -> Result<ProviderContext, Error> {
+    let model = node.model().unwrap_or(default_model);
+    resolve_provider_context(catalog, default_provider_id, model, node.provider())
 }
 
 fn unsupported_backend_error(raw: &str) -> Error {

@@ -163,7 +163,7 @@ async fn initialized(
                     options.hook_runner,
                     run_options.cancel_token.clone(),
                     fabro_model::ProviderId::anthropic(),
-                    fabro_model::AgentProfileKind::Anthropic,
+                    "claude-sonnet-4-6".to_string(),
                     options
                         .llm_source
                         .unwrap_or_else(|| Arc::new(EnvCredentialSource::new())),

@@ -1203,7 +1203,7 @@ mod tests {
             None,
             tokio_util::sync::CancellationToken::new(),
             fabro_model::ProviderId::anthropic(),
-            fabro_model::AgentProfileKind::Anthropic,
+            "claude-sonnet-4-6".to_string(),
             Arc::new(fabro_auth::EnvCredentialSource::new()),
             Arc::new(Catalog::from_builtin().expect("default catalog should build")),
             Arc::new(SandboxGitRuntime::new()),

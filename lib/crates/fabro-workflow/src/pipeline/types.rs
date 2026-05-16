@@ -5,7 +5,7 @@ use std::sync::Arc;
 use fabro_graphviz::graph::Graph;
 use fabro_interview::Interviewer;
 use fabro_mcp::config::McpServerSettings;
-use fabro_model::{AgentProfileKind, Catalog, FallbackTarget, ProviderId};
+use fabro_model::{Catalog, FallbackTarget, ProviderId};
 use fabro_sandbox::SandboxSpec;
 use fabro_types::RunId;
 use fabro_types::settings::run::{PullRequestSettings, RunModelControls};
@@ -219,7 +219,6 @@ impl Persisted {
 pub struct LlmSpec {
     pub model:          String,
     pub provider_id:    ProviderId,
-    pub profile_kind:   AgentProfileKind,
     pub fallback_chain: Vec<FallbackTarget>,
     pub mcp_servers:    Vec<McpServerSettings>,
     pub model_controls: RunModelControls,

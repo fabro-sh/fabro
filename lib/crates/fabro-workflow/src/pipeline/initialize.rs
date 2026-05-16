@@ -152,7 +152,6 @@ async fn build_registry(
     let build_llm_registry = || {
         let model = spec.model.clone();
         let provider_id = spec.provider_id.clone();
-        let profile_kind = spec.profile_kind;
         let fallback_chain = spec.fallback_chain.clone();
         let mcp_servers = spec.mcp_servers.clone();
         let model_controls = spec.model_controls.clone();
@@ -165,7 +164,6 @@ async fn build_registry(
             let api = AgentApiBackend::new_with_catalog(
                 model.clone(),
                 provider_id.clone(),
-                profile_kind,
                 fallback_chain.clone(),
                 Arc::clone(&llm_source_for_api),
                 Arc::clone(&steering_hub_for_api),
@@ -177,14 +175,8 @@ async fn build_registry(
             let cli = cli_resolver
                 .clone()
                 .map_or_else(
-                    || {
-                        AgentCliBackend::new_from_env(model.clone(), provider_id.clone())
-                            .with_profile_kind(profile_kind)
-                    },
-                    |resolver| {
-                        AgentCliBackend::new(model.clone(), provider_id.clone(), resolver)
-                            .with_profile_kind(profile_kind)
-                    },
+                    || AgentCliBackend::new_from_env(model.clone(), provider_id.clone()),
+                    |resolver| AgentCliBackend::new(model.clone(), provider_id.clone(), resolver),
                 )
                 .with_catalog(Arc::clone(&catalog_for_api))
                 .with_run_model_controls(model_controls.clone())
@@ -192,14 +184,8 @@ async fn build_registry(
             let acp = cli_resolver
                 .clone()
                 .map_or_else(
-                    || {
-                        AgentAcpBackend::new_from_env(model.clone(), provider_id.clone())
-                            .with_profile_kind(profile_kind)
-                    },
-                    |resolver| {
-                        AgentAcpBackend::new(model.clone(), provider_id.clone(), resolver)
-                            .with_profile_kind(profile_kind)
-                    },
+                    || AgentAcpBackend::new_from_env(model.clone(), provider_id.clone()),
+                    |resolver| AgentAcpBackend::new(model.clone(), provider_id.clone(), resolver),
                 )
                 .with_catalog(Arc::clone(&catalog_for_api))
                 .with_tool_env_provider(tool_env_provider.clone(), github_token_refresh_managed);
@@ -687,7 +673,7 @@ pub async fn initialize(
         hook_runner.clone(),
         options.run_options.cancel_token.clone(),
         options.llm.provider_id.clone(),
-        options.llm.profile_kind,
+        options.llm.model.clone(),
         Arc::clone(&llm_source),
         catalog,
         sandbox_git,
@@ -899,7 +885,6 @@ mod tests {
             llm:               LlmSpec {
                 model:          "test-model".to_string(),
                 provider_id:    fabro_model::ProviderId::anthropic(),
-                profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
                 model_controls: RunModelControls::default(),
@@ -961,7 +946,6 @@ mod tests {
             llm:               LlmSpec {
                 model:          "test-model".to_string(),
                 provider_id:    fabro_model::ProviderId::anthropic(),
-                profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
                 model_controls: RunModelControls::default(),
@@ -1057,7 +1041,6 @@ mod tests {
             &LlmSpec {
                 model:          "claude-opus-4-6".to_string(),
                 provider_id:    fabro_model::ProviderId::anthropic(),
-                profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
                 model_controls: RunModelControls::default(),
@@ -1175,7 +1158,6 @@ mod tests {
             llm:               LlmSpec {
                 model:          "fake-acp".to_string(),
                 provider_id:    fabro_model::ProviderId::openai(),
-                profile_kind:   fabro_model::AgentProfileKind::OpenAi,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
                 model_controls: RunModelControls::default(),
@@ -1274,7 +1256,6 @@ mod tests {
             llm:               LlmSpec {
                 model:          "test-model".to_string(),
                 provider_id:    fabro_model::ProviderId::anthropic(),
-                profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
                 model_controls: RunModelControls::default(),
@@ -1391,7 +1372,6 @@ mod tests {
             llm: LlmSpec {
                 model:          "test-model".to_string(),
                 provider_id:    fabro_model::ProviderId::anthropic(),
-                profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
                 model_controls: RunModelControls::default(),
@@ -1457,7 +1437,6 @@ mod tests {
             llm: LlmSpec {
                 model:          "test-model".to_string(),
                 provider_id:    fabro_model::ProviderId::anthropic(),
-                profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
                 model_controls: RunModelControls::default(),

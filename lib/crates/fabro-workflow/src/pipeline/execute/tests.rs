@@ -250,7 +250,6 @@ async fn execute_test_run_with_options(
             llm: LlmSpec {
                 model:          "test-model".to_string(),
                 provider_id:    fabro_model::ProviderId::anthropic(),
-                profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
                 model_controls: RunModelControls::default(),
@@ -314,7 +313,6 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
             llm: LlmSpec {
                 model:          "test-model".to_string(),
                 provider_id:    fabro_model::ProviderId::anthropic(),
-                profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
                 model_controls: RunModelControls::default(),
@@ -393,7 +391,6 @@ async fn run_with_lifecycle(
             llm: LlmSpec {
                 model:          "test-model".to_string(),
                 provider_id:    fabro_model::ProviderId::anthropic(),
-                profile_kind:   fabro_model::AgentProfileKind::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
                 model_controls: RunModelControls::default(),

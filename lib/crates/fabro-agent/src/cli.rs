@@ -208,7 +208,6 @@ fn build_tool_approval(
 
 fn summarizer_model_id(
     provider_id: &ProviderId,
-    profile_kind: AgentProfileKind,
     catalog: &Catalog,
     selected_model: &str,
 ) -> ModelHandle {
@@ -217,10 +216,10 @@ fn summarizer_model_id(
         model:    catalog
             .default_for_provider(provider_id)
             .map_or_else(
-                || match profile_kind {
-                    AgentProfileKind::Anthropic => "claude-haiku-4-5",
-                    AgentProfileKind::OpenAi => selected_model,
-                    AgentProfileKind::Gemini => "gemini-2.0-flash",
+                || match provider_id.as_str() {
+                    ProviderId::ANTHROPIC => "claude-haiku-4-5",
+                    ProviderId::GEMINI => "gemini-2.0-flash",
+                    _ => selected_model,
                 },
                 |model| model.id.as_str(),
             )
@@ -230,14 +229,13 @@ fn summarizer_model_id(
 
 fn build_summarizer(
     provider_id: &ProviderId,
-    profile_kind: AgentProfileKind,
     model: &str,
     catalog: &Catalog,
     llm_client: Client,
 ) -> WebFetchSummarizer {
     WebFetchSummarizer {
         client:   llm_client,
-        model_id: summarizer_model_id(provider_id, profile_kind, catalog, model),
+        model_id: summarizer_model_id(provider_id, catalog, model),
     }
 }
 
@@ -274,14 +272,20 @@ fn parse_provider(args: &AgentArgs) -> anyhow::Result<ProviderId> {
 
 fn resolve_provider_id(catalog: &Catalog, args: &AgentArgs) -> anyhow::Result<ProviderId> {
     if args.provider.is_some() {
-        return parse_provider(args);
+        let requested = parse_provider(args)?;
+        return Ok(catalog
+            .provider(&requested)
+            .map_or(requested, |provider| provider.id.clone()));
     }
     if let Some(model_id) = args.model.as_deref() {
         if let Some(model) = catalog.get(model_id) {
             return Ok(model.provider.clone());
         }
     }
-    parse_provider(args)
+    let requested = parse_provider(args)?;
+    Ok(catalog
+        .provider(&requested)
+        .map_or(requested, |provider| provider.id.clone()))
 }
 
 fn standalone_llm_source() -> Arc<dyn CredentialSource> {
@@ -572,7 +576,6 @@ pub async fn run_with_args_and_client_and_catalog(
         &model,
         Some(build_summarizer(
             &provider_id,
-            profile_kind,
             &model,
             &catalog,
             client.clone(),
@@ -619,7 +622,6 @@ pub async fn run_with_args_and_client_and_catalog(
     let factory: SessionFactory = Arc::new(move || {
         let child_summarizer = Some(build_summarizer(
             &factory_provider_id,
-            factory_profile_kind,
             &factory_model,
             &factory_catalog,
             factory_client.clone(),
@@ -1065,6 +1067,37 @@ mod tests {
     }
 
     #[test]
+    fn standalone_provider_resolution_canonicalizes_explicit_provider_alias() {
+        let mut settings = LlmCatalogSettings::default();
+        settings
+            .providers
+            .insert("bedrock".to_string(), ProviderCatalogSettings {
+                display_name: Some("Bedrock".to_string()),
+                adapter: Some("openai_compatible".to_string()),
+                base_url: Some("https://example.invalid/v1".to_string()),
+                aliases: Some(vec!["br".to_string()]),
+                ..ProviderCatalogSettings::default()
+            });
+        let catalog = Catalog::from_builtin_with_overrides(&settings).unwrap();
+        let args = AgentArgs {
+            prompt:        "test".to_string(),
+            provider:      Some("br".to_string()),
+            model:         None,
+            permissions:   None,
+            auto_approve:  false,
+            debug:         false,
+            verbose:       false,
+            skills_dir:    None,
+            output_format: None,
+        };
+
+        assert_eq!(
+            resolve_provider_id(&catalog, &args).unwrap(),
+            ProviderId::new("bedrock")
+        );
+    }
+
+    #[test]
     fn standalone_profile_kind_uses_model_agent_profile_override() {
         let mut settings = LlmCatalogSettings::default();
         settings
@@ -1111,8 +1144,7 @@ mod tests {
     }
 
     #[test]
-    fn summarizer_model_id_uses_selected_model_for_custom_openai_provider_without_catalog_default()
-    {
+    fn summarizer_model_id_uses_selected_model_for_custom_provider_without_default() {
         let mut settings = LlmCatalogSettings::default();
         settings
             .providers
@@ -1125,12 +1157,28 @@ mod tests {
         let catalog = Catalog::from_builtin_with_overrides(&settings).unwrap();
         let provider_id = ProviderId::new("bedrock");
 
-        let model_id = summarizer_model_id(
-            &provider_id,
-            AgentProfileKind::OpenAi,
-            &catalog,
-            "bedrock-claude-sonnet-4-6",
-        );
+        let model_id = summarizer_model_id(&provider_id, &catalog, "bedrock-claude-sonnet-4-6");
+
+        assert_eq!(model_id.provider(), &provider_id);
+        assert_eq!(model_id.model_id(), "bedrock-claude-sonnet-4-6");
+    }
+
+    #[test]
+    fn summarizer_model_id_ignores_profile_for_custom_provider_without_default() {
+        let mut settings = LlmCatalogSettings::default();
+        settings
+            .providers
+            .insert("bedrock".to_string(), ProviderCatalogSettings {
+                display_name: Some("Bedrock".to_string()),
+                adapter: Some("openai_compatible".to_string()),
+                base_url: Some("https://example.invalid/v1".to_string()),
+                agent_profile: Some(AgentProfileKind::Anthropic),
+                ..ProviderCatalogSettings::default()
+            });
+        let catalog = Catalog::from_builtin_with_overrides(&settings).unwrap();
+        let provider_id = ProviderId::new("bedrock");
+
+        let model_id = summarizer_model_id(&provider_id, &catalog, "bedrock-claude-sonnet-4-6");
 
         assert_eq!(model_id.provider(), &provider_id);
         assert_eq!(model_id.model_id(), "bedrock-claude-sonnet-4-6");

@@ -316,7 +316,6 @@ pub fn parse_cli_response(profile_kind: AgentProfileKind, output: &str) -> Optio
 pub struct AgentCliBackend {
     model: String,
     provider_id: ProviderId,
-    profile_kind: AgentProfileKind,
     tool_env: Option<Arc<dyn ToolEnvProvider>>,
     github_token_refresh_managed: bool,
     resolver: Option<CredentialResolver>,
@@ -333,12 +332,9 @@ impl AgentCliBackend {
     ) -> Self {
         let provider_id = provider_id.into();
         let catalog = default_catalog();
-        let profile_kind =
-            routing::effective_profile_kind(catalog.as_ref(), &provider_id, Some(&model));
         Self {
             model,
             provider_id,
-            profile_kind,
             tool_env: None,
             github_token_refresh_managed: false,
             resolver: Some(resolver),
@@ -351,24 +347,15 @@ impl AgentCliBackend {
     pub fn new_from_env(model: String, provider_id: impl Into<ProviderId>) -> Self {
         let provider_id = provider_id.into();
         let catalog = default_catalog();
-        let profile_kind =
-            routing::effective_profile_kind(catalog.as_ref(), &provider_id, Some(&model));
         Self {
             model,
             provider_id,
-            profile_kind,
             tool_env: None,
             github_token_refresh_managed: false,
             resolver: None,
             run_model_controls: RunModelControls::default(),
             catalog,
         }
-    }
-
-    #[must_use]
-    pub fn with_profile_kind(mut self, profile_kind: AgentProfileKind) -> Self {
-        self.profile_kind = profile_kind;
-        self
     }
 
     #[must_use]
@@ -431,11 +418,11 @@ impl CodergenBackend for AgentCliBackend {
 
         // 3. Build CLI command
         let model = node.model().unwrap_or(&self.model);
-        let provider = routing::resolve_provider_context(
+        let provider = routing::resolve_node_provider_context(
             self.catalog.as_ref(),
             &self.provider_id,
-            model,
-            node.provider(),
+            &self.model,
+            node,
         )?;
         let provider_id = provider.provider_id;
         let profile_kind = provider.profile_kind;

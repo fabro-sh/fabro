@@ -10,7 +10,7 @@ use fabro_acp::{
 use fabro_agent::{Sandbox, StaticEnvProvider, ToolEnvProvider};
 use fabro_auth::CredentialResolver;
 use fabro_graphviz::graph::Node;
-use fabro_model::{AgentProfileKind, Catalog, ProviderId};
+use fabro_model::{Catalog, ProviderId};
 use fabro_util::time::elapsed_ms;
 use tokio_util::sync::CancellationToken;
 
@@ -24,7 +24,6 @@ use crate::event::{Emitter, Event, StageScope};
 pub struct AgentAcpBackend {
     model: String,
     provider_id: ProviderId,
-    profile_kind: AgentProfileKind,
     tool_env: Option<Arc<dyn ToolEnvProvider>>,
     github_token_refresh_managed: bool,
     resolver: Option<CredentialResolver>,
@@ -40,12 +39,9 @@ impl AgentAcpBackend {
     ) -> Self {
         let provider_id = provider_id.into();
         let catalog = default_catalog();
-        let profile_kind =
-            routing::effective_profile_kind(catalog.as_ref(), &provider_id, Some(&model));
         Self {
             model,
             provider_id,
-            profile_kind,
             tool_env: None,
             github_token_refresh_managed: false,
             resolver: Some(resolver),
@@ -57,23 +53,14 @@ impl AgentAcpBackend {
     pub fn new_from_env(model: String, provider_id: impl Into<ProviderId>) -> Self {
         let provider_id = provider_id.into();
         let catalog = default_catalog();
-        let profile_kind =
-            routing::effective_profile_kind(catalog.as_ref(), &provider_id, Some(&model));
         Self {
             model,
             provider_id,
-            profile_kind,
             tool_env: None,
             github_token_refresh_managed: false,
             resolver: None,
             catalog,
         }
-    }
-
-    #[must_use]
-    pub fn with_profile_kind(mut self, profile_kind: AgentProfileKind) -> Self {
-        self.profile_kind = profile_kind;
-        self
     }
 
     #[must_use]
@@ -110,11 +97,11 @@ impl AgentAcpBackend {
     ) -> Result<CodergenResult, Error> {
         let files_before = changed_files::detect_changed_files(sandbox).await;
         let model = node.model().unwrap_or(&self.model);
-        let provider = routing::resolve_provider_context(
+        let provider = routing::resolve_node_provider_context(
             self.catalog.as_ref(),
             &self.provider_id,
-            model,
-            node.provider(),
+            &self.model,
+            node,
         )?;
         let provider_id = provider.provider_id;
         let profile_kind = provider.profile_kind;

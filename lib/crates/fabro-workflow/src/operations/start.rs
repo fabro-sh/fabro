@@ -37,6 +37,7 @@ use crate::event::{
     Emitter, Event, EventBody, RunEventLogger, RunEventSink, RunNoticeLevel, append_event_to_sink,
 };
 use crate::handler::HandlerRegistry;
+use crate::handler::llm::routing;
 use crate::outcome::Outcome;
 use crate::pipeline::{
     self, DevcontainerSpec, FinalizeOptions, Finalized, InitOptions, LlmSpec, Persisted,
@@ -86,7 +87,6 @@ struct RunSession {
 struct ResolvedStartLlm {
     model:          String,
     provider_id:    ProviderId,
-    profile_kind:   fabro_model::AgentProfileKind,
     fallback_chain: Vec<FallbackTarget>,
 }
 
@@ -400,7 +400,6 @@ impl RunSession {
             llm: LlmSpec {
                 model: llm.model.clone(),
                 provider_id: llm.provider_id.clone(),
-                profile_kind: llm.profile_kind,
                 fallback_chain: llm.fallback_chain,
                 mcp_servers,
                 model_controls: resolved.model.controls.clone(),
@@ -551,33 +550,22 @@ fn resolve_start_llm(
         .map(InterpString::as_source)
         .filter(|value| !value.is_empty());
 
-    let provider_id = if let Some(value) = provider.as_deref() {
-        let provider_id = ProviderId::from(value);
-        catalog
-            .provider(&provider_id)
-            .ok_or_else(|| Error::Precondition(format!("Provider \"{value}\" is not configured")))?
-            .id
-            .clone()
-    } else if let Some(model) = catalog.get(&model) {
-        model.provider.clone()
-    } else {
-        catalog
-            .default_for_configured_ids(configured)
-            .provider
-            .clone()
-    };
-
-    let profile_kind = catalog
-        .effective_agent_profile(&provider_id, Some(&model))
-        .ok_or_else(|| {
-            Error::Precondition(format!("Provider \"{provider_id}\" is not configured"))
-        })?;
+    let default_provider_id = catalog
+        .default_for_configured_ids(configured)
+        .provider
+        .clone();
+    let provider_context = routing::resolve_provider_context(
+        catalog,
+        &default_provider_id,
+        &model,
+        provider.as_deref(),
+    )?;
+    let provider_id = provider_context.provider_id;
     let fallback_chain = resolve_fallback_chain(catalog, &provider_id, &model, &settings.model);
 
     Ok(ResolvedStartLlm {
         model,
         provider_id,
-        profile_kind,
         fallback_chain,
     })
 }
@@ -1228,7 +1216,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_start_llm_uses_model_agent_profile_override() {
+    fn resolve_start_llm_infers_provider_from_model_alias() {
         let overrides: fabro_model::catalog::LlmCatalogSettings = toml::from_str(
             r#"
 [providers.acme]
@@ -1262,10 +1250,6 @@ reasoning = false
 
         assert_eq!(resolved.model, "ac");
         assert_eq!(resolved.provider_id, ProviderId::new("acme"));
-        assert_eq!(
-            resolved.profile_kind,
-            fabro_model::AgentProfileKind::Anthropic
-        );
     }
 
     #[test]
