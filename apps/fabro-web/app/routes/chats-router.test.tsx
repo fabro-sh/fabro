@@ -15,7 +15,11 @@ describe("chats route module exports", () => {
   });
 
   test("chats-layout declares the AppShell handle (children inherit via useMatches)", () => {
-    expect(ChatsLayoutModule.handle).toEqual({ fullHeight: true, wide: true });
+    expect(ChatsLayoutModule.handle).toEqual({
+      hideHeader: true,
+      fullHeight: true,
+      wide: true,
+    });
   });
 
   test("chats-new renders inside MemoryRouter without crashing", () => {
