@@ -1,6 +1,13 @@
 @import "@xterm/xterm/css/xterm.css";
 
 /*
+ * Do NOT `import "./app.css"` from JS — Bun's CSS bundler rejects the
+ * `@layer name, name;` ordering rule between `@import` rules below. This file
+ * is built standalone by the Tailwind CLI step in `scripts/build.ts`; the
+ * generated `assets/app.css` is linked from `index.template.html`.
+ */
+
+/*
  * Cascade layer order. @assistant-ui/react-ui ships unlayered CSS authored
  * against Tailwind v3; in Tailwind v4 utilities live in @layer utilities, and
  * any unlayered CSS wins over layered CSS regardless of selector specificity.
