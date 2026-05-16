@@ -23,7 +23,7 @@ use crate::ManifestPath;
 use crate::error::Error;
 use crate::event::{Event, append_event, to_run_event_at};
 use crate::file_resolver::FileResolver;
-use crate::pipeline::types::{PersistOptions, TEMPLATE_UNDEFINED_VARIABLE_RULE};
+use crate::pipeline::types::PersistOptions;
 use crate::pipeline::{self, Persisted, TransformOptions, Validated};
 use crate::records::RunSpec;
 use crate::run_lookup::default_scratch_base;
@@ -296,7 +296,7 @@ fn create_from_source(
         &options.catalog,
     )?;
 
-    validated.promote_rule_to_error(TEMPLATE_UNDEFINED_VARIABLE_RULE);
+    validated.promote_template_undefined_variables_to_errors();
     if validated.has_errors() {
         return Err(Error::ValidationFailed {
             diagnostics: validated.diagnostics().to_vec(),
@@ -516,7 +516,7 @@ mod tests {
         let mut validated = validate_dot(dot, WorkflowSettings::default());
         assert!(!validated.has_errors());
 
-        validated.promote_rule_to_error(TEMPLATE_UNDEFINED_VARIABLE_RULE);
+        validated.promote_template_undefined_variables_to_errors();
 
         assert!(validated.has_errors());
         let diagnostic = validated

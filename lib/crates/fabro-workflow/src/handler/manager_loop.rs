@@ -18,7 +18,7 @@ use crate::context::{Context, WorkflowContext, keys};
 use crate::error::Error;
 use crate::operations::{ValidateInput, WorkflowInput, validate};
 use crate::outcome::{Outcome, OutcomeExt, StageOutcome};
-use crate::pipeline::types::{Initialized, TEMPLATE_UNDEFINED_VARIABLE_RULE};
+use crate::pipeline::types::Initialized;
 use crate::run_dir::visit_from_context;
 use crate::run_options::RunOptions;
 use crate::static_reference::{ReferenceKind, validate_static_reference};
@@ -78,7 +78,7 @@ fn parse_child_graph(node: &Node, services: &EngineServices) -> Result<ParsedChi
             custom_transforms: Vec::new(),
             catalog:           Arc::clone(&services.run.catalog),
         })?;
-        validated.promote_rule_to_error(TEMPLATE_UNDEFINED_VARIABLE_RULE);
+        validated.promote_template_undefined_variables_to_errors();
         validated.raise_on_errors()?;
         let (graph, _, _) = validated.into_parts();
         return Ok(ParsedChildWorkflow {
@@ -123,7 +123,7 @@ fn parse_child_graph(node: &Node, services: &EngineServices) -> Result<ParsedChi
             custom_transforms: Vec::new(),
             catalog: Arc::clone(&services.run.catalog),
         })?;
-        validated.promote_rule_to_error(TEMPLATE_UNDEFINED_VARIABLE_RULE);
+        validated.promote_template_undefined_variables_to_errors();
         validated.raise_on_errors()?;
         let (graph, _, _) = validated.into_parts();
         return Ok(ParsedChildWorkflow {

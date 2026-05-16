@@ -129,6 +129,10 @@ impl Validated {
         }
     }
 
+    pub fn promote_template_undefined_variables_to_errors(&mut self) {
+        self.promote_rule_to_error(TEMPLATE_UNDEFINED_VARIABLE_RULE);
+    }
+
     /// True if any diagnostic has Error severity.
     #[must_use]
     pub fn has_errors(&self) -> bool {

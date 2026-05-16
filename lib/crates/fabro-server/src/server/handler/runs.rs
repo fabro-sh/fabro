@@ -23,7 +23,6 @@ use fabro_types::{
 };
 use fabro_util::version::FABRO_VERSION;
 use fabro_workflow::command_log::{command_log_path, read_json_string_blob, read_log_slice};
-use fabro_workflow::pipeline::TEMPLATE_UNDEFINED_VARIABLE_RULE;
 use fabro_workflow::run_status::RunStatus;
 use fabro_workflow::{Error as WorkflowError, operations};
 use tokio::fs;
@@ -681,7 +680,7 @@ async fn run_preflight(
         }
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
-    validated.promote_rule_to_error(TEMPLATE_UNDEFINED_VARIABLE_RULE);
+    validated.promote_template_undefined_variables_to_errors();
     let response = match run_manifest::run_preflight(&state, &prepared, &validated).await {
         Ok((response, _ok)) => response,
         Err(err) => {

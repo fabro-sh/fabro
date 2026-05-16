@@ -1,5 +1,6 @@
 use std::fmt;
 
+use fabro_template::contains_template_syntax;
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -8,7 +9,6 @@ pub enum ReferenceKind {
     Import,
     ChildWorkflow,
     Dockerfile,
-    Workflow,
     GraphGoalFile,
 }
 
@@ -19,11 +19,23 @@ impl fmt::Display for ReferenceKind {
             Self::Import => "import reference",
             Self::ChildWorkflow => "child workflow reference",
             Self::Dockerfile => "Dockerfile reference",
-            Self::Workflow => "workflow reference",
             Self::GraphGoalFile => "graph goal file reference",
         };
         f.write_str(label)
     }
+}
+
+impl ReferenceKind {
+    pub fn validate(self, value: &str) -> Result<(), StaticReferenceError> {
+        validate_static_reference(value, self)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AttributeScope {
+    Graph,
+    Node,
+    Edge,
 }
 
 #[derive(Debug, Error)]
@@ -53,11 +65,6 @@ impl StaticReferenceError {
     }
 }
 
-#[must_use]
-pub fn contains_template_syntax(value: &str) -> bool {
-    value.contains("{{") || value.contains("{%") || value.contains("{#")
-}
-
 pub fn validate_static_reference(
     value: &str,
     kind: ReferenceKind,
@@ -66,4 +73,23 @@ pub fn validate_static_reference(
         return Err(StaticReferenceError::new(kind, value));
     }
     Ok(())
+}
+
+#[must_use]
+pub fn reference_kind_for_attribute(
+    scope: AttributeScope,
+    key: &str,
+    value: &str,
+) -> Option<ReferenceKind> {
+    match key {
+        "import" => Some(ReferenceKind::Import),
+        "stack.child_workflow" | "stack.child_dotfile" => Some(ReferenceKind::ChildWorkflow),
+        "goal" if matches!(scope, AttributeScope::Graph) && value.starts_with('@') => {
+            Some(ReferenceKind::GraphGoalFile)
+        }
+        "prompt" if matches!(scope, AttributeScope::Node) && value.starts_with('@') => {
+            Some(ReferenceKind::FileInline)
+        }
+        _ => None,
+    }
 }

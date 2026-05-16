@@ -10,8 +10,6 @@ use serde_json::Value;
 use super::common::{ToolError, ToolResult};
 use super::create::ValidatedCreateRunSpec;
 
-const TEMPLATE_UNDEFINED_VARIABLE_RULE: &str = "template_undefined_variable";
-
 pub(super) fn build_mcp_run_manifest(
     spec: &ValidatedCreateRunSpec,
     cwd: &Path,
@@ -34,15 +32,11 @@ pub(super) fn build_mcp_run_manifest(
         Catalog::from_builtin_with_overrides(&llm_catalog_settings)
             .map_err(|err| ToolError::message(err.to_string()))?,
     );
-    let validation =
+    let mut validation =
         manifest_validation::validate_manifest(&RunLayer::default(), &built.manifest, catalog)
             .map_err(|err| ToolError::from_anyhow(&err))?;
-    let has_blocking_template_diagnostic = validation
-        .workflow
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.rule == TEMPLATE_UNDEFINED_VARIABLE_RULE);
-    if !validation.ok || has_blocking_template_diagnostic {
+    manifest_validation::promote_template_undefined_variables_to_errors(&mut validation);
+    if !validation.ok {
         return Err(ToolError::message("workflow manifest validation failed"));
     }
     Ok(built.manifest)

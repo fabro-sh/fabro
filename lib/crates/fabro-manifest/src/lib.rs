@@ -23,7 +23,9 @@ use fabro_workflow::ManifestPath;
 use fabro_workflow::git::{
     GitSyncStatus, branch_needs_push, head_sha, push_branch_noninteractive, sync_status,
 };
-use fabro_workflow::static_reference::{ReferenceKind, validate_static_reference};
+use fabro_workflow::static_reference::{
+    AttributeScope, ReferenceKind, reference_kind_for_attribute,
+};
 
 #[derive(Debug, Default)]
 pub struct ManifestBuildInput {
@@ -326,11 +328,6 @@ fn collect_workflow_files(
 
     if let Some(goal_ref) = graph.attrs.get("goal").and_then(AttrValue::as_str) {
         if goal_ref.starts_with('@') {
-            validate_static_reference(
-                goal_ref.trim_start_matches('@'),
-                ReferenceKind::GraphGoalFile,
-            )
-            .map_err(anyhow::Error::new)?;
             collect_bundled_file(
                 files,
                 workflow
@@ -340,6 +337,7 @@ fn collect_workflow_files(
                 context.cwd,
                 goal_ref.trim_start_matches('@'),
                 types::ManifestFileRefType::FileInline,
+                manifest_attr_reference_kind(AttributeScope::Graph, "goal", goal_ref)?,
                 Some(workflow.dot_path.clone()),
             )?;
         }
@@ -357,6 +355,7 @@ fn collect_workflow_files(
                     context.cwd,
                     prompt_ref.trim_start_matches('@'),
                     types::ManifestFileRefType::FileInline,
+                    manifest_attr_reference_kind(AttributeScope::Node, "prompt", prompt_ref)?,
                     Some(workflow.dot_path.clone()),
                 )?;
             }
@@ -372,6 +371,7 @@ fn collect_workflow_files(
                 context.cwd,
                 import_ref,
                 types::ManifestFileRefType::Import,
+                manifest_attr_reference_kind(AttributeScope::Node, "import", import_ref)?,
                 Some(workflow.dot_path.clone()),
             )?;
             let import_key = imported.path.to_string();
@@ -395,7 +395,8 @@ fn collect_workflow_files(
             .or_else(|| node.attrs.get("stack.child_dotfile"))
             .and_then(AttrValue::as_str)
         {
-            validate_static_reference(child_ref, ReferenceKind::ChildWorkflow)
+            manifest_attr_reference_kind(AttributeScope::Node, "stack.child_workflow", child_ref)?
+                .validate(child_ref)
                 .map_err(anyhow::Error::new)?;
             collect_workflow_entry(
                 context,
@@ -409,6 +410,15 @@ fn collect_workflow_files(
     }
 
     Ok(())
+}
+
+fn manifest_attr_reference_kind(
+    scope: AttributeScope,
+    key: &str,
+    value: &str,
+) -> Result<ReferenceKind> {
+    reference_kind_for_attribute(scope, key, value)
+        .ok_or_else(|| anyhow!("unsupported manifest reference attribute: {key}={value}"))
 }
 
 fn collect_config_dockerfile(
@@ -434,8 +444,6 @@ fn collect_config_dockerfile(
     let Some(DaytonaDockerfileLayer::Path { path }) = dockerfile else {
         return Ok(());
     };
-    validate_static_reference(path, ReferenceKind::Dockerfile).map_err(anyhow::Error::new)?;
-
     let absolute_config_path = cwd.join(config_path.as_path());
     collect_bundled_file(
         files,
@@ -445,6 +453,7 @@ fn collect_config_dockerfile(
         cwd,
         path,
         types::ManifestFileRefType::Dockerfile,
+        ReferenceKind::Dockerfile,
         Some(config_path.clone()),
     )?;
     Ok(())
@@ -461,14 +470,12 @@ fn collect_bundled_file(
     cwd: &Path,
     reference: &str,
     ref_type: types::ManifestFileRefType,
+    reference_kind: ReferenceKind,
     from: Option<ManifestPath>,
 ) -> Result<BundledFile> {
-    let kind = match ref_type {
-        types::ManifestFileRefType::FileInline => ReferenceKind::FileInline,
-        types::ManifestFileRefType::Import => ReferenceKind::Import,
-        types::ManifestFileRefType::Dockerfile => ReferenceKind::Dockerfile,
-    };
-    validate_static_reference(reference, kind).map_err(anyhow::Error::new)?;
+    reference_kind
+        .validate(reference)
+        .map_err(anyhow::Error::new)?;
 
     let absolute_path = normalize_absolute_path(base_dir, reference)
         .ok_or_else(|| anyhow!("unsupported manifest reference: {reference}"))?;
@@ -527,7 +534,8 @@ fn resolve_manifest_goal(
         return Ok(None);
     };
     if let Some(reference) = goal.strip_prefix('@') {
-        validate_static_reference(reference, ReferenceKind::GraphGoalFile)
+        ReferenceKind::GraphGoalFile
+            .validate(reference)
             .map_err(anyhow::Error::new)?;
         let goal_path = normalize_absolute_path(
             root_dot_path.parent().unwrap_or_else(|| Path::new(".")),
