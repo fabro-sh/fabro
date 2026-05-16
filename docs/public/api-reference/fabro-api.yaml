@@ -8098,6 +8098,43 @@ components:
           minimum: 0
           description: Disk size in bytes. Null when unavailable.
 
+    SandboxNetworkPolicyMode:
+      description: Provider-neutral public-network policy for one direction.
+      type: string
+      enum:
+        - unknown
+        - open
+        - blocked
+        - cidr_allow_list
+        - essentials_only
+
+    SandboxNetworkPolicy:
+      description: Public-network policy for one direction.
+      type: object
+      required:
+        - mode
+        - cidrs
+      properties:
+        mode:
+          $ref: "#/components/schemas/SandboxNetworkPolicyMode"
+        cidrs:
+          type: array
+          items:
+            type: string
+          description: CIDR entries when `mode` is `cidr_allow_list`; empty for other modes.
+
+    SandboxNetwork:
+      description: Provider-neutral public-network policy for sandbox egress and ingress.
+      type: object
+      required:
+        - egress
+        - ingress
+      properties:
+        egress:
+          $ref: "#/components/schemas/SandboxNetworkPolicy"
+        ingress:
+          $ref: "#/components/schemas/SandboxNetworkPolicy"
+
     SandboxTimestamps:
       description: Lifecycle timestamps for a sandbox. Fields are nullable when the provider does not surface a value.
       type: object
@@ -8118,6 +8155,7 @@ components:
         - sandbox
         - state
         - resources
+        - network
         - labels
         - timestamps
       properties:
@@ -8131,8 +8169,13 @@ components:
         region:
           type: ["string", "null"]
           description: Provider region or target. Null for local-style providers.
+        web_url:
+          type: ["string", "null"]
+          description: Provider dashboard URL for this sandbox when available.
         resources:
           $ref: "#/components/schemas/SandboxResources"
+        network:
+          $ref: "#/components/schemas/SandboxNetwork"
         labels:
           type: object
           additionalProperties:

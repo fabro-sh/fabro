@@ -1678,7 +1678,7 @@ mod tests {
 
     use chrono::Duration as ChronoDuration;
     use fabro_util::exit;
-    use httpmock::Method::POST;
+    use httpmock::Method::{GET, POST};
     use httpmock::MockServer;
     use serde_json::json;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -1809,6 +1809,33 @@ mod tests {
 
         assert_eq!(chunk, Bytes::from_static(b"data: hello\n\n"));
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn list_models_allows_custom_provider_filters() {
+        let server = MockServer::start_async().await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path("/api/v1/models")
+                    .query_param("provider", "bedrock");
+                then.status(200)
+                    .header("Content-Type", "application/json")
+                    .body(
+                        serde_json::json!({
+                            "data": [],
+                            "meta": { "has_more": false }
+                        })
+                        .to_string(),
+                    );
+            })
+            .await;
+
+        let client = Client::new_no_proxy(&server.url("")).unwrap();
+        let models = client.list_models(Some("bedrock"), None).await.unwrap();
+
+        mock.assert_async().await;
+        assert!(models.is_empty());
     }
 
     async fn oauth_client(

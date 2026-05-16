@@ -41,7 +41,7 @@ pub struct AgentArgs {
     /// Task prompt
     pub prompt: String,
 
-    /// LLM provider (anthropic, openai, gemini, kimi, zai, minimax, inception)
+    /// LLM provider (built-in or configured provider ID)
     #[arg(long)]
     pub provider: Option<String>,
 
@@ -463,7 +463,11 @@ pub async fn run_with_args(
     mcp_servers: Vec<McpServerSettings>,
 ) -> anyhow::Result<()> {
     let llm_source = standalone_llm_source();
-    run_with_args_and_source(args, llm_source, mcp_servers).await
+    let catalog = Arc::new(
+        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
+            .context("failed to build standalone agent LLM catalog")?,
+    );
+    run_with_args_and_source_and_catalog(args, llm_source, mcp_servers, catalog).await
 }
 
 #[allow(
@@ -476,16 +480,28 @@ pub async fn run_with_args_and_source(
     llm_source: Arc<dyn CredentialSource>,
     mcp_servers: Vec<McpServerSettings>,
 ) -> anyhow::Result<()> {
-    let provider_id = parse_provider(&args)?;
     let catalog = Arc::new(
         Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
             .context("failed to build standalone agent LLM catalog")?,
     );
+    run_with_args_and_source_and_catalog(args, llm_source, mcp_servers, catalog).await
+}
+
+#[allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "Assistant output stays on stdout while prompts and diagnostics use stderr."
+)]
+pub async fn run_with_args_and_source_and_catalog(
+    args: AgentArgs,
+    llm_source: Arc<dyn CredentialSource>,
+    mcp_servers: Vec<McpServerSettings>,
+    catalog: Arc<Catalog>,
+) -> anyhow::Result<()> {
     let client = Client::from_source(llm_source.as_ref(), Arc::clone(&catalog))
         .await
         .context("Failed to create LLM client")?;
-    ensure_provider_registered(&client, &provider_id)?;
-    run_with_args_and_client(args, client, mcp_servers).await
+    run_with_args_and_client_and_catalog(args, client, mcp_servers, catalog).await
 }
 
 #[allow(
@@ -495,8 +511,26 @@ pub async fn run_with_args_and_source(
 )]
 pub async fn run_with_args_and_client(
     args: AgentArgs,
+    client: Client,
+    mcp_servers: Vec<McpServerSettings>,
+) -> anyhow::Result<()> {
+    let catalog = Arc::new(
+        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
+            .context("failed to build standalone agent LLM catalog")?,
+    );
+    run_with_args_and_client_and_catalog(args, client, mcp_servers, catalog).await
+}
+
+#[allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "Assistant output stays on stdout while prompts and diagnostics use stderr."
+)]
+pub async fn run_with_args_and_client_and_catalog(
+    args: AgentArgs,
     mut client: Client,
     mcp_servers: Vec<McpServerSettings>,
+    catalog: Arc<Catalog>,
 ) -> anyhow::Result<()> {
     // Resolve color support once, leak to get 'static lifetime for use across
     // threads
@@ -511,11 +545,6 @@ pub async fn run_with_args_and_client(
         client.add_middleware(Arc::new(DebugMiddleware { styles }));
     }
 
-    // Resolve model and build profile
-    let catalog = Arc::new(
-        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-            .context("failed to build standalone agent LLM catalog")?,
-    );
     let model = if let Some(model) = args.model.clone() {
         model
     } else {
@@ -790,6 +819,7 @@ pub async fn run() -> anyhow::Result<()> {
 mod tests {
     use std::collections::HashMap;
 
+    use fabro_model::catalog::ProviderCatalogSettings;
     use serde_json::json;
 
     use super::*;
@@ -941,6 +971,64 @@ mod tests {
         );
         assert_eq!(profile.profile_kind(), AgentProfileKind::Gemini);
         assert_eq!(profile.provider_id(), ProviderId::gemini());
+    }
+
+    #[test]
+    fn profile_kind_accepts_custom_catalog_provider() {
+        let mut settings = LlmCatalogSettings::default();
+        settings
+            .providers
+            .insert("bedrock".to_string(), ProviderCatalogSettings {
+                display_name: Some("Bedrock".to_string()),
+                adapter: Some("openai_compatible".to_string()),
+                base_url: Some("https://example.invalid/v1".to_string()),
+                ..ProviderCatalogSettings::default()
+            });
+        let catalog = Catalog::from_builtin_with_overrides(&settings).unwrap();
+        let args = AgentArgs {
+            prompt:        "test".to_string(),
+            provider:      Some("bedrock".to_string()),
+            model:         None,
+            permissions:   None,
+            auto_approve:  false,
+            debug:         false,
+            verbose:       false,
+            skills_dir:    None,
+            output_format: None,
+        };
+
+        let provider_id = parse_provider(&args).unwrap();
+        assert_eq!(provider_id, ProviderId::new("bedrock"));
+        assert_eq!(
+            profile_kind_for_provider(&catalog, &provider_id).unwrap(),
+            AgentProfileKind::OpenAi
+        );
+    }
+
+    #[test]
+    fn summarizer_model_id_uses_selected_model_for_custom_openai_provider_without_catalog_default()
+    {
+        let mut settings = LlmCatalogSettings::default();
+        settings
+            .providers
+            .insert("bedrock".to_string(), ProviderCatalogSettings {
+                display_name: Some("Bedrock".to_string()),
+                adapter: Some("openai_compatible".to_string()),
+                base_url: Some("https://example.invalid/v1".to_string()),
+                ..ProviderCatalogSettings::default()
+            });
+        let catalog = Catalog::from_builtin_with_overrides(&settings).unwrap();
+        let provider_id = ProviderId::new("bedrock");
+
+        let model_id = summarizer_model_id(
+            &provider_id,
+            AgentProfileKind::OpenAi,
+            &catalog,
+            "bedrock-claude-sonnet-4-6",
+        );
+
+        assert_eq!(model_id.provider(), &provider_id);
+        assert_eq!(model_id.model_id(), "bedrock-claude-sonnet-4-6");
     }
 
     // subagent tool registration tests

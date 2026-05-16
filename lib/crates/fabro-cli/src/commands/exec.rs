@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result as AnyResult};
-use fabro_agent::cli::{OutputFormat, run_with_args_and_client, run_with_args_and_source};
+use fabro_agent::cli::{
+    OutputFormat, run_with_args_and_client_and_catalog, run_with_args_and_source_and_catalog,
+};
 use fabro_llm::client::Client;
 use fabro_llm::error::{
     Error as LlmError, ProviderErrorDetail, ProviderErrorKind, error_from_status_code,
@@ -13,6 +15,7 @@ use fabro_llm::types::{
     FinishReason, Message, Request, Response as LlmResponse, StreamEvent, TokenCounts,
 };
 use fabro_mcp::config::McpServerSettings;
+use fabro_model::ProviderId;
 use fabro_types::settings::InterpString;
 use fabro_types::settings::cli::OutputFormat as SettingsOutputFormat;
 use fabro_util::exit::{self, ErrorExt, ExitClass};
@@ -320,23 +323,29 @@ pub(crate) async fn execute(mut args: ExecArgs, ctx: &CommandContext) -> AnyResu
             .provider
             .clone()
             .unwrap_or_else(|| "anthropic".to_string());
+        let catalog = ctx.catalog()?;
+        let provider_id = ProviderId::from(provider_name.as_str());
+        let adapter_provider_name = catalog
+            .provider(&provider_id)
+            .map_or(provider_name.as_str(), |provider| provider.id.as_str());
         let server_client = server_client::connect_server_target(&target).await?;
         let adapter = Arc::new(AuthenticatedFabroServerAdapter::new(
             server_client,
-            &provider_name,
+            adapter_provider_name,
         ));
         let mut client = Client::new(HashMap::new(), None, vec![]);
         client
             .register_provider(adapter)
             .await
             .context("Failed to register fabro server adapter")?;
-        run_with_args_and_client(args.agent, client, mcp_servers)
+        run_with_args_and_client_and_catalog(args.agent, client, mcp_servers, catalog)
             .await
             .map_err(classify_server_agent_auth)?;
     } else {
         tracing::info!(transport = "direct", "Agent session starting");
         let llm_source = ctx.llm_source().await?;
-        run_with_args_and_source(args.agent, llm_source, mcp_servers).await?;
+        let catalog = ctx.catalog()?;
+        run_with_args_and_source_and_catalog(args.agent, llm_source, mcp_servers, catalog).await?;
     }
 
     Ok(())

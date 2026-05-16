@@ -18,6 +18,9 @@
 import type { RunSandbox } from './run-sandbox';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { SandboxNetwork } from './sandbox-network';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { SandboxResources } from './sandbox-resources';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -40,7 +43,12 @@ export interface SandboxDetails {
      * Provider region or target. Null for local-style providers.
      */
     'region'?: string | null;
+    /**
+     * Provider dashboard URL for this sandbox when available.
+     */
+    'web_url'?: string | null;
     'resources': SandboxResources;
+    'network': SandboxNetwork;
     /**
      * Provider-reported labels.
      */

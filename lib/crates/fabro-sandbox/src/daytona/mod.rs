@@ -36,6 +36,8 @@ pub(crate) const WORKING_DIRECTORY: &str = "/home/daytona/workspace";
 pub(crate) const REPOS_ROOT: &str = "/repos";
 const DEFAULT_SNAPSHOT: &str = "daytona-medium";
 pub const DEFAULT_DAYTONA_API_URL: &str = "https://app.daytona.io/api";
+pub(crate) const DAYTONA_DASHBOARD_SANDBOXES_URL: &str =
+    "https://app.daytona.io/dashboard/sandboxes";
 const FABRO_SANDBOX_USER_AGENT: &str = concat!("fabro-sandbox/", env!("CARGO_PKG_VERSION"));
 const DAYTONA_PROBE_TIMEOUT: Duration = Duration::from_secs(20);
 /// Upper bound on `DaytonaSession::close` so a stalled Daytona REST call cannot
@@ -1033,7 +1035,7 @@ impl Sandbox for DaytonaSandbox {
             name:        Some(sandbox_name),
             cpu:         Some(sandbox_cpu),
             memory:      Some(sandbox_memory),
-            url:         Some("https://app.daytona.io/dashboard/sandboxes".into()),
+            url:         Some(DAYTONA_DASHBOARD_SANDBOXES_URL.into()),
         });
 
         Ok(())
