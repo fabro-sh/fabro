@@ -46,9 +46,9 @@ import type { PaginatedRunList } from '../models';
 // @ts-ignore
 import type { PreflightResponse } from '../models';
 // @ts-ignore
-import type { PullRequest } from '../models';
+import type { PullRequestLink } from '../models';
 // @ts-ignore
-import type { PullRequestDetails } from '../models';
+import type { PullRequestResponse } from '../models';
 // @ts-ignore
 import type { RenderWorkflowGraphRequest } from '../models';
 // @ts-ignore
@@ -447,7 +447,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Links or replaces the GitHub pull request association for a run without modifying the remote pull request. The server captures live GitHub metadata, including the title, when credentials are configured and the lookup succeeds.
+         * Links or replaces the GitHub pull request association for a run without modifying the remote pull request.
          * @summary Link Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {LinkRunPullRequestRequest} linkRunPullRequestRequest
@@ -1289,7 +1289,7 @@ export const RunsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async createRunPullRequest(id: string, createRunPullRequestRequest: CreateRunPullRequestRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PullRequest>> {
+        async createRunPullRequest(id: string, createRunPullRequestRequest: CreateRunPullRequestRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PullRequestLink>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.createRunPullRequest(id, createRunPullRequestRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.createRunPullRequest']?.[localVarOperationServerIndex]?.url;
@@ -1330,7 +1330,7 @@ export const RunsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async getRunPullRequest(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PullRequestDetails>> {
+        async getRunPullRequest(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PullRequestResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.getRunPullRequest(id, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.getRunPullRequest']?.[localVarOperationServerIndex]?.url;
@@ -1350,14 +1350,14 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Links or replaces the GitHub pull request association for a run without modifying the remote pull request. The server captures live GitHub metadata, including the title, when credentials are configured and the lookup succeeds.
+         * Links or replaces the GitHub pull request association for a run without modifying the remote pull request.
          * @summary Link Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {LinkRunPullRequestRequest} linkRunPullRequestRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async linkRunPullRequest(id: string, linkRunPullRequestRequest: LinkRunPullRequestRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PullRequest>> {
+        async linkRunPullRequest(id: string, linkRunPullRequestRequest: LinkRunPullRequestRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PullRequestLink>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.linkRunPullRequest(id, linkRunPullRequestRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.linkRunPullRequest']?.[localVarOperationServerIndex]?.url;
@@ -1547,7 +1547,7 @@ export const RunsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async unlinkRunPullRequest(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PullRequest>> {
+        async unlinkRunPullRequest(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PullRequestLink>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.unlinkRunPullRequest(id, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.unlinkRunPullRequest']?.[localVarOperationServerIndex]?.url;
@@ -1650,7 +1650,7 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        createRunPullRequest(id: string, createRunPullRequestRequest: CreateRunPullRequestRequest, options?: RawAxiosRequestConfig): AxiosPromise<PullRequest> {
+        createRunPullRequest(id: string, createRunPullRequestRequest: CreateRunPullRequestRequest, options?: RawAxiosRequestConfig): AxiosPromise<PullRequestLink> {
             return localVarFp.createRunPullRequest(id, createRunPullRequestRequest, options).then((request) => request(axios, basePath));
         },
         /**
@@ -1682,7 +1682,7 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getRunPullRequest(id: string, options?: RawAxiosRequestConfig): AxiosPromise<PullRequestDetails> {
+        getRunPullRequest(id: string, options?: RawAxiosRequestConfig): AxiosPromise<PullRequestResponse> {
             return localVarFp.getRunPullRequest(id, options).then((request) => request(axios, basePath));
         },
         /**
@@ -1696,14 +1696,14 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.getRunTimeline(id, options).then((request) => request(axios, basePath));
         },
         /**
-         * Links or replaces the GitHub pull request association for a run without modifying the remote pull request. The server captures live GitHub metadata, including the title, when credentials are configured and the lookup succeeds.
+         * Links or replaces the GitHub pull request association for a run without modifying the remote pull request.
          * @summary Link Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {LinkRunPullRequestRequest} linkRunPullRequestRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        linkRunPullRequest(id: string, linkRunPullRequestRequest: LinkRunPullRequestRequest, options?: RawAxiosRequestConfig): AxiosPromise<PullRequest> {
+        linkRunPullRequest(id: string, linkRunPullRequestRequest: LinkRunPullRequestRequest, options?: RawAxiosRequestConfig): AxiosPromise<PullRequestLink> {
             return localVarFp.linkRunPullRequest(id, linkRunPullRequestRequest, options).then((request) => request(axios, basePath));
         },
         /**
@@ -1851,7 +1851,7 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        unlinkRunPullRequest(id: string, options?: RawAxiosRequestConfig): AxiosPromise<PullRequest> {
+        unlinkRunPullRequest(id: string, options?: RawAxiosRequestConfig): AxiosPromise<PullRequestLink> {
             return localVarFp.unlinkRunPullRequest(id, options).then((request) => request(axios, basePath));
         },
         /**
@@ -1995,7 +1995,7 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Links or replaces the GitHub pull request association for a run without modifying the remote pull request. The server captures live GitHub metadata, including the title, when credentials are configured and the lookup succeeds.
+     * Links or replaces the GitHub pull request association for a run without modifying the remote pull request.
      * @summary Link Run Pull Request
      * @param {string} id Unique run identifier (ULID).
      * @param {LinkRunPullRequestRequest} linkRunPullRequestRequest

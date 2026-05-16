@@ -24,6 +24,9 @@ import type { Conclusion } from './conclusion';
 import type { PendingInterviewRecord } from './pending-interview-record';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { PullRequestLink } from './pull-request-link';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { RunControlAction } from './run-control-action';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -66,7 +69,7 @@ export interface RunProjection {
     'checkpoints': Array<CheckpointRecord>;
     'conclusion'?: Conclusion | null;
     'sandbox'?: RunSandbox | null;
-    'pull_request'?: { [key: string]: any; } | null;
+    'pull_request'?: PullRequestLink | null;
     'superseded_by'?: string | null;
     'pending_interviews': { [key: string]: PendingInterviewRecord; };
     /**

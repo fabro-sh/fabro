@@ -15,32 +15,27 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { CheckRun } from './check-run';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { PullRequest } from './pull-request';
-// May contain unused imports in some cases
-// @ts-ignore
 import type { PullRequestDetailsTimestamps } from './pull-request-details-timestamps';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { PullRequestUser } from './pull-request-user';
 
 /**
- * Stored pull request record plus live GitHub-enriched fields when available.
+ * Live pull request fields retrieved successfully from GitHub.
  */
 export interface PullRequestDetails {
-    'pull_request': PullRequest;
-    'state'?: string | null;
-    'draft'?: boolean | null;
-    'merged'?: boolean | null;
+    'title': string;
+    'body'?: string | null;
+    'state': string;
+    'draft': boolean;
+    'merged': boolean;
     'merged_at'?: string | null;
     'mergeable'?: boolean | null;
-    'additions'?: number | null;
-    'deletions'?: number | null;
-    'changed_files'?: number | null;
-    'comments'?: number | null;
-    'checks'?: Array<CheckRun> | null;
-    'author'?: PullRequestUser | null;
-    'timestamps'?: PullRequestDetailsTimestamps | null;
+    'additions': number;
+    'deletions': number;
+    'changed_files': number;
+    'author': PullRequestUser;
+    'head_branch': string;
+    'base_branch': string;
+    'timestamps': PullRequestDetailsTimestamps;
 }

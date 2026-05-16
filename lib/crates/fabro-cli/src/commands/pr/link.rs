@@ -12,9 +12,8 @@ pub(super) async fn link_command(args: PrLinkArgs, base_ctx: &CommandContext) ->
     let record = client.link_run_pull_request(&run_id, args.url).await?;
 
     info!(
-        pr_url = %record.html_url,
-        provider = %record.provider,
-        number = ?record.number,
+        pr_url = %record.html_url(),
+        number = record.number,
         "Linked pull request"
     );
 
@@ -24,7 +23,7 @@ pub(super) async fn link_command(args: PrLinkArgs, base_ctx: &CommandContext) ->
         fabro_util::printout!(
             ctx.printer(),
             "Linked pull request: {} ({})",
-            record.html_url,
+            record.html_url(),
             record_label(&record)
         );
     }
@@ -33,8 +32,5 @@ pub(super) async fn link_command(args: PrLinkArgs, base_ctx: &CommandContext) ->
 }
 
 fn record_label(record: &PullRequestRecord) -> String {
-    match record.number {
-        Some(number) => format!("{} #{number}", record.provider),
-        None => record.provider.clone(),
-    }
+    format!("github #{}", record.number)
 }

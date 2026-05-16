@@ -1728,7 +1728,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PullRequest"
+                $ref: "#/components/schemas/PullRequestLink"
         "400":
           description: Pull request creation does not apply to this run
           headers:
@@ -1780,7 +1780,7 @@ paths:
       operationId: linkRunPullRequest
       tags: [Runs]
       summary: Link Run Pull Request
-      description: Links or replaces the GitHub pull request association for a run without modifying the remote pull request. The server captures live GitHub metadata, including the title, when credentials are configured and the lookup succeeds.
+      description: Links or replaces the GitHub pull request association for a run without modifying the remote pull request.
       parameters:
         - $ref: "#/components/parameters/RunId"
       requestBody:
@@ -1795,7 +1795,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PullRequest"
+                $ref: "#/components/schemas/PullRequestLink"
         "400":
           description: Pull request link request is invalid
           headers:
@@ -1827,7 +1827,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PullRequest"
+                $ref: "#/components/schemas/PullRequestLink"
         "404":
           description: Run or stored pull request record not found
           headers:
@@ -1850,7 +1850,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PullRequestDetails"
+                $ref: "#/components/schemas/PullRequestResponse"
         "404":
           description: Run or stored pull request record not found
           headers:
@@ -6612,8 +6612,9 @@ components:
             - $ref: "#/components/schemas/RunSandbox"
             - type: "null"
         pull_request:
-          type: ["object", "null"]
-          additionalProperties: true
+          oneOf:
+            - $ref: "#/components/schemas/PullRequestLink"
+            - type: "null"
         superseded_by:
           type: ["string", "null"]
         pending_interviews:
@@ -6701,7 +6702,7 @@ components:
             - type: "null"
         pull_request:
           oneOf:
-            - $ref: "#/components/schemas/PullRequest"
+            - $ref: "#/components/schemas/PullRequestLink"
             - type: "null"
         current_question:
           oneOf:
@@ -7088,38 +7089,82 @@ components:
           description: Error message.
           example: "Stage 'apply-changes' exceeded maximum retries."
 
-    PullRequest:
-      description: Persisted record of a pull request associated with a run.
+    PullRequestLink:
+      description: Minimal GitHub pull request link associated with a run.
       type: object
       required:
-        - provider
+        - owner
+        - repo
+        - number
         - html_url
       properties:
-        provider:
+        owner:
           type: string
-          example: github
+          example: fabro-sh
+        repo:
+          type: string
+          example: fabro
+        number:
+          type: integer
+          example: 123
         html_url:
           type: string
           format: uri
+          description: Computed GitHub web URL for the pull request.
           example: https://github.com/fabro-sh/fabro/pull/123
-        number:
-          type: ["integer", "null"]
-          example: 123
-        owner:
-          type: ["string", "null"]
-          example: fabro-sh
-        repo:
-          type: ["string", "null"]
-          example: fabro
-        base_branch:
-          type: ["string", "null"]
-          example: main
-        head_branch:
-          type: ["string", "null"]
-          example: fabro/run/demo
-        title:
-          type: ["string", "null"]
-          example: Move PR commands server-side
+
+    PullRequest:
+      description: Stored pull request link plus optional live GitHub details.
+      type: object
+      required:
+        - link
+      properties:
+        link:
+          $ref: "#/components/schemas/PullRequestLink"
+        details:
+          oneOf:
+            - $ref: "#/components/schemas/PullRequestDetails"
+            - type: "null"
+
+    PullRequestMeta:
+      description: Metadata for live GitHub detail retrieval.
+      type: object
+      required:
+        - details_status
+      properties:
+        details_status:
+          $ref: "#/components/schemas/PullRequestDetailsStatus"
+        details_unavailable_reason:
+          oneOf:
+            - $ref: "#/components/schemas/PullRequestDetailsUnavailableReason"
+            - type: "null"
+
+    PullRequestResponse:
+      description: Pull request link and optional live GitHub details for a run.
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/PullRequest"
+        meta:
+          $ref: "#/components/schemas/PullRequestMeta"
+
+    PullRequestDetailsStatus:
+      description: Whether live GitHub pull request details are present.
+      type: string
+      enum:
+        - available
+        - unavailable
+
+    PullRequestDetailsUnavailableReason:
+      description: Why live GitHub pull request details are unavailable.
+      type: string
+      enum:
+        - integration_unavailable
+        - not_found
+        - fetch_failed
 
     PullRequestUser:
       description: GitHub user summary for a pull request.
@@ -7142,21 +7187,35 @@ components:
           example: fabro/run/demo
 
     PullRequestDetails:
-      description: Stored pull request record plus live GitHub-enriched fields when available.
+      description: Live pull request fields retrieved successfully from GitHub.
       type: object
       required:
-        - pull_request
+        - title
+        - state
+        - draft
+        - merged
+        - additions
+        - deletions
+        - changed_files
+        - author
+        - head_branch
+        - base_branch
+        - timestamps
       properties:
-        pull_request:
-          $ref: "#/components/schemas/PullRequest"
-        state:
+        title:
+          type: string
+          example: Move PR commands server-side
+        body:
           type: ["string", "null"]
+          example: Detailed description
+        state:
+          type: string
           example: open
         draft:
-          type: ["boolean", "null"]
+          type: boolean
           example: false
         merged:
-          type: ["boolean", "null"]
+          type: boolean
           example: false
         merged_at:
           type: ["string", "null"]
@@ -7166,39 +7225,32 @@ components:
           type: ["boolean", "null"]
           example: true
         additions:
-          type: ["integer", "null"]
+          type: integer
           example: 234
         deletions:
-          type: ["integer", "null"]
+          type: integer
           example: 67
         changed_files:
-          type: ["integer", "null"]
+          type: integer
           example: 5
-        comments:
-          type: ["integer", "null"]
-          example: 4
-        checks:
-          oneOf:
-            - type: array
-              items:
-                $ref: "#/components/schemas/CheckRun"
-            - type: "null"
         author:
-          oneOf:
-            - $ref: "#/components/schemas/PullRequestUser"
-            - type: "null"
+          $ref: "#/components/schemas/PullRequestUser"
+        head_branch:
+          type: string
+          example: fabro/run/demo
+        base_branch:
+          type: string
+          example: main
         timestamps:
-          oneOf:
-            - type: object
-              required: [created_at, updated_at]
-              properties:
-                created_at:
-                  type: string
-                  format: date-time
-                updated_at:
-                  type: string
-                  format: date-time
-            - type: "null"
+          type: object
+          required: [created_at, updated_at]
+          properties:
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
 
     CreateRunPullRequestRequest:
       description: Request body for creating a run pull request.

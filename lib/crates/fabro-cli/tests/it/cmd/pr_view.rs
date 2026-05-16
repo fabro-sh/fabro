@@ -106,9 +106,9 @@ fn pr_view_reads_pull_request_from_store_without_pull_request_json() {
     success: true
     exit_code: 0
     ----- stdout -----
-    #123 Map the constellations
+    #123 Pull request
     URL:     https://github.com/fabro-sh/fabro/pull/123
-    Branch:  fabro/run/demo -> main
+    Details: unavailable (integration_unavailable)
     ----- stderr -----
     ");
 }
@@ -127,35 +127,37 @@ fn pr_view_uses_server_pull_request_endpoint_and_renders_merged_state() {
             .header("Content-Type", "application/json")
             .body(
                 serde_json::json!({
-                    "pull_request": {
-                        "provider": "github",
-                        "html_url": "https://github.com/fabro-sh/fabro/pull/123",
-                        "number": 123,
-                        "owner": "fabro-sh",
-                        "repo": "fabro",
-                        "base_branch": "main",
-                        "head_branch": "fabro/run/demo",
-                        "title": "Map the constellations"
+                    "data": {
+                        "link": {
+                            "owner": "fabro-sh",
+                            "repo": "fabro",
+                            "number": 123,
+                            "html_url": "https://github.com/fabro-sh/fabro/pull/123"
+                        },
+                        "details": {
+                            "title": "Map the constellations",
+                            "body": "Detailed description",
+                            "state": "closed",
+                            "draft": false,
+                            "merged": true,
+                            "merged_at": "2026-04-06T12:30:00Z",
+                            "mergeable": false,
+                            "additions": 10,
+                            "deletions": 3,
+                            "changed_files": 2,
+                            "author": {
+                                "login": "testuser"
+                            },
+                            "head_branch": "fabro/run/demo",
+                            "base_branch": "main",
+                            "timestamps": {
+                                "created_at": "2026-04-05T12:00:00Z",
+                                "updated_at": "2026-04-06T12:30:00Z"
+                            }
+                        }
                     },
-                    "number": 123,
-                    "title": "Map the constellations",
-                    "body": "Detailed description",
-                    "state": "closed",
-                    "draft": false,
-                    "merged": true,
-                    "merged_at": "2026-04-06T12:30:00Z",
-                    "mergeable": false,
-                    "additions": 10,
-                    "deletions": 3,
-                    "changed_files": 2,
-                    "comments": 0,
-                    "checks": [],
-                    "author": {
-                        "login": "testuser"
-                    },
-                    "timestamps": {
-                        "created_at": "2026-04-05T12:00:00Z",
-                        "updated_at": "2026-04-06T12:30:00Z"
+                    "meta": {
+                        "details_status": "available"
                     }
                 })
                 .to_string(),
@@ -189,7 +191,7 @@ fn pr_view_uses_server_pull_request_endpoint_and_renders_merged_state() {
 }
 
 #[test]
-fn pr_view_renders_external_stored_only_association() {
+fn pr_view_renders_unavailable_details_reason() {
     let context = test_context!();
     let server = MockServer::start();
     let run_id = unique_run_id();
@@ -202,23 +204,19 @@ fn pr_view_renders_external_stored_only_association() {
             .header("Content-Type", "application/json")
             .body(
                 serde_json::json!({
-                    "pull_request": {
-                        "provider": "external",
-                        "html_url": "https://gitlab.com/acme/widgets/-/merge_requests/42",
-                        "title": "Review deployment chart"
+                    "data": {
+                        "link": {
+                            "owner": "acme",
+                            "repo": "widgets",
+                            "number": 42,
+                            "html_url": "https://github.com/acme/widgets/pull/42"
+                        },
+                        "details": null
                     },
-                    "state": null,
-                    "draft": null,
-                    "merged": null,
-                    "merged_at": null,
-                    "mergeable": null,
-                    "additions": null,
-                    "deletions": null,
-                    "changed_files": null,
-                    "comments": null,
-                    "checks": null,
-                    "author": null,
-                    "timestamps": null
+                    "meta": {
+                        "details_status": "unavailable",
+                        "details_unavailable_reason": "fetch_failed"
+                    }
                 })
                 .to_string(),
             );
@@ -237,9 +235,9 @@ fn pr_view_renders_external_stored_only_association() {
     success: true
     exit_code: 0
     ----- stdout -----
-    Pull request Review deployment chart
-    Provider: external
-    URL:      https://gitlab.com/acme/widgets/-/merge_requests/42
+    #42 Pull request
+    URL:     https://github.com/acme/widgets/pull/42
+    Details: unavailable (fetch_failed)
     ----- stderr -----
     ");
 

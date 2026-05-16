@@ -45,9 +45,10 @@ fn pr_unlink_uses_server_endpoint_and_prints_removed_url() {
         then.status(200)
             .header("Content-Type", "application/json")
             .json_body(serde_json::json!({
-                "provider": "external",
-                "html_url": "https://gitlab.com/acme/widgets/-/merge_requests/42",
-                "title": "Review deployment chart"
+                "owner": "acme",
+                "repo": "widgets",
+                "number": 42,
+                "html_url": "https://github.com/acme/widgets/pull/42"
             }));
     });
 
@@ -64,7 +65,7 @@ fn pr_unlink_uses_server_endpoint_and_prints_removed_url() {
     success: true
     exit_code: 0
     ----- stdout -----
-    Unlinked pull request: https://gitlab.com/acme/widgets/-/merge_requests/42
+    Unlinked pull request: https://github.com/acme/widgets/pull/42
     ----- stderr -----
     ");
 

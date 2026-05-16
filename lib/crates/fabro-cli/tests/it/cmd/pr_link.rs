@@ -50,12 +50,10 @@ fn pr_link_uses_server_endpoint_and_prints_linked_record() {
         then.status(200)
             .header("Content-Type", "application/json")
             .json_body(serde_json::json!({
-                "provider": "github",
-                "html_url": "https://github.com/acme/widgets/pull/42",
-                "number": 42,
                 "owner": "acme",
                 "repo": "widgets",
-                "title": "Fix the bug"
+                "number": 42,
+                "html_url": "https://github.com/acme/widgets/pull/42"
             }));
     });
 
@@ -97,9 +95,10 @@ fn pr_link_skips_resolve_endpoint_for_full_run_id() {
         then.status(200)
             .header("Content-Type", "application/json")
             .json_body(serde_json::json!({
-                "provider": "github",
-                "html_url": "https://github.com/acme/widgets/pull/42",
-                "number": 42
+                "owner": "acme",
+                "repo": "widgets",
+                "number": 42,
+                "html_url": "https://github.com/acme/widgets/pull/42"
             }));
     });
 

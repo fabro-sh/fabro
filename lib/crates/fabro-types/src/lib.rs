@@ -65,8 +65,9 @@ pub use outcome::{
 };
 pub use principal::{AuthMethod, Principal, SystemActorKind, UserPrincipal};
 pub use pull_request::{
-    CheckRun, CheckRunStatus, PullRequest, PullRequestDetails, PullRequestGithubDetail,
-    PullRequestRef, PullRequestTimestamps, PullRequestUser,
+    CheckRun, CheckRunStatus, PullRequest, PullRequestDetails, PullRequestDetailsStatus,
+    PullRequestDetailsUnavailableReason, PullRequestGithubDetail, PullRequestLink, PullRequestMeta,
+    PullRequestRef, PullRequestResponse, PullRequestTimestamps, PullRequestUser,
 };
 pub use repository::{RepositoryProvider, RepositoryRef};
 pub type RepositoryReference = RepositoryRef;
@@ -90,8 +91,8 @@ pub use run_summary::{
     RunOriginKind, RunTimestamps, WorkflowRef,
 };
 pub type RunSummary = Run;
-pub type PullRequestRecord = PullRequest;
-pub type PullRequestDetail = PullRequestDetails;
+pub type PullRequestRecord = PullRequestLink;
+pub type PullRequestDetail = PullRequestResponse;
 pub use run_title::{RunTitleError, infer_run_title, normalize_explicit_run_title};
 pub use sandbox_details::{SandboxDetails, SandboxResources, SandboxState, SandboxTimestamps};
 pub use sandbox_provider::SandboxProvider;

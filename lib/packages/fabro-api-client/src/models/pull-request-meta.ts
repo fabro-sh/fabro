@@ -15,15 +15,15 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { PullRequestDetails } from './pull-request-details';
+import type { PullRequestDetailsStatus } from './pull-request-details-status';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { PullRequestLink } from './pull-request-link';
+import type { PullRequestDetailsUnavailableReason } from './pull-request-details-unavailable-reason';
 
 /**
- * Stored pull request link plus optional live GitHub details.
+ * Metadata for live GitHub detail retrieval.
  */
-export interface PullRequest {
-    'link': PullRequestLink;
-    'details'?: PullRequestDetails | null;
+export interface PullRequestMeta {
+    'details_status': PullRequestDetailsStatus;
+    'details_unavailable_reason'?: PullRequestDetailsUnavailableReason | null;
 }

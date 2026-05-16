@@ -238,14 +238,9 @@ impl RunProjectionReducer for RunProjection {
             }
             EventBody::PullRequestCreated(props) => {
                 self.pull_request = Some(PullRequestRecord {
-                    provider:    "github".to_string(),
-                    html_url:    props.pr_url.clone(),
-                    number:      Some(props.pr_number),
-                    owner:       Some(props.owner.clone()),
-                    repo:        Some(props.repo.clone()),
-                    base_branch: Some(props.base_branch.clone()),
-                    head_branch: Some(props.head_branch.clone()),
-                    title:       Some(props.title.clone()),
+                    owner:  props.owner.clone(),
+                    repo:   props.repo.clone(),
+                    number: props.pr_number,
                 });
             }
             EventBody::PullRequestLinked(props) => {
@@ -2497,10 +2492,10 @@ mod tests {
             .as_ref()
             .expect("projection should store pull request");
         assert_eq!(
-            pull_request.html_url,
+            pull_request.html_url(),
             "https://github.com/fabro-sh/fabro/pull/123"
         );
-        assert_eq!(pull_request.number, Some(123));
+        assert_eq!(pull_request.number, 123);
 
         let summary = build_summary(&state, &fixtures::RUN_1);
         assert_eq!(summary.pull_request, state.pull_request);
@@ -2514,37 +2509,27 @@ mod tests {
 
         let mut state = running_projection();
         let github_pull_request = PullRequestRecord {
-            provider:    "github".to_string(),
-            html_url:    "https://github.com/fabro-sh/fabro/pull/123".to_string(),
-            number:      Some(123),
-            owner:       Some("fabro-sh".to_string()),
-            repo:        Some("fabro".to_string()),
-            base_branch: Some("main".to_string()),
-            head_branch: Some("fabro/run/demo".to_string()),
-            title:       Some("Add run PR chip".to_string()),
+            owner:  "fabro-sh".to_string(),
+            repo:   "fabro".to_string(),
+            number: 123,
         };
-        let external_pull_request = PullRequestRecord {
-            provider:    "external".to_string(),
-            html_url:    "https://gitlab.com/acme/widgets/-/merge_requests/42".to_string(),
-            number:      None,
-            owner:       None,
-            repo:        None,
-            base_branch: None,
-            head_branch: None,
-            title:       Some("Review deployment chart".to_string()),
+        let replacement_pull_request = PullRequestRecord {
+            owner:  "acme".to_string(),
+            repo:   "widgets".to_string(),
+            number: 42,
         };
 
         state
             .apply_event(&test_event(
                 1,
                 EventBody::PullRequestCreated(PullRequestCreatedProps {
-                    pr_url:      github_pull_request.html_url.clone(),
-                    pr_number:   github_pull_request.number.unwrap(),
-                    owner:       github_pull_request.owner.clone().unwrap(),
-                    repo:        github_pull_request.repo.clone().unwrap(),
-                    base_branch: github_pull_request.base_branch.clone().unwrap(),
-                    head_branch: github_pull_request.head_branch.clone().unwrap(),
-                    title:       github_pull_request.title.clone().unwrap(),
+                    pr_url:      github_pull_request.html_url(),
+                    pr_number:   github_pull_request.number,
+                    owner:       github_pull_request.owner.clone(),
+                    repo:        github_pull_request.repo.clone(),
+                    base_branch: "main".to_string(),
+                    head_branch: "fabro/run/demo".to_string(),
+                    title:       "Add run PR chip".to_string(),
                     draft:       false,
                 }),
                 None,
@@ -2556,18 +2541,18 @@ mod tests {
             .apply_event(&test_event(
                 2,
                 EventBody::PullRequestLinked(PullRequestLinkedProps {
-                    pull_request: external_pull_request.clone(),
+                    pull_request: replacement_pull_request.clone(),
                 }),
                 None,
             ))
             .unwrap();
-        assert_eq!(state.pull_request, Some(external_pull_request.clone()));
+        assert_eq!(state.pull_request, Some(replacement_pull_request.clone()));
 
         state
             .apply_event(&test_event(
                 3,
                 EventBody::PullRequestUnlinked(PullRequestUnlinkedProps {
-                    pull_request: external_pull_request.clone(),
+                    pull_request: replacement_pull_request,
                 }),
                 None,
             ))

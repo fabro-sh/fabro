@@ -1514,15 +1514,10 @@ mod tests {
             tool_call_id:       None,
             actor:              None,
             body:               EventBody::PullRequestLinked(PullRequestLinkedProps {
-                pull_request: crate::PullRequest {
-                    provider:    "github".to_string(),
-                    html_url:    "https://github.com/acme/widgets/pull/42".to_string(),
-                    number:      Some(42),
-                    owner:       Some("acme".to_string()),
-                    repo:        Some("widgets".to_string()),
-                    base_branch: None,
-                    head_branch: None,
-                    title:       Some("Review deployment chart".to_string()),
+                pull_request: crate::PullRequestLink {
+                    owner:  "acme".to_string(),
+                    repo:   "widgets".to_string(),
+                    number: 42,
                 },
             }),
         };
@@ -1556,15 +1551,10 @@ mod tests {
             tool_call_id:       None,
             actor:              None,
             body:               EventBody::PullRequestUnlinked(PullRequestUnlinkedProps {
-                pull_request: crate::PullRequest {
-                    provider:    "github".to_string(),
-                    html_url:    "https://github.com/acme/widgets/pull/42".to_string(),
-                    number:      Some(42),
-                    owner:       Some("acme".to_string()),
-                    repo:        Some("widgets".to_string()),
-                    base_branch: Some("main".to_string()),
-                    head_branch: Some("feature".to_string()),
-                    title:       Some("Fix the bug".to_string()),
+                pull_request: crate::PullRequestLink {
+                    owner:  "acme".to_string(),
+                    repo:   "widgets".to_string(),
+                    number: 42,
                 },
             }),
         };

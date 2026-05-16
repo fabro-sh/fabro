@@ -18,8 +18,8 @@ pub use initialize::initialize;
 pub use parse::parse;
 pub(crate) use persist::persist;
 pub use pull_request::{
-    AutoMergeOptions, OpenPullRequestRequest, PrContent, build_pr_content, maybe_open_pull_request,
-    pull_request,
+    AutoMergeOptions, CreatedPullRequest, OpenPullRequestRequest, PrContent, build_pr_content,
+    maybe_open_pull_request, pull_request,
 };
 pub use transform::transform;
 pub use types::{

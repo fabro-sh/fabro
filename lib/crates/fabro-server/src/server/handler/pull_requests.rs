@@ -52,124 +52,17 @@ fn parse_github_owner_repo_from_url(url: &str, kind: &str) -> Result<(String, St
     fabro_github::parse_github_owner_repo(url).map_err(|err| ApiError::bad_request(err.to_string()))
 }
 
-#[expect(
-    clippy::disallowed_types,
-    reason = "Pull-request links are public URLs stored for display and GitHub coordinate inference."
-)]
-fn github_pull_request_coordinates_for_link(url: &str) -> Result<(String, String, u64), ApiError> {
-    let parsed = fabro_http::Url::parse(url).map_err(|err| {
-        ApiError::with_code(
-            StatusCode::BAD_REQUEST,
-            format!("Invalid pull request URL: {err}"),
-            "invalid_pull_request_url",
-        )
-    })?;
-    if parsed.scheme() != "https" || parsed.host_str() != Some("github.com") {
-        return Err(ApiError::with_code(
-            StatusCode::BAD_REQUEST,
-            "Pull request link must be a GitHub pull request URL like https://github.com/owner/repo/pull/123.",
-            "unsupported_pull_request_provider",
-        ));
-    }
-    github_pull_request_coordinates_from_url(url)
-}
-
-#[expect(
-    clippy::disallowed_types,
-    reason = "Pull-request API validates public github.com URLs; these raw URLs are not credential-bearing log output."
-)]
-fn github_pull_request_coordinates_from_url(url: &str) -> Result<(String, String, u64), ApiError> {
-    let (owner, repo) = parse_github_owner_repo_from_url(url, "pull request URL")?;
-    let parsed = fabro_http::Url::parse(url).map_err(|err| {
-        ApiError::with_code(
-            StatusCode::BAD_REQUEST,
-            format!("Invalid pull request URL: {err}"),
-            "invalid_pull_request_url",
-        )
-    })?;
-    let segments = parsed
-        .path_segments()
-        .map(|segments| {
-            segments
-                .filter(|segment| !segment.is_empty())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    match segments.as_slice() {
-        [path_owner, path_repo, "pull", number]
-            if *path_owner == owner.as_str() && *path_repo == repo.as_str() =>
-        {
-            let number = number.parse().map_err(|_| {
-                ApiError::with_code(
-                    StatusCode::BAD_REQUEST,
-                    "Pull request URL number must be an unsigned integer.",
-                    "invalid_pull_request_url",
-                )
-            })?;
-            Ok((owner, repo, number))
-        }
-        _ => Err(ApiError::with_code(
-            StatusCode::BAD_REQUEST,
-            "Pull request link must use https://github.com/owner/repo/pull/123.",
-            "invalid_pull_request_url",
-        )),
-    }
-}
-
 fn pull_request_record_from_link_request(
     body: &LinkRunPullRequestRequest,
 ) -> Result<PullRequestRecord, ApiError> {
-    let html_url = body.html_url.trim().to_string();
-    let (owner, repo, number) = github_pull_request_coordinates_for_link(&html_url)?;
-
-    Ok(PullRequestRecord {
-        provider: "github".to_string(),
-        html_url,
-        number: Some(number),
-        owner: Some(owner),
-        repo: Some(repo),
-        base_branch: None,
-        head_branch: None,
-        title: None,
+    PullRequestRecord::from_github_url(body.html_url.trim()).map_err(|err| {
+        let code = if err.contains("GitHub pull request URL") {
+            "unsupported_pull_request_provider"
+        } else {
+            "invalid_pull_request_url"
+        };
+        ApiError::with_code(StatusCode::BAD_REQUEST, err, code)
     })
-}
-
-async fn enrich_linked_pull_request_from_github(
-    state: &Arc<AppState>,
-    mut record: PullRequestRecord,
-) -> PullRequestRecord {
-    let (Some(owner), Some(repo), Some(number)) =
-        (record.owner.clone(), record.repo.clone(), record.number)
-    else {
-        return record;
-    };
-    let creds = match load_server_github_credentials(state.as_ref()) {
-        Ok(creds) => creds,
-        Err(err) => {
-            warn!(error = ?err, "Linked pull request without live GitHub metadata");
-            return record;
-        }
-    };
-    let github = match server_github_context(state.as_ref(), &creds) {
-        Ok(github) => github,
-        Err(err) => {
-            warn!(error = ?err, "Linked pull request without live GitHub metadata");
-            return record;
-        }
-    };
-
-    match fabro_github::get_pull_request(&github, &owner, &repo, number).await {
-        Ok(github) => {
-            record.title = Some(github.title);
-            record.head_branch = Some(github.head.ref_name);
-            record.base_branch = Some(github.base.ref_name);
-            record
-        }
-        Err(err) => {
-            warn!(error = %err, "Linked pull request without live GitHub metadata");
-            record
-        }
-    }
 }
 
 fn load_server_github_credentials(
@@ -253,30 +146,8 @@ async fn load_pull_request_record(
     })
 }
 
-fn github_coordinates_for_record(
-    record: &PullRequestRecord,
-) -> Result<(String, String, u64), ApiError> {
-    if record.provider != "github" {
-        return Err(ApiError::with_code(
-            StatusCode::BAD_REQUEST,
-            format!(
-                "Pull request operation requires a GitHub association; stored provider is '{}'.",
-                record.provider
-            ),
-            "unsupported_pull_request_provider",
-        ));
-    }
-    github_pull_request_coordinates_from_url(&record.html_url).map_err(|err| {
-        if err.code() == Some("invalid_pull_request_url") {
-            ApiError::with_code(
-                StatusCode::BAD_REQUEST,
-                "Stored GitHub pull request is missing owner/repo/number coordinates.",
-                "missing_pull_request_coordinates",
-            )
-        } else {
-            err
-        }
-    })
+fn github_coordinates_for_record(record: &PullRequestRecord) -> (String, String, u64) {
+    (record.owner.clone(), record.repo.clone(), record.number)
 }
 
 async fn load_pull_request_github_context(
@@ -284,7 +155,7 @@ async fn load_pull_request_github_context(
     id: &RunId,
 ) -> Result<PullRequestGithubContext, ApiError> {
     let record = load_pull_request_record(state, id).await?;
-    let (owner, repo, number) = github_coordinates_for_record(&record)?;
+    let (owner, repo, number) = github_coordinates_for_record(&record);
     let creds = load_server_github_credentials(state.as_ref())?;
     Ok(PullRequestGithubContext {
         record,
@@ -309,7 +180,7 @@ impl<'a> RunPrInputs<'a> {
         if let Some(record) = run_state.pull_request.as_ref() {
             return Err(ApiError::with_code(
                 StatusCode::CONFLICT,
-                format!("Pull request already exists at {}", record.html_url),
+                format!("Pull request already exists at {}", record.html_url()),
                 "pull_request_exists",
             ));
         }
@@ -381,21 +252,35 @@ impl<'a> RunPrInputs<'a> {
     }
 }
 
-fn stored_pull_request_detail(record: PullRequestRecord) -> fabro_types::PullRequestDetail {
+fn unavailable_pull_request_response(
+    record: PullRequestRecord,
+    reason: fabro_types::PullRequestDetailsUnavailableReason,
+) -> fabro_types::PullRequestDetail {
     fabro_types::PullRequestDetail {
-        pull_request:  record,
-        state:         None,
-        draft:         None,
-        merged:        None,
-        merged_at:     None,
-        mergeable:     None,
-        additions:     None,
-        deletions:     None,
-        changed_files: None,
-        comments:      None,
-        checks:        None,
-        author:        None,
-        timestamps:    None,
+        data: fabro_types::PullRequest {
+            link:    record,
+            details: None,
+        },
+        meta: fabro_types::PullRequestMeta {
+            details_status:             fabro_types::PullRequestDetailsStatus::Unavailable,
+            details_unavailable_reason: Some(reason),
+        },
+    }
+}
+
+fn available_pull_request_response(
+    record: PullRequestRecord,
+    details: fabro_types::PullRequestDetails,
+) -> fabro_types::PullRequestDetail {
+    fabro_types::PullRequestDetail {
+        data: fabro_types::PullRequest {
+            link:    record,
+            details: Some(details),
+        },
+        meta: fabro_types::PullRequestMeta {
+            details_status:             fabro_types::PullRequestDetailsStatus::Available,
+            details_unavailable_reason: None,
+        },
     }
 }
 
@@ -456,8 +341,8 @@ async fn create_run_pull_request(
         conclusion: Some(inputs.conclusion),
         run_state: Some(&run_state),
     };
-    let pull_request = match pull_request::maybe_open_pull_request(request).await {
-        Ok(Some(record)) => record,
+    let created_pull_request = match pull_request::maybe_open_pull_request(request).await {
+        Ok(Some(created)) => created,
         Ok(None) => {
             return ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -468,12 +353,18 @@ async fn create_run_pull_request(
         Err(err) => return ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
     };
 
-    let event = workflow_event::Event::pull_request_created(&pull_request, true);
+    let event = workflow_event::Event::pull_request_created(
+        &created_pull_request.link,
+        &created_pull_request.base_branch,
+        &created_pull_request.head_branch,
+        &created_pull_request.title,
+        true,
+    );
     if let Err(err) = workflow_event::append_event(&run_store, &id, &event).await {
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
 
-    Json(pull_request).into_response()
+    Json(created_pull_request.link).into_response()
 }
 
 async fn link_run_pull_request(
@@ -488,7 +379,6 @@ async fn link_run_pull_request(
     let Ok(run_store) = state.store.open_run(&id).await else {
         return ApiError::not_found("Run not found.").into_response();
     };
-    let pull_request = enrich_linked_pull_request_from_github(&state, pull_request).await;
     let event = workflow_event::Event::PullRequestLinked {
         pull_request: pull_request.clone(),
     };
@@ -540,51 +430,47 @@ async fn get_run_pull_request(
         Ok(record) => record,
         Err(err) => return err.into_response(),
     };
-    let Ok((owner, repo, number)) = github_coordinates_for_record(&record) else {
-        return Json(stored_pull_request_detail(record)).into_response();
-    };
+    let (owner, repo, number) = github_coordinates_for_record(&record);
     let creds = match load_server_github_credentials(state.as_ref()) {
         Ok(creds) => creds,
         Err(err) => {
             warn!(error = ?err, "Returning stored pull request without live GitHub details");
-            return Json(stored_pull_request_detail(record)).into_response();
+            return Json(unavailable_pull_request_response(
+                record,
+                fabro_types::PullRequestDetailsUnavailableReason::IntegrationUnavailable,
+            ))
+            .into_response();
         }
     };
     let github = match server_github_context(state.as_ref(), &creds) {
         Ok(github) => github,
         Err(err) => {
             warn!(error = ?err, "Returning stored pull request without live GitHub details");
-            return Json(stored_pull_request_detail(record)).into_response();
+            return Json(unavailable_pull_request_response(
+                record,
+                fabro_types::PullRequestDetailsUnavailableReason::IntegrationUnavailable,
+            ))
+            .into_response();
         }
     };
 
     match fabro_github::get_pull_request(&github, &owner, &repo, number).await {
-        Ok(github) => Json(fabro_types::PullRequestDetail {
-            pull_request:  record,
-            state:         Some(github.state),
-            draft:         Some(github.draft),
-            merged:        Some(github.merged),
-            merged_at:     github.merged_at,
-            mergeable:     github.mergeable,
-            additions:     Some(github.additions),
-            deletions:     Some(github.deletions),
-            changed_files: Some(github.changed_files),
-            comments:      Some(0),
-            checks:        Some(Vec::new()),
-            author:        Some(github.user),
-            timestamps:    Some(fabro_types::PullRequestTimestamps {
-                created_at: github.created_at,
-                updated_at: github.updated_at,
-            }),
-        })
-        .into_response(),
+        Ok(github) => Json(available_pull_request_response(record, github.into())).into_response(),
         Err(fabro_github::PullRequestApiError::NotFound { .. }) => {
             warn!("Returning stored pull request because GitHub no longer has the PR");
-            Json(stored_pull_request_detail(record)).into_response()
+            Json(unavailable_pull_request_response(
+                record,
+                fabro_types::PullRequestDetailsUnavailableReason::NotFound,
+            ))
+            .into_response()
         }
         Err(err) => {
             warn!(error = %err, "Returning stored pull request without live GitHub details");
-            Json(stored_pull_request_detail(record)).into_response()
+            Json(unavailable_pull_request_response(
+                record,
+                fabro_types::PullRequestDetailsUnavailableReason::FetchFailed,
+            ))
+            .into_response()
         }
     }
 }
@@ -609,7 +495,7 @@ async fn merge_run_pull_request(
         Ok(()) => Json(MergeRunPullRequestResponse {
             number:   i64::try_from(ctx.number)
                 .expect("stored pull request number should fit in i64"),
-            html_url: ctx.record.html_url,
+            html_url: ctx.record.html_url(),
             method:   body.method,
         })
         .into_response(),
@@ -637,7 +523,7 @@ async fn close_run_pull_request(
         Ok(()) => Json(CloseRunPullRequestResponse {
             number:   i64::try_from(ctx.number)
                 .expect("stored pull request number should fit in i64"),
-            html_url: ctx.record.html_url,
+            html_url: ctx.record.html_url(),
         })
         .into_response(),
         Err(fabro_github::PullRequestApiError::NotFound { .. }) => {

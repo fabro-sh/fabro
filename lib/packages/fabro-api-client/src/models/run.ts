@@ -24,7 +24,7 @@ import type { DiffSummary } from './diff-summary';
 import type { Principal } from './principal';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { PullRequest } from './pull-request';
+import type { PullRequestLink } from './pull-request-link';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { RepositoryRef } from './repository-ref';
@@ -76,7 +76,7 @@ export interface Run {
     'timestamps': RunTimestamps;
     'billing': RunBillingSummary | null;
     'diff': DiffSummary | null;
-    'pull_request': PullRequest | null;
+    'pull_request': PullRequestLink | null;
     'current_question': RunQuestion | null;
     'superseded_by': string | null;
     'links': RunLinks;

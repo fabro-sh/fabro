@@ -13,16 +13,16 @@ pub(super) async fn create_command(args: PrCreateArgs, base_ctx: &CommandContext
         .await?;
 
     info!(
-        number = ?record.number,
-        owner = ?record.owner,
-        repo = ?record.repo,
+        number = record.number,
+        owner = %record.owner,
+        repo = %record.repo,
         "Created pull request"
     );
 
     if ctx.json_output() {
         print_json_pretty(&record)?;
     } else {
-        fabro_util::printout!(ctx.printer(), "{}", record.html_url);
+        fabro_util::printout!(ctx.printer(), "{}", record.html_url());
     }
 
     Ok(())

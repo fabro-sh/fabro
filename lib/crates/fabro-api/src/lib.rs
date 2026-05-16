@@ -35,12 +35,14 @@ pub mod types {
         AuthMethod, BilledTokenCounts, CommandTermination, Conclusion, DiffStats, DiffSummary,
         DirtyStatus, EventEnvelope, ExecOutputTail, FailureCategory, FailureSignature, GitContext,
         IdpIdentity, InterviewOption, InterviewQuestionRecord, PendingInterviewRecord,
-        PreRunPushOutcome, Principal, PullRequest, PullRequestDetails, QuestionType, RepositoryRef,
-        Run, RunClientProvenance, RunEvent, RunFailure, RunProjection, RunProvenance, RunSandbox,
-        RunSandboxRuntime, RunServerProvenance, SandboxDetails, SandboxProvider, SandboxResources,
-        SandboxService, SandboxServiceListResponse, SandboxState, SandboxTimestamps,
-        SecretMetadata, SecretType, ServerSettings, StageCompletion, StageHandler, StageOutcome,
-        StageProjection, StageState, SystemActorKind, UserPrincipal, WorkflowSettings,
+        PreRunPushOutcome, Principal, PullRequest, PullRequestDetails, PullRequestDetailsStatus,
+        PullRequestDetailsUnavailableReason, PullRequestLink, PullRequestMeta, PullRequestResponse,
+        QuestionType, RepositoryRef, Run, RunClientProvenance, RunEvent, RunFailure, RunProjection,
+        RunProvenance, RunSandbox, RunSandboxRuntime, RunServerProvenance, SandboxDetails,
+        SandboxProvider, SandboxResources, SandboxService, SandboxServiceListResponse,
+        SandboxState, SandboxTimestamps, SecretMetadata, SecretType, ServerSettings,
+        StageCompletion, StageHandler, StageOutcome, StageProjection, StageState, SystemActorKind,
+        UserPrincipal, WorkflowSettings,
     };
 
     pub use crate::generated::types::*;

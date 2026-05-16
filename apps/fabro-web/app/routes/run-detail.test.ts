@@ -105,7 +105,7 @@ function makeRunSummary(
     },
     billing:          null,
     diff:             diffSummary,
-    pull_request:     pullRequest ? { provider: "github", ...pullRequest } : null,
+    pull_request:     pullRequest,
     current_question: null,
     superseded_by:    null,
     links:            { web: null },
@@ -449,13 +449,10 @@ describe("RunDetail full-height child routes", () => {
     const renderer = await renderRunDetail({
       initialEntry: "/runs/run_1",
       pullRequest: {
-        html_url: "https://github.com/fabro-sh/fabro/pull/123",
-        number: 123,
         owner: "fabro-sh",
         repo: "fabro",
-        base_branch: "main",
-        head_branch: "fabro/run/demo",
-        title: "Add run PR chip",
+        number: 123,
+        html_url: "https://github.com/fabro-sh/fabro/pull/123",
       },
     });
 
@@ -468,26 +465,6 @@ describe("RunDetail full-height child routes", () => {
     expect(links).toHaveLength(1);
     expect(links[0].props.target).toBe("_blank");
     expect(links[0].children.filter((child) => typeof child !== "object").join("")).toBe("#123");
-  });
-
-  test("shows a stored-only pull request chip when no number is available", async () => {
-    const renderer = await renderRunDetail({
-      initialEntry: "/runs/run_1",
-      pullRequest: {
-        provider: "external",
-        html_url: "https://gitlab.com/acme/widgets/-/merge_requests/42",
-        title: "Review deployment chart",
-      },
-    });
-
-    const links = renderer.root.findAll(
-      (node) =>
-        node.type === "a" &&
-        node.props.href === "https://gitlab.com/acme/widgets/-/merge_requests/42",
-    );
-
-    expect(links).toHaveLength(1);
-    expect(links[0].children.filter((child) => typeof child !== "object").join("")).toBe("PR");
   });
 
   test("keeps blocked full-height children clear of the interview dock without an h-72 sibling", async () => {

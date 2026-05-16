@@ -15,15 +15,15 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { PullRequestDetails } from './pull-request-details';
+import type { PullRequest } from './pull-request';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { PullRequestLink } from './pull-request-link';
+import type { PullRequestMeta } from './pull-request-meta';
 
 /**
- * Stored pull request link plus optional live GitHub details.
+ * Pull request link and optional live GitHub details for a run.
  */
-export interface PullRequest {
-    'link': PullRequestLink;
-    'details'?: PullRequestDetails | null;
+export interface PullRequestResponse {
+    'data': PullRequest;
+    'meta': PullRequestMeta;
 }

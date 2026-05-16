@@ -715,32 +715,21 @@ impl Event {
         }
     }
 
-    pub fn pull_request_created(record: &PullRequestRecord, draft: bool) -> Self {
+    pub fn pull_request_created(
+        record: &PullRequestRecord,
+        base_branch: &str,
+        head_branch: &str,
+        title: &str,
+        draft: bool,
+    ) -> Self {
         Self::PullRequestCreated {
-            pr_url: record.html_url.clone(),
-            pr_number: record
-                .number
-                .expect("created pull request record should include a number"),
-            owner: record
-                .owner
-                .clone()
-                .expect("created pull request record should include an owner"),
-            repo: record
-                .repo
-                .clone()
-                .expect("created pull request record should include a repo"),
-            base_branch: record
-                .base_branch
-                .clone()
-                .expect("created pull request record should include a base branch"),
-            head_branch: record
-                .head_branch
-                .clone()
-                .expect("created pull request record should include a head branch"),
-            title: record
-                .title
-                .clone()
-                .expect("created pull request record should include a title"),
+            pr_url: record.html_url(),
+            pr_number: record.number,
+            owner: record.owner.clone(),
+            repo: record.repo.clone(),
+            base_branch: base_branch.to_string(),
+            head_branch: head_branch.to_string(),
+            title: title.to_string(),
             draft,
         }
     }
@@ -1451,17 +1440,15 @@ impl Event {
             }
             Self::PullRequestLinked { pull_request } => {
                 info!(
-                    pr_url = %pull_request.html_url,
-                    provider = %pull_request.provider,
-                    pr_number = ?pull_request.number,
+                    pr_url = %pull_request.html_url(),
+                    pr_number = pull_request.number,
                     "Pull request linked"
                 );
             }
             Self::PullRequestUnlinked { pull_request } => {
                 info!(
-                    pr_url = %pull_request.html_url,
-                    provider = %pull_request.provider,
-                    pr_number = ?pull_request.number,
+                    pr_url = %pull_request.html_url(),
+                    pr_number = pull_request.number,
                     "Pull request unlinked"
                 );
             }

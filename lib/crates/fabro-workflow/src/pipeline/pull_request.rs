@@ -472,13 +472,21 @@ pub struct OpenPullRequestRequest<'a> {
     pub run_state:   Option<&'a RunProjection>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreatedPullRequest {
+    pub link:        PullRequestRecord,
+    pub title:       String,
+    pub base_branch: String,
+    pub head_branch: String,
+}
+
 /// Optionally open a pull request after a successful workflow run.
 ///
-/// Returns `Ok(Some(PullRequestRecord))` if a PR was created, `Ok(None)` if
+/// Returns `Ok(Some(CreatedPullRequest))` if a PR was created, `Ok(None)` if
 /// the diff was empty, or `Err` on failure.
 pub async fn maybe_open_pull_request(
     req: OpenPullRequestRequest<'_>,
-) -> Result<Option<PullRequestRecord>, String> {
+) -> Result<Option<CreatedPullRequest>, String> {
     if req.diff.is_empty() {
         debug!("Empty diff, skipping pull request creation");
         return Ok(None);
@@ -541,18 +549,18 @@ pub async fn maybe_open_pull_request(
         }
     }
 
-    let record = PullRequestRecord {
-        provider:    "github".to_string(),
-        html_url:    created.html_url,
-        number:      Some(created.number),
-        owner:       Some(owner),
-        repo:        Some(repo),
-        base_branch: Some(req.base_branch.to_string()),
-        head_branch: Some(req.head_branch.to_string()),
-        title:       Some(title),
+    let link = PullRequestRecord {
+        owner,
+        repo,
+        number: created.number,
     };
 
-    Ok(Some(record))
+    Ok(Some(CreatedPullRequest {
+        link,
+        title,
+        base_branch: req.base_branch.to_string(),
+        head_branch: req.head_branch.to_string(),
+    }))
 }
 
 /// PULL_REQUEST phase: optionally create a pull request after finalize.
@@ -615,11 +623,15 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                     })
                     .await
                     {
-                        Ok(Some(record)) => {
-                            services
-                                .emitter
-                                .emit(&Event::pull_request_created(&record, pr_cfg.draft));
-                            pr_url = Some(record.html_url.clone());
+                        Ok(Some(created)) => {
+                            services.emitter.emit(&Event::pull_request_created(
+                                &created.link,
+                                &created.base_branch,
+                                &created.head_branch,
+                                &created.title,
+                                pr_cfg.draft,
+                            ));
+                            pr_url = Some(created.link.html_url());
                         }
                         Ok(None) => {}
                         Err(e) => {
@@ -1940,7 +1952,7 @@ mod tests {
         .expect("PR creation should succeed");
 
         let record = result.expect("PR record should be Some");
-        assert_eq!(record.title.as_deref(), Some("Fix telemetry leak"));
+        assert_eq!(record.title, "Fix telemetry leak");
         harness.assert_mocks_called_once().await;
     }
 
@@ -1977,10 +1989,7 @@ mod tests {
         .expect("PR creation should succeed");
 
         let record = result.expect("PR record should be Some");
-        let title = record
-            .title
-            .as_deref()
-            .expect("record should include title");
+        let title = record.title;
         assert_eq!(title.chars().count(), 72);
         assert!(title.ends_with('\u{2026}'));
         harness.assert_mocks_called_once().await;
