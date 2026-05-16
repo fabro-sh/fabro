@@ -144,7 +144,7 @@ fn list_query_case_insensitive() {
 }
 
 #[test]
-fn list_unknown_provider_returns_empty_page() {
+fn list_unknown_provider_returns_empty() {
     let context = test_context!();
     let mut cmd = context.model();
     cmd.args(["list", "--provider", "not-a-provider"]);

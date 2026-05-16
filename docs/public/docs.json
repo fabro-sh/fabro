@@ -93,6 +93,7 @@
             "pages": [
               "integrations/github",
               "integrations/daytona",
+              "integrations/litellm",
               "integrations/slack",
               "integrations/brave-search"
             ]

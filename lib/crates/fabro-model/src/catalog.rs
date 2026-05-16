@@ -1597,6 +1597,35 @@ effort = false
     }
 
     #[test]
+    fn builtin_ollama_provider_is_opt_in() {
+        let ollama = ProviderId::new("ollama");
+        let builtin = Catalog::builtin();
+
+        assert!(builtin.provider(&ollama).is_none());
+        assert!(builtin.list(Some(&ollama)).is_empty());
+
+        let catalog = Catalog::from_builtin_with_overrides(&minimal_settings(
+            r"
+[providers.ollama]
+enabled = true
+",
+        ))
+        .expect("enabled Ollama override should build from the built-in provider settings");
+
+        let provider = catalog
+            .provider(&ollama)
+            .expect("enabled Ollama provider should be present");
+        assert_eq!(provider.adapter, "openai_compatible");
+        assert_eq!(
+            provider.base_url.as_deref(),
+            Some("http://localhost:11434/v1")
+        );
+
+        assert!(catalog.list(Some(&ollama)).is_empty());
+        assert!(catalog.default_for_provider(&ollama).is_none());
+    }
+
+    #[test]
     fn builtin_get_by_id() {
         let m = Catalog::builtin().get("claude-opus-4-6").unwrap();
         assert_eq!(m.id, "claude-opus-4-6");

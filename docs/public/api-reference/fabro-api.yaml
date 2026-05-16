@@ -554,6 +554,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/health:
+    get:
+      operationId: getApiHealth
+      tags: [Discovery]
+      summary: Health Check (API)
+      description: >
+        Returns service health status under the versioned API prefix. Mirrors
+        `/health` for callers that prefer a uniform `/api/v1` base.
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
   /api/v1/health/diagnostics:
     post:
       operationId: runDiagnostics

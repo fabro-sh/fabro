@@ -1,0 +1,26 @@
+[providers.ollama]
+display_name = "Ollama"
+adapter = "openai_compatible"
+base_url = "http://localhost:11434/v1"
+credentials = ["credential:ollama", "env:OLLAMA_API_KEY"]
+priority = 30
+enabled = false
+
+# Example model. Uncomment after `ollama pull qwen3.5` (and `enabled = true`
+# above) to expose it through the OpenAI-compatible adapter.
+#
+# [models."qwen3.5"]
+# provider = "ollama"
+# api_id = "qwen3.5:latest"
+# display_name = "Qwen3.5"
+# family = "qwen3.5"
+# default = true
+# aliases = ["ollama-qwen3.5"]
+#
+# [models."qwen3.5".limits]
+# context_window = 32768
+#
+# [models."qwen3.5".features]
+# tools = true
+# vision = false
+# reasoning = false
