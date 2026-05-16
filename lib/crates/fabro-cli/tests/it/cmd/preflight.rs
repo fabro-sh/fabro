@@ -73,8 +73,8 @@ fn preflight_rejects_unbound_template_inputs() {
     Graph: [FIXTURES]/templated_unbound.fabro
     Goal: Demo
 
-    error: undefined template variable `inputs.app_dir` at line 1 (template_undefined_variable)
-    error [node: work]: undefined template variable `inputs.app_dir` in node `work` (template_undefined_variable)
+    error: [FIXTURES]/templated_unbound.fabro:2:26: undefined template variable `inputs.app_dir` in graph attribute `goal` (template_undefined_variable)
+    error: [FIXTURES]/templated_unbound.fabro:7:44: undefined template variable `inputs.app_dir` in node `work` attribute `prompt` [node: work] (template_undefined_variable)
       × Validation failed
     ");
 }
