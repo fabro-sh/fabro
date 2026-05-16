@@ -15,15 +15,18 @@
 
 
 /**
- * Optional provider-specific model speed tier used for cost estimates.
+ * Provider-neutral public-network policy for one direction.
  */
 
-export const BillingSpeed = {
-    STANDARD: 'standard',
-    FAST: 'fast'
+export const SandboxNetworkPolicyMode = {
+    UNKNOWN: 'unknown',
+    OPEN: 'open',
+    BLOCKED: 'blocked',
+    CIDR_ALLOW_LIST: 'cidr_allow_list',
+    ESSENTIALS_ONLY: 'essentials_only'
 } as const;
 
-export type BillingSpeed = typeof BillingSpeed[keyof typeof BillingSpeed];
+export type SandboxNetworkPolicyMode = typeof SandboxNetworkPolicyMode[keyof typeof SandboxNetworkPolicyMode];
 
 
 

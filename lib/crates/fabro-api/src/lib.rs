@@ -39,10 +39,11 @@ pub mod types {
         PullRequestDetailsUnavailableReason, PullRequestLink, PullRequestMeta, PullRequestResponse,
         QuestionType, RepositoryRef, Run, RunClientProvenance, RunEvent, RunFailure, RunProjection,
         RunProvenance, RunSandbox, RunSandboxRuntime, RunServerProvenance, SandboxDetails,
-        SandboxProvider, SandboxResources, SandboxService, SandboxServiceListResponse,
-        SandboxState, SandboxTimestamps, SecretMetadata, SecretType, ServerSettings,
-        StageCompletion, StageHandler, StageOutcome, StageProjection, StageState, SystemActorKind,
-        UserPrincipal, WorkflowSettings,
+        SandboxNetwork, SandboxNetworkPolicy, SandboxNetworkPolicyMode, SandboxProvider,
+        SandboxResources, SandboxService, SandboxServiceListResponse, SandboxState,
+        SandboxTimestamps, SecretMetadata, SecretType, ServerSettings, StageCompletion,
+        StageHandler, StageOutcome, StageProjection, StageState, SystemActorKind, UserPrincipal,
+        WorkflowSettings,
     };
 
     pub use crate::generated::types::*;

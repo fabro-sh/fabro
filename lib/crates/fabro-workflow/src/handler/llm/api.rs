@@ -177,35 +177,19 @@ fn build_profile(
     match profile_kind {
         AgentProfileKind::OpenAi => Box::new(
             OpenAiProfile::new(model)
-                .with_provider(provider)
-                .with_provider_id(provider_id)
+                .with_identity(provider, provider_id)
                 .with_catalog(catalog),
         ),
         AgentProfileKind::Gemini => Box::new(
             GeminiProfile::new(model)
-                .with_provider(provider)
-                .with_provider_id(provider_id)
+                .with_identity(provider, provider_id)
                 .with_catalog(catalog),
         ),
         AgentProfileKind::Anthropic => Box::new(
             AnthropicProfile::new(model)
-                .with_provider(provider)
-                .with_provider_id(provider_id)
+                .with_identity(provider, provider_id)
                 .with_catalog(catalog),
         ),
-    }
-}
-
-fn default_profile_kind(provider: Provider) -> AgentProfileKind {
-    match provider {
-        Provider::Anthropic => AgentProfileKind::Anthropic,
-        Provider::Gemini => AgentProfileKind::Gemini,
-        Provider::OpenAi
-        | Provider::Kimi
-        | Provider::Zai
-        | Provider::Minimax
-        | Provider::Inception
-        | Provider::OpenAiCompatible => AgentProfileKind::OpenAi,
     }
 }
 
@@ -286,19 +270,6 @@ fn legacy_reasoning_effort_default(catalog: &Catalog, model: &str) -> Option<Rea
         Some(_) => None,
         None => Some(ReasoningEffort::High),
     }
-}
-
-fn profile_provider_for_catalog_provider(
-    provider_id: &ProviderId,
-    profile_kind: AgentProfileKind,
-    adapter: &str,
-) -> Provider {
-    Provider::from_id(provider_id).unwrap_or(match (profile_kind, adapter) {
-        (AgentProfileKind::Anthropic, _) => Provider::Anthropic,
-        (AgentProfileKind::Gemini, _) => Provider::Gemini,
-        (AgentProfileKind::OpenAi, "openai_compatible") => Provider::OpenAiCompatible,
-        (AgentProfileKind::OpenAi, _) => Provider::OpenAi,
-    })
 }
 
 /// Shared state for tracking file modifications from agent tool calls.
@@ -416,7 +387,7 @@ impl AgentApiBackend {
             model,
             provider,
             provider.id(),
-            default_profile_kind(provider),
+            adapter::default_profile_for_provider_id(&provider.id()),
             fallback_chain,
             source,
             steering_hub,
@@ -534,11 +505,7 @@ impl AgentApiBackend {
                 ))
             })?;
         Ok(ProviderContext {
-            provider: profile_provider_for_catalog_provider(
-                &provider.id,
-                profile_kind,
-                &provider.adapter,
-            ),
+            provider: adapter::profile_provider_for_provider_id(&provider.id, &provider.adapter),
             provider_id: provider.id.clone(),
             profile_kind,
         })

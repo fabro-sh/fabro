@@ -13,6 +13,7 @@ use super::super::{
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/repos/github/{owner}/{name}", get(get_github_repo))
+        .route("/health", get(health))
         .route("/health/diagnostics", post(run_diagnostics))
         .route("/settings", get(get_server_settings))
         .route("/system/info", get(get_system_info))

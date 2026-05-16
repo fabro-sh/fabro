@@ -15,20 +15,18 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { BilledTokenCounts } from './billed-token-counts';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { BillingModelRef } from './billing-model-ref';
+import type { SandboxNetworkPolicyMode } from './sandbox-network-policy-mode';
 
 /**
- * Billing statistics grouped by model.
+ * Public-network policy for one direction.
  */
-export interface BillingByModel {
-    'model': BillingModelRef;
+export interface SandboxNetworkPolicy {
+    'mode': SandboxNetworkPolicyMode;
     /**
-     * Number of usage-bearing stage visits that used this model.
+     * CIDR entries when `mode` is `cidr_allow_list`; empty for other modes.
      */
-    'stages': number;
-    'billing': BilledTokenCounts;
+    'cidrs': Array<string>;
 }
+
+
 

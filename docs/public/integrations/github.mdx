@@ -208,7 +208,7 @@ For public repositories, the clone works without credentials. The token is still
 
 ### GITHUB_TOKEN injection
 
-When any settings layer declares `[run.integrations.github.permissions]`, Fabro prepares a scoped GitHub App token source and exposes it as the `GITHUB_TOKEN` environment variable in sandbox command and agent execution. Agents running inside the sandbox can use this token for GitHub API calls, cloning additional private repos, or pushing to branches.
+When any settings layer declares `[run.integrations.github.permissions]`, Fabro prepares a scoped GitHub App token source and exposes it as the `GITHUB_TOKEN` environment variable in sandbox command and agent execution. Agents running inside the sandbox can use this token for GitHub API calls, cloning additional private repos, or pushing to branches. The GitHub CLI (`gh`) reads `GITHUB_TOKEN` automatically, so command stages can run `gh pr list`, `gh issue create`, and similar commands without an explicit `gh auth login`.
 
 ```toml title="workflow.toml"
 [run.integrations.github.permissions]

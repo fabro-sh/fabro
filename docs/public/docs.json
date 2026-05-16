@@ -41,6 +41,7 @@
               "workflows/stages-and-nodes",
               "workflows/transitions",
               "workflows/variables",
+              "workflows/imports",
               "workflows/human-in-the-loop",
               "workflows/stylesheets"
             ]
@@ -92,6 +93,7 @@
             "pages": [
               "integrations/github",
               "integrations/daytona",
+              "integrations/litellm",
               "integrations/slack",
               "integrations/brave-search"
             ]

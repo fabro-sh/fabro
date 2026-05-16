@@ -67,7 +67,7 @@ fabro run docs/internal/demo/12-sub-workflow.fabro
 
 ## The house node
 
-The `impl` node has `shape=house`, which makes it a **sub-workflow node**. Instead of running an LLM or a script, it launches an entirely separate workflow engine to execute the child workflow file:
+The `impl` node has `shape=house`, which makes it a **sub-workflow node**. Instead of running an LLM or a script, it launches a separate engine to execute the child workflow file:
 
 ```dot
 impl [label="Implement & Test", shape=house, stack.child_workflow="implement-and-test.fabro", manager.max_cycles=50]
@@ -88,9 +88,11 @@ The child workflow runs through its own start → implement → validate → gat
 
 Use `stack.child_workflow` when you want to reuse the child workflow across multiple parents. Use `stack.child_dot_source` for one-off child workflows that are specific to the parent.
 
-## Context flow
+## What's shared and what's isolated
 
-Context flows bidirectionally between parent and child:
+The child shares the parent's **run ID and event stream** — its stage events appear in the same run, so `fabro events` and `fabro inspect` see parent and child interleaved. The child gets its own **checkpoints, artifacts, and run directory**, so its working state can't pollute the parent.
+
+Context flows bidirectionally:
 
 1. **Parent → child:** The child receives a clone of the parent's context. In this example, the `plan` node writes `plan.md` to disk and the child's `implement` node reads it.
 2. **Child → parent:** When the child finishes, any context values it added or changed are merged back into the parent. The `review` node sees the results of the child's work.
@@ -115,7 +117,7 @@ The parent polls at `manager.poll_interval` (default 45 seconds). On each poll, 
 Sub-workflows are most valuable when:
 
 - **Reusability** — the same child workflow is used by multiple parents (e.g., a standard test-and-fix loop, a deploy pipeline, a review checklist)
-- **Encapsulation** — the child runs its own engine with isolated logs and checkpoints, keeping the parent's execution trace clean
+- **Encapsulation** — the child has its own checkpoints and artifacts, so its working state can't pollute the parent's
 - **Supervisor patterns** — the parent needs to monitor or cancel a complex child process based on external conditions
 
 For simpler cases, just add more nodes to a single workflow. Sub-workflows add a layer of indirection — use them when the benefits of reuse or encapsulation justify it.

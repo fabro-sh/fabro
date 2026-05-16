@@ -13,12 +13,15 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { SandboxNetworkPolicy } from './sandbox-network-policy';
 
-export interface DockerSettings {
-    'image': string;
-    'network_mode': string | null;
-    'memory_limit': number | null;
-    'cpu_quota': number | null;
-    'env_vars': { [key: string]: string; };
+/**
+ * Provider-neutral public-network policy for sandbox egress and ingress.
+ */
+export interface SandboxNetwork {
+    'egress': SandboxNetworkPolicy;
+    'ingress': SandboxNetworkPolicy;
 }
 

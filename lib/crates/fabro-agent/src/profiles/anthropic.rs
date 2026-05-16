@@ -51,7 +51,14 @@ impl AnthropicProfile {
     #[must_use]
     pub fn with_provider(mut self, provider: Provider) -> Self {
         self.base.provider = provider;
-        self.base.provider_id = provider.id();
+        self
+    }
+
+    /// Override the provider identity and provider ID together.
+    #[must_use]
+    pub fn with_identity(mut self, provider: Provider, provider_id: ProviderId) -> Self {
+        self.base.provider = provider;
+        self.base.provider_id = provider_id;
         self
     }
 
@@ -209,6 +216,17 @@ mod tests {
         let profile = AnthropicProfile::new("claude-sonnet-4-20250514");
         assert_eq!(profile.provider(), Provider::Anthropic);
         assert_eq!(profile.model(), "claude-sonnet-4-20250514");
+    }
+
+    #[test]
+    fn with_provider_preserves_explicit_provider_id() {
+        let custom_id = ProviderId::new("acme-anthropic");
+        let profile = AnthropicProfile::new("model")
+            .with_provider_id(custom_id.clone())
+            .with_provider(Provider::Anthropic);
+
+        assert_eq!(profile.provider(), Provider::Anthropic);
+        assert_eq!(profile.provider_id(), custom_id);
     }
 
     #[test]

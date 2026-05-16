@@ -41,7 +41,7 @@ fn help() {
     Options:
           --json                           Output as JSON [env: FABRO_JSON=]
           --server <SERVER>                Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
-          --provider <PROVIDER>            LLM provider (anthropic, openai, gemini, kimi, zai, minimax, inception)
+          --provider <PROVIDER>            LLM provider (built-in or configured provider ID)
           --model <MODEL>                  Model name (defaults per provider)
           --no-upgrade-check               Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --permissions <PERMISSIONS>      Permission level for tool execution [possible values: read-only, read-write, full]
@@ -117,6 +117,32 @@ fn exec_uses_user_config_defaults() {
 }
 
 #[test]
+fn exec_accepts_configured_custom_provider_from_settings() {
+    let context = test_context!();
+    context.write_home(
+        ".fabro/settings.toml",
+        "_version = 1\n\n[llm.providers.bedrock]\nadapter = \"openai_compatible\"\nbase_url = \"https://bedrock.example.invalid/v1\"\n\n[cli.exec.model]\nprovider = \"bedrock\"\nname = \"bedrock-claude-sonnet-4-6\"\n",
+    );
+
+    let mut cmd = context.exec_cmd();
+    cmd.arg("test prompt");
+    cmd.env_clear();
+    preserve_coverage_env!(cmd);
+    cmd.env("HOME", &context.home_dir);
+    cmd.env("FABRO_STORAGE_DIR", &context.storage_dir);
+    cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled");
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+      × LLM credentials not configured for provider 'bedrock'
+    ");
+}
+
+#[test]
 fn exec_server_target_uses_remote_transport_instead_of_local_api_key_resolution() {
     let context = test_context!();
     let server = MockServer::start();
@@ -152,6 +178,43 @@ fn exec_server_target_uses_remote_transport_instead_of_local_api_key_resolution(
     assert!(
         !stderr.contains("API key not set"),
         "exec should not fail local API key validation when --server is set: {stderr}"
+    );
+}
+
+#[test]
+fn exec_server_target_accepts_configured_custom_provider_from_settings() {
+    let context = test_context!();
+    context.write_home(
+        ".fabro/settings.toml",
+        "_version = 1\n\n[llm.providers.bedrock]\nadapter = \"openai_compatible\"\nbase_url = \"https://bedrock.example.invalid/v1\"\n\n[cli.exec.model]\nprovider = \"bedrock\"\nname = \"bedrock-claude-sonnet-4-6\"\n",
+    );
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method("POST").path("/api/v1/completions");
+        then.status(400).body("custom-server-routed-marker");
+    });
+
+    let mut cmd = context.exec_cmd();
+    cmd.env_clear();
+    preserve_coverage_env!(cmd);
+    cmd.env("HOME", &context.home_dir);
+    cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled");
+    cmd.args([
+        "--server",
+        &format!("{}/api/v1", server.base_url()),
+        "test prompt",
+    ]);
+
+    let output = cmd.assert().failure().get_output().clone();
+    let stderr = String::from_utf8(output.stderr).expect("valid utf8");
+    assert!(
+        stderr.contains("custom-server-routed-marker"),
+        "expected remote server failure marker, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("unknown provider: bedrock"),
+        "exec should resolve custom providers from settings for remote transport: {stderr}"
     );
 }
 

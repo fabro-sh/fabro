@@ -59,13 +59,16 @@ pub struct AdapterControlCapabilities {
 pub struct AdapterMetadata {
     /// Stable adapter key referenced from `[llm.providers.<id>] adapter =
     /// "..."`.
-    pub key:             &'static str,
+    pub key:               &'static str,
     /// Default agent profile dispatched for providers that use this adapter.
-    pub default_profile: AgentProfileKind,
+    pub default_profile:   AgentProfileKind,
+    /// Provider behavior to use when the catalog provider ID is not a built-in
+    /// provider enum variant.
+    pub fallback_provider: Provider,
     /// How API keys for this adapter are converted into auth headers.
-    pub api_key_header:  ApiKeyHeaderPolicy,
+    pub api_key_header:    ApiKeyHeaderPolicy,
     /// Native control values the adapter can transmit.
-    pub controls:        AdapterControlCapabilities,
+    pub controls:          AdapterControlCapabilities,
 }
 
 /// Every reasoning-effort variant. Re-exposed as a const slice so static
@@ -76,10 +79,11 @@ const FAST_SPEEDS: &[Speed] = &[Speed::Fast];
 
 /// Anthropic — `anthropic` adapter.
 pub const ANTHROPIC: AdapterMetadata = AdapterMetadata {
-    key:             "anthropic",
-    default_profile: AgentProfileKind::Anthropic,
-    api_key_header:  ApiKeyHeaderPolicy::Custom { name: "x-api-key" },
-    controls:        AdapterControlCapabilities {
+    key:               "anthropic",
+    default_profile:   AgentProfileKind::Anthropic,
+    fallback_provider: Provider::Anthropic,
+    api_key_header:    ApiKeyHeaderPolicy::Custom { name: "x-api-key" },
+    controls:          AdapterControlCapabilities {
         native_reasoning_effort: FULL_REASONING_EFFORTS,
         additional_speeds:       FAST_SPEEDS,
     },
@@ -87,10 +91,11 @@ pub const ANTHROPIC: AdapterMetadata = AdapterMetadata {
 
 /// OpenAI — `openai` adapter.
 pub const OPENAI: AdapterMetadata = AdapterMetadata {
-    key:             "openai",
-    default_profile: AgentProfileKind::OpenAi,
-    api_key_header:  ApiKeyHeaderPolicy::Bearer,
-    controls:        AdapterControlCapabilities {
+    key:               "openai",
+    default_profile:   AgentProfileKind::OpenAi,
+    fallback_provider: Provider::OpenAi,
+    api_key_header:    ApiKeyHeaderPolicy::Bearer,
+    controls:          AdapterControlCapabilities {
         native_reasoning_effort: FULL_REASONING_EFFORTS,
         additional_speeds:       &[],
     },
@@ -98,12 +103,13 @@ pub const OPENAI: AdapterMetadata = AdapterMetadata {
 
 /// Google Gemini — `gemini` adapter.
 pub const GEMINI: AdapterMetadata = AdapterMetadata {
-    key:             "gemini",
-    default_profile: AgentProfileKind::Gemini,
-    api_key_header:  ApiKeyHeaderPolicy::Custom {
+    key:               "gemini",
+    default_profile:   AgentProfileKind::Gemini,
+    fallback_provider: Provider::Gemini,
+    api_key_header:    ApiKeyHeaderPolicy::Custom {
         name: "x-goog-api-key",
     },
-    controls:        AdapterControlCapabilities {
+    controls:          AdapterControlCapabilities {
         native_reasoning_effort: FULL_REASONING_EFFORTS,
         additional_speeds:       &[],
     },
@@ -113,10 +119,11 @@ pub const GEMINI: AdapterMetadata = AdapterMetadata {
 /// Routes through the OpenAI agent profile but accepts arbitrary `base_url`
 /// per provider settings.
 pub const OPENAI_COMPATIBLE: AdapterMetadata = AdapterMetadata {
-    key:             "openai_compatible",
-    default_profile: AgentProfileKind::OpenAi,
-    api_key_header:  ApiKeyHeaderPolicy::Bearer,
-    controls:        AdapterControlCapabilities {
+    key:               "openai_compatible",
+    default_profile:   AgentProfileKind::OpenAi,
+    fallback_provider: Provider::OpenAiCompatible,
+    api_key_header:    ApiKeyHeaderPolicy::Bearer,
+    controls:          AdapterControlCapabilities {
         // `openai_compatible` providers vary widely; the catalog requires
         // models declaring `features.reasoning_effort = "levels"` to
         // enumerate exactly which effort values their endpoint accepts.
@@ -156,6 +163,24 @@ pub fn default_for_provider_id(provider: &ProviderId) -> &'static str {
         )
         | None => OPENAI_COMPATIBLE.key,
     }
+}
+
+/// Default agent profile for a provider ID.
+#[must_use]
+pub fn default_profile_for_provider_id(provider: &ProviderId) -> AgentProfileKind {
+    get(default_for_provider_id(provider))
+        .expect("default adapter key must be registered")
+        .default_profile
+}
+
+/// Agent-facing provider enum to use for a catalog provider.
+#[must_use]
+pub fn profile_provider_for_provider_id(provider_id: &ProviderId, adapter_key: &str) -> Provider {
+    Provider::from_id(provider_id).unwrap_or_else(|| {
+        get(adapter_key)
+            .expect("catalog provider adapter key must be registered")
+            .fallback_provider
+    })
 }
 
 #[cfg(test)]
@@ -206,6 +231,53 @@ mod tests {
     #[test]
     fn openai_compatible_uses_openai_profile() {
         assert_eq!(OPENAI_COMPATIBLE.default_profile, AgentProfileKind::OpenAi);
+    }
+
+    #[test]
+    fn adapters_declare_fallback_provider_for_custom_provider_ids() {
+        assert_eq!(ANTHROPIC.fallback_provider, Provider::Anthropic);
+        assert_eq!(OPENAI.fallback_provider, Provider::OpenAi);
+        assert_eq!(GEMINI.fallback_provider, Provider::Gemini);
+        assert_eq!(
+            OPENAI_COMPATIBLE.fallback_provider,
+            Provider::OpenAiCompatible
+        );
+    }
+
+    #[test]
+    fn default_profile_for_builtin_provider_ids_uses_adapter_metadata() {
+        assert_eq!(
+            default_profile_for_provider_id(&ProviderId::anthropic()),
+            AgentProfileKind::Anthropic
+        );
+        assert_eq!(
+            default_profile_for_provider_id(&ProviderId::openai()),
+            AgentProfileKind::OpenAi
+        );
+        assert_eq!(
+            default_profile_for_provider_id(&ProviderId::gemini()),
+            AgentProfileKind::Gemini
+        );
+    }
+
+    #[test]
+    fn profile_provider_for_provider_id_preserves_builtins() {
+        assert_eq!(
+            profile_provider_for_provider_id(&ProviderId::new("kimi"), OPENAI_COMPATIBLE.key,),
+            Provider::Kimi
+        );
+    }
+
+    #[test]
+    fn profile_provider_for_custom_provider_maps_openai_compatible_adapter() {
+        assert_eq!(
+            profile_provider_for_provider_id(&ProviderId::new("bedrock"), OPENAI_COMPATIBLE.key),
+            Provider::OpenAiCompatible
+        );
+        assert_eq!(
+            profile_provider_for_provider_id(&ProviderId::new("openrouter"), OPENAI.key),
+            Provider::OpenAi
+        );
     }
 
     #[test]

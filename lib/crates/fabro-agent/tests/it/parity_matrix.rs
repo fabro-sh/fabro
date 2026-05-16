@@ -66,9 +66,10 @@ fn build_profile(provider: Provider, model: &str, client: &Client) -> Box<dyn Ag
         | Provider::Zai
         | Provider::Minimax
         | Provider::Inception
-        | Provider::OpenAiCompatible => {
-            Box::new(OpenAiProfile::with_summarizer(model, summarizer).with_provider(provider))
-        }
+        | Provider::OpenAiCompatible => Box::new(
+            OpenAiProfile::with_summarizer(model, summarizer)
+                .with_identity(provider, provider.id()),
+        ),
         Provider::Gemini => Box::new(GeminiProfile::with_summarizer(model, summarizer)),
     }
 }
@@ -106,7 +107,7 @@ async fn make_session(
                 | Provider::Inception
                 | Provider::OpenAiCompatible => Arc::new(
                     OpenAiProfile::with_summarizer(&factory_model, summarizer)
-                        .with_provider(provider),
+                        .with_identity(provider, provider.id()),
                 ),
                 Provider::Gemini => {
                     Arc::new(GeminiProfile::with_summarizer(&factory_model, summarizer))

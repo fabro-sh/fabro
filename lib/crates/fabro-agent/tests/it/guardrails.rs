@@ -27,7 +27,7 @@ fn profile_context_window_matches_catalog_for_default_models() {
             | Provider::Inception
             | Provider::OpenAiCompatible => Box::new(
                 OpenAiProfile::new(model)
-                    .with_provider(provider)
+                    .with_identity(provider, provider.id())
                     .with_catalog(Arc::clone(&catalog)),
             ),
             Provider::Gemini => {

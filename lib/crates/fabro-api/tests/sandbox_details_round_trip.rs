@@ -3,13 +3,15 @@ use std::collections::BTreeMap;
 
 use chrono::{TimeZone, Utc};
 use fabro_api::types::{
-    SandboxDetails as ApiSandboxDetails, SandboxProvider as ApiSandboxProvider,
+    SandboxDetails as ApiSandboxDetails, SandboxNetwork as ApiSandboxNetwork,
+    SandboxNetworkPolicy as ApiSandboxNetworkPolicy,
+    SandboxNetworkPolicyMode as ApiSandboxNetworkPolicyMode, SandboxProvider as ApiSandboxProvider,
     SandboxResources as ApiSandboxResources, SandboxState as ApiSandboxState,
     SandboxTimestamps as ApiSandboxTimestamps,
 };
 use fabro_types::{
-    RunSandbox, RunSandboxRuntime, SandboxDetails, SandboxProvider, SandboxResources, SandboxState,
-    SandboxTimestamps,
+    RunSandbox, RunSandboxRuntime, SandboxDetails, SandboxNetwork, SandboxNetworkPolicy,
+    SandboxNetworkPolicyMode, SandboxProvider, SandboxResources, SandboxState, SandboxTimestamps,
 };
 use serde_json::json;
 
@@ -20,6 +22,9 @@ fn sandbox_details_reuses_domain_types() {
     assert_same_type::<ApiSandboxState, SandboxState>();
     assert_same_type::<ApiSandboxResources, SandboxResources>();
     assert_same_type::<ApiSandboxTimestamps, SandboxTimestamps>();
+    assert_same_type::<ApiSandboxNetwork, SandboxNetwork>();
+    assert_same_type::<ApiSandboxNetworkPolicy, SandboxNetworkPolicy>();
+    assert_same_type::<ApiSandboxNetworkPolicyMode, SandboxNetworkPolicyMode>();
 }
 
 #[test]
@@ -45,10 +50,18 @@ fn sandbox_details_json_matches_openapi_shape() {
         state:        SandboxState::Running,
         native_state: Some("running".to_string()),
         region:       None,
+        web_url:      Some(
+            "https://app.daytona.io/dashboard/sandboxes?sandboxId=ad65029a-2d01-421e-8936-49451653fcd9"
+                .to_string(),
+        ),
         resources:    SandboxResources {
             cpu_cores:    Some(2.0),
             memory_bytes: Some(4 * 1024 * 1024 * 1024),
             disk_bytes:   None,
+        },
+        network:      SandboxNetwork {
+            egress:  SandboxNetworkPolicy::open(),
+            ingress: SandboxNetworkPolicy::blocked(),
         },
         labels:       BTreeMap::from([("run".to_string(), "abc".to_string())]),
         timestamps:   SandboxTimestamps {
@@ -74,9 +87,20 @@ fn sandbox_details_json_matches_openapi_shape() {
             },
             "state": "running",
             "native_state": "running",
+            "web_url": "https://app.daytona.io/dashboard/sandboxes?sandboxId=ad65029a-2d01-421e-8936-49451653fcd9",
             "resources": {
                 "cpu_cores": 2.0,
                 "memory_bytes": 4_294_967_296_u64,
+            },
+            "network": {
+                "egress": {
+                    "mode": "open",
+                    "cidrs": []
+                },
+                "ingress": {
+                    "mode": "blocked",
+                    "cidrs": []
+                }
             },
             "labels": {
                 "run": "abc"
@@ -128,6 +152,7 @@ fn sandbox_details_deserializes_when_optional_fields_are_absent() {
     assert!(details.native_state.is_none());
     assert!(details.labels.is_empty());
     assert_eq!(details.resources, SandboxResources::default());
+    assert_eq!(details.network, SandboxNetwork::unknown());
     assert_eq!(details.timestamps, SandboxTimestamps::default());
 }
 
