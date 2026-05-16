@@ -481,7 +481,6 @@ async fn link_run_pull_request(
     State(state): State<Arc<AppState>>,
     Json(body): Json<LinkRunPullRequestRequest>,
 ) -> Response {
-    let _create_guard = lock_pull_request_create(&state.pull_request_create_locks, &id).await;
     let pull_request = match pull_request_record_from_link_request(&body) {
         Ok(record) => record,
         Err(err) => return err.into_response(),
