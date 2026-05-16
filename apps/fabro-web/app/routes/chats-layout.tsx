@@ -25,12 +25,12 @@ function Sidebar() {
   const { state } = useChatsStore();
   const navigate = useNavigate();
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-line bg-panel/40">
+    <aside className="flex w-64 shrink-0 flex-col border-r border-line bg-panel">
       <div className="p-3">
         <button
           type="button"
           onClick={() => navigate("/chats/new")}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-overlay px-3 py-2 text-sm font-medium text-fg ring-1 ring-line-strong transition-all hover:bg-overlay-strong hover:ring-line-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500"
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-overlay-strong px-3 py-2 text-sm font-medium text-fg ring-1 ring-line-strong transition-all hover:bg-overlay-strong hover:ring-line-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500"
         >
           <PencilSquareIcon className="size-4" />
           New chat
