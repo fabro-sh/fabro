@@ -26,16 +26,15 @@ describe("createScriptedAdapter", () => {
     });
 
     const controller = new AbortController();
-    const runResults = [];
-    for await (const r of adapter.run({
-      messages: [],
-      abortSignal: controller.signal,
-      runConfig: {},
-      context: { tools: [] } as unknown as Parameters<typeof adapter.run>[0]["context"],
-      unstable_getMessage: () => ({}) as never,
-    })) {
-      runResults.push(r);
-    }
+    const runResults = await Array.fromAsync(
+      adapter.run({
+        messages: [],
+        abortSignal: controller.signal,
+        runConfig: {},
+        context: { tools: [] } as unknown as Parameters<typeof adapter.run>[0]["context"],
+        unstable_getMessage: () => ({}) as never,
+      }),
+    );
 
     expect(onCompleteCalled).toBe(true);
     expect(completedReply).toBe(SCRIPTED_REPLIES[0]);
@@ -63,15 +62,15 @@ describe("createScriptedAdapter", () => {
       },
     });
     const controller = new AbortController();
-    for await (const _ of adapter.run({
-      messages: [],
-      abortSignal: controller.signal,
-      runConfig: {},
-      context: { tools: [] } as unknown as Parameters<typeof adapter.run>[0]["context"],
-      unstable_getMessage: () => ({}) as never,
-    })) {
-      // drain
-    }
+    await Array.fromAsync(
+      adapter.run({
+        messages: [],
+        abortSignal: controller.signal,
+        runConfig: {},
+        context: { tools: [] } as unknown as Parameters<typeof adapter.run>[0]["context"],
+        unstable_getMessage: () => ({}) as never,
+      }),
+    );
     expect(completed).toBe(SCRIPTED_REPLIES[2]);
   });
 });

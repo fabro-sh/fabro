@@ -177,6 +177,13 @@ export const SCRIPTED_REPLIES: CompletionMessage[] = [
   },
 ];
 
+const FALLBACK_REPLY: CompletionMessage = {
+  role: "assistant",
+  content: [{ kind: "text", data: { text: "(No reply available.)" } }],
+};
+
 export function pickReply(scriptIndex: number): CompletionMessage {
-  return SCRIPTED_REPLIES[scriptIndex % SCRIPTED_REPLIES.length]!;
+  return (
+    SCRIPTED_REPLIES[scriptIndex % SCRIPTED_REPLIES.length] ?? FALLBACK_REPLY
+  );
 }

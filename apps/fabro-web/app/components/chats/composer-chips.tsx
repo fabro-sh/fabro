@@ -14,20 +14,23 @@ import {
 
 type Choice = { id: string; label: string };
 
+const DEFAULT_PROJECT: Choice = { id: "fabro-web", label: "fabro-web" };
 const PROJECTS: Choice[] = [
-  { id: "fabro-web", label: "fabro-web" },
+  DEFAULT_PROJECT,
   { id: "fabro-workflows", label: "fabro-workflows" },
   { id: "fabro-cli", label: "fabro-cli" },
 ];
 
+const DEFAULT_BRANCH: Choice = { id: "main", label: "main" };
 const BRANCHES: Choice[] = [
-  { id: "main", label: "main" },
+  DEFAULT_BRANCH,
   { id: "develop", label: "develop" },
   { id: "feature/start-page", label: "feature/start-page" },
 ];
 
+const DEFAULT_MODEL: Choice = { id: "claude-opus-4-7", label: "Claude Opus 4.7" };
 const MODELS: Choice[] = [
-  { id: "claude-opus-4-7", label: "Claude Opus 4.7" },
+  DEFAULT_MODEL,
   { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
   { id: "gpt-5", label: "GPT-5" },
 ];
@@ -82,9 +85,9 @@ function Chip({
 }
 
 export default function ComposerChips() {
-  const [project, setProject] = useState(PROJECTS[0]!);
-  const [branch, setBranch] = useState(BRANCHES[0]!);
-  const [model, setModel] = useState(MODELS[0]!);
+  const [project, setProject] = useState(DEFAULT_PROJECT);
+  const [branch, setBranch] = useState(DEFAULT_BRANCH);
+  const [model, setModel] = useState(DEFAULT_MODEL);
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       <Chip options={PROJECTS} value={project} onChange={setProject} Icon={FolderIcon} />
