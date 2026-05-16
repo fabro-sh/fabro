@@ -7,6 +7,7 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -70,6 +71,10 @@ const GITHUB_TOKEN_SECRET_KEY: &str = "GITHUB_TOKEN";
 const GITHUB_APP_PRIVATE_KEY_KEY: &str = "GITHUB_APP_PRIVATE_KEY";
 const GITHUB_APP_CLIENT_SECRET_KEY: &str = "GITHUB_APP_CLIENT_SECRET";
 const GITHUB_APP_WEBHOOK_SECRET_KEY: &str = "GITHUB_APP_WEBHOOK_SECRET";
+
+static INSTALL_CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
+    Catalog::from_builtin().expect("embedded install model catalog should be valid")
+});
 
 fn supports_install_api_key(provider: &CatalogProvider) -> bool {
     provider.credentials.iter().any(|credential| {
@@ -416,7 +421,7 @@ impl InstallInputSource for InteractiveInstallInputSource {
         }
 
         let mut credentials = Vec::new();
-        let catalog = Catalog::builtin();
+        let catalog = &*INSTALL_CATALOG;
         let mut configured_providers: Vec<ProviderId> = Vec::new();
         let mut openai_configured = false;
 

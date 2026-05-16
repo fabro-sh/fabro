@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, anyhow, bail};
@@ -98,6 +98,10 @@ const DEFAULT_GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com
 const REDACTED_SECRET_VALUE: &str = "[REDACTED]";
 const VALIDATION_TIMEOUT: Duration = Duration::from_secs(20);
 const VALIDATION_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+static INSTALL_CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
+    Catalog::from_builtin().expect("embedded install model catalog should be valid")
+});
 
 impl InstallAppState {
     #[must_use]
@@ -824,7 +828,7 @@ async fn put_install_llm(
 }
 
 fn install_catalog_provider(provider: &ProviderId) -> Result<&'static CatalogProvider, String> {
-    let catalog_provider = Catalog::builtin()
+    let catalog_provider = INSTALL_CATALOG
         .provider(provider)
         .ok_or_else(|| format!("provider '{provider}' is not configured in the model catalog"))?;
     let supports_api_key = catalog_provider.credentials.iter().any(|credential| {
