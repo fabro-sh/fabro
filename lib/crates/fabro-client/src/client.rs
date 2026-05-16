@@ -912,21 +912,27 @@ impl Client {
         Ok(response.into_inner())
     }
 
-    pub async fn list_store_runs(&self) -> Result<Vec<RunSummary>> {
+    pub async fn list_store_runs(&self, parent_id: Option<RunId>) -> Result<Vec<RunSummary>> {
         let mut all_runs = Vec::new();
         let mut offset = 0_u64;
         let limit = 100_u64;
+        let parent_id = parent_id.map(|run_id| run_id.to_string());
 
         loop {
             let response = self
-                .send_api(|client| async move {
-                    client
-                        .list_runs()
-                        .page_limit(limit)
-                        .page_offset(offset)
-                        .include_archived(true)
-                        .send()
-                        .await
+                .send_api(|client| {
+                    let parent_id = parent_id.clone();
+                    async move {
+                        let mut request = client
+                            .list_runs()
+                            .page_limit(limit)
+                            .page_offset(offset)
+                            .include_archived(true);
+                        if let Some(parent_id) = parent_id {
+                            request = request.parent_id(parent_id);
+                        }
+                        request.send().await
+                    }
                 })
                 .await?;
             let parsed = response.into_inner();
@@ -945,6 +951,36 @@ impl Client {
         }
 
         Ok(all_runs)
+    }
+
+    pub async fn link_run_parent(&self, child_id: &RunId, parent_id: &RunId) -> Result<RunSummary> {
+        let body = types::UpdateRunParentRequest {
+            parent_id: parent_id.to_string(),
+        };
+        let response = self
+            .send_api(|client| async move {
+                client
+                    .link_run_parent()
+                    .id(child_id.to_string())
+                    .body(body.clone())
+                    .send()
+                    .await
+            })
+            .await?;
+        convert_type(response.into_inner())
+    }
+
+    pub async fn unlink_run_parent(&self, child_id: &RunId) -> Result<RunSummary> {
+        let response = self
+            .send_api(|client| async move {
+                client
+                    .unlink_run_parent()
+                    .id(child_id.to_string())
+                    .send()
+                    .await
+            })
+            .await?;
+        convert_type(response.into_inner())
     }
 
     pub async fn retrieve_run(&self, run_id: &RunId) -> Result<RunSummary> {

@@ -21,6 +21,10 @@ impl ServerRunSummaryInfo {
         self.summary.id
     }
 
+    pub(crate) fn parent_id(&self) -> Option<RunId> {
+        self.summary.parent_id
+    }
+
     pub(crate) fn workflow_name(&self) -> String {
         self.summary.workflow.name.clone()
     }
@@ -82,8 +86,8 @@ pub(crate) struct ServerSummaryLookup {
 }
 
 impl ServerSummaryLookup {
-    pub(crate) async fn from_client(client: Arc<Client>) -> Result<Self> {
-        let summaries = client.list_store_runs().await?;
+    pub(crate) async fn from_client(client: Arc<Client>, parent_id: Option<RunId>) -> Result<Self> {
+        let summaries = client.list_store_runs(parent_id).await?;
         let mut runs = summaries
             .into_iter()
             .map(ServerRunSummaryInfo::from_summary)

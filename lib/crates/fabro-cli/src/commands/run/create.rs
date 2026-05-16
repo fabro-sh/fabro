@@ -40,7 +40,7 @@ pub(crate) async fn create_run(
         .transpose()
         .context("invalid run ID")?;
 
-    let built = build_run_manifest(ManifestBuildInput {
+    let mut built = build_run_manifest(ManifestBuildInput {
         workflow: workflow_path.clone(),
         cwd,
         run_overrides: cli_args_config.run,
@@ -73,6 +73,10 @@ pub(crate) async fn create_run(
     }
 
     let client = ctx.server().await?;
+    if let Some(parent_selector) = args.parent.as_deref() {
+        let parent_id = client.resolve_run(parent_selector).await?.id;
+        built.manifest.parent_id = Some(parent_id.to_string());
+    }
     let created_run_id = client
         .create_run_from_manifest(built.manifest)
         .await

@@ -1,7 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 use httpmock::MockServer;
 use insta::assert_snapshot;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use super::support::{
     compact_git_inspect, compact_inspect, remote_run_summary_json, run_success,
@@ -102,6 +102,7 @@ fn inspect_resolves_selector_via_server_endpoint() {
     [
       {
         "run_id": "[ULID]",
+        "parent_id": null,
         "status": {
           "kind": "succeeded",
           "reason": "completed"
@@ -212,6 +213,69 @@ fn inspect_resolves_selector_via_server_endpoint() {
     ]
     ----- stderr -----
     "#);
+
+    resolve_run.assert();
+    run_state.assert();
+}
+
+#[test]
+fn inspect_includes_parent_id_from_run_projection() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+    let parent_id = unique_run_id();
+    let summary = remote_run_summary(
+        run_id.as_str(),
+        &json!({
+            "kind": "succeeded",
+            "reason": "completed"
+        }),
+    );
+
+    let resolve_run = server.mock(|when, then| {
+        when.method("GET")
+            .path("/api/v1/runs/resolve")
+            .query_param("selector", "nightly-build");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(summary.to_string());
+    });
+    let run_state = server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{}/state", run_id.as_str()));
+        let mut state = run_projection_json(
+            run_id.as_str(),
+            &json!({
+                "kind": "succeeded",
+                "reason": "completed"
+            }),
+        );
+        state["parent_id"] = json!(parent_id);
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(state.to_string());
+    });
+
+    let output = context
+        .command()
+        .args([
+            "inspect",
+            "--server",
+            &format!("{}/api/v1", server.base_url()),
+            "nightly-build",
+        ])
+        .output()
+        .expect("inspect should execute");
+
+    assert!(
+        output.status.success(),
+        "inspect failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let items: Value = serde_json::from_slice(&output.stdout).expect("inspect JSON should parse");
+    assert_eq!(items[0]["run_id"], run_id);
+    assert_eq!(items[0]["parent_id"], parent_id);
 
     resolve_run.assert();
     run_state.assert();
