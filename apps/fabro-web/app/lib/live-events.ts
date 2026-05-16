@@ -1,3 +1,5 @@
+import type { Key } from "swr";
+
 import {
   subscribeToCrossTabSse,
   type CrossTabSseCoordinator,
@@ -9,7 +11,6 @@ import {
   type EventPayload,
   type EventSourceLike,
   type SharedEventSubscription,
-  type SseKey,
 } from "./sse";
 
 export interface LiveEventPayload extends EventPayload {
@@ -29,7 +30,7 @@ interface LiveEventOptions {
 
 const subscriptions = new Map<string, SharedEventSubscription>();
 const SUBSCRIPTION_KEY = "live-events";
-const NO_KEYS: SseKey[] = [];
+const NO_KEYS: Key[] = [];
 const NOOP_MUTATE = () => Promise.resolve();
 
 export function subscribeToLiveEvents(

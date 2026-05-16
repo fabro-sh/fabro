@@ -5,7 +5,7 @@ use anyhow::{Context as _, Result};
 use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Style, Table};
 use fabro_api::types;
-use fabro_types::{PullRequestRecord, RunBlobId, RunId, parse_blob_ref};
+use fabro_types::{PullRequestLink, RunBlobId, RunId, parse_blob_ref};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_util::error::render_with_causes;
 use fabro_util::printer::Printer;
@@ -139,7 +139,7 @@ pub(crate) async fn print_run_summary_with_client(
     let pr_url = run_state
         .pull_request
         .as_ref()
-        .map(PullRequestRecord::html_url);
+        .map(PullRequestLink::html_url);
     let Some(conclusion) = conclusion else {
         return Ok(());
     };

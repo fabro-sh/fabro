@@ -69,23 +69,17 @@ impl AttrValue {
     }
 }
 
-/// Returns true if the handler type is an LLM-based handler (agent or prompt,
-/// including legacy aliases).
+/// Returns true if the handler type is an LLM-based handler (agent or prompt).
 #[must_use]
 pub fn is_llm_handler_type(handler_type: Option<&str>) -> bool {
-    matches!(
-        handler_type,
-        Some("agent" | "agent_loop" | "prompt" | "one_shot")
-    )
+    matches!(handler_type, Some("agent" | "prompt"))
 }
 
 pub const KNOWN_HANDLER_TYPES: &[&str] = &[
     "start",
     "exit",
     "agent",
-    "agent_loop",
     "prompt",
-    "one_shot",
     "human",
     "conditional",
     "parallel",
@@ -97,7 +91,7 @@ pub const KNOWN_HANDLER_TYPES: &[&str] = &[
 ];
 
 /// Returns true if the handler type is part of Fabro's built-in handler
-/// vocabulary, including legacy aliases.
+/// vocabulary.
 #[must_use]
 pub fn is_known_handler_type(handler_type: &str) -> bool {
     KNOWN_HANDLER_TYPES.contains(&handler_type)
@@ -558,9 +552,7 @@ mod tests {
     #[test]
     fn is_llm_handler_type_checks() {
         assert!(is_llm_handler_type(Some("agent")));
-        assert!(is_llm_handler_type(Some("agent_loop")));
         assert!(is_llm_handler_type(Some("prompt")));
-        assert!(is_llm_handler_type(Some("one_shot")));
         assert!(!is_llm_handler_type(Some("command")));
         assert!(!is_llm_handler_type(Some("human")));
         assert!(!is_llm_handler_type(None));

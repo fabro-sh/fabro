@@ -1048,13 +1048,13 @@ mod runs {
         pending_control: Option<RunControlAction>,
         total_usd_micros: Option<i64>,
         entries: &[(&str, &str)],
-    ) -> RunSummary {
+    ) -> Run {
         let created_at = ts(created_at);
         let run_id = RunId::with_timestamp(created_at, sequence);
         let source_directory = Some(format!("/demo/{repo_name}"));
         let repo_origin_url = Some(format!("https://github.com/demo/{repo_name}.git"));
         let duration_ms = elapsed_secs.and_then(duration_ms_from_secs);
-        RunSummary {
+        Run {
             id: run_id,
             parent_id: None,
             title: fabro_types::infer_run_title(goal),
@@ -1184,7 +1184,7 @@ mod runs {
         ]
     }
 
-    pub(super) fn summaries() -> Vec<RunSummary> {
+    pub(super) fn summaries() -> Vec<Run> {
         vec![
             summary(
                 1,

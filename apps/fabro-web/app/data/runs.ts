@@ -1,7 +1,6 @@
 import { formatElapsedSecs, formatDurationSecs } from "../lib/format";
 import {
   BoardColumn,
-  type BoardColumn as ApiBoardColumn,
   type Run,
   type RunStatus as ApiRunStatus,
 } from "@qltysh/fabro-api-client";
@@ -21,7 +20,7 @@ export interface RunItem {
   repo: string;
   title: string;
   workflow: string;
-  column?: ColumnStatus;
+  column?: BoardColumn;
   lifecycleStatus?: RunStatus | null;
   lifecycleStatusLabel?: string;
   number?: number;
@@ -41,8 +40,6 @@ export interface RunItem {
   lastEventAt?: string;
 }
 
-export type ColumnStatus = ApiBoardColumn;
-
 export const columnStatuses = [
   BoardColumn.QUEUED,
   BoardColumn.INITIALIZING,
@@ -51,9 +48,9 @@ export const columnStatuses = [
   BoardColumn.SUCCEEDED,
   BoardColumn.FAILED,
   BoardColumn.ARCHIVED,
-] as const satisfies readonly ColumnStatus[];
+] as const satisfies readonly BoardColumn[];
 
-export const columnStatusDisplay: Record<ColumnStatus, { label: string; dot: string; text: string }> = {
+export const columnStatusDisplay: Record<BoardColumn, { label: string; dot: string; text: string }> = {
   queued:       { label: "Queued",       dot: "bg-fg-muted",  text: "text-fg-muted" },
   initializing: { label: "Initializing", dot: "bg-amber",     text: "text-amber" },
   running:      { label: "Running",      dot: "bg-teal-500",  text: "text-teal-500" },
@@ -64,7 +61,7 @@ export const columnStatusDisplay: Record<ColumnStatus, { label: string; dot: str
 };
 
 export interface RunWithStatus extends RunItem {
-  status: ColumnStatus;
+  status: BoardColumn;
   statusLabel: string;
 }
 
@@ -106,13 +103,12 @@ export function mapRunListItem(item: Run): RunItem {
 }
 
 export type { Run };
-export type RunSummary = Run;
 
-export function mapRunSummaryToRunItem(summary: Run): RunItem {
-  return mapRunListItem(summary);
+export function mapRunToRunItem(run: Run): RunItem {
+  return mapRunListItem(run);
 }
 
-export function columnForStatus(status: ApiRunStatus | null | undefined): ColumnStatus | null {
+export function columnForStatus(status: ApiRunStatus | null | undefined): BoardColumn | null {
   switch (status?.kind) {
     case "submitted":
     case "queued":
@@ -135,7 +131,7 @@ export function columnForStatus(status: ApiRunStatus | null | undefined): Column
   }
 }
 
-export function columnForRun(run: Run): ColumnStatus | null {
+export function columnForRun(run: Run): BoardColumn | null {
   if (run.lifecycle.archived) return "archived";
   return columnForStatus(run.lifecycle.status);
 }

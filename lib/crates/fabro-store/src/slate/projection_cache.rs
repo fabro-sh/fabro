@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
-use fabro_types::{RunId, RunProjection, RunSummary};
+use fabro_types::{Run, RunId, RunProjection};
 use tokio::sync::Mutex;
 
 use crate::run_state::{RunProjectionReducer, build_summary};
@@ -10,7 +10,7 @@ use crate::{Error, EventEnvelope, ListRunsQuery, Result};
 #[derive(Debug, Clone)]
 pub struct CachedRunProjection {
     pub run_id:     RunId,
-    pub summary:    RunSummary,
+    pub summary:    Run,
     pub projection: Arc<RunProjection>,
     pub last_seq:   u32,
 }
@@ -131,7 +131,7 @@ impl RunProjectionCache {
         self.state.lock().await.entries.get(run_id).cloned()
     }
 
-    pub(crate) async fn get_summary(&self, run_id: &RunId) -> Option<RunSummary> {
+    pub(crate) async fn get_summary(&self, run_id: &RunId) -> Option<Run> {
         self.state
             .lock()
             .await

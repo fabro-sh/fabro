@@ -4200,11 +4200,11 @@ async fn manager_loop_context_flows_e2e() {
 }
 
 // ===========================================================================
-// 19b-3. Manager loop with child_dotfile E2E
+// 19b-3. Manager loop with child_workflow E2E
 // ===========================================================================
 
 #[tokio::test]
-async fn manager_loop_child_dotfile_e2e() {
+async fn manager_loop_child_workflow_e2e() {
     let dir = tempfile::tempdir().unwrap();
     let dot_path = dir.path().join("child.dot");
     std::fs::write(
@@ -4220,7 +4220,7 @@ async fn manager_loop_child_dotfile_e2e() {
         AttrValue::String("stack.manager_loop".to_string()),
     );
     supervisor.attrs.insert(
-        "stack.child_dotfile".to_string(),
+        "stack.child_workflow".to_string(),
         AttrValue::String(dot_path.to_string_lossy().to_string()),
     );
     supervisor.attrs.insert(

@@ -79,8 +79,7 @@ The child workflow runs through its own start → implement → validate → gat
 
 | Attribute | Description |
 |---|---|
-| `stack.child_workflow` | Path to the child workflow file (resolved relative to the parent). Preferred. |
-| `stack.child_dotfile` | Backward-compatible alias for `stack.child_workflow`. |
+| `stack.child_workflow` | Path to the child workflow file (resolved relative to the parent). |
 | `stack.child_dot_source` | Inline child Graphviz source (alternative to `child_workflow`) |
 | `manager.max_cycles` | Safety limit on poll cycles before the child is cancelled (default: 1000) |
 | `manager.poll_interval` | How often to check for completion or stop conditions (default: `45s`) |
@@ -125,7 +124,7 @@ For simpler cases, just add more nodes to a single workflow. Sub-workflows add a
 ## What you've learned
 
 - **Sub-workflow nodes** (`shape=house`) run a child workflow inside a parent
-- **`stack.child_workflow`** references an external workflow file for reuse (`stack.child_dotfile` is also supported for backward compatibility)
+- **`stack.child_workflow`** references an external workflow file for reuse
 - **Context flows** from parent to child and back via diff merging
 - **`manager.max_cycles`** prevents runaway child workflows
 - **`manager.stop_condition`** cancels the child when an external signal arrives

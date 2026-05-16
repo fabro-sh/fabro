@@ -104,18 +104,6 @@ impl SemanticState {
         if let Some(cls) = subgraph_class {
             Self::add_class_to_node(node, cls);
         }
-        // Legacy: translate codergen_mode to type if type is not explicitly set
-        if !node.attrs.contains_key("type") {
-            if let Some(mode) = node.attrs.get("codergen_mode").and_then(AttrValue::as_str) {
-                let mapped = match mode {
-                    "one_shot" => "prompt",
-                    "agent_loop" => "agent",
-                    other => other,
-                };
-                node.attrs
-                    .insert("type".to_string(), AttrValue::String(mapped.to_string()));
-            }
-        }
         // Parse explicit class attr into classes vec
         let class_str = node
             .attrs
@@ -536,67 +524,5 @@ mod tests {
         let graph = ast_to_graph(&dot).unwrap();
         assert!(graph.nodes.contains_key("a"));
         assert!(graph.nodes.contains_key("b"));
-    }
-
-    #[test]
-    fn codergen_mode_legacy_translates_to_type() {
-        let dot = DotGraph {
-            name:       "Legacy".into(),
-            statements: vec![
-                Statement::Node(NodeStmt {
-                    id:    "classify".into(),
-                    attrs: Some(vec![(
-                        "codergen_mode".into(),
-                        AstValue::Str("one_shot".into()),
-                    )]),
-                }),
-                Statement::Node(NodeStmt {
-                    id:    "work".into(),
-                    attrs: Some(vec![(
-                        "codergen_mode".into(),
-                        AstValue::Str("agent_loop".into()),
-                    )]),
-                }),
-            ],
-        };
-
-        let graph = ast_to_graph(&dot).unwrap();
-        assert_eq!(
-            graph.nodes["classify"]
-                .attrs
-                .get("type")
-                .and_then(AttrValue::as_str),
-            Some("prompt")
-        );
-        assert_eq!(
-            graph.nodes["work"]
-                .attrs
-                .get("type")
-                .and_then(AttrValue::as_str),
-            Some("agent")
-        );
-    }
-
-    #[test]
-    fn codergen_mode_does_not_override_explicit_type() {
-        let dot = DotGraph {
-            name:       "ExplicitType".into(),
-            statements: vec![Statement::Node(NodeStmt {
-                id:    "gate".into(),
-                attrs: Some(vec![
-                    ("type".into(), AstValue::Str("human".into())),
-                    ("codergen_mode".into(), AstValue::Str("one_shot".into())),
-                ]),
-            })],
-        };
-
-        let graph = ast_to_graph(&dot).unwrap();
-        assert_eq!(
-            graph.nodes["gate"]
-                .attrs
-                .get("type")
-                .and_then(AttrValue::as_str),
-            Some("human")
-        );
     }
 }

@@ -40,7 +40,7 @@ impl StageHandler {
         match raw.unwrap_or("agent") {
             "start" => Self::Start,
             "exit" => Self::Exit,
-            "prompt" | "one_shot" => Self::Prompt,
+            "prompt" => Self::Prompt,
             "command" | "tool" => Self::Command,
             "human" => Self::Human,
             "conditional" => Self::Conditional,

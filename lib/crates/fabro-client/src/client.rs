@@ -13,7 +13,7 @@ use fabro_http::multipart::{Form, Part};
 use fabro_model::{Model, ModelTestMode, ProviderId};
 use fabro_types::settings::run::MergeStrategy;
 use fabro_types::{
-    ArtifactUpload, EventEnvelope, RunBlobId, RunEvent, RunId, RunProjection, RunSummary,
+    ArtifactUpload, EventEnvelope, Run, RunBlobId, RunEvent, RunId, RunProjection,
     SessionEventEnvelope, SessionId, SessionRecord, StageId, TurnId,
 };
 use fabro_util::exit::{ErrorExt, ExitClass};
@@ -57,6 +57,11 @@ pub struct SessionEventStream {
 pub struct RewindRunResult {
     pub status:   u16,
     pub response: types::RewindResponse,
+}
+
+#[derive(Default)]
+struct ListStoreRunsOptions {
+    parent_id: Option<RunId>,
 }
 
 #[derive(Clone)]
@@ -895,7 +900,7 @@ impl Client {
         Ok(bytes)
     }
 
-    pub async fn start_run(&self, run_id: &RunId, resume: bool) -> Result<RunSummary> {
+    pub async fn start_run(&self, run_id: &RunId, resume: bool) -> Result<Run> {
         let response = self
             .send_api(|client| async move {
                 client
@@ -909,7 +914,7 @@ impl Client {
         convert_type(response.into_inner())
     }
 
-    pub async fn cancel_run(&self, run_id: &RunId) -> Result<RunSummary> {
+    pub async fn cancel_run(&self, run_id: &RunId) -> Result<Run> {
         let response = self
             .send_api(
                 |client| async move { client.cancel_run().id(run_id.to_string()).send().await },
@@ -947,7 +952,7 @@ impl Client {
         Ok(())
     }
 
-    pub async fn archive_run(&self, run_id: &RunId) -> Result<RunSummary> {
+    pub async fn archive_run(&self, run_id: &RunId) -> Result<Run> {
         let response = self
             .send_api(
                 |client| async move { client.archive_run().id(run_id.to_string()).send().await },
@@ -956,7 +961,7 @@ impl Client {
         convert_type(response.into_inner())
     }
 
-    pub async fn unarchive_run(&self, run_id: &RunId) -> Result<RunSummary> {
+    pub async fn unarchive_run(&self, run_id: &RunId) -> Result<Run> {
         let response = self
             .send_api(
                 |client| async move { client.unarchive_run().id(run_id.to_string()).send().await },
@@ -1018,21 +1023,42 @@ impl Client {
         Ok(response.into_inner())
     }
 
-    pub async fn list_store_runs(&self) -> Result<Vec<RunSummary>> {
+    pub async fn list_store_runs(&self) -> Result<Vec<Run>> {
+        self.list_store_runs_with_options(ListStoreRunsOptions::default())
+            .await
+    }
+
+    pub async fn list_store_runs_by_parent(&self, parent_id: RunId) -> Result<Vec<Run>> {
+        self.list_store_runs_with_options(ListStoreRunsOptions {
+            parent_id: Some(parent_id),
+        })
+        .await
+    }
+
+    async fn list_store_runs_with_options(
+        &self,
+        options: ListStoreRunsOptions,
+    ) -> Result<Vec<Run>> {
         let mut all_runs = Vec::new();
         let mut offset = 0_u64;
         let limit = 100_u64;
+        let parent_id = options.parent_id.map(|run_id| run_id.to_string());
 
         loop {
             let response = self
-                .send_api(|client| async move {
-                    client
-                        .list_runs()
-                        .page_limit(limit)
-                        .page_offset(offset)
-                        .include_archived(true)
-                        .send()
-                        .await
+                .send_api(|client| {
+                    let parent_id = parent_id.clone();
+                    async move {
+                        let mut request = client
+                            .list_runs()
+                            .page_limit(limit)
+                            .page_offset(offset)
+                            .include_archived(true);
+                        if let Some(parent_id) = parent_id {
+                            request = request.parent_id(parent_id);
+                        }
+                        request.send().await
+                    }
                 })
                 .await?;
             let parsed = response.into_inner();
@@ -1053,7 +1079,37 @@ impl Client {
         Ok(all_runs)
     }
 
-    pub async fn retrieve_run(&self, run_id: &RunId) -> Result<RunSummary> {
+    pub async fn link_run_parent(&self, child_id: &RunId, parent_id: &RunId) -> Result<Run> {
+        let body = types::UpdateRunParentRequest {
+            parent_id: parent_id.to_string(),
+        };
+        let response = self
+            .send_api(|client| async move {
+                client
+                    .link_run_parent()
+                    .id(child_id.to_string())
+                    .body(body.clone())
+                    .send()
+                    .await
+            })
+            .await?;
+        convert_type(response.into_inner())
+    }
+
+    pub async fn unlink_run_parent(&self, child_id: &RunId) -> Result<Run> {
+        let response = self
+            .send_api(|client| async move {
+                client
+                    .unlink_run_parent()
+                    .id(child_id.to_string())
+                    .send()
+                    .await
+            })
+            .await?;
+        convert_type(response.into_inner())
+    }
+
+    pub async fn retrieve_run(&self, run_id: &RunId) -> Result<Run> {
         let response = self
             .send_api(
                 |client| async move { client.retrieve_run().id(run_id.to_string()).send().await },
@@ -1062,7 +1118,7 @@ impl Client {
         convert_type(response.into_inner())
     }
 
-    pub async fn resolve_run(&self, selector: &str) -> Result<RunSummary> {
+    pub async fn resolve_run(&self, selector: &str) -> Result<Run> {
         let response = self
             .send_api(|client| async move {
                 client
@@ -1118,7 +1174,7 @@ impl Client {
         run_id: &RunId,
         force: bool,
         model: Option<String>,
-    ) -> Result<fabro_types::PullRequestRecord> {
+    ) -> Result<fabro_types::PullRequestLink> {
         let body = types::CreateRunPullRequestRequest { force, model };
         let response = self
             .send_api(|client| async move {
@@ -1137,7 +1193,7 @@ impl Client {
     pub async fn get_run_pull_request(
         &self,
         run_id: &RunId,
-    ) -> Result<fabro_types::PullRequestDetail> {
+    ) -> Result<fabro_types::PullRequestResponse> {
         let response = self
             .send_api(|client| async move {
                 client
@@ -1155,7 +1211,7 @@ impl Client {
         &self,
         run_id: &RunId,
         html_url: String,
-    ) -> Result<fabro_types::PullRequestRecord> {
+    ) -> Result<fabro_types::PullRequestLink> {
         let body = types::LinkRunPullRequestRequest { html_url };
         let response = self
             .send_api(|client| async move {
@@ -1174,7 +1230,7 @@ impl Client {
     pub async fn unlink_run_pull_request(
         &self,
         run_id: &RunId,
-    ) -> Result<fabro_types::PullRequestRecord> {
+    ) -> Result<fabro_types::PullRequestLink> {
         let response = self
             .send_api(|client| async move {
                 client

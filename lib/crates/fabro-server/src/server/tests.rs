@@ -4462,7 +4462,7 @@ async fn create_run_with_pull_request_record(
 async fn create_run_with_linked_pull_request_record(
     state: &Arc<AppState>,
     run_id: RunId,
-    pull_request: PullRequestRecord,
+    pull_request: PullRequestLink,
 ) {
     create_durable_run_with_events(state, run_id, &[workflow_event::Event::PullRequestLinked {
         pull_request,
@@ -6355,7 +6355,7 @@ async fn merge_run_pull_request_uses_stored_link_coordinates() {
     });
     let (state, app, run_id) = pr_test_app(Some("ghu_test"), Some(github.base_url()));
 
-    create_run_with_linked_pull_request_record(&state, run_id, PullRequestRecord {
+    create_run_with_linked_pull_request_record(&state, run_id, PullRequestLink {
         owner:  "acme".to_string(),
         repo:   "widgets".to_string(),
         number: 42,
@@ -10427,7 +10427,7 @@ async fn demo_get_run_returns_run_summary_shape() {
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
     let body = response_json!(response, StatusCode::OK).await;
-    // Should have RunSummary fields, not RunStatusResponse fields
+    // Should have Run fields, not RunStatusResponse fields
     assert!(body["id"].is_string(), "should have id field");
     assert!(body["goal"].is_string(), "should have goal field");
     assert!(

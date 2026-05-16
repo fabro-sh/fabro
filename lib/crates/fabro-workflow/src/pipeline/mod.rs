@@ -9,7 +9,6 @@ pub(crate) mod types;
 mod validate;
 
 pub use execute::execute;
-pub use fabro_types::PullRequestRecord;
 pub(crate) use finalize::{
     billing_from_projection, build_conclusion_from_store, build_terminal_event,
 };

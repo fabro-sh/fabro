@@ -10,10 +10,10 @@ use fabro_types::run_event::{
 use fabro_types::settings::run::RunSandboxSettings;
 use fabro_types::{
     BilledModelUsage, Checkpoint, CheckpointRecord, CommandTermination, Conclusion, EventBody,
-    FailureSignature, InterviewQuestionRecord, Outcome, PendingInterviewRecord, PullRequestRecord,
-    RepositoryRef, RunBillingSummary, RunControlAction, RunDiff, RunEvent, RunId, RunLifecycle,
-    RunLinks, RunModel, RunOrigin, RunProjection, RunSandbox, RunSandboxRuntime, RunSpec,
-    RunStatus, RunSummary, RunTimestamps, SandboxProvider, StageCompletion, StageHandler, StageId,
+    FailureSignature, InterviewQuestionRecord, Outcome, PendingInterviewRecord, PullRequestLink,
+    RepositoryRef, Run, RunBillingSummary, RunControlAction, RunDiff, RunEvent, RunId,
+    RunLifecycle, RunLinks, RunModel, RunOrigin, RunProjection, RunSandbox, RunSandboxRuntime,
+    RunSpec, RunStatus, RunTimestamps, SandboxProvider, StageCompletion, StageHandler, StageId,
     StageOutcome, StageProjection, StageState, StartRecord, WorkflowRef, first_event_seq,
 };
 use fabro_util::error::render_compact_with_causes;
@@ -244,7 +244,7 @@ impl RunProjectionReducer for RunProjection {
                 });
             }
             EventBody::PullRequestCreated(props) => {
-                self.pull_request = Some(PullRequestRecord {
+                self.pull_request = Some(PullRequestLink {
                     owner:  props.owner.clone(),
                     repo:   props.repo.clone(),
                     number: props.pr_number,
@@ -625,7 +625,7 @@ fn stage_at_completed_visit<'a>(
     Some(state.stage_entry(node_id, visit, first_event_seq(seq)))
 }
 
-pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> RunSummary {
+pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> Run {
     let workflow_name = if state.spec.graph.name.is_empty() {
         "unnamed".to_string()
     } else {
@@ -676,7 +676,7 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> RunSummary
         .and_then(|conclusion| conclusion.billing.as_ref())
         .and_then(|billing| billing.total_usd_micros);
 
-    RunSummary {
+    Run {
         id: *run_id,
         parent_id: state.parent_id,
         title: state.title().into_owned(),
@@ -961,7 +961,7 @@ mod tests {
     use fabro_types::{
         BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint, CheckpointRecord,
         CommandTermination, EventBody, FailureCategory, FailureDetail, FailureReason, Graph,
-        Outcome, PullRequestRecord, QuestionType, RunBlobId, RunControlAction, RunDiff, RunEvent,
+        Outcome, PullRequestLink, QuestionType, RunBlobId, RunControlAction, RunDiff, RunEvent,
         RunSpec, RunStatus, StageOutcome, StageState, SuccessReason, WorkflowSettings,
         first_event_seq, fixtures,
     };
@@ -2518,12 +2518,12 @@ mod tests {
         };
 
         let mut state = running_projection();
-        let github_pull_request = PullRequestRecord {
+        let github_pull_request = PullRequestLink {
             owner:  "fabro-sh".to_string(),
             repo:   "fabro".to_string(),
             number: 123,
         };
-        let replacement_pull_request = PullRequestRecord {
+        let replacement_pull_request = PullRequestLink {
             owner:  "acme".to_string(),
             repo:   "widgets".to_string(),
             number: 42,

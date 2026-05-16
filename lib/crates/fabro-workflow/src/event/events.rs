@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use ::fabro_types::{
     BilledTokenCounts, BlockedReason, CommandTermination, DiffSummary, FailureReason,
-    ForkSourceRef, GitContext, ParallelBranchId, Principal, PullRequestRecord, RunBlobId,
-    RunFailure, RunId, RunNoticeLevel, RunProvenance, SandboxProvider, StageId, SuccessReason,
+    ForkSourceRef, GitContext, ParallelBranchId, Principal, PullRequestLink, RunBlobId, RunFailure,
+    RunId, RunNoticeLevel, RunProvenance, SandboxProvider, StageId, SuccessReason,
     run_event as fabro_types,
 };
 use fabro_agent::{AgentEvent, SandboxEvent};
@@ -663,10 +663,10 @@ pub enum Event {
         draft:       bool,
     },
     PullRequestLinked {
-        pull_request: PullRequestRecord,
+        pull_request: PullRequestLink,
     },
     PullRequestUnlinked {
-        pull_request: PullRequestRecord,
+        pull_request: PullRequestLink,
     },
     PullRequestFailed {
         error: String,
@@ -730,7 +730,7 @@ impl Event {
     }
 
     pub fn pull_request_created(
-        record: &PullRequestRecord,
+        record: &PullRequestLink,
         base_branch: &str,
         head_branch: &str,
         title: &str,

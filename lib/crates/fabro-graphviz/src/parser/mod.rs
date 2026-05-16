@@ -186,11 +186,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_legacy_codergen_mode_attribute() {
-        let input = r#"digraph Legacy {
+    fn parse_prompt_handler_type_attribute() {
+        let input = r#"digraph Prompt {
             start [shape=Mdiamond]
             exit  [shape=Msquare]
-            classify [codergen_mode="one_shot", prompt="Classify this"]
+            classify [type="prompt", prompt="Classify this"]
             start -> classify -> exit
         }"#;
         let graph = parse(input).unwrap();

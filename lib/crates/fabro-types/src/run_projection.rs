@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 
 use crate::{
     BilledTokenCounts, Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition,
-    ModelRef, PullRequestRecord, RunControlAction, RunDiff, RunId, RunSandbox, RunSpec, RunStatus,
+    ModelRef, PullRequestLink, RunControlAction, RunDiff, RunId, RunSandbox, RunSpec, RunStatus,
     StageCompletion, StageHandler, StageId, StageState, StartRecord,
 };
 
@@ -29,7 +29,7 @@ pub struct RunProjection {
     pub checkpoints:        Vec<CheckpointRecord>,
     pub conclusion:         Option<Conclusion>,
     pub sandbox:            Option<RunSandbox>,
-    pub pull_request:       Option<PullRequestRecord>,
+    pub pull_request:       Option<PullRequestLink>,
     pub superseded_by:      Option<RunId>,
     pub pending_interviews: BTreeMap<String, PendingInterviewRecord>,
     stages:                 HashMap<StageId, StageProjection>,

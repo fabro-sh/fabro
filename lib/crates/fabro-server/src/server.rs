@@ -82,7 +82,7 @@ use fabro_types::settings::server::{
 };
 use fabro_types::settings::{InterpString, RunNamespace};
 use fabro_types::{
-    EventBody, InterviewQuestionRecord, Principal, PullRequestRecord, QuestionType, RunBlobId,
+    EventBody, InterviewQuestionRecord, Principal, PullRequestLink, QuestionType, RunBlobId,
     RunControlAction, RunEvent, RunId, ServerSettings, SessionCapability,
 };
 use fabro_util::error::{
@@ -1331,7 +1331,7 @@ struct PrunePlan {
     reason = "sync helper invoked from async handler via spawn_blocking (see callers at :1301 / :1341)"
 )]
 fn build_disk_usage_response(
-    summaries: &[fabro_types::RunSummary],
+    summaries: &[fabro_types::Run],
     storage_dir: &std::path::Path,
     verbose: bool,
 ) -> anyhow::Result<DiskUsageResponse> {
@@ -1404,7 +1404,7 @@ fn build_disk_usage_response(
 
 fn build_prune_plan(
     request: &PruneRunsRequest,
-    summaries: &[fabro_types::RunSummary],
+    summaries: &[fabro_types::Run],
     storage_dir: &std::path::Path,
 ) -> anyhow::Result<PrunePlan> {
     let scratch_base_dir = scratch_base(storage_dir);

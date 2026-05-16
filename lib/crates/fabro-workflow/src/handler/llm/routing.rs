@@ -37,9 +37,7 @@ pub(crate) fn node_needs_api_backend(node: &Node) -> bool {
     }
 
     match node.handler_type() {
-        Some("prompt" | "one_shot") => {
-            !matches!(select_one_shot_backend(node), Ok(LlmBackend::Acp))
-        }
+        Some("prompt") => !matches!(select_one_shot_backend(node), Ok(LlmBackend::Acp)),
         _ => matches!(select_run_backend(node), Ok(LlmBackend::Api)),
     }
 }

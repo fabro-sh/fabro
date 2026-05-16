@@ -25,9 +25,9 @@ import { useToast } from "../components/toast";
 import { ConfirmDialog, SECONDARY_BUTTON_CLASS, Tooltip } from "../components/ui";
 import {
   isRunStatus,
-  mapRunSummaryToRunItem,
+  mapRunToRunItem,
   runStatusDisplay,
-  type RunSummary,
+  type Run,
 } from "../data/runs";
 import { useDemoMode } from "../lib/demo-mode";
 import { useSWRConfig } from "swr";
@@ -107,7 +107,7 @@ function useTickingNow(intervalMs: number): number {
   return now;
 }
 
-type RunDetailRun = ReturnType<typeof mapRunSummaryToRunItem> & {
+type RunDetailRun = ReturnType<typeof mapRunToRunItem> & {
   statusLabel: string;
   statusDot: string;
   statusText: string;
@@ -145,8 +145,8 @@ function runHasSandbox(runState: unknown): boolean {
   );
 }
 
-function buildRunDetailRun(summary: RunSummary): RunDetailRun {
-  const item = mapRunSummaryToRunItem(summary);
+function buildRunDetailRun(summary: Run): RunDetailRun {
+  const item = mapRunToRunItem(summary);
   const rawStatus = summary.lifecycle.status;
   const statusKind = rawStatus.kind;
   const display = isRunStatus(statusKind)

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useSWRConfig } from "swr";
+import { useSWRConfig, type Key } from "swr";
 
 import {
   subscribeToCrossTabSse,
@@ -12,7 +12,6 @@ import {
   type EventPayload,
   type EventSourceLike,
   type MutateFn,
-  type SseKey,
   type SharedEventSubscription,
 } from "./sse";
 
@@ -100,7 +99,7 @@ export function queryKeysForRunEvent(
   runId: string,
   event: string,
   stageId?: string,
-): SseKey[] {
+): Key[] {
   if (event === "checkpoint.completed") {
     return [
       ...queryKeys.runs.filesAllScopes(runId),
@@ -132,7 +131,7 @@ export function queryKeysForRunEvent(
   }
 
   if (STAGE_EVENTS.has(event)) {
-    const keys: SseKey[] = [
+    const keys: Key[] = [
       queryKeys.runs.stages(runId),
       queryKeys.runs.billing(runId),
       queryKeys.runs.events(runId, 1000),
@@ -147,7 +146,7 @@ export function queryKeysForRunEvent(
   }
 
   if (STEERING_EVENTS.has(event)) {
-    const keys: SseKey[] = [queryKeys.runs.events(runId, 1000)];
+    const keys: Key[] = [queryKeys.runs.events(runId, 1000)];
     if (stageId) {
       keys.push(queryKeys.runs.stageEvents(runId, stageId));
     }

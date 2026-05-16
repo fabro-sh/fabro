@@ -1,8 +1,4 @@
-import type { WorkflowSettings } from "@qltysh/fabro-api-client";
-
 import { getObject } from "./unknown";
-
-export type Snapshot = WorkflowSettings;
 
 export {
   getArray,

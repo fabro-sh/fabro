@@ -148,8 +148,6 @@ export function useSubmitInterviewAnswer(runId: string | undefined) {
   );
 }
 
-export type SteerRunArg = SteerRunRequest;
-
 export function useInterruptRun(runId: string | undefined) {
   const { mutate } = useSWRConfig();
   return useSWRMutation(
@@ -171,7 +169,7 @@ export function useSteerRun(runId: string | undefined) {
   const { mutate } = useSWRConfig();
   return useSWRMutation(
     runId ? `steer-run:${runId}` : null,
-    async (_key: string, { arg }: { arg: SteerRunArg }) => {
+    async (_key: string, { arg }: { arg: SteerRunRequest }) => {
       if (!runId) throw new Error("runId is required");
       await apiData(() => humanInTheLoopApi.steerRun(runId, arg));
     },

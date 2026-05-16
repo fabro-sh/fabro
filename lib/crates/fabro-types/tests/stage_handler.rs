@@ -27,13 +27,13 @@ fn stage_handler_serializes_canonical_wire_values() {
 }
 
 #[test]
-fn stage_handler_collapses_legacy_aliases_and_defaults_to_agent() {
+fn stage_handler_maps_current_handler_types_and_defaults_to_agent() {
     assert_eq!(
-        StageHandler::from_handler_type(Some("agent_loop")),
+        StageHandler::from_handler_type(Some("agent")),
         StageHandler::Agent
     );
     assert_eq!(
-        StageHandler::from_handler_type(Some("one_shot")),
+        StageHandler::from_handler_type(Some("prompt")),
         StageHandler::Prompt
     );
     assert_eq!(

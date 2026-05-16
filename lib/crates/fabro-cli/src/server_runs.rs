@@ -3,34 +3,38 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use fabro_types::{RunId, RunStatus, RunSummary};
+use fabro_types::{Run, RunId, RunStatus};
 
 use crate::server_client::Client;
 
 #[derive(Debug, Clone)]
-pub(crate) struct ServerRunSummaryInfo {
-    summary: RunSummary,
+pub(crate) struct ServerRunInfo {
+    run: Run,
 }
 
-impl ServerRunSummaryInfo {
-    pub(crate) fn from_summary(summary: RunSummary) -> Self {
-        Self { summary }
+impl ServerRunInfo {
+    pub(crate) fn from_run(run: Run) -> Self {
+        Self { run }
     }
 
     pub(crate) fn run_id(&self) -> RunId {
-        self.summary.id
+        self.run.id
+    }
+
+    pub(crate) fn parent_id(&self) -> Option<RunId> {
+        self.run.parent_id
     }
 
     pub(crate) fn workflow_name(&self) -> String {
-        self.summary.workflow.name.clone()
+        self.run.workflow.name.clone()
     }
 
     pub(crate) fn workflow_slug(&self) -> Option<&str> {
-        self.summary.workflow.slug.as_deref()
+        self.run.workflow.slug.as_deref()
     }
 
     pub(crate) fn status(&self) -> RunStatus {
-        self.summary.lifecycle.status
+        self.run.lifecycle.status
     }
 
     pub(crate) fn start_time(&self) -> String {
@@ -40,74 +44,86 @@ impl ServerRunSummaryInfo {
     }
 
     pub(crate) fn start_time_dt(&self) -> Option<DateTime<Utc>> {
-        self.summary
+        self.run
             .timestamps
             .started_at
-            .or(Some(self.summary.id.created_at()))
+            .or(Some(self.run.id.created_at()))
     }
 
     pub(crate) fn labels(&self) -> &HashMap<String, String> {
-        &self.summary.labels
+        &self.run.labels
     }
 
     pub(crate) fn duration_ms(&self) -> Option<u64> {
-        self.summary.timestamps.duration_ms
+        self.run.timestamps.duration_ms
     }
 
     pub(crate) fn total_usd_micros(&self) -> Option<i64> {
-        self.summary
+        self.run
             .billing
             .as_ref()
             .and_then(|billing| billing.total_usd_micros)
     }
 
     pub(crate) fn source_directory(&self) -> Option<&str> {
-        self.summary.source_directory.as_deref()
+        self.run.source_directory.as_deref()
     }
 
     pub(crate) fn repo_origin_url(&self) -> Option<&str> {
-        self.summary
+        self.run
             .repository
             .as_ref()
             .and_then(|repository| repository.origin_url.as_deref())
     }
 
     pub(crate) fn goal(&self) -> String {
-        self.summary.goal.clone()
+        self.run.goal.clone()
     }
 }
 
-pub(crate) struct ServerSummaryLookup {
-    runs: Vec<ServerRunSummaryInfo>,
+pub(crate) struct ServerRunLookup {
+    runs: Vec<ServerRunInfo>,
 }
 
-impl ServerSummaryLookup {
+impl ServerRunLookup {
     pub(crate) async fn from_client(client: Arc<Client>) -> Result<Self> {
-        let summaries = client.list_store_runs().await?;
-        let mut runs = summaries
+        let runs = client.list_store_runs().await?;
+        Ok(Self::from_runs(runs))
+    }
+
+    pub(crate) async fn from_client_by_parent(
+        client: Arc<Client>,
+        parent_id: RunId,
+    ) -> Result<Self> {
+        let runs = client.list_store_runs_by_parent(parent_id).await?;
+        Ok(Self::from_runs(runs))
+    }
+
+    fn from_runs(runs: Vec<Run>) -> Self {
+        let mut runs = runs
             .into_iter()
-            .map(ServerRunSummaryInfo::from_summary)
+            .map(ServerRunInfo::from_run)
             .collect::<Vec<_>>();
         runs.sort_by(|a, b| {
             b.start_time_dt()
                 .cmp(&a.start_time_dt())
                 .then_with(|| b.run_id().cmp(&a.run_id()))
         });
-        Ok(Self { runs })
+        Self { runs }
     }
 
-    pub(crate) fn runs(&self) -> &[ServerRunSummaryInfo] {
+    pub(crate) fn runs(&self) -> &[ServerRunInfo] {
         &self.runs
     }
 }
 
 pub(crate) fn filter_server_runs(
-    runs: &[ServerRunSummaryInfo],
+    runs: &[ServerRunInfo],
     before: Option<&str>,
     workflow: Option<&str>,
     labels: &[(String, String)],
     running_only: bool,
-) -> Vec<ServerRunSummaryInfo> {
+) -> Vec<ServerRunInfo> {
     runs.iter()
         .filter(|run| !running_only || run.status().is_active())
         .filter(|run| {

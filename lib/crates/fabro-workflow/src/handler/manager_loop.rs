@@ -56,9 +56,7 @@ fn parse_duration_str(s: &str) -> Duration {
 
 /// Parse a child workflow graph from node attributes: inline
 /// `stack.child_dot_source` (no file inlining), or file path
-/// `stack.child_workflow` / `stack.child_dotfile` (with file inlining).
-/// `stack.child_workflow` is preferred; `stack.child_dotfile` is kept for
-/// backward compatibility.
+/// `stack.child_workflow` (with file inlining).
 fn parse_child_graph(node: &Node, services: &EngineServices) -> Result<ParsedChildWorkflow, Error> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
@@ -88,7 +86,6 @@ fn parse_child_graph(node: &Node, services: &EngineServices) -> Result<ParsedChi
     if let Some(path) = node
         .attrs
         .get("stack.child_workflow")
-        .or_else(|| node.attrs.get("stack.child_dotfile"))
         .and_then(|v| v.as_str())
     {
         let workflow = match (&services.workflow_bundle, &services.workflow_path) {
@@ -558,7 +555,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn child_dotfile_reads_from_file() {
+    async fn child_workflow_reads_from_file() {
         let dir = tempfile::tempdir().unwrap();
         let dot_path = dir.path().join("child.dot");
         std::fs::write(&dot_path, child_dot_succeeds()).unwrap();
@@ -566,7 +563,7 @@ mod tests {
         let handler = SubWorkflowHandler;
         let mut node = Node::new("manager");
         node.attrs.insert(
-            "stack.child_dotfile".to_string(),
+            "stack.child_workflow".to_string(),
             AttrValue::String(dot_path.to_string_lossy().to_string()),
         );
         node.attrs

@@ -3,10 +3,10 @@ import { ChevronDownIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outlin
 import { Link, useParams } from "react-router";
 import { InlineMarkdown } from "../components/inline-markdown";
 import { PullRequestChip } from "../components/pull-request-chip";
-import { ciConfig, columnForRun, columnStatusDisplay, deriveCiStatus, mapRunSummaryToRunItem } from "../data/runs";
-import type { ColumnStatus, RunWithStatus } from "../data/runs";
+import { ciConfig, columnForRun, columnStatusDisplay, deriveCiStatus, mapRunToRunItem } from "../data/runs";
+import type { RunWithStatus } from "../data/runs";
 import { useWorkflowRuns } from "../lib/queries";
-import type { PaginatedRunList } from "@qltysh/fabro-api-client";
+import type { BoardColumn, PaginatedRunList } from "@qltysh/fabro-api-client";
 
 function mapWorkflowRuns(result: PaginatedRunList | null | undefined): RunWithStatus[] {
   const apiRuns = result?.data ?? [];
@@ -15,7 +15,7 @@ function mapWorkflowRuns(result: PaginatedRunList | null | undefined): RunWithSt
       const column = columnForRun(r);
       if (column == null) return null;
       return {
-        ...mapRunSummaryToRunItem(r),
+        ...mapRunToRunItem(r),
         status: column,
         statusLabel: columnStatusDisplay[column].label,
       };
@@ -71,7 +71,7 @@ export default function AutomationRuns() {
   const runsQuery = useWorkflowRuns(name);
   const runs = mapWorkflowRuns(runsQuery.data);
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<ColumnStatus | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<BoardColumn | "all">("all");
   const filtered = runs.filter(
     (r) =>
       (statusFilter === "all" || r.status === statusFilter) &&
@@ -96,11 +96,11 @@ export default function AutomationRuns() {
         <div className="relative">
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as ColumnStatus | "all")}
+            onChange={(e) => setStatusFilter(e.target.value as BoardColumn | "all")}
             className="appearance-none rounded-md border border-line bg-panel/80 py-2 pl-3 pr-8 text-sm text-fg-2 outline-none transition-colors focus:border-focus focus:ring-0"
           >
             <option value="all">All statuses</option>
-            {(Object.entries(columnStatusDisplay) as [ColumnStatus, { label: string }][]).map(([id, { label }]) => (
+            {(Object.entries(columnStatusDisplay) as [BoardColumn, { label: string }][]).map(([id, { label }]) => (
               <option key={id} value={id}>{label}</option>
             ))}
           </select>

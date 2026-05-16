@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useParams } from "react-router";
+import type { WorkflowSettings } from "@qltysh/fabro-api-client";
 import { CollapsibleFile } from "../components/collapsible-file";
 import { StageSidebar } from "../components/stage-sidebar";
 import {
@@ -17,7 +18,6 @@ import {
 import { useRunSettings, useRunStages } from "../lib/queries";
 import { mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
 import {
-  type Snapshot,
   type UnknownRecord,
   getArray,
   getBool,
@@ -31,7 +31,7 @@ export const handle = { wide: true };
 export default function RunSettingsPage() {
   const { id } = useParams();
   const stagesQuery = useRunStages(id);
-  const settingsQuery = useRunSettings<Snapshot>(id);
+  const settingsQuery = useRunSettings<WorkflowSettings>(id);
   const stages = useMemo(
     () => mapRunStagesToSidebarStages(stagesQuery.data),
     [stagesQuery.data],
@@ -94,7 +94,7 @@ function PageIntro({
   );
 }
 
-function WorkflowPanel({ snapshot }: { snapshot: Snapshot }) {
+function WorkflowPanel({ snapshot }: { snapshot: WorkflowSettings }) {
   const workflow = getObject(snapshot, "workflow");
   const run = getObject(snapshot, "run");
   const name = getString(workflow, "name");
@@ -135,7 +135,7 @@ function WorkflowPanel({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
-function SandboxPanel({ snapshot }: { snapshot: Snapshot }) {
+function SandboxPanel({ snapshot }: { snapshot: WorkflowSettings }) {
   const sandbox = getObject(getObject(snapshot, "run"), "sandbox");
   const provider = getString(sandbox, "provider");
   const docker = getObject(sandbox, "docker");
@@ -166,7 +166,7 @@ function SandboxPanel({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
-function GitPanel({ snapshot }: { snapshot: Snapshot }) {
+function GitPanel({ snapshot }: { snapshot: WorkflowSettings }) {
   const run = getObject(snapshot, "run");
   const author = getObject(getObject(run, "git"), "author");
   const authorName = getString(author, "name");
@@ -199,7 +199,7 @@ function GitPanel({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
-function ArtifactsPanel({ snapshot }: { snapshot: Snapshot }) {
+function ArtifactsPanel({ snapshot }: { snapshot: WorkflowSettings }) {
   const artifacts = getObject(getObject(snapshot, "run"), "artifacts");
   const include = getArray(artifacts, "include");
   return (

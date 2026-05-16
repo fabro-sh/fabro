@@ -2,17 +2,17 @@ use std::any::{TypeId, type_name};
 use std::collections::HashMap;
 
 use chrono::{TimeZone, Utc};
-use fabro_api::types::{RepositoryRef as ApiRepositoryRef, RunSummary as ApiRunSummary};
+use fabro_api::types::{RepositoryRef as ApiRepositoryRef, Run as ApiRun};
 use fabro_types::status::{RunStatus, SuccessReason};
 use fabro_types::{
-    DiffSummary, PullRequestLink, RepositoryProvider, RepositoryRef, RunBillingSummary, RunId,
-    RunLifecycle, RunLinks, RunOrigin, RunSummary, RunTimestamps, WorkflowRef,
+    DiffSummary, PullRequestLink, RepositoryProvider, RepositoryRef, Run, RunBillingSummary, RunId,
+    RunLifecycle, RunLinks, RunOrigin, RunTimestamps, WorkflowRef,
 };
 use serde_json::json;
 
 #[test]
 fn run_summary_reuses_domain_types() {
-    assert_same_type::<ApiRunSummary, RunSummary>();
+    assert_same_type::<ApiRun, Run>();
     assert_same_type::<ApiRepositoryRef, RepositoryRef>();
 }
 
@@ -22,7 +22,7 @@ fn run_summary_json_matches_openapi_shape() {
     let run_id = RunId::with_timestamp(created_at, 7);
     let last_event_at = Utc.with_ymd_and_hms(2026, 4, 20, 12, 0, 42).unwrap();
     let archived_at = Utc.with_ymd_and_hms(2026, 4, 20, 12, 1, 0).unwrap();
-    let summary = RunSummary {
+    let summary = Run {
         id:               run_id,
         parent_id:        None,
         title:            "API title".to_string(),
@@ -151,7 +151,7 @@ fn run_summary_json_matches_openapi_shape() {
 fn run_summary_deserializes_when_optional_fields_are_absent() {
     let created_at = Utc.with_ymd_and_hms(2026, 4, 20, 12, 0, 0).unwrap();
     let run_id = RunId::with_timestamp(created_at, 7);
-    let summary: RunSummary = serde_json::from_value(json!({
+    let summary: Run = serde_json::from_value(json!({
         "id": run_id.to_string(),
         "goal": "ship it",
         "title": "ship it",
@@ -220,7 +220,7 @@ fn run_summary_rejects_legacy_flat_json() {
     let created_at = Utc.with_ymd_and_hms(2026, 4, 20, 12, 0, 0).unwrap();
     let run_id = RunId::with_timestamp(created_at, 7);
 
-    let result = serde_json::from_value::<RunSummary>(json!({
+    let result = serde_json::from_value::<Run>(json!({
         "run_id": run_id.to_string(),
         "workflow_name": "legacy",
         "status": {

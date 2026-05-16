@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize, de};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::ExecOutputTail;
@@ -204,7 +204,8 @@ pub struct CommandStartedProps {
     pub timeout_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CommandCompletedProps {
     pub output:         String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -215,93 +216,6 @@ pub struct CommandCompletedProps {
     pub output_bytes:   u64,
     #[serde(default)]
     pub live_streaming: bool,
-}
-
-impl<'de> Deserialize<'de> for CommandCompletedProps {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        struct Wire {
-            #[serde(default)]
-            output:         Option<String>,
-            #[serde(default)]
-            stdout:         Option<String>,
-            #[serde(default)]
-            stderr:         Option<String>,
-            #[serde(default)]
-            exit_code:      Option<i32>,
-            duration_ms:    u64,
-            termination:    CommandTermination,
-            #[serde(default)]
-            output_bytes:   Option<u64>,
-            #[serde(default)]
-            stdout_bytes:   Option<u64>,
-            #[serde(default)]
-            stderr_bytes:   Option<u64>,
-            #[serde(default)]
-            live_streaming: bool,
-        }
-
-        let wire = Wire::deserialize(deserializer)?;
-        let (output, output_bytes) = if let Some(output) = wire.output {
-            (output, wire.output_bytes.unwrap_or(0))
-        } else {
-            let stdout_bytes = wire.stdout_bytes.unwrap_or(0);
-            let stderr_bytes = wire.stderr_bytes.unwrap_or(0);
-            let legacy_output = if stdout_bytes == 0 && stderr_bytes > 0 && wire.stderr.is_some() {
-                wire.stderr
-            } else {
-                wire.stdout.or(wire.stderr)
-            }
-            .ok_or_else(|| de::Error::missing_field("output"))?;
-            let legacy_bytes = if stdout_bytes == 0 && stderr_bytes > 0 {
-                stderr_bytes
-            } else {
-                stdout_bytes
-            };
-            (legacy_output, legacy_bytes)
-        };
-
-        Ok(Self {
-            output,
-            exit_code: wire.exit_code,
-            duration_ms: wire.duration_ms,
-            termination: wire.termination,
-            output_bytes,
-            live_streaming: wire.live_streaming,
-        })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    #[test]
-    fn command_completed_deserializes_legacy_stdout_stderr_shape() {
-        let props: CommandCompletedProps = serde_json::from_value(json!({
-            "stdout": "blob://sha256/stdout",
-            "stderr": "blob://sha256/stderr",
-            "exit_code": 1,
-            "duration_ms": 42,
-            "termination": "exited",
-            "stdout_bytes": 0,
-            "stderr_bytes": 12,
-            "streams_separated": true,
-            "live_streaming": true
-        }))
-        .unwrap();
-
-        assert_eq!(props.output, "blob://sha256/stderr");
-        assert_eq!(props.output_bytes, 12);
-        assert_eq!(props.exit_code, Some(1));
-        assert_eq!(props.termination, CommandTermination::Exited);
-        assert!(props.live_streaming);
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

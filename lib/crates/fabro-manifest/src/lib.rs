@@ -397,7 +397,6 @@ fn collect_workflow_files(
         if let Some(child_ref) = node
             .attrs
             .get("stack.child_workflow")
-            .or_else(|| node.attrs.get("stack.child_dotfile"))
             .and_then(AttrValue::as_str)
         {
             collect_workflow_entry(
