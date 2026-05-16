@@ -147,3 +147,41 @@
 .graph-svg ellipse[stroke="#357f9e"],
 .graph-svg polygon[stroke="#357f9e"] { stroke: #67B2D7; }
 .graph-svg [fill="#1a1a1a"] { fill: #c6d4e0; }
+
+/* ---------------------------------------------------------------------------
+ * assistant-ui theme overrides (--aui-* variables) — mapped to Fabro tokens.
+ * Values are HSL component triples so assistant-ui's hsl(var(...)) wrapper
+ * works. Scoped to .fabro-chat so the shadcn theme cannot leak out.
+ *
+ * Source colors come from the @theme block above:
+ *   navy-950 #0F1729 = 220 47% 11%
+ *   panel    #252C3D = 222 24% 19%
+ *   panel-alt #1a2133 = 223 33% 15%
+ *   teal-500 #67B2D7 = 200 60% 62%  (Fabro's "teal" is a sky blue)
+ *   mint     #5AC8A8 = 163 49% 57%
+ *   ice-100  #E8EDF3 = 213 27% 93%
+ *   ice-300  #A8B5C5 = 213 22% 72%
+ * ------------------------------------------------------------------------- */
+.fabro-chat {
+  --aui-background: 220 47% 11%;
+  --aui-foreground: 0 0% 100%;
+  --aui-card: 222 24% 19%;
+  --aui-card-foreground: 0 0% 100%;
+  --aui-popover: 222 24% 19%;
+  --aui-popover-foreground: 0 0% 100%;
+  --aui-primary: 200 60% 62%;
+  --aui-primary-foreground: 220 47% 11%;
+  --aui-secondary: 223 33% 15%;
+  --aui-secondary-foreground: 0 0% 100%;
+  --aui-muted: 223 33% 15%;
+  --aui-muted-foreground: 213 22% 72%;
+  --aui-accent: 163 49% 57%;
+  --aui-accent-foreground: 220 47% 11%;
+  --aui-destructive: 0 76% 66%;
+  --aui-destructive-foreground: 0 0% 100%;
+  --aui-border: 218 28% 17%;
+  --aui-input: 218 28% 17%;
+  --aui-ring: 200 60% 62%;
+  --aui-radius: 0.5rem;
+  --aui-thread-max-width: 44rem;
+}
