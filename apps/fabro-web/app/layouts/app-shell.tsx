@@ -11,6 +11,7 @@ import {
   Bars3Icon,
   BeakerIcon,
   ChartBarIcon,
+  ChatBubbleLeftRightIcon,
   Cog6ToothIcon,
   PlayIcon,
   SparklesIcon,
@@ -25,10 +26,23 @@ import { useAuthMe } from "../lib/queries";
 
 const allNavigation = [
   { name: "Automations", href: "/automations", icon: SparklesIcon, demoOnly: true },
+  {
+    name: "Chats",
+    href: "/chats/new",
+    icon: ChatBubbleLeftRightIcon,
+    demoOnly: true,
+    // /chats/new is the click target, but the entry stays active on any
+    // /chats/:id child route as well.
+    activePathPrefix: "/chats",
+  },
   { name: "Runs", href: "/runs", icon: PlayIcon, demoOnly: false },
   { name: "Insights", href: "/insights", icon: ChartBarIcon, demoOnly: true },
   { name: "Settings", href: "/settings", icon: Cog6ToothIcon, demoOnly: false },
 ];
+
+function activeFor(item: (typeof allNavigation)[number], pathname: string): boolean {
+  return pathname.startsWith(item.activePathPrefix ?? item.href);
+}
 
 export function getVisibleNavigation(demoMode: boolean) {
   return allNavigation.filter((item) => !item.demoOnly || demoMode);
@@ -61,7 +75,7 @@ export default function AppShell() {
 
   const { user, provider, demoMode } = auth;
   const navigation = getVisibleNavigation(demoMode);
-  const currentNav = navigation.find((item) => pathname.startsWith(item.href));
+  const currentNav = navigation.find((item) => activeFor(item, pathname));
   const title = currentNav?.name ?? "";
   const lastMatch = matches[matches.length - 1];
   const handle = lastMatch?.handle as { headerExtra?: React.ReactNode } | undefined;
@@ -101,7 +115,7 @@ export default function AppShell() {
               <div className="hidden md:block">
                 <div className="ml-10 flex items-baseline space-x-4">
                   {navigation.map((item) => {
-                    const current = pathname.startsWith(item.href);
+                    const current = activeFor(item, pathname);
                     return (
                       <Link
                         key={item.name}
@@ -193,7 +207,7 @@ export default function AppShell() {
         <DisclosurePanel className="md:hidden">
           <div className="space-y-1 px-2 pt-2 pb-3 sm:px-3">
             {navigation.map((item) => {
-              const current = pathname.startsWith(item.href);
+              const current = activeFor(item, pathname);
               return (
                 <DisclosureButton
                   key={item.name}

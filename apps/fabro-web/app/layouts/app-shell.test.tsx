@@ -6,15 +6,17 @@ describe("getVisibleNavigation", () => {
     const items = getVisibleNavigation(true);
     const names = items.map((i) => i.name);
     expect(names[0]).toBe("Automations");
+    expect(names).toContain("Chats");
     expect(names).toContain("Runs");
     expect(names).toContain("Insights");
     expect(names).toContain("Settings");
   });
 
-  test("hides Automations and Insights in production mode", () => {
+  test("hides Automations, Chats, and Insights in production mode", () => {
     const items = getVisibleNavigation(false);
     const names = items.map((i) => i.name);
     expect(names).not.toContain("Automations");
+    expect(names).not.toContain("Chats");
     expect(names).not.toContain("Insights");
     expect(names).toContain("Runs");
     expect(names).toContain("Settings");
