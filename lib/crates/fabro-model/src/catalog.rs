@@ -1602,8 +1602,6 @@ effort = false
         let builtin = Catalog::builtin();
 
         assert!(builtin.provider(&ollama).is_none());
-        assert!(builtin.get("qwen3-coder").is_none());
-        assert!(builtin.get("ollama-qwen3-coder").is_none());
         assert!(builtin.list(Some(&ollama)).is_empty());
 
         let catalog = Catalog::from_builtin_with_overrides(&minimal_settings(
@@ -1623,23 +1621,8 @@ enabled = true
             Some("http://localhost:11434/v1")
         );
 
-        let model = catalog
-            .get("qwen3-coder")
-            .expect("enabled Ollama provider should expose its sample model");
-        assert_eq!(model.provider, ProviderId::new("ollama"));
-        assert_eq!(model.id, "qwen3-coder");
-        assert_eq!(
-            catalog
-                .get("ollama-qwen3-coder")
-                .map(|model| model.id.as_str()),
-            Some("qwen3-coder")
-        );
-        assert_eq!(
-            catalog
-                .default_for_provider(&ollama)
-                .map(|model| model.id.as_str()),
-            Some("qwen3-coder")
-        );
+        assert!(catalog.list(Some(&ollama)).is_empty());
+        assert!(catalog.default_for_provider(&ollama).is_none());
     }
 
     #[test]
