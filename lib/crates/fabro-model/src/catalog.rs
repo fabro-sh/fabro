@@ -1743,7 +1743,7 @@ enabled = true
         );
         assert_eq!(
             catalog
-                .provider(&ProviderId::kimi())
+                .provider(&ProviderId::new("kimi"))
                 .unwrap()
                 .base_url
                 .as_deref(),
@@ -2486,13 +2486,13 @@ reasoning_effort = "levels"
     #[test]
     fn glm_4_7_in_catalog() {
         let m = Catalog::builtin().get("glm-4.7").unwrap();
-        assert_eq!(m.provider, ProviderId::zai());
+        assert_eq!(m.provider, ProviderId::new("zai"));
     }
 
     #[test]
     fn minimax_m2_5_in_catalog() {
         let m = Catalog::builtin().get("minimax-m2.5").unwrap();
-        assert_eq!(m.provider, ProviderId::minimax());
+        assert_eq!(m.provider, ProviderId::new("minimax"));
     }
 
     #[test]
@@ -2743,7 +2743,7 @@ reasoning_effort = "levels"
     fn closest_model_haiku_to_kimi() {
         let haiku = Catalog::builtin().get("claude-haiku-4-5").unwrap();
         let result = Catalog::builtin()
-            .closest(&ProviderId::kimi(), haiku)
+            .closest(&ProviderId::new("kimi"), haiku)
             .unwrap();
         assert_eq!(result.id, "kimi-k2.5");
     }

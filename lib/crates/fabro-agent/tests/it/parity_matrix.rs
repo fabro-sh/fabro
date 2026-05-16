@@ -31,11 +31,7 @@ struct OpenAiTwinOptions {
 
 fn summarizer_model_id(provider: &Provider) -> ModelHandle {
     match provider.as_str() {
-        ProviderId::OPENAI
-        | ProviderId::KIMI
-        | ProviderId::ZAI
-        | ProviderId::MINIMAX
-        | ProviderId::INCEPTION => ModelHandle::ByName {
+        ProviderId::OPENAI | "kimi" | "zai" | "minimax" | "inception" => ModelHandle::ByName {
             provider: ProviderId::openai(),
             model:    "gpt-5.4-mini".to_string(),
         },
@@ -63,12 +59,9 @@ fn build_profile(provider: &Provider, model: &str, client: &Client) -> Box<dyn A
     match provider.as_str() {
         ProviderId::ANTHROPIC => Box::new(AnthropicProfile::with_summarizer(model, summarizer)),
         ProviderId::OPENAI => Box::new(OpenAiProfile::with_summarizer(model, summarizer)),
-        ProviderId::KIMI | ProviderId::ZAI | ProviderId::MINIMAX | ProviderId::INCEPTION => {
-            Box::new(
-                OpenAiProfile::with_summarizer(model, summarizer)
-                    .with_provider_id(provider.clone()),
-            )
-        }
+        "kimi" | "zai" | "minimax" | "inception" => Box::new(
+            OpenAiProfile::with_summarizer(model, summarizer).with_provider_id(provider.clone()),
+        ),
         ProviderId::GEMINI => Box::new(GeminiProfile::with_summarizer(model, summarizer)),
         other => panic!("unexpected provider {other}"),
     }
@@ -102,10 +95,7 @@ async fn make_session(
                 ProviderId::OPENAI => {
                     Arc::new(OpenAiProfile::with_summarizer(&factory_model, summarizer))
                 }
-                ProviderId::KIMI
-                | ProviderId::ZAI
-                | ProviderId::MINIMAX
-                | ProviderId::INCEPTION => Arc::new(
+                "kimi" | "zai" | "minimax" | "inception" => Arc::new(
                     OpenAiProfile::with_summarizer(&factory_model, summarizer)
                         .with_provider_id(factory_provider.clone()),
                 ),
@@ -224,7 +214,7 @@ macro_rules! provider_tests {
         );
         provider_test!(
             $scenario,
-            ProviderId::kimi(),
+            ProviderId::new("kimi"),
             "kimi-k2.5",
             kimi,
             keys = ["KIMI_API_KEY"]
@@ -232,14 +222,14 @@ macro_rules! provider_tests {
         #[cfg(feature = "quarantine")]
         provider_test!(
             $scenario,
-            ProviderId::zai(),
+            ProviderId::new("zai"),
             "glm-4.7",
             zai,
             keys = ["ZAI_API_KEY"]
         );
         provider_test!(
             $scenario,
-            ProviderId::minimax(),
+            ProviderId::new("minimax"),
             "minimax-m2.5",
             minimax,
             keys = ["MINIMAX_API_KEY"]
@@ -247,7 +237,7 @@ macro_rules! provider_tests {
         #[cfg(feature = "quarantine")]
         provider_test!(
             $scenario,
-            ProviderId::inception(),
+            ProviderId::new("inception"),
             "mercury-2",
             inception,
             keys = ["INCEPTION_API_KEY"]
@@ -301,7 +291,7 @@ provider_test!(
 );
 provider_test!(
     web_fetch,
-    ProviderId::kimi(),
+    ProviderId::new("kimi"),
     "kimi-k2.5",
     kimi,
     keys = ["KIMI_API_KEY", "OPENAI_API_KEY"]
@@ -309,14 +299,14 @@ provider_test!(
 #[cfg(feature = "quarantine")]
 provider_test!(
     web_fetch,
-    ProviderId::zai(),
+    ProviderId::new("zai"),
     "glm-4.7",
     zai,
     keys = ["ZAI_API_KEY", "OPENAI_API_KEY"]
 );
 provider_test!(
     web_fetch,
-    ProviderId::minimax(),
+    ProviderId::new("minimax"),
     "minimax-m2.5",
     minimax,
     keys = ["MINIMAX_API_KEY", "OPENAI_API_KEY"]
@@ -324,7 +314,7 @@ provider_test!(
 #[cfg(feature = "quarantine")]
 provider_test!(
     web_fetch,
-    ProviderId::inception(),
+    ProviderId::new("inception"),
     "mercury-2",
     inception,
     keys = ["INCEPTION_API_KEY", "OPENAI_API_KEY"]
@@ -353,7 +343,7 @@ provider_test!(
 );
 provider_test!(
     web_search,
-    ProviderId::kimi(),
+    ProviderId::new("kimi"),
     "kimi-k2.5",
     kimi,
     keys = ["KIMI_API_KEY", "BRAVE_SEARCH_API_KEY"]
@@ -361,14 +351,14 @@ provider_test!(
 #[cfg(feature = "quarantine")]
 provider_test!(
     web_search,
-    ProviderId::zai(),
+    ProviderId::new("zai"),
     "glm-4.7",
     zai,
     keys = ["ZAI_API_KEY", "BRAVE_SEARCH_API_KEY"]
 );
 provider_test!(
     web_search,
-    ProviderId::minimax(),
+    ProviderId::new("minimax"),
     "minimax-m2.5",
     minimax,
     keys = ["MINIMAX_API_KEY", "BRAVE_SEARCH_API_KEY"]
@@ -376,7 +366,7 @@ provider_test!(
 #[cfg(feature = "quarantine")]
 provider_test!(
     web_search,
-    ProviderId::inception(),
+    ProviderId::new("inception"),
     "mercury-2",
     inception,
     keys = ["INCEPTION_API_KEY", "BRAVE_SEARCH_API_KEY"]
@@ -413,7 +403,7 @@ macro_rules! non_openai_provider_tests {
         );
         provider_test!(
             $scenario,
-            ProviderId::kimi(),
+            ProviderId::new("kimi"),
             "kimi-k2.5",
             kimi,
             keys = ["KIMI_API_KEY"]
@@ -421,14 +411,14 @@ macro_rules! non_openai_provider_tests {
         #[cfg(feature = "quarantine")]
         provider_test!(
             $scenario,
-            ProviderId::zai(),
+            ProviderId::new("zai"),
             "glm-4.7",
             zai,
             keys = ["ZAI_API_KEY"]
         );
         provider_test!(
             $scenario,
-            ProviderId::minimax(),
+            ProviderId::new("minimax"),
             "minimax-m2.5",
             minimax,
             keys = ["MINIMAX_API_KEY"]
@@ -436,7 +426,7 @@ macro_rules! non_openai_provider_tests {
         #[cfg(feature = "quarantine")]
         provider_test!(
             $scenario,
-            ProviderId::inception(),
+            ProviderId::new("inception"),
             "mercury-2",
             inception,
             keys = ["INCEPTION_API_KEY"]
@@ -696,27 +686,27 @@ reasoning_effort_tests!(
     keys = ["GEMINI_API_KEY"]
 );
 reasoning_effort_tests!(
-    ProviderId::kimi(),
+    ProviderId::new("kimi"),
     "kimi-k2.5",
     kimi_reasoning_effort,
     keys = ["KIMI_API_KEY"]
 );
 #[cfg(feature = "quarantine")]
 reasoning_effort_tests!(
-    ProviderId::zai(),
+    ProviderId::new("zai"),
     "glm-4.7",
     zai_reasoning_effort,
     keys = ["ZAI_API_KEY"]
 );
 reasoning_effort_tests!(
-    ProviderId::minimax(),
+    ProviderId::new("minimax"),
     "minimax-m2.5",
     minimax_reasoning_effort,
     keys = ["MINIMAX_API_KEY"]
 );
 #[cfg(feature = "quarantine")]
 reasoning_effort_tests!(
-    ProviderId::inception(),
+    ProviderId::new("inception"),
     "mercury-2",
     inception_reasoning_effort,
     keys = ["INCEPTION_API_KEY"]
@@ -779,27 +769,27 @@ loop_detection_tests!(
     keys = ["GEMINI_API_KEY"]
 );
 loop_detection_tests!(
-    ProviderId::kimi(),
+    ProviderId::new("kimi"),
     "kimi-k2.5",
     kimi_loop_detection,
     keys = ["KIMI_API_KEY"]
 );
 #[cfg(feature = "quarantine")]
 loop_detection_tests!(
-    ProviderId::zai(),
+    ProviderId::new("zai"),
     "glm-4.7",
     zai_loop_detection,
     keys = ["ZAI_API_KEY"]
 );
 loop_detection_tests!(
-    ProviderId::minimax(),
+    ProviderId::new("minimax"),
     "minimax-m2.5",
     minimax_loop_detection,
     keys = ["MINIMAX_API_KEY"]
 );
 #[cfg(feature = "quarantine")]
 loop_detection_tests!(
-    ProviderId::inception(),
+    ProviderId::new("inception"),
     "mercury-2",
     inception_loop_detection,
     keys = ["INCEPTION_API_KEY"]

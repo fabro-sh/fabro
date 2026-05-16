@@ -680,7 +680,7 @@ mod tests {
         let catalog = catalog_with("");
         let client = Client::from_credentials(
             vec![ApiCredential {
-                provider:      ProviderId::kimi(),
+                provider:      ProviderId::new("kimi"),
                 auth_header:   Some(ApiKeyHeader::Bearer("kimi-key".to_string())),
                 extra_headers: HashMap::new(),
                 base_url:      None,

@@ -250,7 +250,7 @@ mod tests {
         let resolved = source.resolve(&catalog).await.unwrap();
         let credential = resolved.credentials.first().unwrap();
 
-        assert_eq!(credential.provider, ProviderId::kimi());
+        assert_eq!(credential.provider, ProviderId::new("kimi"));
         assert_eq!(
             credential.base_url.as_deref(),
             Some("https://api.moonshot.ai/v1")

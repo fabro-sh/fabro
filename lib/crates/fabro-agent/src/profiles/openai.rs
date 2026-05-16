@@ -324,7 +324,7 @@ mod tests {
     #[test]
     fn kimi_provider_prompt_uses_catalog_display_name() {
         let profile = OpenAiProfile::new("kimi-k2.5")
-            .with_provider_id(ProviderId::kimi())
+            .with_provider_id(ProviderId::new("kimi"))
             .with_catalog(test_catalog());
         let env = MockSandbox::linux();
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None, &[]);
@@ -335,7 +335,7 @@ mod tests {
     #[test]
     fn zai_provider_prompt_uses_catalog_display_name() {
         let profile = OpenAiProfile::new("glm-4.7")
-            .with_provider_id(ProviderId::zai())
+            .with_provider_id(ProviderId::new("zai"))
             .with_catalog(test_catalog());
         let env = MockSandbox::linux();
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None, &[]);
@@ -345,7 +345,7 @@ mod tests {
     #[test]
     fn minimax_provider_prompt_uses_catalog_display_name() {
         let profile = OpenAiProfile::new("minimax-m2.5")
-            .with_provider_id(ProviderId::minimax())
+            .with_provider_id(ProviderId::new("minimax"))
             .with_catalog(test_catalog());
         let env = MockSandbox::linux();
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None, &[]);
@@ -355,7 +355,7 @@ mod tests {
     #[test]
     fn inception_provider_prompt_uses_catalog_display_name() {
         let profile = OpenAiProfile::new("mercury-2")
-            .with_provider_id(ProviderId::inception())
+            .with_provider_id(ProviderId::new("inception"))
             .with_catalog(test_catalog());
         let env = MockSandbox::linux();
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None, &[]);

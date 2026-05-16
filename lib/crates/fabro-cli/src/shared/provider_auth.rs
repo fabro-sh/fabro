@@ -388,10 +388,10 @@ mod tests {
             ProviderId::anthropic(),
             ProviderId::openai(),
             ProviderId::gemini(),
-            ProviderId::kimi(),
-            ProviderId::zai(),
-            ProviderId::minimax(),
-            ProviderId::inception(),
+            ProviderId::new("kimi"),
+            ProviderId::new("zai"),
+            ProviderId::new("minimax"),
+            ProviderId::new("inception"),
         ] {
             let provider = api_key_catalog_provider(&provider, catalog).unwrap();
             let url = provider.api_key_url.as_deref().unwrap_or_default();
