@@ -698,7 +698,6 @@ context_window = 128000
 tools = true
 vision = false
 reasoning = false
-effort = false
 "#,
         );
         let dir = tempfile::tempdir().unwrap();
@@ -954,7 +953,6 @@ context_window = 128000
 tools = true
 vision = false
 reasoning = false
-effort = false
 "#,
         );
         let dir = tempfile::tempdir().unwrap();

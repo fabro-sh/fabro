@@ -494,7 +494,6 @@ mod tests {
                 reasoning:        false,
                 reasoning_effort: ReasoningEffortFeature::None,
                 prompt_cache:     false,
-                effort:           false,
             },
             costs: ModelCosts {
                 input_cost_per_mtok:       Some(1.0),
@@ -527,7 +526,6 @@ mod tests {
                 reasoning:        false,
                 reasoning_effort: ReasoningEffortFeature::None,
                 prompt_cache:     false,
-                effort:           false,
             },
             costs:                ModelCosts {
                 input_cost_per_mtok:       Some(1.0),

@@ -29,7 +29,6 @@ fn model_json_matches_openapi_shape() {
             reasoning:        true,
             reasoning_effort: ReasoningEffortFeature::Levels,
             prompt_cache:     true,
-            effort:           true,
         },
         costs:                ModelCosts {
             input_cost_per_mtok:       Some(5.0),
@@ -48,7 +47,6 @@ fn model_json_matches_openapi_shape() {
     assert_eq!(json["knowledge_cutoff"], "May 2025");
     assert_eq!(json["features"]["reasoning_effort"], "levels");
     assert_eq!(json["features"]["prompt_cache"], true);
-    assert_eq!(json["features"]["effort"], true);
     assert_eq!(json["estimated_output_tps"], 25.0);
     assert_eq!(json["configured"], true);
 

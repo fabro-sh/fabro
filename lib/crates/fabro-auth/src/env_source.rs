@@ -280,7 +280,6 @@ context_window = 128000
 tools = true
 vision = false
 reasoning = false
-effort = false
 "#,
         );
         let source = test_source(&[("ACME_API_KEY", "acme-key")]);
@@ -328,7 +327,7 @@ context_window = 200000
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 "#,
         );
         let source = test_source(&[("PORTKEY_API_KEY", "pk-live")]);
@@ -376,7 +375,7 @@ context_window = 200000
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 "#,
         );
         let source = test_source(&[]);

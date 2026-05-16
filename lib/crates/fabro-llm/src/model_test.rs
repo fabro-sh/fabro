@@ -225,7 +225,6 @@ mod tests {
             reasoning:        true,
             reasoning_effort: ReasoningEffortFeature::Levels,
             prompt_cache:     false,
-            effort:           true,
         });
 
         let outcome = run_model_test(&info, ModelTestMode::Deep, empty_test_client()).await;

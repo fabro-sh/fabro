@@ -147,8 +147,6 @@ pub struct ModelFeatures {
     pub reasoning_effort: Option<ReasoningEffortFeature>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_cache:     Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effort:           Option<bool>,
 }
 
 /// User-facing allow-list for native control values Fabro accepts on this
@@ -521,7 +519,6 @@ max_output = 32768
 tools = true
 vision = false
 reasoning = true
-effort = false
 
 [models."kimi-k2.5".costs]
 input_cost_per_mtok = 0.60
@@ -549,7 +546,6 @@ cache_input_cost_per_mtok = 0.15
         assert_eq!(features.tools, Some(true));
         assert_eq!(features.vision, Some(false));
         assert_eq!(features.reasoning, Some(true));
-        assert_eq!(features.effort, Some(false));
 
         let costs = m.costs.as_ref().unwrap();
         assert_eq!(costs.base.input_cost_per_mtok, Some(0.60));

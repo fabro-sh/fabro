@@ -43,10 +43,6 @@ pub struct ModelFeatures {
     /// Whether this model endpoint supports prompt caching annotations.
     #[serde(default)]
     pub prompt_cache:     bool,
-    /// Deprecated compatibility bool equivalent to
-    /// `reasoning_effort == "levels"`.
-    #[serde(default)]
-    pub effort:           bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -119,10 +115,6 @@ impl Model {
         self.features.reasoning_effort == ReasoningEffortFeature::Levels
     }
 
-    pub fn supports_effort(&self) -> bool {
-        self.supports_reasoning_effort()
-    }
-
     pub fn supports_prompt_cache(&self) -> bool {
         self.features.prompt_cache
     }
@@ -177,7 +169,7 @@ mod tests {
         assert!(info.supports_tools());
         assert!(info.supports_vision());
         assert!(info.supports_reasoning());
-        assert!(info.supports_effort());
+        assert!(info.supports_reasoning_effort());
         assert_eq!(info.training(), Some("2025-08-01"));
         assert_eq!(info.knowledge_cutoff(), Some("May 2025"));
         assert_eq!(info.input_cost_per_mtok(), Some(5.0));

@@ -1378,7 +1378,6 @@ context_window = 128000
 tools = true
 vision = false
 reasoning = false
-effort = false
 "#,
         )
         .unwrap();

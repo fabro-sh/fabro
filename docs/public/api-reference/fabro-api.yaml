@@ -4443,7 +4443,6 @@ components:
         - reasoning
         - reasoning_effort
         - prompt_cache
-        - effort
       properties:
         tools:
           type: boolean
@@ -4459,10 +4458,6 @@ components:
         prompt_cache:
           type: boolean
           description: Whether the model endpoint supports prompt caching.
-        effort:
-          type: boolean
-          deprecated: true
-          description: Deprecated compatibility flag equivalent to reasoning_effort = levels.
 
     ModelCosts:
       description: Pricing per million tokens in USD.

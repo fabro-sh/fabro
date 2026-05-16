@@ -366,7 +366,6 @@ fn model_features_to_catalog(features: &LlmModelFeatures) -> model_catalog::Sett
         reasoning:        features.reasoning,
         reasoning_effort: features.reasoning_effort,
         prompt_cache:     features.prompt_cache,
-        effort:           features.effort,
     }
 }
 
@@ -706,7 +705,6 @@ context_window = 128000
 tools = true
 vision = false
 reasoning = false
-effort = false
 "#,
             None,
             None,

@@ -110,8 +110,6 @@ pub struct SettingsModelFeatures {
     pub reasoning_effort: Option<ReasoningEffortFeature>,
     #[serde(default)]
     pub prompt_cache:     Option<bool>,
-    #[serde(default)]
-    pub effort:           Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -964,7 +962,6 @@ fn merge_model_features_settings(
         reasoning:        higher.reasoning.or(fallback.reasoning),
         reasoning_effort: higher.reasoning_effort.or(fallback.reasoning_effort),
         prompt_cache:     higher.prompt_cache.or(fallback.prompt_cache),
-        effort:           higher.effort.or(fallback.effort),
     }
 }
 
@@ -1140,13 +1137,7 @@ fn build_model_features(
             model: model_id.to_string(),
             field: "features.reasoning",
         })?;
-    let reasoning_effort = features.reasoning_effort.unwrap_or_else(|| {
-        if features.effort.unwrap_or_default() {
-            ReasoningEffortFeature::Levels
-        } else {
-            ReasoningEffortFeature::None
-        }
-    });
+    let reasoning_effort = features.reasoning_effort.unwrap_or_default();
     if !reasoning && reasoning_effort == ReasoningEffortFeature::Levels {
         return Err(CatalogBuildError::ReasoningEffortWithoutReasoning {
             model: model_id.to_string(),
@@ -1169,7 +1160,6 @@ fn build_model_features(
         reasoning,
         reasoning_effort,
         prompt_cache: features.prompt_cache.unwrap_or_default(),
-        effort: reasoning_effort == ReasoningEffortFeature::Levels,
     })
 }
 
@@ -1511,7 +1501,6 @@ context_window = 128000
 tools = true
 vision = false
 reasoning = false
-effort = false
 "#,
         ))
         .expect("custom provider overlay should build");
@@ -2103,7 +2092,7 @@ context_window = 1000
 tools = false
 vision = false
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 
 [models.model.controls]
 reasoning_effort = ["turbo"]
@@ -2182,7 +2171,6 @@ reasoning_effort = ["low", "medium"]
             crate::ReasoningEffortFeature::Levels
         );
         assert!(model.features.prompt_cache);
-        assert!(model.features.effort);
         assert_eq!(
             catalog
                 .model_settings("model")
@@ -2191,104 +2179,6 @@ reasoning_effort = ["low", "medium"]
                 .reasoning_effort,
             vec![ReasoningEffort::Low, ReasoningEffort::Medium]
         );
-    }
-
-    #[test]
-    fn catalog_from_settings_maps_legacy_effort_to_reasoning_effort_feature() {
-        let settings = minimal_settings(
-            r#"
-[providers.test]
-display_name = "Test"
-adapter = "openai"
-
-[models.with_effort]
-provider = "test"
-display_name = "With Effort"
-family = "test"
-default = true
-
-[models.with_effort.limits]
-context_window = 1000
-
-[models.with_effort.features]
-tools = true
-vision = false
-reasoning = true
-effort = true
-
-[models.no_effort]
-provider = "test"
-display_name = "No Effort"
-family = "test"
-
-[models.no_effort.limits]
-context_window = 1000
-
-[models.no_effort.features]
-tools = true
-vision = false
-reasoning = true
-effort = false
-"#,
-        );
-
-        let catalog = Catalog::from_settings(&settings).unwrap();
-
-        let with_effort = catalog.get("with_effort").unwrap();
-        assert_eq!(
-            with_effort.features.reasoning_effort,
-            crate::ReasoningEffortFeature::Levels
-        );
-        assert!(with_effort.features.effort);
-
-        let no_effort = catalog.get("no_effort").unwrap();
-        assert_eq!(
-            no_effort.features.reasoning_effort,
-            crate::ReasoningEffortFeature::None
-        );
-        assert!(!no_effort.features.effort);
-    }
-
-    #[test]
-    fn catalog_merge_prefers_explicit_reasoning_effort_over_legacy_effort() {
-        let fallback = minimal_settings(
-            r#"
-[providers.test]
-display_name = "Test"
-adapter = "openai"
-
-[models.model]
-provider = "test"
-display_name = "Model"
-family = "test"
-default = true
-
-[models.model.limits]
-context_window = 1000
-
-[models.model.features]
-tools = true
-vision = false
-reasoning = true
-reasoning_effort = "levels"
-"#,
-        );
-        let higher = minimal_settings(
-            r"
-[models.model.features]
-effort = false
-",
-        );
-
-        let merged = merge_catalog_settings(higher, fallback);
-        let catalog = Catalog::from_settings(&merged).unwrap();
-        let model = catalog.get("model").unwrap();
-
-        assert_eq!(
-            model.features.reasoning_effort,
-            crate::ReasoningEffortFeature::Levels
-        );
-        assert!(model.features.effort);
     }
 
     #[test]
@@ -2433,7 +2323,6 @@ reasoning_effort = "levels"
                 reasoning: true,
                 reasoning_effort: Levels,
                 prompt_cache: true,
-                effort: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -2503,7 +2392,6 @@ reasoning_effort = "levels"
                 reasoning: true,
                 reasoning_effort: Levels,
                 prompt_cache: false,
-                effort: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -2563,7 +2451,6 @@ reasoning_effort = "levels"
                 reasoning: false,
                 reasoning_effort: None,
                 prompt_cache: false,
-                effort: false,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -2626,7 +2513,6 @@ reasoning_effort = "levels"
                 reasoning: true,
                 reasoning_effort: Levels,
                 prompt_cache: false,
-                effort: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -2681,7 +2567,6 @@ reasoning_effort = "levels"
                 reasoning: true,
                 reasoning_effort: Levels,
                 prompt_cache: false,
-                effort: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -2734,7 +2619,6 @@ reasoning_effort = "levels"
                 reasoning: true,
                 reasoning_effort: Levels,
                 prompt_cache: false,
-                effort: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -2813,7 +2697,6 @@ reasoning_effort = "levels"
                 reasoning: true,
                 reasoning_effort: Levels,
                 prompt_cache: false,
-                effort: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: None,

@@ -1457,7 +1457,6 @@ max_output = 8192
 tools = true
 vision = false
 reasoning = false
-effort = false
 "#,
         )
         .unwrap();
