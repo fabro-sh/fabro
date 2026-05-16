@@ -196,19 +196,6 @@ fn build_profile(
     }
 }
 
-fn default_profile_kind(provider: Provider) -> AgentProfileKind {
-    match provider {
-        Provider::Anthropic => AgentProfileKind::Anthropic,
-        Provider::Gemini => AgentProfileKind::Gemini,
-        Provider::OpenAi
-        | Provider::Kimi
-        | Provider::Zai
-        | Provider::Minimax
-        | Provider::Inception
-        | Provider::OpenAiCompatible => AgentProfileKind::OpenAi,
-    }
-}
-
 pub(super) fn effective_request_controls(
     catalog: &Catalog,
     run_model_controls: &RunModelControls,
@@ -286,19 +273,6 @@ fn legacy_reasoning_effort_default(catalog: &Catalog, model: &str) -> Option<Rea
         Some(_) => None,
         None => Some(ReasoningEffort::High),
     }
-}
-
-fn profile_provider_for_catalog_provider(
-    provider_id: &ProviderId,
-    profile_kind: AgentProfileKind,
-    adapter: &str,
-) -> Provider {
-    Provider::from_id(provider_id).unwrap_or(match (profile_kind, adapter) {
-        (AgentProfileKind::Anthropic, _) => Provider::Anthropic,
-        (AgentProfileKind::Gemini, _) => Provider::Gemini,
-        (AgentProfileKind::OpenAi, "openai_compatible") => Provider::OpenAiCompatible,
-        (AgentProfileKind::OpenAi, _) => Provider::OpenAi,
-    })
 }
 
 /// Shared state for tracking file modifications from agent tool calls.
@@ -416,7 +390,7 @@ impl AgentApiBackend {
             model,
             provider,
             provider.id(),
-            default_profile_kind(provider),
+            adapter::default_profile_for_provider_id(&provider.id()),
             fallback_chain,
             source,
             steering_hub,
@@ -534,7 +508,7 @@ impl AgentApiBackend {
                 ))
             })?;
         Ok(ProviderContext {
-            provider: profile_provider_for_catalog_provider(
+            provider: adapter::profile_provider_for_provider_id(
                 &provider.id,
                 profile_kind,
                 &provider.adapter,

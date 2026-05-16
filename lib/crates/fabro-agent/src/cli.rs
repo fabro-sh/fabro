@@ -206,22 +206,33 @@ fn build_tool_approval(
 }
 
 fn summarizer_model_id(
-    provider: Provider,
-    provider_id: &ProviderId,
+    provider: &ResolvedProvider,
+    selected_model: &str,
     catalog: &Catalog,
 ) -> ModelHandle {
-    if Provider::from_id(provider_id).is_none() {
-        if let Some(model) = catalog.default_for_provider(provider_id) {
+    if Provider::from_id(&provider.provider_id).is_none() {
+        if let Some(model) = catalog.default_for_provider(&provider.provider_id) {
             return ModelHandle::ByName {
-                provider: provider_id.clone(),
+                provider: provider.provider_id.clone(),
                 model:    model.id.clone(),
             };
         }
+        return ModelHandle::ByName {
+            provider: provider.provider_id.clone(),
+            model:    selected_model.to_string(),
+        };
+    }
+
+    if let Some(model) = catalog.probe_for_provider(provider.provider) {
+        return ModelHandle::ByName {
+            provider: provider.provider_id.clone(),
+            model:    model.id.clone(),
+        };
     }
 
     ModelHandle::ByName {
-        provider: provider_id.clone(),
-        model:    match provider {
+        provider: provider.provider_id.clone(),
+        model:    match provider.provider {
             Provider::OpenAi | Provider::OpenAiCompatible => "gpt-4o-mini",
             Provider::Gemini => "gemini-2.0-flash",
             Provider::Anthropic => "claude-haiku-4-5",
@@ -234,43 +245,36 @@ fn summarizer_model_id(
     }
 }
 
-fn build_summarizer(
-    provider: Provider,
-    provider_id: &ProviderId,
-    llm_client: Client,
-    catalog: &Catalog,
-) -> WebFetchSummarizer {
+fn build_summarizer(model_id: ModelHandle, llm_client: Client) -> WebFetchSummarizer {
     WebFetchSummarizer {
-        client:   llm_client,
-        model_id: summarizer_model_id(provider, provider_id, catalog),
+        client: llm_client,
+        model_id,
     }
 }
 
 fn build_profile(
-    provider: Provider,
-    provider_id: ProviderId,
-    profile_kind: AgentProfileKind,
+    provider: &ResolvedProvider,
     model: &str,
     summarizer: Option<WebFetchSummarizer>,
     catalog: Arc<Catalog>,
 ) -> Box<dyn AgentProfile> {
-    match profile_kind {
+    match provider.profile_kind {
         AgentProfileKind::OpenAi => Box::new(
             OpenAiProfile::with_summarizer(model, summarizer)
-                .with_provider(provider)
-                .with_provider_id(provider_id)
+                .with_provider(provider.provider)
+                .with_provider_id(provider.provider_id.clone())
                 .with_catalog(catalog),
         ),
         AgentProfileKind::Gemini => Box::new(
             GeminiProfile::with_summarizer(model, summarizer)
-                .with_provider(provider)
-                .with_provider_id(provider_id)
+                .with_provider(provider.provider)
+                .with_provider_id(provider.provider_id.clone())
                 .with_catalog(catalog),
         ),
         AgentProfileKind::Anthropic => Box::new(
             AnthropicProfile::with_summarizer(model, summarizer)
-                .with_provider(provider)
-                .with_provider_id(provider_id)
+                .with_provider(provider.provider)
+                .with_provider_id(provider.provider_id.clone())
                 .with_catalog(catalog),
         ),
     }
@@ -281,19 +285,6 @@ struct ResolvedProvider {
     provider:     Provider,
     provider_id:  ProviderId,
     profile_kind: AgentProfileKind,
-}
-
-fn profile_provider_for_catalog_provider(
-    provider_id: &ProviderId,
-    profile_kind: AgentProfileKind,
-    adapter_key: &str,
-) -> Provider {
-    Provider::from_id(provider_id).unwrap_or(match (profile_kind, adapter_key) {
-        (AgentProfileKind::Anthropic, _) => Provider::Anthropic,
-        (AgentProfileKind::Gemini, _) => Provider::Gemini,
-        (AgentProfileKind::OpenAi, "openai_compatible") => Provider::OpenAiCompatible,
-        (AgentProfileKind::OpenAi, _) => Provider::OpenAi,
-    })
 }
 
 fn resolve_provider(args: &AgentArgs, catalog: &Catalog) -> anyhow::Result<ResolvedProvider> {
@@ -307,7 +298,7 @@ fn resolve_provider(args: &AgentArgs, catalog: &Catalog) -> anyhow::Result<Resol
             )
         })?;
         let profile_kind = metadata.default_profile;
-        let provider = profile_provider_for_catalog_provider(
+        let provider = adapter::profile_provider_for_provider_id(
             &catalog_provider.id,
             profile_kind,
             &catalog_provider.adapter,
@@ -321,20 +312,12 @@ fn resolve_provider(args: &AgentArgs, catalog: &Catalog) -> anyhow::Result<Resol
 
     let provider = Provider::from_id(&provider_id)
         .ok_or_else(|| anyhow::anyhow!("unknown provider: {}", provider_id.as_str()))?;
+    let profile_kind = adapter::default_profile_for_provider_id(&provider_id);
 
     Ok(ResolvedProvider {
         provider,
         provider_id,
-        profile_kind: match provider {
-            Provider::Anthropic => AgentProfileKind::Anthropic,
-            Provider::Gemini => AgentProfileKind::Gemini,
-            Provider::OpenAi
-            | Provider::Kimi
-            | Provider::Zai
-            | Provider::Minimax
-            | Provider::Inception
-            | Provider::OpenAiCompatible => AgentProfileKind::OpenAi,
-        },
+        profile_kind,
     })
 }
 
@@ -349,11 +332,7 @@ fn standalone_llm_source() -> Arc<dyn CredentialSource> {
 }
 
 fn ensure_provider_registered(client: &Client, provider_id: &ProviderId) -> anyhow::Result<()> {
-    if client
-        .provider_names()
-        .iter()
-        .any(|name| *name == provider_id.as_str())
-    {
+    if client.has_provider(provider_id.as_str()) {
         return Ok(());
     }
 
@@ -558,11 +537,9 @@ pub async fn run_with_args_and_source_and_catalog(
     mcp_servers: Vec<McpServerSettings>,
     catalog: Arc<Catalog>,
 ) -> anyhow::Result<()> {
-    let provider = resolve_provider(&args, catalog.as_ref())?;
     let client = Client::from_source(llm_source.as_ref(), Arc::clone(&catalog))
         .await
         .context("Failed to create LLM client")?;
-    ensure_provider_registered(&client, &provider.provider_id)?;
     run_with_args_and_client_and_catalog(args, client, mcp_servers, catalog).await
 }
 
@@ -622,17 +599,11 @@ pub async fn run_with_args_and_client_and_catalog(
             })?
     };
     eprintln!("{}", styles.dim.apply_to(format!("Using model: {model}")));
+    let summarizer_model = summarizer_model_id(&provider, &model, catalog.as_ref());
     let mut profile = build_profile(
-        provider.provider,
-        provider.provider_id.clone(),
-        provider.profile_kind,
+        &provider,
         &model,
-        Some(build_summarizer(
-            provider.provider,
-            &provider.provider_id,
-            client.clone(),
-            catalog.as_ref(),
-        )),
+        Some(build_summarizer(summarizer_model.clone(), client.clone())),
         Arc::clone(&catalog),
     );
 
@@ -671,17 +642,14 @@ pub async fn run_with_args_and_client_and_catalog(
     let factory_env = Arc::clone(&env);
     let factory_hooks = config.tool_hooks.clone();
     let factory_provider = provider.clone();
+    let factory_summarizer_model = summarizer_model.clone();
     let factory: SessionFactory = Arc::new(move || {
         let child_summarizer = Some(build_summarizer(
-            factory_provider.provider,
-            &factory_provider.provider_id,
+            factory_summarizer_model.clone(),
             factory_client.clone(),
-            factory_catalog.as_ref(),
         ));
         let child_profile: Arc<dyn AgentProfile> = Arc::from(build_profile(
-            factory_provider.provider,
-            factory_provider.provider_id.clone(),
-            factory_provider.profile_kind,
+            &factory_provider,
             &factory_model,
             child_summarizer,
             Arc::clone(&factory_catalog),
@@ -882,6 +850,7 @@ mod tests {
     use std::collections::HashMap;
 
     use fabro_model::Provider;
+    use fabro_model::catalog::ProviderCatalogSettings;
     use serde_json::json;
 
     use super::*;
@@ -986,29 +955,26 @@ mod tests {
         Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap())
     }
 
+    fn resolved_builtin(provider: Provider) -> ResolvedProvider {
+        let provider_id = provider.id();
+        ResolvedProvider {
+            provider,
+            provider_id: provider_id.clone(),
+            profile_kind: adapter::default_profile_for_provider_id(&provider_id),
+        }
+    }
+
     #[test]
     fn build_profile_anthropic() {
-        let profile = build_profile(
-            Provider::Anthropic,
-            Provider::Anthropic.id(),
-            AgentProfileKind::Anthropic,
-            "model",
-            None,
-            test_catalog(),
-        );
+        let provider = resolved_builtin(Provider::Anthropic);
+        let profile = build_profile(&provider, "model", None, test_catalog());
         assert_eq!(profile.provider(), Provider::Anthropic);
     }
 
     #[test]
     fn build_profile_openai() {
-        let profile = build_profile(
-            Provider::OpenAi,
-            Provider::OpenAi.id(),
-            AgentProfileKind::OpenAi,
-            "model",
-            None,
-            test_catalog(),
-        );
+        let provider = resolved_builtin(Provider::OpenAi);
+        let profile = build_profile(&provider, "model", None, test_catalog());
         assert_eq!(profile.provider(), Provider::OpenAi);
     }
 
@@ -1024,23 +990,17 @@ mod tests {
 
     #[test]
     fn build_profile_gemini() {
-        let profile = build_profile(
-            Provider::Gemini,
-            Provider::Gemini.id(),
-            AgentProfileKind::Gemini,
-            "model",
-            None,
-            test_catalog(),
-        );
+        let provider = resolved_builtin(Provider::Gemini);
+        let profile = build_profile(&provider, "model", None, test_catalog());
         assert_eq!(profile.provider(), Provider::Gemini);
     }
 
     #[test]
     fn resolve_provider_accepts_custom_catalog_provider() {
         let mut settings = LlmCatalogSettings::default();
-        settings.providers.insert(
-            "bedrock".to_string(),
-            fabro_model::catalog::ProviderCatalogSettings {
+        settings
+            .providers
+            .insert("bedrock".to_string(), ProviderCatalogSettings {
                 display_name:  Some("Bedrock".to_string()),
                 adapter:       Some("openai_compatible".to_string()),
                 base_url:      Some("https://example.invalid/v1".to_string()),
@@ -1049,8 +1009,7 @@ mod tests {
                 priority:      None,
                 enabled:       None,
                 aliases:       None,
-            },
-        );
+            });
         let catalog = Catalog::from_builtin_with_overrides(&settings).unwrap();
         let args = AgentArgs {
             prompt:        "test".to_string(),
@@ -1070,18 +1029,51 @@ mod tests {
         assert_eq!(resolved.profile_kind, AgentProfileKind::OpenAi);
     }
 
+    #[test]
+    fn summarizer_model_id_uses_selected_model_for_custom_provider_without_catalog_default() {
+        let mut settings = LlmCatalogSettings::default();
+        settings
+            .providers
+            .insert("bedrock".to_string(), ProviderCatalogSettings {
+                display_name:  Some("Bedrock".to_string()),
+                adapter:       Some("openai_compatible".to_string()),
+                base_url:      Some("https://example.invalid/v1".to_string()),
+                credentials:   None,
+                extra_headers: None,
+                priority:      None,
+                enabled:       None,
+                aliases:       None,
+            });
+        let catalog = Catalog::from_builtin_with_overrides(&settings).unwrap();
+        let args = AgentArgs {
+            prompt:        "test".to_string(),
+            provider:      Some("bedrock".to_string()),
+            model:         Some("bedrock-claude-sonnet-4-6".to_string()),
+            permissions:   None,
+            auto_approve:  false,
+            debug:         false,
+            verbose:       false,
+            skills_dir:    None,
+            output_format: None,
+        };
+        let resolved = resolve_provider(&args, &catalog).unwrap();
+
+        let model_id = summarizer_model_id(
+            &resolved,
+            args.model.as_deref().expect("explicit model"),
+            &catalog,
+        );
+
+        assert_eq!(model_id.provider(), &ProviderId::new("bedrock"));
+        assert_eq!(model_id.model_id(), "bedrock-claude-sonnet-4-6");
+    }
+
     // subagent tool registration tests
 
     #[test]
     fn build_profile_can_register_subagent_tools() {
-        let mut profile = build_profile(
-            Provider::Anthropic,
-            Provider::Anthropic.id(),
-            AgentProfileKind::Anthropic,
-            "model",
-            None,
-            test_catalog(),
-        );
+        let provider = resolved_builtin(Provider::Anthropic);
+        let mut profile = build_profile(&provider, "model", None, test_catalog());
         let manager = Arc::new(AsyncMutex::new(SubAgentManager::new(1)));
         let factory: SessionFactory = Arc::new(|| {
             panic!("factory should not be called in this test");

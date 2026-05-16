@@ -182,6 +182,43 @@ fn exec_server_target_uses_remote_transport_instead_of_local_api_key_resolution(
 }
 
 #[test]
+fn exec_server_target_accepts_configured_custom_provider_from_settings() {
+    let context = test_context!();
+    context.write_home(
+        ".fabro/settings.toml",
+        "_version = 1\n\n[llm.providers.bedrock]\nadapter = \"openai_compatible\"\nbase_url = \"https://bedrock.example.invalid/v1\"\n\n[cli.exec.model]\nprovider = \"bedrock\"\nname = \"bedrock-claude-sonnet-4-6\"\n",
+    );
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method("POST").path("/api/v1/completions");
+        then.status(400).body("custom-server-routed-marker");
+    });
+
+    let mut cmd = context.exec_cmd();
+    cmd.env_clear();
+    preserve_coverage_env!(cmd);
+    cmd.env("HOME", &context.home_dir);
+    cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled");
+    cmd.args([
+        "--server",
+        &format!("{}/api/v1", server.base_url()),
+        "test prompt",
+    ]);
+
+    let output = cmd.assert().failure().get_output().clone();
+    let stderr = String::from_utf8(output.stderr).expect("valid utf8");
+    assert!(
+        stderr.contains("custom-server-routed-marker"),
+        "expected remote server failure marker, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("unknown provider: bedrock"),
+        "exec should resolve custom providers from settings for remote transport: {stderr}"
+    );
+}
+
+#[test]
 fn exec_configured_server_target_alone_does_not_reroute_exec() {
     let context = test_context!();
     let server = MockServer::start();

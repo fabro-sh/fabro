@@ -158,6 +158,37 @@ pub fn default_for_provider_id(provider: &ProviderId) -> &'static str {
     }
 }
 
+/// Default agent profile for a provider ID.
+#[must_use]
+pub fn default_profile_for_provider_id(provider: &ProviderId) -> AgentProfileKind {
+    get(default_for_provider_id(provider))
+        .expect("default adapter key must be registered")
+        .default_profile
+}
+
+/// Agent-facing provider enum to use for a catalog provider.
+#[must_use]
+pub fn profile_provider_for_provider_id(
+    provider_id: &ProviderId,
+    profile_kind: AgentProfileKind,
+    adapter_key: &str,
+) -> Provider {
+    Provider::from_id(provider_id)
+        .unwrap_or_else(|| profile_provider_for_custom_provider(profile_kind, adapter_key))
+}
+
+fn profile_provider_for_custom_provider(
+    profile_kind: AgentProfileKind,
+    adapter_key: &str,
+) -> Provider {
+    match (profile_kind, adapter_key) {
+        (AgentProfileKind::Anthropic, _) => Provider::Anthropic,
+        (AgentProfileKind::Gemini, _) => Provider::Gemini,
+        (AgentProfileKind::OpenAi, "openai_compatible") => Provider::OpenAiCompatible,
+        (AgentProfileKind::OpenAi, _) => Provider::OpenAi,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,6 +237,46 @@ mod tests {
     #[test]
     fn openai_compatible_uses_openai_profile() {
         assert_eq!(OPENAI_COMPATIBLE.default_profile, AgentProfileKind::OpenAi);
+    }
+
+    #[test]
+    fn default_profile_for_builtin_provider_ids_uses_adapter_metadata() {
+        assert_eq!(
+            default_profile_for_provider_id(&ProviderId::anthropic()),
+            AgentProfileKind::Anthropic
+        );
+        assert_eq!(
+            default_profile_for_provider_id(&ProviderId::openai()),
+            AgentProfileKind::OpenAi
+        );
+        assert_eq!(
+            default_profile_for_provider_id(&ProviderId::gemini()),
+            AgentProfileKind::Gemini
+        );
+    }
+
+    #[test]
+    fn profile_provider_for_provider_id_preserves_builtins() {
+        assert_eq!(
+            profile_provider_for_provider_id(
+                &ProviderId::new("kimi"),
+                AgentProfileKind::OpenAi,
+                OPENAI_COMPATIBLE.key,
+            ),
+            Provider::Kimi
+        );
+    }
+
+    #[test]
+    fn profile_provider_for_custom_provider_maps_openai_compatible_adapter() {
+        assert_eq!(
+            profile_provider_for_custom_provider(AgentProfileKind::OpenAi, OPENAI_COMPATIBLE.key),
+            Provider::OpenAiCompatible
+        );
+        assert_eq!(
+            profile_provider_for_custom_provider(AgentProfileKind::OpenAi, OPENAI.key),
+            Provider::OpenAi
+        );
     }
 
     #[test]
