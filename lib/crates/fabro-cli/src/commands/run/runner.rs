@@ -653,7 +653,7 @@ mod tests {
     use fabro_auth::{AuthCredential, AuthDetails};
     use fabro_config::Storage;
     use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question};
-    use fabro_model::Provider;
+    use fabro_model::ProviderId;
     use fabro_types::run_event::{
         InterviewCompletedProps, InterviewStartedProps, RunCompletedProps, RunControlEffectProps,
         RunFailedProps, RunStatusTransitionProps,
@@ -984,7 +984,7 @@ mod tests {
             .set(
                 "anthropic",
                 &serde_json::to_string(&AuthCredential {
-                    provider: Provider::Anthropic.id(),
+                    provider: ProviderId::anthropic(),
                     details:  AuthDetails::ApiKey {
                         key: "vault-key".to_string(),
                     },

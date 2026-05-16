@@ -307,6 +307,7 @@ fn provider_settings_to_catalog(
     model_catalog::ProviderCatalogSettings {
         display_name:  settings.display_name,
         adapter:       settings.adapter,
+        api_key_url:   settings.api_key_url,
         base_url:      settings.base_url,
         credentials:   settings.credentials,
         extra_headers: settings.extra_headers,
@@ -365,7 +366,6 @@ fn model_features_to_catalog(features: &LlmModelFeatures) -> model_catalog::Sett
         reasoning:        features.reasoning,
         reasoning_effort: features.reasoning_effort,
         prompt_cache:     features.prompt_cache,
-        effort:           features.effort,
     }
 }
 
@@ -705,7 +705,6 @@ context_window = 128000
 tools = true
 vision = false
 reasoning = false
-effort = false
 "#,
             None,
             None,

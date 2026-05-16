@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use fabro_agent::{Sandbox, ToolEnvProvider};
 use fabro_auth::{CliAgentKind, CredentialResolver, CredentialUsage, ResolvedCredential};
-use fabro_model::{Catalog, CredentialRef, Provider};
+use fabro_model::{Catalog, CredentialRef, ProviderId};
 use tokio_util::sync::CancellationToken;
 
 use super::cli::{AgentCli, process_env_var};
@@ -11,7 +11,7 @@ use crate::error::Error;
 use crate::event::{Emitter, RunNoticeCode, RunNoticeLevel};
 
 pub(crate) struct AgentLaunchEnvRequest<'a> {
-    pub provider: Provider,
+    pub provider_id: ProviderId,
     pub cli: AgentCli,
     pub catalog: &'a Catalog,
     pub resolver: Option<&'a CredentialResolver>,
@@ -35,7 +35,7 @@ pub(crate) async fn resolve_agent_launch_env(
     let mut launch_env = if let Some(resolver) = request.resolver {
         let resolved = resolver
             .resolve(
-                request.provider,
+                request.provider_id.clone(),
                 CredentialUsage::CliAgent(cli_agent),
                 request.catalog,
             )
@@ -79,20 +79,13 @@ pub(crate) async fn resolve_agent_launch_env(
         cli_credential.env_vars
     } else {
         let mut env = HashMap::new();
-        let provider_id = request.provider.id();
-        if let Some(provider) = request.catalog.provider(&provider_id) {
+        if let Some(provider) = request.catalog.provider(&request.provider_id) {
             for credential_ref in &provider.credentials {
                 let CredentialRef::Env(name) = credential_ref else {
                     continue;
                 };
                 if let Some(value) = process_env_var(name) {
                     env.insert(name.clone(), value);
-                }
-            }
-        } else {
-            for name in request.provider.api_key_env_vars() {
-                if let Some(value) = process_env_var(name) {
-                    env.insert((*name).to_string(), value);
                 }
             }
         }

@@ -587,7 +587,7 @@ fn build_summary_preamble(
 mod tests {
     use fabro_graphviz::graph::AttrValue;
     use fabro_llm::types::TokenCounts;
-    use fabro_model::{Catalog, ModelRef, Provider};
+    use fabro_model::{Catalog, ModelRef, ProviderId};
 
     use super::*;
     use crate::outcome::{BilledModelUsage, billed_model_usage_from_llm};
@@ -596,7 +596,7 @@ mod tests {
         billed_model_usage_from_llm(
             Catalog::builtin(),
             &ModelRef {
-                provider: Provider::Anthropic.id(),
+                provider: ProviderId::anthropic(),
                 model_id: model.to_string(),
                 speed:    None,
             },
@@ -606,6 +606,7 @@ mod tests {
                 ..TokenCounts::default()
             },
         )
+        .unwrap()
     }
 
     // --- truncate mode ---

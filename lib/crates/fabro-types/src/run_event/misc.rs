@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize, de};
 use serde_json::Value;
 
 use super::ExecOutputTail;
-use crate::CommandTermination;
+use crate::{CommandTermination, PullRequestLink};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InterviewOption {
@@ -376,6 +376,16 @@ pub struct PullRequestCreatedProps {
     pub head_branch: String,
     pub title:       String,
     pub draft:       bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PullRequestLinkedProps {
+    pub pull_request: PullRequestLink,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PullRequestUnlinkedProps {
+    pub pull_request: PullRequestLink,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

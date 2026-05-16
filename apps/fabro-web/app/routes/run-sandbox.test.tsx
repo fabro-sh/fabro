@@ -113,10 +113,36 @@ function sandboxDetails(
     native_state: null,
     region:       null,
     resources:    { cpu_cores: null, memory_bytes: null, disk_bytes: null },
+    network:      networkDetails(),
     labels:       {},
     timestamps:   { created_at: null, last_activity_at: null },
     ...overrides,
   };
+}
+
+function networkDetails(
+  overrides: Partial<SandboxDetails["network"]> = {},
+): SandboxDetails["network"] {
+  return {
+    egress:  networkPolicy("unknown"),
+    ingress: networkPolicy("unknown"),
+    ...overrides,
+  };
+}
+
+function networkPolicy(
+  mode: SandboxDetails["network"]["egress"]["mode"],
+  cidrs: string[] = [],
+): SandboxDetails["network"]["egress"] {
+  return { mode, cidrs };
+}
+
+function textContent(renderer: TestRenderer.ReactTestRenderer): string {
+  return renderer.root
+    .findAll((node) => typeof node.type === "string")
+    .flatMap((node) => node.children)
+    .filter((child): child is string => typeof child === "string")
+    .join(" ");
 }
 
 function renderRoute(initialPath: string = "/runs/run_1/sandbox") {
@@ -176,6 +202,10 @@ describe("RunSandbox route", () => {
         memory_bytes: 4 * 1024 * 1024 * 1024,
         disk_bytes:   undefined,
       },
+      network:           networkDetails({
+        egress:  networkPolicy("open"),
+        ingress: networkPolicy("blocked"),
+      }),
       labels:            { run: "abc" },
       timestamps:        {
         created_at:       "2026-05-09T12:00:00Z",
@@ -188,7 +218,37 @@ describe("RunSandbox route", () => {
       .findAll((node) => node.type === "h3")
       .map((node) => node.children.find((child) => typeof child === "string"))
       .filter((text): text is string => typeof text === "string");
-    expect(panelHeadings).toEqual(["Overview", "Resources", "Labels", "Timestamps"]);
+    expect(panelHeadings).toEqual(["Overview", "Resources", "Network", "Labels", "Timestamps"]);
+    const copy = textContent(renderer);
+    expect(copy).toContain("Open");
+    expect(copy).toContain("Blocked");
+  });
+
+  test("links to the provider dashboard when a sandbox web URL is present", () => {
+    currentDetails = sandboxDetails({
+      sandbox: {
+        provider: "daytona",
+        runtime:  {
+          id:                "ad65029a-2d01-421e-8936-49451653fcd9",
+          working_directory: "/workspace",
+        },
+      },
+      web_url:
+        "https://app.daytona.io/dashboard/sandboxes?sandboxId=ad65029a-2d01-421e-8936-49451653fcd9",
+    });
+    const renderer = renderRoute();
+
+    const providerLinks = renderer.root.findAll(
+      (node) =>
+        node.type === "a" &&
+        node.props.href ===
+          "https://app.daytona.io/dashboard/sandboxes?sandboxId=ad65029a-2d01-421e-8936-49451653fcd9",
+    );
+    expect(providerLinks).toHaveLength(1);
+    expect(providerLinks[0]?.props.target).toBe("_blank");
+    expect(providerLinks[0]?.props.rel).toBe("noopener noreferrer");
+    const linkText = providerLinks[0]?.findByType("span");
+    expect(linkText?.children).toContain("Open in Daytona");
   });
 
   test("renders without crashing when most fields are null", () => {
@@ -230,6 +290,37 @@ describe("RunSandbox route", () => {
         node.children.includes("No labels"),
     );
     expect(noLabelsCopy).toHaveLength(1);
+  });
+
+  test("renders unknown network policies", () => {
+    currentDetails = sandboxDetails({
+      network: networkDetails({
+        egress:  networkPolicy("unknown"),
+        ingress: networkPolicy("unknown"),
+      }),
+    });
+    const renderer = renderRoute();
+
+    const copy = textContent(renderer);
+    expect(copy).toContain("Network");
+    expect(copy).toContain("Egress");
+    expect(copy).toContain("Ingress");
+    expect(copy).toContain("Unknown");
+  });
+
+  test("renders blocked, essentials, and CIDR network policies", () => {
+    currentDetails = sandboxDetails({
+      network: networkDetails({
+        egress:  networkPolicy("cidr_allow_list", ["10.0.0.0/8", "192.168.0.0/16"]),
+        ingress: networkPolicy("essentials_only"),
+      }),
+    });
+    const renderer = renderRoute();
+
+    const copy = textContent(renderer);
+    expect(copy).toContain("CIDR allow list");
+    expect(copy).toContain("10.0.0.0/8, 192.168.0.0/16");
+    expect(copy).toContain("Essentials only");
   });
 
   test("shows the empty state when no sandbox is reported", () => {
@@ -300,7 +391,7 @@ describe("RunSandbox route", () => {
       .findAll((node) => node.type === "h3")
       .map((node) => node.children.find((child) => typeof child === "string"))
       .filter((text): text is string => typeof text === "string");
-    expect(panelHeadings).toEqual(["Overview", "Resources", "Labels", "Timestamps"]);
+    expect(panelHeadings).toEqual(["Overview", "Resources", "Network", "Labels", "Timestamps"]);
 
     const tabs = renderer.root.findAll(
       (node) => node.type === "button" && node.props.role === "tab",

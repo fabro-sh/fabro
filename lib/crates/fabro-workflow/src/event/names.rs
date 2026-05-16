@@ -139,6 +139,8 @@ pub fn event_name(event: &Event) -> &'static str {
         Event::AgentAcpCancelled { .. } => "agent.acp.cancelled",
         Event::AgentAcpTimedOut { .. } => "agent.acp.timed_out",
         Event::PullRequestCreated { .. } => "pull_request.created",
+        Event::PullRequestLinked { .. } => "pull_request.linked",
+        Event::PullRequestUnlinked { .. } => "pull_request.unlinked",
         Event::PullRequestFailed { .. } => "pull_request.failed",
         Event::DevcontainerResolved { .. } => "devcontainer.resolved",
         Event::DevcontainerLifecycleStarted { .. } => "devcontainer.lifecycle.started",

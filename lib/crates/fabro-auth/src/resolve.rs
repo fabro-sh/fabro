@@ -2,9 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use fabro_model::catalog::CatalogProvider;
-use fabro_model::{
-    ApiKeyHeaderPolicy, Catalog, CredentialRef, HeaderValueRef, Provider, ProviderId, adapter,
-};
+use fabro_model::{ApiKeyHeaderPolicy, Catalog, CredentialRef, HeaderValueRef, ProviderId};
 use fabro_static::EnvVars;
 use fabro_vault::Vault;
 use shlex::try_quote;
@@ -46,25 +44,25 @@ pub struct ApiCredential {
 impl ApiCredential {
     /// Build an `ApiCredential` from an API key using the supplied catalog for
     /// auth header policy and provider base URL.
-    #[must_use]
-    pub fn from_api_key(provider: impl Into<ProviderId>, key: String, catalog: &Catalog) -> Self {
+    pub fn from_api_key(
+        provider: impl Into<ProviderId>,
+        key: String,
+        catalog: &Catalog,
+    ) -> Result<Self, ResolveError> {
         let provider_id = provider.into();
-        let (auth_header, base_url) = match catalog.provider(&provider_id) {
-            Some(provider) => (
-                auth_header_for_catalog_provider(provider, key),
-                provider.base_url.clone(),
-            ),
-            None => (default_auth_header_for_provider(&provider_id, key), None),
-        };
-        Self {
-            provider: provider_id,
-            auth_header: Some(auth_header),
+        let provider = catalog
+            .provider(&provider_id)
+            .ok_or_else(|| ResolveError::NotConfigured(provider_id.clone()))?;
+        let auth_header = auth_header_for_catalog_provider(provider, key);
+        Ok(Self {
+            provider:      provider_id,
+            auth_header:   Some(auth_header),
             extra_headers: HashMap::new(),
-            base_url,
-            codex_mode: false,
-            org_id: None,
-            project_id: None,
-        }
+            base_url:      provider.base_url.clone(),
+            codex_mode:    false,
+            org_id:        None,
+            project_id:    None,
+        })
     }
 }
 
@@ -79,17 +77,8 @@ pub fn build_api_key_header(policy: ApiKeyHeaderPolicy, key: String) -> ApiKeyHe
     }
 }
 
-fn default_auth_header_for_provider(provider: &ProviderId, key: String) -> ApiKeyHeader {
-    let policy = match Provider::from_id(provider) {
-        Some(Provider::Anthropic) => ApiKeyHeaderPolicy::Custom { name: "x-api-key" },
-        _ => ApiKeyHeaderPolicy::Bearer,
-    };
-    build_api_key_header(policy, key)
-}
-
 fn auth_header_for_catalog_provider(provider: &CatalogProvider, key: String) -> ApiKeyHeader {
-    let policy = adapter::get(&provider.adapter)
-        .map_or(ApiKeyHeaderPolicy::Bearer, |adapter| adapter.api_key_header);
+    let policy = provider.adapter.metadata().api_key_header;
     build_api_key_header(policy, key)
 }
 
@@ -121,7 +110,7 @@ pub enum ResolveError {
 
 #[must_use]
 pub fn auth_issue_message(provider: &ProviderId, err: &ResolveError) -> String {
-    let provider_name = Provider::display_name_for_id(provider);
+    let provider_name = provider.display_name();
     match err {
         ResolveError::NotConfigured(_) => {
             format!("{provider_name} is not configured")
@@ -239,7 +228,7 @@ impl CredentialResolver {
         provider: &CatalogProvider,
         usage: CredentialUsage,
     ) -> Result<AuthCredential, ResolveError> {
-        if provider.id == Provider::OpenAi.id()
+        if provider.id == ProviderId::openai()
             && usage == CredentialUsage::CliAgent(CliAgentKind::Codex)
         {
             for credential_id in ["openai_codex", "openai"] {
@@ -312,17 +301,11 @@ impl CredentialResolver {
         provider: &ProviderId,
         catalog: &Catalog,
     ) -> Option<String> {
-        let env_base_url = match Provider::from_id(provider) {
-            Some(Provider::Anthropic) => {
-                self.lookup_env_or_vault(vault, EnvVars::ANTHROPIC_BASE_URL)
-            }
-            Some(Provider::OpenAi) => self.lookup_env_or_vault(vault, EnvVars::OPENAI_BASE_URL),
-            Some(Provider::Gemini) => self.lookup_env_or_vault(vault, EnvVars::GEMINI_BASE_URL),
-            Some(Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception)
-            | None => None,
-            Some(Provider::OpenAiCompatible) => {
-                self.lookup_env_or_vault(vault, EnvVars::OPENAI_COMPATIBLE_BASE_URL)
-            }
+        let env_base_url = match provider.as_str() {
+            ProviderId::ANTHROPIC => self.lookup_env_or_vault(vault, EnvVars::ANTHROPIC_BASE_URL),
+            ProviderId::OPENAI => self.lookup_env_or_vault(vault, EnvVars::OPENAI_BASE_URL),
+            ProviderId::GEMINI => self.lookup_env_or_vault(vault, EnvVars::GEMINI_BASE_URL),
+            _ => None,
         };
         env_base_url.or_else(|| {
             catalog
@@ -364,10 +347,10 @@ impl CredentialResolver {
         let base_url = self.provider_base_url_for_catalog(vault, &credential.provider, catalog);
         match &credential.details {
             AuthDetails::ApiKey { key } => {
-                let auth_header = catalog.provider(&credential.provider).map_or_else(
-                    || default_auth_header_for_provider(&credential.provider, key.clone()),
-                    |provider| auth_header_for_catalog_provider(provider, key.clone()),
-                );
+                let provider = catalog
+                    .provider(&credential.provider)
+                    .ok_or_else(|| ResolveError::NotConfigured(credential.provider.clone()))?;
+                let auth_header = auth_header_for_catalog_provider(provider, key.clone());
                 let mut cred = ApiCredential {
                     provider:      credential.provider.clone(),
                     auth_header:   Some(auth_header),
@@ -380,7 +363,7 @@ impl CredentialResolver {
                 cred.base_url = base_url;
                 cred.extra_headers =
                     self.resolved_extra_headers_for_catalog(vault, &credential.provider, catalog)?;
-                if credential.provider == Provider::OpenAi.id() {
+                if credential.provider == ProviderId::openai() {
                     cred.org_id = self.lookup_env_or_vault(vault, EnvVars::OPENAI_ORG_ID);
                     cred.project_id = self.lookup_env_or_vault(vault, EnvVars::OPENAI_PROJECT_ID);
                 }
@@ -435,14 +418,14 @@ impl CredentialResolver {
         catalog: &Catalog,
     ) -> CliCredential {
         let mut env_vars = HashMap::new();
-        let provider = Provider::from_id(&credential.provider);
-        let login_command = match (provider, &credential.details, kind) {
-            (Some(Provider::OpenAi), AuthDetails::ApiKey { key }, CliAgentKind::Codex) => {
+        let is_openai = credential.provider == ProviderId::openai();
+        let login_command = match (is_openai, &credential.details, kind) {
+            (true, AuthDetails::ApiKey { key }, CliAgentKind::Codex) => {
                 env_vars.insert(EnvVars::OPENAI_API_KEY.to_string(), key.clone());
                 Some(codex_login_command(key))
             }
             (
-                Some(Provider::OpenAi),
+                true,
                 AuthDetails::CodexOAuth {
                     tokens, account_id, ..
                 },
@@ -530,10 +513,10 @@ mod tests {
     use crate::credential::{OAuthConfig, OAuthTokens};
     use crate::vault_ext::vault_get_credential;
 
-    fn api_key_credential(provider: Provider, key: &str) -> AuthCredential {
+    fn api_key_credential(provider: ProviderId, key: &str) -> AuthCredential {
         AuthCredential {
-            provider: provider.id(),
-            details:  AuthDetails::ApiKey {
+            provider,
+            details: AuthDetails::ApiKey {
                 key: key.to_string(),
             },
         }
@@ -541,7 +524,7 @@ mod tests {
 
     fn oauth_credential(token_url: String, expires_at: chrono::DateTime<Utc>) -> AuthCredential {
         AuthCredential {
-            provider: Provider::OpenAi.id(),
+            provider: ProviderId::openai(),
             details:  AuthDetails::CodexOAuth {
                 tokens:     OAuthTokens {
                     access_token: "expired-access".to_string(),
@@ -581,14 +564,14 @@ mod tests {
         vault_set_credential(
             &mut vault,
             "openai",
-            &api_key_credential(Provider::OpenAi, "vault-key"),
+            &api_key_credential(ProviderId::openai(), "vault-key"),
         )
         .unwrap();
         let resolver = test_resolver(vault, Arc::new(|_| Some("env-key".to_string())));
         let catalog = default_catalog();
 
         let resolved = resolver
-            .resolve(Provider::OpenAi, CredentialUsage::ApiRequest, &catalog)
+            .resolve(ProviderId::openai(), CredentialUsage::ApiRequest, &catalog)
             .await
             .unwrap();
 
@@ -618,7 +601,7 @@ mod tests {
         let catalog = default_catalog();
 
         let resolved = resolver
-            .resolve(Provider::OpenAi, CredentialUsage::ApiRequest, &catalog)
+            .resolve(ProviderId::openai(), CredentialUsage::ApiRequest, &catalog)
             .await
             .unwrap();
 
@@ -644,13 +627,17 @@ mod tests {
         let catalog = default_catalog();
 
         let err = resolver
-            .resolve(Provider::Anthropic, CredentialUsage::ApiRequest, &catalog)
+            .resolve(
+                ProviderId::anthropic(),
+                CredentialUsage::ApiRequest,
+                &catalog,
+            )
             .await
             .unwrap_err();
 
         assert!(matches!(
             err,
-            ResolveError::NotConfigured(provider) if provider == Provider::Anthropic.id()
+            ResolveError::NotConfigured(provider) if provider == ProviderId::anthropic()
         ));
     }
 
@@ -661,14 +648,18 @@ mod tests {
         vault_set_credential(
             &mut vault,
             "anthropic",
-            &api_key_credential(Provider::Anthropic, "anthropic-key"),
+            &api_key_credential(ProviderId::anthropic(), "anthropic-key"),
         )
         .unwrap();
         let resolver = test_resolver(vault, Arc::new(|_| None));
         let catalog = default_catalog();
 
         let ResolvedCredential::Api(api) = resolver
-            .resolve(Provider::Anthropic, CredentialUsage::ApiRequest, &catalog)
+            .resolve(
+                ProviderId::anthropic(),
+                CredentialUsage::ApiRequest,
+                &catalog,
+            )
             .await
             .unwrap()
         else {
@@ -685,17 +676,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn openai_compatible_resolves_with_openai_base_url_from_vault() {
+    async fn custom_openai_compatible_resolves_with_catalog_base_url_from_vault() {
         let catalog = catalog_with(
             r#"
-[providers.openai_compatible]
-display_name = "OpenAI Compatible"
+[providers.acme]
+display_name = "Acme"
 adapter = "openai_compatible"
 base_url = "https://default.example.com/v1"
-credentials = ["credential:openai_compatible"]
+credentials = ["credential:acme"]
 
 [models."compat-model"]
-provider = "openai_compatible"
+provider = "acme"
 display_name = "Compat Model"
 family = "openai"
 default = true
@@ -707,29 +698,20 @@ context_window = 128000
 tools = true
 vision = false
 reasoning = false
-effort = false
 "#,
         );
         let dir = tempfile::tempdir().unwrap();
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
         vault_set_credential(
             &mut vault,
-            "openai_compatible",
-            &api_key_credential(Provider::OpenAiCompatible, "compat-key"),
+            "acme",
+            &api_key_credential(ProviderId::new("acme"), "compat-key"),
         )
         .unwrap();
-        vault
-            .set(
-                "OPENAI_COMPATIBLE_BASE_URL",
-                "https://compat.example.com/v1",
-                fabro_vault::SecretType::Environment,
-                None,
-            )
-            .unwrap();
         let resolver = test_resolver(vault, Arc::new(|_| None));
         let resolved = resolver
             .resolve(
-                Provider::OpenAiCompatible,
+                ProviderId::new("acme"),
                 CredentialUsage::ApiRequest,
                 &catalog,
             )
@@ -745,7 +727,7 @@ effort = false
         );
         assert_eq!(
             api.base_url.as_deref(),
-            Some("https://compat.example.com/v1")
+            Some("https://default.example.com/v1")
         );
     }
 
@@ -767,7 +749,7 @@ effort = false
 
         let ResolvedCredential::Cli(cli) = resolver
             .resolve(
-                Provider::OpenAi,
+                ProviderId::openai(),
                 CredentialUsage::CliAgent(CliAgentKind::Codex),
                 &catalog,
             )
@@ -799,7 +781,7 @@ effort = false
         vault_set_credential(
             &mut vault,
             "openai",
-            &api_key_credential(Provider::OpenAi, "openai-key"),
+            &api_key_credential(ProviderId::openai(), "openai-key"),
         )
         .unwrap();
         let resolver = test_resolver(vault, Arc::new(|_| None));
@@ -807,7 +789,7 @@ effort = false
 
         let ResolvedCredential::Cli(cli) = resolver
             .resolve(
-                Provider::OpenAi,
+                ProviderId::openai(),
                 CredentialUsage::CliAgent(CliAgentKind::Codex),
                 &catalog,
             )
@@ -851,7 +833,7 @@ effort = false
         vault_set_credential(
             &mut vault,
             "openai",
-            &api_key_credential(Provider::OpenAi, "openai-key"),
+            &api_key_credential(ProviderId::openai(), "openai-key"),
         )
         .unwrap();
         let resolver = test_resolver(vault, Arc::new(|_| None));
@@ -859,7 +841,7 @@ effort = false
 
         let ResolvedCredential::Cli(cli) = resolver
             .resolve(
-                Provider::OpenAi,
+                ProviderId::openai(),
                 CredentialUsage::CliAgent(CliAgentKind::Codex),
                 &catalog,
             )
@@ -901,7 +883,7 @@ effort = false
         vault_set_credential(
             &mut vault,
             "openai",
-            &api_key_credential(Provider::OpenAi, "vault-key"),
+            &api_key_credential(ProviderId::openai(), "vault-key"),
         )
         .unwrap();
         vault
@@ -919,7 +901,7 @@ effort = false
         let catalog = default_catalog();
 
         let ResolvedCredential::Api(api) = resolver
-            .resolve(Provider::OpenAi, CredentialUsage::ApiRequest, &catalog)
+            .resolve(ProviderId::openai(), CredentialUsage::ApiRequest, &catalog)
             .await
             .unwrap()
         else {
@@ -936,7 +918,7 @@ effort = false
         vault_set_credential(
             &mut vault,
             "openai",
-            &api_key_credential(Provider::OpenAi, "vault-key"),
+            &api_key_credential(ProviderId::openai(), "vault-key"),
         )
         .unwrap();
         let resolver = test_resolver(vault, Arc::new(|_| None));
@@ -944,7 +926,7 @@ effort = false
         let catalog = default_catalog();
 
         assert_eq!(resolver.configured_providers(&vault, &catalog), vec![
-            Provider::OpenAi.id()
+            ProviderId::openai()
         ]);
     }
 
@@ -971,7 +953,6 @@ context_window = 128000
 tools = true
 vision = false
 reasoning = false
-effort = false
 "#,
         );
         let dir = tempfile::tempdir().unwrap();
@@ -1017,7 +998,7 @@ effort = false
         let catalog = default_catalog();
 
         assert_eq!(resolver.configured_providers(&vault, &catalog), vec![
-            Provider::OpenAi.id()
+            ProviderId::openai()
         ]);
     }
 
@@ -1062,7 +1043,7 @@ effort = false
 
         let ResolvedCredential::Cli(cli) = resolver
             .resolve(
-                Provider::OpenAi,
+                ProviderId::openai(),
                 CredentialUsage::CliAgent(CliAgentKind::Codex),
                 &catalog,
             )
@@ -1111,7 +1092,7 @@ effort = false
 
         let err = resolver
             .resolve(
-                Provider::OpenAi,
+                ProviderId::openai(),
                 CredentialUsage::CliAgent(CliAgentKind::Codex),
                 &catalog,
             )
@@ -1120,27 +1101,27 @@ effort = false
 
         assert!(matches!(
             err,
-            ResolveError::RefreshTokenMissing(provider) if provider == Provider::OpenAi.id()
+            ResolveError::RefreshTokenMissing(provider) if provider == ProviderId::openai()
         ));
     }
 
     #[test]
     fn auth_issue_message_formats_refresh_token_missing() {
         let message = auth_issue_message(
-            &Provider::OpenAi.id(),
-            &ResolveError::RefreshTokenMissing(Provider::OpenAi.id()),
+            &ProviderId::openai(),
+            &ResolveError::RefreshTokenMissing(ProviderId::openai()),
         );
 
         assert_eq!(
             message,
-            "OpenAI requires re-authentication: refresh token missing"
+            "openai requires re-authentication: refresh token missing"
         );
     }
 
     #[test]
     fn api_credential_debug_redacts_secret_material() {
         let credential = ApiCredential {
-            provider:      Provider::OpenAi.id(),
+            provider:      ProviderId::openai(),
             auth_header:   Some(ApiKeyHeader::Bearer("sk-test".to_string())),
             extra_headers: HashMap::new(),
             base_url:      None,

@@ -18,7 +18,7 @@ export function PullRequestChip({
   const content = (
     <>
       <GitPullRequestIcon className={iconClassName} />
-      #{number}
+      {`#${number}`}
       {children}
     </>
   );

@@ -6,7 +6,7 @@
 use fabro_acp::test_support::fake_acp_agent_script;
 use fabro_auth::{AuthCredential, AuthDetails};
 use fabro_config::Storage;
-use fabro_model::Provider;
+use fabro_model::ProviderId;
 use fabro_test::test_context;
 use fabro_types::EventBody;
 use fabro_vault::{SecretType, Vault};
@@ -164,7 +164,7 @@ fn seed_openai_vault(storage_dir: &std::path::Path) {
         .set(
             "openai",
             &serde_json::to_string(&AuthCredential {
-                provider: Provider::OpenAi.id(),
+                provider: ProviderId::openai(),
                 details:  AuthDetails::ApiKey {
                     key: "test-openai-key".to_string(),
                 },

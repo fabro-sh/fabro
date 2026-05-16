@@ -66,9 +66,7 @@ fn sample_usage() -> BilledModelUsage {
                     "output_tokens": 45
                 }
             },
-            "facts": {
-                "provider": "open_ai"
-            }
+            "facts": { "algorithm": "openai" }
         },
         "total_usd_micros": 168
     }))

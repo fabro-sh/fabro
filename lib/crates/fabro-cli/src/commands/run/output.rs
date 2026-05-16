@@ -139,7 +139,7 @@ pub(crate) async fn print_run_summary_with_client(
     let pr_url = run_state
         .pull_request
         .as_ref()
-        .map(|record: &PullRequestRecord| record.html_url.clone());
+        .map(PullRequestRecord::html_url);
     let Some(conclusion) = conclusion else {
         return Ok(());
     };

@@ -239,15 +239,16 @@ impl RunProjectionReducer for RunProjection {
             }
             EventBody::PullRequestCreated(props) => {
                 self.pull_request = Some(PullRequestRecord {
-                    provider:    "github".to_string(),
-                    html_url:    props.pr_url.clone(),
-                    number:      props.pr_number,
-                    owner:       props.owner.clone(),
-                    repo:        props.repo.clone(),
-                    base_branch: props.base_branch.clone(),
-                    head_branch: props.head_branch.clone(),
-                    title:       props.title.clone(),
+                    owner:  props.owner.clone(),
+                    repo:   props.repo.clone(),
+                    number: props.pr_number,
                 });
+            }
+            EventBody::PullRequestLinked(props) => {
+                self.pull_request = Some(props.pull_request.clone());
+            }
+            EventBody::PullRequestUnlinked(_) => {
+                self.pull_request = None;
             }
             EventBody::InterviewStarted(props) => {
                 if props.question_id.is_empty() {
@@ -952,8 +953,9 @@ mod tests {
     use fabro_types::{
         BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint, CheckpointRecord,
         CommandTermination, EventBody, FailureCategory, FailureDetail, FailureReason, Graph,
-        Outcome, QuestionType, RunBlobId, RunControlAction, RunDiff, RunEvent, RunSpec, RunStatus,
-        StageOutcome, StageState, SuccessReason, WorkflowSettings, first_event_seq, fixtures,
+        Outcome, PullRequestRecord, QuestionType, RunBlobId, RunControlAction, RunDiff, RunEvent,
+        RunSpec, RunStatus, StageOutcome, StageState, SuccessReason, WorkflowSettings,
+        first_event_seq, fixtures,
     };
     use serde_json::json;
 
@@ -999,9 +1001,7 @@ mod tests {
                         "output_tokens": output_tokens
                     }
                 },
-                "facts": {
-                    "provider": "open_ai"
-                }
+                "facts": { "algorithm": "openai" }
             },
             "total_usd_micros": input_tokens + output_tokens
         }))
@@ -2494,13 +2494,83 @@ mod tests {
             .as_ref()
             .expect("projection should store pull request");
         assert_eq!(
-            pull_request.html_url,
+            pull_request.html_url(),
             "https://github.com/fabro-sh/fabro/pull/123"
         );
         assert_eq!(pull_request.number, 123);
 
         let summary = build_summary(&state, &fixtures::RUN_1);
         assert_eq!(summary.pull_request, state.pull_request);
+    }
+
+    #[test]
+    fn pull_request_linked_replaces_and_unlinked_clears_projection() {
+        use fabro_types::run_event::{
+            PullRequestCreatedProps, PullRequestLinkedProps, PullRequestUnlinkedProps,
+        };
+
+        let mut state = running_projection();
+        let github_pull_request = PullRequestRecord {
+            owner:  "fabro-sh".to_string(),
+            repo:   "fabro".to_string(),
+            number: 123,
+        };
+        let replacement_pull_request = PullRequestRecord {
+            owner:  "acme".to_string(),
+            repo:   "widgets".to_string(),
+            number: 42,
+        };
+
+        state
+            .apply_event(&test_event(
+                1,
+                EventBody::PullRequestCreated(PullRequestCreatedProps {
+                    pr_url:      github_pull_request.html_url(),
+                    pr_number:   github_pull_request.number,
+                    owner:       github_pull_request.owner.clone(),
+                    repo:        github_pull_request.repo.clone(),
+                    base_branch: "main".to_string(),
+                    head_branch: "fabro/run/demo".to_string(),
+                    title:       "Add run PR chip".to_string(),
+                    draft:       false,
+                }),
+                None,
+            ))
+            .unwrap();
+        assert_eq!(state.pull_request, Some(github_pull_request.clone()));
+
+        state
+            .apply_event(&test_event(
+                2,
+                EventBody::PullRequestLinked(PullRequestLinkedProps {
+                    pull_request: replacement_pull_request.clone(),
+                }),
+                None,
+            ))
+            .unwrap();
+        assert_eq!(state.pull_request, Some(replacement_pull_request.clone()));
+
+        state
+            .apply_event(&test_event(
+                3,
+                EventBody::PullRequestUnlinked(PullRequestUnlinkedProps {
+                    pull_request: replacement_pull_request,
+                }),
+                None,
+            ))
+            .unwrap();
+        assert_eq!(state.pull_request, None);
+
+        state
+            .apply_event(&test_event(
+                4,
+                EventBody::PullRequestLinked(PullRequestLinkedProps {
+                    pull_request: github_pull_request.clone(),
+                }),
+                None,
+            ))
+            .unwrap();
+        assert_eq!(state.pull_request, Some(github_pull_request));
     }
 
     #[test]
@@ -2748,7 +2818,7 @@ mod tests {
                         "cache_write_tokens": 4
                     }
                 },
-                "facts": { "provider": "open_ai" }
+                "facts": { "algorithm": "openai" }
             },
             "total_usd_micros": 123
         }))

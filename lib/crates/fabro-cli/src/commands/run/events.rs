@@ -766,6 +766,18 @@ fn format_event_pretty_value(envelope: &serde_json::Value, styles: &Styles) -> O
                 url,
             ))
         }
+        "pull_request.linked" => Some(format_pull_request_record_event(
+            envelope,
+            styles,
+            &ts,
+            "PR linked:",
+        )),
+        "pull_request.unlinked" => Some(format_pull_request_record_event(
+            envelope,
+            styles,
+            &ts,
+            "PR unlinked:",
+        )),
         "pull_request.failed" => {
             let error = prop_str_field(envelope, "error").unwrap_or("unknown error");
             Some(format!(
@@ -802,6 +814,24 @@ fn failure_message(failure: &serde_json::Value) -> Option<&serde_json::Value> {
         .get("detail")
         .and_then(|detail| detail.get("message"))
         .or_else(|| failure.get("message"))
+}
+
+fn format_pull_request_record_event(
+    envelope: &serde_json::Value,
+    styles: &Styles,
+    ts: &str,
+    label: &str,
+) -> String {
+    let url = prop_field(envelope, "pull_request")
+        .and_then(|record| record.get("html_url"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("?");
+    format!(
+        "{} {} {}",
+        styles.dim.apply_to(ts),
+        styles.bold.apply_to(label),
+        url,
+    )
 }
 
 fn format_timestamp(ts: &str) -> String {
@@ -1124,6 +1154,26 @@ mod tests {
         let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"pull_request.created","properties":{"pr_url":"https://github.com/owner/repo/pull/42","pr_number":42,"draft":true}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("Draft PR:"), "got: {result}");
+    }
+
+    #[test]
+    fn pretty_pull_request_linked() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"pull_request.linked","properties":{"pull_request":{"owner":"owner","repo":"repo","number":42,"html_url":"https://github.com/owner/repo/pull/42"}}}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("PR linked:"), "got: {result}");
+        assert!(
+            result.contains("https://github.com/owner/repo/pull/42"),
+            "got: {result}"
+        );
+    }
+
+    #[test]
+    fn pretty_pull_request_unlinked() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"pull_request.unlinked","properties":{"pull_request":{"owner":"owner","repo":"repo","number":42,"html_url":"https://github.com/owner/repo/pull/42"}}}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("PR unlinked:"), "got: {result}");
     }
 
     #[test]

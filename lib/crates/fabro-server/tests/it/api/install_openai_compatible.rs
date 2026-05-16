@@ -6,7 +6,7 @@ use tower::ServiceExt;
 use crate::helpers::response_json;
 
 #[tokio::test]
-async fn install_llm_endpoints_reject_openai_compatible_in_v1() {
+async fn install_llm_endpoints_reject_non_catalog_openai_compatible_provider() {
     let app = build_install_router(InstallAppState::for_test("test-install-token"));
 
     let test_response = app
@@ -32,7 +32,7 @@ async fn install_llm_endpoints_reject_openai_compatible_in_v1() {
     .await;
     assert_eq!(
         test_body["errors"][0]["detail"],
-        "openai_compatible is not supported by install in v1"
+        "provider 'openai_compatible' is not configured in the model catalog"
     );
 
     let put_response = app
@@ -57,6 +57,6 @@ async fn install_llm_endpoints_reject_openai_compatible_in_v1() {
     .await;
     assert_eq!(
         put_body["errors"][0]["detail"],
-        "openai_compatible is not supported by install in v1"
+        "provider 'openai_compatible' is not configured in the model catalog"
     );
 }

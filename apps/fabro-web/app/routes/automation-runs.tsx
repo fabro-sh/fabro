@@ -56,7 +56,7 @@ function RunRow({ run }: { run: RunWithStatus }) {
       </Link>
 
       <span className="inline-flex items-center justify-end gap-1.5 font-mono text-xs text-fg-muted">
-        {run.number != null && (
+        {run.pullRequestUrl && run.number != null && (
           <PullRequestChip number={run.number} url={run.pullRequestUrl}>
             {run.checks != null && <span className={`size-1.5 rounded-full ${ciConfig[deriveCiStatus(run.checks)].dot}`} />}
           </PullRequestChip>

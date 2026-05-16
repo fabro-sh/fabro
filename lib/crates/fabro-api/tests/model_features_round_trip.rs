@@ -16,7 +16,6 @@ fn model_features_json_matches_openapi_shape() {
         reasoning:        true,
         reasoning_effort: ReasoningEffortFeature::Levels,
         prompt_cache:     false,
-        effort:           true,
     };
 
     let json = serde_json::to_value(&features).unwrap();
@@ -25,7 +24,6 @@ fn model_features_json_matches_openapi_shape() {
     assert_eq!(json["reasoning"], true);
     assert_eq!(json["reasoning_effort"], "levels");
     assert_eq!(json["prompt_cache"], false);
-    assert_eq!(json["effort"], true);
 
     let round_trip: ApiModelFeatures = serde_json::from_value(json).unwrap();
     assert_eq!(round_trip, features);

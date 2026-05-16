@@ -8,7 +8,6 @@ use fabro_agent::Sandbox;
 use fabro_auth::{CredentialSource, EnvCredentialSource};
 use fabro_graphviz::graph::Graph as GvGraph;
 use fabro_model::Catalog;
-use fabro_model::catalog::LlmCatalogSettings;
 use fabro_store::{ArtifactStore, Database, RunProjection};
 use object_store::local::LocalFileSystem;
 
@@ -162,14 +161,12 @@ async fn initialized(
                     sandbox,
                     options.hook_runner,
                     run_options.cancel_token.clone(),
-                    fabro_llm::Provider::Anthropic,
+                    fabro_model::ProviderId::anthropic(),
+                    fabro_model::AgentProfileKind::Anthropic,
                     options
                         .llm_source
                         .unwrap_or_else(|| Arc::new(EnvCredentialSource::new())),
-                    Arc::new(
-                        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-                            .expect("default catalog should build"),
-                    ),
+                    Arc::new(Catalog::from_builtin().expect("default catalog should build")),
                     Arc::new(SandboxGitRuntime::new()),
                     Arc::new(RunMetadataRuntime::new()),
                     None,

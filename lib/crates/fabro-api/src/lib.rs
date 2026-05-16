@@ -16,7 +16,7 @@ mod generated {
 pub mod types {
     pub use fabro_model::{
         Model, ModelCosts, ModelFeatures, ModelLimits, ModelRef as BillingModelRef, ModelTestMode,
-        Provider, ReasoningEffortFeature, Speed as BillingSpeed,
+        ReasoningEffortFeature, Speed as BillingSpeed,
     };
     pub use fabro_types::settings::server::{
         GithubIntegrationSettings, GithubIntegrationStrategy, IntegrationWebhooksSettings,
@@ -36,12 +36,14 @@ pub mod types {
         DirtyStatus, EventEnvelope, ExecOutputTail, FailureCategory, FailureDetail,
         FailureSignature, GitContext, IdpIdentity, InterviewOption, InterviewQuestionRecord,
         PendingInterviewRecord, PreRunPushOutcome, Principal, PullRequest, PullRequestDetails,
-        QuestionType, RepositoryRef, Run, RunClientProvenance, RunEvent, RunFailure, RunProjection,
-        RunProvenance, RunSandbox, RunSandboxRuntime, RunServerProvenance, SandboxDetails,
-        SandboxProvider, SandboxResources, SandboxService, SandboxServiceListResponse,
-        SandboxState, SandboxTimestamps, SecretMetadata, SecretType, ServerSettings,
-        StageCompletion, StageHandler, StageOutcome, StageProjection, StageState, SystemActorKind,
-        UserPrincipal, WorkflowSettings,
+        PullRequestDetailsStatus, PullRequestDetailsUnavailableReason, PullRequestLink,
+        PullRequestMeta, PullRequestResponse, QuestionType, RepositoryRef, Run,
+        RunClientProvenance, RunEvent, RunFailure, RunProjection, RunProvenance, RunSandbox,
+        RunSandboxRuntime, RunServerProvenance, SandboxDetails, SandboxNetwork,
+        SandboxNetworkPolicy, SandboxNetworkPolicyMode, SandboxProvider, SandboxResources,
+        SandboxService, SandboxServiceListResponse, SandboxState, SandboxTimestamps,
+        SecretMetadata, SecretType, ServerSettings, StageCompletion, StageHandler, StageOutcome,
+        StageProjection, StageState, SystemActorKind, UserPrincipal, WorkflowSettings,
     };
 
     pub use crate::generated::types::*;

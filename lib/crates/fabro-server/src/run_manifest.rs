@@ -1313,7 +1313,7 @@ fn report_to_api(report: &CheckReport) -> types::PreflightCheckReport {
 
 #[cfg(test)]
 mod tests {
-    use fabro_model::Provider;
+    use fabro_model::ProviderId;
     use fabro_model::catalog::LlmCatalogSettings;
 
     use super::*;
@@ -1369,7 +1369,7 @@ mod tests {
     }
 
     fn test_catalog() -> Arc<Catalog> {
-        Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap())
+        Arc::new(Catalog::from_builtin().unwrap())
     }
 
     fn manifest_workflow() -> types::ManifestWorkflow {
@@ -1436,7 +1436,7 @@ enabled = {clone_enabled}
             prepared.settings.clone(),
             validated.graph(),
             Catalog::builtin(),
-            &[Provider::Anthropic.id()],
+            &[ProviderId::anthropic()],
         )
         .run;
 
@@ -2100,7 +2100,7 @@ provider = "daytona"
             .set(
                 "openai",
                 &serde_json::to_string(&fabro_auth::AuthCredential {
-                    provider: Provider::OpenAi.id(),
+                    provider: ProviderId::openai(),
                     details:  fabro_auth::AuthDetails::ApiKey {
                         key: "test-openai-key".to_string(),
                     },
@@ -2196,7 +2196,7 @@ digraph Demo {
 
     #[tokio::test]
     async fn preflight_resolves_model_aliases_from_app_state_catalog() {
-        let llm_catalog_settings: fabro_model::catalog::LlmCatalogSettings = toml::from_str(
+        let llm_catalog_settings: LlmCatalogSettings = toml::from_str(
             r#"
 [providers.acme]
 display_name = "Acme"
@@ -2218,7 +2218,6 @@ context_window = 128000
 tools = true
 vision = false
 reasoning = false
-effort = false
 "#,
         )
         .expect("catalog fixture should parse");

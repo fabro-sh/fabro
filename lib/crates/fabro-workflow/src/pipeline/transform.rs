@@ -61,7 +61,6 @@ mod tests {
 
     use fabro_graphviz::graph::AttrValue;
     use fabro_model::Catalog;
-    use fabro_model::catalog::LlmCatalogSettings;
 
     use super::*;
     use crate::file_resolver::FilesystemFileResolver;
@@ -75,7 +74,7 @@ mod tests {
     }
 
     fn test_catalog() -> Arc<Catalog> {
-        Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap())
+        Arc::new(Catalog::from_builtin().unwrap())
     }
 
     fn transform_options() -> TransformOptions {

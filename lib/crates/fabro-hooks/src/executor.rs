@@ -726,7 +726,6 @@ impl HookExecutor for HookExecutorImpl {
 #[cfg(test)]
 mod tests {
     use fabro_auth::{CredentialSource, EnvCredentialSource};
-    use fabro_model::catalog::LlmCatalogSettings;
     use fabro_types::fixtures;
     use fabro_util::env::TestEnv;
 
@@ -749,7 +748,7 @@ mod tests {
     }
 
     fn test_catalog() -> Arc<Catalog> {
-        Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap())
+        Arc::new(Catalog::from_builtin().unwrap())
     }
 
     fn test_http_client() -> fabro_http::HttpClient {

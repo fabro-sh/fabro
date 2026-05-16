@@ -105,7 +105,7 @@ function makeRunSummary(
     },
     billing:          null,
     diff:             diffSummary,
-    pull_request:     pullRequest ? { provider: "github", ...pullRequest } : null,
+    pull_request:     pullRequest,
     current_question: null,
     superseded_by:    null,
     links:            { web: null },
@@ -449,13 +449,10 @@ describe("RunDetail full-height child routes", () => {
     const renderer = await renderRunDetail({
       initialEntry: "/runs/run_1",
       pullRequest: {
-        html_url: "https://github.com/fabro-sh/fabro/pull/123",
-        number: 123,
         owner: "fabro-sh",
         repo: "fabro",
-        base_branch: "main",
-        head_branch: "fabro/run/demo",
-        title: "Add run PR chip",
+        number: 123,
+        html_url: "https://github.com/fabro-sh/fabro/pull/123",
       },
     });
 

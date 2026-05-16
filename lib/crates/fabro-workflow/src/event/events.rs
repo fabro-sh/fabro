@@ -648,6 +648,12 @@ pub enum Event {
         title:       String,
         draft:       bool,
     },
+    PullRequestLinked {
+        pull_request: PullRequestRecord,
+    },
+    PullRequestUnlinked {
+        pull_request: PullRequestRecord,
+    },
     PullRequestFailed {
         error: String,
     },
@@ -709,15 +715,21 @@ impl Event {
         }
     }
 
-    pub fn pull_request_created(record: &PullRequestRecord, draft: bool) -> Self {
+    pub fn pull_request_created(
+        record: &PullRequestRecord,
+        base_branch: &str,
+        head_branch: &str,
+        title: &str,
+        draft: bool,
+    ) -> Self {
         Self::PullRequestCreated {
-            pr_url: record.html_url.clone(),
+            pr_url: record.html_url(),
             pr_number: record.number,
             owner: record.owner.clone(),
             repo: record.repo.clone(),
-            base_branch: record.base_branch.clone(),
-            head_branch: record.head_branch.clone(),
-            title: record.title.clone(),
+            base_branch: base_branch.to_string(),
+            head_branch: head_branch.to_string(),
+            title: title.to_string(),
             draft,
         }
     }
@@ -1426,6 +1438,20 @@ impl Event {
                 ..
             } => {
                 info!(pr_url = %pr_url, pr_number, draft, owner, repo, "Pull request created");
+            }
+            Self::PullRequestLinked { pull_request } => {
+                info!(
+                    pr_url = %pull_request.html_url(),
+                    pr_number = pull_request.number,
+                    "Pull request linked"
+                );
+            }
+            Self::PullRequestUnlinked { pull_request } => {
+                info!(
+                    pr_url = %pull_request.html_url(),
+                    pr_number = pull_request.number,
+                    "Pull request unlinked"
+                );
             }
             Self::PullRequestFailed { error, .. } => {
                 error!(error = %error, "Pull request creation failed");

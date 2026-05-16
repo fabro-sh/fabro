@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use fabro_model::Provider;
+use fabro_model::{Catalog, ProviderId};
 
 use crate::context::{AuthContextRequest, AuthContextResponse};
 use crate::credential::{AuthCredential, OAuthConfig};
@@ -40,13 +40,22 @@ pub fn codex_oauth_config() -> OAuthConfig {
 }
 
 #[must_use]
-pub fn strategy_for(provider: Provider, method: AuthMethod) -> Box<dyn AuthStrategy> {
+pub fn strategy_for(
+    provider_id: &ProviderId,
+    method: AuthMethod,
+    catalog: &Catalog,
+) -> Box<dyn AuthStrategy> {
     match method {
-        AuthMethod::ApiKey => Box::new(ApiKeyStrategy::new(provider)),
+        AuthMethod::ApiKey => {
+            let provider = catalog
+                .provider(provider_id)
+                .expect("API key auth requires a catalog provider");
+            Box::new(ApiKeyStrategy::new(provider))
+        }
         AuthMethod::CodexDevice(config) => {
             assert_eq!(
-                provider,
-                Provider::OpenAi,
+                provider_id.as_str(),
+                ProviderId::OPENAI,
                 "Codex device auth is only supported for OpenAI"
             );
             Box::new(CodexDeviceStrategy::new(config))
@@ -71,11 +80,15 @@ mod tests {
 
     #[tokio::test]
     async fn api_key_strategy_uses_provider_env_names() {
-        let mut strategy = ApiKeyStrategy::new(Provider::Anthropic);
+        let catalog = Catalog::builtin();
+        let provider = catalog.provider(&ProviderId::anthropic()).unwrap();
+        let mut strategy = ApiKeyStrategy::new(provider);
         let request = strategy.init().await.unwrap();
         assert_eq!(request, AuthContextRequest::ApiKey {
-            provider:      Provider::Anthropic,
+            provider_id:   ProviderId::anthropic(),
+            display_name:  "Anthropic".to_string(),
             env_var_names: vec!["ANTHROPIC_API_KEY".to_string()],
+            api_key_url:   Some("https://console.anthropic.com/settings/keys".to_string()),
         });
     }
 }

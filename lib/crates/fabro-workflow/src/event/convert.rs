@@ -1,6 +1,5 @@
 use ::fabro_types::{
-    BilledTokenCounts, EventBody, RunControlAction, RunEvent, RunId, StageOutcome,
-    run_event as fabro_types,
+    EventBody, RunControlAction, RunEvent, RunId, StageOutcome, run_event as fabro_types,
 };
 use chrono::Utc;
 use fabro_agent::{AgentEvent, SandboxEvent};
@@ -8,7 +7,7 @@ use uuid::Uuid;
 
 use super::Event;
 use super::stored_fields::stored_event_fields;
-use crate::outcome::unpriced_model_usage_from_llm;
+use crate::outcome::billed_token_counts_from_llm;
 use crate::stage_scope::StageScope;
 
 fn stage_status_from_string(status: &str) -> StageOutcome {
@@ -550,8 +549,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 usage,
                 tool_call_count,
             } => {
-                let billed = unpriced_model_usage_from_llm(model.clone(), usage);
-                let billing = BilledTokenCounts::from_billed_usage(std::slice::from_ref(&billed));
+                let billing = billed_token_counts_from_llm(usage);
                 EventBody::AgentMessage(fabro_types::AgentMessageProps {
                     text: text.clone(),
                     model: model.clone(),
@@ -1168,6 +1166,16 @@ fn event_body_from_event(event: &Event) -> EventBody {
             title:       title.clone(),
             draft:       *draft,
         }),
+        Event::PullRequestLinked { pull_request } => {
+            EventBody::PullRequestLinked(fabro_types::PullRequestLinkedProps {
+                pull_request: pull_request.clone(),
+            })
+        }
+        Event::PullRequestUnlinked { pull_request } => {
+            EventBody::PullRequestUnlinked(fabro_types::PullRequestUnlinkedProps {
+                pull_request: pull_request.clone(),
+            })
+        }
         Event::PullRequestFailed { error } => {
             EventBody::PullRequestFailed(fabro_types::PullRequestFailedProps {
                 error: error.clone(),
@@ -1289,7 +1297,7 @@ mod tests {
     use chrono::Utc;
     use fabro_agent::{AgentEvent, SandboxEvent};
     use fabro_llm::types::TokenCounts as LlmTokenCounts;
-    use fabro_model::{ModelRef, Provider, ProviderId};
+    use fabro_model::{ModelRef, ProviderId};
 
     use super::*;
     use crate::error::Error;
@@ -1330,9 +1338,7 @@ mod tests {
                         "output_tokens": output_tokens
                     }
                 },
-                "facts": {
-                    "provider": "open_ai"
-                }
+                "facts": { "algorithm": "openai" }
             },
             "total_usd_micros": input_tokens + output_tokens
         }))
@@ -2005,7 +2011,7 @@ mod tests {
             event:             AgentEvent::AssistantMessage {
                 text:            "ok".to_string(),
                 model:           ModelRef {
-                    provider: Provider::Anthropic.id(),
+                    provider: ProviderId::anthropic(),
                     model_id: "claude-sonnet".to_string(),
                     speed:    None,
                 },

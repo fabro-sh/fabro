@@ -1,9 +1,9 @@
 [providers.openai]
 display_name = "OpenAI"
 adapter = "openai"
+api_key_url = "https://platform.openai.com/api-keys"
 credentials = ["credential:openai", "credential:openai_codex", "env:OPENAI_API_KEY"]
 priority = 90
-aliases = ["open_ai"]
 
 [models."gpt-5.2"]
 provider = "openai"

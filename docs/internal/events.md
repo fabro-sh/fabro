@@ -2042,6 +2042,49 @@ These legacy events may appear in older run logs. Current CLI backend runs do no
 | `pr_number` | number | Pull request number |
 | `draft` | boolean | Whether the PR is a draft |
 
+### `pull_request.linked`
+
+```json
+{
+  "id": "...", "ts": "...", "run_id": "...",
+  "event": "pull_request.linked",
+  "properties": {
+    "pull_request": {
+      "provider": "github",
+      "html_url": "https://github.com/org/repo/pull/42",
+      "number": 42,
+      "owner": "org",
+      "repo": "repo",
+      "title": "Review deployment chart"
+    }
+  }
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `pull_request` | object | Stored GitHub pull request association. `title`, `base_branch`, and `head_branch` may be included when live GitHub metadata is available. |
+
+### `pull_request.unlinked`
+
+```json
+{
+  "id": "...", "ts": "...", "run_id": "...",
+  "event": "pull_request.unlinked",
+  "properties": {
+    "pull_request": {
+      "provider": "github",
+      "html_url": "https://github.com/org/repo/pull/42",
+      "number": 42
+    }
+  }
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `pull_request` | object | Pull request association removed from the run. |
+
 ### `pull_request.failed`
 
 ```json

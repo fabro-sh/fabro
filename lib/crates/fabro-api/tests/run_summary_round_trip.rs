@@ -5,7 +5,7 @@ use chrono::{TimeZone, Utc};
 use fabro_api::types::{RepositoryRef as ApiRepositoryRef, RunSummary as ApiRunSummary};
 use fabro_types::status::{RunStatus, SuccessReason};
 use fabro_types::{
-    DiffSummary, PullRequest, RepositoryProvider, RepositoryRef, RunBillingSummary, RunId,
+    DiffSummary, PullRequestLink, RepositoryProvider, RepositoryRef, RunBillingSummary, RunId,
     RunLifecycle, RunLinks, RunOrigin, RunSummary, RunTimestamps, WorkflowRef,
 };
 use serde_json::json;
@@ -68,15 +68,10 @@ fn run_summary_json_matches_openapi_shape() {
             additions:     12,
             deletions:     4,
         }),
-        pull_request:     Some(PullRequest {
-            provider:    "github".to_string(),
-            html_url:    "https://github.com/fabro-sh/fabro/pull/123".to_string(),
-            number:      123,
-            owner:       "fabro-sh".to_string(),
-            repo:        "fabro".to_string(),
-            base_branch: "main".to_string(),
-            head_branch: "fabro/run/demo".to_string(),
-            title:       "Add run PR chip".to_string(),
+        pull_request:     Some(PullRequestLink {
+            owner:  "fabro-sh".to_string(),
+            repo:   "fabro".to_string(),
+            number: 123,
         }),
         current_question: None,
         superseded_by:    None,
@@ -137,14 +132,10 @@ fn run_summary_json_matches_openapi_shape() {
                 "deletions": 4
             },
             "pull_request": {
-                "provider": "github",
-                "html_url": "https://github.com/fabro-sh/fabro/pull/123",
-                "number": 123,
                 "owner": "fabro-sh",
                 "repo": "fabro",
-                "base_branch": "main",
-                "head_branch": "fabro/run/demo",
-                "title": "Add run PR chip"
+                "number": 123,
+                "html_url": "https://github.com/fabro-sh/fabro/pull/123"
             },
             "current_question": null,
             "superseded_by": null,

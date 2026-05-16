@@ -20,7 +20,6 @@ pub fn validate(
 #[cfg(test)]
 mod tests {
     use fabro_model::Catalog;
-    use fabro_model::catalog::LlmCatalogSettings;
 
     use super::*;
     use crate::pipeline::parse::parse;
@@ -28,9 +27,7 @@ mod tests {
     use crate::pipeline::types::TransformOptions;
 
     fn test_catalog() -> std::sync::Arc<Catalog> {
-        std::sync::Arc::new(
-            Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap(),
-        )
+        std::sync::Arc::new(Catalog::from_builtin().unwrap())
     }
 
     fn run_pipeline(dot: &str) -> Validated {

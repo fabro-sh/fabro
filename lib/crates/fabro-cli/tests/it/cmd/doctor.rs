@@ -7,7 +7,7 @@ use std::process::Output;
 
 use fabro_auth::{AuthCredential, AuthDetails};
 use fabro_config::Storage;
-use fabro_model::Provider;
+use fabro_model::ProviderId;
 use fabro_test::{fabro_snapshot, test_context, twin_openai};
 use fabro_vault::{SecretType, Vault};
 
@@ -31,7 +31,7 @@ fn seed_openai_vault(storage_dir: &std::path::Path, base_url: &str, api_key: &st
         .set(
             "openai",
             &serde_json::to_string(&AuthCredential {
-                provider: Provider::OpenAi.id(),
+                provider: ProviderId::openai(),
                 details:  AuthDetails::ApiKey {
                     key: api_key.to_string(),
                 },

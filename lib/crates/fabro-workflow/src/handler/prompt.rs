@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
-use fabro_model::Provider;
+use fabro_model::ProviderId;
 
 use super::agent::{
     CodergenBackend, CodergenResult, OneShotRequest, expand_variables, extract_status_fields,
@@ -70,15 +70,22 @@ impl Handler for PromptHandler {
         // 1b. Discover project docs for system prompt when project_memory is enabled
         let system_prompt = if node.project_memory() {
             let working_dir = services.run.sandbox.working_directory();
-            let provider = node
+            let profile_kind = node
                 .provider()
-                .and_then(|s| s.parse::<Provider>().ok())
-                .unwrap_or(services.run.provider);
+                .map(ProviderId::from)
+                .and_then(|provider_id| {
+                    services
+                        .run
+                        .catalog
+                        .provider(&provider_id)
+                        .map(|provider| provider.adapter.metadata().default_profile)
+                })
+                .unwrap_or(services.run.profile_kind);
             let docs = match fabro_agent::discover_memory(
                 &*services.run.sandbox,
                 working_dir,
                 working_dir,
-                provider,
+                profile_kind,
                 &services.run.cancel_token(),
             )
             .await
@@ -102,7 +109,7 @@ impl Handler for PromptHandler {
         let prompt_provider = node
             .provider()
             .map(String::from)
-            .or_else(|| Some(services.run.provider.to_string()));
+            .or_else(|| Some(services.run.provider_id.to_string()));
         let prompt_model = node.model().map(String::from);
         let stage_scope = StageScope::for_handler(context, &node.id);
         services.run.emitter.emit_scoped(
@@ -163,7 +170,7 @@ impl Handler for PromptHandler {
         let response_provider = node
             .provider()
             .map(String::from)
-            .or_else(|| Some(services.run.provider.to_string()))
+            .or_else(|| Some(services.run.provider_id.to_string()))
             .unwrap_or_default();
 
         services.run.emitter.emit_scoped(

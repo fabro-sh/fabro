@@ -4,8 +4,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    DiffSummary, InterviewQuestionRecord, Principal, PullRequest, RepositoryRef, RunControlAction,
-    RunId, RunSandbox, RunStatus,
+    DiffSummary, InterviewQuestionRecord, Principal, PullRequestLink, RepositoryRef,
+    RunControlAction, RunId, RunSandbox, RunStatus,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -34,7 +34,7 @@ pub struct Run {
     #[serde(default)]
     pub diff:             Option<DiffSummary>,
     #[serde(default)]
-    pub pull_request:     Option<PullRequest>,
+    pub pull_request:     Option<PullRequestLink>,
     #[serde(default)]
     pub current_question: Option<InterviewQuestionRecord>,
     #[serde(default)]

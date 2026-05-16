@@ -379,7 +379,24 @@ fn main() {
         ("RunEvent", "fabro_types::RunEvent", &[]),
         ("EventEnvelope", "fabro_types::EventEnvelope", &[]),
         ("PullRequest", "fabro_types::PullRequest", &[]),
+        ("PullRequestLink", "fabro_types::PullRequestLink", &[]),
         ("PullRequestDetails", "fabro_types::PullRequestDetails", &[]),
+        ("PullRequestMeta", "fabro_types::PullRequestMeta", &[]),
+        (
+            "PullRequestResponse",
+            "fabro_types::PullRequestResponse",
+            &[],
+        ),
+        (
+            "PullRequestDetailsStatus",
+            "fabro_types::PullRequestDetailsStatus",
+            &[],
+        ),
+        (
+            "PullRequestDetailsUnavailableReason",
+            "fabro_types::PullRequestDetailsUnavailableReason",
+            &[],
+        ),
         ("RunSandboxRuntime", "fabro_types::RunSandboxRuntime", &[]),
         ("PullRequestUser", "fabro_types::PullRequestUser", &[]),
         ("PullRequestRef", "fabro_types::PullRequestRef", &[]),
@@ -396,6 +413,17 @@ fn main() {
         ("SandboxProvider", "fabro_types::SandboxProvider", &[]),
         ("RunSandbox", "fabro_types::RunSandbox", &[]),
         ("SandboxDetails", "fabro_types::SandboxDetails", &[]),
+        ("SandboxNetwork", "fabro_types::SandboxNetwork", &[]),
+        (
+            "SandboxNetworkPolicy",
+            "fabro_types::SandboxNetworkPolicy",
+            &[],
+        ),
+        (
+            "SandboxNetworkPolicyMode",
+            "fabro_types::SandboxNetworkPolicyMode",
+            &[],
+        ),
         ("SandboxService", "fabro_types::SandboxService", &[]),
         (
             "SandboxServiceDiscoverySource",
