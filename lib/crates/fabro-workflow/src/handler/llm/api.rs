@@ -24,6 +24,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::super::agent::{CodergenBackend, CodergenResult, CodergenRunRequest, OneShotRequest};
 use super::activation_lease::{ActivationLease, ActivationLeaseOptions};
+use super::routing;
+use super::routing::ProviderContext;
 use crate::context::WorkflowContext;
 use crate::context::keys::Fidelity;
 use crate::error::Error;
@@ -99,21 +101,6 @@ enum AgentApiErrorDisposition {
     FailoverEligible(fabro_llm::Error),
     /// Terminal error; abort the invocation with this workflow `Error`.
     Terminal(Error),
-}
-
-#[derive(Clone)]
-struct ProviderContext {
-    provider_id:  ProviderId,
-    profile_kind: AgentProfileKind,
-}
-
-fn default_profile_kind(catalog: &Catalog, provider_id: &ProviderId) -> AgentProfileKind {
-    catalog
-        .provider(provider_id)
-        .unwrap_or_else(|| panic!("Provider \"{provider_id}\" is not configured"))
-        .adapter
-        .metadata()
-        .default_profile
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -369,7 +356,7 @@ impl AgentApiBackend {
     ) -> Self {
         let catalog = Arc::new(Catalog::from_builtin().expect("default catalog should build"));
         let provider_id = provider_id.into();
-        let profile_kind = default_profile_kind(catalog.as_ref(), &provider_id);
+        let profile_kind = routing::default_profile_kind(catalog.as_ref(), &provider_id);
         Self::new_with_catalog(
             model,
             provider_id,
@@ -461,28 +448,12 @@ impl AgentApiBackend {
         model: &str,
         provider_attr: Option<&str>,
     ) -> Result<ProviderContext, Error> {
-        let provider_id = if let Some(provider) = provider_attr {
-            let requested = ProviderId::from(provider);
-            self.catalog
-                .provider(&requested)
-                .ok_or_else(|| {
-                    Error::Precondition(format!("Provider \"{provider}\" is not configured"))
-                })?
-                .id
-                .clone()
-        } else if let Some(model) = self.catalog.get(model) {
-            model.provider.clone()
-        } else {
-            self.provider_id.clone()
-        };
-        let provider = self.catalog.provider(&provider_id).ok_or_else(|| {
-            Error::Precondition(format!("Provider \"{provider_id}\" is not configured"))
-        })?;
-        let profile_kind = provider.adapter.metadata().default_profile;
-        Ok(ProviderContext {
-            provider_id: provider.id.clone(),
-            profile_kind,
-        })
+        routing::resolve_provider_context(
+            self.catalog.as_ref(),
+            &self.provider_id,
+            model,
+            provider_attr,
+        )
     }
 
     async fn create_session(

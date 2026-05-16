@@ -15,9 +15,9 @@ use fabro_util::time::elapsed_ms;
 use tokio_util::sync::CancellationToken;
 
 use super::super::agent::{CodergenBackend, CodergenResult, CodergenRunRequest, OneShotRequest};
-use super::changed_files;
 use super::cli::AgentCli;
 use super::launch_env::{AgentLaunchEnvRequest, resolve_agent_launch_env};
+use super::{changed_files, routing};
 use crate::error::Error;
 use crate::event::{Emitter, Event, StageScope};
 
@@ -40,7 +40,7 @@ impl AgentAcpBackend {
     ) -> Self {
         let provider_id = provider_id.into();
         let catalog = default_catalog();
-        let profile_kind = default_profile_kind(catalog.as_ref(), &provider_id);
+        let profile_kind = routing::default_profile_kind(catalog.as_ref(), &provider_id);
         Self {
             model,
             provider_id,
@@ -56,7 +56,7 @@ impl AgentAcpBackend {
     pub fn new_from_env(model: String, provider_id: impl Into<ProviderId>) -> Self {
         let provider_id = provider_id.into();
         let catalog = default_catalog();
-        let profile_kind = default_profile_kind(catalog.as_ref(), &provider_id);
+        let profile_kind = routing::default_profile_kind(catalog.as_ref(), &provider_id);
         Self {
             model,
             provider_id,
@@ -108,13 +108,14 @@ impl AgentAcpBackend {
     ) -> Result<CodergenResult, Error> {
         let files_before = changed_files::detect_changed_files(sandbox).await;
         let model = node.model().unwrap_or(&self.model);
-        let (provider_id, profile_kind) = resolve_provider_context(
+        let provider = routing::resolve_provider_context(
             self.catalog.as_ref(),
             &self.provider_id,
-            self.profile_kind,
             model,
-            node,
+            node.provider(),
         )?;
+        let provider_id = provider.provider_id;
+        let profile_kind = provider.profile_kind;
         let command =
             resolve_acp_command(node.acp_command()).map_err(acp_command_error_to_workflow)?;
 
@@ -232,44 +233,6 @@ impl AgentAcpBackend {
 
 fn default_catalog() -> Arc<Catalog> {
     Arc::new(Catalog::from_builtin().expect("default catalog should build"))
-}
-
-fn default_profile_kind(catalog: &Catalog, provider_id: &ProviderId) -> AgentProfileKind {
-    catalog
-        .provider(provider_id)
-        .unwrap_or_else(|| panic!("Provider \"{provider_id}\" is not configured"))
-        .adapter
-        .metadata()
-        .default_profile
-}
-
-fn resolve_provider_context(
-    catalog: &Catalog,
-    default_provider_id: &ProviderId,
-    _default_profile_kind: AgentProfileKind,
-    model: &str,
-    node: &Node,
-) -> Result<(ProviderId, AgentProfileKind), Error> {
-    let provider_id = if let Some(provider) = node.provider() {
-        let requested = ProviderId::from(provider);
-        catalog
-            .provider(&requested)
-            .ok_or_else(|| {
-                Error::Precondition(format!("Provider \"{provider}\" is not configured"))
-            })?
-            .id
-            .clone()
-    } else if let Some(model) = catalog.get(model) {
-        model.provider.clone()
-    } else {
-        default_provider_id.clone()
-    };
-
-    let provider = catalog.provider(&provider_id).ok_or_else(|| {
-        Error::Precondition(format!("Provider \"{provider_id}\" is not configured"))
-    })?;
-    let profile_kind = provider.adapter.metadata().default_profile;
-    Ok((provider.id.clone(), profile_kind))
 }
 
 #[async_trait]
