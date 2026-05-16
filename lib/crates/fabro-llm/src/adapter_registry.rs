@@ -15,7 +15,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use fabro_auth::ApiKeyHeader;
-use fabro_model::adapter::AdapterMetadata;
 use fabro_model::{AdapterKind, Catalog};
 
 use crate::client::auth_value;
@@ -174,66 +173,20 @@ fn build_openai_compatible(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
     Arc::new(build_openai_compatible_adapter(config))
 }
 
-/// Single source of truth pairing every adapter kind with its factory. Both
-/// `factory_for` and `registered_kinds` derive from this table.
-const FACTORIES: &[(AdapterKind, AdapterFactory)] = &[
-    (AdapterKind::Anthropic, build_anthropic),
-    (AdapterKind::OpenAi, build_openai),
-    (AdapterKind::Gemini, build_gemini),
-    (AdapterKind::OpenAiCompatible, build_openai_compatible),
-];
-
-/// Look up a factory by adapter kind. Returns `None` if the kind has no
-/// factory registered.
+/// Return the factory for a known adapter kind.
 #[must_use]
-pub fn factory_for(adapter_kind: AdapterKind) -> Option<AdapterFactory> {
-    FACTORIES
-        .iter()
-        .find_map(|(kind, factory)| (*kind == adapter_kind).then_some(*factory))
-}
-
-/// Iterate every adapter kind with a factory registered.
-pub fn registered_kinds() -> impl Iterator<Item = AdapterKind> {
-    FACTORIES.iter().map(|(kind, _)| *kind)
-}
-
-/// Look up adapter metadata by kind.
-#[must_use]
-pub fn metadata_for(adapter_kind: AdapterKind) -> &'static AdapterMetadata {
-    adapter_kind.metadata()
+pub fn factory_for(adapter_kind: AdapterKind) -> AdapterFactory {
+    match adapter_kind {
+        AdapterKind::Anthropic => build_anthropic,
+        AdapterKind::OpenAi => build_openai,
+        AdapterKind::Gemini => build_gemini,
+        AdapterKind::OpenAiCompatible => build_openai_compatible,
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use strum::VariantArray as _;
-
     use super::*;
-
-    #[test]
-    fn every_adapter_kind_has_a_factory() {
-        for kind in AdapterKind::VARIANTS {
-            assert!(
-                factory_for(*kind).is_some(),
-                "adapter kind `{kind}` has no matching factory in fabro-llm",
-            );
-        }
-    }
-
-    #[test]
-    fn every_factory_has_metadata() {
-        for kind in registered_kinds() {
-            assert_eq!(metadata_for(kind).kind, kind);
-        }
-    }
-
-    #[test]
-    fn registered_factory_set_matches_adapter_kind_set() {
-        let factories: Vec<AdapterKind> = registered_kinds().collect();
-        assert_eq!(factories.len(), AdapterKind::VARIANTS.len());
-        for kind in AdapterKind::VARIANTS {
-            assert!(factories.contains(kind));
-        }
-    }
 
     #[test]
     fn anthropic_factory_builds_anthropic_adapter() {
@@ -241,7 +194,7 @@ mod tests {
             name:  "x-api-key".to_string(),
             value: "test-key".to_string(),
         });
-        let adapter = factory_for(AdapterKind::Anthropic).unwrap()(config);
+        let adapter = factory_for(AdapterKind::Anthropic)(config);
         assert_eq!(adapter.name(), "anthropic");
     }
 
@@ -257,7 +210,7 @@ mod tests {
             project_id:    None,
             catalog:       None,
         };
-        let adapter = factory_for(AdapterKind::OpenAiCompatible).unwrap()(config);
+        let adapter = factory_for(AdapterKind::OpenAiCompatible)(config);
         assert_eq!(adapter.name(), "kimi");
     }
 
@@ -328,6 +281,6 @@ mod tests {
     #[should_panic(expected = "openai_compatible adapter requires a base_url")]
     fn openai_compatible_factory_panics_without_base_url() {
         let config = AdapterConfig::new("kimi", ApiKeyHeader::Bearer("k".to_string()));
-        let _ = factory_for(AdapterKind::OpenAiCompatible).unwrap()(config);
+        let _ = factory_for(AdapterKind::OpenAiCompatible)(config);
     }
 }

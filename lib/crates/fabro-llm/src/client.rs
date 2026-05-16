@@ -82,15 +82,7 @@ impl Client {
                     source:  None,
                 });
             };
-            let Some(factory) = factory_for(provider.adapter) else {
-                return Err(Error::Configuration {
-                    message: format!(
-                        "Provider \"{provider_id}\" uses unsupported adapter \"{}\"",
-                        provider.adapter
-                    ),
-                    source:  None,
-                });
-            };
+            let factory = factory_for(provider.adapter);
 
             let adapter = factory(AdapterConfig {
                 provider_id:   provider.id.to_string(),
