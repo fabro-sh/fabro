@@ -9,7 +9,7 @@ use bytes::Bytes;
 use fabro_api::types;
 use fabro_http::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE};
 use fabro_http::multipart::{Form, Part};
-use fabro_model::{Model, ModelTestMode, Provider};
+use fabro_model::{Model, ModelTestMode, ProviderId};
 use fabro_types::settings::run::MergeStrategy;
 use fabro_types::{
     ArtifactUpload, EventEnvelope, RunBlobId, RunEvent, RunId, RunProjection, RunSummary, StageId,
@@ -608,17 +608,12 @@ impl Client {
         provider: Option<&str>,
         query: Option<&str>,
     ) -> Result<Vec<Model>> {
-        let provider = provider
-            .map(|provider| {
-                provider
-                    .parse::<Provider>()
-                    .map_err(|_| anyhow!("unknown provider: {provider}"))
-            })
-            .transpose()?;
+        let provider = provider.map(ProviderId::new);
         let mut offset = 0u64;
         let mut models = Vec::new();
 
         loop {
+            let provider = provider.clone();
             let response = self
                 .send_api(|client| async move {
                     let mut request = client.list_models().page_limit(100u64).page_offset(offset);

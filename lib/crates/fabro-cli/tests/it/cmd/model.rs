@@ -144,16 +144,16 @@ fn list_query_case_insensitive() {
 }
 
 #[test]
-fn list_invalid_provider_errors() {
+fn list_unknown_provider_returns_empty() {
     let context = test_context!();
     let mut cmd = context.model();
     cmd.args(["list", "--provider", "not-a-provider"]);
     fabro_snapshot!(context.filters(), cmd, @"
-    success: false
-    exit_code: 1
+    success: true
+    exit_code: 0
     ----- stdout -----
+    MODEL  PROVIDER  ALIASES  CONTEXT  COST  SPEED
     ----- stderr -----
-      × unknown provider: not-a-provider
     ");
 }
 
