@@ -751,6 +751,29 @@ mod tests {
                 .parent_id,
             Some(test_run_id("run-2"))
         );
+        assert!(
+            store
+                .list_runs(&ListRunsQuery {
+                    parent_id: Some(test_run_id("run-1")),
+                    ..ListRunsQuery::default()
+                })
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .list_runs(&ListRunsQuery {
+                    parent_id: Some(test_run_id("run-2")),
+                    ..ListRunsQuery::default()
+                })
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|summary| summary.id)
+                .collect::<Vec<_>>(),
+            vec![test_run_id("run-3")]
+        );
 
         child
             .append_event(&event_payload(
@@ -759,7 +782,6 @@ mod tests {
                 "run.parent.unlinked",
                 &serde_json::json!({
                     "previous_parent_id": test_run_id("run-2"),
-                    "parent_id": null,
                 }),
             ))
             .await
@@ -772,6 +794,16 @@ mod tests {
                 .unwrap()
                 .parent_id,
             None
+        );
+        assert!(
+            store
+                .list_runs(&ListRunsQuery {
+                    parent_id: Some(test_run_id("run-2")),
+                    ..ListRunsQuery::default()
+                })
+                .await
+                .unwrap()
+                .is_empty()
         );
     }
 

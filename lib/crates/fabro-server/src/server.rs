@@ -525,6 +525,7 @@ pub struct AppState {
     /// proceed in parallel. See `crate::run_files` for semantics.
     pub(crate) files_in_flight: FilesInFlight,
     pull_request_create_locks: PullRequestCreateLocks,
+    parent_link_lock: AsyncMutex<()>,
 
     pub(crate) vault: Arc<AsyncRwLock<Vault>>,
     pub(super) server_secrets: ServerSecrets,
@@ -1590,6 +1591,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         global_event_tx,
         files_in_flight: new_files_in_flight(),
         pull_request_create_locks: Arc::new(Mutex::new(HashMap::new())),
+        parent_link_lock: AsyncMutex::new(()),
         vault,
         server_secrets,
         llm_source,

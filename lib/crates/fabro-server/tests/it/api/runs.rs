@@ -280,15 +280,27 @@ async fn deleting_parent_leaves_child_parent_id_as_historical_reference() {
     )
     .await;
 
-    let child_after_delete = request_json(
+    let get_child = Request::builder()
+        .method("GET")
+        .uri(api(&format!("/runs/{child_id}")))
+        .body(Body::empty())
+        .unwrap();
+    let child_after_delete = response_json(
+        app.clone().oneshot(get_child).await.unwrap(),
+        StatusCode::OK,
+        format!("GET /api/v1/runs/{child_id}"),
+    )
+    .await;
+    assert_eq!(child_after_delete["parent_id"], parent_id);
+
+    request_json(
         &app,
         "PUT",
         format!("/runs/{child_id}/parent"),
         serde_json::json!({ "parent_id": parent_id }),
-        StatusCode::OK,
+        StatusCode::NOT_FOUND,
     )
     .await;
-    assert_eq!(child_after_delete["parent_id"], parent_id);
 }
 
 #[tokio::test]

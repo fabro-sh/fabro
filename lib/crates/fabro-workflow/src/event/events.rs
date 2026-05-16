@@ -127,8 +127,6 @@ pub enum Event {
     RunParentUnlinked {
         previous_parent_id: RunId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        parent_id:          Option<RunId>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         actor:              Option<Principal>,
     },
     WorkflowRunCompleted {
@@ -835,10 +833,9 @@ impl Event {
             }
             Self::RunParentUnlinked {
                 previous_parent_id,
-                parent_id,
                 actor,
             } => {
-                info!(%previous_parent_id, ?parent_id, ?actor, "Run parent unlinked");
+                info!(%previous_parent_id, ?actor, "Run parent unlinked");
             }
             Self::WorkflowRunCompleted {
                 duration_ms,

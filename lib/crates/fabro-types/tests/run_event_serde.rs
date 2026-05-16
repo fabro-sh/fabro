@@ -129,7 +129,6 @@ fn run_parent_events_round_trip_parent_ids() {
 
     let unlinked = EventBody::RunParentUnlinked(RunParentUnlinkedProps {
         previous_parent_id: fixtures::RUN_2,
-        parent_id:          None,
     });
     let unlinked_json = serde_json::to_value(&unlinked).expect("unlinked event should serialize");
     assert_eq!(unlinked_json["event"], "run.parent.unlinked");
@@ -137,6 +136,7 @@ fn run_parent_events_round_trip_parent_ids() {
         unlinked_json["properties"]["previous_parent_id"],
         fixtures::RUN_2.to_string()
     );
+    assert!(unlinked_json["properties"].get("parent_id").is_none());
 
     let unlinked_round_trip: EventBody =
         serde_json::from_value(unlinked_json).expect("unlinked event should deserialize");

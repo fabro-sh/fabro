@@ -154,12 +154,9 @@ fn event_body_from_event(event: &Event) -> EventBody {
             parent_id:          *parent_id,
         }),
         Event::RunParentUnlinked {
-            previous_parent_id,
-            parent_id,
-            ..
+            previous_parent_id, ..
         } => EventBody::RunParentUnlinked(fabro_types::RunParentUnlinkedProps {
             previous_parent_id: *previous_parent_id,
-            parent_id:          *parent_id,
         }),
         Event::WorkflowRunCompleted {
             duration_ms,
