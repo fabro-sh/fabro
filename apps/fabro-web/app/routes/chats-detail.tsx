@@ -13,7 +13,7 @@ import {
 } from "../lib/chats-runtime";
 import CustomComposer from "../components/chats/custom-composer";
 import ToolFallback from "../components/chats/tool-fallback";
-import type { CompletionMessage } from "../lib/chats-types";
+import type { Chat, CompletionMessage } from "../lib/chats-types";
 
 // AppShell handle lives on the parent chats-layout route; do not redeclare it
 // here.
@@ -43,17 +43,15 @@ export default function ChatsDetail() {
     );
   }
 
-  return <ChatRuntime key={chatId} chatId={chatId} />;
+  return <ChatRuntime key={chatId} chatId={chatId} chat={chat} />;
 }
 
-function ChatRuntime({ chatId }: { chatId: string }) {
+function ChatRuntime({ chatId, chat }: { chatId: string; chat: Chat }) {
   const {
-    state,
     peekScriptIndex,
     advanceScriptIndex,
     consumePendingResponse,
   } = useChatsStore();
-  const chat = state.chats[chatId]!;
 
   const initialMessages = useMemo(
     () => toThreadMessages(chat.seedMessages),

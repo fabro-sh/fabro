@@ -35,7 +35,8 @@ function Sidebar() {
       </div>
       <nav className="flex-1 overflow-y-auto px-2 pt-2 pb-3">
         {state.order.map((id) => {
-          const chat = state.chats[id]!;
+          const chat = state.chats[id];
+          if (!chat) return null;
           return (
             <NavLink
               key={id}
