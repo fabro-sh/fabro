@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
-use fabro_model::{ProviderId, adapter};
+use fabro_model::ProviderId;
 
 use super::agent::{
     CodergenBackend, CodergenResult, OneShotRequest, expand_variables, extract_status_fields,
@@ -78,8 +78,7 @@ impl Handler for PromptHandler {
                         .run
                         .catalog
                         .provider(&provider_id)
-                        .and_then(|provider| adapter::get(provider.adapter))
-                        .map(|metadata| metadata.default_profile)
+                        .map(|provider| provider.adapter.metadata().default_profile)
                 })
                 .unwrap_or(services.run.profile_kind);
             let docs = match fabro_agent::discover_memory(

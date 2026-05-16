@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString, IntoStaticStr, VariantArray};
 
 use crate::Speed;
-use crate::ids::ProviderId;
 use crate::reasoning::ReasoningEffort;
 
 /// Stable adapter identity for protocol/client behavior.
@@ -34,12 +33,12 @@ use crate::reasoning::ReasoningEffort;
 #[strum(serialize_all = "snake_case")]
 pub enum AdapterKind {
     Anthropic,
-    #[serde(rename = "openai", alias = "open_ai")]
-    #[strum(to_string = "openai", serialize = "open_ai")]
+    #[serde(rename = "openai")]
+    #[strum(to_string = "openai")]
     OpenAi,
     Gemini,
-    #[serde(rename = "openai_compatible", alias = "open_ai_compatible")]
-    #[strum(to_string = "openai_compatible", serialize = "open_ai_compatible")]
+    #[serde(rename = "openai_compatible")]
+    #[strum(to_string = "openai_compatible")]
     OpenAiCompatible,
 }
 
@@ -47,6 +46,16 @@ impl AdapterKind {
     #[must_use]
     pub fn as_str(self) -> &'static str {
         self.into()
+    }
+
+    #[must_use]
+    pub fn metadata(self) -> &'static AdapterMetadata {
+        match self {
+            Self::Anthropic => &ANTHROPIC,
+            Self::OpenAi => &OPENAI,
+            Self::Gemini => &GEMINI,
+            Self::OpenAiCompatible => &OPENAI_COMPATIBLE,
+        }
     }
 }
 
@@ -185,18 +194,6 @@ pub fn get(key: impl AsRef<str>) -> Option<&'static AdapterMetadata> {
 /// Iterate every registered adapter key.
 pub fn keys() -> impl Iterator<Item = &'static str> {
     ALL_ADAPTERS.iter().map(|a| a.key)
-}
-
-/// Default adapter key for a provider ID when no explicit catalog provider row
-/// is available.
-#[must_use]
-pub fn default_for_provider_id(provider: &ProviderId) -> AdapterKind {
-    match provider.as_str() {
-        ProviderId::ANTHROPIC => AdapterKind::Anthropic,
-        ProviderId::OPENAI => AdapterKind::OpenAi,
-        ProviderId::GEMINI => AdapterKind::Gemini,
-        _ => AdapterKind::OpenAiCompatible,
-    }
 }
 
 #[cfg(test)]

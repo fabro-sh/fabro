@@ -1313,8 +1313,8 @@ fn report_to_api(report: &CheckReport) -> types::PreflightCheckReport {
 
 #[cfg(test)]
 mod tests {
+    use fabro_model::ProviderId;
     use fabro_model::catalog::LlmCatalogSettings;
-    use fabro_model::provider::Provider;
 
     use super::*;
 
@@ -1436,7 +1436,7 @@ enabled = {clone_enabled}
             prepared.settings.clone(),
             validated.graph(),
             Catalog::builtin(),
-            &[Provider::Anthropic.id()],
+            &[ProviderId::anthropic()],
         )
         .run;
 
@@ -2100,7 +2100,7 @@ provider = "daytona"
             .set(
                 "openai",
                 &serde_json::to_string(&fabro_auth::AuthCredential {
-                    provider: Provider::OpenAi.id(),
+                    provider: ProviderId::openai(),
                     details:  fabro_auth::AuthDetails::ApiKey {
                         key: "test-openai-key".to_string(),
                     },

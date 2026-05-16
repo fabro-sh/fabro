@@ -11,7 +11,7 @@ use fabro_agent::{Sandbox, StaticEnvProvider, ToolEnvProvider};
 use fabro_auth::CredentialResolver;
 use fabro_graphviz::graph::Node;
 use fabro_model::catalog::LlmCatalogSettings;
-use fabro_model::{AgentProfileKind, Catalog, ProviderId, adapter};
+use fabro_model::{AgentProfileKind, Catalog, ProviderId};
 use fabro_util::time::elapsed_ms;
 use tokio_util::sync::CancellationToken;
 
@@ -40,10 +40,8 @@ impl AgentAcpBackend {
         resolver: CredentialResolver,
     ) -> Self {
         let provider_id = provider_id.into();
-        let profile_kind = adapter::get(adapter::default_for_provider_id(&provider_id))
-            .map_or(AgentProfileKind::OpenAi, |metadata| {
-                metadata.default_profile
-            });
+        let catalog = default_catalog();
+        let profile_kind = default_profile_kind(catalog.as_ref(), &provider_id);
         Self {
             model,
             provider_id,
@@ -51,17 +49,15 @@ impl AgentAcpBackend {
             tool_env: None,
             github_token_refresh_managed: false,
             resolver: Some(resolver),
-            catalog: default_catalog(),
+            catalog,
         }
     }
 
     #[must_use]
     pub fn new_from_env(model: String, provider_id: impl Into<ProviderId>) -> Self {
         let provider_id = provider_id.into();
-        let profile_kind = adapter::get(adapter::default_for_provider_id(&provider_id))
-            .map_or(AgentProfileKind::OpenAi, |metadata| {
-                metadata.default_profile
-            });
+        let catalog = default_catalog();
+        let profile_kind = default_profile_kind(catalog.as_ref(), &provider_id);
         Self {
             model,
             provider_id,
@@ -69,7 +65,7 @@ impl AgentAcpBackend {
             tool_env: None,
             github_token_refresh_managed: false,
             resolver: None,
-            catalog: default_catalog(),
+            catalog,
         }
     }
 
@@ -242,10 +238,19 @@ fn default_catalog() -> Arc<Catalog> {
     )
 }
 
+fn default_profile_kind(catalog: &Catalog, provider_id: &ProviderId) -> AgentProfileKind {
+    catalog
+        .provider(provider_id)
+        .unwrap_or_else(|| panic!("Provider \"{provider_id}\" is not configured"))
+        .adapter
+        .metadata()
+        .default_profile
+}
+
 fn resolve_provider_context(
     catalog: &Catalog,
     default_provider_id: &ProviderId,
-    default_profile_kind: AgentProfileKind,
+    _default_profile_kind: AgentProfileKind,
     model: &str,
     node: &Node,
 ) -> Result<(ProviderId, AgentProfileKind), Error> {
@@ -264,17 +269,10 @@ fn resolve_provider_context(
         default_provider_id.clone()
     };
 
-    let Some(provider) = catalog.provider(&provider_id) else {
-        return Ok((default_provider_id.clone(), default_profile_kind));
-    };
-    let profile_kind = adapter::get(provider.adapter)
-        .map(|metadata| metadata.default_profile)
-        .ok_or_else(|| {
-            Error::Precondition(format!(
-                "Provider \"{provider_id}\" uses unknown adapter \"{}\"",
-                provider.adapter,
-            ))
-        })?;
+    let provider = catalog.provider(&provider_id).ok_or_else(|| {
+        Error::Precondition(format!("Provider \"{provider_id}\" is not configured"))
+    })?;
+    let profile_kind = provider.adapter.metadata().default_profile;
     Ok((provider.id.clone(), profile_kind))
 }
 
@@ -351,7 +349,7 @@ mod tests {
     use fabro_acp::test_support::fake_acp_agent_script;
     use fabro_agent::{LocalSandbox, Sandbox, shell_quote};
     use fabro_graphviz::graph::{AttrValue, Node};
-    use fabro_model::provider::Provider;
+    use fabro_model::ProviderId;
     use fabro_sandbox::test_support::MockSandbox;
     use fabro_types::EventBody;
     use tokio_util::sync::CancellationToken;
@@ -392,7 +390,7 @@ mod tests {
         );
 
         let backend =
-            AgentAcpBackend::new_from_env("fake-acp".to_string(), Provider::OpenAi).with_env(
+            AgentAcpBackend::new_from_env("fake-acp".to_string(), ProviderId::openai()).with_env(
                 HashMap::from([("ACP_MODE".to_string(), "write_file".to_string())]),
             );
         let sandbox: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(tempdir.path().to_path_buf()));
@@ -448,7 +446,7 @@ mod tests {
             )),
         );
 
-        let backend = AgentAcpBackend::new_from_env("fake-acp".to_string(), Provider::OpenAi)
+        let backend = AgentAcpBackend::new_from_env("fake-acp".to_string(), ProviderId::openai())
             .with_env(HashMap::from([
                 (
                     "ACP_PROMPT_RECORD".to_string(),
@@ -506,7 +504,7 @@ mod tests {
         );
 
         let backend =
-            AgentAcpBackend::new_from_env("fake-acp".to_string(), Provider::OpenAi).with_env(
+            AgentAcpBackend::new_from_env("fake-acp".to_string(), ProviderId::openai()).with_env(
                 HashMap::from([("ACP_STOP_REASON".to_string(), "cancelled".to_string())]),
             );
         let sandbox: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(tempdir.path().to_path_buf()));
@@ -559,7 +557,7 @@ mod tests {
         node.attrs
             .insert("acp_command".to_string(), AttrValue::String(raw_command));
 
-        let backend = AgentAcpBackend::new_from_env("fake-acp".to_string(), Provider::OpenAi);
+        let backend = AgentAcpBackend::new_from_env("fake-acp".to_string(), ProviderId::openai());
         let sandbox: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(tempdir.path().to_path_buf()));
         let emitter = Arc::new(Emitter::default());
         let events = Arc::new(Mutex::new(Vec::new()));
@@ -611,7 +609,7 @@ mod tests {
         node.attrs
             .insert("backend".to_string(), AttrValue::String("acp".to_string()));
 
-        let backend = AgentAcpBackend::new_from_env("fake-acp".to_string(), Provider::OpenAi);
+        let backend = AgentAcpBackend::new_from_env("fake-acp".to_string(), ProviderId::openai());
         let emitter = Arc::new(Emitter::default());
         let context = Context::new();
         let result = backend
@@ -665,7 +663,7 @@ mod tests {
         );
 
         let backend =
-            AgentAcpBackend::new_from_env("fake-acp".to_string(), Provider::OpenAi).with_env(
+            AgentAcpBackend::new_from_env("fake-acp".to_string(), ProviderId::openai()).with_env(
                 HashMap::from([("OPENAI_API_KEY".to_string(), "test-key".to_string())]),
             );
         let emitter = Arc::new(Emitter::default());

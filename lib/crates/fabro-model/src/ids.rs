@@ -83,16 +83,7 @@ impl ProviderId {
 
     #[must_use]
     pub fn display_name(&self) -> String {
-        match self.as_str() {
-            Self::ANTHROPIC => "Anthropic".to_string(),
-            Self::OPENAI => "OpenAI".to_string(),
-            Self::GEMINI => "Gemini".to_string(),
-            Self::KIMI => "Kimi".to_string(),
-            Self::ZAI => "Z.ai".to_string(),
-            Self::MINIMAX => "MiniMax".to_string(),
-            Self::INCEPTION => "Inception".to_string(),
-            other => other.to_string(),
-        }
+        self.0.clone()
     }
 }
 

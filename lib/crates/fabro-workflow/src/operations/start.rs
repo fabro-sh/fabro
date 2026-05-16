@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use fabro_auth::{CredentialSource, EnvCredentialSource, VaultCredentialSource};
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
-use fabro_model::{Catalog, FallbackTarget, ProviderId, adapter};
+use fabro_model::{Catalog, FallbackTarget, ProviderId};
 use fabro_sandbox::config::{
     DaytonaNetwork, DaytonaSnapshotSettings, DaytonaVolumeMount,
     DockerfileSource as SandboxDockerfileSource,
@@ -348,14 +348,7 @@ impl RunSession {
         let catalog_provider = catalog.provider(&provider_id).ok_or_else(|| {
             Error::Precondition(format!("Provider \"{provider_id}\" is not configured"))
         })?;
-        let profile_kind = adapter::get(catalog_provider.adapter)
-            .map(|metadata| metadata.default_profile)
-            .ok_or_else(|| {
-                Error::Precondition(format!(
-                    "Provider \"{provider_id}\" uses unknown adapter \"{}\"",
-                    catalog_provider.adapter,
-                ))
-            })?;
+        let profile_kind = catalog_provider.adapter.metadata().default_profile;
         let fallback_chain =
             resolve_fallback_chain(catalog.as_ref(), &provider_id, &model, &resolved.model);
         let mcp_servers = resolved

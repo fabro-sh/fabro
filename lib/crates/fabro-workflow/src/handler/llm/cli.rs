@@ -12,8 +12,7 @@ use fabro_auth::CredentialResolver;
 use fabro_graphviz::graph::Node;
 use fabro_llm::types::TokenCounts;
 use fabro_model::catalog::LlmCatalogSettings;
-use fabro_model::provider::Provider;
-use fabro_model::{AgentProfileKind, Catalog, ModelRef, ProviderId, adapter};
+use fabro_model::{AgentProfileKind, Catalog, ModelRef, ProviderId};
 use fabro_types::settings::run::RunModelControls;
 use fabro_types::{CommandOutputStream, CommandTermination, LlmBackend};
 use fabro_util::time::elapsed_ms;
@@ -67,10 +66,6 @@ impl AgentCli {
         }
     }
 
-    pub fn for_provider(provider: impl Into<ProviderId>) -> Self {
-        Self::for_profile_kind(profile_kind_for_provider_id(&provider.into()))
-    }
-
     pub fn name(self) -> &'static str {
         match self {
             Self::Claude => "claude",
@@ -78,13 +73,6 @@ impl AgentCli {
             Self::Gemini => "gemini",
         }
     }
-}
-
-fn profile_kind_for_provider_id(provider_id: &ProviderId) -> AgentProfileKind {
-    adapter::get(adapter::default_for_provider_id(provider_id))
-        .map_or(AgentProfileKind::OpenAi, |metadata| {
-            metadata.default_profile
-        })
 }
 
 /// Verify the provider CLI exists in the sandbox. Fabro does not install agent
@@ -166,19 +154,6 @@ pub fn cli_command_for_profile_kind(
             "cat {prompt_file} | CLAUDECODE= claude -p --verbose --output-format stream-json --dangerously-skip-permissions{model_flag}"
         ),
     }
-}
-
-#[must_use]
-pub fn cli_command_for_provider(
-    provider: impl Into<ProviderId>,
-    model: &str,
-    prompt_file: &str,
-) -> String {
-    cli_command_for_profile_kind(
-        profile_kind_for_provider_id(&provider.into()),
-        model,
-        prompt_file,
-    )
 }
 
 /// Parsed response from a CLI tool invocation.
@@ -329,44 +304,11 @@ fn parse_gemini_json(output: &str) -> Option<CliResponse> {
 }
 
 /// Parse CLI output, choosing the right parser based on profile behavior.
-pub fn parse_cli_response(profile: impl Into<CliProfile>, output: &str) -> Option<CliResponse> {
-    let profile_kind = profile.into().profile_kind();
+pub fn parse_cli_response(profile_kind: AgentProfileKind, output: &str) -> Option<CliResponse> {
     match AgentCli::for_profile_kind(profile_kind) {
         AgentCli::Codex => parse_codex_ndjson(output),
         AgentCli::Gemini => parse_gemini_json(output),
         AgentCli::Claude => parse_claude_ndjson(output),
-    }
-}
-
-pub enum CliProfile {
-    Kind(AgentProfileKind),
-    ProviderId(ProviderId),
-}
-
-impl CliProfile {
-    fn profile_kind(self) -> AgentProfileKind {
-        match self {
-            Self::Kind(kind) => kind,
-            Self::ProviderId(provider_id) => profile_kind_for_provider_id(&provider_id),
-        }
-    }
-}
-
-impl From<AgentProfileKind> for CliProfile {
-    fn from(value: AgentProfileKind) -> Self {
-        Self::Kind(value)
-    }
-}
-
-impl From<ProviderId> for CliProfile {
-    fn from(value: ProviderId) -> Self {
-        Self::ProviderId(value)
-    }
-}
-
-impl From<Provider> for CliProfile {
-    fn from(value: Provider) -> Self {
-        Self::ProviderId(value.id())
     }
 }
 
@@ -391,10 +333,8 @@ impl AgentCliBackend {
         resolver: CredentialResolver,
     ) -> Self {
         let provider_id = provider_id.into();
-        let profile_kind = adapter::get(adapter::default_for_provider_id(&provider_id))
-            .map_or(AgentProfileKind::OpenAi, |metadata| {
-                metadata.default_profile
-            });
+        let catalog = default_catalog();
+        let profile_kind = default_profile_kind(catalog.as_ref(), &provider_id);
         Self {
             model,
             provider_id,
@@ -403,17 +343,15 @@ impl AgentCliBackend {
             github_token_refresh_managed: false,
             resolver: Some(resolver),
             run_model_controls: RunModelControls::default(),
-            catalog: default_catalog(),
+            catalog,
         }
     }
 
     #[must_use]
     pub fn new_from_env(model: String, provider_id: impl Into<ProviderId>) -> Self {
         let provider_id = provider_id.into();
-        let profile_kind = adapter::get(adapter::default_for_provider_id(&provider_id))
-            .map_or(AgentProfileKind::OpenAi, |metadata| {
-                metadata.default_profile
-            });
+        let catalog = default_catalog();
+        let profile_kind = default_profile_kind(catalog.as_ref(), &provider_id);
         Self {
             model,
             provider_id,
@@ -422,7 +360,7 @@ impl AgentCliBackend {
             github_token_refresh_managed: false,
             resolver: None,
             run_model_controls: RunModelControls::default(),
-            catalog: default_catalog(),
+            catalog,
         }
     }
 
@@ -469,10 +407,19 @@ fn default_catalog() -> Arc<Catalog> {
     )
 }
 
+fn default_profile_kind(catalog: &Catalog, provider_id: &ProviderId) -> AgentProfileKind {
+    catalog
+        .provider(provider_id)
+        .unwrap_or_else(|| panic!("Provider \"{provider_id}\" is not configured"))
+        .adapter
+        .metadata()
+        .default_profile
+}
+
 fn resolve_provider_context(
     catalog: &Catalog,
     default_provider_id: &ProviderId,
-    default_profile_kind: AgentProfileKind,
+    _default_profile_kind: AgentProfileKind,
     model: &str,
     node: &Node,
 ) -> Result<(ProviderId, AgentProfileKind), Error> {
@@ -491,17 +438,10 @@ fn resolve_provider_context(
         default_provider_id.clone()
     };
 
-    let Some(provider) = catalog.provider(&provider_id) else {
-        return Ok((default_provider_id.clone(), default_profile_kind));
-    };
-    let profile_kind = adapter::get(provider.adapter)
-        .map(|metadata| metadata.default_profile)
-        .ok_or_else(|| {
-            Error::Precondition(format!(
-                "Provider \"{provider_id}\" uses unknown adapter \"{}\"",
-                provider.adapter,
-            ))
-        })?;
+    let provider = catalog.provider(&provider_id).ok_or_else(|| {
+        Error::Precondition(format!("Provider \"{provider_id}\" is not configured"))
+    })?;
+    let profile_kind = provider.adapter.metadata().default_profile;
     Ok((provider.id.clone(), profile_kind))
 }
 
@@ -768,7 +708,7 @@ impl CodergenBackend for AgentCliBackend {
                 output_tokens: parsed.output_tokens,
                 ..TokenCounts::default()
             },
-        );
+        )?;
 
         Ok(CodergenResult::Text {
             text: parsed.text,
@@ -852,7 +792,7 @@ mod tests {
     use fabro_agent::LocalSandbox;
     use fabro_agent::sandbox::ExecResult;
     use fabro_graphviz::graph::AttrValue;
-    use fabro_model::provider::Provider;
+    use fabro_model::ProviderId;
 
     use super::*;
     use crate::context::Context;
@@ -862,15 +802,33 @@ mod tests {
     #[test]
     fn agent_cli_for_provider() {
         assert_eq!(
-            AgentCli::for_provider(Provider::Anthropic),
+            AgentCli::for_profile_kind(AgentProfileKind::Anthropic),
             AgentCli::Claude
         );
-        assert_eq!(AgentCli::for_provider(Provider::OpenAi), AgentCli::Codex);
-        assert_eq!(AgentCli::for_provider(Provider::Gemini), AgentCli::Gemini);
-        assert_eq!(AgentCli::for_provider(Provider::Kimi), AgentCli::Codex);
-        assert_eq!(AgentCli::for_provider(Provider::Zai), AgentCli::Codex);
-        assert_eq!(AgentCli::for_provider(Provider::Minimax), AgentCli::Codex);
-        assert_eq!(AgentCli::for_provider(Provider::Inception), AgentCli::Codex);
+        assert_eq!(
+            AgentCli::for_profile_kind(AgentProfileKind::OpenAi),
+            AgentCli::Codex
+        );
+        assert_eq!(
+            AgentCli::for_profile_kind(AgentProfileKind::Gemini),
+            AgentCli::Gemini
+        );
+        assert_eq!(
+            AgentCli::for_profile_kind(AgentProfileKind::OpenAi),
+            AgentCli::Codex
+        );
+        assert_eq!(
+            AgentCli::for_profile_kind(AgentProfileKind::OpenAi),
+            AgentCli::Codex
+        );
+        assert_eq!(
+            AgentCli::for_profile_kind(AgentProfileKind::OpenAi),
+            AgentCli::Codex
+        );
+        assert_eq!(
+            AgentCli::for_profile_kind(AgentProfileKind::OpenAi),
+            AgentCli::Codex
+        );
     }
 
     #[test]
@@ -1061,19 +1019,26 @@ mod tests {
         );
     }
 
-    // -- Cycle 1: cli_command_for_provider --
+    // -- Cycle 1: cli_command_for_profile_kind --
 
     #[test]
     fn cli_command_for_codex() {
-        let cmd = cli_command_for_provider(Provider::OpenAi, "gpt-5.3-codex", "/tmp/prompt.txt");
+        let cmd = cli_command_for_profile_kind(
+            AgentProfileKind::OpenAi,
+            "gpt-5.3-codex",
+            "/tmp/prompt.txt",
+        );
         assert!(cmd.starts_with("cat /tmp/prompt.txt | codex exec --json --full-auto"));
         assert!(cmd.contains("-m gpt-5.3-codex"));
     }
 
     #[test]
     fn cli_command_for_claude() {
-        let cmd =
-            cli_command_for_provider(Provider::Anthropic, "claude-opus-4-6", "/tmp/prompt.txt");
+        let cmd = cli_command_for_profile_kind(
+            AgentProfileKind::Anthropic,
+            "claude-opus-4-6",
+            "/tmp/prompt.txt",
+        );
         assert!(cmd.starts_with("cat /tmp/prompt.txt |"));
         assert!(cmd.contains("claude -p"));
         assert!(cmd.contains("--dangerously-skip-permissions"));
@@ -1083,20 +1048,24 @@ mod tests {
 
     #[test]
     fn cli_command_for_gemini() {
-        let cmd = cli_command_for_provider(Provider::Gemini, "gemini-3.1-pro", "/tmp/prompt.txt");
+        let cmd = cli_command_for_profile_kind(
+            AgentProfileKind::Gemini,
+            "gemini-3.1-pro",
+            "/tmp/prompt.txt",
+        );
         assert!(cmd.starts_with("cat /tmp/prompt.txt | gemini -o json --yolo"));
         assert!(cmd.contains("-m gemini-3.1-pro"));
     }
 
     #[test]
     fn cli_command_omits_model_when_empty() {
-        let cmd = cli_command_for_provider(Provider::OpenAi, "", "/tmp/prompt.txt");
+        let cmd = cli_command_for_profile_kind(AgentProfileKind::OpenAi, "", "/tmp/prompt.txt");
         assert!(cmd.contains("codex exec --json --full-auto"));
         assert!(!cmd.contains("-m "));
-        let cmd = cli_command_for_provider(Provider::Anthropic, "", "/tmp/prompt.txt");
+        let cmd = cli_command_for_profile_kind(AgentProfileKind::Anthropic, "", "/tmp/prompt.txt");
         assert!(cmd.contains("--dangerously-skip-permissions"));
         assert!(!cmd.contains("--model "));
-        let cmd = cli_command_for_provider(Provider::Gemini, "", "/tmp/prompt.txt");
+        let cmd = cli_command_for_profile_kind(AgentProfileKind::Gemini, "", "/tmp/prompt.txt");
         assert!(cmd.contains("--yolo"));
         assert!(!cmd.contains("-m "));
     }
@@ -1117,7 +1086,7 @@ mod tests {
         let output = r#"{"type":"system","message":"Claude CLI v1.0"}
 {"type":"assistant","message":{"content":"thinking..."}}
 {"type":"result","result":"Here is the implementation.","usage":{"input_tokens":100,"output_tokens":50}}"#;
-        let response = parse_cli_response(Provider::Anthropic, output).unwrap();
+        let response = parse_cli_response(AgentProfileKind::Anthropic, output).unwrap();
         assert_eq!(response.text, "Here is the implementation.");
         assert_eq!(response.input_tokens, 100);
         assert_eq!(response.output_tokens, 50);
@@ -1127,7 +1096,7 @@ mod tests {
     fn parse_claude_ndjson_uses_last_result() {
         let output = r#"{"type":"result","result":"first","usage":{"input_tokens":10,"output_tokens":5}}
 {"type":"result","result":"second","usage":{"input_tokens":20,"output_tokens":10}}"#;
-        let response = parse_cli_response(Provider::Anthropic, output).unwrap();
+        let response = parse_cli_response(AgentProfileKind::Anthropic, output).unwrap();
         assert_eq!(response.text, "second");
         assert_eq!(response.input_tokens, 20);
     }
@@ -1136,13 +1105,13 @@ mod tests {
     fn parse_claude_ndjson_returns_none_for_no_result() {
         let output = r#"{"type":"system","message":"hello"}
 {"type":"assistant","message":{"content":"no result line"}}"#;
-        assert!(parse_cli_response(Provider::Anthropic, output).is_none());
+        assert!(parse_cli_response(AgentProfileKind::Anthropic, output).is_none());
     }
 
     #[test]
     fn parse_gemini_json_extracts_text_and_usage() {
         let output = r#"{"session_id":"abc","response":"Gemini says hello","stats":{"models":{"gemini-2.5-flash":{"tokens":{"input":200,"candidates":80,"total":280}}}}}"#;
-        let response = parse_cli_response(Provider::Gemini, output).unwrap();
+        let response = parse_cli_response(AgentProfileKind::Gemini, output).unwrap();
         assert_eq!(response.text, "Gemini says hello");
         assert_eq!(response.input_tokens, 200);
         assert_eq!(response.output_tokens, 80);
@@ -1151,7 +1120,7 @@ mod tests {
     #[test]
     fn parse_gemini_json_handles_missing_stats() {
         let output = r#"{"response":"hello"}"#;
-        let response = parse_cli_response(Provider::Gemini, output).unwrap();
+        let response = parse_cli_response(AgentProfileKind::Gemini, output).unwrap();
         assert_eq!(response.text, "hello");
         assert_eq!(response.input_tokens, 0);
         assert_eq!(response.output_tokens, 0);
@@ -1159,7 +1128,7 @@ mod tests {
 
     #[test]
     fn parse_gemini_json_returns_none_for_invalid_json() {
-        assert!(parse_cli_response(Provider::Gemini, "not json").is_none());
+        assert!(parse_cli_response(AgentProfileKind::Gemini, "not json").is_none());
     }
 
     // -- Cycle 4: parse_cli_response — Codex NDJSON --
@@ -1171,7 +1140,7 @@ mod tests {
 {"type":"item.completed","item":{"id":"item_0","type":"reasoning","text":"thinking..."}}
 {"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Fixed the bug."}}
 {"type":"turn.completed","usage":{"input_tokens":300,"output_tokens":150}}"#;
-        let response = parse_cli_response(Provider::OpenAi, output).unwrap();
+        let response = parse_cli_response(AgentProfileKind::OpenAi, output).unwrap();
         assert_eq!(response.text, "Fixed the bug.");
         assert_eq!(response.input_tokens, 300);
         assert_eq!(response.output_tokens, 150);
@@ -1180,14 +1149,14 @@ mod tests {
     #[test]
     fn parse_codex_ndjson_handles_no_message() {
         let output = r#"{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}"#;
-        let response = parse_cli_response(Provider::OpenAi, output).unwrap();
+        let response = parse_cli_response(AgentProfileKind::OpenAi, output).unwrap();
         assert_eq!(response.text, "");
         assert_eq!(response.input_tokens, 10);
     }
 
     #[test]
     fn parse_codex_ndjson_returns_none_for_no_events() {
-        assert!(parse_cli_response(Provider::OpenAi, "not json at all").is_none());
+        assert!(parse_cli_response(AgentProfileKind::OpenAi, "not json at all").is_none());
     }
 
     // -- Cycle 5: Node::backend() accessor (tested here since the accessor is
@@ -1394,8 +1363,8 @@ mod tests {
     }
 
     fn test_router() -> BackendRouter {
-        let cli_backend = AgentCliBackend::new_from_env("model".into(), Provider::Anthropic);
-        let acp_backend = AgentAcpBackend::new_from_env("model".into(), Provider::Anthropic);
+        let cli_backend = AgentCliBackend::new_from_env("model".into(), ProviderId::anthropic());
+        let acp_backend = AgentAcpBackend::new_from_env("model".into(), ProviderId::anthropic());
         BackendRouter::new(Box::new(StubBackend), cli_backend, acp_backend)
     }
 
@@ -1557,7 +1526,8 @@ mod tests {
             termination: CommandTermination::Cancelled,
             exit_code:   None,
         });
-        let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+        let backend =
+            AgentCliBackend::new_from_env("claude-opus-4-6".into(), ProviderId::anthropic());
         let node = Node::new("step");
         let context = Context::new();
         let emitter = Arc::new(Emitter::default());
@@ -1610,7 +1580,8 @@ mod tests {
             termination: CommandTermination::TimedOut,
             exit_code:   None,
         });
-        let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+        let backend =
+            AgentCliBackend::new_from_env("claude-opus-4-6".into(), ProviderId::anthropic());
         let node = Node::new("step");
         let context = Context::new();
         let emitter = Arc::new(Emitter::default());

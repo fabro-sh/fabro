@@ -352,8 +352,8 @@ pub(crate) fn auth_value(auth_header: &ApiKeyHeader) -> String {
 mod tests {
     use async_trait::async_trait;
     use fabro_auth::{CredentialSource, ResolvedCredentials};
+    use fabro_model::ProviderId;
     use fabro_model::catalog::LlmCatalogSettings;
-    use fabro_model::provider::Provider;
     use futures::stream;
 
     use super::*;
@@ -656,7 +656,7 @@ mod tests {
         let client = Client::from_credentials(
             vec![
                 ApiCredential {
-                    provider:      Provider::Anthropic.id(),
+                    provider:      ProviderId::anthropic(),
                     auth_header:   Some(ApiKeyHeader::Custom {
                         name:  "x-api-key".to_string(),
                         value: "anthropic-key".to_string(),
@@ -668,7 +668,7 @@ mod tests {
                     project_id:    None,
                 },
                 ApiCredential {
-                    provider:      Provider::OpenAi.id(),
+                    provider:      ProviderId::openai(),
                     auth_header:   Some(ApiKeyHeader::Bearer("openai-key".to_string())),
                     extra_headers: HashMap::new(),
                     base_url:      None,
@@ -689,11 +689,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn from_credentials_supports_openai_compatible_provider_constants() {
+    async fn from_credentials_supports_builtin_openai_compatible_providers() {
         let catalog = catalog_with("");
         let client = Client::from_credentials(
             vec![ApiCredential {
-                provider:      Provider::Kimi.id(),
+                provider:      ProviderId::kimi(),
                 auth_header:   Some(ApiKeyHeader::Bearer("kimi-key".to_string())),
                 extra_headers: HashMap::new(),
                 base_url:      None,
@@ -743,7 +743,7 @@ mod tests {
     async fn from_source_registers_provider_from_resolved_credentials() {
         let source = StubSource {
             credentials: vec![ApiCredential {
-                provider:      Provider::Anthropic.id(),
+                provider:      ProviderId::anthropic(),
                 auth_header:   Some(ApiKeyHeader::Custom {
                     name:  "x-api-key".to_string(),
                     value: "anthropic-key".to_string(),

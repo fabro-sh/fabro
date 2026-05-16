@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_model::catalog::CatalogProvider;
-use fabro_model::{Catalog, CredentialRef, HeaderValueRef, ProviderId, adapter};
+use fabro_model::{Catalog, CredentialRef, HeaderValueRef, ProviderId};
 use fabro_static::EnvVars;
 
 use crate::credential_source::{CredentialSource, ResolvedCredentials};
@@ -54,10 +54,7 @@ impl EnvCredentialSource {
         }
 
         let auth_header = key.map(|key| {
-            let policy = adapter::get(provider.adapter)
-                .map_or(fabro_model::ApiKeyHeaderPolicy::Bearer, |adapter| {
-                    adapter.api_key_header
-                });
+            let policy = provider.adapter.metadata().api_key_header;
             build_api_key_header(policy, key)
         });
 
@@ -93,7 +90,6 @@ impl EnvCredentialSource {
             ProviderId::ANTHROPIC => self.lookup(EnvVars::ANTHROPIC_BASE_URL),
             ProviderId::OPENAI => self.lookup(EnvVars::OPENAI_BASE_URL),
             ProviderId::GEMINI => self.lookup(EnvVars::GEMINI_BASE_URL),
-            "openai_compatible" => self.lookup(EnvVars::OPENAI_COMPATIBLE_BASE_URL),
             _ => None,
         }
     }
@@ -178,7 +174,6 @@ mod tests {
     use std::sync::Arc;
 
     use fabro_model::catalog::LlmCatalogSettings;
-    use fabro_model::provider::Provider;
     use fabro_model::{Catalog, ProviderId};
 
     use super::EnvCredentialSource;
@@ -207,7 +202,7 @@ mod tests {
         let catalog = default_catalog();
 
         assert_eq!(source.configured_providers(&catalog).await, vec![
-            Provider::Anthropic.id()
+            ProviderId::anthropic()
         ]);
     }
 
@@ -234,7 +229,7 @@ mod tests {
         let resolved = source.resolve(&catalog).await.unwrap();
         let credential = resolved.credentials.first().unwrap();
 
-        assert_eq!(credential.provider, Provider::OpenAi.id());
+        assert_eq!(credential.provider, ProviderId::openai());
         assert!(credential.codex_mode);
         assert_eq!(
             credential.base_url.as_deref(),
@@ -255,7 +250,7 @@ mod tests {
         let resolved = source.resolve(&catalog).await.unwrap();
         let credential = resolved.credentials.first().unwrap();
 
-        assert_eq!(credential.provider, Provider::Kimi.id());
+        assert_eq!(credential.provider, ProviderId::kimi());
         assert_eq!(
             credential.base_url.as_deref(),
             Some("https://api.moonshot.ai/v1")

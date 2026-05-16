@@ -241,7 +241,7 @@ mod tests {
         let profile = OpenAiProfile::new("o3-mini");
         let env = MockSandbox::linux();
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None, &[]);
-        assert!(prompt.contains("You are a coding agent powered by OpenAI"));
+        assert!(prompt.contains("You are a coding agent powered by openai"));
         assert!(prompt.contains("<environment>"));
         assert!(prompt.contains("linux"));
         assert!(prompt.contains("v4a patch format"));
@@ -325,7 +325,7 @@ mod tests {
     #[test]
     fn kimi_provider_prompt_uses_catalog_display_name() {
         let profile = OpenAiProfile::new("kimi-k2.5")
-            .with_provider_id(ProviderId::new(ProviderId::KIMI))
+            .with_provider_id(ProviderId::kimi())
             .with_catalog(test_catalog());
         let env = MockSandbox::linux();
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None, &[]);
@@ -336,7 +336,7 @@ mod tests {
     #[test]
     fn zai_provider_prompt_uses_catalog_display_name() {
         let profile = OpenAiProfile::new("glm-4.7")
-            .with_provider_id(ProviderId::new(ProviderId::ZAI))
+            .with_provider_id(ProviderId::zai())
             .with_catalog(test_catalog());
         let env = MockSandbox::linux();
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None, &[]);
@@ -346,7 +346,7 @@ mod tests {
     #[test]
     fn minimax_provider_prompt_uses_catalog_display_name() {
         let profile = OpenAiProfile::new("minimax-m2.5")
-            .with_provider_id(ProviderId::new(ProviderId::MINIMAX))
+            .with_provider_id(ProviderId::minimax())
             .with_catalog(test_catalog());
         let env = MockSandbox::linux();
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None, &[]);
@@ -356,7 +356,7 @@ mod tests {
     #[test]
     fn inception_provider_prompt_uses_catalog_display_name() {
         let profile = OpenAiProfile::new("mercury-2")
-            .with_provider_id(ProviderId::new(ProviderId::INCEPTION))
+            .with_provider_id(ProviderId::inception())
             .with_catalog(test_catalog());
         let env = MockSandbox::linux();
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None, &[]);

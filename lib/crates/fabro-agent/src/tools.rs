@@ -686,7 +686,7 @@ mod tests {
     use std::collections::HashMap;
 
     use fabro_llm::provider::ProviderAdapter;
-    use fabro_model::provider::Provider;
+    use fabro_model::ProviderId;
     use fabro_types::CommandTermination;
     use tokio_util::sync::CancellationToken;
 
@@ -1411,7 +1411,7 @@ mod tests {
         let summarizer = WebFetchSummarizer {
             client,
             model_id: ModelHandle::ByName {
-                provider: Provider::Anthropic.id(),
+                provider: ProviderId::anthropic(),
                 model:    "mock-model".to_string(),
             },
         };
@@ -1512,7 +1512,7 @@ mod tests {
         let summarizer = WebFetchSummarizer {
             client,
             model_id: ModelHandle::ByName {
-                provider: Provider::Anthropic.id(),
+                provider: ProviderId::anthropic(),
                 model:    "target-model".to_string(),
             },
         };

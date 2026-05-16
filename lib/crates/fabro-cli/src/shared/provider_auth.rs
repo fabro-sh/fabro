@@ -101,7 +101,7 @@ pub(crate) async fn validate_api_key(
             provider.clone(),
             api_key.to_string(),
             catalog.as_ref(),
-        )],
+        )?],
         Arc::clone(&catalog),
     )
     .await

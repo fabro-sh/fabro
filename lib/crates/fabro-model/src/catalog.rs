@@ -5,11 +5,10 @@ use std::sync::LazyLock;
 
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use strum::VariantArray;
 use toml::de::Error as TomlDeError;
 
 use crate::Speed;
-use crate::adapter::{self, AdapterKind, AdapterMetadata};
+use crate::adapter::{AdapterKind, AdapterMetadata};
 use crate::ids::ProviderId;
 use crate::reasoning::ReasoningEffort;
 use crate::types::{Model, ModelCosts, ModelFeatures, ModelLimits, ReasoningEffortFeature};
@@ -502,8 +501,7 @@ pub enum CatalogBuildError {
 
 /// Typed model catalog backed by a `Vec<Model>`.
 ///
-/// Use [`Catalog::builtin()`] for the embedded settings-backed catalog, or
-/// [`Catalog::from_models()`] for testing with custom model sets.
+/// Use [`Catalog::builtin()`] for the embedded settings-backed catalog.
 #[derive(Debug)]
 pub struct Catalog {
     models:           Vec<Model>,
@@ -626,55 +624,6 @@ impl Catalog {
         let builtins = Self::builtin_settings()?;
         let settings = merge_catalog_settings(overrides.clone(), builtins);
         Self::from_settings(&settings)
-    }
-
-    /// Create a catalog from a custom set of models (useful for testing).
-    #[must_use]
-    pub fn from_models(models: Vec<Model>) -> Self {
-        let mut providers = Vec::<CatalogProvider>::new();
-        let mut seen = HashSet::<ProviderId>::new();
-        for model in &models {
-            if !seen.insert(model.provider.clone()) {
-                continue;
-            }
-            providers.push(CatalogProvider {
-                id:            model.provider.clone(),
-                display_name:  model.provider.display_name(),
-                adapter:       adapter::default_for_provider_id(&model.provider),
-                api_key_url:   None,
-                base_url:      None,
-                credentials:   Vec::new(),
-                extra_headers: HashMap::new(),
-                priority:      0,
-                aliases:       Vec::new(),
-            });
-        }
-
-        let provider_index = providers
-            .iter()
-            .enumerate()
-            .map(|(idx, provider)| (provider.id.clone(), idx))
-            .collect::<HashMap<_, _>>();
-        let model_settings = models
-            .iter()
-            .map(|model| {
-                (model.id.clone(), CatalogModelSettings {
-                    api_id:      model.id.clone(),
-                    controls:    default_controls_for_model(model),
-                    speed_costs: HashMap::new(),
-                })
-            })
-            .collect();
-        let model_index = build_model_index(&models);
-
-        Self {
-            models,
-            providers,
-            model_settings,
-            model_index,
-            provider_aliases: HashMap::new(),
-            provider_index,
-        }
     }
 
     fn builtin_settings() -> Result<LlmCatalogSettings, CatalogBuildError> {
@@ -1147,7 +1096,7 @@ fn build_model(
                 field: "features",
             })?;
     let model_features = build_model_features(model_id, features)?;
-    let adapter = adapter::get(provider.adapter).expect("provider adapter was validated earlier");
+    let adapter = provider.adapter.metadata();
     let controls = build_model_controls(model_id, &model_features, settings, adapter)?;
     let costs = build_model_costs(settings.costs.as_ref());
     let speed_costs = build_speed_costs(model_id, settings.costs.as_ref(), &controls)?;
@@ -1471,17 +1420,6 @@ fn validate_builtin_fragment(
     Ok(())
 }
 
-fn default_controls_for_model(model: &Model) -> CatalogModelControls {
-    CatalogModelControls {
-        reasoning_effort: if model.features.reasoning_effort == ReasoningEffortFeature::Levels {
-            ReasoningEffort::VARIANTS.to_vec()
-        } else {
-            Vec::new()
-        },
-        speed:            Vec::new(),
-    }
-}
-
 fn provider_order(left: &CatalogProvider, right: &CatalogProvider) -> std::cmp::Ordering {
     right
         .priority
@@ -1497,15 +1435,12 @@ fn model_order(left: &Model, right: &Model) -> std::cmp::Ordering {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use strum::VariantArray;
 
     use super::*;
-    use crate::Speed;
     use crate::adapter::AdapterKind;
-    use crate::provider::Provider;
     use crate::reasoning::ReasoningEffort;
+    use crate::{ProviderId, Speed};
 
     fn minimal_settings(source: &str) -> LlmCatalogSettings {
         toml::from_str(source).expect("fixture should parse as an LLM settings layer")
@@ -1646,19 +1581,18 @@ enabled = true
 
     #[test]
     fn builtin_list_by_provider() {
-        let anthropic = Catalog::builtin().list(Some(&Provider::Anthropic.id()));
+        let anthropic = Catalog::builtin().list(Some(&ProviderId::anthropic()));
         assert!(!anthropic.is_empty());
         assert!(
             anthropic
                 .iter()
-                .all(|m| m.provider == Provider::Anthropic.id())
+                .all(|m| m.provider == ProviderId::anthropic())
         );
     }
 
     #[test]
     fn builtin_list_unknown_provider_empty() {
-        // OpenAiCompatible has no catalog models
-        let models = Catalog::builtin().list(Some(&Provider::OpenAiCompatible.id()));
+        let models = Catalog::builtin().list(Some(&ProviderId::new("missing-provider")));
         assert!(models.is_empty());
     }
 
@@ -1671,18 +1605,18 @@ enabled = true
     #[test]
     fn builtin_default_for_provider() {
         let m = Catalog::builtin()
-            .default_for_provider(&Provider::Anthropic.id())
+            .default_for_provider(&ProviderId::anthropic())
             .unwrap();
         assert_eq!(m.id, "claude-sonnet-4-6");
         assert!(m.default);
 
         let m = Catalog::builtin()
-            .default_for_provider(&Provider::OpenAi.id())
+            .default_for_provider(&ProviderId::openai())
             .unwrap();
         assert_eq!(m.id, "gpt-5.4");
 
         let m = Catalog::builtin()
-            .default_for_provider(&Provider::Gemini.id())
+            .default_for_provider(&ProviderId::gemini())
             .unwrap();
         assert_eq!(m.id, "gemini-3.1-pro-preview");
     }
@@ -1715,7 +1649,7 @@ enabled = true
     fn builtin_closest_opus_to_gemini() {
         let opus = Catalog::builtin().get("claude-opus-4-6").unwrap();
         let result = Catalog::builtin()
-            .closest(&Provider::Gemini.id(), opus)
+            .closest(&ProviderId::gemini(), opus)
             .unwrap();
         assert_eq!(result.id, "gemini-3.1-pro-preview");
     }
@@ -1725,7 +1659,7 @@ enabled = true
         let haiku = Catalog::builtin().get("claude-haiku-4-5").unwrap();
         assert!(
             Catalog::builtin()
-                .closest(&Provider::OpenAi.id(), haiku)
+                .closest(&ProviderId::openai(), haiku)
                 .is_none()
         );
     }
@@ -1737,7 +1671,7 @@ enabled = true
             "openai".to_string(),
         ])]);
         let chain = Catalog::builtin().build_fallback_chain(
-            &Provider::Anthropic.id(),
+            &ProviderId::anthropic(),
             "claude-opus-4-6",
             &fallbacks,
         );
@@ -1752,7 +1686,7 @@ enabled = true
     fn builtin_build_fallback_chain_unknown_model() {
         let fallbacks = HashMap::from([("anthropic".to_string(), vec!["gemini".to_string()])]);
         let chain = Catalog::builtin().build_fallback_chain(
-            &Provider::Anthropic.id(),
+            &ProviderId::anthropic(),
             "unknown-xyz",
             &fallbacks,
         );
@@ -1763,7 +1697,7 @@ enabled = true
     fn builtin_build_fallback_chain_provider_not_in_map() {
         let fallbacks = HashMap::from([("openai".to_string(), vec!["anthropic".to_string()])]);
         let chain = Catalog::builtin().build_fallback_chain(
-            &Provider::Anthropic.id(),
+            &ProviderId::anthropic(),
             "claude-opus-4-6",
             &fallbacks,
         );
@@ -1777,7 +1711,7 @@ enabled = true
             "kimi".to_string(),
         ])]);
         let chain = Catalog::builtin().build_fallback_chain(
-            &Provider::Anthropic.id(),
+            &ProviderId::anthropic(),
             "claude-haiku-4-5",
             &fallbacks,
         );
@@ -1790,53 +1724,11 @@ enabled = true
     fn builtin_build_fallback_chain_empty_map() {
         let fallbacks = HashMap::new();
         let chain = Catalog::builtin().build_fallback_chain(
-            &Provider::Anthropic.id(),
+            &ProviderId::anthropic(),
             "claude-opus-4-6",
             &fallbacks,
         );
         assert!(chain.is_empty());
-    }
-
-    #[test]
-    fn from_models_custom_catalog() {
-        use crate::types::{Model, ModelCosts, ModelFeatures, ModelLimits};
-
-        let models = vec![Model {
-            id:                   "test-model".to_string(),
-            provider:             Provider::Anthropic.id(),
-            family:               "test".to_string(),
-            display_name:         "Test Model".to_string(),
-            limits:               ModelLimits {
-                context_window: 100_000,
-                max_output:     Some(4096),
-            },
-            training:             None,
-            knowledge_cutoff:     None,
-            features:             ModelFeatures {
-                tools:            true,
-                vision:           false,
-                reasoning:        false,
-                reasoning_effort: ReasoningEffortFeature::None,
-                prompt_cache:     false,
-                effort:           false,
-            },
-            costs:                ModelCosts {
-                input_cost_per_mtok:       Some(1.0),
-                output_cost_per_mtok:      Some(5.0),
-                cache_input_cost_per_mtok: None,
-            },
-            estimated_output_tps: None,
-            aliases:              vec!["test".to_string()],
-            default:              true,
-            configured:           false,
-        }];
-
-        let catalog = Catalog::from_models(models);
-        assert_eq!(catalog.get("test-model").unwrap().id, "test-model");
-        assert_eq!(catalog.get("test").unwrap().id, "test-model");
-        assert!(catalog.get("nonexistent").is_none());
-        assert_eq!(catalog.default_model().id, "test-model");
-        assert_eq!(catalog.list(None).len(), 1);
     }
 
     #[test]
@@ -2468,20 +2360,23 @@ reasoning_effort = "levels"
 
     #[test]
     fn every_provider_has_catalog_models() {
-        for &provider in Provider::ALL {
-            let models = Catalog::builtin().list(Some(&provider.id()));
+        let catalog = Catalog::builtin();
+        for provider in catalog.providers() {
+            let models = catalog.list(Some(&provider.id));
             assert!(
                 !models.is_empty(),
-                "Provider {provider:?} has no models in catalog"
+                "Provider {:?} has no models in catalog",
+                provider.id,
             );
         }
     }
 
     #[test]
     fn every_provider_has_exactly_one_default_model() {
-        for &provider in Provider::ALL {
-            let defaults: Vec<_> = Catalog::builtin()
-                .list(Some(&provider.id()))
+        let catalog = Catalog::builtin();
+        for provider in catalog.providers() {
+            let defaults: Vec<_> = catalog
+                .list(Some(&provider.id))
                 .into_iter()
                 .filter(|m| m.default)
                 .collect();
@@ -2489,7 +2384,7 @@ reasoning_effort = "levels"
                 defaults.len(),
                 1,
                 "Provider {:?} should have exactly one default model, found {}: {:?}",
-                provider,
+                provider.id,
                 defaults.len(),
                 defaults.iter().map(|m| &m.id).collect::<Vec<_>>()
             );
@@ -2505,18 +2400,6 @@ reasoning_effort = "levels"
                 "catalog model '{}' provider {:?} has no provider metadata",
                 model.id,
                 model.provider,
-            );
-        }
-    }
-
-    #[test]
-    fn provider_static_str_roundtrips_through_from_str() {
-        for &provider in Provider::ALL {
-            let roundtripped = Provider::from_str(<&'static str>::from(provider));
-            assert_eq!(
-                roundtripped,
-                Ok(provider),
-                "Provider::{provider:?} IntoStaticStr does not round-trip through from_str"
             );
         }
     }
@@ -2711,13 +2594,13 @@ reasoning_effort = "levels"
     #[test]
     fn glm_4_7_in_catalog() {
         let m = Catalog::builtin().get("glm-4.7").unwrap();
-        assert_eq!(m.provider, Provider::Zai.id());
+        assert_eq!(m.provider, ProviderId::zai());
     }
 
     #[test]
     fn minimax_m2_5_in_catalog() {
         let m = Catalog::builtin().get("minimax-m2.5").unwrap();
-        assert_eq!(m.provider, Provider::Minimax.id());
+        assert_eq!(m.provider, ProviderId::minimax());
     }
 
     #[test]
@@ -2963,7 +2846,7 @@ reasoning_effort = "levels"
     fn closest_model_sonnet_to_gemini() {
         let sonnet = Catalog::builtin().get("claude-sonnet-4-5").unwrap();
         let result = Catalog::builtin()
-            .closest(&Provider::Gemini.id(), sonnet)
+            .closest(&ProviderId::gemini(), sonnet)
             .unwrap();
         assert_eq!(result.id, "gemini-3.1-pro-preview");
     }
@@ -2972,7 +2855,7 @@ reasoning_effort = "levels"
     fn closest_model_haiku_to_kimi() {
         let haiku = Catalog::builtin().get("claude-haiku-4-5").unwrap();
         let result = Catalog::builtin()
-            .closest(&Provider::Kimi.id(), haiku)
+            .closest(&ProviderId::kimi(), haiku)
             .unwrap();
         assert_eq!(result.id, "kimi-k2.5");
     }
@@ -2982,7 +2865,7 @@ reasoning_effort = "levels"
         let glm = Catalog::builtin().get("glm-4.7").unwrap();
         assert!(
             Catalog::builtin()
-                .closest(&Provider::Gemini.id(), glm)
+                .closest(&ProviderId::gemini(), glm)
                 .is_none()
         );
     }

@@ -2,9 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use fabro_model::catalog::CatalogProvider;
-use fabro_model::{
-    ApiKeyHeaderPolicy, Catalog, CredentialRef, HeaderValueRef, ProviderId, adapter,
-};
+use fabro_model::{ApiKeyHeaderPolicy, Catalog, CredentialRef, HeaderValueRef, ProviderId};
 use fabro_static::EnvVars;
 use fabro_vault::Vault;
 use shlex::try_quote;
@@ -46,25 +44,25 @@ pub struct ApiCredential {
 impl ApiCredential {
     /// Build an `ApiCredential` from an API key using the supplied catalog for
     /// auth header policy and provider base URL.
-    #[must_use]
-    pub fn from_api_key(provider: impl Into<ProviderId>, key: String, catalog: &Catalog) -> Self {
+    pub fn from_api_key(
+        provider: impl Into<ProviderId>,
+        key: String,
+        catalog: &Catalog,
+    ) -> Result<Self, ResolveError> {
         let provider_id = provider.into();
-        let (auth_header, base_url) = match catalog.provider(&provider_id) {
-            Some(provider) => (
-                auth_header_for_catalog_provider(provider, key),
-                provider.base_url.clone(),
-            ),
-            None => (default_auth_header_for_provider(&provider_id, key), None),
-        };
-        Self {
-            provider: provider_id,
-            auth_header: Some(auth_header),
+        let provider = catalog
+            .provider(&provider_id)
+            .ok_or_else(|| ResolveError::NotConfigured(provider_id.clone()))?;
+        let auth_header = auth_header_for_catalog_provider(provider, key);
+        Ok(Self {
+            provider:      provider_id,
+            auth_header:   Some(auth_header),
             extra_headers: HashMap::new(),
-            base_url,
-            codex_mode: false,
-            org_id: None,
-            project_id: None,
-        }
+            base_url:      provider.base_url.clone(),
+            codex_mode:    false,
+            org_id:        None,
+            project_id:    None,
+        })
     }
 }
 
@@ -79,17 +77,8 @@ pub fn build_api_key_header(policy: ApiKeyHeaderPolicy, key: String) -> ApiKeyHe
     }
 }
 
-fn default_auth_header_for_provider(provider: &ProviderId, key: String) -> ApiKeyHeader {
-    let policy = match provider.as_str() {
-        ProviderId::ANTHROPIC => ApiKeyHeaderPolicy::Custom { name: "x-api-key" },
-        _ => ApiKeyHeaderPolicy::Bearer,
-    };
-    build_api_key_header(policy, key)
-}
-
 fn auth_header_for_catalog_provider(provider: &CatalogProvider, key: String) -> ApiKeyHeader {
-    let policy = adapter::get(provider.adapter)
-        .map_or(ApiKeyHeaderPolicy::Bearer, |adapter| adapter.api_key_header);
+    let policy = provider.adapter.metadata().api_key_header;
     build_api_key_header(policy, key)
 }
 
@@ -316,9 +305,6 @@ impl CredentialResolver {
             ProviderId::ANTHROPIC => self.lookup_env_or_vault(vault, EnvVars::ANTHROPIC_BASE_URL),
             ProviderId::OPENAI => self.lookup_env_or_vault(vault, EnvVars::OPENAI_BASE_URL),
             ProviderId::GEMINI => self.lookup_env_or_vault(vault, EnvVars::GEMINI_BASE_URL),
-            "openai_compatible" => {
-                self.lookup_env_or_vault(vault, EnvVars::OPENAI_COMPATIBLE_BASE_URL)
-            }
             _ => None,
         };
         env_base_url.or_else(|| {
@@ -361,10 +347,10 @@ impl CredentialResolver {
         let base_url = self.provider_base_url_for_catalog(vault, &credential.provider, catalog);
         match &credential.details {
             AuthDetails::ApiKey { key } => {
-                let auth_header = catalog.provider(&credential.provider).map_or_else(
-                    || default_auth_header_for_provider(&credential.provider, key.clone()),
-                    |provider| auth_header_for_catalog_provider(provider, key.clone()),
-                );
+                let provider = catalog
+                    .provider(&credential.provider)
+                    .ok_or_else(|| ResolveError::NotConfigured(credential.provider.clone()))?;
+                let auth_header = auth_header_for_catalog_provider(provider, key.clone());
                 let mut cred = ApiCredential {
                     provider:      credential.provider.clone(),
                     auth_header:   Some(auth_header),
@@ -690,17 +676,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn openai_compatible_resolves_with_openai_base_url_from_vault() {
+    async fn custom_openai_compatible_resolves_with_catalog_base_url_from_vault() {
         let catalog = catalog_with(
             r#"
-[providers.openai_compatible]
-display_name = "OpenAI Compatible"
+[providers.acme]
+display_name = "Acme"
 adapter = "openai_compatible"
 base_url = "https://default.example.com/v1"
-credentials = ["credential:openai_compatible"]
+credentials = ["credential:acme"]
 
 [models."compat-model"]
-provider = "openai_compatible"
+provider = "acme"
 display_name = "Compat Model"
 family = "openai"
 default = true
@@ -719,22 +705,14 @@ effort = false
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
         vault_set_credential(
             &mut vault,
-            "openai_compatible",
-            &api_key_credential(ProviderId::new("openai_compatible"), "compat-key"),
+            "acme",
+            &api_key_credential(ProviderId::new("acme"), "compat-key"),
         )
         .unwrap();
-        vault
-            .set(
-                "OPENAI_COMPATIBLE_BASE_URL",
-                "https://compat.example.com/v1",
-                fabro_vault::SecretType::Environment,
-                None,
-            )
-            .unwrap();
         let resolver = test_resolver(vault, Arc::new(|_| None));
         let resolved = resolver
             .resolve(
-                ProviderId::new("openai_compatible"),
+                ProviderId::new("acme"),
                 CredentialUsage::ApiRequest,
                 &catalog,
             )
@@ -750,7 +728,7 @@ effort = false
         );
         assert_eq!(
             api.base_url.as_deref(),
-            Some("https://compat.example.com/v1")
+            Some("https://default.example.com/v1")
         );
     }
 
@@ -1138,7 +1116,7 @@ effort = false
 
         assert_eq!(
             message,
-            "OpenAI requires re-authentication: refresh token missing"
+            "openai requires re-authentication: refresh token missing"
         );
     }
 

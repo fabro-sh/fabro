@@ -5,7 +5,6 @@ pub mod catalog;
 pub mod ids;
 pub mod model_ref;
 pub mod model_test;
-pub mod provider;
 pub mod reasoning;
 pub mod types;
 

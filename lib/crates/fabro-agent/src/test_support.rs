@@ -193,8 +193,8 @@ pub fn text_response(text: &str) -> Response {
 pub async fn make_client(provider: Arc<dyn ProviderAdapter>) -> Client {
     let mut providers = HashMap::new();
     providers.insert(provider.name().to_string(), provider.clone());
-    // Also register under "anthropic" so TestProfile (Provider::Anthropic) routes
-    // correctly
+    // Also register under "anthropic" so TestProfile (ProviderId::anthropic())
+    // routes correctly
     providers.insert("anthropic".to_string(), provider);
     Client::new(providers, Some("mock".into()), vec![])
 }

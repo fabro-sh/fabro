@@ -1,7 +1,6 @@
 use std::any::{TypeId, type_name};
 
 use fabro_api::types::Model as ApiModel;
-use fabro_model::provider::Provider;
 use fabro_model::{
     Model, ModelCosts, ModelFeatures, ModelLimits, ProviderId, ReasoningEffortFeature,
 };
@@ -15,16 +14,12 @@ fn provider_id_reuses_canonical_model_field_type() {
 #[test]
 fn provider_id_json_matches_openapi_shape_through_model() {
     assert_eq!(
-        serde_json::to_value(Provider::Anthropic.id()).unwrap(),
+        serde_json::to_value(ProviderId::anthropic()).unwrap(),
         json!("anthropic")
     );
     assert_eq!(
-        serde_json::to_value(Provider::OpenAi.id()).unwrap(),
+        serde_json::to_value(ProviderId::openai()).unwrap(),
         json!("openai")
-    );
-    assert_eq!(
-        serde_json::to_value(Provider::OpenAiCompatible.id()).unwrap(),
-        json!("openai_compatible")
     );
 
     let model = Model {

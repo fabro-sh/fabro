@@ -19,7 +19,7 @@ use fabro_llm::provider::StreamEventStream;
 use fabro_llm::types::{Request, Response};
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::catalog::LlmCatalogSettings;
-use fabro_model::{AgentProfileKind, Catalog, ModelHandle, ProviderId, adapter};
+use fabro_model::{AgentProfileKind, Catalog, ModelHandle, ProviderId};
 use fabro_util::terminal::Styles;
 use fabro_vault::Vault;
 use tokio::io::{AsyncWriteExt, stdout};
@@ -281,15 +281,14 @@ fn standalone_llm_source() -> Arc<dyn CredentialSource> {
     }
 }
 
-fn profile_kind_for_provider(catalog: &Catalog, provider_id: &ProviderId) -> AgentProfileKind {
-    catalog
+fn profile_kind_for_provider(
+    catalog: &Catalog,
+    provider_id: &ProviderId,
+) -> anyhow::Result<AgentProfileKind> {
+    let provider = catalog
         .provider(provider_id)
-        .and_then(|provider| adapter::get(provider.adapter).map(|adapter| adapter.default_profile))
-        .or_else(|| {
-            adapter::get(adapter::default_for_provider_id(provider_id))
-                .map(|adapter| adapter.default_profile)
-        })
-        .unwrap_or(AgentProfileKind::OpenAi)
+        .ok_or_else(|| anyhow::anyhow!("provider '{provider_id}' is not configured"))?;
+    Ok(provider.adapter.metadata().default_profile)
 }
 
 fn ensure_provider_registered(client: &Client, provider_id: &ProviderId) -> anyhow::Result<()> {
@@ -529,7 +528,7 @@ pub async fn run_with_args_and_client(
                 )
             })?
     };
-    let profile_kind = profile_kind_for_provider(&catalog, &provider_id);
+    let profile_kind = profile_kind_for_provider(&catalog, &provider_id)?;
     eprintln!("{}", styles.dim.apply_to(format!("Using model: {model}")));
     let mut profile = build_profile(
         profile_kind,

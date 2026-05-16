@@ -14,7 +14,7 @@ use fabro_llm::client::Client;
 use fabro_llm::types::{Message, ReasoningEffort, Request, Speed, TokenCounts};
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::catalog::LlmCatalogSettings;
-use fabro_model::{AgentProfileKind, Catalog, FallbackTarget, ModelRef, ProviderId, adapter};
+use fabro_model::{AgentProfileKind, Catalog, FallbackTarget, ModelRef, ProviderId};
 use fabro_types::settings::run::RunModelControls;
 use fabro_types::{SessionCapability, StageId};
 use tokio::sync::Mutex as TokioMutex;
@@ -104,6 +104,15 @@ enum AgentApiErrorDisposition {
 struct ProviderContext {
     provider_id:  ProviderId,
     profile_kind: AgentProfileKind,
+}
+
+fn default_profile_kind(catalog: &Catalog, provider_id: &ProviderId) -> AgentProfileKind {
+    catalog
+        .provider(provider_id)
+        .unwrap_or_else(|| panic!("Provider \"{provider_id}\" is not configured"))
+        .adapter
+        .metadata()
+        .default_profile
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -374,15 +383,12 @@ impl AgentApiBackend {
         source: Arc<dyn CredentialSource>,
         steering_hub: Arc<SteeringHub>,
     ) -> Self {
-        let provider_id = provider_id.into();
-        let profile_kind = adapter::get(adapter::default_for_provider_id(&provider_id))
-            .map_or(AgentProfileKind::OpenAi, |metadata| {
-                metadata.default_profile
-            });
         let catalog = Arc::new(
             Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
                 .expect("default catalog should build"),
         );
+        let provider_id = provider_id.into();
+        let profile_kind = default_profile_kind(catalog.as_ref(), &provider_id);
         Self::new_with_catalog(
             model,
             provider_id,
@@ -492,20 +498,10 @@ impl AgentApiBackend {
         } else {
             self.provider_id.clone()
         };
-        let Some(provider) = self.catalog.provider(&provider_id) else {
-            return Ok(ProviderContext {
-                provider_id:  self.provider_id.clone(),
-                profile_kind: self.profile_kind,
-            });
-        };
-        let profile_kind = adapter::get(provider.adapter)
-            .map(|metadata| metadata.default_profile)
-            .ok_or_else(|| {
-                Error::Precondition(format!(
-                    "Provider \"{provider_id}\" uses unknown adapter \"{}\"",
-                    provider.adapter,
-                ))
-            })?;
+        let provider = self.catalog.provider(&provider_id).ok_or_else(|| {
+            Error::Precondition(format!("Provider \"{provider_id}\" is not configured"))
+        })?;
+        let profile_kind = provider.adapter.metadata().default_profile;
         Ok(ProviderContext {
             provider_id: provider.id.clone(),
             profile_kind,
@@ -822,7 +818,7 @@ impl CodergenBackend for AgentApiBackend {
                 speed:    actual_speed,
             },
             &response.usage,
-        );
+        )?;
 
         Ok(CodergenResult::Text {
             text:              response.text(),
@@ -1130,7 +1126,7 @@ impl CodergenBackend for AgentApiBackend {
                 speed:    billing_controls.speed,
             },
             &total_usage,
-        );
+        )?;
 
         // Extract last assistant response from the session history.
         let response = session
@@ -1540,7 +1536,7 @@ effort = false
     fn known_model_without_effort_omits_legacy_high_default() {
         let backend = AgentApiBackend::new_from_env(
             "kimi-k2.5".to_string(),
-            ProviderId::new(ProviderId::KIMI),
+            ProviderId::kimi(),
             Vec::new(),
             SteeringHub::for_tests(),
         );
