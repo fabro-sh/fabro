@@ -1,6 +1,19 @@
 @import "@xterm/xterm/css/xterm.css";
+
+/*
+ * Cascade layer order. @assistant-ui/react-ui ships unlayered CSS authored
+ * against Tailwind v3; in Tailwind v4 utilities live in @layer utilities, and
+ * any unlayered CSS wins over layered CSS regardless of selector specificity.
+ * Putting assistant-ui in a named layer that we declare BEFORE utilities makes
+ * Tailwind v4 utility classes cascade above assistant-ui's scoped preflight.
+ */
+@layer theme, base, assistant-ui, components, utilities;
+
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
+
+@import "@assistant-ui/react-ui/styles/index.css" layer(assistant-ui);
+@import "@assistant-ui/react-ui/styles/markdown.css" layer(assistant-ui);
 
 @layer base {
   a[href],
