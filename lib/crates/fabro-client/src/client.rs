@@ -615,26 +615,16 @@ impl Client {
         Ok(response.into_inner())
     }
 
+    #[expect(
+        clippy::unused_async,
+        reason = "Preserves the async high-level client API while queued turns are unsupported."
+    )]
     pub async fn submit_session_turn_queued(
         &self,
-        session_id: SessionId,
-        input: impl Into<String>,
+        _session_id: SessionId,
+        _input: impl Into<String>,
     ) -> Result<TurnId> {
-        let body = types::SubmitTurnRequest {
-            input: input.into(),
-        };
-        let response = self
-            .send_api(|client| async move {
-                client
-                    .submit_session_turn()
-                    .id(session_id)
-                    .stream(false)
-                    .body(body.clone())
-                    .send()
-                    .await
-            })
-            .await?;
-        Ok(response.into_inner().turn_id)
+        bail!("queued session turns are not supported; use submit_session_turn_stream")
     }
 
     #[expect(
