@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import type { ChatModelAdapter } from "@assistant-ui/react";
 
 import { createScriptedAdapter, toThreadMessages } from "./chats-runtime";
 import { SCRIPTED_REPLIES } from "./chats-script";
-import type { Chat, CompletionMessage } from "./chats-types";
+import type { Chat, ChatMessage } from "./chats-types";
 
 const emptyChat: Chat = {
   id: "c_test",
@@ -13,10 +14,36 @@ const emptyChat: Chat = {
   seedMessages: [],
 };
 
+type RunArgs = Parameters<ChatModelAdapter["run"]>[0];
+
+// The scripted adapter only reads `abortSignal` from RunArgs; the other fields
+// belong to assistant-ui's full ModelContext surface and have no test value.
+// One centralized factory keeps the unavoidable casts off the call sites.
+function fakeRunArgs(abortSignal: AbortSignal): RunArgs {
+  return {
+    messages: [],
+    abortSignal,
+    runConfig: {},
+    context: { tools: [] } as unknown as RunArgs["context"],
+    unstable_getMessage: () => ({}) as never,
+  };
+}
+
+async function runAll(
+  adapter: ChatModelAdapter,
+  abortSignal: AbortSignal,
+): Promise<Array<{ content?: readonly { type: string; text?: string }[] }>> {
+  const result = adapter.run(fakeRunArgs(abortSignal));
+  if (Symbol.asyncIterator in result) {
+    return await Array.fromAsync(result);
+  }
+  return [await result];
+}
+
 describe("createScriptedAdapter", () => {
   test("yields chunks ending in the full scripted reply content", async () => {
     let onCompleteCalled = false;
-    let completedReply: CompletionMessage | null = null;
+    let completedReply: ChatMessage | null = null;
     const adapter = createScriptedAdapter({
       getChat: () => ({ ...emptyChat, scriptIndex: 0 }),
       onReplyComplete: (reply) => {
@@ -26,15 +53,7 @@ describe("createScriptedAdapter", () => {
     });
 
     const controller = new AbortController();
-    const runResults = await Array.fromAsync(
-      adapter.run({
-        messages: [],
-        abortSignal: controller.signal,
-        runConfig: {},
-        context: { tools: [] } as unknown as Parameters<typeof adapter.run>[0]["context"],
-        unstable_getMessage: () => ({}) as never,
-      }),
-    );
+    const runResults = await runAll(adapter, controller.signal);
 
     expect(onCompleteCalled).toBe(true);
     expect(completedReply).toBe(SCRIPTED_REPLIES[0]);
@@ -44,17 +63,17 @@ describe("createScriptedAdapter", () => {
     expect(finalContent).toBeDefined();
     const finalText = finalContent
       ?.filter((p) => p.type === "text")
-      .map((p) => (p as { type: "text"; text: string }).text)
+      .map((p) => p.text ?? "")
       .join("");
     const expectedText = SCRIPTED_REPLIES[0]!.content
       .filter((p) => p.kind === "text")
-      .map((p) => (p.data as { text: string }).text)
+      .map((p) => p.data.text)
       .join("");
     expect(finalText).toBe(expectedText);
   });
 
   test("picks reply based on getChat().scriptIndex (wraps modulo bank length)", async () => {
-    let completed: CompletionMessage | null = null;
+    let completed: ChatMessage | null = null;
     const adapter = createScriptedAdapter({
       getChat: () => ({ ...emptyChat, scriptIndex: SCRIPTED_REPLIES.length + 2 }),
       onReplyComplete: (reply) => {
@@ -62,15 +81,7 @@ describe("createScriptedAdapter", () => {
       },
     });
     const controller = new AbortController();
-    await Array.fromAsync(
-      adapter.run({
-        messages: [],
-        abortSignal: controller.signal,
-        runConfig: {},
-        context: { tools: [] } as unknown as Parameters<typeof adapter.run>[0]["context"],
-        unstable_getMessage: () => ({}) as never,
-      }),
-    );
+    await runAll(adapter, controller.signal);
     expect(completed).toBe(SCRIPTED_REPLIES[2]);
   });
 });
@@ -107,14 +118,14 @@ describe("toThreadMessages", () => {
     ]);
     expect(out).toHaveLength(1);
     expect(out[0]?.role).toBe("assistant");
-    const parts = out[0]?.content as Array<{
-      type: string;
-      result?: unknown;
-      toolCallId?: string;
-    }>;
+    const parts = out[0]?.content;
+    expect(Array.isArray(parts)).toBe(true);
+    if (!Array.isArray(parts)) throw new Error("expected array content");
     expect(parts).toHaveLength(1);
-    expect(parts[0]?.type).toBe("tool-call");
-    expect(parts[0]?.toolCallId).toBe("t1");
-    expect(parts[0]?.result).toEqual({ ok: true });
+    const first = parts[0];
+    expect(first?.type).toBe("tool-call");
+    if (first?.type !== "tool-call") throw new Error("expected tool-call part");
+    expect(first.toolCallId).toBe("t1");
+    expect(first.result).toEqual({ ok: true });
   });
 });

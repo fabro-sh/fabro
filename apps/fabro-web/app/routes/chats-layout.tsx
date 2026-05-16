@@ -1,7 +1,7 @@
 import { NavLink, Outlet, useNavigate } from "react-router";
 import { PencilSquareIcon } from "@heroicons/react/24/outline";
 
-import { ChatsProvider, useChatsStore } from "../lib/chats-store";
+import { ChatsProvider, useChatsState } from "../lib/chats-store";
 
 export const handle = { hideHeader: true, fullHeight: true, wide: true };
 
@@ -22,7 +22,7 @@ export default function ChatsLayout() {
 }
 
 function Sidebar() {
-  const { state } = useChatsStore();
+  const state = useChatsState();
   const navigate = useNavigate();
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-line bg-panel">

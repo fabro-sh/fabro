@@ -1,16 +1,33 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { act } from "react-test-renderer";
 
-import { renderHook } from "./test-utils";
-import { ChatsProvider, useChatsStore } from "./chats-store";
+import { renderHook, setupReactTestEnv } from "./test-utils";
+import {
+  ChatsProvider,
+  useChatsActions,
+  useChatsState,
+} from "./chats-store";
+
+function useStore() {
+  return { ...useChatsActions(), state: useChatsState() };
+}
 
 function wrapper({ children }: { children: React.ReactNode }) {
   return <ChatsProvider>{children}</ChatsProvider>;
 }
 
 describe("chats-store reducer", () => {
+  let teardown: () => void = () => {};
+  beforeEach(() => {
+    teardown = setupReactTestEnv();
+  });
+  afterEach(() => {
+    teardown();
+  });
+
+
   test("createChatWithFirstMessage seeds title and user message", () => {
-    const { result } = renderHook(() => useChatsStore(), { wrapper });
+    const { result } = renderHook(() => useStore(), { wrapper });
     let id = "";
     act(() => {
       id = result.current.createChatWithFirstMessage("Help me with React");
@@ -27,7 +44,7 @@ describe("chats-store reducer", () => {
   });
 
   test("title is truncated to 40 chars at word boundary", () => {
-    const { result } = renderHook(() => useChatsStore(), { wrapper });
+    const { result } = renderHook(() => useStore(), { wrapper });
     let id = "";
     act(() => {
       id = result.current.createChatWithFirstMessage(
@@ -40,7 +57,7 @@ describe("chats-store reducer", () => {
   });
 
   test("consumePendingResponse clears the flag", () => {
-    const { result } = renderHook(() => useChatsStore(), { wrapper });
+    const { result } = renderHook(() => useStore(), { wrapper });
     let id = "";
     act(() => {
       id = result.current.createChatWithFirstMessage("hi");
@@ -53,7 +70,7 @@ describe("chats-store reducer", () => {
   });
 
   test("advanceScriptIndex increments by one", () => {
-    const { result } = renderHook(() => useChatsStore(), { wrapper });
+    const { result } = renderHook(() => useStore(), { wrapper });
     let id = "";
     act(() => {
       id = result.current.createChatWithFirstMessage("hi");
@@ -66,7 +83,7 @@ describe("chats-store reducer", () => {
   });
 
   test("seed chats appear in order on mount", () => {
-    const { result } = renderHook(() => useChatsStore(), { wrapper });
+    const { result } = renderHook(() => useStore(), { wrapper });
     expect(result.current.state.order.length).toBeGreaterThanOrEqual(3);
     const titles = result.current.state.order.map(
       (id) => result.current.state.chats[id]?.title,

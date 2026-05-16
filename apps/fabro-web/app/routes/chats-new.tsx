@@ -2,7 +2,7 @@ import { useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { ArrowUpIcon } from "@heroicons/react/24/solid";
 
-import { useChatsStore } from "../lib/chats-store";
+import { useChatsActions } from "../lib/chats-store";
 import ComposerChips from "../components/chats/composer-chips";
 
 export function meta() {
@@ -11,7 +11,7 @@ export function meta() {
 
 export default function ChatsNew() {
   const navigate = useNavigate();
-  const { createChatWithFirstMessage } = useChatsStore();
+  const { createChatWithFirstMessage } = useChatsActions();
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 

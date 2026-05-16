@@ -1,5 +1,3 @@
-import type { CompletionMessage } from "@qltysh/fabro-api-client";
-
 /**
  * Stricter discriminated-union view over @qltysh/fabro-api-client's
  * `CompletionContentPart` ({ kind: string; data: any }). Each variant in our
@@ -33,6 +31,16 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
+export type ChatRole = "user" | "assistant" | "system";
+
+/** Strict in-app message shape; widens to the API's CompletionMessage at the
+ * wire boundary. Keeping this strict inside the chat code lets every
+ * `switch (part.kind)` be exhaustive. */
+export type ChatMessage = {
+  role: ChatRole;
+  content: ChatContentPart[];
+};
+
 /**
  * Sidebar/store wrapper around a single chat. Messages and the in-flight
  * stream live inside assistant-ui's runtime; the store holds the metadata
@@ -46,8 +54,6 @@ export type Chat = {
   title: string;
   createdAt: number;
   scriptIndex: number;
-  seedMessages: CompletionMessage[];
+  seedMessages: ChatMessage[];
   pendingResponse: boolean;
 };
-
-export type { CompletionMessage } from "@qltysh/fabro-api-client";

@@ -5,11 +5,7 @@ import type {
   ThreadMessageLike,
 } from "@assistant-ui/react";
 
-import type {
-  Chat,
-  ChatContentPart,
-  CompletionMessage,
-} from "./chats-types";
+import type { Chat, ChatContentPart, ChatMessage } from "./chats-types";
 import { pickReply } from "./chats-script";
 
 const STREAM_CHUNK_CHARS = 28;
@@ -49,16 +45,15 @@ function toAssistantParts(
         argsText: JSON.stringify(part.data.arguments),
       });
     } else if (part.kind === "tool_result") {
-      const target = out
-        .slice()
-        .reverse()
-        .find(
-          (p): p is Extract<ThreadAssistantMessagePart, { type: "tool-call" }> =>
-            p.type === "tool-call" && p.toolCallId === part.data.tool_call_id,
-        );
-      if (target) {
-        const idx = out.lastIndexOf(target);
-        out[idx] = { ...target, result: part.data.content };
+      for (let i = out.length - 1; i >= 0; i--) {
+        const candidate = out[i];
+        if (
+          candidate?.type === "tool-call" &&
+          candidate.toolCallId === part.data.tool_call_id
+        ) {
+          out[i] = { ...candidate, result: part.data.content };
+          break;
+        }
       }
     }
   }
@@ -67,7 +62,7 @@ function toAssistantParts(
 
 export function createScriptedAdapter(args: {
   getChat: () => Chat | undefined;
-  onReplyComplete: (reply: CompletionMessage) => void;
+  onReplyComplete: (reply: ChatMessage) => void;
 }): ChatModelAdapter {
   return {
     async *run({ abortSignal }) {
@@ -75,7 +70,7 @@ export function createScriptedAdapter(args: {
       const reply = pickReply(chat?.scriptIndex ?? 0);
       const accumulated: ChatContentPart[] = [];
 
-      for (const part of reply.content as ChatContentPart[]) {
+      for (const part of reply.content) {
         if (part.kind === "text") {
           const text = part.data.text;
           let cursor = 0;
@@ -109,23 +104,21 @@ function buildUpdate(parts: ChatContentPart[]): ChatModelRunResult {
 }
 
 export function toThreadMessages(
-  messages: readonly CompletionMessage[],
+  messages: readonly ChatMessage[],
 ): ThreadMessageLike[] {
   return messages.map((msg) => {
     if (msg.role === "user") {
       return {
         role: "user",
-        content: (msg.content as ChatContentPart[])
-          .filter((p): p is Extract<ChatContentPart, { kind: "text" }> =>
-            p.kind === "text",
-          )
+        content: msg.content
+          .filter((p) => p.kind === "text")
           .map((p) => ({ type: "text", text: p.data.text }) as const),
       };
     }
     if (msg.role === "assistant") {
       return {
         role: "assistant",
-        content: toAssistantParts(msg.content as ChatContentPart[]),
+        content: toAssistantParts(msg.content),
       };
     }
     return { role: "system", content: [] };

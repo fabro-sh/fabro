@@ -1,13 +1,23 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { MemoryRouter, Routes, Route } from "react-router";
 import TestRenderer, { act } from "react-test-renderer";
 
+import { setupReactTestEnv } from "../lib/test-utils";
 import { ChatsProvider } from "../lib/chats-store";
 import * as ChatsLayoutModule from "./chats-layout";
 import * as ChatsNewModule from "./chats-new";
 import * as ChatsDetailModule from "./chats-detail";
 
 describe("chats route module exports", () => {
+  let teardown: () => void = () => {};
+  beforeEach(() => {
+    teardown = setupReactTestEnv();
+  });
+  afterEach(() => {
+    teardown();
+  });
+
+
   test("each route exports a default component", () => {
     expect(typeof ChatsLayoutModule.default).toBe("function");
     expect(typeof ChatsNewModule.default).toBe("function");

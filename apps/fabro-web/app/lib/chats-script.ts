@@ -1,12 +1,12 @@
-import type { CompletionMessage } from "./chats-types";
+import type { ChatMessage } from "./chats-types";
 
 /**
  * Scripted assistant replies cycled through per chat. Generic content,
  * intentionally not Fabro-specific. Each entry is a single assistant
- * CompletionMessage; tool calls and their results are siblings in the
- * content array so the renderer can pair them.
+ * ChatMessage; tool calls and their results are siblings in the content
+ * array so the renderer can pair them.
  */
-export const SCRIPTED_REPLIES: CompletionMessage[] = [
+export const SCRIPTED_REPLIES: ChatMessage[] = [
   {
     role: "assistant",
     content: [
@@ -177,12 +177,12 @@ export const SCRIPTED_REPLIES: CompletionMessage[] = [
   },
 ];
 
-const FALLBACK_REPLY: CompletionMessage = {
+const FALLBACK_REPLY: ChatMessage = {
   role: "assistant",
   content: [{ kind: "text", data: { text: "(No reply available.)" } }],
 };
 
-export function pickReply(scriptIndex: number): CompletionMessage {
+export function pickReply(scriptIndex: number): ChatMessage {
   return (
     SCRIPTED_REPLIES[scriptIndex % SCRIPTED_REPLIES.length] ?? FALLBACK_REPLY
   );

@@ -4,11 +4,10 @@ import {
   useContext,
   useMemo,
   useReducer,
-  useRef,
   type ReactNode,
 } from "react";
 
-import type { Chat, CompletionMessage } from "./chats-types";
+import type { Chat, ChatMessage } from "./chats-types";
 import { pickReply } from "./chats-script";
 
 type State = {
@@ -22,7 +21,7 @@ type Action =
       id: string;
       title: string;
       createdAt: number;
-      userMessage: CompletionMessage;
+      userMessage: ChatMessage;
     }
   | { type: "consume_pending"; chatId: string }
   | { type: "advance_script"; chatId: string };
@@ -36,53 +35,56 @@ function deriveTitle(text: string): string {
   return `${base}…`;
 }
 
-function userMessage(text: string): CompletionMessage {
+function userMessage(text: string): ChatMessage {
   return {
     role: "user",
     content: [{ kind: "text", data: { text } }],
   };
 }
 
-function seedChat(
-  id: string,
-  title: string,
-  ageDays: number,
-  scriptIndex: number,
-  userText: string,
-): Chat {
+function seedChat(args: {
+  id: string;
+  title: string;
+  ageDays: number;
+  scriptIndex: number;
+  userText: string;
+}): Chat {
   return {
-    id,
-    title,
-    createdAt: Date.now() - ageDays * 86_400_000,
-    scriptIndex: scriptIndex + 1, // seeded reply already "consumed"
+    id: args.id,
+    title: args.title,
+    createdAt: Date.now() - args.ageDays * 86_400_000,
+    scriptIndex: args.scriptIndex + 1, // seeded reply already "consumed"
     pendingResponse: false,
-    seedMessages: [userMessage(userText), pickReply(scriptIndex)],
+    seedMessages: [userMessage(args.userText), pickReply(args.scriptIndex)],
   };
 }
 
 const initialState: State = (() => {
   const seeds: Chat[] = [
-    seedChat(
-      "seed_email",
-      "Draft a launch email",
-      0.5,
-      0,
-      "Help me draft a launch announcement email for our new analytics dashboard.",
-    ),
-    seedChat(
-      "seed_hook",
-      "Refactor a React hook",
-      2,
-      3,
-      "My useChat hook has grown to 200 lines and I keep tangling concerns. How should I think about refactoring it?",
-    ),
-    seedChat(
-      "seed_db",
-      "Compare Postgres vs SQLite",
-      6,
-      5,
-      "For a side project with ~50 daily users, should I reach for Postgres or stick with SQLite?",
-    ),
+    seedChat({
+      id: "seed_email",
+      title: "Draft a launch email",
+      ageDays: 0.5,
+      scriptIndex: 0,
+      userText:
+        "Help me draft a launch announcement email for our new analytics dashboard.",
+    }),
+    seedChat({
+      id: "seed_hook",
+      title: "Refactor a React hook",
+      ageDays: 2,
+      scriptIndex: 3,
+      userText:
+        "My useChat hook has grown to 200 lines and I keep tangling concerns. How should I think about refactoring it?",
+    }),
+    seedChat({
+      id: "seed_db",
+      title: "Compare Postgres vs SQLite",
+      ageDays: 6,
+      scriptIndex: 5,
+      userText:
+        "For a side project with ~50 daily users, should I reach for Postgres or stick with SQLite?",
+    }),
   ];
   const chats: Record<string, Chat> = {};
   for (const s of seeds) chats[s.id] = s;
@@ -133,15 +135,14 @@ function reducer(state: State, action: Action): State {
   }
 }
 
-type ChatsContextValue = {
-  state: State;
+export type ChatsActions = {
   createChatWithFirstMessage: (text: string) => string;
   consumePendingResponse: (chatId: string) => void;
-  peekScriptIndex: (chatId: string) => number;
   advanceScriptIndex: (chatId: string) => void;
 };
 
-const ChatsContext = createContext<ChatsContextValue | null>(null);
+const ChatsStateContext = createContext<State | null>(null);
+const ChatsActionsContext = createContext<ChatsActions | null>(null);
 
 function shortId(): string {
   return `c_${Math.random().toString(36).slice(2, 8)}`;
@@ -149,56 +150,52 @@ function shortId(): string {
 
 export function ChatsProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
-  const stateRef = useRef(state);
-  stateRef.current = state;
 
-  const createChatWithFirstMessage = useCallback((text: string) => {
-    const id = shortId();
-    dispatch({
-      type: "create",
-      id,
-      title: deriveTitle(text),
-      createdAt: Date.now(),
-      userMessage: userMessage(text),
-    });
-    return id;
-  }, []);
-
-  const consumePendingResponse = useCallback((chatId: string) => {
-    dispatch({ type: "consume_pending", chatId });
-  }, []);
-
-  const peekScriptIndex = useCallback(
-    (chatId: string) => stateRef.current.chats[chatId]?.scriptIndex ?? 0,
+  const actions = useMemo<ChatsActions>(
+    () => ({
+      createChatWithFirstMessage(text: string) {
+        const id = shortId();
+        dispatch({
+          type: "create",
+          id,
+          title: deriveTitle(text),
+          createdAt: Date.now(),
+          userMessage: userMessage(text),
+        });
+        return id;
+      },
+      consumePendingResponse(chatId: string) {
+        dispatch({ type: "consume_pending", chatId });
+      },
+      advanceScriptIndex(chatId: string) {
+        dispatch({ type: "advance_script", chatId });
+      },
+    }),
     [],
   );
 
-  const advanceScriptIndex = useCallback((chatId: string) => {
-    dispatch({ type: "advance_script", chatId });
-  }, []);
-
-  const value = useMemo<ChatsContextValue>(
-    () => ({
-      state,
-      createChatWithFirstMessage,
-      consumePendingResponse,
-      peekScriptIndex,
-      advanceScriptIndex,
-    }),
-    [
-      state,
-      createChatWithFirstMessage,
-      consumePendingResponse,
-      peekScriptIndex,
-      advanceScriptIndex,
-    ],
+  return (
+    <ChatsStateContext.Provider value={state}>
+      <ChatsActionsContext.Provider value={actions}>
+        {children}
+      </ChatsActionsContext.Provider>
+    </ChatsStateContext.Provider>
   );
-
-  return <ChatsContext.Provider value={value}>{children}</ChatsContext.Provider>;
 }
 
-export function useChatsStore(): ChatsContextValue {
-  const value = useContext(ChatsContext);
-  if (!value) throw new Error("useChatsStore must be used inside <ChatsProvider>");
+export function useChatsState(): State {
+  const value = useContext(ChatsStateContext);
+  if (!value) throw new Error("useChatsState must be used inside <ChatsProvider>");
   return value;
+}
+
+export function useChatsActions(): ChatsActions {
+  const value = useContext(ChatsActionsContext);
+  if (!value) throw new Error("useChatsActions must be used inside <ChatsProvider>");
+  return value;
+}
+
+export function useChat(chatId: string | undefined): Chat | undefined {
+  const state = useChatsState();
+  return chatId ? state.chats[chatId] : undefined;
 }
