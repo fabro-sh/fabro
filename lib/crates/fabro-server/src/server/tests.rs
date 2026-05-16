@@ -5770,6 +5770,50 @@ async fn merge_run_pull_request_returns_service_unavailable_without_github_crede
 }
 
 #[tokio::test]
+async fn merge_run_pull_request_derives_coordinates_from_stored_url() {
+    let github = MockServer::start();
+    let github_mock = github.mock(|when, then| {
+        when.method("PUT")
+            .path("/repos/acme/widgets/pulls/42/merge")
+            .header("authorization", "Bearer ghu_test")
+            .json_body(json!({ "merge_method": "squash" }));
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(json!({}).to_string());
+    });
+    let (state, app, run_id) = pr_test_app(Some("ghu_test"), Some(github.base_url()));
+
+    create_run_with_linked_pull_request_record(&state, run_id, PullRequestRecord {
+        provider:    "github".to_string(),
+        html_url:    "https://github.com/acme/widgets/pull/42".to_string(),
+        number:      None,
+        owner:       None,
+        repo:        None,
+        base_branch: None,
+        head_branch: None,
+        title:       None,
+    })
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/runs/{run_id}/pull_request/merge")))
+                .header("content-type", "application/json")
+                .body(Body::from(json!({ "method": "squash" }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+
+    assert_eq!(body["number"], 42);
+    assert_eq!(body["html_url"], "https://github.com/acme/widgets/pull/42");
+    github_mock.assert();
+}
+
+#[tokio::test]
 async fn close_run_pull_request_returns_not_found_when_record_missing() {
     let (_state, app, run_id) = pr_test_app_with_minimal_run(Some("ghu_test"), None).await;
 

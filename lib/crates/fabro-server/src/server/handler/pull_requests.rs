@@ -71,25 +71,49 @@ fn github_pull_request_coordinates_for_link(url: &str) -> Result<(String, String
             "unsupported_pull_request_provider",
         ));
     }
-    let segments = parsed
-        .path_segments()
-        .map(Iterator::collect::<Vec<_>>)
-        .unwrap_or_default();
-    let [owner, repo, "pull", number] = segments.as_slice() else {
-        return Err(ApiError::with_code(
-            StatusCode::BAD_REQUEST,
-            "Pull request link must use https://github.com/owner/repo/pull/123.",
-            "invalid_pull_request_url",
-        ));
-    };
-    let number = number.parse().map_err(|_| {
+    github_pull_request_coordinates_from_url(url)
+}
+
+#[expect(
+    clippy::disallowed_types,
+    reason = "Pull-request API validates public github.com URLs; these raw URLs are not credential-bearing log output."
+)]
+fn github_pull_request_coordinates_from_url(url: &str) -> Result<(String, String, u64), ApiError> {
+    let (owner, repo) = parse_github_owner_repo_from_url(url, "pull request URL")?;
+    let parsed = fabro_http::Url::parse(url).map_err(|err| {
         ApiError::with_code(
             StatusCode::BAD_REQUEST,
-            "Pull request URL number must be an unsigned integer.",
+            format!("Invalid pull request URL: {err}"),
             "invalid_pull_request_url",
         )
     })?;
-    Ok(((*owner).to_string(), (*repo).to_string(), number))
+    let segments = parsed
+        .path_segments()
+        .map(|segments| {
+            segments
+                .filter(|segment| !segment.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    match segments.as_slice() {
+        [path_owner, path_repo, "pull", number]
+            if *path_owner == owner.as_str() && *path_repo == repo.as_str() =>
+        {
+            let number = number.parse().map_err(|_| {
+                ApiError::with_code(
+                    StatusCode::BAD_REQUEST,
+                    "Pull request URL number must be an unsigned integer.",
+                    "invalid_pull_request_url",
+                )
+            })?;
+            Ok((owner, repo, number))
+        }
+        _ => Err(ApiError::with_code(
+            StatusCode::BAD_REQUEST,
+            "Pull request link must use https://github.com/owner/repo/pull/123.",
+            "invalid_pull_request_url",
+        )),
+    }
 }
 
 fn pull_request_record_from_link_request(
@@ -191,13 +215,10 @@ fn server_github_context<'a>(
     ))
 }
 
-fn github_pull_request_not_found_error(record: &PullRequestRecord) -> ApiError {
+fn github_pull_request_not_found_error(number: u64) -> ApiError {
     ApiError::with_code(
         StatusCode::BAD_GATEWAY,
-        format!(
-            "Pull request #{} was deleted on GitHub.",
-            record.number.unwrap_or_default()
-        ),
+        format!("Pull request #{number} was deleted on GitHub."),
         "github_not_found",
     )
 }
@@ -245,29 +266,17 @@ fn github_coordinates_for_record(
             "unsupported_pull_request_provider",
         ));
     }
-    parse_github_owner_repo_from_url(&record.html_url, "pull request URL")?;
-    let owner = record.owner.clone().ok_or_else(|| {
-        ApiError::with_code(
-            StatusCode::BAD_REQUEST,
-            "Stored GitHub pull request is missing owner/repo/number coordinates.",
-            "missing_pull_request_coordinates",
-        )
-    })?;
-    let repo = record.repo.clone().ok_or_else(|| {
-        ApiError::with_code(
-            StatusCode::BAD_REQUEST,
-            "Stored GitHub pull request is missing owner/repo/number coordinates.",
-            "missing_pull_request_coordinates",
-        )
-    })?;
-    let number = record.number.ok_or_else(|| {
-        ApiError::with_code(
-            StatusCode::BAD_REQUEST,
-            "Stored GitHub pull request is missing owner/repo/number coordinates.",
-            "missing_pull_request_coordinates",
-        )
-    })?;
-    Ok((owner, repo, number))
+    github_pull_request_coordinates_from_url(&record.html_url).map_err(|err| {
+        if err.code() == Some("invalid_pull_request_url") {
+            ApiError::with_code(
+                StatusCode::BAD_REQUEST,
+                "Stored GitHub pull request is missing owner/repo/number coordinates.",
+                "missing_pull_request_coordinates",
+            )
+        } else {
+            err
+        }
+    })
 }
 
 async fn load_pull_request_github_context(
@@ -606,7 +615,7 @@ async fn merge_run_pull_request(
         })
         .into_response(),
         Err(fabro_github::PullRequestApiError::NotFound { .. }) => {
-            github_pull_request_not_found_error(&ctx.record).into_response()
+            github_pull_request_not_found_error(ctx.number).into_response()
         }
         Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err.to_string()).into_response(),
     }
@@ -633,7 +642,7 @@ async fn close_run_pull_request(
         })
         .into_response(),
         Err(fabro_github::PullRequestApiError::NotFound { .. }) => {
-            github_pull_request_not_found_error(&ctx.record).into_response()
+            github_pull_request_not_found_error(ctx.number).into_response()
         }
         Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err.to_string()).into_response(),
     }

@@ -32,6 +32,9 @@ async fn resolve_run_for_pr(
 ) -> Result<(CommandContext, Arc<Client>, RunId)> {
     let ctx = base_ctx.with_target(server)?;
     let client = ctx.server().await?;
-    let run_id = client.resolve_run(selector).await?.id;
+    let run_id = match selector.parse::<RunId>() {
+        Ok(run_id) => run_id,
+        Err(_) => client.resolve_run(selector).await?.id,
+    };
     Ok((ctx, client, run_id))
 }

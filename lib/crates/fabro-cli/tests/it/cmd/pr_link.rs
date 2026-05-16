@@ -80,3 +80,46 @@ fn pr_link_uses_server_endpoint_and_prints_linked_record() {
     resolve_mock.assert();
     link_mock.assert();
 }
+
+#[test]
+fn pr_link_skips_resolve_endpoint_for_full_run_id() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+
+    let link_mock = server.mock(|when, then| {
+        when.method("PUT")
+            .path(format!("/api/v1/runs/{run_id}/pull_request"))
+            .header("content-type", "application/json")
+            .json_body(serde_json::json!({
+                "html_url": "https://github.com/acme/widgets/pull/42"
+            }));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .json_body(serde_json::json!({
+                "provider": "github",
+                "html_url": "https://github.com/acme/widgets/pull/42",
+                "number": 42
+            }));
+    });
+
+    let mut cmd = context.command();
+    cmd.args([
+        "pr",
+        "link",
+        "--server",
+        &server.base_url(),
+        &run_id,
+        "https://github.com/acme/widgets/pull/42",
+    ]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    Linked pull request: https://github.com/acme/widgets/pull/42 (github #42)
+    ----- stderr -----
+    ");
+
+    link_mock.assert();
+}

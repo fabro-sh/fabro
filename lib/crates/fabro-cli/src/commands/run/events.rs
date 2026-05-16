@@ -766,34 +766,18 @@ fn format_event_pretty_value(envelope: &serde_json::Value, styles: &Styles) -> O
                 url,
             ))
         }
-        "pull_request.linked" => {
-            let url = envelope
-                .get("properties")
-                .and_then(|props| props.get("pull_request"))
-                .and_then(|record| record.get("html_url"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("?");
-            Some(format!(
-                "{} {} {}",
-                styles.dim.apply_to(&ts),
-                styles.bold.apply_to("PR linked:"),
-                url,
-            ))
-        }
-        "pull_request.unlinked" => {
-            let url = envelope
-                .get("properties")
-                .and_then(|props| props.get("pull_request"))
-                .and_then(|record| record.get("html_url"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("?");
-            Some(format!(
-                "{} {} {}",
-                styles.dim.apply_to(&ts),
-                styles.bold.apply_to("PR unlinked:"),
-                url,
-            ))
-        }
+        "pull_request.linked" => Some(format_pull_request_record_event(
+            envelope,
+            styles,
+            &ts,
+            "PR linked:",
+        )),
+        "pull_request.unlinked" => Some(format_pull_request_record_event(
+            envelope,
+            styles,
+            &ts,
+            "PR unlinked:",
+        )),
         "pull_request.failed" => {
             let error = prop_str_field(envelope, "error").unwrap_or("unknown error");
             Some(format!(
@@ -823,6 +807,24 @@ fn prop_field<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a serde_j
 
 fn prop_str_field<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
     prop_field(value, key)?.as_str()
+}
+
+fn format_pull_request_record_event(
+    envelope: &serde_json::Value,
+    styles: &Styles,
+    ts: &str,
+    label: &str,
+) -> String {
+    let url = prop_field(envelope, "pull_request")
+        .and_then(|record| record.get("html_url"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("?");
+    format!(
+        "{} {} {}",
+        styles.dim.apply_to(ts),
+        styles.bold.apply_to(label),
+        url,
+    )
 }
 
 fn format_timestamp(ts: &str) -> String {
