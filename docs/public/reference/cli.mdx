@@ -81,6 +81,7 @@ fabro [OPTIONS] [COMMAND]
 | `fabro logs` | View the raw worker tracing log of a workflow run |
 | `fabro mcp` | Model Context Protocol server |
 | `fabro model` | List and test LLM models |
+| `fabro parent` | Manage run parent links |
 | `fabro pr` | Pull request operations |
 | `fabro preflight` | Validate run configuration without executing |
 | `fabro provider` | Provider operations |
@@ -306,6 +307,7 @@ fabro create [OPTIONS] <WORKFLOW>
 | `--goal-file <goal_file>` | Read the workflow goal from a file |
 | `--label <key=value>` | Attach a label to this run (repeatable, format: KEY=VALUE) |
 | `--model <model>` | Override default LLM model |
+| `--parent <run>` | Link this run to an existing orchestration parent run |
 | `--preserve-sandbox` | Keep the sandbox alive after the run finishes (for debugging) |
 | `--provider <provider>` | Override default LLM provider |
 | `--sandbox <sandbox>` | Sandbox for agent tools<br />Values: `local`, `docker`, `daytona` |
@@ -625,6 +627,62 @@ fabro model test [OPTIONS]
 | `-j, --jobs <jobs>` | Number of model tests to run concurrently in bulk mode<br />Default: `4` |
 | `-m, --model <model>` | Test a specific model |
 | `-p, --provider <provider>` | Filter by provider |
+| `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
+
+### `fabro parent`
+
+Manage run parent links
+
+```bash
+fabro parent [OPTIONS] <COMMAND>
+```
+
+#### Subcommands
+
+| Command | Description |
+| --- | --- |
+| `fabro parent link` | Link or replace a run's orchestration parent |
+| `fabro parent unlink` | Unlink a run from its orchestration parent |
+
+#### `fabro parent link`
+
+Link or replace a run's orchestration parent
+
+```bash
+fabro parent link [OPTIONS] <CHILD_RUN> <PARENT_RUN>
+```
+
+#### Arguments
+
+| Name | Description |
+| --- | --- |
+| `CHILD_RUN` | Child run selector |
+| `PARENT_RUN` | Parent run selector |
+
+#### Options
+
+| Option | Description |
+| --- | --- |
+| `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
+
+#### `fabro parent unlink`
+
+Unlink a run from its orchestration parent
+
+```bash
+fabro parent unlink [OPTIONS] <CHILD_RUN>
+```
+
+#### Arguments
+
+| Name | Description |
+| --- | --- |
+| `CHILD_RUN` | Child run selector |
+
+#### Options
+
+| Option | Description |
+| --- | --- |
 | `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
 
 ### `fabro pr`
@@ -953,6 +1011,7 @@ fabro run [OPTIONS] <WORKFLOW>
 | `--goal-file <goal_file>` | Read the workflow goal from a file |
 | `--label <key=value>` | Attach a label to this run (repeatable, format: KEY=VALUE) |
 | `--model <model>` | Override default LLM model |
+| `--parent <run>` | Link this run to an existing orchestration parent run |
 | `--preserve-sandbox` | Keep the sandbox alive after the run finishes (for debugging) |
 | `--provider <provider>` | Override default LLM provider |
 | `--sandbox <sandbox>` | Sandbox for agent tools<br />Values: `local`, `docker`, `daytona` |
