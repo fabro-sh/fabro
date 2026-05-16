@@ -1,8 +1,12 @@
 # /chats/new — assistant-ui prototype
 
-Status: design approved, ready for implementation plan.
+Status: design approved, runnable prototype built, ready for implementation plan.
 Owner: fabro-web.
 Scope: client-side prototype only. No backend, no persistence.
+
+Reference implementation: `../prototypes/2026-05-16-chats-new/` (runnable Vite
+app — `bun install && bun run dev`). Includes `/chats/new`, `/chats/:id`, and
+`/sample` with a right-side Ask-Fabro assistant.
 
 ## Goal
 

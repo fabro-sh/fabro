@@ -1,0 +1,29 @@
+{
+  "name": "chats-prototype",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@assistant-ui/react": "0.14.5",
+    "@assistant-ui/react-markdown": "0.14.0",
+    "@assistant-ui/react-ui": "0.2.1",
+    "@headlessui/react": "^2.2.9",
+    "@heroicons/react": "^2.2.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-router": "^7.12.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.0",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "tailwindcss": "^4.3.0",
+    "typescript": "^5.9.2",
+    "vite": "^8.0.13"
+  }
+}
