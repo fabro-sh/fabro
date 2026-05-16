@@ -49,6 +49,11 @@ pub struct RewindRunResult {
     pub response: types::RewindResponse,
 }
 
+#[derive(Default)]
+struct ListStoreRunsOptions {
+    parent_id: Option<RunId>,
+}
+
 #[derive(Clone)]
 struct ClientState {
     client:       fabro_api::ApiClient,
@@ -912,11 +917,26 @@ impl Client {
         Ok(response.into_inner())
     }
 
-    pub async fn list_store_runs(&self, parent_id: Option<RunId>) -> Result<Vec<RunSummary>> {
+    pub async fn list_store_runs(&self) -> Result<Vec<RunSummary>> {
+        self.list_store_runs_with_options(ListStoreRunsOptions::default())
+            .await
+    }
+
+    pub async fn list_store_runs_by_parent(&self, parent_id: RunId) -> Result<Vec<RunSummary>> {
+        self.list_store_runs_with_options(ListStoreRunsOptions {
+            parent_id: Some(parent_id),
+        })
+        .await
+    }
+
+    async fn list_store_runs_with_options(
+        &self,
+        options: ListStoreRunsOptions,
+    ) -> Result<Vec<RunSummary>> {
         let mut all_runs = Vec::new();
         let mut offset = 0_u64;
         let limit = 100_u64;
-        let parent_id = parent_id.map(|run_id| run_id.to_string());
+        let parent_id = options.parent_id.map(|run_id| run_id.to_string());
 
         loop {
             let response = self

@@ -8,7 +8,7 @@ use crate::shared::print_json_pretty;
 
 pub(super) async fn link_command(args: PrLinkArgs, base_ctx: &CommandContext) -> Result<()> {
     let (ctx, client, run_id) =
-        super::resolve_run_for_pr(base_ctx, &args.server, &args.run_id).await?;
+        super::resolve_run_selector(base_ctx, &args.server, &args.run_id).await?;
     let record = client.link_run_pull_request(&run_id, args.url).await?;
 
     info!(

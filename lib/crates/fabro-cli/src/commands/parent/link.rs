@@ -6,9 +6,12 @@ use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
 
 pub(super) async fn link_command(args: ParentLinkArgs, base_ctx: &CommandContext) -> Result<()> {
-    let (ctx, client, child_id) =
-        super::resolve_run_selector(base_ctx, &args.server, &args.child_run).await?;
-    let parent_id = client.resolve_run(&args.parent_run).await?.id;
+    let ctx = base_ctx.with_target(&args.server)?;
+    let client = ctx.server().await?;
+    let (child_id, parent_id) = tokio::try_join!(
+        super::resolve_run_id(client.as_ref(), &args.child_run),
+        super::resolve_run_id(client.as_ref(), &args.parent_run),
+    )?;
     let summary = client.link_run_parent(&child_id, &parent_id).await?;
 
     info!(%child_id, %parent_id, "Linked run parent");

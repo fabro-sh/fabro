@@ -101,7 +101,7 @@ pub(crate) async fn search_runs(
         resolve_requested_runs(&client, run_ids).await?
     } else {
         client
-            .list_store_runs(None)
+            .list_store_runs()
             .await
             .map_err(|err| ToolError::from_anyhow(&err))?
     };
