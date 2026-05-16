@@ -6,19 +6,26 @@ use fabro_graphviz::graph::{AttrValue, Graph};
 use super::Transform;
 use crate::error::Error;
 use crate::file_resolver::FileResolver;
+use crate::static_reference::{ReferenceKind, validate_static_reference};
 
 /// Resolve a potential `@path` file reference.
 ///
 /// If `value` starts with `@` and the referenced file exists locally, the file
 /// contents are returned (inlined). Otherwise the original value is returned
 /// unchanged.
-pub fn resolve_file_ref(value: &str, current_dir: &Path, resolver: &dyn FileResolver) -> String {
+pub fn resolve_file_ref(
+    value: &str,
+    current_dir: &Path,
+    resolver: &dyn FileResolver,
+) -> Result<String, Error> {
     let Some(path_str) = value.strip_prefix('@') else {
-        return value.to_string();
+        return Ok(value.to_string());
     };
-    resolver
+    validate_static_reference(path_str, ReferenceKind::FileInline)
+        .map_err(|error| Error::Validation(error.to_string()))?;
+    Ok(resolver
         .resolve(current_dir, path_str)
-        .map_or_else(|| value.to_string(), |resolved| resolved.content)
+        .map_or_else(|| value.to_string(), |resolved| resolved.content))
 }
 
 /// Inlines `@file` references in node prompts and the graph-level goal.
@@ -44,7 +51,7 @@ impl Transform for FileInliningTransform {
         // Inline @file refs in node prompts
         for node in graph.nodes.values_mut() {
             if let Some(AttrValue::String(prompt)) = node.attrs.get("prompt") {
-                let resolved = resolve_file_ref(prompt, &self.current_dir, self.resolver.as_ref());
+                let resolved = resolve_file_ref(prompt, &self.current_dir, self.resolver.as_ref())?;
                 if resolved != *prompt {
                     node.attrs
                         .insert("prompt".to_string(), AttrValue::String(resolved));
@@ -54,7 +61,7 @@ impl Transform for FileInliningTransform {
 
         // Inline @file refs in graph-level goal
         if let Some(AttrValue::String(goal)) = graph.attrs.get("goal") {
-            let resolved = resolve_file_ref(goal, &self.current_dir, self.resolver.as_ref());
+            let resolved = resolve_file_ref(goal, &self.current_dir, self.resolver.as_ref())?;
             if resolved != *goal {
                 graph
                     .attrs
@@ -88,7 +95,8 @@ mod tests {
                 "hello world",
                 dir.path(),
                 &FilesystemFileResolver::new(None),
-            ),
+            )
+            .unwrap(),
             "hello world"
         );
     }
@@ -101,7 +109,8 @@ mod tests {
                 "@nonexistent.md",
                 dir.path(),
                 &FilesystemFileResolver::new(None),
-            ),
+            )
+            .unwrap(),
             "@nonexistent.md"
         );
     }
@@ -112,7 +121,7 @@ mod tests {
         std::fs::write(dir.path().join("prompt.md"), "inlined content").unwrap();
 
         assert_eq!(
-            resolve_file_ref("@prompt.md", dir.path(), &FilesystemFileResolver::new(None)),
+            resolve_file_ref("@prompt.md", dir.path(), &FilesystemFileResolver::new(None)).unwrap(),
             "inlined content"
         );
     }
@@ -191,7 +200,8 @@ mod tests {
                 "@~/.fabro_test_tilde_tmp",
                 dir.path(),
                 &FilesystemFileResolver::new(None),
-            ),
+            )
+            .unwrap(),
             "tilde content"
         );
     }
@@ -207,7 +217,8 @@ mod tests {
                 "@subdir/../file.md",
                 dir.path(),
                 &FilesystemFileResolver::new(None),
-            ),
+            )
+            .unwrap(),
             "dotdot content"
         );
     }
@@ -223,7 +234,8 @@ mod tests {
                 "@shared.md",
                 base.path(),
                 &FilesystemFileResolver::new(Some(fallback.path().to_path_buf())),
-            ),
+            )
+            .unwrap(),
             "shared content"
         );
     }
@@ -240,7 +252,8 @@ mod tests {
                 "@prompt.md",
                 base.path(),
                 &FilesystemFileResolver::new(Some(fallback.path().to_path_buf())),
-            ),
+            )
+            .unwrap(),
             "base content"
         );
     }
@@ -256,7 +269,8 @@ mod tests {
             "@~/nonexistent_fabro_test.md",
             base.path(),
             &FilesystemFileResolver::new(Some(fallback.path().to_path_buf())),
-        );
+        )
+        .unwrap();
         assert_eq!(result, "@~/nonexistent_fabro_test.md");
     }
 
@@ -268,8 +282,26 @@ mod tests {
                 "@missing.md",
                 base.path(),
                 &FilesystemFileResolver::new(None)
-            ),
+            )
+            .unwrap(),
             "@missing.md"
+        );
+    }
+
+    #[test]
+    fn resolve_file_ref_rejects_template_path() {
+        let base = tempfile::tempdir().unwrap();
+        let err = resolve_file_ref(
+            "@prompts/{{ inputs.prompt_file }}",
+            base.path(),
+            &FilesystemFileResolver::new(None),
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("templates are not supported in file inline references"),
+            "unexpected error: {err}"
         );
     }
 

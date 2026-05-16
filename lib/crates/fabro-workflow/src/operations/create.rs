@@ -13,10 +13,8 @@ use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, ProviderId};
 use fabro_sandbox::SandboxProvider;
 use fabro_store::Database;
-use fabro_template::{TemplateContext, TemplateError, render as render_template, render_lenient};
 use fabro_types::settings::run::{RunMode, RunNamespace};
 use fabro_types::{ForkSourceRef, GitContext, RunId, RunProvenance, WorkflowSettings};
-use fabro_util::error::collect_chain;
 use fabro_util::json::normalize_json_value;
 use tokio::task::spawn_blocking;
 
@@ -25,8 +23,8 @@ use crate::ManifestPath;
 use crate::error::Error;
 use crate::event::{Event, append_event, to_run_event_at};
 use crate::file_resolver::FileResolver;
-use crate::pipeline::types::{PersistOptions, template_undefined_variable_diagnostic};
-use crate::pipeline::{self, Persisted, RenderMode, TransformOptions, Validated};
+use crate::pipeline::types::{PersistOptions, TEMPLATE_UNDEFINED_VARIABLE_RULE};
+use crate::pipeline::{self, Persisted, TransformOptions, Validated};
 use crate::records::RunSpec;
 use crate::run_lookup::default_scratch_base;
 use crate::run_materialization::materialize_run;
@@ -288,17 +286,17 @@ fn create_from_source(
     file_resolver: Option<Arc<dyn FileResolver>>,
     goal_override: Option<&str>,
 ) -> Result<Persisted, Error> {
-    let validated = preprocess_and_validate(
+    let mut validated = preprocess_and_validate(
         dot_source,
         current_dir,
         file_resolver,
         Vec::new(),
         Some(&options.settings),
         goal_override,
-        RenderMode::Strict,
         &options.catalog,
     )?;
 
+    validated.promote_rule_to_error(TEMPLATE_UNDEFINED_VARIABLE_RULE);
     if validated.has_errors() {
         return Err(Error::ValidationFailed {
             diagnostics: validated.diagnostics().to_vec(),
@@ -315,33 +313,10 @@ pub(super) fn preprocess_and_validate(
     custom_transforms: Vec<Box<dyn Transform>>,
     settings: Option<&WorkflowSettings>,
     goal_override: Option<&str>,
-    render_mode: RenderMode,
     catalog: &Arc<Catalog>,
 ) -> Result<Validated, Error> {
     let inputs = run_inputs(settings);
-    let template_ctx = TemplateContext::for_input_scan(inputs.clone());
-    let (source, template_diagnostics) = match render_mode {
-        RenderMode::Strict => {
-            let source = render_template(dot_source, &template_ctx)
-                .map_err(|err| template_parse_error(&err))?;
-            (source, Vec::new())
-        }
-        RenderMode::Structural => match render_template(dot_source, &template_ctx) {
-            Ok(source) => (source, Vec::new()),
-            Err(TemplateError::UndefinedVariable {
-                expression, line, ..
-            }) => {
-                let diagnostic =
-                    template_undefined_variable_diagnostic(expression.as_deref(), line, None);
-                let source = render_lenient(dot_source, &template_ctx)
-                    .map_err(|err| template_parse_error(&err))?;
-                (source, vec![diagnostic])
-            }
-            Err(error) => return Err(template_parse_error(&error)),
-        },
-    };
-
-    let mut parsed = pipeline::parse(&source)?;
+    let mut parsed = pipeline::parse(dot_source)?;
     apply_goal_override(&mut parsed.graph, goal_override);
 
     let transformed = pipeline::transform(parsed, &TransformOptions {
@@ -350,20 +325,8 @@ pub(super) fn preprocess_and_validate(
         inputs,
         custom_transforms,
         catalog: Arc::clone(catalog),
-        render_mode,
     })?;
-    let mut validated = pipeline::validate(transformed, catalog.as_ref(), &[]);
-    if !template_diagnostics.is_empty() {
-        validated.prepend_diagnostics(template_diagnostics);
-    }
-    Ok(validated)
-}
-
-fn template_parse_error(error: &TemplateError) -> Error {
-    Error::Parse(format!(
-        "template expansion failed: {}",
-        collect_chain(error).join(": ")
-    ))
+    Ok(pipeline::validate(transformed, catalog.as_ref(), &[]))
 }
 
 fn run_inputs(settings: Option<&WorkflowSettings>) -> HashMap<String, toml::Value> {
@@ -496,7 +459,6 @@ mod tests {
             cwd: PathBuf::from("."),
             custom_transforms: Vec::new(),
             catalog: test_catalog(),
-            mode: RenderMode::Structural,
         })
         .unwrap()
     }
@@ -544,36 +506,25 @@ mod tests {
     }
 
     #[test]
-    fn strict_render_hard_fails_on_unbound_inputs() {
+    fn promote_template_undefined_rule_turns_warning_into_error() {
         let dot = r#"digraph Test {
             graph [goal="Build {{ inputs.app_dir }}"]
             start [shape=Mdiamond, label="Start"]
             exit  [shape=Msquare,  label="Exit"]
             start -> exit
         }"#;
-        let result = preprocess_and_validate(
-            dot,
-            None,
-            None,
-            Vec::new(),
-            Some(&WorkflowSettings::default()),
-            None,
-            RenderMode::Strict,
-            &test_catalog(),
-        );
+        let mut validated = validate_dot(dot, WorkflowSettings::default());
+        assert!(!validated.has_errors());
 
-        let Err(err) = result else {
-            panic!("expected strict mode to hard-fail on unbound inputs");
-        };
-        let message = err.to_string();
-        assert!(
-            message.contains("template expansion failed"),
-            "missing prefix in: {message}"
-        );
-        assert!(
-            message.contains("inputs.app_dir"),
-            "missing variable in: {message}"
-        );
+        validated.promote_rule_to_error(TEMPLATE_UNDEFINED_VARIABLE_RULE);
+
+        assert!(validated.has_errors());
+        let diagnostic = validated
+            .diagnostics()
+            .iter()
+            .find(|d| d.rule == TEMPLATE_UNDEFINED_VARIABLE_RULE)
+            .expect("expected template diagnostic");
+        assert_eq!(diagnostic.severity, Severity::Error);
     }
 
     #[test]
@@ -594,6 +545,151 @@ mod tests {
             .and_then(AttrValue::as_str)
             .unwrap();
         assert_eq!(prompt, "Goal: Fix bugs");
+    }
+
+    #[test]
+    fn validate_does_not_render_source_level_templated_node_ids() {
+        let dot = r#"digraph Test {
+            graph [goal="Fix bugs"]
+            start [shape=Mdiamond]
+            {{ inputs.step }} [prompt="Do work"]
+            exit [shape=Msquare]
+            start -> exit
+        }"#;
+
+        let result = validate(ValidateInput {
+            workflow:          WorkflowInput::DotSource {
+                source:   dot.to_string(),
+                base_dir: None,
+            },
+            settings:          settings_from_run_layer({
+                let mut inputs = std::collections::HashMap::new();
+                inputs.insert("step".to_string(), toml::Value::String("work".to_string()));
+                RunLayer {
+                    inputs: Some(inputs),
+                    ..RunLayer::default()
+                }
+            }),
+            cwd:               PathBuf::from("."),
+            custom_transforms: Vec::new(),
+            catalog:           test_catalog(),
+        });
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn inline_and_file_prompt_diagnostics_match() {
+        fn normalized_diagnostics(
+            validated: &Validated,
+        ) -> Vec<(String, Severity, String, Option<String>)> {
+            validated
+                .diagnostics()
+                .iter()
+                .map(|diagnostic| {
+                    (
+                        diagnostic.rule.clone(),
+                        diagnostic.severity.clone(),
+                        diagnostic.message.clone(),
+                        diagnostic.node_id.clone(),
+                    )
+                })
+                .collect()
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("missing.md"),
+            "Work in {{ inputs.app_dir }}",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("goal.md"), "Goal: {{ goal }}").unwrap();
+
+        let inline_missing = validate(ValidateInput {
+            workflow:          WorkflowInput::DotSource {
+                source:   r#"digraph Test {
+                    graph [goal="Demo"]
+                    start [shape=Mdiamond]
+                    work [prompt="Work in {{ inputs.app_dir }}"]
+                    exit [shape=Msquare]
+                    start -> work -> exit
+                }"#
+                .to_string(),
+                base_dir: Some(dir.path().to_path_buf()),
+            },
+            settings:          WorkflowSettings::default(),
+            cwd:               dir.path().to_path_buf(),
+            custom_transforms: Vec::new(),
+            catalog:           test_catalog(),
+        })
+        .unwrap();
+        let file_missing = validate(ValidateInput {
+            workflow:          WorkflowInput::DotSource {
+                source:   r#"digraph Test {
+                    graph [goal="Demo"]
+                    start [shape=Mdiamond]
+                    work [prompt="@missing.md"]
+                    exit [shape=Msquare]
+                    start -> work -> exit
+                }"#
+                .to_string(),
+                base_dir: Some(dir.path().to_path_buf()),
+            },
+            settings:          WorkflowSettings::default(),
+            cwd:               dir.path().to_path_buf(),
+            custom_transforms: Vec::new(),
+            catalog:           test_catalog(),
+        })
+        .unwrap();
+        assert_eq!(
+            normalized_diagnostics(&inline_missing),
+            normalized_diagnostics(&file_missing)
+        );
+
+        let inline_goal = validate(ValidateInput {
+            workflow:          WorkflowInput::DotSource {
+                source:   r#"digraph Test {
+                    graph [goal="Ship"]
+                    start [shape=Mdiamond]
+                    work [prompt="Goal: {{ goal }}"]
+                    exit [shape=Msquare]
+                    start -> work -> exit
+                }"#
+                .to_string(),
+                base_dir: Some(dir.path().to_path_buf()),
+            },
+            settings:          WorkflowSettings::default(),
+            cwd:               dir.path().to_path_buf(),
+            custom_transforms: Vec::new(),
+            catalog:           test_catalog(),
+        })
+        .unwrap();
+        let file_goal = validate(ValidateInput {
+            workflow:          WorkflowInput::DotSource {
+                source:   r#"digraph Test {
+                    graph [goal="Ship"]
+                    start [shape=Mdiamond]
+                    work [prompt="@goal.md"]
+                    exit [shape=Msquare]
+                    start -> work -> exit
+                }"#
+                .to_string(),
+                base_dir: Some(dir.path().to_path_buf()),
+            },
+            settings:          WorkflowSettings::default(),
+            cwd:               dir.path().to_path_buf(),
+            custom_transforms: Vec::new(),
+            catalog:           test_catalog(),
+        })
+        .unwrap();
+        assert_eq!(
+            inline_goal.graph().nodes["work"].attrs.get("prompt"),
+            file_goal.graph().nodes["work"].attrs.get("prompt")
+        );
+        assert_eq!(
+            normalized_diagnostics(&inline_goal),
+            normalized_diagnostics(&file_goal)
+        );
     }
 
     #[test]
@@ -675,7 +771,6 @@ mod tests {
             cwd:               PathBuf::from("."),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
-            mode:              RenderMode::Strict,
         });
         assert!(result.is_err());
     }
@@ -720,7 +815,6 @@ mod tests {
             cwd:               PathBuf::from("."),
             custom_transforms: vec![Box::new(TagTransform)],
             catalog:           test_catalog(),
-            mode:              RenderMode::Strict,
         })
         .unwrap();
         validated.raise_on_errors().unwrap();
@@ -755,7 +849,6 @@ mod tests {
             cwd:               dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
-            mode:              RenderMode::Strict,
         })
         .unwrap();
         validated.raise_on_errors().unwrap();
@@ -797,7 +890,6 @@ mod tests {
             cwd:               PathBuf::from("."),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
-            mode:              RenderMode::Strict,
         })
         .unwrap();
 

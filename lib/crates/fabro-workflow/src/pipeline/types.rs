@@ -43,30 +43,13 @@ pub struct Parsed {
 pub struct Transformed {
     pub graph:       Graph,
     pub source:      String,
-    /// Diagnostics produced during the transform pass (currently from lenient
-    /// template expansion under [`RenderMode::Structural`]). Prepended to the
+    /// Diagnostics produced during the transform pass. Prepended to the
     /// validation diagnostics so users see them before lint output.
     pub diagnostics: Vec<Diagnostic>,
 }
 
-/// How the template-expansion pass should treat undefined input variables.
-///
-/// Validate is structural — it should not fail just because the user has not
-/// bound `{{ inputs.* }}` yet. Run-start is strict — missing inputs are real
-/// errors. Splitting the two lets validate work on a bare `.fabro` while
-/// run-start preserves its current hard-fail behavior.
-#[derive(Clone, Copy, Debug)]
-pub enum RenderMode {
-    /// Undefined inputs are hard errors. Used by run-create.
-    Strict,
-    /// Undefined inputs render as empty and become warning diagnostics on the
-    /// returned `Validated`, so structural lints still run. Used by
-    /// `fabro validate`.
-    Structural,
-}
-
 /// Lint rule name attached to diagnostics for undefined template variables.
-pub(crate) const TEMPLATE_UNDEFINED_VARIABLE_RULE: &str = "template_undefined_variable";
+pub const TEMPLATE_UNDEFINED_VARIABLE_RULE: &str = "template_undefined_variable";
 
 /// Build a warning diagnostic describing an undefined template variable.
 /// Shared between the DOT-source render pass (`operations::create`) and the
@@ -135,12 +118,15 @@ impl Validated {
         &self.diagnostics
     }
 
-    /// Insert diagnostics at the front of the list. Used to surface
-    /// pre-structural-validation issues (e.g. template expansion warnings)
-    /// before the lint-rule output.
-    pub(crate) fn prepend_diagnostics(&mut self, mut diagnostics: Vec<Diagnostic>) {
-        diagnostics.append(&mut self.diagnostics);
-        self.diagnostics = diagnostics;
+    /// Promote diagnostics for one rule from warnings to errors. Rendering is
+    /// intentionally lenient; callers decide whether a diagnostic should block
+    /// the operation they are about to perform.
+    pub fn promote_rule_to_error(&mut self, rule: &str) {
+        for diagnostic in &mut self.diagnostics {
+            if diagnostic.rule == rule {
+                diagnostic.severity = Severity::Error;
+            }
+        }
     }
 
     /// True if any diagnostic has Error severity.
@@ -378,10 +364,6 @@ pub struct TransformOptions {
     pub inputs:            HashMap<String, toml::Value>,
     pub custom_transforms: Vec<Box<dyn Transform>>,
     pub catalog:           Arc<fabro_model::Catalog>,
-    /// Controls how the per-attribute template-expansion pass treats undefined
-    /// input variables. Must match the mode used for the DOT-source render so
-    /// inline and `@file`-imported prompts behave consistently.
-    pub render_mode:       RenderMode,
 }
 
 /// Options for the FINALIZE phase.

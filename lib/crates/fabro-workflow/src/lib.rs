@@ -258,6 +258,7 @@ pub mod sandbox_git;
 pub(crate) mod sandbox_git_runtime;
 pub mod services;
 mod stage_scope;
+pub mod static_reference;
 pub mod steering_hub;
 #[doc(hidden)]
 pub mod test_support;

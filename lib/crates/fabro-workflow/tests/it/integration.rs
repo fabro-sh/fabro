@@ -1823,7 +1823,7 @@ async fn smoke_test_with_mock_codergen_backend() {
         .insert("shape".to_string(), AttrValue::String("box".to_string()));
     plan.attrs.insert(
         "prompt".to_string(),
-        AttrValue::String("Plan to achieve: {{ goal }}".to_string()),
+        AttrValue::String("Plan to achieve: Build and validate".to_string()),
     );
     graph.nodes.insert("plan".to_string(), plan);
 
@@ -4309,7 +4309,6 @@ async fn import_e2e_through_engine() {
         inputs:            std::collections::HashMap::new(),
         custom_transforms: vec![],
         catalog:           std::sync::Arc::clone(&catalog),
-        render_mode:       fabro_workflow::operations::RenderMode::Strict,
     })
     .unwrap();
     let validated = validate(transformed, catalog.as_ref(), &[]);

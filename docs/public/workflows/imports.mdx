@@ -107,7 +107,7 @@ After import under the placeholder `validate`, `validate.lint`'s retry target be
 
 ## Templating
 
-Imported files are rendered through the template engine **before** being parsed, using the parent run's inputs. This means `{{ inputs.* }}` can parameterize the structure of an imported graph:
+Imported files are parsed as static DOT before template expansion. The import path and graph structure must be literal, but templates remain supported inside final string attributes such as `prompt`, `script`, and `label`:
 
 ```dot title="shared/lint.fabro"
 digraph Lint {
@@ -119,7 +119,7 @@ digraph Lint {
 }
 ```
 
-`{{ goal }}` is preserved through the pre-parse step and rendered later, the same as in inline graphs. See [Variables](/workflows/variables#expansion-timing) for the full template-rendering pipeline.
+Do not put templates in `import` paths, node IDs, edge definitions, or other structural references. See [Variables](/workflows/variables#expansion-timing) for the rendering pipeline.
 
 ## Nested imports
 

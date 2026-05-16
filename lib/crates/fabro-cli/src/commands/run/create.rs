@@ -1,11 +1,12 @@
 use anyhow::{Context as _, bail};
+use fabro_api::types::WorkflowDiagnosticSeverity;
 use fabro_config::RunLayer;
 use fabro_config::user::active_settings_path;
 use fabro_manifest::{ManifestBuildInput, build_run_manifest};
 use fabro_server::manifest_validation;
 use fabro_types::RunId;
 use fabro_util::terminal::Styles;
-use fabro_workflow::operations::RenderMode;
+use fabro_workflow::pipeline::TEMPLATE_UNDEFINED_VARIABLE_RULE;
 
 use super::output::{api_diagnostics_to_local, print_workflow_summary};
 use super::overrides::run_args_overrides;
@@ -61,12 +62,16 @@ pub(crate) async fn create_run(
         None
     };
 
-    let validation = manifest_validation::validate_manifest(
+    let mut validation = manifest_validation::validate_manifest(
         &RunLayer::default(),
         &built.manifest,
-        RenderMode::Strict,
         ctx.catalog()?,
     )?;
+    for diagnostic in &mut validation.workflow.diagnostics {
+        if diagnostic.rule == TEMPLATE_UNDEFINED_VARIABLE_RULE {
+            diagnostic.severity = WorkflowDiagnosticSeverity::Error;
+        }
+    }
     let diagnostics = api_diagnostics_to_local(&validation.workflow.diagnostics);
     if !quiet {
         print_workflow_summary(

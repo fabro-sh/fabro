@@ -18,7 +18,6 @@ fabro-api = { path = "../fabro-api" }
 fabro-config = { path = "../fabro-config" }
 fabro-github = { path = "../fabro-github" }
 fabro-graphviz = { path = "../fabro-graphviz" }
-fabro-template = { path = "../fabro-template" }
 fabro-types = { path = "../fabro-types" }
 fabro-workflow = { path = "../fabro-workflow" }
 git2.workspace = true

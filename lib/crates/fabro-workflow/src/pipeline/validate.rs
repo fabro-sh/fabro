@@ -44,7 +44,6 @@ mod tests {
             inputs:            std::collections::HashMap::new(),
             custom_transforms: vec![],
             catalog:           std::sync::Arc::clone(&catalog),
-            render_mode:       crate::pipeline::types::RenderMode::Strict,
         })
         .unwrap();
         validate(transformed, catalog.as_ref(), &[])

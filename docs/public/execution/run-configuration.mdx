@@ -355,7 +355,7 @@ exclude_globs = ["**/node_modules/**", "**/.cache/**", "**/dist/**"]
 
 ### `[run.inputs]`
 
-Define inputs that are expanded into the Graphviz source before the graph is parsed. See [Variables](/workflows/variables) for the full reference.
+Define inputs that are rendered into final workflow string attributes. See [Variables](/workflows/variables) for the full reference.
 
 ```toml title="run.toml"
 [run.inputs]
@@ -364,7 +364,7 @@ repo_url = "https://github.com/fabro-sh/fabro"
 language = "rust"
 ```
 
-Inputs can be used anywhere in the Graphviz file with `{{ inputs.name }}` syntax:
+Inputs can be used in final string attributes with `{{ inputs.name }}` syntax:
 
 ```dot title="c-i.fabro"
 digraph CI {
@@ -374,7 +374,9 @@ digraph CI {
 }
 ```
 
-If a workflow template references an undefined input like `{{ inputs.langauge }}`, Fabro raises an error immediately.
+Inputs cannot parameterize workflow structure or file references such as node IDs, edges, `import` paths, `@file` paths, or child workflow paths.
+
+If a workflow template references an undefined input like `{{ inputs.langauge }}`, `fabro validate` reports a warning. Run-style commands promote that diagnostic to an error before creating or starting a run.
 
 TOML `[run.inputs]` tables replace wholesale across layers. Unlike labels, TOML input tables do not merge by key — the highest-precedence config layer that sets `inputs` wins its entire map.
 

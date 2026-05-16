@@ -35,7 +35,7 @@ repo_url = "https://github.com/fabro-sh/fabro"
 language = "rust"
 ```
 
-These values are available throughout the workflow as `{{ inputs.* }}`:
+These values are available in final string attributes such as `goal`, `prompt`, `script`, `label`, and edge labels:
 
 ```dot title="check.fabro"
 digraph Check {
@@ -75,17 +75,19 @@ That prompt becomes `Create a plan for: Implement the login feature`.
 
 ## Expansion timing
 
-Fabro expands templates in multiple passes:
+Fabro keeps workflow structure static and renders workflow templates once:
 
-1. Before DOT parsing, `{{ inputs.* }}` can parameterize structural parts of the graph, including imported `.fabro` files.
-2. After parsing, all string graph, node, and edge attributes are rendered again with the real `{ goal, inputs }` context.
-3. Agent and prompt handlers do a final runtime render pass as a safety net.
+1. Fabro parses the root DOT and imported `.fabro` files without rendering them.
+2. Literal `import`, `@file`, graph-goal file, and child-workflow references are resolved.
+3. Final graph, node, and edge string attributes are rendered with the `{ goal, inputs }` context.
 
-`{{ goal }}` is preserved through the pre-parse step so it can be resolved later. That means goal-dependent MiniJinja control flow such as `{% if goal %}` is not useful in structural pre-parse templates.
+Templates are not supported in graph syntax, node IDs, edge structure, `import` paths, `@file` paths, child workflow paths, or other file references.
+
+Fabro renders the graph `goal` first and stores the rendered value back onto the graph. Other attributes that use `{{ goal }}` receive that rendered value.
 
 ## Undefined variables
 
-Fabro uses strict undefined-variable handling. If a workflow template references an unknown value such as `{{ inputs.langauge }}`, validation fails instead of passing the literal text through to the model.
+Fabro renders undefined workflow variables as empty text and records a `template_undefined_variable` diagnostic. `fabro validate` reports that diagnostic as a warning so you can validate workflow structure before all inputs are known. Run-style commands such as `fabro run`, `fabro create`, and preflight promote the same diagnostic to an error before proceeding.
 
 ## Escaping
 

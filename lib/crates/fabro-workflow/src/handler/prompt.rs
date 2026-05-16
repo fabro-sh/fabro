@@ -6,8 +6,7 @@ use fabro_graphviz::graph::{Graph, Node};
 use fabro_model::ProviderId;
 
 use super::agent::{
-    CodergenBackend, CodergenResult, OneShotRequest, expand_variables, extract_status_fields,
-    truncate,
+    CodergenBackend, CodergenResult, OneShotRequest, extract_status_fields, truncate,
 };
 use super::{EngineServices, Handler};
 use crate::context::{Context, WorkflowContext, keys};
@@ -50,7 +49,7 @@ impl Handler for PromptHandler {
         &self,
         node: &Node,
         context: &Context,
-        graph: &Graph,
+        _graph: &Graph,
         _run_dir: &Path,
         services: &EngineServices,
     ) -> Result<Outcome, Error> {
@@ -59,12 +58,11 @@ impl Handler for PromptHandler {
             .prompt()
             .filter(|p| !p.is_empty())
             .unwrap_or_else(|| node.label());
-        let expanded = expand_variables(raw_prompt, graph, &services.inputs)?;
         let preamble = context.preamble();
         let prompt = if preamble.is_empty() {
-            expanded
+            raw_prompt.to_string()
         } else {
-            format!("{preamble}\n\n{expanded}")
+            format!("{preamble}\n\n{raw_prompt}")
         };
 
         // 1b. Discover project docs for system prompt when project_memory is enabled

@@ -162,7 +162,8 @@ fn bare_fabro_with_unbound_inputs_validates_structurally_with_warning() {
     ----- stderr -----
     Workflow: TemplatedUnbound (3 nodes, 2 edges)
     Graph: [FIXTURES]/templated_unbound.fabro
-    warning: undefined template variable `inputs.app_dir` at line 2 (template_undefined_variable)
+    warning: undefined template variable `inputs.app_dir` at line 1 (template_undefined_variable)
+    warning [node: work]: undefined template variable `inputs.app_dir` in node `work` (template_undefined_variable)
     Validation: OK
     ");
 }

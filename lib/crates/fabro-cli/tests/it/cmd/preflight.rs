@@ -58,6 +58,28 @@ fn preflight_invalid_workflow_fails_with_validation_output() {
 }
 
 #[test]
+fn preflight_rejects_unbound_template_inputs() {
+    let context = test_context!();
+    let workflow = fixture("templated_unbound.fabro");
+    let mut cmd = context.command();
+    cmd.args(["preflight", workflow.to_str().unwrap()]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    Workflow: TemplatedUnbound (3 nodes, 2 edges)
+    Graph: [FIXTURES]/templated_unbound.fabro
+    Goal: Demo
+
+    error: undefined template variable `inputs.app_dir` at line 1 (template_undefined_variable)
+    error [node: work]: undefined template variable `inputs.app_dir` in node `work` (template_undefined_variable)
+      × Validation failed
+    ");
+}
+
+#[test]
 fn preflight_invalid_workflow_json_emits_diagnostics() {
     let context = test_context!();
     let workflow = fixture("invalid.fabro");

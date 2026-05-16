@@ -2081,7 +2081,6 @@ dependencies = [
  "fabro-config",
  "fabro-github",
  "fabro-graphviz",
- "fabro-template",
  "fabro-types",
  "fabro-workflow",
  "git2",
