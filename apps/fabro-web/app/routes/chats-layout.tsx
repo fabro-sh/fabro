@@ -3,12 +3,15 @@ import { PencilSquareIcon } from "@heroicons/react/24/outline";
 
 import { ChatsProvider, useChatsStore } from "../lib/chats-store";
 
-export const handle = { fullHeight: true, wide: true };
+export const handle = { hideHeader: true, fullHeight: true, wide: true };
 
 export default function ChatsLayout() {
   return (
     <ChatsProvider>
-      <div className="fabro-chat relative isolate flex h-full">
+      {/* Cancel AppShell's content padding (px-4 py-6 / sm:px-6 / lg:px-8) so the
+       * chat surface bleeds edge-to-edge below the top nav. The height grows
+       * by the vertical padding amount to recover the full viewport area. */}
+      <div className="fabro-chat relative isolate -mx-4 -my-6 flex h-[calc(100%+3rem)] sm:-mx-6 lg:-mx-8">
         <Sidebar />
         <div className="min-h-0 flex-1">
           <Outlet />
