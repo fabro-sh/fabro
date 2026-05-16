@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
-use fabro_llm::provider::Provider;
+use fabro_model::provider::Provider;
 use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
 use fabro_static::EnvVars;
 use fabro_store::{ArtifactKey, ArtifactStore, Database};

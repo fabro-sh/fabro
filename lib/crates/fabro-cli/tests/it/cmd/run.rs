@@ -5,7 +5,7 @@
 
 use fabro_auth::{AuthCredential, AuthDetails};
 use fabro_config::Storage;
-use fabro_model::Provider;
+use fabro_model::provider::Provider;
 use fabro_test::{fabro_json_snapshot, fabro_snapshot, test_context};
 use fabro_vault::{SecretType, Vault};
 use httpmock::MockServer;

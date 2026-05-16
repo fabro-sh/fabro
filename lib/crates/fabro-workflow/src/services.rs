@@ -11,10 +11,8 @@ use fabro_auth::CredentialSource;
 use fabro_auth::ResolvedCredentials;
 use fabro_hooks::{HookContext, HookDecision, HookRunner};
 #[cfg(test)]
-use fabro_model::ProviderId;
-#[cfg(test)]
 use fabro_model::catalog::LlmCatalogSettings;
-use fabro_model::{Catalog, Provider};
+use fabro_model::{AgentProfileKind, Catalog, ProviderId};
 use tokio_util::sync::CancellationToken;
 
 use crate::ManifestPath;
@@ -42,7 +40,8 @@ pub struct RunServices {
     pub sandbox:                 Arc<dyn Sandbox>,
     pub hook_runner:             Option<Arc<HookRunner>>,
     pub(crate) cancel_token:     CancellationToken,
-    pub provider:                Provider,
+    pub provider_id:             ProviderId,
+    pub profile_kind:            AgentProfileKind,
     pub llm_source:              Arc<dyn CredentialSource>,
     pub catalog:                 Arc<Catalog>,
     pub(crate) sandbox_git:      Arc<SandboxGitRuntime>,
@@ -58,7 +57,8 @@ impl RunServices {
         sandbox: Arc<dyn Sandbox>,
         hook_runner: Option<Arc<HookRunner>>,
         cancel_token: CancellationToken,
-        provider: Provider,
+        provider_id: ProviderId,
+        profile_kind: AgentProfileKind,
         llm_source: Arc<dyn CredentialSource>,
         catalog: Arc<Catalog>,
         sandbox_git: Arc<SandboxGitRuntime>,
@@ -71,7 +71,8 @@ impl RunServices {
             sandbox,
             hook_runner,
             cancel_token,
-            provider,
+            provider_id,
+            profile_kind,
             llm_source,
             catalog,
             sandbox_git,
@@ -234,7 +235,8 @@ impl EngineServices {
                 )),
                 None,
                 CancellationToken::new(),
-                Provider::Anthropic,
+                ProviderId::anthropic(),
+                AgentProfileKind::Anthropic,
                 Arc::new(StubCredentialSource),
                 Arc::new(
                     Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())

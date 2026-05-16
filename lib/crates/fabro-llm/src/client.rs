@@ -82,7 +82,7 @@ impl Client {
                     source:  None,
                 });
             };
-            let Some(factory) = factory_for(&provider.adapter) else {
+            let Some(factory) = factory_for(provider.adapter) else {
                 return Err(Error::Configuration {
                     message: format!(
                         "Provider \"{provider_id}\" uses unsupported adapter \"{}\"",
@@ -353,6 +353,7 @@ mod tests {
     use async_trait::async_trait;
     use fabro_auth::{CredentialSource, ResolvedCredentials};
     use fabro_model::catalog::LlmCatalogSettings;
+    use fabro_model::provider::Provider;
     use futures::stream;
 
     use super::*;
@@ -655,7 +656,7 @@ mod tests {
         let client = Client::from_credentials(
             vec![
                 ApiCredential {
-                    provider:      fabro_model::Provider::Anthropic.id(),
+                    provider:      Provider::Anthropic.id(),
                     auth_header:   Some(ApiKeyHeader::Custom {
                         name:  "x-api-key".to_string(),
                         value: "anthropic-key".to_string(),
@@ -667,7 +668,7 @@ mod tests {
                     project_id:    None,
                 },
                 ApiCredential {
-                    provider:      fabro_model::Provider::OpenAi.id(),
+                    provider:      Provider::OpenAi.id(),
                     auth_header:   Some(ApiKeyHeader::Bearer("openai-key".to_string())),
                     extra_headers: HashMap::new(),
                     base_url:      None,
@@ -692,7 +693,7 @@ mod tests {
         let catalog = catalog_with("");
         let client = Client::from_credentials(
             vec![ApiCredential {
-                provider:      fabro_model::Provider::Kimi.id(),
+                provider:      Provider::Kimi.id(),
                 auth_header:   Some(ApiKeyHeader::Bearer("kimi-key".to_string())),
                 extra_headers: HashMap::new(),
                 base_url:      None,
@@ -742,7 +743,7 @@ mod tests {
     async fn from_source_registers_provider_from_resolved_credentials() {
         let source = StubSource {
             credentials: vec![ApiCredential {
-                provider:      fabro_model::Provider::Anthropic.id(),
+                provider:      Provider::Anthropic.id(),
                 auth_header:   Some(ApiKeyHeader::Custom {
                     name:  "x-api-key".to_string(),
                     value: "anthropic-key".to_string(),

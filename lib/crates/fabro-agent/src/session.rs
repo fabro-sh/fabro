@@ -13,7 +13,7 @@ use fabro_llm::types::{
 use fabro_llm::{Error as LlmError, retry};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_mcp::connection_manager::McpConnectionManager;
-use fabro_model::{Catalog, ModelRef, Provider, Speed};
+use fabro_model::{AgentProfileKind, Catalog, ModelRef, Speed};
 use fabro_types::Principal;
 use futures::StreamExt;
 use tokio::sync::{Mutex as AsyncMutex, Notify, broadcast};
@@ -344,8 +344,8 @@ impl Session {
     }
 
     #[must_use]
-    pub fn provider(&self) -> Provider {
-        self.provider_profile.provider()
+    pub fn profile_kind(&self) -> AgentProfileKind {
+        self.provider_profile.profile_kind()
     }
 
     #[must_use]
@@ -387,7 +387,7 @@ impl Session {
             self.sandbox.as_ref(),
             &doc_root,
             self.sandbox.working_directory(),
-            self.provider_profile.provider(),
+            self.provider_profile.profile_kind(),
             &cancel_token,
         )
         .await?;

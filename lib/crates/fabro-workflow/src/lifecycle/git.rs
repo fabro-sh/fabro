@@ -1202,7 +1202,8 @@ mod tests {
             )),
             None,
             tokio_util::sync::CancellationToken::new(),
-            fabro_model::Provider::Anthropic,
+            fabro_model::ProviderId::anthropic(),
+            fabro_model::AgentProfileKind::Anthropic,
             Arc::new(fabro_auth::EnvCredentialSource::new()),
             Arc::new(
                 Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())

@@ -1313,8 +1313,8 @@ fn report_to_api(report: &CheckReport) -> types::PreflightCheckReport {
 
 #[cfg(test)]
 mod tests {
-    use fabro_model::Provider;
     use fabro_model::catalog::LlmCatalogSettings;
+    use fabro_model::provider::Provider;
 
     use super::*;
 

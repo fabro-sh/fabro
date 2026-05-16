@@ -7,7 +7,7 @@ use std::process::Output;
 
 use fabro_auth::{AuthCredential, AuthDetails};
 use fabro_config::Storage;
-use fabro_model::Provider;
+use fabro_model::provider::Provider;
 use fabro_test::{fabro_snapshot, test_context, twin_openai};
 use fabro_vault::{SecretType, Vault};
 

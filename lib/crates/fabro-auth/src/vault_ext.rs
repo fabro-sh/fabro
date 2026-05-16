@@ -43,7 +43,7 @@ pub fn vault_credentials_for_provider(
 #[cfg(test)]
 mod tests {
     use chrono::{Duration, Utc};
-    use fabro_model::Provider;
+    use fabro_model::provider::Provider;
 
     use super::*;
     use crate::credential::{AuthDetails, OAuthConfig, OAuthTokens};

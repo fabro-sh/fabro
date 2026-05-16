@@ -619,7 +619,7 @@ destination = "{destination}"
             Commands::Provider(ProviderNamespace {
                 command: ProviderCommand::Login(args),
             }) => {
-                assert_eq!(args.provider, fabro_model::Provider::OpenAi);
+                assert_eq!(args.provider, fabro_model::ProviderId::openai());
             }
             _ => panic!("unexpected command variant"),
         }
@@ -633,7 +633,7 @@ destination = "{destination}"
             Commands::Provider(ProviderNamespace {
                 command: ProviderCommand::Login(args),
             }) => {
-                assert_eq!(args.provider, fabro_model::Provider::Anthropic);
+                assert_eq!(args.provider, fabro_model::ProviderId::anthropic());
             }
             _ => panic!("unexpected command variant"),
         }
@@ -654,7 +654,7 @@ destination = "{destination}"
             Commands::Provider(ProviderNamespace {
                 command: ProviderCommand::Login(args),
             }) => {
-                assert_eq!(args.provider, fabro_model::Provider::Anthropic);
+                assert_eq!(args.provider, fabro_model::ProviderId::anthropic());
                 assert!(args.api_key_stdin);
             }
             _ => panic!("unexpected command variant"),
@@ -1156,9 +1156,17 @@ destination = "{destination}"
     }
 
     #[test]
-    fn parse_provider_login_bogus_provider() {
-        let result = Cli::try_parse_from(["fabro", "provider", "login", "--provider", "bogus"]);
-        assert!(result.is_err(), "should fail with unknown provider");
+    fn parse_provider_login_accepts_open_ended_provider_id() {
+        let cli = Cli::try_parse_from(["fabro", "provider", "login", "--provider", "bogus"])
+            .expect("provider IDs are resolved against the catalog at runtime");
+        match *cli.command.unwrap() {
+            Commands::Provider(ProviderNamespace {
+                command: ProviderCommand::Login(args),
+            }) => {
+                assert_eq!(args.provider, fabro_model::ProviderId::new("bogus"));
+            }
+            _ => panic!("expected provider login command"),
+        }
     }
 
     #[test]

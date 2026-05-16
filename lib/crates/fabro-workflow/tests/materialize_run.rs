@@ -1,6 +1,7 @@
 use fabro_graphviz::graph::Graph;
 use fabro_graphviz::parser;
-use fabro_model::{Catalog, Provider};
+use fabro_model::Catalog;
+use fabro_model::provider::Provider;
 use fabro_types::WorkflowSettings;
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{PullRequestSettings, RunGoal, RunModelSettings, RunNamespace};

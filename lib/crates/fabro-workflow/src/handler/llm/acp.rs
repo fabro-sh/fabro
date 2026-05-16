@@ -11,7 +11,7 @@ use fabro_agent::{Sandbox, StaticEnvProvider, ToolEnvProvider};
 use fabro_auth::CredentialResolver;
 use fabro_graphviz::graph::Node;
 use fabro_model::catalog::LlmCatalogSettings;
-use fabro_model::{Catalog, Provider};
+use fabro_model::{AgentProfileKind, Catalog, ProviderId, adapter};
 use fabro_util::time::elapsed_ms;
 use tokio_util::sync::CancellationToken;
 
@@ -24,7 +24,8 @@ use crate::event::{Emitter, Event, StageScope};
 
 pub struct AgentAcpBackend {
     model: String,
-    provider: Provider,
+    provider_id: ProviderId,
+    profile_kind: AgentProfileKind,
     tool_env: Option<Arc<dyn ToolEnvProvider>>,
     github_token_refresh_managed: bool,
     resolver: Option<CredentialResolver>,
@@ -33,10 +34,20 @@ pub struct AgentAcpBackend {
 
 impl AgentAcpBackend {
     #[must_use]
-    pub fn new(model: String, provider: Provider, resolver: CredentialResolver) -> Self {
+    pub fn new(
+        model: String,
+        provider_id: impl Into<ProviderId>,
+        resolver: CredentialResolver,
+    ) -> Self {
+        let provider_id = provider_id.into();
+        let profile_kind = adapter::get(adapter::default_for_provider_id(&provider_id))
+            .map_or(AgentProfileKind::OpenAi, |metadata| {
+                metadata.default_profile
+            });
         Self {
             model,
-            provider,
+            provider_id,
+            profile_kind,
             tool_env: None,
             github_token_refresh_managed: false,
             resolver: Some(resolver),
@@ -45,15 +56,27 @@ impl AgentAcpBackend {
     }
 
     #[must_use]
-    pub fn new_from_env(model: String, provider: Provider) -> Self {
+    pub fn new_from_env(model: String, provider_id: impl Into<ProviderId>) -> Self {
+        let provider_id = provider_id.into();
+        let profile_kind = adapter::get(adapter::default_for_provider_id(&provider_id))
+            .map_or(AgentProfileKind::OpenAi, |metadata| {
+                metadata.default_profile
+            });
         Self {
             model,
-            provider,
+            provider_id,
+            profile_kind,
             tool_env: None,
             github_token_refresh_managed: false,
             resolver: None,
             catalog: default_catalog(),
         }
+    }
+
+    #[must_use]
+    pub fn with_profile_kind(mut self, profile_kind: AgentProfileKind) -> Self {
+        self.profile_kind = profile_kind;
+        self
     }
 
     #[must_use]
@@ -90,16 +113,19 @@ impl AgentAcpBackend {
     ) -> Result<CodergenResult, Error> {
         let files_before = changed_files::detect_changed_files(sandbox).await;
         let model = node.model().unwrap_or(&self.model);
-        let provider = node
-            .provider()
-            .and_then(|value| value.parse::<Provider>().ok())
-            .unwrap_or(self.provider);
+        let (provider_id, profile_kind) = resolve_provider_context(
+            self.catalog.as_ref(),
+            &self.provider_id,
+            self.profile_kind,
+            model,
+            node,
+        )?;
         let command =
             resolve_acp_command(node.acp_command()).map_err(acp_command_error_to_workflow)?;
 
         let launch_env = resolve_agent_launch_env(AgentLaunchEnvRequest {
-            provider,
-            cli: AgentCli::for_provider(provider),
+            provider_id: provider_id.clone(),
+            cli: AgentCli::for_profile_kind(profile_kind),
             catalog: self.catalog.as_ref(),
             resolver: self.resolver.as_ref(),
             tool_env: self.tool_env.as_ref(),
@@ -121,7 +147,7 @@ impl AgentAcpBackend {
                 node_id:  node.id.clone(),
                 visit:    stage_scope.visit,
                 mode:     "acp".to_string(),
-                provider: provider.to_string(),
+                provider: provider_id.to_string(),
                 model:    model.to_string(),
                 command:  command_display,
             },
@@ -216,6 +242,42 @@ fn default_catalog() -> Arc<Catalog> {
     )
 }
 
+fn resolve_provider_context(
+    catalog: &Catalog,
+    default_provider_id: &ProviderId,
+    default_profile_kind: AgentProfileKind,
+    model: &str,
+    node: &Node,
+) -> Result<(ProviderId, AgentProfileKind), Error> {
+    let provider_id = if let Some(provider) = node.provider() {
+        let requested = ProviderId::from(provider);
+        catalog
+            .provider(&requested)
+            .ok_or_else(|| {
+                Error::Precondition(format!("Provider \"{provider}\" is not configured"))
+            })?
+            .id
+            .clone()
+    } else if let Some(model) = catalog.get(model) {
+        model.provider.clone()
+    } else {
+        default_provider_id.clone()
+    };
+
+    let Some(provider) = catalog.provider(&provider_id) else {
+        return Ok((default_provider_id.clone(), default_profile_kind));
+    };
+    let profile_kind = adapter::get(provider.adapter)
+        .map(|metadata| metadata.default_profile)
+        .ok_or_else(|| {
+            Error::Precondition(format!(
+                "Provider \"{provider_id}\" uses unknown adapter \"{}\"",
+                provider.adapter,
+            ))
+        })?;
+    Ok((provider.id.clone(), profile_kind))
+}
+
 #[async_trait]
 impl CodergenBackend for AgentAcpBackend {
     async fn run(&self, request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
@@ -289,7 +351,7 @@ mod tests {
     use fabro_acp::test_support::fake_acp_agent_script;
     use fabro_agent::{LocalSandbox, Sandbox, shell_quote};
     use fabro_graphviz::graph::{AttrValue, Node};
-    use fabro_model::Provider;
+    use fabro_model::provider::Provider;
     use fabro_sandbox::test_support::MockSandbox;
     use fabro_types::EventBody;
     use tokio_util::sync::CancellationToken;

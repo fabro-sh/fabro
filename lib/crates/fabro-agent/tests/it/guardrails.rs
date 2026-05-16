@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use fabro_agent::{AgentProfile, AnthropicProfile, GeminiProfile, OpenAiProfile};
+use fabro_model::Catalog;
 use fabro_model::catalog::LlmCatalogSettings;
-use fabro_model::{Catalog, Provider};
+use fabro_model::provider::Provider;
 
 #[test]
 fn profile_context_window_matches_catalog_for_default_models() {
@@ -27,7 +28,7 @@ fn profile_context_window_matches_catalog_for_default_models() {
             | Provider::Inception
             | Provider::OpenAiCompatible => Box::new(
                 OpenAiProfile::new(model)
-                    .with_provider(provider)
+                    .with_provider_id(provider.id())
                     .with_catalog(Arc::clone(&catalog)),
             ),
             Provider::Gemini => {

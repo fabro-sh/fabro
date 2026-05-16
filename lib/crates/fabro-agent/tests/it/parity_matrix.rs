@@ -15,9 +15,10 @@ use fabro_agent::{
 };
 use fabro_auth::EnvCredentialSource;
 use fabro_llm::client::Client;
-use fabro_llm::provider::{Provider, ProviderAdapter};
+use fabro_llm::provider::ProviderAdapter;
 use fabro_llm::providers::OpenAiAdapter;
 use fabro_model::catalog::LlmCatalogSettings;
+use fabro_model::provider::Provider;
 use fabro_model::{Catalog, ModelHandle};
 use fabro_test::{TwinScenario, TwinScenarios, TwinToolCall, twin_openai};
 use tokio::sync::Mutex as AsyncMutex;
@@ -66,9 +67,9 @@ fn build_profile(provider: Provider, model: &str, client: &Client) -> Box<dyn Ag
         | Provider::Zai
         | Provider::Minimax
         | Provider::Inception
-        | Provider::OpenAiCompatible => {
-            Box::new(OpenAiProfile::with_summarizer(model, summarizer).with_provider(provider))
-        }
+        | Provider::OpenAiCompatible => Box::new(
+            OpenAiProfile::with_summarizer(model, summarizer).with_provider_id(provider.id()),
+        ),
         Provider::Gemini => Box::new(GeminiProfile::with_summarizer(model, summarizer)),
     }
 }
@@ -106,7 +107,7 @@ async fn make_session(
                 | Provider::Inception
                 | Provider::OpenAiCompatible => Arc::new(
                     OpenAiProfile::with_summarizer(&factory_model, summarizer)
-                        .with_provider(provider),
+                        .with_provider_id(provider.id()),
                 ),
                 Provider::Gemini => {
                     Arc::new(GeminiProfile::with_summarizer(&factory_model, summarizer))

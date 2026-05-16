@@ -8,12 +8,53 @@
 //! (in `fabro-model`) and the LLM factory registry (in `fabro-llm`) must agree
 //! on the same set of adapter keys; the parity is enforced by tests.
 
-use strum::VariantArray;
+use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString, IntoStaticStr, VariantArray};
 
 use crate::Speed;
 use crate::ids::ProviderId;
-use crate::provider::Provider;
 use crate::reasoning::ReasoningEffort;
+
+/// Stable adapter identity for protocol/client behavior.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    IntoStaticStr,
+    VariantArray,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum AdapterKind {
+    Anthropic,
+    #[serde(rename = "openai", alias = "open_ai")]
+    #[strum(to_string = "openai", serialize = "open_ai")]
+    OpenAi,
+    Gemini,
+    #[serde(rename = "openai_compatible", alias = "open_ai_compatible")]
+    #[strum(to_string = "openai_compatible", serialize = "open_ai_compatible")]
+    OpenAiCompatible,
+}
+
+impl AdapterKind {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        self.into()
+    }
+}
+
+impl AsRef<str> for AdapterKind {
+    fn as_ref(&self) -> &str {
+        (*self).as_str()
+    }
+}
 
 /// Internal dispatch key that `fabro-agent` maps to a concrete agent profile.
 ///
@@ -57,6 +98,8 @@ pub struct AdapterControlCapabilities {
 /// Static metadata for a single adapter implementation.
 #[derive(Debug, Clone, Copy)]
 pub struct AdapterMetadata {
+    /// Typed stable adapter identity.
+    pub kind:            AdapterKind,
     /// Stable adapter key referenced from `[llm.providers.<id>] adapter =
     /// "..."`.
     pub key:             &'static str,
@@ -76,6 +119,7 @@ const FAST_SPEEDS: &[Speed] = &[Speed::Fast];
 
 /// Anthropic — `anthropic` adapter.
 pub const ANTHROPIC: AdapterMetadata = AdapterMetadata {
+    kind:            AdapterKind::Anthropic,
     key:             "anthropic",
     default_profile: AgentProfileKind::Anthropic,
     api_key_header:  ApiKeyHeaderPolicy::Custom { name: "x-api-key" },
@@ -87,6 +131,7 @@ pub const ANTHROPIC: AdapterMetadata = AdapterMetadata {
 
 /// OpenAI — `openai` adapter.
 pub const OPENAI: AdapterMetadata = AdapterMetadata {
+    kind:            AdapterKind::OpenAi,
     key:             "openai",
     default_profile: AgentProfileKind::OpenAi,
     api_key_header:  ApiKeyHeaderPolicy::Bearer,
@@ -98,6 +143,7 @@ pub const OPENAI: AdapterMetadata = AdapterMetadata {
 
 /// Google Gemini — `gemini` adapter.
 pub const GEMINI: AdapterMetadata = AdapterMetadata {
+    kind:            AdapterKind::Gemini,
     key:             "gemini",
     default_profile: AgentProfileKind::Gemini,
     api_key_header:  ApiKeyHeaderPolicy::Custom {
@@ -113,6 +159,7 @@ pub const GEMINI: AdapterMetadata = AdapterMetadata {
 /// Routes through the OpenAI agent profile but accepts arbitrary `base_url`
 /// per provider settings.
 pub const OPENAI_COMPATIBLE: AdapterMetadata = AdapterMetadata {
+    kind:            AdapterKind::OpenAiCompatible,
     key:             "openai_compatible",
     default_profile: AgentProfileKind::OpenAi,
     api_key_header:  ApiKeyHeaderPolicy::Bearer,
@@ -130,7 +177,8 @@ pub const ALL_ADAPTERS: &[AdapterMetadata] = &[ANTHROPIC, OPENAI, GEMINI, OPENAI
 
 /// Look up adapter metadata by stable key.
 #[must_use]
-pub fn get(key: &str) -> Option<&'static AdapterMetadata> {
+pub fn get(key: impl AsRef<str>) -> Option<&'static AdapterMetadata> {
+    let key = key.as_ref();
     ALL_ADAPTERS.iter().find(|a| a.key == key)
 }
 
@@ -142,25 +190,29 @@ pub fn keys() -> impl Iterator<Item = &'static str> {
 /// Default adapter key for a provider ID when no explicit catalog provider row
 /// is available.
 #[must_use]
-pub fn default_for_provider_id(provider: &ProviderId) -> &'static str {
-    match Provider::from_id(provider) {
-        Some(Provider::Anthropic) => ANTHROPIC.key,
-        Some(Provider::OpenAi) => OPENAI.key,
-        Some(Provider::Gemini) => GEMINI.key,
-        Some(
-            Provider::Kimi
-            | Provider::Zai
-            | Provider::Minimax
-            | Provider::Inception
-            | Provider::OpenAiCompatible,
-        )
-        | None => OPENAI_COMPATIBLE.key,
+pub fn default_for_provider_id(provider: &ProviderId) -> AdapterKind {
+    match provider.as_str() {
+        ProviderId::ANTHROPIC => AdapterKind::Anthropic,
+        ProviderId::OPENAI => AdapterKind::OpenAi,
+        ProviderId::GEMINI => AdapterKind::Gemini,
+        _ => AdapterKind::OpenAiCompatible,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn adapter_kind_round_trips_as_snake_case() {
+        for kind in AdapterKind::VARIANTS {
+            let json = serde_json::to_string(kind).unwrap();
+            assert_eq!(json, format!("\"{}\"", kind.as_str()));
+            let parsed: AdapterKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, *kind);
+            assert_eq!(kind.as_str().parse::<AdapterKind>().unwrap(), *kind);
+        }
+    }
 
     #[test]
     fn lookup_by_known_key() {

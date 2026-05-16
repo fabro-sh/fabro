@@ -1289,7 +1289,8 @@ mod tests {
     use chrono::Utc;
     use fabro_agent::{AgentEvent, SandboxEvent};
     use fabro_llm::types::TokenCounts as LlmTokenCounts;
-    use fabro_model::{ModelRef, Provider, ProviderId};
+    use fabro_model::provider::Provider;
+    use fabro_model::{ModelRef, ProviderId};
 
     use super::*;
     use crate::error::Error;

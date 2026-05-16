@@ -190,7 +190,8 @@ const FACTORIES: &[(&str, AdapterFactory)] = &[
 /// Look up a factory by adapter key. Returns `None` if the key has no factory
 /// registered.
 #[must_use]
-pub fn factory_for(adapter_key: &str) -> Option<AdapterFactory> {
+pub fn factory_for(adapter_key: impl AsRef<str>) -> Option<AdapterFactory> {
+    let adapter_key = adapter_key.as_ref();
     FACTORIES
         .iter()
         .find_map(|(key, factory)| (*key == adapter_key).then_some(*factory))
@@ -204,7 +205,7 @@ pub fn registered_keys() -> impl Iterator<Item = &'static str> {
 /// Look up adapter metadata by key, ensuring the metadata + factory pair
 /// remains in sync.
 #[must_use]
-pub fn metadata_for(adapter_key: &str) -> Option<&'static AdapterMetadata> {
+pub fn metadata_for(adapter_key: impl AsRef<str>) -> Option<&'static AdapterMetadata> {
     model_adapter::get(adapter_key)
 }
 

@@ -429,7 +429,7 @@ pub struct SessionEvent {
 
 #[cfg(test)]
 mod tests {
-    use fabro_model::Provider;
+    use fabro_model::provider::Provider;
 
     use super::*;
 

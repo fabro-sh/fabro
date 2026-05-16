@@ -31,9 +31,9 @@ use fabro_interview::{
     Answer, AnswerValue, AutoApproveInterviewer, CallbackInterviewer, Interviewer,
     QueueInterviewer, RecordingInterviewer,
 };
-use fabro_llm::provider::Provider;
 use fabro_model::Catalog;
 use fabro_model::catalog::LlmCatalogSettings;
+use fabro_model::provider::Provider;
 use fabro_store::{ArtifactKey, ArtifactStore, Database};
 use fabro_types::{CommandTermination, RunEvent, RunId, StageId, WorkflowSettings, parse_blob_ref};
 use fabro_validate::{Severity, validate, validate_or_raise};
@@ -6865,7 +6865,7 @@ mod real_llm {
 
 fn openai_api_key_credential(key: &str) -> fabro_auth::AuthCredential {
     fabro_auth::AuthCredential {
-        provider: fabro_model::Provider::OpenAi.id(),
+        provider: Provider::OpenAi.id(),
         details:  fabro_auth::AuthDetails::ApiKey {
             key: key.to_string(),
         },

@@ -1,9 +1,8 @@
 use std::any::{TypeId, type_name};
 
 use fabro_api::types::Model as ApiModel;
-use fabro_model::{
-    Model, ModelCosts, ModelFeatures, ModelLimits, Provider, ReasoningEffortFeature,
-};
+use fabro_model::provider::Provider;
+use fabro_model::{Model, ModelCosts, ModelFeatures, ModelLimits, ReasoningEffortFeature};
 
 #[test]
 fn model_reuses_canonical_type() {

@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ids::ProviderId;
-use crate::provider::Provider;
 
 // --- 2.9 Model ---
 
@@ -88,10 +87,6 @@ impl Model {
         &self.provider
     }
 
-    pub fn builtin_provider(&self) -> Option<Provider> {
-        Provider::from_id(&self.provider)
-    }
-
     pub fn family(&self) -> &str {
         &self.family
     }
@@ -168,13 +163,13 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use crate::catalog::Catalog;
-    use crate::provider::Provider;
+    use crate::ids::ProviderId;
 
     #[test]
     fn inherent_methods_return_correct_values() {
         let info = Catalog::builtin().get("claude-opus-4-7").unwrap();
         assert_eq!(info.id(), "claude-opus-4-7");
-        assert_eq!(info.provider(), &Provider::Anthropic.id());
+        assert_eq!(info.provider(), &ProviderId::anthropic());
         assert_eq!(info.family(), "claude-4");
         assert_eq!(info.display_name(), "Claude Opus 4.7");
         assert_eq!(info.context_window(), 1_000_000);
@@ -191,12 +186,5 @@ mod tests {
         assert_eq!(info.estimated_output_tps(), Some(25.0));
         assert!(!info.aliases().is_empty());
         assert!(!info.is_default());
-    }
-
-    #[test]
-    fn builtin_provider_matches_known_static_provider_ids() {
-        for info in Catalog::builtin().list(None) {
-            assert_eq!(info.builtin_provider(), Provider::from_id(info.provider()));
-        }
     }
 }

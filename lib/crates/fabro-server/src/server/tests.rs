@@ -17,7 +17,8 @@ use fabro_interview::{
 };
 use fabro_llm::types::{Message as LlmMessage, Request as LlmRequest};
 use fabro_model::catalog::LlmCatalogSettings;
-use fabro_model::{Catalog, ModelRef, Provider, Speed};
+use fabro_model::provider::Provider;
+use fabro_model::{Catalog, ModelRef, Speed};
 use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{
     AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,

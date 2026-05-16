@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use fabro_graphviz::graph::{AttrValue, Node};
-use fabro_llm::provider::Provider;
+use fabro_model::provider::Provider;
 use fabro_workflow::context::Context;
 use fabro_workflow::event::Emitter;
 use fabro_workflow::handler::agent::{CodergenBackend, CodergenResult, CodergenRunRequest};

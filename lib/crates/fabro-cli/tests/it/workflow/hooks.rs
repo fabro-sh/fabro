@@ -13,7 +13,7 @@ use std::process::Output;
 
 use fabro_auth::{AuthCredential, AuthDetails};
 use fabro_config::Storage;
-use fabro_model::Provider;
+use fabro_model::provider::Provider;
 use fabro_test::{
     TestMode, TwinOpenAi, TwinScenario, TwinScenarios, TwinToolCall, test_context, twin_openai,
 };

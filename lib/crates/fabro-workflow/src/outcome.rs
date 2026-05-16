@@ -147,7 +147,8 @@ fn token_counts_from_llm_usage(usage: &LlmTokenCounts) -> TokenCounts {
 mod tests {
     use fabro_llm::types::TokenCounts;
     use fabro_model::catalog::LlmCatalogSettings;
-    use fabro_model::{Catalog, ModelRef, Provider, ProviderId, Speed};
+    use fabro_model::provider::Provider;
+    use fabro_model::{Catalog, ModelRef, ProviderId, Speed};
 
     use super::{OutcomeExt, billed_model_usage_from_llm};
 

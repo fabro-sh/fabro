@@ -23,7 +23,7 @@ use fabro_install::{
     merge_server_settings, persist_install_outputs_direct, write_github_app_settings,
     write_object_store_settings, write_sandbox_settings, write_token_settings,
 };
-use fabro_model::Provider;
+use fabro_model::ProviderId;
 use fabro_sandbox::daytona;
 use fabro_static::EnvVars;
 use fabro_store::ArtifactStore;
@@ -75,7 +75,7 @@ pub type InstallFinishHook = Arc<dyn Fn(&InstallFinishInfo) -> anyhow::Result<()
 
 #[derive(Clone, Debug, Default)]
 struct InstallUpstreamConfig {
-    provider_base_urls:      HashMap<Provider, String>,
+    provider_base_urls:      HashMap<ProviderId, String>,
     github_api_base_url:     Option<String>,
     daytona_api_base_url:    Option<String>,
     daytona_organization_id: Option<String>,
@@ -190,12 +190,12 @@ impl InstallAppState {
     #[must_use]
     pub fn with_provider_base_url(
         mut self,
-        provider: Provider,
+        provider: impl Into<ProviderId>,
         base_url: impl Into<String>,
     ) -> Self {
         self.upstreams
             .provider_base_urls
-            .insert(provider, base_url.into());
+            .insert(provider.into(), base_url.into());
         self
     }
 
@@ -248,7 +248,7 @@ struct LlmProvidersInput {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct LlmProviderInput {
-    provider: Provider,
+    provider: ProviderId,
     api_key:  String,
 }
 
@@ -487,7 +487,7 @@ struct GithubAppInstall {
 
 #[derive(Clone, Debug, Deserialize)]
 struct InstallLlmTestInput {
-    provider: Provider,
+    provider: ProviderId,
     api_key:  String,
 }
 
@@ -773,7 +773,7 @@ async fn post_install_llm_test(
     }
     observe_operator(&state, &headers);
 
-    if let Some(error) = unsupported_install_provider_error(input.provider) {
+    if let Some(error) = unsupported_install_provider_error(&input.provider) {
         return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, error);
     }
 
@@ -804,7 +804,7 @@ async fn put_install_llm(
     // completed with zero credentials. `/install/finish` still requires the
     // step to be present, just not populated.
     for provider in &input.providers {
-        if let Some(error) = unsupported_install_provider_error(provider.provider) {
+        if let Some(error) = unsupported_install_provider_error(&provider.provider) {
             return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, error);
         }
         if provider.api_key.trim().is_empty() {
@@ -820,10 +820,10 @@ async fn put_install_llm(
     StatusCode::NO_CONTENT.into_response()
 }
 
-fn unsupported_install_provider_error(provider: Provider) -> Option<&'static str> {
-    match provider {
-        Provider::OpenAiCompatible => Some("openai_compatible is not supported by install in v1"),
-        _ => None,
+fn unsupported_install_provider_error(provider: &ProviderId) -> Option<String> {
+    match provider.as_str() {
+        ProviderId::ANTHROPIC | ProviderId::OPENAI | ProviderId::GEMINI => None,
+        _ => Some(format!("{provider} is not supported by install in v1")),
     }
 }
 
@@ -1525,7 +1525,7 @@ async fn post_install_finish(
     }
     for provider in llm.providers {
         let credential = AuthCredential {
-            provider: provider.provider.id(),
+            provider: provider.provider,
             details:  AuthDetails::ApiKey {
                 key: provider.api_key,
             },
@@ -1888,7 +1888,7 @@ fn redacted_llm(pending_install: &PendingInstall) -> serde_json::Value {
         |llm| {
             serde_json::json!({
                 "providers": llm.providers.iter().map(|provider| serde_json::json!({
-                    "provider": <&'static str>::from(provider.provider),
+                    "provider": provider.provider.to_string(),
                     "configured": true,
                 })).collect::<Vec<_>>()
             })
@@ -2041,27 +2041,21 @@ async fn validate_llm_provider(
     state: &InstallAppState,
     input: &InstallLlmTestInput,
 ) -> anyhow::Result<()> {
-    let (auth_header, auth_value) = match input.provider {
-        Provider::Anthropic => ("x-api-key", input.api_key.clone()),
-        Provider::OpenAi => ("Authorization", format!("Bearer {}", input.api_key)),
-        Provider::Gemini => ("x-goog-api-key", input.api_key.clone()),
-        Provider::Kimi
-        | Provider::Zai
-        | Provider::Minimax
-        | Provider::Inception
-        | Provider::OpenAiCompatible => {
-            bail!("{} is not supported by install validation", input.provider);
-        }
+    let (auth_header, auth_value) = match input.provider.as_str() {
+        ProviderId::ANTHROPIC => ("x-api-key", input.api_key.clone()),
+        ProviderId::OPENAI => ("Authorization", format!("Bearer {}", input.api_key)),
+        ProviderId::GEMINI => ("x-goog-api-key", input.api_key.clone()),
+        _ => bail!("{} is not supported by install validation", input.provider),
     };
 
-    let base_url = provider_base_url(state, input.provider);
+    let base_url = provider_base_url(state, &input.provider);
     let endpoint = install_upstream_endpoint(&base_url, &["models"])?;
     let client = install_http_client_for_url(&base_url)?;
     let mut request = client
         .get(endpoint)
         .header(auth_header, auth_value)
         .header("User-Agent", "fabro-server");
-    if matches!(input.provider, Provider::Anthropic) {
+    if input.provider.as_str() == ProviderId::ANTHROPIC {
         request = request.header("anthropic-version", "2023-06-01");
     }
 
@@ -2085,28 +2079,23 @@ async fn validate_llm_provider(
     clippy::disallowed_methods,
     reason = "Install flow checks documented provider base-url overrides while building defaults."
 )]
-fn provider_base_url(state: &InstallAppState, provider: Provider) -> String {
+fn provider_base_url(state: &InstallAppState, provider: &ProviderId) -> String {
     state
         .upstreams
         .provider_base_urls
-        .get(&provider)
+        .get(provider)
         .cloned()
-        .or_else(|| match provider {
-            Provider::Anthropic => std::env::var(EnvVars::ANTHROPIC_BASE_URL).ok(),
-            Provider::OpenAi => std::env::var(EnvVars::OPENAI_BASE_URL).ok(),
-            Provider::Gemini => std::env::var(EnvVars::GEMINI_BASE_URL).ok(),
-            Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => None,
-            Provider::OpenAiCompatible => std::env::var(EnvVars::OPENAI_COMPATIBLE_BASE_URL).ok(),
+        .or_else(|| match provider.as_str() {
+            ProviderId::ANTHROPIC => std::env::var(EnvVars::ANTHROPIC_BASE_URL).ok(),
+            ProviderId::OPENAI => std::env::var(EnvVars::OPENAI_BASE_URL).ok(),
+            ProviderId::GEMINI => std::env::var(EnvVars::GEMINI_BASE_URL).ok(),
+            _ => None,
         })
-        .unwrap_or_else(|| match provider {
-            Provider::Anthropic => DEFAULT_ANTHROPIC_BASE_URL.to_string(),
-            Provider::OpenAi => DEFAULT_OPENAI_BASE_URL.to_string(),
-            Provider::Gemini => DEFAULT_GEMINI_BASE_URL.to_string(),
-            Provider::Kimi
-            | Provider::Zai
-            | Provider::Minimax
-            | Provider::Inception
-            | Provider::OpenAiCompatible => String::new(),
+        .unwrap_or_else(|| match provider.as_str() {
+            ProviderId::ANTHROPIC => DEFAULT_ANTHROPIC_BASE_URL.to_string(),
+            ProviderId::OPENAI => DEFAULT_OPENAI_BASE_URL.to_string(),
+            ProviderId::GEMINI => DEFAULT_GEMINI_BASE_URL.to_string(),
+            _ => String::new(),
         })
 }
 

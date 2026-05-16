@@ -1,6 +1,7 @@
 [providers.anthropic]
 display_name = "Anthropic"
 adapter = "anthropic"
+api_key_url = "https://console.anthropic.com/settings/keys"
 credentials = ["credential:anthropic", "env:ANTHROPIC_API_KEY"]
 priority = 100
 

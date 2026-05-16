@@ -307,6 +307,7 @@ fn provider_settings_to_catalog(
     model_catalog::ProviderCatalogSettings {
         display_name:  settings.display_name,
         adapter:       settings.adapter,
+        api_key_url:   settings.api_key_url,
         base_url:      settings.base_url,
         credentials:   settings.credentials,
         extra_headers: settings.extra_headers,

@@ -85,8 +85,9 @@ mod tests {
     use std::sync::Arc;
 
     use chrono::{Duration, Utc};
+    use fabro_model::Catalog;
     use fabro_model::catalog::LlmCatalogSettings;
-    use fabro_model::{Catalog, Provider};
+    use fabro_model::provider::Provider;
     use fabro_vault::{SecretType, Vault};
     use tokio::sync::RwLock as AsyncRwLock;
 

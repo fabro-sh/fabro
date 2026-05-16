@@ -58,6 +58,8 @@ pub struct ProviderSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adapter:       Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key_url:   Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url:      Option<String>,
     /// Ordered list of credential references — first successful wins. Each
     /// entry must be a typed `CredentialRef` (`credential:<id>` or

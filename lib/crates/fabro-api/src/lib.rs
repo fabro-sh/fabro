@@ -16,7 +16,7 @@ mod generated {
 pub mod types {
     pub use fabro_model::{
         Model, ModelCosts, ModelFeatures, ModelLimits, ModelRef as BillingModelRef, ModelTestMode,
-        Provider, ReasoningEffortFeature, Speed as BillingSpeed,
+        ReasoningEffortFeature, Speed as BillingSpeed,
     };
     pub use fabro_types::settings::server::{
         GithubIntegrationSettings, GithubIntegrationStrategy, IntegrationWebhooksSettings,

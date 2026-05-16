@@ -9,9 +9,8 @@ use strum::VariantArray;
 use toml::de::Error as TomlDeError;
 
 use crate::Speed;
-use crate::adapter::{self, AdapterMetadata};
+use crate::adapter::{self, AdapterKind, AdapterMetadata};
 use crate::ids::ProviderId;
-use crate::provider::Provider;
 use crate::reasoning::ReasoningEffort;
 use crate::types::{Model, ModelCosts, ModelFeatures, ModelLimits, ReasoningEffortFeature};
 
@@ -41,6 +40,8 @@ pub struct ProviderCatalogSettings {
     pub display_name:  Option<String>,
     #[serde(default)]
     pub adapter:       Option<String>,
+    #[serde(default)]
+    pub api_key_url:   Option<String>,
     #[serde(default)]
     pub base_url:      Option<String>,
     #[serde(default)]
@@ -362,7 +363,8 @@ pub struct FallbackTarget {
 pub struct CatalogProvider {
     pub id:            ProviderId,
     pub display_name:  String,
-    pub adapter:       String,
+    pub adapter:       AdapterKind,
+    pub api_key_url:   Option<String>,
     pub base_url:      Option<String>,
     pub credentials:   Vec<CredentialRef>,
     pub extra_headers: HashMap<String, HeaderValueRef>,
@@ -637,8 +639,9 @@ impl Catalog {
             }
             providers.push(CatalogProvider {
                 id:            model.provider.clone(),
-                display_name:  Provider::display_name_for_id(&model.provider),
-                adapter:       adapter::default_for_provider_id(&model.provider).to_string(),
+                display_name:  model.provider.display_name(),
+                adapter:       adapter::default_for_provider_id(&model.provider),
+                api_key_url:   None,
                 base_url:      None,
                 credentials:   Vec::new(),
                 extra_headers: HashMap::new(),
@@ -798,18 +801,6 @@ impl Catalog {
         self.default_for_configured_ids(&configured)
     }
 
-    /// Default model for the best configured provider, falling back to the
-    /// global catalog default.
-    #[must_use]
-    pub fn default_for_configured(&self, configured: &[Provider]) -> &Model {
-        let configured = configured
-            .iter()
-            .copied()
-            .map(Provider::id)
-            .collect::<Vec<_>>();
-        self.default_for_configured_ids(&configured)
-    }
-
     /// Default model for the best-available built-in provider IDs, falling
     /// back to the global catalog default.
     #[must_use]
@@ -832,10 +823,11 @@ impl Catalog {
     /// connectivity checks. Falls back to the provider's default when no
     /// explicit override is configured.
     #[must_use]
-    pub fn probe_for_provider(&self, p: Provider) -> Option<&Model> {
-        let override_id: Option<&str> = match p {
-            Provider::Anthropic => Some("claude-haiku-4-5"),
-            Provider::OpenAi => Some("gpt-5.4-mini"),
+    pub fn probe_for_provider(&self, p: &ProviderId) -> Option<&Model> {
+        let provider_id = self.provider(p).map_or(p, |provider| &provider.id);
+        let override_id: Option<&str> = match provider_id.as_str() {
+            ProviderId::ANTHROPIC => Some("claude-haiku-4-5"),
+            ProviderId::OPENAI => Some("gpt-5.4-mini"),
             _ => None,
         };
         if let Some(id) = override_id {
@@ -843,7 +835,7 @@ impl Catalog {
                 return Some(info);
             }
         }
-        self.default_for_provider(&p.id())
+        self.default_for_provider(provider_id)
     }
 
     /// Find the closest model on a target provider matching the reference's
@@ -949,6 +941,7 @@ fn merge_provider_settings(
     ProviderCatalogSettings {
         display_name:  higher.display_name.or(fallback.display_name),
         adapter:       higher.adapter.or(fallback.adapter),
+        api_key_url:   higher.api_key_url.or(fallback.api_key_url),
         base_url:      higher.base_url.or(fallback.base_url),
         credentials:   higher.credentials.or(fallback.credentials),
         extra_headers: higher.extra_headers.or(fallback.extra_headers),
@@ -1077,14 +1070,15 @@ fn build_providers(
             continue;
         }
 
-        let adapter = required_provider_string(&provider_id, settings.adapter.as_ref(), "adapter")?;
-        if adapter::get(adapter.as_str()).is_none() {
-            return Err(CatalogBuildError::UnknownAdapter {
-                provider: provider_id,
-                adapter,
-            });
-        }
-        if adapter == adapter::OPENAI_COMPATIBLE.key && settings.base_url.is_none() {
+        let adapter_name =
+            required_provider_string(&provider_id, settings.adapter.as_ref(), "adapter")?;
+        let adapter = AdapterKind::from_str(&adapter_name).map_err(|_| {
+            CatalogBuildError::UnknownAdapter {
+                provider: provider_id.clone(),
+                adapter:  adapter_name,
+            }
+        })?;
+        if adapter == AdapterKind::OpenAiCompatible && settings.base_url.is_none() {
             return Err(CatalogBuildError::MissingOpenAiCompatibleBaseUrl {
                 provider: provider_id,
             });
@@ -1094,6 +1088,7 @@ fn build_providers(
             id: provider_id,
             display_name: settings.display_name.clone().unwrap_or_else(|| id.clone()),
             adapter,
+            api_key_url: settings.api_key_url.clone(),
             base_url: settings.base_url.clone(),
             credentials: settings.credentials.clone().unwrap_or_default(),
             extra_headers: settings.extra_headers.clone().unwrap_or_default(),
@@ -1152,7 +1147,7 @@ fn build_model(
                 field: "features",
             })?;
     let model_features = build_model_features(model_id, features)?;
-    let adapter = adapter::get(&provider.adapter).expect("provider adapter was validated earlier");
+    let adapter = adapter::get(provider.adapter).expect("provider adapter was validated earlier");
     let controls = build_model_controls(model_id, &model_features, settings, adapter)?;
     let costs = build_model_costs(settings.costs.as_ref());
     let speed_costs = build_speed_costs(model_id, settings.costs.as_ref(), &controls)?;
@@ -1508,6 +1503,7 @@ mod tests {
 
     use super::*;
     use crate::Speed;
+    use crate::adapter::AdapterKind;
     use crate::provider::Provider;
     use crate::reasoning::ReasoningEffort;
 
@@ -1589,7 +1585,7 @@ effort = false
             .provider(&ProviderId::new("acme-ai"))
             .expect("provider alias should resolve");
         assert_eq!(provider.id, ProviderId::new("acme"));
-        assert_eq!(provider.adapter, "openai_compatible");
+        assert_eq!(provider.adapter, AdapterKind::OpenAiCompatible);
 
         let model = catalog.get("al").expect("model alias should resolve");
         assert_eq!(model.id, "acme-large");
@@ -1615,7 +1611,7 @@ enabled = true
         let provider = catalog
             .provider(&ollama)
             .expect("enabled Ollama provider should be present");
-        assert_eq!(provider.adapter, "openai_compatible");
+        assert_eq!(provider.adapter, AdapterKind::OpenAiCompatible);
         assert_eq!(
             provider.base_url.as_deref(),
             Some("http://localhost:11434/v1")
@@ -1694,7 +1690,7 @@ enabled = true
     #[test]
     fn builtin_probe_openai_returns_override() {
         let m = Catalog::builtin()
-            .probe_for_provider(Provider::OpenAi)
+            .probe_for_provider(&ProviderId::openai())
             .unwrap();
         assert_eq!(m.id, "gpt-5.4-mini");
     }
@@ -1702,7 +1698,7 @@ enabled = true
     #[test]
     fn builtin_probe_anthropic_returns_override() {
         let m = Catalog::builtin()
-            .probe_for_provider(Provider::Anthropic)
+            .probe_for_provider(&ProviderId::anthropic())
             .unwrap();
         assert_eq!(m.id, "claude-haiku-4-5");
     }
@@ -1710,7 +1706,7 @@ enabled = true
     #[test]
     fn builtin_probe_gemini_returns_default() {
         let m = Catalog::builtin()
-            .probe_for_provider(Provider::Gemini)
+            .probe_for_provider(&ProviderId::gemini())
             .unwrap();
         assert_eq!(m.id, "gemini-3.1-pro-preview");
     }
@@ -1849,7 +1845,15 @@ enabled = true
 
         assert_eq!(
             catalog.provider(&ProviderId::openai()).unwrap().adapter,
-            "openai"
+            AdapterKind::OpenAi
+        );
+        assert_eq!(
+            catalog
+                .provider(&ProviderId::openai())
+                .unwrap()
+                .api_key_url
+                .as_deref(),
+            Some("https://platform.openai.com/api-keys")
         );
         assert_eq!(
             catalog

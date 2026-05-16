@@ -14,9 +14,7 @@ use fabro_llm::client::Client;
 use fabro_llm::types::{Message, ReasoningEffort, Request, Speed, TokenCounts};
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::catalog::LlmCatalogSettings;
-use fabro_model::{
-    AgentProfileKind, Catalog, FallbackTarget, ModelRef, Provider, ProviderId, adapter,
-};
+use fabro_model::{AgentProfileKind, Catalog, FallbackTarget, ModelRef, ProviderId, adapter};
 use fabro_types::settings::run::RunModelControls;
 use fabro_types::{SessionCapability, StageId};
 use tokio::sync::Mutex as TokioMutex;
@@ -104,7 +102,6 @@ enum AgentApiErrorDisposition {
 
 #[derive(Clone)]
 struct ProviderContext {
-    provider:     Provider,
     provider_id:  ProviderId,
     profile_kind: AgentProfileKind,
 }
@@ -169,7 +166,6 @@ fn discard_session(
 
 fn build_profile(
     model: &str,
-    provider: Provider,
     provider_id: ProviderId,
     profile_kind: AgentProfileKind,
     catalog: Arc<Catalog>,
@@ -177,35 +173,19 @@ fn build_profile(
     match profile_kind {
         AgentProfileKind::OpenAi => Box::new(
             OpenAiProfile::new(model)
-                .with_provider(provider)
                 .with_provider_id(provider_id)
                 .with_catalog(catalog),
         ),
         AgentProfileKind::Gemini => Box::new(
             GeminiProfile::new(model)
-                .with_provider(provider)
                 .with_provider_id(provider_id)
                 .with_catalog(catalog),
         ),
         AgentProfileKind::Anthropic => Box::new(
             AnthropicProfile::new(model)
-                .with_provider(provider)
                 .with_provider_id(provider_id)
                 .with_catalog(catalog),
         ),
-    }
-}
-
-fn default_profile_kind(provider: Provider) -> AgentProfileKind {
-    match provider {
-        Provider::Anthropic => AgentProfileKind::Anthropic,
-        Provider::Gemini => AgentProfileKind::Gemini,
-        Provider::OpenAi
-        | Provider::Kimi
-        | Provider::Zai
-        | Provider::Minimax
-        | Provider::Inception
-        | Provider::OpenAiCompatible => AgentProfileKind::OpenAi,
     }
 }
 
@@ -286,19 +266,6 @@ fn legacy_reasoning_effort_default(catalog: &Catalog, model: &str) -> Option<Rea
         Some(_) => None,
         None => Some(ReasoningEffort::High),
     }
-}
-
-fn profile_provider_for_catalog_provider(
-    provider_id: &ProviderId,
-    profile_kind: AgentProfileKind,
-    adapter: &str,
-) -> Provider {
-    Provider::from_id(provider_id).unwrap_or(match (profile_kind, adapter) {
-        (AgentProfileKind::Anthropic, _) => Provider::Anthropic,
-        (AgentProfileKind::Gemini, _) => Provider::Gemini,
-        (AgentProfileKind::OpenAi, "openai_compatible") => Provider::OpenAiCompatible,
-        (AgentProfileKind::OpenAi, _) => Provider::OpenAi,
-    })
 }
 
 /// Shared state for tracking file modifications from agent tool calls.
@@ -386,7 +353,6 @@ fn spawn_event_forwarder(
 /// and reused so the LLM sees the full conversation history.
 pub struct AgentApiBackend {
     model:              String,
-    provider:           Provider,
     provider_id:        ProviderId,
     profile_kind:       AgentProfileKind,
     fallback_chain:     Vec<FallbackTarget>,
@@ -403,20 +369,24 @@ impl AgentApiBackend {
     #[must_use]
     pub fn new(
         model: String,
-        provider: Provider,
+        provider_id: impl Into<ProviderId>,
         fallback_chain: Vec<FallbackTarget>,
         source: Arc<dyn CredentialSource>,
         steering_hub: Arc<SteeringHub>,
     ) -> Self {
+        let provider_id = provider_id.into();
+        let profile_kind = adapter::get(adapter::default_for_provider_id(&provider_id))
+            .map_or(AgentProfileKind::OpenAi, |metadata| {
+                metadata.default_profile
+            });
         let catalog = Arc::new(
             Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
                 .expect("default catalog should build"),
         );
         Self::new_with_catalog(
             model,
-            provider,
-            provider.id(),
-            default_profile_kind(provider),
+            provider_id,
+            profile_kind,
             fallback_chain,
             source,
             steering_hub,
@@ -427,7 +397,6 @@ impl AgentApiBackend {
     #[must_use]
     pub fn new_with_catalog(
         model: String,
-        provider: Provider,
         provider_id: ProviderId,
         profile_kind: AgentProfileKind,
         fallback_chain: Vec<FallbackTarget>,
@@ -437,7 +406,6 @@ impl AgentApiBackend {
     ) -> Self {
         Self {
             model,
-            provider,
             provider_id,
             profile_kind,
             fallback_chain,
@@ -454,17 +422,23 @@ impl AgentApiBackend {
     #[must_use]
     pub fn new_from_env(
         model: String,
-        provider: Provider,
+        provider_id: impl Into<ProviderId>,
         fallback_chain: Vec<FallbackTarget>,
         steering_hub: Arc<SteeringHub>,
     ) -> Self {
         Self::new(
             model,
-            provider,
+            provider_id,
             fallback_chain,
             Arc::new(EnvCredentialSource::new()),
             steering_hub,
         )
+    }
+
+    #[must_use]
+    pub fn with_profile_kind(mut self, profile_kind: AgentProfileKind) -> Self {
+        self.profile_kind = profile_kind;
+        self
     }
 
     #[must_use]
@@ -520,12 +494,11 @@ impl AgentApiBackend {
         };
         let Some(provider) = self.catalog.provider(&provider_id) else {
             return Ok(ProviderContext {
-                provider:     self.provider,
                 provider_id:  self.provider_id.clone(),
                 profile_kind: self.profile_kind,
             });
         };
-        let profile_kind = adapter::get(&provider.adapter)
+        let profile_kind = adapter::get(provider.adapter)
             .map(|metadata| metadata.default_profile)
             .ok_or_else(|| {
                 Error::Precondition(format!(
@@ -534,11 +507,6 @@ impl AgentApiBackend {
                 ))
             })?;
         Ok(ProviderContext {
-            provider: profile_provider_for_catalog_provider(
-                &provider.id,
-                profile_kind,
-                &provider.adapter,
-            ),
             provider_id: provider.id.clone(),
             profile_kind,
         })
@@ -587,7 +555,6 @@ impl AgentApiBackend {
 
         let mut profile = build_profile(
             model,
-            provider.provider,
             provider.provider_id.clone(),
             provider.profile_kind,
             Arc::clone(&catalog),
@@ -617,7 +584,6 @@ impl AgentApiBackend {
         let factory: SessionFactory = Arc::new(move || {
             let child_profile: Arc<dyn AgentProfile> = Arc::from(build_profile(
                 &factory_model,
-                factory_provider.provider,
                 factory_provider.provider_id.clone(),
                 factory_provider.profile_kind,
                 Arc::clone(&factory_catalog),
@@ -1268,8 +1234,12 @@ mod tests {
     }
 
     impl AgentProfile for ShutdownTestProfile {
-        fn provider(&self) -> Provider {
-            Provider::OpenAi
+        fn profile_kind(&self) -> AgentProfileKind {
+            AgentProfileKind::OpenAi
+        }
+
+        fn provider_id(&self) -> ProviderId {
+            ProviderId::openai()
         }
 
         fn model(&self) -> &str {
@@ -1320,19 +1290,20 @@ mod tests {
     fn agent_backend_stores_config() {
         let backend = AgentApiBackend::new_from_env(
             "claude-opus-4-6".to_string(),
-            Provider::OpenAi,
+            ProviderId::openai(),
             Vec::new(),
             SteeringHub::for_tests(),
         );
         assert_eq!(backend.model, "claude-opus-4-6");
-        assert_eq!(backend.provider, Provider::OpenAi);
+        assert_eq!(backend.provider_id, ProviderId::openai());
+        assert_eq!(backend.profile_kind, AgentProfileKind::OpenAi);
     }
 
     #[test]
     fn agent_backend_initializes_empty_sessions() {
         let backend = AgentApiBackend::new_from_env(
             "claude-opus-4-6".to_string(),
-            Provider::Anthropic,
+            ProviderId::anthropic(),
             Vec::new(),
             SteeringHub::for_tests(),
         );
@@ -1449,8 +1420,7 @@ mod tests {
     fn build_profile_can_register_subagent_tools() {
         let mut profile = build_profile(
             "claude-opus-4-6",
-            Provider::Anthropic,
-            Provider::Anthropic.id(),
+            ProviderId::anthropic(),
             AgentProfileKind::Anthropic,
             Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap()),
         );
@@ -1498,7 +1468,6 @@ effort = false
         let catalog = Arc::new(Catalog::from_builtin_with_overrides(&settings).unwrap());
         let backend = AgentApiBackend::new_with_catalog(
             "acme-llama".to_string(),
-            Provider::OpenAiCompatible,
             ProviderId::from("acme"),
             AgentProfileKind::OpenAi,
             Vec::new(),
@@ -1513,14 +1482,13 @@ effort = false
 
         assert_eq!(provider.provider_id, ProviderId::from("acme"));
         assert_eq!(provider.profile_kind, AgentProfileKind::OpenAi);
-        assert_eq!(provider.provider, Provider::OpenAiCompatible);
     }
 
     #[test]
     fn run_model_controls_apply_when_node_omits_controls() {
         let backend = AgentApiBackend::new_from_env(
             "gpt-5.4".to_string(),
-            Provider::OpenAi,
+            ProviderId::openai(),
             Vec::new(),
             SteeringHub::for_tests(),
         )
@@ -1542,7 +1510,7 @@ effort = false
     fn node_controls_override_run_model_controls() {
         let backend = AgentApiBackend::new_from_env(
             "gpt-5.4".to_string(),
-            Provider::OpenAi,
+            ProviderId::openai(),
             Vec::new(),
             SteeringHub::for_tests(),
         )
@@ -1572,7 +1540,7 @@ effort = false
     fn known_model_without_effort_omits_legacy_high_default() {
         let backend = AgentApiBackend::new_from_env(
             "kimi-k2.5".to_string(),
-            Provider::Kimi,
+            ProviderId::new(ProviderId::KIMI),
             Vec::new(),
             SteeringHub::for_tests(),
         );
@@ -1593,7 +1561,7 @@ effort = false
             .set(
                 "anthropic",
                 &serde_json::to_string(&AuthCredential {
-                    provider: Provider::Anthropic.id(),
+                    provider: ProviderId::anthropic(),
                     details:  AuthDetails::ApiKey {
                         key: "anthropic-key".to_string(),
                     },
@@ -1605,7 +1573,7 @@ effort = false
             .unwrap();
         let backend = AgentApiBackend::new(
             "claude-opus-4-6".to_string(),
-            Provider::Anthropic,
+            ProviderId::anthropic(),
             Vec::new(),
             Arc::new(VaultCredentialSource::with_env_lookup(
                 Arc::new(AsyncRwLock::new(vault)),
@@ -1625,7 +1593,7 @@ effort = false
     async fn api_backend_shutdown_closes_cached_sessions_once() {
         let backend = AgentApiBackend::new_from_env(
             "gpt-5.4".to_string(),
-            Provider::OpenAi,
+            ProviderId::openai(),
             Vec::new(),
             SteeringHub::for_tests(),
         );

@@ -587,7 +587,8 @@ fn build_summary_preamble(
 mod tests {
     use fabro_graphviz::graph::AttrValue;
     use fabro_llm::types::TokenCounts;
-    use fabro_model::{Catalog, ModelRef, Provider};
+    use fabro_model::provider::Provider;
+    use fabro_model::{Catalog, ModelRef};
 
     use super::*;
     use crate::outcome::{BilledModelUsage, billed_model_usage_from_llm};

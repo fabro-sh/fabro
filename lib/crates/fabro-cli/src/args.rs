@@ -771,7 +771,7 @@ pub(crate) struct ProviderLoginArgs {
 
     /// LLM provider to authenticate with
     #[arg(long)]
-    pub(crate) provider: fabro_model::Provider,
+    pub(crate) provider: fabro_model::ProviderId,
 
     /// Read an API key from stdin instead of prompting
     #[arg(long)]
@@ -1553,7 +1553,7 @@ pub(crate) struct InstallGithubArgs {
 #[derive(Args, Debug, Clone, Default)]
 pub(crate) struct InstallNonInteractiveArgs {
     #[arg(long, hide = true)]
-    pub(crate) llm_provider: Option<fabro_model::Provider>,
+    pub(crate) llm_provider: Option<fabro_model::ProviderId>,
 
     #[arg(long, hide = true)]
     pub(crate) llm_api_key_stdin: bool,

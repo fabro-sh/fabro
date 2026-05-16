@@ -668,6 +668,7 @@ mod tests {
     use fabro_llm::client::Client;
     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
     use fabro_llm::types::{FinishReason, Message, Request, Response, StreamEvent, TokenCounts};
+    use fabro_model::provider::Provider;
     use fabro_store::Database;
     use fabro_types::{
         BilledTokenCounts, RunProjection, RunSpec, SuccessReason, WorkflowSettings,
@@ -814,7 +815,7 @@ mod tests {
 
     fn openai_api_key_credential(key: &str) -> AuthCredential {
         AuthCredential {
-            provider: fabro_model::Provider::OpenAi.id(),
+            provider: Provider::OpenAi.id(),
             details:  AuthDetails::ApiKey {
                 key: key.to_string(),
             },

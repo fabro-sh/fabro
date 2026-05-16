@@ -653,7 +653,7 @@ mod tests {
     use fabro_auth::{AuthCredential, AuthDetails};
     use fabro_config::Storage;
     use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question};
-    use fabro_model::Provider;
+    use fabro_model::provider::Provider;
     use fabro_types::run_event::{
         InterviewCompletedProps, InterviewStartedProps, RunCompletedProps, RunControlEffectProps,
         RunFailedProps, RunStatusTransitionProps,

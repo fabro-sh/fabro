@@ -12,7 +12,8 @@ use fabro_auth::CredentialResolver;
 use fabro_graphviz::graph::Node;
 use fabro_llm::types::TokenCounts;
 use fabro_model::catalog::LlmCatalogSettings;
-use fabro_model::{Catalog, ModelRef, Provider};
+use fabro_model::provider::Provider;
+use fabro_model::{AgentProfileKind, Catalog, ModelRef, ProviderId, adapter};
 use fabro_types::settings::run::RunModelControls;
 use fabro_types::{CommandOutputStream, CommandTermination, LlmBackend};
 use fabro_util::time::elapsed_ms;
@@ -58,17 +59,16 @@ pub enum AgentCli {
 }
 
 impl AgentCli {
-    pub fn for_provider(provider: Provider) -> Self {
-        match provider {
-            Provider::Anthropic => Self::Claude,
-            Provider::Gemini => Self::Gemini,
-            Provider::OpenAi
-            | Provider::Kimi
-            | Provider::Zai
-            | Provider::Minimax
-            | Provider::Inception
-            | Provider::OpenAiCompatible => Self::Codex,
+    pub fn for_profile_kind(profile_kind: AgentProfileKind) -> Self {
+        match profile_kind {
+            AgentProfileKind::Anthropic => Self::Claude,
+            AgentProfileKind::OpenAi => Self::Codex,
+            AgentProfileKind::Gemini => Self::Gemini,
         }
+    }
+
+    pub fn for_provider(provider: impl Into<ProviderId>) -> Self {
+        Self::for_profile_kind(profile_kind_for_provider_id(&provider.into()))
     }
 
     pub fn name(self) -> &'static str {
@@ -78,6 +78,13 @@ impl AgentCli {
             Self::Gemini => "gemini",
         }
     }
+}
+
+fn profile_kind_for_provider_id(provider_id: &ProviderId) -> AgentProfileKind {
+    adapter::get(adapter::default_for_provider_id(provider_id))
+        .map_or(AgentProfileKind::OpenAi, |metadata| {
+            metadata.default_profile
+        })
 }
 
 /// Verify the provider CLI exists in the sandbox. Fabro does not install agent
@@ -121,52 +128,57 @@ pub fn is_cli_only_model(model: &str) -> bool {
     CLI_ONLY_MODELS.contains(&model)
 }
 
-/// Build the CLI command string for a given provider.
+/// Build the CLI command string for a given agent profile.
 ///
 /// The `prompt_file` is the path to a file containing the prompt text, which
 /// is piped into the command's stdin via `cat`.
 #[must_use]
-pub fn cli_command_for_provider(provider: Provider, model: &str, prompt_file: &str) -> String {
+pub fn cli_command_for_profile_kind(
+    profile_kind: AgentProfileKind,
+    model: &str,
+    prompt_file: &str,
+) -> String {
     let prompt_file = shell_quote(prompt_file);
+    let cli = AgentCli::for_profile_kind(profile_kind);
     let model_flag = if model.is_empty() {
         String::new()
     } else {
         let model = shell_quote(model);
-        match provider {
-            Provider::OpenAi
-            | Provider::Gemini
-            | Provider::Kimi
-            | Provider::Zai
-            | Provider::Minimax
-            | Provider::Inception
-            | Provider::OpenAiCompatible => {
-                format!(" -m {model}")
-            }
-            Provider::Anthropic => format!(" --model {model}"),
+        match cli {
+            AgentCli::Codex | AgentCli::Gemini => format!(" -m {model}"),
+            AgentCli::Claude => format!(" --model {model}"),
         }
     };
     // Use `cat | command` instead of `command < file` because the background
     // launch wrapper (`setsid sh -c '...' </dev/null`) can clobber stdin
     // redirects in nested shells. A pipe creates an explicit new stdin.
-    match provider {
+    match cli {
         // --full-auto: sandboxed auto-execution, escalates on request
-        Provider::OpenAi
-        | Provider::Kimi
-        | Provider::Zai
-        | Provider::Minimax
-        | Provider::Inception
-        | Provider::OpenAiCompatible => {
+        AgentCli::Codex => {
             format!("cat {prompt_file} | codex exec --json --full-auto{model_flag}")
         }
         // --yolo: auto-approve all tool calls
-        Provider::Gemini => format!("cat {prompt_file} | gemini -o json --yolo{model_flag}"),
+        AgentCli::Gemini => format!("cat {prompt_file} | gemini -o json --yolo{model_flag}"),
         // --dangerously-skip-permissions: bypass all permission checks (required for
         // non-interactive use). CLAUDECODE= unset to allow running inside a Claude Code
         // session.
-        Provider::Anthropic => format!(
+        AgentCli::Claude => format!(
             "cat {prompt_file} | CLAUDECODE= claude -p --verbose --output-format stream-json --dangerously-skip-permissions{model_flag}"
         ),
     }
+}
+
+#[must_use]
+pub fn cli_command_for_provider(
+    provider: impl Into<ProviderId>,
+    model: &str,
+    prompt_file: &str,
+) -> String {
+    cli_command_for_profile_kind(
+        profile_kind_for_provider_id(&provider.into()),
+        model,
+        prompt_file,
+    )
 }
 
 /// Parsed response from a CLI tool invocation.
@@ -316,17 +328,45 @@ fn parse_gemini_json(output: &str) -> Option<CliResponse> {
     })
 }
 
-/// Parse CLI output, choosing the right parser based on provider.
-pub fn parse_cli_response(provider: Provider, output: &str) -> Option<CliResponse> {
-    match provider {
-        Provider::OpenAi
-        | Provider::Kimi
-        | Provider::Zai
-        | Provider::Minimax
-        | Provider::Inception
-        | Provider::OpenAiCompatible => parse_codex_ndjson(output),
-        Provider::Gemini => parse_gemini_json(output),
-        Provider::Anthropic => parse_claude_ndjson(output),
+/// Parse CLI output, choosing the right parser based on profile behavior.
+pub fn parse_cli_response(profile: impl Into<CliProfile>, output: &str) -> Option<CliResponse> {
+    let profile_kind = profile.into().profile_kind();
+    match AgentCli::for_profile_kind(profile_kind) {
+        AgentCli::Codex => parse_codex_ndjson(output),
+        AgentCli::Gemini => parse_gemini_json(output),
+        AgentCli::Claude => parse_claude_ndjson(output),
+    }
+}
+
+pub enum CliProfile {
+    Kind(AgentProfileKind),
+    ProviderId(ProviderId),
+}
+
+impl CliProfile {
+    fn profile_kind(self) -> AgentProfileKind {
+        match self {
+            Self::Kind(kind) => kind,
+            Self::ProviderId(provider_id) => profile_kind_for_provider_id(&provider_id),
+        }
+    }
+}
+
+impl From<AgentProfileKind> for CliProfile {
+    fn from(value: AgentProfileKind) -> Self {
+        Self::Kind(value)
+    }
+}
+
+impl From<ProviderId> for CliProfile {
+    fn from(value: ProviderId) -> Self {
+        Self::ProviderId(value)
+    }
+}
+
+impl From<Provider> for CliProfile {
+    fn from(value: Provider) -> Self {
+        Self::ProviderId(value.id())
     }
 }
 
@@ -334,7 +374,8 @@ pub fn parse_cli_response(provider: Provider, output: &str) -> Option<CliRespons
 /// `exec_command()`.
 pub struct AgentCliBackend {
     model: String,
-    provider: Provider,
+    provider_id: ProviderId,
+    profile_kind: AgentProfileKind,
     tool_env: Option<Arc<dyn ToolEnvProvider>>,
     github_token_refresh_managed: bool,
     resolver: Option<CredentialResolver>,
@@ -344,10 +385,20 @@ pub struct AgentCliBackend {
 
 impl AgentCliBackend {
     #[must_use]
-    pub fn new(model: String, provider: Provider, resolver: CredentialResolver) -> Self {
+    pub fn new(
+        model: String,
+        provider_id: impl Into<ProviderId>,
+        resolver: CredentialResolver,
+    ) -> Self {
+        let provider_id = provider_id.into();
+        let profile_kind = adapter::get(adapter::default_for_provider_id(&provider_id))
+            .map_or(AgentProfileKind::OpenAi, |metadata| {
+                metadata.default_profile
+            });
         Self {
             model,
-            provider,
+            provider_id,
+            profile_kind,
             tool_env: None,
             github_token_refresh_managed: false,
             resolver: Some(resolver),
@@ -357,16 +408,28 @@ impl AgentCliBackend {
     }
 
     #[must_use]
-    pub fn new_from_env(model: String, provider: Provider) -> Self {
+    pub fn new_from_env(model: String, provider_id: impl Into<ProviderId>) -> Self {
+        let provider_id = provider_id.into();
+        let profile_kind = adapter::get(adapter::default_for_provider_id(&provider_id))
+            .map_or(AgentProfileKind::OpenAi, |metadata| {
+                metadata.default_profile
+            });
         Self {
             model,
-            provider,
+            provider_id,
+            profile_kind,
             tool_env: None,
             github_token_refresh_managed: false,
             resolver: None,
             run_model_controls: RunModelControls::default(),
             catalog: default_catalog(),
         }
+    }
+
+    #[must_use]
+    pub fn with_profile_kind(mut self, profile_kind: AgentProfileKind) -> Self {
+        self.profile_kind = profile_kind;
+        self
     }
 
     #[must_use]
@@ -406,6 +469,42 @@ fn default_catalog() -> Arc<Catalog> {
     )
 }
 
+fn resolve_provider_context(
+    catalog: &Catalog,
+    default_provider_id: &ProviderId,
+    default_profile_kind: AgentProfileKind,
+    model: &str,
+    node: &Node,
+) -> Result<(ProviderId, AgentProfileKind), Error> {
+    let provider_id = if let Some(provider) = node.provider() {
+        let requested = ProviderId::from(provider);
+        catalog
+            .provider(&requested)
+            .ok_or_else(|| {
+                Error::Precondition(format!("Provider \"{provider}\" is not configured"))
+            })?
+            .id
+            .clone()
+    } else if let Some(model) = catalog.get(model) {
+        model.provider.clone()
+    } else {
+        default_provider_id.clone()
+    };
+
+    let Some(provider) = catalog.provider(&provider_id) else {
+        return Ok((default_provider_id.clone(), default_profile_kind));
+    };
+    let profile_kind = adapter::get(provider.adapter)
+        .map(|metadata| metadata.default_profile)
+        .ok_or_else(|| {
+            Error::Precondition(format!(
+                "Provider \"{provider_id}\" uses unknown adapter \"{}\"",
+                provider.adapter,
+            ))
+        })?;
+    Ok((provider.id.clone(), profile_kind))
+}
+
 #[async_trait]
 impl CodergenBackend for AgentCliBackend {
     async fn run(&self, request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
@@ -432,10 +531,13 @@ impl CodergenBackend for AgentCliBackend {
 
         // 3. Build CLI command
         let model = node.model().unwrap_or(&self.model);
-        let provider = node
-            .provider()
-            .and_then(|s| s.parse::<Provider>().ok())
-            .unwrap_or(self.provider);
+        let (provider_id, profile_kind) = resolve_provider_context(
+            self.catalog.as_ref(),
+            &self.provider_id,
+            self.profile_kind,
+            model,
+            node,
+        )?;
         let controls = effective_request_controls(
             self.catalog.as_ref(),
             &self.run_model_controls,
@@ -443,17 +545,17 @@ impl CodergenBackend for AgentCliBackend {
             node,
         )?;
 
-        let cli = AgentCli::for_provider(provider);
+        let cli = AgentCli::for_profile_kind(profile_kind);
         verify_cli_available(cli, sandbox, &cancel_token).await?;
 
-        let command = cli_command_for_provider(provider, model, &prompt_path);
+        let command = cli_command_for_profile_kind(profile_kind, model, &prompt_path);
         let stage_scope = StageScope::for_handler(context, &node.id);
         emitter.emit_scoped(
             &Event::AgentCliStarted {
                 node_id:  node.id.clone(),
                 visit:    stage_scope.visit,
                 mode:     "cli".to_string(),
-                provider: provider.to_string(),
+                provider: provider_id.to_string(),
                 model:    model.to_string(),
                 command:  command.clone(),
             },
@@ -461,7 +563,7 @@ impl CodergenBackend for AgentCliBackend {
         );
 
         let launch_env = resolve_agent_launch_env(AgentLaunchEnvRequest {
-            provider,
+            provider_id: provider_id.clone(),
             cli,
             catalog: self.catalog.as_ref(),
             resolver: self.resolver.as_ref(),
@@ -647,7 +749,7 @@ impl CodergenBackend for AgentCliBackend {
         }
 
         // 4. Parse the CLI output
-        let parsed = parse_cli_response(provider, &stdout)
+        let parsed = parse_cli_response(profile_kind, &stdout)
             .ok_or_else(|| Error::handler("Failed to parse CLI output".to_string()))?;
 
         // 5. Detect changed files
@@ -657,7 +759,7 @@ impl CodergenBackend for AgentCliBackend {
         let stage_usage = billed_model_usage_from_llm(
             self.catalog.as_ref(),
             &ModelRef {
-                provider: provider.id(),
+                provider: provider_id,
                 model_id: model.to_string(),
                 speed:    controls.speed,
             },
@@ -750,6 +852,7 @@ mod tests {
     use fabro_agent::LocalSandbox;
     use fabro_agent::sandbox::ExecResult;
     use fabro_graphviz::graph::AttrValue;
+    use fabro_model::provider::Provider;
 
     use super::*;
     use crate::context::Context;

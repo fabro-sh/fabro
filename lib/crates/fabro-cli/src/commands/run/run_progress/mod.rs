@@ -471,7 +471,8 @@ mod tests {
     use chrono::{DateTime, Utc};
     use fabro_agent::{AgentEvent, SandboxEvent};
     use fabro_llm::types::TokenCounts;
-    use fabro_model::{Catalog, ModelRef, Provider};
+    use fabro_model::provider::Provider;
+    use fabro_model::{Catalog, ModelRef};
     use fabro_types::run_event::CliEnsureCompletedProps;
     use fabro_types::{
         MetadataSnapshotFailureKind, MetadataSnapshotPhase, ParallelBranchId, SandboxProvider,

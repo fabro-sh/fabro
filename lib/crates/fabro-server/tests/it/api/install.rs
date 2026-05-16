@@ -13,7 +13,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_config::{ServerSettingsBuilder, Storage};
 use fabro_install::OBJECT_STORE_MANAGED_COMMENT;
-use fabro_model::Provider;
+use fabro_model::provider::Provider;
 use fabro_server::install::{
     InstallAppState, InstallFinishHook, InstallFinishInfo, build_install_router,
 };

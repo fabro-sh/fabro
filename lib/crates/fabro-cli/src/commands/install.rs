@@ -30,7 +30,7 @@ use fabro_install::{
     InstallListenConfig, PendingSettingsWrite, merge_server_settings as merge_server_settings_impl,
     persist_install_outputs_direct, write_github_app_settings, write_token_settings,
 };
-use fabro_model::Provider;
+use fabro_model::{Catalog, CredentialRef, ProviderId};
 use fabro_server::serve;
 use fabro_store::ArtifactStore;
 use fabro_types::ServerSettings;
@@ -69,6 +69,46 @@ const GITHUB_TOKEN_SECRET_KEY: &str = "GITHUB_TOKEN";
 const GITHUB_APP_PRIVATE_KEY_KEY: &str = "GITHUB_APP_PRIVATE_KEY";
 const GITHUB_APP_CLIENT_SECRET_KEY: &str = "GITHUB_APP_CLIENT_SECRET";
 const GITHUB_APP_WEBHOOK_SECRET_KEY: &str = "GITHUB_APP_WEBHOOK_SECRET";
+
+const INSTALL_LLM_PROVIDERS: &[&str] = &[
+    ProviderId::ANTHROPIC,
+    ProviderId::OPENAI,
+    ProviderId::GEMINI,
+];
+
+fn install_llm_provider_ids() -> Vec<ProviderId> {
+    INSTALL_LLM_PROVIDERS
+        .iter()
+        .copied()
+        .map(ProviderId::from)
+        .collect()
+}
+
+fn ensure_install_llm_provider_supported(provider: &ProviderId) -> Result<()> {
+    anyhow::ensure!(
+        INSTALL_LLM_PROVIDERS.contains(&provider.as_str()),
+        "{provider} is not supported by install in v1"
+    );
+    Ok(())
+}
+
+fn provider_env_var_label(provider: &ProviderId, catalog: &Catalog) -> String {
+    catalog
+        .provider(provider)
+        .map(|provider| {
+            provider
+                .credentials
+                .iter()
+                .filter_map(|credential| match credential {
+                    CredentialRef::Env(name) => Some(name.as_str()),
+                    CredentialRef::Credential(_) => None,
+                })
+                .collect::<Vec<_>>()
+                .join(" / ")
+        })
+        .filter(|label| !label.is_empty())
+        .unwrap_or_else(|| "API_KEY".to_string())
+}
 
 // ---------------------------------------------------------------------------
 // Auth status display
@@ -379,7 +419,8 @@ impl InstallInputSource for InteractiveInstallInputSource {
         }
 
         let mut credentials = Vec::new();
-        let mut configured_providers: Vec<Provider> = Vec::new();
+        let catalog = Catalog::builtin();
+        let mut configured_providers: Vec<ProviderId> = Vec::new();
         let mut openai_configured = false;
 
         if facts.codex_detected {
@@ -394,23 +435,23 @@ impl InstallInputSource for InteractiveInstallInputSource {
 
             if use_device_auth {
                 let credential = authenticate_provider_with_method(
-                    Provider::OpenAi,
+                    ProviderId::openai(),
                     AuthMethod::CodexDevice(codex_oauth_config()),
                     s,
                     printer,
                 )
                 .await?;
                 credentials.push(credential);
-                configured_providers.push(Provider::OpenAi);
+                configured_providers.push(ProviderId::openai());
                 openai_configured = true;
             }
         }
 
         if !openai_configured {
-            let primary_providers = [Provider::Anthropic, Provider::OpenAi, Provider::Gemini];
+            let primary_providers = install_llm_provider_ids();
             let primary_labels: Vec<String> = primary_providers
                 .iter()
-                .map(|p| provider_display_name(*p).to_string())
+                .map(|p| provider_display_name(p, catalog))
                 .collect();
             let primary_idx: usize = spawn_blocking({
                 let labels = primary_labels.clone();
@@ -418,8 +459,8 @@ impl InstallInputSource for InteractiveInstallInputSource {
             })
             .await??;
 
-            let first_provider = primary_providers[primary_idx];
-            credentials.push(authenticate_provider(first_provider, s, printer).await?);
+            let first_provider = primary_providers[primary_idx].clone();
+            credentials.push(authenticate_provider(first_provider.clone(), s, printer).await?);
             configured_providers.push(first_provider);
         }
 
@@ -427,18 +468,18 @@ impl InstallInputSource for InteractiveInstallInputSource {
             spawn_blocking(|| prompt_confirm("Set up additional LLM providers?", false)).await??;
 
         if add_more {
-            let remaining_labels: Vec<String> = Provider::ALL
+            let remaining_labels: Vec<String> = install_llm_provider_ids()
                 .iter()
                 .filter(|p| !configured_providers.contains(p))
                 .map(|p| {
-                    let env_vars = p.api_key_env_vars().join(" / ");
-                    format!("{} ({})", provider_display_name(*p), env_vars)
+                    let env_vars = provider_env_var_label(p, catalog);
+                    format!("{} ({})", provider_display_name(p, catalog), env_vars)
                 })
                 .collect();
-            let remaining_providers: Vec<Provider> = Provider::ALL
+            let remaining_providers: Vec<ProviderId> = install_llm_provider_ids()
                 .iter()
                 .filter(|p| !configured_providers.contains(p))
-                .copied()
+                .cloned()
                 .collect();
 
             let selected_indices: Vec<usize> = spawn_blocking({
@@ -448,7 +489,7 @@ impl InstallInputSource for InteractiveInstallInputSource {
             .await??;
 
             for idx in selected_indices {
-                let provider = remaining_providers[idx];
+                let provider = remaining_providers[idx].clone();
                 credentials.push(authenticate_provider(provider, s, printer).await?);
             }
         }
@@ -642,7 +683,9 @@ impl InstallInputSource for NonInteractiveInstallInputSource {
         let provider = self
             .args
             .llm_provider
+            .clone()
             .context("non-interactive install requires --llm-provider")?;
+        ensure_install_llm_provider_supported(&provider)?;
         let credential =
             authenticate_provider_with_api_key_source(provider, self.api_key_source()?, s, printer)
                 .await?;
@@ -2506,7 +2549,7 @@ client_id = "client-id"
                 description: None,
             },
             credential_secret_request(&AuthCredential {
-                provider: Provider::Anthropic.id(),
+                provider: ProviderId::anthropic(),
                 details:  fabro_auth::AuthDetails::ApiKey {
                     key: "anthropic-key".to_string(),
                 },
@@ -3039,7 +3082,7 @@ root = "{}"
     #[test]
     fn non_interactive_source_rejects_hidden_args_without_switch() {
         let args = install_args(false, InstallNonInteractiveArgs {
-            llm_provider: Some(Provider::Anthropic),
+            llm_provider: Some(ProviderId::anthropic()),
             ..InstallNonInteractiveArgs::default()
         });
         let err = NonInteractiveInstallInputSource::new(&args).unwrap_err();
@@ -3052,7 +3095,7 @@ root = "{}"
     #[test]
     fn non_interactive_source_rejects_conflicting_api_key_inputs() {
         let args = install_args(true, InstallNonInteractiveArgs {
-            llm_provider: Some(Provider::Anthropic),
+            llm_provider: Some(ProviderId::anthropic()),
             llm_api_key_stdin: true,
             llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
             github_strategy: Some(InstallGitHubStrategyArg::Token),
@@ -3148,7 +3191,7 @@ root = "{}"
     fn non_interactive_source_rejects_missing_github_strategy() {
         let source = NonInteractiveInstallInputSource {
             args: InstallNonInteractiveArgs {
-                llm_provider: Some(Provider::Anthropic),
+                llm_provider: Some(ProviderId::anthropic()),
                 llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
                 github_username: Some("brynary".to_string()),
                 ..InstallNonInteractiveArgs::default()
@@ -3166,7 +3209,7 @@ root = "{}"
     fn non_interactive_source_rejects_missing_github_username_for_new_config() {
         let source = NonInteractiveInstallInputSource {
             args: InstallNonInteractiveArgs {
-                llm_provider: Some(Provider::Anthropic),
+                llm_provider: Some(ProviderId::anthropic()),
                 llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
                 github_strategy: Some(InstallGitHubStrategyArg::Token),
                 ..InstallNonInteractiveArgs::default()
@@ -3183,7 +3226,7 @@ root = "{}"
     fn non_interactive_source_allows_keep_existing_settings_without_username() {
         let source = NonInteractiveInstallInputSource {
             args: InstallNonInteractiveArgs {
-                llm_provider: Some(Provider::Anthropic),
+                llm_provider: Some(ProviderId::anthropic()),
                 llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
                 github_strategy: Some(InstallGitHubStrategyArg::Token),
                 keep_existing_settings: true,
@@ -3198,7 +3241,7 @@ root = "{}"
     fn non_interactive_source_rejects_missing_github_owner_for_app() {
         let source = NonInteractiveInstallInputSource {
             args: InstallNonInteractiveArgs {
-                llm_provider: Some(Provider::Anthropic),
+                llm_provider: Some(ProviderId::anthropic()),
                 llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
                 github_strategy: Some(InstallGitHubStrategyArg::App),
                 ..InstallNonInteractiveArgs::default()
@@ -3217,7 +3260,7 @@ root = "{}"
     fn non_interactive_source_rejects_github_owner_for_token() {
         let source = NonInteractiveInstallInputSource {
             args: InstallNonInteractiveArgs {
-                llm_provider: Some(Provider::Anthropic),
+                llm_provider: Some(ProviderId::anthropic()),
                 llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
                 github_strategy: Some(InstallGitHubStrategyArg::Token),
                 github_owner: Some("personal".to_string()),
@@ -3237,7 +3280,7 @@ root = "{}"
     fn non_interactive_source_rejects_github_username_for_app() {
         let source = NonInteractiveInstallInputSource {
             args: InstallNonInteractiveArgs {
-                llm_provider: Some(Provider::Anthropic),
+                llm_provider: Some(ProviderId::anthropic()),
                 llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
                 github_strategy: Some(InstallGitHubStrategyArg::App),
                 github_owner: Some("personal".to_string()),
@@ -3257,7 +3300,7 @@ root = "{}"
     fn non_interactive_source_allows_github_app_setup() {
         let source = NonInteractiveInstallInputSource {
             args: InstallNonInteractiveArgs {
-                llm_provider: Some(Provider::Anthropic),
+                llm_provider: Some(ProviderId::anthropic()),
                 llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
                 github_strategy: Some(InstallGitHubStrategyArg::App),
                 github_owner: Some("personal".to_string()),
@@ -3272,7 +3315,7 @@ root = "{}"
     async fn non_interactive_source_requires_config_choice_when_settings_exist() {
         let source = NonInteractiveInstallInputSource {
             args: InstallNonInteractiveArgs {
-                llm_provider: Some(Provider::Anthropic),
+                llm_provider: Some(ProviderId::anthropic()),
                 llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
                 github_strategy: Some(InstallGitHubStrategyArg::Token),
                 github_username: Some("brynary".to_string()),

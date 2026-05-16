@@ -1,5 +1,5 @@
 use chrono::{DateTime, Duration, Utc};
-use fabro_model::{Provider, ProviderId};
+use fabro_model::ProviderId;
 use fabro_redact::redact_string;
 use serde::{Deserialize, Serialize};
 
@@ -92,7 +92,7 @@ impl std::fmt::Debug for ApiKeyHeader {
 pub fn credential_id_for(credential: &AuthCredential) -> Result<String, String> {
     match &credential.details {
         AuthDetails::ApiKey { .. } => Ok(credential.provider.to_string()),
-        AuthDetails::CodexOAuth { .. } if credential.provider == Provider::OpenAi.id() => {
+        AuthDetails::CodexOAuth { .. } if credential.provider == ProviderId::openai() => {
             Ok("openai_codex".to_string())
         }
         AuthDetails::CodexOAuth { .. } => Err(format!(
@@ -120,7 +120,7 @@ mod tests {
 
     fn oauth_credential(expires_at: DateTime<Utc>) -> AuthCredential {
         AuthCredential {
-            provider: Provider::OpenAi.id(),
+            provider: ProviderId::openai(),
             details:  AuthDetails::CodexOAuth {
                 tokens:     OAuthTokens {
                     access_token: "access".to_string(),
@@ -163,7 +163,7 @@ mod tests {
     #[test]
     fn credential_id_for_openai_api_key() {
         let credential = AuthCredential {
-            provider: Provider::OpenAi.id(),
+            provider: ProviderId::openai(),
             details:  AuthDetails::ApiKey {
                 key: "sk-test".to_string(),
             },
@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn credential_id_for_non_openai_codex_oauth_errors() {
         let mut credential = oauth_credential(Utc::now() + Duration::hours(1));
-        credential.provider = Provider::Anthropic.id();
+        credential.provider = ProviderId::anthropic();
         assert!(credential_id_for(&credential).is_err());
     }
 

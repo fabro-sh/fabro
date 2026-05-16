@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_model::catalog::CatalogProvider;
-use fabro_model::{Catalog, CredentialRef, HeaderValueRef, Provider, ProviderId, adapter};
+use fabro_model::{Catalog, CredentialRef, HeaderValueRef, ProviderId, adapter};
 use fabro_static::EnvVars;
 
 use crate::credential_source::{CredentialSource, ResolvedCredentials};
@@ -54,7 +54,7 @@ impl EnvCredentialSource {
         }
 
         let auth_header = key.map(|key| {
-            let policy = adapter::get(&provider.adapter)
+            let policy = adapter::get(provider.adapter)
                 .map_or(fabro_model::ApiKeyHeaderPolicy::Bearer, |adapter| {
                     adapter.api_key_header
                 });
@@ -73,7 +73,7 @@ impl EnvCredentialSource {
         cred.base_url = self
             .env_base_url(&provider.id)
             .or_else(|| provider.base_url.clone());
-        if provider.id == Provider::OpenAi.id() && cred.auth_header.is_some() {
+        if provider.id == ProviderId::openai() && cred.auth_header.is_some() {
             cred.org_id = self.lookup(EnvVars::OPENAI_ORG_ID);
             cred.project_id = self.lookup(EnvVars::OPENAI_PROJECT_ID);
             if let Some(account_id) = self.lookup(EnvVars::CHATGPT_ACCOUNT_ID) {
@@ -89,13 +89,12 @@ impl EnvCredentialSource {
     }
 
     fn env_base_url(&self, provider: &ProviderId) -> Option<String> {
-        match Provider::from_id(provider) {
-            Some(Provider::Anthropic) => self.lookup(EnvVars::ANTHROPIC_BASE_URL),
-            Some(Provider::OpenAi) => self.lookup(EnvVars::OPENAI_BASE_URL),
-            Some(Provider::Gemini) => self.lookup(EnvVars::GEMINI_BASE_URL),
-            Some(Provider::OpenAiCompatible) => self.lookup(EnvVars::OPENAI_COMPATIBLE_BASE_URL),
-            Some(Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception)
-            | None => None,
+        match provider.as_str() {
+            ProviderId::ANTHROPIC => self.lookup(EnvVars::ANTHROPIC_BASE_URL),
+            ProviderId::OPENAI => self.lookup(EnvVars::OPENAI_BASE_URL),
+            ProviderId::GEMINI => self.lookup(EnvVars::GEMINI_BASE_URL),
+            "openai_compatible" => self.lookup(EnvVars::OPENAI_COMPATIBLE_BASE_URL),
+            _ => None,
         }
     }
 
@@ -179,7 +178,8 @@ mod tests {
     use std::sync::Arc;
 
     use fabro_model::catalog::LlmCatalogSettings;
-    use fabro_model::{Catalog, Provider, ProviderId};
+    use fabro_model::provider::Provider;
+    use fabro_model::{Catalog, ProviderId};
 
     use super::EnvCredentialSource;
     use crate::CredentialSource;

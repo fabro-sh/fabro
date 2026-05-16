@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use fabro_auth::{CredentialSource, EnvCredentialSource, VaultCredentialSource};
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
-use fabro_model::{AgentProfileKind, Catalog, FallbackTarget, Provider, ProviderId, adapter};
+use fabro_model::{Catalog, FallbackTarget, ProviderId, adapter};
 use fabro_sandbox::config::{
     DaytonaNetwork, DaytonaSnapshotSettings, DaytonaVolumeMount,
     DockerfileSource as SandboxDockerfileSource,
@@ -348,7 +348,7 @@ impl RunSession {
         let catalog_provider = catalog.provider(&provider_id).ok_or_else(|| {
             Error::Precondition(format!("Provider \"{provider_id}\" is not configured"))
         })?;
-        let profile_kind = adapter::get(&catalog_provider.adapter)
+        let profile_kind = adapter::get(catalog_provider.adapter)
             .map(|metadata| metadata.default_profile)
             .ok_or_else(|| {
                 Error::Precondition(format!(
@@ -356,10 +356,6 @@ impl RunSession {
                     catalog_provider.adapter,
                 ))
             })?;
-        let provider_enum = Provider::from_id(&provider_id).unwrap_or_else(|| {
-            profile_provider_for_custom_provider(profile_kind, &catalog_provider.adapter)
-        });
-
         let fallback_chain =
             resolve_fallback_chain(catalog.as_ref(), &provider_id, &model, &resolved.model);
         let mcp_servers = resolved
@@ -437,7 +433,6 @@ impl RunSession {
             sandbox,
             llm: LlmSpec {
                 model: model.clone(),
-                provider: provider_enum,
                 provider_id: provider_id.clone(),
                 profile_kind,
                 fallback_chain,
@@ -490,15 +485,6 @@ async fn configured_providers_for_start(
         None => Arc::new(EnvCredentialSource::new()),
     };
     source.configured_providers(catalog).await
-}
-
-fn profile_provider_for_custom_provider(profile_kind: AgentProfileKind, adapter: &str) -> Provider {
-    match (profile_kind, adapter) {
-        (AgentProfileKind::Anthropic, _) => Provider::Anthropic,
-        (AgentProfileKind::Gemini, _) => Provider::Gemini,
-        (AgentProfileKind::OpenAi, "openai_compatible") => Provider::OpenAiCompatible,
-        (AgentProfileKind::OpenAi, _) => Provider::OpenAi,
-    }
 }
 
 fn resolve_interp(value: &InterpString) -> String {
@@ -1200,7 +1186,7 @@ mod tests {
 
         let chain = resolve_fallback_chain(
             catalog.as_ref(),
-            &Provider::Anthropic.id(),
+            &ProviderId::anthropic(),
             "claude-opus-4-6",
             &settings,
         );
@@ -1221,7 +1207,7 @@ mod tests {
 
         let chain = resolve_fallback_chain(
             catalog.as_ref(),
-            &Provider::Anthropic.id(),
+            &ProviderId::anthropic(),
             "claude-opus-4-6",
             &settings,
         );

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use fabro_model::{Catalog, Provider, ProviderId};
+use fabro_model::{AgentProfileKind, Catalog, ProviderId};
 
 use super::EnvContext;
 use crate::agent_profile::AgentProfile;
@@ -37,22 +37,13 @@ impl AnthropicProfile {
 
         Self {
             base: BaseProfile {
-                provider: Provider::Anthropic,
-                provider_id: Provider::Anthropic.id(),
+                profile_kind: AgentProfileKind::Anthropic,
+                provider_id: ProviderId::anthropic(),
                 model: model.into(),
                 catalog: None,
                 registry,
             },
         }
-    }
-
-    /// Override the provider identity (e.g. for Kimi, which uses the Anthropic
-    /// Messages protocol but routes to a different adapter).
-    #[must_use]
-    pub fn with_provider(mut self, provider: Provider) -> Self {
-        self.base.provider = provider;
-        self.base.provider_id = provider.id();
-        self
     }
 
     /// Override the provider ID while retaining the adapter/profile behavior.
@@ -70,8 +61,8 @@ impl AnthropicProfile {
 }
 
 impl AgentProfile for AnthropicProfile {
-    fn provider(&self) -> Provider {
-        self.base.provider
+    fn profile_kind(&self) -> AgentProfileKind {
+        self.base.profile_kind
     }
 
     fn provider_id(&self) -> ProviderId {
@@ -207,7 +198,8 @@ mod tests {
     #[test]
     fn anthropic_profile_identity() {
         let profile = AnthropicProfile::new("claude-sonnet-4-20250514");
-        assert_eq!(profile.provider(), Provider::Anthropic);
+        assert_eq!(profile.profile_kind(), AgentProfileKind::Anthropic);
+        assert_eq!(profile.provider_id(), ProviderId::anthropic());
         assert_eq!(profile.model(), "claude-sonnet-4-20250514");
     }
 

@@ -5,7 +5,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use fabro_auth::auth_issue_message;
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::types::{Message, Request};
-use fabro_model::{Catalog, Provider};
+use fabro_model::{Catalog, ProviderId};
 use fabro_sandbox::daytona;
 use fabro_static::EnvVars;
 use fabro_types::settings::server::GithubIntegrationStrategy;
@@ -112,20 +112,21 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
         details.push(CheckDetail::new(message));
     }
 
-    let providers: Vec<Provider> = result
+    let providers: Vec<ProviderId> = result
         .client
         .provider_names()
         .iter()
-        .filter_map(|name| name.parse::<Provider>().ok())
+        .map(|name| ProviderId::new(*name))
         .collect();
     let client = &result.client;
     let catalog = state.catalog();
-    let probe_outcomes = join_all(providers.iter().map(|&provider| {
+    let probe_outcomes = join_all(providers.iter().map(|provider| {
         let catalog = catalog.clone();
+        let provider = provider.clone();
         async move {
             let outcome = timeout(
                 Duration::from_secs(30),
-                probe_llm_provider(client, provider, catalog.as_ref()),
+                probe_llm_provider(client, &provider, catalog.as_ref()),
             )
             .await;
             (provider, outcome)
@@ -204,7 +205,7 @@ fn short_error_line(rendered: &str) -> String {
     }
 }
 
-fn probe_model(provider: Provider, catalog: &Catalog) -> String {
+fn probe_model(provider: &ProviderId, catalog: &Catalog) -> String {
     catalog
         .probe_for_provider(provider)
         .map_or_else(|| format!("unknown-{provider}"), |m| m.id.clone())
@@ -212,7 +213,7 @@ fn probe_model(provider: Provider, catalog: &Catalog) -> String {
 
 async fn probe_llm_provider(
     client: &LlmClient,
-    provider: Provider,
+    provider: &ProviderId,
     catalog: &Catalog,
 ) -> fabro_llm::Result<()> {
     let request = Request {
@@ -725,7 +726,7 @@ mod tests {
             },
         );
         let credential = AuthCredential {
-            provider: Provider::OpenAi.id(),
+            provider: ProviderId::openai(),
             details:  AuthDetails::ApiKey {
                 key: "vault-openai-key".to_string(),
             },

@@ -162,7 +162,8 @@ async fn initialized(
                     sandbox,
                     options.hook_runner,
                     run_options.cancel_token.clone(),
-                    fabro_llm::Provider::Anthropic,
+                    fabro_model::ProviderId::anthropic(),
+                    fabro_model::AgentProfileKind::Anthropic,
                     options
                         .llm_source
                         .unwrap_or_else(|| Arc::new(EnvCredentialSource::new())),

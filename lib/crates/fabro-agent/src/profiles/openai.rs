@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use fabro_model::{Catalog, Provider, ProviderId};
+use fabro_model::{AgentProfileKind, Catalog, ProviderId};
 
 use super::EnvContext;
 use crate::agent_profile::AgentProfile;
@@ -35,22 +35,13 @@ impl OpenAiProfile {
 
         Self {
             base: BaseProfile {
-                provider: Provider::OpenAi,
-                provider_id: Provider::OpenAi.id(),
+                profile_kind: AgentProfileKind::OpenAi,
+                provider_id: ProviderId::openai(),
                 model: model.into(),
                 catalog: None,
                 registry,
             },
         }
-    }
-
-    /// Override the provider identity (e.g. for Z.AI or Minimax, which use the
-    /// OpenAI Chat Completions protocol but route to different adapters).
-    #[must_use]
-    pub fn with_provider(mut self, provider: Provider) -> Self {
-        self.base.provider = provider;
-        self.base.provider_id = provider.id();
-        self
     }
 
     /// Override the provider ID while retaining the adapter/profile behavior.
@@ -72,15 +63,15 @@ impl OpenAiProfile {
             .as_ref()
             .and_then(|catalog| catalog.provider(&self.base.provider_id))
             .map_or_else(
-                || self.base.provider.display_name().to_string(),
+                || self.base.provider_id.display_name(),
                 |provider| provider.display_name.clone(),
             )
     }
 }
 
 impl AgentProfile for OpenAiProfile {
-    fn provider(&self) -> Provider {
-        self.base.provider
+    fn profile_kind(&self) -> AgentProfileKind {
+        self.base.profile_kind
     }
 
     fn provider_id(&self) -> ProviderId {
@@ -240,7 +231,8 @@ mod tests {
     #[test]
     fn openai_profile_identity() {
         let profile = OpenAiProfile::new("o3-mini");
-        assert_eq!(profile.provider(), Provider::OpenAi);
+        assert_eq!(profile.profile_kind(), AgentProfileKind::OpenAi);
+        assert_eq!(profile.provider_id(), ProviderId::openai());
         assert_eq!(profile.model(), "o3-mini");
     }
 
@@ -333,7 +325,7 @@ mod tests {
     #[test]
     fn kimi_provider_prompt_uses_catalog_display_name() {
         let profile = OpenAiProfile::new("kimi-k2.5")
-            .with_provider(Provider::Kimi)
+            .with_provider_id(ProviderId::new(ProviderId::KIMI))
             .with_catalog(test_catalog());
         let env = MockSandbox::linux();
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None, &[]);
@@ -344,7 +336,7 @@ mod tests {
     #[test]
     fn zai_provider_prompt_uses_catalog_display_name() {
         let profile = OpenAiProfile::new("glm-4.7")
-            .with_provider(Provider::Zai)
+            .with_provider_id(ProviderId::new(ProviderId::ZAI))
             .with_catalog(test_catalog());
         let env = MockSandbox::linux();
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None, &[]);
@@ -354,7 +346,7 @@ mod tests {
     #[test]
     fn minimax_provider_prompt_uses_catalog_display_name() {
         let profile = OpenAiProfile::new("minimax-m2.5")
-            .with_provider(Provider::Minimax)
+            .with_provider_id(ProviderId::new(ProviderId::MINIMAX))
             .with_catalog(test_catalog());
         let env = MockSandbox::linux();
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None, &[]);
@@ -364,7 +356,7 @@ mod tests {
     #[test]
     fn inception_provider_prompt_uses_catalog_display_name() {
         let profile = OpenAiProfile::new("mercury-2")
-            .with_provider(Provider::Inception)
+            .with_provider_id(ProviderId::new(ProviderId::INCEPTION))
             .with_catalog(test_catalog());
         let env = MockSandbox::linux();
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None, &[]);

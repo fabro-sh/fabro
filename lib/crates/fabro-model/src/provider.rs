@@ -173,7 +173,7 @@ mod tests {
         assert_eq!(Provider::Inception.id().as_str(), ProviderId::INCEPTION);
         assert_eq!(
             Provider::OpenAiCompatible.id().as_str(),
-            ProviderId::OPENAI_COMPATIBLE,
+            "openai_compatible"
         );
     }
 

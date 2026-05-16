@@ -5,6 +5,7 @@
 //! keeping wire format compatible with plain strings.
 
 use std::fmt;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
@@ -25,7 +26,6 @@ impl ProviderId {
     pub const ZAI: &'static str = "zai";
     pub const MINIMAX: &'static str = "minimax";
     pub const INCEPTION: &'static str = "inception";
-    pub const OPENAI_COMPATIBLE: &'static str = "openai_compatible";
 
     /// Construct a provider ID from any string-like value without validation.
     /// Catalog construction is responsible for canonicalisation; consumers
@@ -82,8 +82,17 @@ impl ProviderId {
     }
 
     #[must_use]
-    pub fn openai_compatible() -> Self {
-        Self::new(Self::OPENAI_COMPATIBLE)
+    pub fn display_name(&self) -> String {
+        match self.as_str() {
+            Self::ANTHROPIC => "Anthropic".to_string(),
+            Self::OPENAI => "OpenAI".to_string(),
+            Self::GEMINI => "Gemini".to_string(),
+            Self::KIMI => "Kimi".to_string(),
+            Self::ZAI => "Z.ai".to_string(),
+            Self::MINIMAX => "MiniMax".to_string(),
+            Self::INCEPTION => "Inception".to_string(),
+            other => other.to_string(),
+        }
     }
 }
 
@@ -108,6 +117,14 @@ impl From<&str> for ProviderId {
 impl From<String> for ProviderId {
     fn from(s: String) -> Self {
         Self(s)
+    }
+}
+
+impl FromStr for ProviderId {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from(s))
     }
 }
 
