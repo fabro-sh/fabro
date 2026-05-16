@@ -82,10 +82,10 @@ mod daytona_streaming_live {
 
         let result = sandbox
             .exec_command(
-                "test -d /repos/brynary/rack-test/.git && \
+                "test -d /home/daytona/repos/brynary/rack-test/.git && \
                  test -L /home/daytona/workspace/rack-test && \
-                 test \"$(readlink /home/daytona/workspace/rack-test)\" = /repos/brynary/rack-test && \
-                 test \"$(git -C /repos/brynary/rack-test rev-parse HEAD)\" = \
+                 test \"$(readlink /home/daytona/workspace/rack-test)\" = /home/daytona/repos/brynary/rack-test && \
+                 test \"$(git -C /home/daytona/repos/brynary/rack-test rev-parse HEAD)\" = \
                       \"$(git -C /home/daytona/workspace/rack-test rev-parse HEAD)\" && \
                  git rev-parse --is-inside-work-tree",
                 30_000,
