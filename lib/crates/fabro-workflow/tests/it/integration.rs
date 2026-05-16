@@ -1223,9 +1223,7 @@ fn variable_expansion_replaces_goal_in_prompts() {
     );
     graph.nodes.insert("report".to_string(), no_var_node);
 
-    let transform = TemplateTransform {
-        inputs: std::collections::HashMap::new(),
-    };
+    let transform = TemplateTransform::new(std::collections::HashMap::new());
     let graph = transform.apply(graph).unwrap();
 
     let plan_prompt = graph.nodes["plan"]
@@ -2782,11 +2780,9 @@ async fn scenario_ship_a_feature() {
     }"#;
     let graph = parse(dot).expect("parse");
     validate_or_raise(&graph, &[]).expect("validate");
-    let graph = TemplateTransform {
-        inputs: std::collections::HashMap::new(),
-    }
-    .apply(graph)
-    .unwrap();
+    let graph = TemplateTransform::new(std::collections::HashMap::new())
+        .apply(graph)
+        .unwrap();
     assert_eq!(
         graph.nodes["plan"].prompt().unwrap(),
         "Plan to achieve: Ship the widget"
@@ -3908,11 +3904,9 @@ async fn integration_smoke_plan_implement_review_done() {
     assert!(errors.is_empty());
 
     // Apply transforms
-    let graph = TemplateTransform {
-        inputs: std::collections::HashMap::new(),
-    }
-    .apply(graph)
-    .unwrap();
+    let graph = TemplateTransform::new(std::collections::HashMap::new())
+        .apply(graph)
+        .unwrap();
     let graph = StylesheetApplicationTransform.apply(graph).unwrap();
 
     // Verify transforms applied
@@ -4315,6 +4309,7 @@ async fn import_e2e_through_engine() {
         inputs:            std::collections::HashMap::new(),
         custom_transforms: vec![],
         catalog:           std::sync::Arc::clone(&catalog),
+        render_mode:       fabro_workflow::operations::RenderMode::Strict,
     })
     .unwrap();
     let validated = validate(transformed, catalog.as_ref(), &[]);

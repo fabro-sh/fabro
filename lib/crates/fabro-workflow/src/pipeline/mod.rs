@@ -24,7 +24,7 @@ pub use pull_request::{
 pub use transform::transform;
 pub use types::{
     Concluded, DevcontainerSpec, Executed, FinalizeOptions, Finalized, InitOptions, Initialized,
-    LlmSpec, Parsed, Persisted, PullRequestOptions, SandboxEnvSpec, TransformOptions, Transformed,
-    Validated,
+    LlmSpec, Parsed, Persisted, PullRequestOptions, RenderMode, SandboxEnvSpec, TransformOptions,
+    Transformed, Validated,
 };
 pub use validate::validate;

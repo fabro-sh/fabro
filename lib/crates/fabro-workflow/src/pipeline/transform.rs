@@ -36,10 +36,9 @@ pub fn transform(parsed: Parsed, options: &TransformOptions) -> Result<Transform
         graph
     };
 
-    let graph = TemplateTransform {
-        inputs: options.inputs.clone(),
-    }
-    .apply(graph)?;
+    let (graph, diagnostics) = TemplateTransform::new(options.inputs.clone())
+        .with_render_mode(options.render_mode)
+        .apply_with_diagnostics(graph)?;
     let graph = StylesheetApplicationTransform.apply(graph)?;
     let graph = ModelResolutionTransform::new(Arc::clone(&options.catalog)).apply(graph)?;
 
@@ -49,7 +48,11 @@ pub fn transform(parsed: Parsed, options: &TransformOptions) -> Result<Transform
         .iter()
         .try_fold(graph, |graph, transform| transform.apply(graph))?;
 
-    Ok(Transformed { graph, source })
+    Ok(Transformed {
+        graph,
+        source,
+        diagnostics,
+    })
 }
 
 #[cfg(test)]
@@ -84,6 +87,7 @@ mod tests {
             inputs:            HashMap::new(),
             custom_transforms: vec![],
             catalog:           test_catalog(),
+            render_mode:       crate::pipeline::types::RenderMode::Strict,
         }
     }
 
@@ -144,6 +148,7 @@ mod tests {
             inputs:            HashMap::new(),
             custom_transforms: vec![],
             catalog:           test_catalog(),
+            render_mode:       crate::pipeline::types::RenderMode::Strict,
         })
         .unwrap();
 
@@ -192,6 +197,7 @@ mod tests {
             )]),
             custom_transforms: vec![],
             catalog:           test_catalog(),
+            render_mode:       crate::pipeline::types::RenderMode::Strict,
         })
         .unwrap();
 

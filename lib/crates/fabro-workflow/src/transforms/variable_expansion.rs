@@ -1,51 +1,115 @@
 use std::collections::HashMap;
 
 use fabro_graphviz::graph::{AttrValue, Graph};
-use fabro_template::{TemplateContext, render as render_template};
+use fabro_template::{TemplateContext, TemplateError, render as render_template, render_lenient};
+use fabro_validate::Diagnostic;
 
 use super::Transform;
 use crate::error::Error;
+use crate::pipeline::types::{RenderMode, template_undefined_variable_diagnostic};
 
 /// Expands `{{ goal }}` / `{{ inputs.* }}` across all string attributes.
+///
+/// In [`RenderMode::Strict`] (used at run-start), undefined variables surface
+/// as hard validation errors. In [`RenderMode::Structural`] (used by
+/// `fabro validate`), undefined variables fall back to lenient expansion and
+/// emit warning diagnostics so the rest of the lint pipeline can keep running.
 pub struct TemplateTransform {
-    pub inputs: HashMap<String, toml::Value>,
+    pub inputs:      HashMap<String, toml::Value>,
+    pub render_mode: RenderMode,
 }
 
 impl TemplateTransform {
+    #[must_use]
+    pub fn new(inputs: HashMap<String, toml::Value>) -> Self {
+        Self {
+            inputs,
+            render_mode: RenderMode::Strict,
+        }
+    }
+
+    #[must_use]
+    pub fn with_render_mode(mut self, render_mode: RenderMode) -> Self {
+        self.render_mode = render_mode;
+        self
+    }
+
+    /// Run the transform, returning the rendered graph together with any
+    /// diagnostics collected during a lenient pass. Diagnostics are only ever
+    /// non-empty when `render_mode` is [`RenderMode::Structural`].
+    pub fn apply_with_diagnostics(
+        &self,
+        mut graph: Graph,
+    ) -> Result<(Graph, Vec<Diagnostic>), Error> {
+        let mut diagnostics = Vec::new();
+
+        let resolved_goal = self.resolve_goal(&graph, &mut diagnostics)?;
+        let ctx = TemplateContext::new()
+            .with_goal(resolved_goal)
+            .with_inputs(self.inputs.clone());
+
+        self.render_attrs(&mut graph.attrs, &ctx, None, &mut diagnostics)?;
+        for (node_id, node) in &mut graph.nodes {
+            self.render_attrs(&mut node.attrs, &ctx, Some(node_id), &mut diagnostics)?;
+        }
+        for edge in &mut graph.edges {
+            self.render_attrs(&mut edge.attrs, &ctx, None, &mut diagnostics)?;
+        }
+
+        Ok((graph, diagnostics))
+    }
+
+    fn resolve_goal(
+        &self,
+        graph: &Graph,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<String, Error> {
+        let ctx = TemplateContext::for_input_scan(self.inputs.clone());
+        self.render_text(graph.goal(), &ctx, None, diagnostics)
+    }
+
     fn render_attrs(
+        &self,
         attrs: &mut HashMap<String, AttrValue>,
         ctx: &TemplateContext,
+        node_id: Option<&str>,
+        diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<(), Error> {
         for value in attrs.values_mut() {
             if let AttrValue::String(text) = value {
-                *text = render_template(text, ctx)?;
+                *text = self.render_text(text, ctx, node_id, diagnostics)?;
             }
         }
         Ok(())
     }
 
-    fn resolved_goal(&self, graph: &Graph) -> Result<String, Error> {
-        let ctx = TemplateContext::for_input_scan(self.inputs.clone());
-        Ok(render_template(graph.goal(), &ctx)?)
+    fn render_text(
+        &self,
+        text: &str,
+        ctx: &TemplateContext,
+        node_id: Option<&str>,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<String, Error> {
+        match render_template(text, ctx) {
+            Ok(rendered) => Ok(rendered),
+            Err(TemplateError::UndefinedVariable {
+                expression, line, ..
+            }) if matches!(self.render_mode, RenderMode::Structural) => {
+                diagnostics.push(template_undefined_variable_diagnostic(
+                    expression.as_deref(),
+                    line,
+                    node_id,
+                ));
+                Ok(render_lenient(text, ctx)?)
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 }
 
 impl Transform for TemplateTransform {
     fn apply(&self, graph: Graph) -> Result<Graph, Error> {
-        let mut graph = graph;
-        let resolved_goal = self.resolved_goal(&graph)?;
-        let ctx = TemplateContext::new()
-            .with_goal(resolved_goal)
-            .with_inputs(self.inputs.clone());
-
-        Self::render_attrs(&mut graph.attrs, &ctx)?;
-        for node in graph.nodes.values_mut() {
-            Self::render_attrs(&mut node.attrs, &ctx)?;
-        }
-        for edge in &mut graph.edges {
-            Self::render_attrs(&mut edge.attrs, &ctx)?;
-        }
-
+        let (graph, _diagnostics) = self.apply_with_diagnostics(graph)?;
         Ok(graph)
     }
 }
@@ -90,18 +154,16 @@ mod tests {
             )]),
         });
 
-        let transform = TemplateTransform {
-            inputs: HashMap::from([
-                (
-                    "name".to_string(),
-                    toml::Value::String("Planner".to_string()),
-                ),
-                (
-                    "greeting".to_string(),
-                    toml::Value::String("hello".to_string()),
-                ),
-            ]),
-        };
+        let transform = TemplateTransform::new(HashMap::from([
+            (
+                "name".to_string(),
+                toml::Value::String("Planner".to_string()),
+            ),
+            (
+                "greeting".to_string(),
+                toml::Value::String("hello".to_string()),
+            ),
+        ]));
         let graph = transform.apply(graph).unwrap();
 
         let prompt = graph.nodes["plan"]
@@ -132,9 +194,7 @@ mod tests {
             .insert("max_retries".to_string(), AttrValue::Integer(3));
         graph.nodes.insert("plan".to_string(), node);
 
-        let transform = TemplateTransform {
-            inputs: HashMap::new(),
-        };
+        let transform = TemplateTransform::new(HashMap::new());
         let graph = transform.apply(graph).unwrap();
 
         assert_eq!(
@@ -153,9 +213,7 @@ mod tests {
         );
         graph.nodes.insert("plan".to_string(), node);
 
-        let transform = TemplateTransform {
-            inputs: HashMap::new(),
-        };
+        let transform = TemplateTransform::new(HashMap::new());
         let graph = transform.apply(graph).unwrap();
 
         let prompt = graph.nodes["plan"]
@@ -176,10 +234,44 @@ mod tests {
         );
         graph.nodes.insert("plan".to_string(), node);
 
-        let transform = TemplateTransform {
-            inputs: HashMap::new(),
-        };
+        let transform = TemplateTransform::new(HashMap::new());
         let err = transform.apply(graph).unwrap_err();
         assert!(err.to_string().contains("undefined"));
+    }
+
+    #[test]
+    fn template_transform_structural_mode_downgrades_undefined_to_warning() {
+        let mut graph = Graph::new("test");
+        let mut node = Node::new("plan");
+        node.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("Run {{ inputs.missing }}".to_string()),
+        );
+        graph.nodes.insert("plan".to_string(), node);
+
+        let transform =
+            TemplateTransform::new(HashMap::new()).with_render_mode(RenderMode::Structural);
+        let (graph, diagnostics) = transform.apply_with_diagnostics(graph).unwrap();
+
+        let prompt = graph.nodes["plan"]
+            .attrs
+            .get("prompt")
+            .and_then(AttrValue::as_str)
+            .unwrap();
+        assert_eq!(prompt, "Run ");
+        assert_eq!(diagnostics.len(), 1);
+        let diag = &diagnostics[0];
+        assert_eq!(diag.rule, "template_undefined_variable");
+        assert!(
+            diag.message.contains("inputs.missing"),
+            "message: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("in node `plan`"),
+            "message: {}",
+            diag.message
+        );
+        assert_eq!(diag.node_id.as_deref(), Some("plan"));
     }
 }

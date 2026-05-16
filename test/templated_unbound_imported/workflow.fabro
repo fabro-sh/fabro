@@ -1,0 +1,8 @@
+digraph TemplatedUnboundImported {
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare,  label="Exit"]
+
+    work [label="Work", prompt="@work.md"]
+
+    start -> work -> exit
+}

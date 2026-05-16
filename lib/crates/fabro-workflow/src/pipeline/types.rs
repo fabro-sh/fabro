@@ -41,8 +41,66 @@ pub struct Parsed {
 /// post-transform adjustments (e.g. goal override) before validation.
 #[non_exhaustive]
 pub struct Transformed {
-    pub graph:  Graph,
-    pub source: String,
+    pub graph:       Graph,
+    pub source:      String,
+    /// Diagnostics produced during the transform pass (currently from lenient
+    /// template expansion under [`RenderMode::Structural`]). Prepended to the
+    /// validation diagnostics so users see them before lint output.
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// How the template-expansion pass should treat undefined input variables.
+///
+/// Validate is structural — it should not fail just because the user has not
+/// bound `{{ inputs.* }}` yet. Run-start is strict — missing inputs are real
+/// errors. Splitting the two lets validate work on a bare `.fabro` while
+/// run-start preserves its current hard-fail behavior.
+#[derive(Clone, Copy, Debug)]
+pub enum RenderMode {
+    /// Undefined inputs are hard errors. Used by run-create.
+    Strict,
+    /// Undefined inputs render as empty and become warning diagnostics on the
+    /// returned `Validated`, so structural lints still run. Used by
+    /// `fabro validate`.
+    Structural,
+}
+
+/// Lint rule name attached to diagnostics for undefined template variables.
+pub(crate) const TEMPLATE_UNDEFINED_VARIABLE_RULE: &str = "template_undefined_variable";
+
+/// Build a warning diagnostic describing an undefined template variable.
+/// Shared between the DOT-source render pass (`operations::create`) and the
+/// per-attribute render pass (`transforms::variable_expansion`).
+pub(crate) fn template_undefined_variable_diagnostic(
+    expression: Option<&str>,
+    line: Option<u32>,
+    node_id: Option<&str>,
+) -> Diagnostic {
+    let location = match (node_id, line) {
+        (Some(id), _) => format!(" in node `{id}`"),
+        (None, Some(l)) => format!(" at line {l}"),
+        (None, None) => String::new(),
+    };
+    let (name, message) = match expression {
+        Some(expr) => (
+            expr,
+            format!("undefined template variable `{expr}`{location}"),
+        ),
+        None => (
+            "<unknown>",
+            format!("undefined template variable{location}"),
+        ),
+    };
+    Diagnostic {
+        rule: TEMPLATE_UNDEFINED_VARIABLE_RULE.to_owned(),
+        severity: Severity::Warning,
+        message,
+        node_id: node_id.map(str::to_owned),
+        edge: None,
+        fix: Some(format!(
+            "bind `{name}` via `[run.inputs]` in workflow.toml, or pass `--input {name}=<value>`"
+        )),
+    }
 }
 
 /// Output of the VALIDATE phase. Always produced (even with errors).
@@ -320,6 +378,10 @@ pub struct TransformOptions {
     pub inputs:            HashMap<String, toml::Value>,
     pub custom_transforms: Vec<Box<dyn Transform>>,
     pub catalog:           Arc<fabro_model::Catalog>,
+    /// Controls how the per-attribute template-expansion pass treats undefined
+    /// input variables. Must match the mode used for the DOT-source render so
+    /// inline and `@file`-imported prompts behave consistently.
+    pub render_mode:       RenderMode,
 }
 
 /// Options for the FINALIZE phase.

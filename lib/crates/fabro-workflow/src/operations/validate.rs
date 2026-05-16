@@ -4,7 +4,8 @@ use std::sync::Arc;
 use fabro_model::Catalog;
 use fabro_types::WorkflowSettings;
 
-use super::create::{RenderMode, preprocess_and_validate};
+use super::RenderMode;
+use super::create::preprocess_and_validate;
 use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
 use crate::error::Error;
 use crate::pipeline::Validated;

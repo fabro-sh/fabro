@@ -18,7 +18,6 @@ use fabro_types::settings::run::{RunMode, RunNamespace};
 use fabro_types::{ForkSourceRef, GitContext, RunId, RunProvenance, WorkflowSettings};
 use fabro_util::error::collect_chain;
 use fabro_util::json::normalize_json_value;
-use fabro_validate::{Diagnostic, Severity};
 use tokio::task::spawn_blocking;
 
 use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
@@ -26,8 +25,8 @@ use crate::ManifestPath;
 use crate::error::Error;
 use crate::event::{Event, append_event, to_run_event_at};
 use crate::file_resolver::FileResolver;
-use crate::pipeline::types::PersistOptions;
-use crate::pipeline::{self, Persisted, TransformOptions, Validated};
+use crate::pipeline::types::{PersistOptions, template_undefined_variable_diagnostic};
+use crate::pipeline::{self, Persisted, RenderMode, TransformOptions, Validated};
 use crate::records::RunSpec;
 use crate::run_lookup::default_scratch_base;
 use crate::run_materialization::materialize_run;
@@ -282,22 +281,6 @@ fn validate_sandbox_provider(run: &RunNamespace) -> Result<(), Error> {
     Ok(())
 }
 
-/// How the template-expansion pass should treat undefined input variables.
-///
-/// Validate is structural — it should not fail just because the user has not
-/// bound `{{ inputs.* }}` yet. Run-start is strict — missing inputs are real
-/// errors. Splitting the two lets validate work on a bare `.fabro` while
-/// run-start preserves its current hard-fail behavior.
-#[derive(Clone, Copy, Debug)]
-pub enum RenderMode {
-    /// Undefined inputs are hard errors. Used by run-create.
-    Strict,
-    /// Undefined inputs render as empty and become warning diagnostics on the
-    /// returned `Validated`, so structural lints still run. Used by
-    /// `fabro validate`.
-    Structural,
-}
-
 fn create_from_source(
     dot_source: &str,
     options: PersistCreateOptions,
@@ -348,7 +331,8 @@ pub(super) fn preprocess_and_validate(
             Err(TemplateError::UndefinedVariable {
                 expression, line, ..
             }) => {
-                let diagnostic = template_diagnostic(expression.as_deref(), line);
+                let diagnostic =
+                    template_undefined_variable_diagnostic(expression.as_deref(), line, None);
                 let source = render_lenient(dot_source, &template_ctx)
                     .map_err(|err| template_parse_error(&err))?;
                 (source, vec![diagnostic])
@@ -366,38 +350,13 @@ pub(super) fn preprocess_and_validate(
         inputs,
         custom_transforms,
         catalog: Arc::clone(catalog),
+        render_mode,
     })?;
     let mut validated = pipeline::validate(transformed, catalog.as_ref(), &[]);
     if !template_diagnostics.is_empty() {
         validated.prepend_diagnostics(template_diagnostics);
     }
     Ok(validated)
-}
-
-const TEMPLATE_UNDEFINED_VARIABLE_RULE: &str = "template_undefined_variable";
-
-fn template_diagnostic(expression: Option<&str>, line: Option<u32>) -> Diagnostic {
-    let location = line.map(|l| format!(" at line {l}")).unwrap_or_default();
-    let (name, message) = match expression {
-        Some(expr) => (
-            expr,
-            format!("undefined template variable `{expr}`{location}"),
-        ),
-        None => (
-            "<unknown>",
-            format!("undefined template variable{location}"),
-        ),
-    };
-    Diagnostic {
-        rule: TEMPLATE_UNDEFINED_VARIABLE_RULE.to_owned(),
-        severity: Severity::Warning,
-        message,
-        node_id: None,
-        edge: None,
-        fix: Some(format!(
-            "bind `{name}` via `[run.inputs]` in workflow.toml, or pass `--input {name}=<value>`"
-        )),
-    }
 }
 
 fn template_parse_error(error: &TemplateError) -> Error {
@@ -493,11 +452,13 @@ mod tests {
     use fabro_types::settings::InterpString;
     use fabro_types::settings::run::RunMode;
     use fabro_types::{WorkflowSettings, fixtures};
+    use fabro_validate::Severity;
     use object_store::local::LocalFileSystem;
     use object_store::memory::InMemory;
 
     use super::*;
     use crate::operations::{ValidateInput, validate};
+    use crate::pipeline::types::TEMPLATE_UNDEFINED_VARIABLE_RULE;
     use crate::workflow_bundle::BundledWorkflow;
     fn memory_store() -> Arc<Database> {
         Arc::new(Database::new(
