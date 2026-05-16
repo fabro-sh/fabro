@@ -221,10 +221,6 @@ impl PendingTurnInterrupt {
             cancel_token.cancel();
         }
     }
-
-    pub(crate) fn rollback(self) {
-        drop(self);
-    }
 }
 
 impl SessionTurnLease {

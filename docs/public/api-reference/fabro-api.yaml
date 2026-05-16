@@ -928,15 +928,7 @@ paths:
       operationId: submitSessionTurn
       tags: [Sessions]
       summary: Submit a session turn
-      description: Starts a streamed turn immediately. Queued/background turns are not supported in this API version; `stream=false` returns 400.
-      parameters:
-        - name: stream
-          in: query
-          required: false
-          description: Must be true when supplied.
-          schema:
-            type: boolean
-            default: true
+      description: Starts a streamed turn immediately. Background turns are not supported in this API version.
       requestBody:
         required: true
         content:
@@ -951,7 +943,7 @@ paths:
               schema:
                 type: string
         "400":
-          description: Unsupported queued turn mode or invalid input
+          description: Invalid input
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -4686,7 +4678,7 @@ components:
 
     TurnStatus:
       type: string
-      enum: [queued, running, succeeded, failed, interrupted]
+      enum: [running, succeeded, failed, interrupted]
 
     SessionMessage:
       description: Persisted full-fidelity session transcript message.
@@ -4783,14 +4775,13 @@ components:
           format: date-time
 
     TurnRecord:
-      description: One externally submitted input plus display-level output metadata. Full resumable context is stored on SessionRecord.runtime_context.
+      description: One externally submitted input plus terminal output metadata. Full resumable context is stored on SessionRecord.runtime_context.
       type: object
       required:
         - id
         - session_id
         - input
         - status
-        - messages
         - created_at
         - updated_at
       properties:
@@ -4802,10 +4793,8 @@ components:
           type: string
         status:
           $ref: "#/components/schemas/TurnStatus"
-        messages:
-          type: array
-          items:
-            $ref: "#/components/schemas/SessionMessage"
+        output:
+          type: ["string", "null"]
         error:
           type: ["string", "null"]
         created_at:
@@ -4839,7 +4828,7 @@ components:
             - type: "null"
         event:
           type: string
-          example: turn.queued
+          example: turn.running
         properties: {}
         ts:
           type: string

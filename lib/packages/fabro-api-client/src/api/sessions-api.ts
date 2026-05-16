@@ -376,15 +376,14 @@ export const SessionsApiAxiosParamCreator = function (configuration?: Configurat
             };
         },
         /**
-         * Starts a streamed turn immediately. Queued/background turns are not supported in this API version; `stream=false` returns 400.
+         * Starts a streamed turn immediately. Background turns are not supported in this API version.
          * @summary Submit a session turn
          * @param {string} id
          * @param {SubmitTurnRequest} submitTurnRequest
-         * @param {boolean} [stream] Must be true when supplied.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        submitSessionTurn: async (id: string, submitTurnRequest: SubmitTurnRequest, stream?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        submitSessionTurn: async (id: string, submitTurnRequest: SubmitTurnRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('submitSessionTurn', 'id', id)
             // verify required parameter 'submitTurnRequest' is not null or undefined
@@ -407,10 +406,6 @@ export const SessionsApiAxiosParamCreator = function (configuration?: Configurat
             // authentication BearerAuth required
             // http bearer authentication required
             await setBearerAuthToObject(localVarHeaderParameter, configuration)
-
-            if (stream !== undefined) {
-                localVarQueryParameter['stream'] = stream;
-            }
 
             localVarHeaderParameter['Content-Type'] = 'application/json';
             localVarHeaderParameter['Accept'] = 'text/event-stream,application/json';
@@ -586,16 +581,15 @@ export const SessionsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Starts a streamed turn immediately. Queued/background turns are not supported in this API version; `stream=false` returns 400.
+         * Starts a streamed turn immediately. Background turns are not supported in this API version.
          * @summary Submit a session turn
          * @param {string} id
          * @param {SubmitTurnRequest} submitTurnRequest
-         * @param {boolean} [stream] Must be true when supplied.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async submitSessionTurn(id: string, submitTurnRequest: SubmitTurnRequest, stream?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<string>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.submitSessionTurn(id, submitTurnRequest, stream, options);
+        async submitSessionTurn(id: string, submitTurnRequest: SubmitTurnRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<string>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.submitSessionTurn(id, submitTurnRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['SessionsApi.submitSessionTurn']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -706,16 +700,15 @@ export const SessionsApiFactory = function (configuration?: Configuration, baseP
             return localVarFp.listSessions(options).then((request) => request(axios, basePath));
         },
         /**
-         * Starts a streamed turn immediately. Queued/background turns are not supported in this API version; `stream=false` returns 400.
+         * Starts a streamed turn immediately. Background turns are not supported in this API version.
          * @summary Submit a session turn
          * @param {string} id
          * @param {SubmitTurnRequest} submitTurnRequest
-         * @param {boolean} [stream] Must be true when supplied.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        submitSessionTurn(id: string, submitTurnRequest: SubmitTurnRequest, stream?: boolean, options?: RawAxiosRequestConfig): AxiosPromise<string> {
-            return localVarFp.submitSessionTurn(id, submitTurnRequest, stream, options).then((request) => request(axios, basePath));
+        submitSessionTurn(id: string, submitTurnRequest: SubmitTurnRequest, options?: RawAxiosRequestConfig): AxiosPromise<string> {
+            return localVarFp.submitSessionTurn(id, submitTurnRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -826,16 +819,15 @@ export class SessionsApi extends BaseAPI {
     }
 
     /**
-     * Starts a streamed turn immediately. Queued/background turns are not supported in this API version; `stream=false` returns 400.
+     * Starts a streamed turn immediately. Background turns are not supported in this API version.
      * @summary Submit a session turn
      * @param {string} id
      * @param {SubmitTurnRequest} submitTurnRequest
-     * @param {boolean} [stream] Must be true when supplied.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public submitSessionTurn(id: string, submitTurnRequest: SubmitTurnRequest, stream?: boolean, options?: RawAxiosRequestConfig) {
-        return SessionsApiFp(this.configuration).submitSessionTurn(id, submitTurnRequest, stream, options).then((request) => request(this.axios, this.basePath));
+    public submitSessionTurn(id: string, submitTurnRequest: SubmitTurnRequest, options?: RawAxiosRequestConfig) {
+        return SessionsApiFp(this.configuration).submitSessionTurn(id, submitTurnRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

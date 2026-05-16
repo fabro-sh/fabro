@@ -115,7 +115,6 @@ impl SessionStatus {
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum TurnStatus {
-    Queued,
     Running,
     Succeeded,
     Failed,
@@ -195,7 +194,7 @@ pub struct TurnRecord {
     pub session_id:   SessionId,
     pub input:        String,
     pub status:       TurnStatus,
-    pub messages:     Vec<SessionMessage>,
+    pub output:       Option<String>,
     pub error:        Option<String>,
     pub created_at:   DateTime<Utc>,
     pub updated_at:   DateTime<Utc>,

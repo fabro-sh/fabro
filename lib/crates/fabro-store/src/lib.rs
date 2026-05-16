@@ -40,8 +40,8 @@ pub struct ListRunsQuery {
 mod session_store_contract_tests {
     use chrono::Utc;
     use fabro_types::{
-        SessionEventEnvelope, SessionId, SessionMessage, SessionRecord, SessionStatus, TurnId,
-        TurnRecord, TurnStatus,
+        SessionEventEnvelope, SessionId, SessionRecord, SessionStatus, TurnId, TurnRecord,
+        TurnStatus,
     };
     use serde_json::json;
 
@@ -70,7 +70,7 @@ mod session_store_contract_tests {
                 session_id,
                 input: "hello".to_string(),
                 status: TurnStatus::Succeeded,
-                messages: vec![SessionMessage::user("hello", now)],
+                output: Some("world".to_string()),
                 error: None,
                 created_at: now,
                 updated_at: now,
@@ -172,7 +172,6 @@ mod session_store_contract_tests {
         let store = SessionStore::new(root.path().join("sessions"));
         let session_id = SessionId::new();
         let running_turn_id = TurnId::new();
-        let queued_turn_id = TurnId::new();
         let now = Utc::now();
         let mut session = SessionRecord::new(session_id, now);
         session.status = SessionStatus::Running;
@@ -181,25 +180,20 @@ mod session_store_contract_tests {
             .await
             .expect("session should persist");
 
-        for (turn_id, status) in [
-            (running_turn_id, TurnStatus::Running),
-            (queued_turn_id, TurnStatus::Queued),
-        ] {
-            store
-                .append_turn(TurnRecord {
-                    id: turn_id,
-                    session_id,
-                    input: "hello".to_string(),
-                    status,
-                    messages: vec![SessionMessage::user("hello", now)],
-                    error: None,
-                    created_at: now,
-                    updated_at: now,
-                    completed_at: None,
-                })
-                .await
-                .expect("turn should persist");
-        }
+        store
+            .append_turn(TurnRecord {
+                id: running_turn_id,
+                session_id,
+                input: "hello".to_string(),
+                status: TurnStatus::Running,
+                output: None,
+                error: None,
+                created_at: now,
+                updated_at: now,
+                completed_at: None,
+            })
+            .await
+            .expect("turn should persist");
 
         let recovered_at = now + chrono::Duration::seconds(5);
         store
@@ -218,7 +212,7 @@ mod session_store_contract_tests {
             .list_turns(session_id)
             .await
             .expect("turn list should succeed");
-        assert_eq!(turns.len(), 2);
+        assert_eq!(turns.len(), 1);
         for turn in turns {
             assert_eq!(turn.status, TurnStatus::Interrupted);
             assert_eq!(turn.completed_at, Some(recovered_at));

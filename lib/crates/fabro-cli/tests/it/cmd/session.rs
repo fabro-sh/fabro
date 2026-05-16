@@ -58,8 +58,7 @@ fn prompt_creates_session_and_streams_turn_events() {
     });
     let submit = server.mock(|when, then| {
         when.method("POST")
-            .path(format!("/api/v1/sessions/{session_id}/turns"))
-            .query_param("stream", "true");
+            .path(format!("/api/v1/sessions/{session_id}/turns"));
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(format!(

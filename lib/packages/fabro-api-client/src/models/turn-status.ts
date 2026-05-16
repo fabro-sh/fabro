@@ -16,7 +16,6 @@
 
 
 export const TurnStatus = {
-    QUEUED: 'queued',
     RUNNING: 'running',
     SUCCEEDED: 'succeeded',
     FAILED: 'failed',

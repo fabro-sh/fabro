@@ -15,13 +15,10 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { SessionMessage } from './session-message';
-// May contain unused imports in some cases
-// @ts-ignore
 import type { TurnStatus } from './turn-status';
 
 /**
- * One externally submitted input plus display-level output metadata. Full resumable context is stored on SessionRecord.runtime_context.
+ * One externally submitted input plus terminal output metadata. Full resumable context is stored on SessionRecord.runtime_context.
  */
 export interface TurnRecord {
     /**
@@ -34,7 +31,7 @@ export interface TurnRecord {
     'session_id': string;
     'input': string;
     'status': TurnStatus;
-    'messages': Array<SessionMessage>;
+    'output'?: string | null;
     'error'?: string | null;
     'created_at': string;
     'updated_at': string;

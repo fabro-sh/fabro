@@ -2180,7 +2180,7 @@ async fn create_run(app: &Router, dot_source: &str) -> String {
 }
 
 #[tokio::test]
-async fn session_apis_reject_non_streaming_turns_and_replay_events() {
+async fn session_apis_create_list_replay_events_and_delete() {
     let state = test_app_state_with_isolated_storage();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let create_response = app
@@ -2225,26 +2225,6 @@ async fn session_apis_reject_non_streaming_turns_and_replay_events() {
         .unwrap();
     let list = response_json!(list_response, StatusCode::OK).await;
     assert_eq!(list["data"].as_array().unwrap().len(), 1);
-
-    let turn_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(api(&format!("/sessions/{session_id}/turns?stream=false")))
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({"input": "hello"}).to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let error = response_json!(turn_response, StatusCode::BAD_REQUEST).await;
-    assert_eq!(
-        error["errors"][0]["detail"],
-        "Queued session turns are not supported yet; use stream=true."
-    );
 
     let turns_response = app
         .clone()
@@ -2389,7 +2369,6 @@ async fn streaming_session_turn_persists_terminal_failure_event() {
             .to_vec(),
     )
     .unwrap();
-    assert!(body.contains("turn.queued"), "SSE body: {body}");
     assert!(body.contains("turn.running"), "SSE body: {body}");
     assert!(body.contains("turn.failed"), "SSE body: {body}");
     assert!(
@@ -2431,7 +2410,6 @@ async fn streaming_session_turn_persists_terminal_failure_event() {
         .collect::<Vec<_>>();
     assert_eq!(event_names, vec![
         "session.created",
-        "turn.queued",
         "turn.running",
         "turn.failed"
     ]);
@@ -2533,7 +2511,6 @@ async fn session_events_sse_replays_history_then_streams_live_events() {
         .into_iter()
         .map(|event| event["event"].as_str().unwrap().to_string())
         .collect::<Vec<_>>();
-    assert!(event_names.contains(&"turn.queued".to_string()));
     assert!(event_names.contains(&"turn.running".to_string()));
     assert!(event_names.contains(&"turn.failed".to_string()));
 }
@@ -2676,15 +2653,10 @@ async fn streaming_session_turn_updates_runtime_context_without_copying_prior_hi
         .await
         .unwrap();
     let turns = response_json!(turns_response, StatusCode::OK).await;
-    let messages = turns["data"][0]["messages"].as_array().unwrap();
-    assert_eq!(messages.len(), 2);
-    assert_eq!(messages[0]["content"], "new question");
-    assert_eq!(messages[1]["content"], "new answer");
-    assert!(
-        !messages
-            .iter()
-            .any(|message| message["content"] == "prior question")
-    );
+    let turn = &turns["data"][0];
+    assert_eq!(turn["input"], "new question");
+    assert_eq!(turn["output"], "new answer");
+    assert!(turn.get("messages").is_none());
     response_mock.assert_async().await;
 }
 
@@ -2778,10 +2750,10 @@ async fn interrupt_active_session_turn_cancels_runtime_and_persists_interrupted(
     let turn_id = sse_events(&running)
         .into_iter()
         .find_map(|event| {
-            (event["event"] == "turn.queued")
+            (event["event"] == "turn.running")
                 .then(|| event["turn_id"].as_str().unwrap().to_string())
         })
-        .expect("queued event should include turn id");
+        .expect("running event should include turn id");
 
     let conflict_response = app
         .clone()

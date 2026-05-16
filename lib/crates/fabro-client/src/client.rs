@@ -14,7 +14,7 @@ use fabro_model::{Model, ModelTestMode, ProviderId};
 use fabro_types::settings::run::MergeStrategy;
 use fabro_types::{
     ArtifactUpload, EventEnvelope, Run, RunBlobId, RunEvent, RunId, RunProjection,
-    SessionEventEnvelope, SessionId, SessionRecord, StageId, TurnId,
+    SessionEventEnvelope, SessionId, SessionRecord, StageId,
 };
 use fabro_util::exit::{ErrorExt, ExitClass};
 use futures::future::BoxFuture;
@@ -621,18 +621,6 @@ impl Client {
     }
 
     #[expect(
-        clippy::unused_async,
-        reason = "Preserves the async high-level client API while queued turns are unsupported."
-    )]
-    pub async fn submit_session_turn_queued(
-        &self,
-        _session_id: SessionId,
-        _input: impl Into<String>,
-    ) -> Result<TurnId> {
-        bail!("queued session turns are not supported; use submit_session_turn_stream")
-    }
-
-    #[expect(
         clippy::disallowed_types,
         reason = "Client builds raw server API request URLs for wire transit; logging redaction is handled at log boundaries."
     )]
@@ -647,7 +635,6 @@ impl Client {
         url.path_segments_mut()
             .map_err(|()| anyhow!("server base URL cannot accept path segments"))?
             .extend(["api", "v1", "sessions", &session_id.to_string(), "turns"]);
-        url.query_pairs_mut().append_pair("stream", "true");
         let body = types::SubmitTurnRequest {
             input: input.into(),
         };

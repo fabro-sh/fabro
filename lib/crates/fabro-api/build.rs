@@ -151,22 +151,6 @@ fn patch_codegen_delete_run_responses(value: &mut serde_json::Value) {
     responses.remove("200");
 }
 
-/// Progenitor cannot generate operations with two typed success responses. The
-/// source spec advertises both streaming and async turn submission; keep the
-/// generated Rust client on the JSON `202` shape for now.
-fn patch_codegen_session_turn_responses(value: &mut serde_json::Value) {
-    let Some(responses) = value
-        .get_mut("paths")
-        .and_then(|paths| paths.get_mut("/api/v1/sessions/{id}/turns"))
-        .and_then(|path| path.get_mut("post"))
-        .and_then(|operation| operation.get_mut("responses"))
-        .and_then(serde_json::Value::as_object_mut)
-    else {
-        return;
-    };
-    responses.remove("200");
-}
-
 fn spec_path_from_manifest_dir(manifest_dir: &Path) -> PathBuf {
     manifest_dir
         .ancestors()
@@ -195,7 +179,6 @@ fn main() {
     patch_nullable(&mut spec_value);
     patch_codegen_request_body_media_types(&mut spec_value);
     patch_codegen_delete_run_responses(&mut spec_value);
-    patch_codegen_session_turn_responses(&mut spec_value);
 
     let spec: openapiv3::OpenAPI =
         serde_json::from_value(spec_value).expect("failed to deserialize OpenAPI spec");

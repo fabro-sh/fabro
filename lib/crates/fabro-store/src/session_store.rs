@@ -198,7 +198,7 @@ impl SessionStore {
                 Err(Error::Serde(_)) => continue,
                 Err(err) => return Err(err),
             };
-            if !matches!(turn.status, TurnStatus::Queued | TurnStatus::Running) {
+            if turn.status != TurnStatus::Running {
                 continue;
             }
             turn.status = TurnStatus::Interrupted;
