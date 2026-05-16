@@ -47,7 +47,5 @@ pub mod types {
     };
 
     pub use crate::generated::types::*;
-
-    pub type RunSummary = fabro_types::Run;
 }
 pub use generated::Client as ApiClient;

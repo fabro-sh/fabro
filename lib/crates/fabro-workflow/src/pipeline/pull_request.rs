@@ -9,7 +9,7 @@ use fabro_model::Catalog;
 #[cfg(test)]
 use fabro_model::catalog::LlmCatalogSettings;
 use fabro_store::RunProjection;
-use fabro_types::PullRequestRecord;
+use fabro_types::PullRequestLink;
 use fabro_types::settings::run::MergeStrategy;
 use fabro_util::text::strip_goal_decoration;
 use tracing::{debug, info, warn};
@@ -474,7 +474,7 @@ pub struct OpenPullRequestRequest<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreatedPullRequest {
-    pub link:        PullRequestRecord,
+    pub link:        PullRequestLink,
     pub title:       String,
     pub base_branch: String,
     pub head_branch: String,
@@ -549,7 +549,7 @@ pub async fn maybe_open_pull_request(
         }
     }
 
-    let link = PullRequestRecord {
+    let link = PullRequestLink {
         owner,
         repo,
         number: created.number,

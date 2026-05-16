@@ -16,8 +16,7 @@ pub use artifact_store::{
 };
 pub use error::{Error, Result};
 pub use fabro_types::{
-    EventEnvelope, PendingInterviewRecord, RunBlobId, RunProjection, RunSummary, StageId,
-    StageProjection,
+    EventEnvelope, PendingInterviewRecord, Run, RunBlobId, RunProjection, StageId, StageProjection,
 };
 pub(crate) use keyed_mutex::KeyedMutex;
 pub use run_state::RunProjectionReducer;

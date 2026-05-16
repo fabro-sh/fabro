@@ -70,7 +70,6 @@ pub use pull_request::{
     PullRequestRef, PullRequestResponse, PullRequestTimestamps, PullRequestUser,
 };
 pub use repository::{RepositoryProvider, RepositoryRef};
-pub type RepositoryReference = RepositoryRef;
 pub use run::{
     DirtyStatus, ForkSourceRef, GitContext, PreRunPushOutcome, RunClientProvenance, RunProvenance,
     RunServerProvenance, RunSpec,
@@ -90,9 +89,6 @@ pub use run_summary::{
     AutomationRef, Run, RunBillingSummary, RunError, RunLifecycle, RunLinks, RunModel, RunOrigin,
     RunOriginKind, RunTimestamps, WorkflowRef,
 };
-pub type RunSummary = Run;
-pub type PullRequestRecord = PullRequestLink;
-pub type PullRequestDetail = PullRequestResponse;
 pub use run_title::{RunTitleError, infer_run_title, normalize_explicit_run_title};
 pub use sandbox_details::{
     SandboxDetails, SandboxNetwork, SandboxNetworkPolicy, SandboxNetworkPolicyMode,

@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use fabro_config::Storage;
 use fabro_config::user::default_storage_dir;
 use fabro_store::Database;
-use fabro_types::{RunId, RunSummary};
+use fabro_types::{Run, RunId};
 use serde::Serialize;
 
 use crate::operations::make_run_dir;
@@ -30,7 +30,7 @@ struct RunLocalState {
 #[derive(Debug, Clone, Serialize)]
 pub struct RunInfo {
     #[serde(skip)]
-    summary:           Option<RunSummary>,
+    summary:           Option<Run>,
     pub dir_name:      String,
     #[serde(skip)]
     pub start_time_dt: Option<DateTime<Utc>>,
@@ -43,7 +43,7 @@ pub struct RunInfo {
 }
 
 impl RunInfo {
-    fn new(summary: Option<RunSummary>, local: RunLocalState) -> Self {
+    fn new(summary: Option<Run>, local: RunLocalState) -> Self {
         Self {
             summary,
             dir_name: local.dir_name,
@@ -217,7 +217,7 @@ pub async fn scan_runs_combined(store: &Database, base: &Path) -> Result<Vec<Run
     scan_runs_with_summaries(&store_runs, base)
 }
 
-pub fn scan_runs_with_summaries(summaries: &[RunSummary], base: &Path) -> Result<Vec<RunInfo>> {
+pub fn scan_runs_with_summaries(summaries: &[Run], base: &Path) -> Result<Vec<RunInfo>> {
     let mut runs_by_id: HashMap<RunId, RunInfo> = HashMap::new();
 
     for summary in summaries {
@@ -247,7 +247,7 @@ pub fn scan_runs_with_summaries(summaries: &[RunSummary], base: &Path) -> Result
     Ok(runs)
 }
 
-fn run_info_from_summary(summary: &RunSummary, scratch_base: &Path) -> Option<RunInfo> {
+fn run_info_from_summary(summary: &Run, scratch_base: &Path) -> Option<RunInfo> {
     let path = make_run_dir(scratch_base, &summary.id);
     if !path.exists() {
         return None;
@@ -328,7 +328,7 @@ pub async fn resolve_run_combined(
 }
 
 pub fn resolve_run_from_summaries(
-    summaries: &[RunSummary],
+    summaries: &[Run],
     base: &Path,
     identifier: &str,
 ) -> Result<RunInfo> {

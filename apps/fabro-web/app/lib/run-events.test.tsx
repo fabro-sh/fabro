@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { Key } from "swr";
 
 import {
   queryKeysForRunEvent,
@@ -9,7 +10,7 @@ import {
   type BroadcastChannelLike,
 } from "./cross-tab-sse";
 import { queryKeys } from "./query-keys";
-import type { EventSourceLike, SseKey } from "./sse";
+import type { EventSourceLike } from "./sse";
 
 type MessageHandler = ((event: { data: string }) => void) | null;
 
@@ -82,7 +83,7 @@ describe("subscribeToRunEvents", () => {
   test("coordinated mode uses the global attach stream and filters by run_id", async () => {
     const source = new FakeEventSource();
     const created: string[] = [];
-    const keys: SseKey[] = [];
+    const keys: Key[] = [];
     const coordinator = createCoordinator((url) => {
       created.push(url);
       return source;
@@ -118,7 +119,7 @@ describe("subscribeToRunEvents", () => {
 
   test("coordinated terminal events invalidate without closing the global stream", async () => {
     const source = new FakeEventSource();
-    const keys: SseKey[] = [];
+    const keys: Key[] = [];
     const coordinator = createCoordinator(() => source);
     const cleanup = subscribeToRunEvents(
       "run-terminal",
@@ -150,9 +151,9 @@ describe("subscribeToRunEvents", () => {
   test("fallback refcounts run-scoped sources and keeps mutators active until final unsubscribe", () => {
     const source = new FakeEventSource();
     const created: string[] = [];
-    const keys: SseKey[] = [];
+    const keys: Key[] = [];
     const coordinator = createFallbackCoordinator();
-    const mutate = (key: SseKey) => {
+    const mutate = (key: Key) => {
       keys.push(key);
       return Promise.resolve();
     };
@@ -184,9 +185,9 @@ describe("subscribeToRunEvents", () => {
   test("fallback runs payload callbacks for later subscribers on a shared source", () => {
     const source = new FakeEventSource();
     const seen: string[] = [];
-    const keys: SseKey[] = [];
+    const keys: Key[] = [];
     const coordinator = createFallbackCoordinator();
-    const mutate = (key: SseKey) => {
+    const mutate = (key: Key) => {
       keys.push(key);
       return Promise.resolve();
     };
@@ -218,7 +219,7 @@ describe("subscribeToRunEvents", () => {
 
   test("fallback terminal events close the source after invalidating keys", () => {
     const source = new FakeEventSource();
-    const keys: SseKey[] = [];
+    const keys: Key[] = [];
     const coordinator = createFallbackCoordinator();
     const cleanup = subscribeToRunEvents(
       "run-terminal",
@@ -242,7 +243,7 @@ describe("subscribeToRunEvents", () => {
 
   test("envelope with suffixed stage_id invalidates stageEvents(runId, stageId)", async () => {
     const source = new FakeEventSource();
-    const keys: SseKey[] = [];
+    const keys: Key[] = [];
     const coordinator = createCoordinator(() => source);
     const cleanup = subscribeToRunEvents(
       "run-stage",
@@ -275,7 +276,7 @@ describe("subscribeToRunEvents", () => {
 
   test("falls back to node_id when an event has no stage_id", async () => {
     const source = new FakeEventSource();
-    const keys: SseKey[] = [];
+    const keys: Key[] = [];
     const coordinator = createCoordinator(() => source);
     const cleanup = subscribeToRunEvents(
       "run-stage-node",
@@ -301,7 +302,7 @@ describe("subscribeToRunEvents", () => {
     const firstSource = new FakeEventSource();
     const secondSource = new FakeEventSource();
     const sources = [firstSource, secondSource];
-    const keys: SseKey[] = [];
+    const keys: Key[] = [];
     const coordinator = createFallbackCoordinator();
 
     const firstCleanup = subscribeToRunEvents(

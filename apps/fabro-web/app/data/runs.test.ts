@@ -5,7 +5,7 @@ import {
   columnStatusDisplay,
   isRunStatus,
   mapRunListItem,
-  mapRunSummaryToRunItem,
+  mapRunToRunItem,
   runStatusDisplay,
 } from "./runs";
 
@@ -94,7 +94,7 @@ describe("mapRunListItem", () => {
   });
 });
 
-describe("mapRunSummaryToRunItem", () => {
+describe("mapRunToRunItem", () => {
   test("maps canonical run summary to RunItem", () => {
     const summary = makeRun({
       pull_request: {
@@ -104,7 +104,7 @@ describe("mapRunSummaryToRunItem", () => {
         html_url: "https://github.com/fabro-sh/fabro/pull/456",
       },
     });
-    const item = mapRunSummaryToRunItem(summary);
+    const item = mapRunToRunItem(summary);
     expect(item.id).toBe("01ABC");
     expect(item.title).toBe("Fix the build");
     expect(item.workflow).toBe("fix_build");
@@ -135,7 +135,7 @@ describe("mapRunSummaryToRunItem", () => {
       },
       billing:          null,
     });
-    const item = mapRunSummaryToRunItem(summary);
+    const item = mapRunToRunItem(summary);
     expect(item.id).toBe("01DEF");
     expect(item.title).toBe("Untitled run");
     expect(item.workflow).toBe("unknown");

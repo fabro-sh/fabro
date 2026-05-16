@@ -44,9 +44,8 @@ impl<'de> Deserialize<'de> for PullRequestLink {
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Wire {
-            #[serde(default)]
-            provider: Option<String>,
             #[serde(default)]
             html_url: Option<String>,
             #[serde(default)]
@@ -58,30 +57,14 @@ impl<'de> Deserialize<'de> for PullRequestLink {
         }
 
         let wire = Wire::deserialize(deserializer)?;
-        if wire
-            .provider
-            .as_deref()
-            .is_some_and(|provider| provider != "github")
-        {
-            return Err(D::Error::custom(
-                "pull request links must reference github.com pull requests",
-            ));
-        }
-
-        let link =
-            if let (Some(owner), Some(repo), Some(number)) = (wire.owner, wire.repo, wire.number) {
-                Self {
-                    owner,
-                    repo,
-                    number,
-                }
-            } else {
-                let html_url = wire
-                    .html_url
-                    .as_deref()
-                    .ok_or_else(|| D::Error::custom("missing pull request owner/repo/number"))?;
-                github_pull_request_link_from_url(html_url).map_err(D::Error::custom)?
-            };
+        let (Some(owner), Some(repo), Some(number)) = (wire.owner, wire.repo, wire.number) else {
+            return Err(D::Error::custom("missing pull request owner/repo/number"));
+        };
+        let link = Self {
+            owner,
+            repo,
+            number,
+        };
 
         if let Some(html_url) = wire.html_url {
             let url_link =
@@ -306,27 +289,14 @@ mod tests {
     }
 
     #[test]
-    fn pull_request_link_accepts_legacy_github_record() {
-        let link: PullRequestLink = serde_json::from_value(json!({
+    fn pull_request_link_rejects_extra_legacy_record_fields() {
+        let result = serde_json::from_value::<PullRequestLink>(json!({
             "provider": "github",
             "html_url": "https://github.com/fabro-sh/fabro/pull/270",
             "number": 270,
             "owner": "fabro-sh",
             "repo": "fabro",
             "title": "ignored live metadata"
-        }))
-        .unwrap();
-
-        assert_eq!(link.owner, "fabro-sh");
-        assert_eq!(link.repo, "fabro");
-        assert_eq!(link.number, 270);
-    }
-
-    #[test]
-    fn pull_request_link_rejects_legacy_external_record() {
-        let result = serde_json::from_value::<PullRequestLink>(json!({
-            "provider": "external",
-            "html_url": "https://gitlab.com/acme/widgets/-/merge_requests/42"
         }));
 
         assert!(result.is_err());

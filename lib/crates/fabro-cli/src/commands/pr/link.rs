@@ -1,5 +1,5 @@
 use anyhow::Result;
-use fabro_types::PullRequestRecord;
+use fabro_types::PullRequestLink;
 use tracing::info;
 
 use crate::args::PrLinkArgs;
@@ -31,6 +31,6 @@ pub(super) async fn link_command(args: PrLinkArgs, base_ctx: &CommandContext) ->
     Ok(())
 }
 
-fn record_label(record: &PullRequestRecord) -> String {
+fn record_label(record: &PullRequestLink) -> String {
     format!("github #{}", record.number)
 }

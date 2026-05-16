@@ -3,17 +3,17 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use fabro_types::{RunId, RunStatus, RunSummary};
+use fabro_types::{Run, RunId, RunStatus};
 
 use crate::server_client::Client;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ServerRunSummaryInfo {
-    summary: RunSummary,
+    summary: Run,
 }
 
 impl ServerRunSummaryInfo {
-    pub(crate) fn from_summary(summary: RunSummary) -> Self {
+    pub(crate) fn from_summary(summary: Run) -> Self {
         Self { summary }
     }
 

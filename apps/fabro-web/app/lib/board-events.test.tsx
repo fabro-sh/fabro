@@ -9,7 +9,8 @@ import {
   type BroadcastChannelLike,
 } from "./cross-tab-sse";
 import { queryKeys } from "./query-keys";
-import type { EventSourceLike, SseKey } from "./sse";
+import type { Key } from "swr";
+import type { EventSourceLike } from "./sse";
 
 type MessageHandler = ((event: { data: string }) => void) | null;
 
@@ -47,12 +48,12 @@ describe("subscribeToBoardEvents", () => {
   test("coordinated mode shares one global source and invalidates the board runs key", async () => {
     const source = new FakeEventSource();
     const created: string[] = [];
-    const keys: SseKey[] = [];
+    const keys: Key[] = [];
     const coordinator = createCoordinator((url) => {
       created.push(url);
       return source;
     });
-    const mutate = (key: SseKey) => {
+    const mutate = (key: Key) => {
       keys.push(key);
       return Promise.resolve();
     };
@@ -82,9 +83,9 @@ describe("subscribeToBoardEvents", () => {
   test("fallback mode preserves the existing shared board EventSource", () => {
     const source = new FakeEventSource();
     const created: string[] = [];
-    const keys: SseKey[] = [];
+    const keys: Key[] = [];
     const coordinator = createFallbackCoordinator();
-    const mutate = (key: SseKey) => {
+    const mutate = (key: Key) => {
       keys.push(key);
       return Promise.resolve();
     };

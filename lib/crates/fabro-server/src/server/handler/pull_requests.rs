@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::super::{
     ApiError, AppState, CloseRunPullRequestResponse, CreateRunPullRequestRequest, IntoResponse,
     Json, LinkRunPullRequestRequest, MergeRunPullRequestRequest, MergeRunPullRequestResponse,
-    PullRequestRecord, RequireRunScoped, Response, Router, RunId, State, StatusCode, get,
+    PullRequestLink, RequireRunScoped, Response, Router, RunId, State, StatusCode, get,
     lock_pull_request_create, post, pull_request, warn, workflow_event,
 };
 
@@ -54,8 +54,8 @@ fn parse_github_owner_repo_from_url(url: &str, kind: &str) -> Result<(String, St
 
 fn pull_request_record_from_link_request(
     body: &LinkRunPullRequestRequest,
-) -> Result<PullRequestRecord, ApiError> {
-    PullRequestRecord::from_github_url(body.html_url.trim()).map_err(|err| {
+) -> Result<PullRequestLink, ApiError> {
+    PullRequestLink::from_github_url(body.html_url.trim()).map_err(|err| {
         let code = if err.contains("GitHub pull request URL") {
             "unsupported_pull_request_provider"
         } else {
@@ -117,7 +117,7 @@ fn github_pull_request_not_found_error(number: u64) -> ApiError {
 }
 
 struct PullRequestGithubContext {
-    record: PullRequestRecord,
+    record: PullRequestLink,
     owner:  String,
     repo:   String,
     number: u64,
@@ -127,7 +127,7 @@ struct PullRequestGithubContext {
 async fn load_pull_request_record(
     state: &Arc<AppState>,
     id: &RunId,
-) -> Result<PullRequestRecord, ApiError> {
+) -> Result<PullRequestLink, ApiError> {
     let run_store = state
         .store
         .open_run_reader(id)
@@ -146,7 +146,7 @@ async fn load_pull_request_record(
     })
 }
 
-fn github_coordinates_for_record(record: &PullRequestRecord) -> (String, String, u64) {
+fn github_coordinates_for_record(record: &PullRequestLink) -> (String, String, u64) {
     (record.owner.clone(), record.repo.clone(), record.number)
 }
 
@@ -253,10 +253,10 @@ impl<'a> RunPrInputs<'a> {
 }
 
 fn unavailable_pull_request_response(
-    record: PullRequestRecord,
+    record: PullRequestLink,
     reason: fabro_types::PullRequestDetailsUnavailableReason,
-) -> fabro_types::PullRequestDetail {
-    fabro_types::PullRequestDetail {
+) -> fabro_types::PullRequestResponse {
+    fabro_types::PullRequestResponse {
         data: fabro_types::PullRequest {
             link:    record,
             details: None,
@@ -269,10 +269,10 @@ fn unavailable_pull_request_response(
 }
 
 fn available_pull_request_response(
-    record: PullRequestRecord,
+    record: PullRequestLink,
     details: fabro_types::PullRequestDetails,
-) -> fabro_types::PullRequestDetail {
-    fabro_types::PullRequestDetail {
+) -> fabro_types::PullRequestResponse {
+    fabro_types::PullRequestResponse {
         data: fabro_types::PullRequest {
             link:    record,
             details: Some(details),

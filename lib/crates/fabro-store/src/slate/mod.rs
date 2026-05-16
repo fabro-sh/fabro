@@ -14,7 +14,7 @@ pub use auth_codes::{AuthCode, AuthCodeStore};
 pub use auth_tokens::{ConsumeOutcome, RefreshToken, RefreshTokenStore};
 pub use blob_store::{Blob, BlobStore};
 use chrono::{DateTime, Utc};
-use fabro_types::{RunId, RunSummary};
+use fabro_types::{Run, RunId};
 use object_store::ObjectStore;
 pub use projection_cache::CachedRunProjection;
 use projection_cache::RunProjectionCache;
@@ -191,7 +191,7 @@ impl Database {
         RunDatabase::open_reader(*run_id, db, Arc::clone(&self.projection_cache)).await
     }
 
-    pub async fn list_runs(&self, query: &ListRunsQuery) -> Result<Vec<RunSummary>> {
+    pub async fn list_runs(&self, query: &ListRunsQuery) -> Result<Vec<Run>> {
         Ok(self
             .list_cached_runs(query)
             .await?
@@ -203,7 +203,7 @@ impl Database {
     pub async fn list_runs_with_projection(
         &self,
         query: &ListRunsQuery,
-    ) -> Result<Vec<(RunSummary, RunProjection)>> {
+    ) -> Result<Vec<(Run, RunProjection)>> {
         Ok(self
             .list_cached_runs(query)
             .await?
@@ -287,7 +287,7 @@ impl Database {
         Ok(self.projection_cache.get(run_id).await)
     }
 
-    pub async fn get_cached_summary(&self, run_id: &RunId) -> Result<Option<RunSummary>> {
+    pub async fn get_cached_summary(&self, run_id: &RunId) -> Result<Option<Run>> {
         self.warm_projection_cache().await?;
         Ok(self.projection_cache.get_summary(run_id).await)
     }
@@ -380,11 +380,11 @@ impl Runs {
         self.db.open_run(run_id).await
     }
 
-    pub async fn find(&self, run_id: &RunId) -> Result<Option<RunSummary>> {
+    pub async fn find(&self, run_id: &RunId) -> Result<Option<Run>> {
         self.db.get_cached_summary(run_id).await
     }
 
-    pub async fn list(&self, query: &ListRunsQuery) -> Result<Vec<RunSummary>> {
+    pub async fn list(&self, query: &ListRunsQuery) -> Result<Vec<Run>> {
         self.db.list_runs(query).await
     }
 }
