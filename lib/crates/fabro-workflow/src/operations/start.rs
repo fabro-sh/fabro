@@ -356,11 +356,8 @@ impl RunSession {
                     catalog_provider.adapter,
                 ))
             })?;
-        let provider_enum = adapter::profile_provider_for_provider_id(
-            &provider_id,
-            profile_kind,
-            &catalog_provider.adapter,
-        );
+        let provider_enum =
+            adapter::profile_provider_for_provider_id(&provider_id, &catalog_provider.adapter);
 
         let fallback_chain =
             resolve_fallback_chain(catalog.as_ref(), &provider_id, &model, &resolved.model);

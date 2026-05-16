@@ -261,20 +261,17 @@ fn build_profile(
     match provider.profile_kind {
         AgentProfileKind::OpenAi => Box::new(
             OpenAiProfile::with_summarizer(model, summarizer)
-                .with_provider(provider.provider)
-                .with_provider_id(provider.provider_id.clone())
+                .with_identity(provider.provider, provider.provider_id.clone())
                 .with_catalog(catalog),
         ),
         AgentProfileKind::Gemini => Box::new(
             GeminiProfile::with_summarizer(model, summarizer)
-                .with_provider(provider.provider)
-                .with_provider_id(provider.provider_id.clone())
+                .with_identity(provider.provider, provider.provider_id.clone())
                 .with_catalog(catalog),
         ),
         AgentProfileKind::Anthropic => Box::new(
             AnthropicProfile::with_summarizer(model, summarizer)
-                .with_provider(provider.provider)
-                .with_provider_id(provider.provider_id.clone())
+                .with_identity(provider.provider, provider.provider_id.clone())
                 .with_catalog(catalog),
         ),
     }
@@ -300,7 +297,6 @@ fn resolve_provider(args: &AgentArgs, catalog: &Catalog) -> anyhow::Result<Resol
         let profile_kind = metadata.default_profile;
         let provider = adapter::profile_provider_for_provider_id(
             &catalog_provider.id,
-            profile_kind,
             &catalog_provider.adapter,
         );
         return Ok(ResolvedProvider {
@@ -1001,14 +997,10 @@ mod tests {
         settings
             .providers
             .insert("bedrock".to_string(), ProviderCatalogSettings {
-                display_name:  Some("Bedrock".to_string()),
-                adapter:       Some("openai_compatible".to_string()),
-                base_url:      Some("https://example.invalid/v1".to_string()),
-                credentials:   None,
-                extra_headers: None,
-                priority:      None,
-                enabled:       None,
-                aliases:       None,
+                display_name: Some("Bedrock".to_string()),
+                adapter: Some("openai_compatible".to_string()),
+                base_url: Some("https://example.invalid/v1".to_string()),
+                ..ProviderCatalogSettings::default()
             });
         let catalog = Catalog::from_builtin_with_overrides(&settings).unwrap();
         let args = AgentArgs {
@@ -1035,14 +1027,10 @@ mod tests {
         settings
             .providers
             .insert("bedrock".to_string(), ProviderCatalogSettings {
-                display_name:  Some("Bedrock".to_string()),
-                adapter:       Some("openai_compatible".to_string()),
-                base_url:      Some("https://example.invalid/v1".to_string()),
-                credentials:   None,
-                extra_headers: None,
-                priority:      None,
-                enabled:       None,
-                aliases:       None,
+                display_name: Some("Bedrock".to_string()),
+                adapter: Some("openai_compatible".to_string()),
+                base_url: Some("https://example.invalid/v1".to_string()),
+                ..ProviderCatalogSettings::default()
             });
         let catalog = Catalog::from_builtin_with_overrides(&settings).unwrap();
         let args = AgentArgs {

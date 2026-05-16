@@ -177,20 +177,17 @@ fn build_profile(
     match profile_kind {
         AgentProfileKind::OpenAi => Box::new(
             OpenAiProfile::new(model)
-                .with_provider(provider)
-                .with_provider_id(provider_id)
+                .with_identity(provider, provider_id)
                 .with_catalog(catalog),
         ),
         AgentProfileKind::Gemini => Box::new(
             GeminiProfile::new(model)
-                .with_provider(provider)
-                .with_provider_id(provider_id)
+                .with_identity(provider, provider_id)
                 .with_catalog(catalog),
         ),
         AgentProfileKind::Anthropic => Box::new(
             AnthropicProfile::new(model)
-                .with_provider(provider)
-                .with_provider_id(provider_id)
+                .with_identity(provider, provider_id)
                 .with_catalog(catalog),
         ),
     }
@@ -508,11 +505,7 @@ impl AgentApiBackend {
                 ))
             })?;
         Ok(ProviderContext {
-            provider: adapter::profile_provider_for_provider_id(
-                &provider.id,
-                profile_kind,
-                &provider.adapter,
-            ),
+            provider: adapter::profile_provider_for_provider_id(&provider.id, &provider.adapter),
             provider_id: provider.id.clone(),
             profile_kind,
         })
