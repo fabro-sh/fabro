@@ -10,8 +10,6 @@ use fabro_auth::CredentialSource;
 #[cfg(test)]
 use fabro_auth::ResolvedCredentials;
 use fabro_hooks::{HookContext, HookDecision, HookRunner};
-#[cfg(test)]
-use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{AgentProfileKind, Catalog, ProviderId};
 use tokio_util::sync::CancellationToken;
 
@@ -238,10 +236,7 @@ impl EngineServices {
                 ProviderId::anthropic(),
                 AgentProfileKind::Anthropic,
                 Arc::new(StubCredentialSource),
-                Arc::new(
-                    Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-                        .expect("default catalog should build"),
-                ),
+                Arc::new(Catalog::from_builtin().expect("default catalog should build")),
                 Arc::new(SandboxGitRuntime::new()),
                 Arc::new(RunMetadataRuntime::new()),
                 None,

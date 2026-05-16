@@ -18,6 +18,7 @@ use fabro_llm::middleware::{Middleware, NextFn, NextStreamFn};
 use fabro_llm::provider::StreamEventStream;
 use fabro_llm::types::{Request, Response};
 use fabro_mcp::config::McpServerSettings;
+#[cfg(test)]
 use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{AgentProfileKind, Catalog, ModelHandle, ProviderId};
 use fabro_util::terminal::Styles;
@@ -463,10 +464,8 @@ pub async fn run_with_args(
     mcp_servers: Vec<McpServerSettings>,
 ) -> anyhow::Result<()> {
     let llm_source = standalone_llm_source();
-    let catalog = Arc::new(
-        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-            .context("failed to build standalone agent LLM catalog")?,
-    );
+    let catalog =
+        Arc::new(Catalog::from_builtin().context("failed to build standalone agent LLM catalog")?);
     run_with_args_and_source_and_catalog(args, llm_source, mcp_servers, catalog).await
 }
 
@@ -480,10 +479,8 @@ pub async fn run_with_args_and_source(
     llm_source: Arc<dyn CredentialSource>,
     mcp_servers: Vec<McpServerSettings>,
 ) -> anyhow::Result<()> {
-    let catalog = Arc::new(
-        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-            .context("failed to build standalone agent LLM catalog")?,
-    );
+    let catalog =
+        Arc::new(Catalog::from_builtin().context("failed to build standalone agent LLM catalog")?);
     run_with_args_and_source_and_catalog(args, llm_source, mcp_servers, catalog).await
 }
 
@@ -514,10 +511,8 @@ pub async fn run_with_args_and_client(
     client: Client,
     mcp_servers: Vec<McpServerSettings>,
 ) -> anyhow::Result<()> {
-    let catalog = Arc::new(
-        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-            .context("failed to build standalone agent LLM catalog")?,
-    );
+    let catalog =
+        Arc::new(Catalog::from_builtin().context("failed to build standalone agent LLM catalog")?);
     run_with_args_and_client_and_catalog(args, client, mcp_servers, catalog).await
 }
 
@@ -921,7 +916,7 @@ mod tests {
     // build_profile tests
 
     fn test_catalog() -> Arc<Catalog> {
-        Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap())
+        Arc::new(Catalog::from_builtin().unwrap())
     }
 
     #[test]

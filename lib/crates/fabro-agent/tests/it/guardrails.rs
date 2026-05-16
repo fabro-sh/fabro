@@ -1,13 +1,11 @@
 use std::sync::Arc;
 
 use fabro_agent::{AgentProfile, AnthropicProfile, GeminiProfile, OpenAiProfile};
-use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{Catalog, ProviderId};
 
 #[test]
 fn profile_context_window_matches_catalog_for_default_models() {
-    let catalog =
-        Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap());
+    let catalog = Arc::new(Catalog::from_builtin().unwrap());
     for provider in catalog.providers() {
         let catalog_info = catalog
             .default_for_provider(&provider.id)

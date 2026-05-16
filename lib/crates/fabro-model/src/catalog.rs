@@ -624,6 +624,12 @@ impl Catalog {
         Self::from_settings(&settings)
     }
 
+    /// Builds a fresh catalog from embedded provider TOML without user
+    /// overrides.
+    pub fn from_builtin() -> Result<Self, CatalogBuildError> {
+        Self::from_builtin_toml()
+    }
+
     fn builtin_settings() -> Result<LlmCatalogSettings, CatalogBuildError> {
         let mut layer = LlmCatalogSettings::default();
         let mut paths = BuiltinCatalogToml::iter()
@@ -1439,9 +1445,8 @@ mod tests {
     // ---- Catalog struct tests ----
 
     #[test]
-    fn builtin_with_empty_overrides_matches_builtin_catalog() {
-        let catalog = Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-            .expect("empty overrides should build");
+    fn from_builtin_matches_builtin_catalog() {
+        let catalog = Catalog::from_builtin().expect("built-in catalog should build");
 
         assert_eq!(
             catalog.get("sonnet").map(|model| model.id.as_str()),

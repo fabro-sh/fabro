@@ -10,7 +10,6 @@ use fabro_acp::{
 use fabro_agent::{Sandbox, StaticEnvProvider, ToolEnvProvider};
 use fabro_auth::CredentialResolver;
 use fabro_graphviz::graph::Node;
-use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{AgentProfileKind, Catalog, ProviderId};
 use fabro_util::time::elapsed_ms;
 use tokio_util::sync::CancellationToken;
@@ -232,10 +231,7 @@ impl AgentAcpBackend {
 }
 
 fn default_catalog() -> Arc<Catalog> {
-    Arc::new(
-        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-            .expect("default catalog should build"),
-    )
+    Arc::new(Catalog::from_builtin().expect("default catalog should build"))
 }
 
 fn default_profile_kind(catalog: &Catalog, provider_id: &ProviderId) -> AgentProfileKind {

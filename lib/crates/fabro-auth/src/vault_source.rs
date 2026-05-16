@@ -85,7 +85,6 @@ mod tests {
     use std::sync::Arc;
 
     use chrono::{Duration, Utc};
-    use fabro_model::catalog::LlmCatalogSettings;
     use fabro_model::{Catalog, ProviderId};
     use fabro_vault::{SecretType, Vault};
     use tokio::sync::RwLock as AsyncRwLock;
@@ -126,7 +125,7 @@ mod tests {
     }
 
     fn default_catalog() -> Catalog {
-        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap()
+        Catalog::from_builtin().unwrap()
     }
 
     #[tokio::test]

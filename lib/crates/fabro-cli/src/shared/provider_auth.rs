@@ -20,7 +20,7 @@ use fabro_auth::{
 };
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate};
-use fabro_model::catalog::{CatalogProvider, LlmCatalogSettings};
+use fabro_model::catalog::CatalogProvider;
 use fabro_model::{Catalog, CredentialRef, ProviderId};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
@@ -57,8 +57,7 @@ pub(crate) enum ApiKeySource {
 
 fn default_catalog_for_provider_auth() -> Result<Arc<Catalog>> {
     Ok(Arc::new(
-        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-            .context("failed to build provider auth catalog")?,
+        Catalog::from_builtin().context("failed to build provider auth catalog")?,
     ))
 }
 

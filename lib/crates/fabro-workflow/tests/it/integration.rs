@@ -31,7 +31,6 @@ use fabro_interview::{
     Answer, AnswerValue, AutoApproveInterviewer, CallbackInterviewer, Interviewer,
     QueueInterviewer, RecordingInterviewer,
 };
-use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{AgentProfileKind, Catalog, ProviderId};
 use fabro_store::{ArtifactKey, ArtifactStore, Database};
 use fabro_types::{CommandTermination, RunEvent, RunId, StageId, WorkflowSettings, parse_blob_ref};
@@ -63,10 +62,7 @@ use tokio_util::sync::CancellationToken;
 use ulid::Ulid;
 
 fn default_catalog() -> Arc<Catalog> {
-    Arc::new(
-        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-            .expect("default catalog should build"),
-    )
+    Arc::new(Catalog::from_builtin().expect("default catalog should build"))
 }
 
 fn local_env() -> Arc<dyn fabro_agent::Sandbox> {

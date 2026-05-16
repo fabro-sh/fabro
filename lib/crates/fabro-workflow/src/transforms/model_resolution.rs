@@ -88,7 +88,7 @@ reasoning = false
     }
 
     fn builtin_transform() -> ModelResolutionTransform {
-        let catalog = Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap();
+        let catalog = Catalog::from_builtin().unwrap();
         ModelResolutionTransform::new(Arc::new(catalog))
     }
 

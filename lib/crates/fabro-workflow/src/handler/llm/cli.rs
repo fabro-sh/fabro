@@ -11,7 +11,6 @@ use fabro_agent::{Sandbox, StaticEnvProvider, ToolEnvProvider, shell_quote};
 use fabro_auth::CredentialResolver;
 use fabro_graphviz::graph::Node;
 use fabro_llm::types::TokenCounts;
-use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{AgentProfileKind, Catalog, ModelRef, ProviderId};
 use fabro_types::settings::run::RunModelControls;
 use fabro_types::{CommandOutputStream, CommandTermination, LlmBackend};
@@ -401,10 +400,7 @@ impl AgentCliBackend {
 }
 
 fn default_catalog() -> Arc<Catalog> {
-    Arc::new(
-        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-            .expect("default catalog should build"),
-    )
+    Arc::new(Catalog::from_builtin().expect("default catalog should build"))
 }
 
 fn default_profile_kind(catalog: &Catalog, provider_id: &ProviderId) -> AgentProfileKind {

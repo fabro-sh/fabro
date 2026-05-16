@@ -526,8 +526,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_rejects_unsupported_reasoning_effort_before_dispatch() {
-        let catalog =
-            Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap());
+        let catalog = Arc::new(Catalog::from_builtin().unwrap());
         let mut client = Client::new(HashMap::new(), None, vec![]);
         client.catalog = Some(Arc::clone(&catalog));
         client
@@ -553,8 +552,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_rejects_unsupported_speed_before_dispatch() {
-        let catalog =
-            Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap());
+        let catalog = Arc::new(Catalog::from_builtin().unwrap());
         let mut client = Client::new(HashMap::new(), None, vec![]);
         client.catalog = Some(Arc::clone(&catalog));
         client
@@ -580,8 +578,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_accepts_standard_speed_without_catalog_declaration() {
-        let catalog =
-            Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap());
+        let catalog = Arc::new(Catalog::from_builtin().unwrap());
         let mut client = Client::new(HashMap::new(), None, vec![]);
         client.catalog = Some(Arc::clone(&catalog));
         client
@@ -601,8 +598,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_skips_control_validation_for_unknown_model_passthrough() {
-        let catalog =
-            Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap());
+        let catalog = Arc::new(Catalog::from_builtin().unwrap());
         let mut client = Client::new(HashMap::new(), None, vec![]);
         client.catalog = Some(Arc::clone(&catalog));
         client
@@ -623,8 +619,7 @@ mod tests {
 
     #[tokio::test]
     async fn stream_rejects_unsupported_speed_before_dispatch() {
-        let catalog =
-            Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap());
+        let catalog = Arc::new(Catalog::from_builtin().unwrap());
         let mut client = Client::new(HashMap::new(), None, vec![]);
         client.catalog = Some(Arc::clone(&catalog));
         client

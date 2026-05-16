@@ -645,7 +645,6 @@ mod tests {
     use bytes::Bytes;
     use fabro_graphviz::graph::Graph;
     use fabro_model::Catalog;
-    use fabro_model::catalog::LlmCatalogSettings;
     use fabro_sandbox::test_support::MockSandbox;
     use fabro_store::{Database, EventEnvelope, RunDatabase, RunProjection};
     use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
@@ -1028,10 +1027,7 @@ mod tests {
             fabro_model::ProviderId::anthropic(),
             fabro_model::AgentProfileKind::Anthropic,
             Arc::new(fabro_auth::EnvCredentialSource::new()),
-            Arc::new(
-                Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-                    .expect("default catalog should build"),
-            ),
+            Arc::new(Catalog::from_builtin().expect("default catalog should build")),
             Arc::new(SandboxGitRuntime::new()),
             metadata_runtime,
             metadata_writer,
@@ -1059,10 +1055,7 @@ mod tests {
             fabro_model::ProviderId::anthropic(),
             fabro_model::AgentProfileKind::Anthropic,
             Arc::new(fabro_auth::EnvCredentialSource::new()),
-            Arc::new(
-                Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-                    .expect("default catalog should build"),
-            ),
+            Arc::new(Catalog::from_builtin().expect("default catalog should build")),
             Arc::new(SandboxGitRuntime::new()),
             Arc::new(RunMetadataRuntime::new()),
             None,

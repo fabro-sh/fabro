@@ -217,7 +217,6 @@ in the project.");
 mod tests {
     use std::sync::Arc;
 
-    use fabro_model::catalog::LlmCatalogSettings;
     use tokio::sync::Mutex as AsyncMutex;
 
     use super::*;
@@ -225,7 +224,7 @@ mod tests {
     use crate::test_support::MockSandbox;
 
     fn test_catalog() -> Arc<Catalog> {
-        Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap())
+        Arc::new(Catalog::from_builtin().unwrap())
     }
 
     #[test]

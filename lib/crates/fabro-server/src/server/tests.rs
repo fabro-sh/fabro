@@ -94,10 +94,7 @@ fn spa_fixture_root() -> PathBuf {
 }
 
 fn state_test_catalog() -> Arc<Catalog> {
-    Arc::new(
-        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-            .expect("default catalog should build"),
-    )
+    Arc::new(Catalog::from_builtin().expect("default catalog should build"))
 }
 
 fn test_app_with_scheduler(state: Arc<AppState>) -> Router {

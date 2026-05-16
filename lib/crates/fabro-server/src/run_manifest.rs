@@ -1369,7 +1369,7 @@ mod tests {
     }
 
     fn test_catalog() -> Arc<Catalog> {
-        Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap())
+        Arc::new(Catalog::from_builtin().unwrap())
     }
 
     fn manifest_workflow() -> types::ManifestWorkflow {
@@ -2196,7 +2196,7 @@ digraph Demo {
 
     #[tokio::test]
     async fn preflight_resolves_model_aliases_from_app_state_catalog() {
-        let llm_catalog_settings: fabro_model::catalog::LlmCatalogSettings = toml::from_str(
+        let llm_catalog_settings: LlmCatalogSettings = toml::from_str(
             r#"
 [providers.acme]
 display_name = "Acme"

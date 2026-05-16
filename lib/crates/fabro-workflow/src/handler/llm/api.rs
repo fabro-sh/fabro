@@ -13,6 +13,7 @@ use fabro_graphviz::graph::{AttrValue, Node};
 use fabro_llm::client::Client;
 use fabro_llm::types::{Message, ReasoningEffort, Request, Speed, TokenCounts};
 use fabro_mcp::config::McpServerSettings;
+#[cfg(test)]
 use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{AgentProfileKind, Catalog, FallbackTarget, ModelRef, ProviderId};
 use fabro_types::settings::run::RunModelControls;
@@ -366,10 +367,7 @@ impl AgentApiBackend {
         source: Arc<dyn CredentialSource>,
         steering_hub: Arc<SteeringHub>,
     ) -> Self {
-        let catalog = Arc::new(
-            Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-                .expect("default catalog should build"),
-        );
+        let catalog = Arc::new(Catalog::from_builtin().expect("default catalog should build"));
         let provider_id = provider_id.into();
         let profile_kind = default_profile_kind(catalog.as_ref(), &provider_id);
         Self::new_with_catalog(
@@ -1396,7 +1394,7 @@ mod tests {
             "claude-opus-4-6",
             ProviderId::anthropic(),
             AgentProfileKind::Anthropic,
-            Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap()),
+            Arc::new(Catalog::from_builtin().unwrap()),
         );
         let manager = Arc::new(TokioMutex::new(SubAgentManager::new(1)));
         let factory: SessionFactory = Arc::new(|| {
