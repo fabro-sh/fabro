@@ -1,20 +1,35 @@
-use fabro_llm::types::{ContentPart, Message, Role};
+use fabro_llm::types::{ContentPart, Message as LlmMessage, Role};
+use fabro_types::SessionMessage;
 
-use crate::types::Turn;
+use crate::types::Message;
 
 #[derive(Debug, Clone, Default)]
 pub struct History {
-    turns: Vec<Turn>,
+    turns: Vec<Message>,
 }
 
 impl History {
-    pub fn push(&mut self, turn: Turn) {
+    pub fn from_session_messages(messages: &[SessionMessage]) -> Result<Self, serde_json::Error> {
+        Ok(Self {
+            turns: messages
+                .iter()
+                .map(Message::from_session_message)
+                .collect::<Result<Vec<_>, _>>()?,
+        })
+    }
+
+    pub fn push(&mut self, turn: Message) {
         self.turns.push(turn);
     }
 
     #[must_use]
-    pub fn turns(&self) -> &[Turn] {
+    pub fn turns(&self) -> &[Message] {
         &self.turns
+    }
+
+    #[must_use]
+    pub fn to_session_messages(&self) -> Vec<SessionMessage> {
+        self.turns.iter().map(Message::to_session_message).collect()
     }
 
     pub fn compact(&mut self, preserve_count: usize, summary: String) {
@@ -25,7 +40,7 @@ impl History {
         let discarded = std::mem::take(&mut self.turns);
         let extracted_user_messages =
             extract_recent_user_messages(discarded, COMPACTION_USER_MESSAGE_TOKEN_BUDGET);
-        self.turns.push(Turn::System {
+        self.turns.push(Message::System {
             content:   summary,
             timestamp: std::time::SystemTime::now(),
         });
@@ -42,19 +57,19 @@ impl History {
     /// output, identified by the message item's `id`).
     fn strip_opaque_provider_items(&mut self) {
         for turn in &mut self.turns {
-            if let Turn::Assistant { provider_parts, .. } = turn {
+            if let Message::Assistant { provider_parts, .. } = turn {
                 provider_parts.retain(|p| !p.is_opaque_openai());
             }
         }
     }
 
     #[must_use]
-    pub fn convert_to_messages(&self) -> Vec<Message> {
+    pub fn convert_to_messages(&self) -> Vec<LlmMessage> {
         self.turns
             .iter()
             .map(|turn| match turn {
-                Turn::User { content, .. } => Message::user(content),
-                Turn::Assistant {
+                Message::User { content, .. } => LlmMessage::user(content),
+                Message::Assistant {
                     content,
                     tool_calls,
                     provider_parts,
@@ -71,29 +86,29 @@ impl History {
                     for tc in tool_calls {
                         parts.push(ContentPart::ToolCall(tc.clone()));
                     }
-                    Message {
+                    LlmMessage {
                         role:         Role::Assistant,
                         content:      parts,
                         name:         None,
                         tool_call_id: None,
                     }
                 }
-                Turn::ToolResults { results, .. } => {
+                Message::ToolResults { results, .. } => {
                     let content: Vec<ContentPart> = results
                         .iter()
                         .map(|r| ContentPart::ToolResult(r.clone()))
                         .collect();
                     // Use the first result's tool_call_id if available
                     let tool_call_id = results.first().map(|r| r.tool_call_id.clone());
-                    Message {
+                    LlmMessage {
                         role: Role::Tool,
                         content,
                         name: None,
                         tool_call_id,
                     }
                 }
-                Turn::System { content, .. } => Message::system(content),
-                Turn::Steering { content, .. } => Message {
+                Message::System { content, .. } => LlmMessage::system(content),
+                Message::Steering { content, .. } => LlmMessage {
                     role:         Role::User,
                     content:      vec![ContentPart::text(content)],
                     name:         None,
@@ -108,18 +123,18 @@ impl History {
 /// compaction.
 const COMPACTION_USER_MESSAGE_TOKEN_BUDGET: usize = 20_000;
 
-/// Walk discarded turns in reverse, collecting `Turn::User` variants up to
+/// Walk discarded turns in reverse, collecting `Message::User` variants up to
 /// a token budget (estimated at ~4 chars per token). Returns them in
 /// chronological order so they can be inserted between the summary and the
 /// preserved tail.
-fn extract_recent_user_messages(discarded: Vec<Turn>, token_budget: usize) -> Vec<Turn> {
+fn extract_recent_user_messages(discarded: Vec<Message>, token_budget: usize) -> Vec<Message> {
     let char_budget = token_budget * 4;
     let mut total_chars = 0;
     let mut first_kept_index = discarded.len();
 
     // Walk backward to find the earliest user message within budget
     for (i, turn) in discarded.iter().enumerate().rev() {
-        if let Turn::User { content, .. } = turn {
+        if let Message::User { content, .. } = turn {
             if total_chars + content.len() > char_budget {
                 break;
             }
@@ -132,7 +147,7 @@ fn extract_recent_user_messages(discarded: Vec<Turn>, token_budget: usize) -> Ve
     discarded
         .into_iter()
         .skip(first_kept_index)
-        .filter(|t| matches!(t, Turn::User { .. }))
+        .filter(|t| matches!(t, Message::User { .. }))
         .collect()
 }
 
@@ -148,7 +163,7 @@ mod tests {
     fn compact_replaces_old_turns_with_summary() {
         let mut history = History::default();
         for i in 0..8 {
-            history.push(Turn::User {
+            history.push(Message::User {
                 content:   format!("msg {i}"),
                 timestamp: SystemTime::now(),
             });
@@ -162,7 +177,7 @@ mod tests {
     fn compact_noop_when_fewer_turns_than_preserve() {
         let mut history = History::default();
         for i in 0..3 {
-            history.push(Turn::User {
+            history.push(Message::User {
                 content:   format!("msg {i}"),
                 timestamp: SystemTime::now(),
             });
@@ -175,7 +190,7 @@ mod tests {
     fn compact_preserves_recent_turns() {
         let mut history = History::default();
         for i in 0..8 {
-            history.push(Turn::User {
+            history.push(Message::User {
                 content:   format!("msg {i}"),
                 timestamp: SystemTime::now(),
             });
@@ -183,22 +198,22 @@ mod tests {
         history.compact(4, "Summary".into());
         let turns = history.turns();
         // Layout: summary, extracted user msgs (0..3), preserved (4..7)
-        assert!(matches!(&turns[0], Turn::System { .. }));
-        assert!(matches!(&turns[1], Turn::User { content, .. } if content == "msg 0"));
-        assert!(matches!(&turns[2], Turn::User { content, .. } if content == "msg 1"));
-        assert!(matches!(&turns[3], Turn::User { content, .. } if content == "msg 2"));
-        assert!(matches!(&turns[4], Turn::User { content, .. } if content == "msg 3"));
-        assert!(matches!(&turns[5], Turn::User { content, .. } if content == "msg 4"));
-        assert!(matches!(&turns[6], Turn::User { content, .. } if content == "msg 5"));
-        assert!(matches!(&turns[7], Turn::User { content, .. } if content == "msg 6"));
-        assert!(matches!(&turns[8], Turn::User { content, .. } if content == "msg 7"));
+        assert!(matches!(&turns[0], Message::System { .. }));
+        assert!(matches!(&turns[1], Message::User { content, .. } if content == "msg 0"));
+        assert!(matches!(&turns[2], Message::User { content, .. } if content == "msg 1"));
+        assert!(matches!(&turns[3], Message::User { content, .. } if content == "msg 2"));
+        assert!(matches!(&turns[4], Message::User { content, .. } if content == "msg 3"));
+        assert!(matches!(&turns[5], Message::User { content, .. } if content == "msg 4"));
+        assert!(matches!(&turns[6], Message::User { content, .. } if content == "msg 5"));
+        assert!(matches!(&turns[7], Message::User { content, .. } if content == "msg 6"));
+        assert!(matches!(&turns[8], Message::User { content, .. } if content == "msg 7"));
     }
 
     #[test]
     fn compact_summary_maps_to_system_message() {
         let mut history = History::default();
         for i in 0..6 {
-            history.push(Turn::User {
+            history.push(Message::User {
                 content:   format!("msg {i}"),
                 timestamp: SystemTime::now(),
             });
@@ -219,7 +234,7 @@ mod tests {
     #[test]
     fn user_turn_maps_to_user_message() {
         let mut history = History::default();
-        history.push(Turn::User {
+        history.push(Message::User {
             content:   "Hello".into(),
             timestamp: SystemTime::now(),
         });
@@ -232,7 +247,7 @@ mod tests {
     #[test]
     fn assistant_turn_maps_to_assistant_message() {
         let mut history = History::default();
-        history.push(Turn::Assistant {
+        history.push(Message::Assistant {
             content:        "Hi there".into(),
             tool_calls:     vec![],
             provider_parts: vec![],
@@ -250,7 +265,7 @@ mod tests {
     fn assistant_turn_with_tool_calls() {
         let mut history = History::default();
         let tc = ToolCall::new("call_1", "read_file", serde_json::json!({"path": "foo.rs"}));
-        history.push(Turn::Assistant {
+        history.push(Message::Assistant {
             content:        "Let me read that".into(),
             tool_calls:     vec![tc],
             provider_parts: vec![],
@@ -276,7 +291,7 @@ mod tests {
             signature: None,
             redacted:  false,
         });
-        history.push(Turn::Assistant {
+        history.push(Message::Assistant {
             content:        "The answer is 42".into(),
             tool_calls:     vec![],
             provider_parts: vec![thinking],
@@ -301,7 +316,7 @@ mod tests {
             signature: Some("sig_abc123".into()),
             redacted:  false,
         });
-        history.push(Turn::Assistant {
+        history.push(Message::Assistant {
             content:        "The answer".into(),
             tool_calls:     vec![],
             provider_parts: vec![thinking],
@@ -332,7 +347,7 @@ mod tests {
             data: serde_json::json!({"type": "reasoning", "id": "rs_abc"}),
         };
         let tc = ToolCall::new("call_1", "search", serde_json::json!({}));
-        history.push(Turn::Assistant {
+        history.push(Message::Assistant {
             content:        String::new(),
             tool_calls:     vec![tc],
             provider_parts: vec![reasoning_item],
@@ -353,7 +368,7 @@ mod tests {
     fn tool_results_turn_maps_to_tool_message() {
         let mut history = History::default();
         let result = ToolResult::success("call_1", serde_json::json!("file contents here"));
-        history.push(Turn::ToolResults {
+        history.push(Message::ToolResults {
             results:   vec![result],
             timestamp: SystemTime::now(),
         });
@@ -366,7 +381,7 @@ mod tests {
     #[test]
     fn system_turn_maps_to_system_message() {
         let mut history = History::default();
-        history.push(Turn::System {
+        history.push(Message::System {
             content:   "You are a coding assistant".into(),
             timestamp: SystemTime::now(),
         });
@@ -379,7 +394,7 @@ mod tests {
     #[test]
     fn steering_turn_maps_to_user_message() {
         let mut history = History::default();
-        history.push(Turn::Steering {
+        history.push(Message::Steering {
             content:   "Focus on the main task".into(),
             timestamp: SystemTime::now(),
         });
@@ -390,15 +405,58 @@ mod tests {
     }
 
     #[test]
+    fn session_message_roundtrip_preserves_runtime_history() {
+        let mut history = History::default();
+        let tool_call = ToolCall::new("call_1", "read_file", serde_json::json!({"path": "a.rs"}));
+        let tool_result = ToolResult::success("call_1", serde_json::json!("ok"));
+        history.push(Message::User {
+            content:   "Read a file".into(),
+            timestamp: SystemTime::now(),
+        });
+        history.push(Message::Assistant {
+            content:        "Reading".into(),
+            tool_calls:     vec![tool_call],
+            provider_parts: vec![],
+            usage:          Box::new(TokenCounts {
+                input_tokens: 10,
+                output_tokens: 3,
+                ..TokenCounts::default()
+            }),
+            response_id:    "resp_1".into(),
+            timestamp:      SystemTime::now(),
+        });
+        history.push(Message::ToolResults {
+            results:   vec![tool_result],
+            timestamp: SystemTime::now(),
+        });
+
+        let persisted = history.to_session_messages();
+        let restored =
+            History::from_session_messages(&persisted).expect("persisted messages should hydrate");
+
+        assert_eq!(restored.turns().len(), 3);
+        assert!(
+            matches!(&restored.turns()[0], Message::User { content, .. } if content == "Read a file")
+        );
+        assert!(
+            matches!(&restored.turns()[1], Message::Assistant { content, tool_calls, usage, .. }
+                if content == "Reading" && tool_calls.len() == 1 && usage.input_tokens == 10)
+        );
+        assert!(
+            matches!(&restored.turns()[2], Message::ToolResults { results, .. } if results.len() == 1)
+        );
+    }
+
+    #[test]
     fn turns_len_matches_push_count() {
         let mut history = History::default();
         assert_eq!(history.turns().len(), 0);
-        history.push(Turn::User {
+        history.push(Message::User {
             content:   "First".into(),
             timestamp: SystemTime::now(),
         });
         assert_eq!(history.turns().len(), 1);
-        history.push(Turn::Assistant {
+        history.push(Message::Assistant {
             content:        "Second".into(),
             tool_calls:     vec![],
             provider_parts: vec![],
@@ -412,11 +470,11 @@ mod tests {
     #[test]
     fn round_trip_preserves_content() {
         let mut history = History::default();
-        history.push(Turn::User {
+        history.push(Message::User {
             content:   "Hello".into(),
             timestamp: SystemTime::now(),
         });
-        history.push(Turn::Assistant {
+        history.push(Message::Assistant {
             content:        "Hi".into(),
             tool_calls:     vec![ToolCall::new(
                 "c1",
@@ -436,7 +494,7 @@ mod tests {
             response_id:    "resp_1".into(),
             timestamp:      SystemTime::now(),
         });
-        history.push(Turn::ToolResults {
+        history.push(Message::ToolResults {
             results:   vec![ToolResult::success(
                 "c1",
                 serde_json::json!("file1.rs\nfile2.rs"),
@@ -454,11 +512,11 @@ mod tests {
     #[test]
     fn compact_strips_openai_reasoning_from_preserved_turns() {
         let mut history = History::default();
-        history.push(Turn::User {
+        history.push(Message::User {
             content:   "old msg".into(),
             timestamp: SystemTime::now(),
         });
-        history.push(Turn::User {
+        history.push(Message::User {
             content:   "recent msg".into(),
             timestamp: SystemTime::now(),
         });
@@ -467,7 +525,7 @@ mod tests {
             data: serde_json::json!({"type": "reasoning", "id": "rs_abc"}),
         };
         let tc = ToolCall::new("call_1", "search", serde_json::json!({}));
-        history.push(Turn::Assistant {
+        history.push(Message::Assistant {
             content:        "response".into(),
             tool_calls:     vec![tc],
             provider_parts: vec![reasoning],
@@ -481,7 +539,7 @@ mod tests {
         // Layout: summary, extracted User("old msg"), preserved User("recent msg"),
         // preserved Assistant
         let assistant_turn = &history.turns()[3];
-        if let Turn::Assistant {
+        if let Message::Assistant {
             provider_parts,
             tool_calls,
             content,
@@ -502,11 +560,11 @@ mod tests {
     #[test]
     fn compact_preserves_anthropic_thinking_blocks() {
         let mut history = History::default();
-        history.push(Turn::User {
+        history.push(Message::User {
             content:   "old msg".into(),
             timestamp: SystemTime::now(),
         });
-        history.push(Turn::User {
+        history.push(Message::User {
             content:   "recent msg".into(),
             timestamp: SystemTime::now(),
         });
@@ -515,7 +573,7 @@ mod tests {
             signature: Some("sig_xyz".into()),
             redacted:  false,
         });
-        history.push(Turn::Assistant {
+        history.push(Message::Assistant {
             content:        "answer".into(),
             tool_calls:     vec![],
             provider_parts: vec![thinking],
@@ -529,7 +587,7 @@ mod tests {
         // Layout: summary, extracted User("old msg"), preserved User("recent msg"),
         // preserved Assistant
         let assistant_turn = &history.turns()[3];
-        if let Turn::Assistant { provider_parts, .. } = assistant_turn {
+        if let Message::Assistant { provider_parts, .. } = assistant_turn {
             assert_eq!(
                 provider_parts.len(),
                 1,
@@ -544,13 +602,13 @@ mod tests {
     #[test]
     fn compact_strips_reasoning_from_all_preserved_assistant_turns() {
         let mut history = History::default();
-        history.push(Turn::User {
+        history.push(Message::User {
             content:   "old msg".into(),
             timestamp: SystemTime::now(),
         });
         // Two assistant turns that will both be preserved
         for i in 0..2 {
-            history.push(Turn::Assistant {
+            history.push(Message::Assistant {
                 content:        format!("response {i}"),
                 tool_calls:     vec![],
                 provider_parts: vec![ContentPart::Other {
@@ -566,7 +624,7 @@ mod tests {
         history.compact(2, "Summary".into());
 
         for turn in history.turns() {
-            if let Turn::Assistant { provider_parts, .. } = turn {
+            if let Message::Assistant { provider_parts, .. } = turn {
                 assert!(
                     provider_parts.is_empty(),
                     "all reasoning items should be stripped from all assistant turns"
@@ -578,11 +636,11 @@ mod tests {
     #[test]
     fn extract_recent_user_messages_collects_in_chronological_order() {
         let turns = vec![
-            Turn::User {
+            Message::User {
                 content:   "first".into(),
                 timestamp: SystemTime::now(),
             },
-            Turn::Assistant {
+            Message::Assistant {
                 content:        "reply".into(),
                 tool_calls:     vec![],
                 provider_parts: vec![],
@@ -590,25 +648,25 @@ mod tests {
                 response_id:    "r1".into(),
                 timestamp:      SystemTime::now(),
             },
-            Turn::User {
+            Message::User {
                 content:   "second".into(),
                 timestamp: SystemTime::now(),
             },
         ];
         let extracted = extract_recent_user_messages(turns, 20_000);
         assert_eq!(extracted.len(), 2);
-        assert!(matches!(&extracted[0], Turn::User { content, .. } if content == "first"));
-        assert!(matches!(&extracted[1], Turn::User { content, .. } if content == "second"));
+        assert!(matches!(&extracted[0], Message::User { content, .. } if content == "first"));
+        assert!(matches!(&extracted[1], Message::User { content, .. } if content == "second"));
     }
 
     #[test]
     fn extract_recent_user_messages_respects_token_budget() {
         let turns = vec![
-            Turn::User {
+            Message::User {
                 content:   "a".repeat(100),
                 timestamp: SystemTime::now(),
             },
-            Turn::User {
+            Message::User {
                 content:   "b".repeat(100),
                 timestamp: SystemTime::now(),
             },
@@ -617,17 +675,17 @@ mod tests {
         // exceed
         let extracted = extract_recent_user_messages(turns, 30);
         assert_eq!(extracted.len(), 1);
-        assert!(matches!(&extracted[0], Turn::User { content, .. } if content.starts_with('b')));
+        assert!(matches!(&extracted[0], Message::User { content, .. } if content.starts_with('b')));
     }
 
     #[test]
     fn compact_extracts_only_user_turns_from_discarded() {
         let mut history = History::default();
-        history.push(Turn::User {
+        history.push(Message::User {
             content:   "user msg".into(),
             timestamp: SystemTime::now(),
         });
-        history.push(Turn::Assistant {
+        history.push(Message::Assistant {
             content:        "assistant msg".into(),
             tool_calls:     vec![],
             provider_parts: vec![],
@@ -635,7 +693,7 @@ mod tests {
             response_id:    "r1".into(),
             timestamp:      SystemTime::now(),
         });
-        history.push(Turn::User {
+        history.push(Message::User {
             content:   "preserved".into(),
             timestamp: SystemTime::now(),
         });
@@ -644,10 +702,12 @@ mod tests {
 
         // Layout: summary, extracted User("user msg"), preserved User("preserved")
         assert_eq!(history.turns().len(), 3);
-        assert!(matches!(&history.turns()[0], Turn::System { .. }));
-        assert!(matches!(&history.turns()[1], Turn::User { content, .. } if content == "user msg"));
+        assert!(matches!(&history.turns()[0], Message::System { .. }));
         assert!(
-            matches!(&history.turns()[2], Turn::User { content, .. } if content == "preserved")
+            matches!(&history.turns()[1], Message::User { content, .. } if content == "user msg")
+        );
+        assert!(
+            matches!(&history.turns()[2], Message::User { content, .. } if content == "preserved")
         );
     }
 }

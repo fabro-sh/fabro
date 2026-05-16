@@ -5,8 +5,8 @@ use async_trait::async_trait;
 use fabro_agent::subagent::{SessionFactory, SubAgentManager};
 use fabro_agent::{
     AgentEvent, AgentProfile, AnthropicProfile, CompletionCoordinator, GeminiProfile,
-    OpenAiProfile, Sandbox, Session, SessionControlHandle, SessionOptions, StaticEnvProvider,
-    ToolEnvProvider, Turn,
+    Message as AgentMessage, OpenAiProfile, Sandbox, Session, SessionControlHandle, SessionOptions,
+    StaticEnvProvider, ToolEnvProvider,
 };
 use fabro_auth::{CredentialSource, EnvCredentialSource};
 use fabro_graphviz::graph::{AttrValue, Node};
@@ -1150,7 +1150,7 @@ impl CodergenBackend for AgentApiBackend {
         // reuse).
         let mut total_usage = TokenCounts::default();
         for turn in &session.history().turns()[turns_before..] {
-            if let Turn::Assistant { usage, .. } = turn {
+            if let AgentMessage::Assistant { usage, .. } = turn {
                 total_usage += *usage.clone();
             }
         }
@@ -1173,7 +1173,7 @@ impl CodergenBackend for AgentApiBackend {
             .iter()
             .rev()
             .find_map(|turn| {
-                if let Turn::Assistant { content, .. } = turn {
+                if let AgentMessage::Assistant { content, .. } = turn {
                     if !content.is_empty() {
                         return Some(content.clone());
                     }

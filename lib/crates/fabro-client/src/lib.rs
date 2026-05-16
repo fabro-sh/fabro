@@ -11,7 +11,9 @@ pub mod target;
 pub use auth_store::{
     AuthEntry, AuthStore, AuthStoreError, DevTokenEntry, LockError, OAuthEntry, StoredSubject,
 };
-pub use client::{Client, RunEventStream, TransportConnector, apply_bearer_token_auth};
+pub use client::{
+    Client, RunEventStream, SessionEventStream, TransportConnector, apply_bearer_token_auth,
+};
 pub use credential::{Credential, CredentialFallback};
 pub use error::{
     ApiError, ApiFailure, StructuredApiError, classify_api_error, classify_http_response,

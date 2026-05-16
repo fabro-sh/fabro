@@ -2116,6 +2116,246 @@ async fn create_run(app: &Router, dot_source: &str) -> String {
 }
 
 #[tokio::test]
+async fn session_apis_persist_turns_and_replay_events() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api("/sessions"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "title": "Investigate failure",
+                        "working_dir": "/tmp",
+                        "provider": "openai",
+                        "model": "gpt-5.4-mini",
+                        "permissions": "read-only"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let created = response_json!(create_response, StatusCode::CREATED).await;
+    let session_id = created["id"]
+        .as_str()
+        .expect("create session response should include id")
+        .to_string();
+    assert_eq!(created["status"], "idle");
+    assert_eq!(created["working_dir"], "/tmp");
+
+    let list_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api("/sessions"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let list = response_json!(list_response, StatusCode::OK).await;
+    assert_eq!(list["data"].as_array().unwrap().len(), 1);
+
+    let turn_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/sessions/{session_id}/turns?stream=false")))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"input": "hello"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let queued = response_json!(turn_response, StatusCode::ACCEPTED).await;
+    let turn_id = queued["turn_id"]
+        .as_str()
+        .expect("turn response should include turn_id")
+        .to_string();
+
+    let turns_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/sessions/{session_id}/turns")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let turns = response_json!(turns_response, StatusCode::OK).await;
+    assert_eq!(turns["data"][0]["id"], turn_id);
+    assert_eq!(turns["data"][0]["input"], "hello");
+    assert_eq!(turns["data"][0]["status"], "queued");
+
+    let replay_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/sessions/{session_id}/events?since_seq=2")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let replay = response_json!(replay_response, StatusCode::OK).await;
+    assert_eq!(replay["data"][0]["seq"], 2);
+    assert_eq!(replay["data"][0]["event"], "turn.queued");
+
+    let header_replay_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/sessions/{session_id}/events")))
+                .header("last-event-id", "2")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let header_replay = response_json!(header_replay_response, StatusCode::OK).await;
+    assert!(
+        header_replay["data"]
+            .as_array()
+            .expect("events response should contain array")
+            .is_empty()
+    );
+
+    let delete_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(api(&format!("/sessions/{session_id}")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    checked_response!(delete_response, StatusCode::NO_CONTENT).await;
+
+    let get_deleted_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/sessions/{session_id}")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    checked_response!(get_deleted_response, StatusCode::NOT_FOUND).await;
+}
+
+#[tokio::test]
+async fn streaming_session_turn_persists_terminal_failure_event() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api("/sessions"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "working_dir": "/tmp",
+                        "provider": "openai",
+                        "model": "gpt-5.4-mini",
+                        "permissions": "read-only"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let created = response_json!(create_response, StatusCode::CREATED).await;
+    let session_id = created["id"].as_str().unwrap().to_string();
+
+    let stream_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/sessions/{session_id}/turns")))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"input": "hello"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stream_response.status(), StatusCode::OK);
+    let body = String::from_utf8(
+        to_bytes(stream_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(body.contains("turn.queued"), "SSE body: {body}");
+    assert!(body.contains("turn.running"), "SSE body: {body}");
+    assert!(body.contains("turn.failed"), "SSE body: {body}");
+    assert!(
+        body.contains("LLM credentials not configured for provider 'openai'"),
+        "SSE body: {body}"
+    );
+
+    let turns_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/sessions/{session_id}/turns")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let turns = response_json!(turns_response, StatusCode::OK).await;
+    assert_eq!(turns["data"][0]["status"], "failed");
+
+    let events_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/sessions/{session_id}/events")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let events = response_json!(events_response, StatusCode::OK).await;
+    let event_names = events["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|event| event["event"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(event_names, vec![
+        "session.created",
+        "turn.queued",
+        "turn.running",
+        "turn.failed"
+    ]);
+}
+
+#[tokio::test]
 async fn create_run_response_includes_web_url_when_web_enabled() {
     let state = test_app_state_with_options(
         server_settings_from_toml(

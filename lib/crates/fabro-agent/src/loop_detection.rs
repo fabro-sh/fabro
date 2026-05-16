@@ -2,7 +2,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use crate::history::History;
-use crate::types::Turn;
+use crate::types::Message;
 
 fn tool_call_signature(name: &str, arguments: &serde_json::Value) -> u64 {
     let mut hasher = DefaultHasher::new();
@@ -12,8 +12,8 @@ fn tool_call_signature(name: &str, arguments: &serde_json::Value) -> u64 {
     hasher.finish()
 }
 
-fn extract_signatures_from_assistant(turn: &Turn) -> Vec<u64> {
-    let Turn::Assistant { tool_calls, .. } = turn else {
+fn extract_signatures_from_assistant(turn: &Message) -> Vec<u64> {
+    let Message::Assistant { tool_calls, .. } = turn else {
         return vec![];
     };
     tool_calls
@@ -101,8 +101,8 @@ mod tests {
 
     use super::*;
 
-    fn assistant_with_tool(name: &str, args: serde_json::Value) -> Turn {
-        Turn::Assistant {
+    fn assistant_with_tool(name: &str, args: serde_json::Value) -> Message {
+        Message::Assistant {
             content:        String::new(),
             tool_calls:     vec![ToolCall::new("call_1", name, args)],
             provider_parts: vec![],
@@ -265,15 +265,15 @@ mod tests {
     #[test]
     fn user_turns_are_ignored() {
         let mut history = History::default();
-        history.push(Turn::User {
+        history.push(Message::User {
             content:   "hello".into(),
             timestamp: SystemTime::now(),
         });
-        history.push(Turn::User {
+        history.push(Message::User {
             content:   "hello".into(),
             timestamp: SystemTime::now(),
         });
-        history.push(Turn::User {
+        history.push(Message::User {
             content:   "hello".into(),
             timestamp: SystemTime::now(),
         });

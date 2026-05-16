@@ -235,6 +235,7 @@ async fn main_inner(worker_token: Option<String>) -> (String, Result<()>) {
         command.as_ref(),
         Commands::RunCmd(RunCommands::Run(_) | RunCommands::Create(_))
             | Commands::Exec(_)
+            | Commands::Session(_)
             | Commands::Repo(_)
             | Commands::Install { .. }
     ) {
@@ -247,6 +248,9 @@ async fn main_inner(worker_token: Option<String>) -> (String, Result<()>) {
         match *command {
             Commands::Exec(args) => {
                 commands::exec::execute(args, &base_ctx).await?;
+            }
+            Commands::Session(args) => {
+                commands::session::execute(args, &base_ctx).await?;
             }
             Commands::RunCmd(cmd) => {
                 Box::pin(commands::run::dispatch(cmd, &base_ctx, worker_token)).await?;

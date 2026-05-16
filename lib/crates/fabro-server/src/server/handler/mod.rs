@@ -16,6 +16,7 @@ mod pull_requests;
 mod runs;
 mod sandbox;
 mod secrets;
+mod sessions;
 mod steer;
 pub(in crate::server) mod system;
 
@@ -151,6 +152,7 @@ pub(super) fn real_routes() -> Router<Arc<AppState>> {
         .merge(graph::run_routes())
         .merge(models::routes())
         .merge(secrets::routes())
+        .merge(sessions::routes())
         .merge(system::routes())
         .merge(completions::routes())
 }
