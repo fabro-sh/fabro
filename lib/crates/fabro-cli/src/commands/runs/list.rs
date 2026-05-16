@@ -12,7 +12,7 @@ use super::short_run_id;
 use crate::args::RunsListArgs;
 use crate::command_context::CommandContext;
 use crate::commands::resolve_run_id;
-use crate::server_runs::{ServerSummaryLookup, filter_server_runs};
+use crate::server_runs::{ServerRunLookup, filter_server_runs};
 use crate::shared::{color_if, format_duration_ms, run_status_kind, tilde_path};
 
 pub(crate) async fn list_command(
@@ -29,8 +29,8 @@ pub(crate) async fn list_command(
     };
     let filtered_by_parent = parent_id.is_some();
     let lookup = match parent_id {
-        Some(parent_id) => ServerSummaryLookup::from_client_by_parent(client, parent_id).await?,
-        None => ServerSummaryLookup::from_client(client).await?,
+        Some(parent_id) => ServerRunLookup::from_client_by_parent(client, parent_id).await?,
+        None => ServerRunLookup::from_client(client).await?,
     };
     let label_filters = parse_label_filters(&args.filter.label);
     let filtered = filter_server_runs(
