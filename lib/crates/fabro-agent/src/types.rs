@@ -1,8 +1,11 @@
 use std::time::SystemTime;
 
+use chrono::{DateTime, Utc};
 use fabro_llm::Error as LlmError;
 use fabro_llm::types::{ContentPart, ThinkingData, TokenCounts, ToolCall, ToolResult};
 use fabro_model::ModelRef;
+use fabro_types::SessionMessage;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
@@ -33,7 +36,7 @@ mod system_time_iso8601 {
 }
 
 #[derive(Debug, Clone)]
-pub enum Turn {
+pub enum Message {
     User {
         content:   String,
         timestamp: SystemTime,
@@ -69,7 +72,7 @@ pub enum Turn {
     },
 }
 
-impl Turn {
+impl Message {
     /// Extract the first non-redacted thinking/reasoning text from an
     /// `Assistant` turn's `provider_parts`, if any.
     #[must_use]
@@ -86,6 +89,101 @@ impl Turn {
             _ => None,
         })
     }
+
+    #[must_use]
+    pub fn to_session_message(&self) -> SessionMessage {
+        match self {
+            Self::User { content, timestamp } => SessionMessage::User {
+                content:   content.clone(),
+                timestamp: system_time_to_utc(*timestamp),
+            },
+            Self::Assistant {
+                content,
+                tool_calls,
+                provider_parts,
+                usage,
+                response_id,
+                timestamp,
+            } => SessionMessage::Assistant {
+                content:        content.clone(),
+                tool_calls:     values_or_empty(tool_calls),
+                provider_parts: values_or_empty(provider_parts),
+                usage:          value_or_null(&**usage),
+                response_id:    response_id.clone(),
+                timestamp:      system_time_to_utc(*timestamp),
+            },
+            Self::ToolResults { results, timestamp } => SessionMessage::ToolResults {
+                results:   values_or_empty(results),
+                timestamp: system_time_to_utc(*timestamp),
+            },
+            Self::System { content, timestamp } => SessionMessage::System {
+                content:   content.clone(),
+                timestamp: system_time_to_utc(*timestamp),
+            },
+            Self::Steering { content, timestamp } => SessionMessage::Steering {
+                content:   content.clone(),
+                timestamp: system_time_to_utc(*timestamp),
+            },
+        }
+    }
+
+    pub fn from_session_message(message: &SessionMessage) -> Result<Self, serde_json::Error> {
+        Ok(match message {
+            SessionMessage::User { content, timestamp } => Self::User {
+                content:   content.clone(),
+                timestamp: utc_to_system_time(*timestamp),
+            },
+            SessionMessage::Assistant {
+                content,
+                tool_calls,
+                provider_parts,
+                usage,
+                response_id,
+                timestamp,
+            } => Self::Assistant {
+                content:        content.clone(),
+                tool_calls:     values_from_json(tool_calls)?,
+                provider_parts: values_from_json(provider_parts)?,
+                usage:          Box::new(serde_json::from_value(usage.clone())?),
+                response_id:    response_id.clone(),
+                timestamp:      utc_to_system_time(*timestamp),
+            },
+            SessionMessage::ToolResults { results, timestamp } => Self::ToolResults {
+                results:   values_from_json(results)?,
+                timestamp: utc_to_system_time(*timestamp),
+            },
+            SessionMessage::System { content, timestamp } => Self::System {
+                content:   content.clone(),
+                timestamp: utc_to_system_time(*timestamp),
+            },
+            SessionMessage::Steering { content, timestamp } => Self::Steering {
+                content:   content.clone(),
+                timestamp: utc_to_system_time(*timestamp),
+            },
+        })
+    }
+}
+
+fn system_time_to_utc(timestamp: SystemTime) -> DateTime<Utc> {
+    timestamp.into()
+}
+
+fn utc_to_system_time(timestamp: DateTime<Utc>) -> SystemTime {
+    timestamp.into()
+}
+
+fn value_or_null<T: Serialize>(value: &T) -> serde_json::Value {
+    serde_json::to_value(value).unwrap_or(serde_json::Value::Null)
+}
+
+fn values_or_empty<T: Serialize>(values: &[T]) -> Vec<serde_json::Value> {
+    values.iter().map(value_or_null).collect()
+}
+
+fn values_from_json<T: DeserializeOwned>(
+    values: &[serde_json::Value],
+) -> Result<Vec<T>, serde_json::Error> {
+    values.iter().cloned().map(serde_json::from_value).collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -311,7 +409,7 @@ impl AgentEvent {
                 warn!(session_id, "Loop detected");
             }
             Self::TurnLimitReached { max_turns } => {
-                warn!(session_id, max_turns, "Turn limit reached");
+                warn!(session_id, max_turns, "Message limit reached");
             }
             Self::SkillExpanded { skill_name } => {
                 debug!(session_id, skill = skill_name.as_str(), "Skill expanded");

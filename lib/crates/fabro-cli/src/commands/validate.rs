@@ -4,7 +4,6 @@ use fabro_config::user::active_settings_path;
 use fabro_manifest::{ManifestBuildInput, build_run_manifest};
 use fabro_server::manifest_validation;
 use fabro_util::terminal::Styles;
-use fabro_workflow::operations::RenderMode;
 
 use crate::args::ValidateArgs;
 use crate::command_context::CommandContext;
@@ -26,7 +25,6 @@ pub(crate) fn run(
     let response = manifest_validation::validate_manifest(
         &RunLayer::default(),
         &built.manifest,
-        RenderMode::Structural,
         base_ctx.catalog()?,
     )?;
     let diagnostics = api_diagnostics_to_local(&response.workflow.diagnostics);

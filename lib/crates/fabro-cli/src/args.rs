@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use fabro_agent::cli::AgentArgs;
+use fabro_agent::cli::{AgentArgs, PermissionLevel};
 use fabro_config::{CliLayer, CliLoggingLayer, CliOutputLayer, CliUpdatesLayer};
 use fabro_server::serve::DEFAULT_TCP_PORT;
 use fabro_static::EnvVars;
@@ -1055,6 +1055,28 @@ pub(crate) struct ExecArgs {
 }
 
 #[derive(Args)]
+pub(crate) struct SessionArgs {
+    #[command(flatten)]
+    pub(crate) connection: ServerConnectionArgs,
+
+    /// Task prompt
+    #[arg(short = 'p', long = "prompt")]
+    pub(crate) prompt: String,
+
+    /// LLM provider (anthropic, openai, gemini, kimi, zai, minimax, inception)
+    #[arg(long)]
+    pub(crate) provider: Option<String>,
+
+    /// Model name (defaults per provider)
+    #[arg(long)]
+    pub(crate) model: Option<String>,
+
+    /// Permission level for tool execution
+    #[arg(long = "permissions", value_name = "LEVEL", value_enum)]
+    pub(crate) permissions: Option<PermissionLevel>,
+}
+
+#[derive(Args)]
 pub(crate) struct UpgradeArgs {
     /// Target version (e.g. "0.5.0", "v0.5.0", or "v0.177.0-alpha.1")
     #[arg(long)]
@@ -1187,6 +1209,8 @@ pub(crate) enum Commands {
     /// Run an agentic coding session
     #[command(hide = true)]
     Exec(ExecArgs),
+    /// Run a persistent Fabro agent session
+    Session(SessionArgs),
     #[command(flatten)]
     RunCmd(RunCommands),
     /// Validate run configuration without executing
@@ -1293,6 +1317,7 @@ impl Commands {
             },
             Self::Dump(_) => "dump",
             Self::Exec(_) => "exec",
+            Self::Session(_) => "session",
             Self::RunCmd(cmd) => cmd.name(),
             Self::Preflight(_) => "preflight",
             Self::Validate(_) => "validate",

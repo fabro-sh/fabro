@@ -18,12 +18,7 @@ pub fn transform(parsed: Parsed, options: &TransformOptions) -> Result<Transform
     let graph = if let (Some(current_dir), Some(file_resolver)) =
         (&options.current_dir, &options.file_resolver)
     {
-        ImportTransform::new(
-            current_dir.clone(),
-            Arc::clone(file_resolver),
-            options.inputs.clone(),
-        )
-        .apply(graph)?
+        ImportTransform::new(current_dir.clone(), Arc::clone(file_resolver)).apply(graph)?
     } else {
         graph
     };
@@ -36,10 +31,8 @@ pub fn transform(parsed: Parsed, options: &TransformOptions) -> Result<Transform
         graph
     };
 
-    let graph = TemplateTransform {
-        inputs: options.inputs.clone(),
-    }
-    .apply(graph)?;
+    let (graph, diagnostics) =
+        TemplateTransform::new(options.inputs.clone()).apply_with_diagnostics(graph)?;
     let graph = StylesheetApplicationTransform.apply(graph)?;
     let graph = ModelResolutionTransform::new(Arc::clone(&options.catalog)).apply(graph)?;
 
@@ -49,7 +42,11 @@ pub fn transform(parsed: Parsed, options: &TransformOptions) -> Result<Transform
         .iter()
         .try_fold(graph, |graph, transform| transform.apply(graph))?;
 
-    Ok(Transformed { graph, source })
+    Ok(Transformed {
+        graph,
+        source,
+        diagnostics,
+    })
 }
 
 #[cfg(test)]

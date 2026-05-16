@@ -162,7 +162,30 @@ fn bare_fabro_with_unbound_inputs_validates_structurally_with_warning() {
     ----- stderr -----
     Workflow: TemplatedUnbound (3 nodes, 2 edges)
     Graph: [FIXTURES]/templated_unbound.fabro
-    warning: undefined template variable `inputs.app_dir` at line 2 (template_undefined_variable)
+    warning: undefined template variable `inputs.app_dir` at line 1 (template_undefined_variable)
+    warning [node: work]: undefined template variable `inputs.app_dir` in node `work` (template_undefined_variable)
+    Validation: OK
+    ");
+}
+
+/// Regression: https://github.com/fabro-sh/fabro/issues/286
+///
+/// Undefined template variables in a prompt loaded via `@file` reference must
+/// surface as the same warning diagnostic as an inline prompt — not a hard
+/// validation error.
+#[test]
+fn bare_fabro_with_unbound_inputs_in_imported_prompt_validates_structurally_with_warning() {
+    let context = test_context!();
+    let mut cmd = context.validate();
+    cmd.arg(fixture("templated_unbound_imported/workflow.fabro"));
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    Workflow: TemplatedUnboundImported (3 nodes, 2 edges)
+    Graph: [FIXTURES]/templated_unbound_imported/workflow.fabro
+    warning [node: work]: undefined template variable `inputs.app_dir` in node `work` (template_undefined_variable)
     Validation: OK
     ");
 }

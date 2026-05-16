@@ -10,7 +10,7 @@ use crate::error::Error;
 use crate::session::Session;
 use crate::tool_registry::RegisteredTool;
 use crate::tools::required_str;
-use crate::types::{AgentEvent, SessionEvent, Turn};
+use crate::types::{AgentEvent, Message, SessionEvent};
 
 pub type SessionFactory = Arc<dyn Fn() -> Session + Send + Sync>;
 
@@ -115,7 +115,7 @@ impl SubAgentManager {
             session.process_input(&task_prompt_for_spawn).await?;
             let turns = session.history().turns();
             let last_text = turns.iter().rev().find_map(|t| match t {
-                Turn::Assistant { content, .. } => Some(content.clone()),
+                Message::Assistant { content, .. } => Some(content.clone()),
                 _ => None,
             });
             Ok(SubAgentResult {

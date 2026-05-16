@@ -4,7 +4,7 @@ use fabro_api::types;
 use fabro_config::{CliLayer, RunLayer, load_llm_catalog_settings};
 use fabro_manifest::{self, ManifestBuildInput, RunOverrideInput};
 use fabro_model::Catalog;
-use fabro_server::manifest_validation::{self, RenderMode};
+use fabro_server::manifest_validation;
 use serde_json::Value;
 
 use super::common::{ToolError, ToolResult};
@@ -32,13 +32,10 @@ pub(super) fn build_mcp_run_manifest(
         Catalog::from_builtin_with_overrides(&llm_catalog_settings)
             .map_err(|err| ToolError::message(err.to_string()))?,
     );
-    let validation = manifest_validation::validate_manifest(
-        &RunLayer::default(),
-        &built.manifest,
-        RenderMode::Strict,
-        catalog,
-    )
-    .map_err(|err| ToolError::from_anyhow(&err))?;
+    let mut validation =
+        manifest_validation::validate_manifest(&RunLayer::default(), &built.manifest, catalog)
+            .map_err(|err| ToolError::from_anyhow(&err))?;
+    manifest_validation::promote_template_undefined_variables_to_errors(&mut validation);
     if !validation.ok {
         return Err(ToolError::message("workflow manifest validation failed"));
     }

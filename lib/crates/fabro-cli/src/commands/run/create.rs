@@ -5,7 +5,6 @@ use fabro_manifest::{ManifestBuildInput, build_run_manifest};
 use fabro_server::manifest_validation;
 use fabro_types::RunId;
 use fabro_util::terminal::Styles;
-use fabro_workflow::operations::RenderMode;
 
 use super::output::{api_diagnostics_to_local, print_workflow_summary};
 use super::overrides::run_args_overrides;
@@ -61,12 +60,12 @@ pub(crate) async fn create_run(
         None
     };
 
-    let validation = manifest_validation::validate_manifest(
+    let mut validation = manifest_validation::validate_manifest(
         &RunLayer::default(),
         &built.manifest,
-        RenderMode::Strict,
         ctx.catalog()?,
     )?;
+    manifest_validation::promote_template_undefined_variables_to_errors(&mut validation);
     let diagnostics = api_diagnostics_to_local(&validation.workflow.diagnostics);
     if !quiet {
         print_workflow_summary(

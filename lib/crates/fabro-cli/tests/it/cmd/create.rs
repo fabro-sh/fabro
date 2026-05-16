@@ -497,3 +497,26 @@ fn create_invalid_workflow_fails_without_creating_run() {
         "invalid create should not persist a run for this test case"
     );
 }
+
+#[test]
+fn create_rejects_unbound_template_inputs_without_creating_run() {
+    let context = test_context!();
+    let workflow = fixture("templated_unbound.fabro");
+    let initial_run_count = run_count_for_test_case(&context);
+    let mut cmd = context.create_cmd();
+    cmd.arg(workflow.to_str().unwrap());
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+      × Validation failed
+    ");
+
+    let run_count = run_count_for_test_case(&context);
+    assert_eq!(
+        run_count, initial_run_count,
+        "invalid create should not persist a run for this test case"
+    );
+}

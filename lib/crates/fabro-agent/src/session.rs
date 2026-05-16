@@ -8,13 +8,14 @@ use fabro_llm::error::ProviderErrorKind;
 use fabro_llm::generate::StreamAccumulator;
 use fabro_llm::provider::StreamEventStream;
 use fabro_llm::types::{
-    ContentPart, Message, ReasoningEffort, Request, RetryPolicy, StreamEvent, ToolChoice,
+    ContentPart, Message as LlmMessage, ReasoningEffort, Request, RetryPolicy, StreamEvent,
+    ToolChoice,
 };
 use fabro_llm::{Error as LlmError, retry};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_mcp::connection_manager::McpConnectionManager;
 use fabro_model::{AgentProfileKind, Catalog, ModelRef, Speed};
-use fabro_types::Principal;
+use fabro_types::{Principal, SessionRecord, SessionStatus};
 use futures::StreamExt;
 use tokio::sync::{Mutex as AsyncMutex, Notify, broadcast};
 use tokio::time;
@@ -38,7 +39,7 @@ use crate::skills::{
 };
 use crate::subagent::{SubAgentCallbackEvent, SubAgentEventCallback, SubAgentManager};
 use crate::tool_execution::execute_tool_calls;
-use crate::types::{AgentEvent, SessionEvent, SessionState, Turn};
+use crate::types::{AgentEvent, Message, SessionEvent, SessionState};
 
 /// One queued steering message: text + the principal that authored it (None
 /// for direct internal callers like loop-detection).
@@ -328,6 +329,49 @@ impl Session {
             config,
             subagent_manager,
         ))
+    }
+
+    pub fn from_record(
+        record: &SessionRecord,
+        llm_client: Client,
+        provider_profile: Arc<dyn AgentProfile>,
+        sandbox: Arc<dyn Sandbox>,
+        config: SessionOptions,
+        subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
+    ) -> Result<Self, Error> {
+        let mut session = Self::new(
+            llm_client,
+            provider_profile,
+            sandbox,
+            config,
+            subagent_manager,
+        );
+        session.id = record.id.to_string();
+        session.history =
+            History::from_session_messages(&record.runtime_context).map_err(|err| {
+                Error::InvalidState(format!("invalid persisted session context: {err}"))
+            })?;
+        session.state = match record.status {
+            SessionStatus::Closed | SessionStatus::Deleted => SessionState::Closed,
+            SessionStatus::Running | SessionStatus::Failed | SessionStatus::Idle => {
+                SessionState::Idle
+            }
+        };
+        Ok(session)
+    }
+
+    #[must_use]
+    pub fn to_record(&self, mut record: SessionRecord) -> SessionRecord {
+        record.status = match self.state {
+            SessionState::Closed => SessionStatus::Closed,
+            SessionState::Thinking | SessionState::Executing => SessionStatus::Running,
+            SessionState::Idle => SessionStatus::Idle,
+        };
+        record.provider = Some(self.provider_id().to_string());
+        record.model = Some(self.model().to_string());
+        record.runtime_context = self.history.to_session_messages();
+        record.updated_at = chrono::Utc::now();
+        record
     }
 
     pub fn set_tool_env_provider(&mut self, provider: Arc<dyn ToolEnvProvider>) {
@@ -1048,7 +1092,7 @@ impl Session {
         let expanded_input = expanded.text;
 
         // Append user turn and emit event
-        self.history.push(Turn::User {
+        self.history.push(Message::User {
             content:   expanded_input.clone(),
             timestamp: SystemTime::now(),
         });
@@ -1317,7 +1361,7 @@ impl Session {
                 .collect();
             let usage = response.usage.clone();
 
-            self.history.push(Turn::Assistant {
+            self.history.push(Message::Assistant {
                 content: text.clone(),
                 tool_calls: tool_calls.clone(),
                 provider_parts,
@@ -1402,7 +1446,7 @@ impl Session {
 
             // Always append tool_results so the tool_use ↔ tool_result
             // invariant holds, regardless of which token fired.
-            self.history.push(Turn::ToolResults {
+            self.history.push(Message::ToolResults {
                 results,
                 timestamp: SystemTime::now(),
             });
@@ -1426,7 +1470,7 @@ impl Session {
             if self.config.enable_loop_detection
                 && detect_loop(&self.history, self.config.loop_detection_window)
             {
-                self.history.push(Turn::Steering {
+                self.history.push(Message::Steering {
                     content: "WARNING: Loop detected. You appear to be repeating the same tool calls. Please try a different approach or ask for clarification.".to_string(),
                     timestamp: SystemTime::now(),
                 });
@@ -1476,7 +1520,7 @@ impl Session {
             control.queue.drain(..).collect()
         };
         for (text, actor) in messages {
-            self.history.push(Turn::Steering {
+            self.history.push(Message::Steering {
                 content:   text.clone(),
                 timestamp: SystemTime::now(),
             });
@@ -1516,7 +1560,7 @@ impl Session {
     fn build_request(&self) -> Request {
         let mut messages = Vec::new();
         if !self.system_prompt.trim().is_empty() {
-            messages.push(Message::system(self.system_prompt.clone()));
+            messages.push(LlmMessage::system(self.system_prompt.clone()));
         }
         messages.extend(self.history.convert_to_messages());
 
@@ -1710,8 +1754,10 @@ mod tests {
         let turns = session.history().turns();
         // UserTurn + AssistantTurn = 2
         assert_eq!(turns.len(), 2);
-        assert!(matches!(&turns[0], Turn::User { content, .. } if content == "Hi"));
-        assert!(matches!(&turns[1], Turn::Assistant { content, .. } if content == "Hello there!"));
+        assert!(matches!(&turns[0], Message::User { content, .. } if content == "Hi"));
+        assert!(
+            matches!(&turns[1], Message::Assistant { content, .. } if content == "Hello there!")
+        );
     }
 
     #[tokio::test]
@@ -1731,13 +1777,15 @@ mod tests {
         let turns = session.history().turns();
         // UserTurn + AssistantTurn(tool_call) + ToolResults + AssistantTurn(text) = 4
         assert_eq!(turns.len(), 4);
-        assert!(matches!(&turns[0], Turn::User { .. }));
-        assert!(matches!(&turns[1], Turn::Assistant { tool_calls, .. } if tool_calls.len() == 1));
-        assert!(matches!(&turns[2], Turn::ToolResults { results, .. } if results.len() == 1));
-        assert!(matches!(&turns[3], Turn::Assistant { content, .. } if content == "Done!"));
+        assert!(matches!(&turns[0], Message::User { .. }));
+        assert!(
+            matches!(&turns[1], Message::Assistant { tool_calls, .. } if tool_calls.len() == 1)
+        );
+        assert!(matches!(&turns[2], Message::ToolResults { results, .. } if results.len() == 1));
+        assert!(matches!(&turns[3], Message::Assistant { content, .. } if content == "Done!"));
 
         // Verify tool result content
-        if let Turn::ToolResults { results, .. } = &turns[2] {
+        if let Message::ToolResults { results, .. } = &turns[2] {
             assert_eq!(results[0].tool_call_id, "call_1");
             assert!(!results[0].is_error);
         }
@@ -1870,11 +1918,11 @@ mod tests {
         let turns = session.history().turns();
         // User + Steering + Assistant = 3
         assert_eq!(turns.len(), 3);
-        assert!(matches!(&turns[0], Turn::User { .. }));
+        assert!(matches!(&turns[0], Message::User { .. }));
         assert!(
-            matches!(&turns[1], Turn::Steering { content, .. } if content == "Focus on the task")
+            matches!(&turns[1], Message::Steering { content, .. } if content == "Focus on the task")
         );
-        assert!(matches!(&turns[2], Turn::Assistant { .. }));
+        assert!(matches!(&turns[2], Message::Assistant { .. }));
     }
 
     #[tokio::test]
@@ -1924,7 +1972,7 @@ mod tests {
             .unwrap();
 
         let turns = session.history().turns();
-        assert!(matches!(&turns[1], Turn::Steering { content, .. } if content == "resume now"));
+        assert!(matches!(&turns[1], Message::Steering { content, .. } if content == "resume now"));
         assert!(!handle.is_waiting_for_steer());
     }
 
@@ -1989,11 +2037,13 @@ mod tests {
         let turns = session.history().turns();
         // User + Assistant + Steering + Assistant = 4
         assert_eq!(turns.len(), 4);
-        assert!(matches!(&turns[0], Turn::User { .. }));
-        assert!(matches!(&turns[1], Turn::Assistant { content, .. } if content == "First reply"));
-        assert!(matches!(&turns[2], Turn::Steering { content, .. }
+        assert!(matches!(&turns[0], Message::User { .. }));
+        assert!(
+            matches!(&turns[1], Message::Assistant { content, .. } if content == "First reply")
+        );
+        assert!(matches!(&turns[2], Message::Steering { content, .. }
                 if content == "after-completion steer"));
-        assert!(matches!(&turns[3], Turn::Assistant { content, .. }
+        assert!(matches!(&turns[3], Message::Assistant { content, .. }
                 if content == "Second reply, after steer"));
     }
 
@@ -2013,13 +2063,15 @@ mod tests {
         // Second cycle: User + Assistant = 2
         // Total = 4
         assert_eq!(turns.len(), 4);
-        assert!(matches!(&turns[0], Turn::User { content, .. } if content == "initial message"));
+        assert!(matches!(&turns[0], Message::User { content, .. } if content == "initial message"));
         assert!(
-            matches!(&turns[1], Turn::Assistant { content, .. } if content == "First response")
+            matches!(&turns[1], Message::Assistant { content, .. } if content == "First response")
         );
-        assert!(matches!(&turns[2], Turn::User { content, .. } if content == "followup message"));
         assert!(
-            matches!(&turns[3], Turn::Assistant { content, .. } if content == "Followup response")
+            matches!(&turns[2], Message::User { content, .. } if content == "followup message")
+        );
+        assert!(
+            matches!(&turns[3], Message::Assistant { content, .. } if content == "Followup response")
         );
     }
 
@@ -2105,7 +2157,7 @@ mod tests {
         let turns = session.history().turns();
         // User + Asst(tool_call) + ToolResults + Asst(text) = 4
         assert_eq!(turns.len(), 4);
-        if let Turn::ToolResults { results, .. } = &turns[2] {
+        if let Message::ToolResults { results, .. } = &turns[2] {
             assert!(results[0].is_error);
             assert_eq!(
                 results[0].content,
@@ -2130,7 +2182,7 @@ mod tests {
         session.process_input("Use fail tool").await.unwrap();
 
         let turns = session.history().turns();
-        if let Turn::ToolResults { results, .. } = &turns[2] {
+        if let Message::ToolResults { results, .. } = &turns[2] {
             assert!(results[0].is_error);
             assert_eq!(
                 results[0].content,
@@ -2176,7 +2228,7 @@ mod tests {
 
         // Check for Steering turn with warning in history
         let has_steering_warning = session.history().turns().iter().any(
-            |t| matches!(t, Turn::Steering { content, .. } if content.contains("Loop detected")),
+            |t| matches!(t, Message::Steering { content, .. } if content.contains("Loop detected")),
         );
         assert!(has_steering_warning);
     }
@@ -2208,7 +2260,7 @@ mod tests {
         // Should have stopped immediately: User turn only, no LLM call
         let turns = session.history().turns();
         assert_eq!(turns.len(), 1);
-        assert!(matches!(&turns[0], Turn::User { .. }));
+        assert!(matches!(&turns[0], Message::User { .. }));
     }
 
     #[tokio::test]
@@ -2263,9 +2315,11 @@ mod tests {
         // The tool cancelled the token, so the loop breaks before the next LLM call
         let turns = session.history().turns();
         assert_eq!(turns.len(), 3);
-        assert!(matches!(&turns[0], Turn::User { .. }));
-        assert!(matches!(&turns[1], Turn::Assistant { tool_calls, .. } if tool_calls.len() == 1));
-        assert!(matches!(&turns[2], Turn::ToolResults { .. }));
+        assert!(matches!(&turns[0], Message::User { .. }));
+        assert!(
+            matches!(&turns[1], Message::Assistant { tool_calls, .. } if tool_calls.len() == 1)
+        );
+        assert!(matches!(&turns[2], Message::ToolResults { .. }));
     }
 
     #[tokio::test]
@@ -2301,10 +2355,10 @@ mod tests {
 
         let turns = session.history().turns();
         assert_eq!(turns.len(), 4);
-        assert!(matches!(&turns[0], Turn::User { content, .. } if content == "one"));
-        assert!(matches!(&turns[1], Turn::Assistant { content, .. } if content == "First"));
-        assert!(matches!(&turns[2], Turn::User { content, .. } if content == "two"));
-        assert!(matches!(&turns[3], Turn::Assistant { content, .. } if content == "Second"));
+        assert!(matches!(&turns[0], Message::User { content, .. } if content == "one"));
+        assert!(matches!(&turns[1], Message::Assistant { content, .. } if content == "First"));
+        assert!(matches!(&turns[2], Message::User { content, .. } if content == "two"));
+        assert!(matches!(&turns[3], Message::Assistant { content, .. } if content == "Second"));
     }
 
     #[tokio::test]
@@ -2386,7 +2440,7 @@ mod tests {
         assert_eq!(turns.len(), 4);
 
         // Verify all 3 tool results collected
-        if let Turn::ToolResults { results, .. } = &turns[2] {
+        if let Message::ToolResults { results, .. } = &turns[2] {
             assert_eq!(results.len(), 3);
             assert_eq!(results[0].tool_call_id, "call_1");
             assert_eq!(results[1].tool_call_id, "call_2");
@@ -2515,7 +2569,7 @@ mod tests {
         session.process_input("Use strict tool").await.unwrap();
 
         let turns = session.history().turns();
-        if let Turn::ToolResults { results, .. } = &turns[2] {
+        if let Message::ToolResults { results, .. } = &turns[2] {
             assert!(results[0].is_error);
             let content_str = results[0].content.to_string();
             assert!(
@@ -2560,7 +2614,7 @@ mod tests {
         session.process_input("Use strict tool").await.unwrap();
 
         let turns = session.history().turns();
-        if let Turn::ToolResults { results, .. } = &turns[2] {
+        if let Message::ToolResults { results, .. } = &turns[2] {
             assert!(!results[0].is_error);
         } else {
             panic!("Expected ToolResults turn at index 2");
@@ -2677,7 +2731,7 @@ mod tests {
         // User + Assistant(tool_call) + ToolResults + Assistant(text) = 4
         assert_eq!(turns.len(), 4);
 
-        if let Turn::ToolResults { results, .. } = &turns[2] {
+        if let Message::ToolResults { results, .. } = &turns[2] {
             assert!(results[0].is_error);
             let content_str = results[0].content.to_string();
             assert!(
@@ -2689,7 +2743,7 @@ mod tests {
         }
 
         assert!(
-            matches!(&turns[3], Turn::Assistant { content, .. } if content == "OK after denial")
+            matches!(&turns[3], Message::Assistant { content, .. } if content == "OK after denial")
         );
     }
 
@@ -2714,7 +2768,7 @@ mod tests {
         session.process_input("Use echo").await.unwrap();
 
         let turns = session.history().turns();
-        if let Turn::ToolResults { results, .. } = &turns[2] {
+        if let Message::ToolResults { results, .. } = &turns[2] {
             assert!(!results[0].is_error);
             let content_str = results[0].content.to_string();
             assert!(
@@ -2779,7 +2833,7 @@ mod tests {
         session.process_input("Use echo").await.unwrap();
 
         let turns = session.history().turns();
-        if let Turn::ToolResults { results, .. } = &turns[2] {
+        if let Message::ToolResults { results, .. } = &turns[2] {
             assert!(!results[0].is_error);
             let content_str = results[0].content.to_string();
             assert!(
@@ -2912,7 +2966,7 @@ mod tests {
         let turns = session.history().turns();
         assert!(matches!(
             turns.last(),
-            Some(Turn::Assistant { content, .. }) if content == "Recovered"
+            Some(Message::Assistant { content, .. }) if content == "Recovered"
         ));
 
         let mut assistant_text_start_count = 0;
@@ -2950,7 +3004,7 @@ mod tests {
         let turns = session.history().turns();
         assert!(matches!(
             turns.last(),
-            Some(Turn::Assistant { content, .. }) if content == "Hello"
+            Some(Message::Assistant { content, .. }) if content == "Hello"
         ));
 
         let mut observed = Vec::new();
@@ -3084,7 +3138,7 @@ mod tests {
         // History should have been compacted: summary turn + preserved turns
         let turns = session.history().turns();
         assert!(
-            turns.iter().any(|t| matches!(t, Turn::System { content, .. } if content.contains("A different assistant began this task"))),
+            turns.iter().any(|t| matches!(t, Message::System { content, .. } if content.contains("A different assistant began this task"))),
             "Should contain a summary system turn"
         );
     }
@@ -3425,15 +3479,17 @@ mod tests {
             4,
             "Expected User + Assistant(tool) + ToolResults + Assistant(text)"
         );
-        assert!(matches!(&turns[0], Turn::User { .. }));
-        assert!(matches!(&turns[1], Turn::Assistant { tool_calls, .. } if tool_calls.len() == 1));
-        assert!(matches!(&turns[2], Turn::ToolResults { results, .. } if results.len() == 1));
+        assert!(matches!(&turns[0], Message::User { .. }));
         assert!(
-            matches!(&turns[3], Turn::Assistant { content, .. } if content == "The echo server replied!")
+            matches!(&turns[1], Message::Assistant { tool_calls, .. } if tool_calls.len() == 1)
+        );
+        assert!(matches!(&turns[2], Message::ToolResults { results, .. } if results.len() == 1));
+        assert!(
+            matches!(&turns[3], Message::Assistant { content, .. } if content == "The echo server replied!")
         );
 
         // Verify the MCP tool result content — the echo server returns the message
-        if let Turn::ToolResults { results, .. } = &turns[2] {
+        if let Message::ToolResults { results, .. } = &turns[2] {
             assert_eq!(results[0].tool_call_id, "mcp_call_1");
             assert!(!results[0].is_error);
             let output = results[0].content.as_str().unwrap_or("");
@@ -3533,7 +3589,9 @@ mod tests {
         assert_eq!(session.state(), SessionState::Idle);
         let turns = session.history().turns();
         assert_eq!(turns.len(), 2);
-        assert!(matches!(&turns[1], Turn::Assistant { content, .. } if content == "Fast response"));
+        assert!(
+            matches!(&turns[1], Message::Assistant { content, .. } if content == "Fast response")
+        );
     }
 
     #[tokio::test]

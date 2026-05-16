@@ -31,6 +31,7 @@ pub mod sandbox_details;
 pub mod sandbox_provider;
 pub mod sandbox_services;
 pub mod secret;
+pub mod session;
 pub mod settings;
 pub mod stage_completion;
 pub mod stage_handler;
@@ -100,6 +101,10 @@ pub use sandbox_services::{
     SandboxServiceListResponse,
 };
 pub use secret::{SecretMetadata, SecretType};
+pub use session::{
+    SessionEventEnvelope, SessionId, SessionMessage, SessionRecord, SessionStatus, SessionSummary,
+    TurnId, TurnRecord, TurnStatus,
+};
 pub use stage_completion::StageCompletion;
 pub use stage_handler::StageHandler;
 pub use stage_id::{InvalidStageVisit, ParallelBranchId, StageId};

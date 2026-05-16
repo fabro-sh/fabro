@@ -16,11 +16,12 @@ use crate::artifact_upload::ArtifactSink;
 use crate::condition::evaluate_condition;
 use crate::context::{Context, WorkflowContext, keys};
 use crate::error::Error;
-use crate::operations::{RenderMode, ValidateInput, WorkflowInput, validate};
+use crate::operations::{ValidateInput, WorkflowInput, validate};
 use crate::outcome::{Outcome, OutcomeExt, StageOutcome};
 use crate::pipeline::types::Initialized;
 use crate::run_dir::visit_from_context;
 use crate::run_options::RunOptions;
+use crate::static_reference::{ReferenceKind, validate_static_reference};
 use crate::{ManifestPath, pipeline};
 
 /// Orchestrates a child workflow engine, polling for completion or stop
@@ -65,7 +66,7 @@ fn parse_child_graph(node: &Node, services: &EngineServices) -> Result<ParsedChi
         .get("stack.child_dot_source")
         .and_then(|v| v.as_str())
     {
-        let validated = validate(ValidateInput {
+        let mut validated = validate(ValidateInput {
             workflow:          WorkflowInput::DotSource {
                 source:   dot.to_string(),
                 base_dir: None,
@@ -74,8 +75,8 @@ fn parse_child_graph(node: &Node, services: &EngineServices) -> Result<ParsedChi
             cwd:               cwd.clone(),
             custom_transforms: Vec::new(),
             catalog:           Arc::clone(&services.run.catalog),
-            mode:              RenderMode::Strict,
         })?;
+        validated.promote_template_undefined_variables_to_errors();
         validated.raise_on_errors()?;
         let (graph, _, _) = validated.into_parts();
         return Ok(ParsedChildWorkflow {
@@ -88,6 +89,8 @@ fn parse_child_graph(node: &Node, services: &EngineServices) -> Result<ParsedChi
         .get("stack.child_workflow")
         .and_then(|v| v.as_str())
     {
+        validate_static_reference(path, ReferenceKind::ChildWorkflow)
+            .map_err(|error| Error::Validation(error.to_string()))?;
         let workflow = match (&services.workflow_bundle, &services.workflow_path) {
             (Some(bundle), Some(current_workflow_path)) => WorkflowInput::Bundled(
                 bundle
@@ -110,14 +113,14 @@ fn parse_child_graph(node: &Node, services: &EngineServices) -> Result<ParsedChi
             WorkflowInput::Bundled(workflow) => Some(workflow.path.clone()),
             WorkflowInput::Path(_) | WorkflowInput::DotSource { .. } => None,
         };
-        let validated = validate(ValidateInput {
+        let mut validated = validate(ValidateInput {
             workflow,
             settings: WorkflowSettings::default(),
             cwd,
             custom_transforms: Vec::new(),
             catalog: Arc::clone(&services.run.catalog),
-            mode: RenderMode::Strict,
         })?;
+        validated.promote_template_undefined_variables_to_errors();
         validated.raise_on_errors()?;
         let (graph, _, _) = validated.into_parts();
         return Ok(ParsedChildWorkflow {

@@ -93,6 +93,7 @@ fabro [OPTIONS] [COMMAND]
 | `fabro sandbox` | Sandbox operations (cp, ssh, preview) |
 | `fabro secret` | Manage server-owned secrets |
 | `fabro server` | Server operations |
+| `fabro session` | Run a persistent Fabro agent session |
 | `fabro settings` | Inspect effective settings |
 | `fabro start` | Start a created workflow run on the server |
 | `fabro steer` | Steer a running agent mid-execution |
@@ -1265,6 +1266,25 @@ fabro server stop [OPTIONS]
 | --- | --- |
 | `--storage-dir <storage_dir>` | Local storage directory (default: ~/.fabro/storage) |
 | `--timeout <timeout>` | Seconds to wait for graceful shutdown before SIGKILL<br />Default: `10` |
+
+### `fabro session`
+
+Run a persistent Fabro agent session
+
+```bash
+fabro session [OPTIONS] --prompt <PROMPT>
+```
+
+#### Options
+
+| Option | Description |
+| --- | --- |
+| `--model <model>` | Model name (defaults per provider) |
+| `--permissions <level>` | Permission level for tool execution<br />Values: `read-only`, `read-write`, `full` |
+| `-p, --prompt <prompt>` | Task prompt |
+| `--provider <provider>` | LLM provider (anthropic, openai, gemini, kimi, zai, minimax, inception) |
+| `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
+| `--storage-dir <storage_dir>` | Local storage directory (default: ~/.fabro/storage) |
 
 ### `fabro settings`
 

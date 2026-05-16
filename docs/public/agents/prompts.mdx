@@ -57,14 +57,14 @@ digraph Pipeline {
 }
 ```
 
-At runtime, `{{ goal }}` becomes `Add a /health endpoint to the API server`.
+Before execution, `{{ goal }}` becomes `Add a /health endpoint to the API server`.
 
 | Expression | Resolves to |
 |---|---|
 | `{{ goal }}` | The graph-level `goal` attribute |
 | `{{ inputs.name }}` | A value from `[run.inputs]` |
 
-Prompt templates use strict undefined handling, so an expression like `{{ inputs.foo }}` fails fast if `foo` is not defined. Environment variables are not available in prompt templates.
+Undefined prompt variables render as empty text and produce a `template_undefined_variable` diagnostic. `fabro validate` reports that diagnostic as a warning; run-style commands promote it to an error before proceeding. Environment variables are not available in prompt templates.
 
 ### Fallback to label
 

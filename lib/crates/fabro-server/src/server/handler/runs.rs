@@ -23,7 +23,6 @@ use fabro_types::{
 };
 use fabro_util::version::FABRO_VERSION;
 use fabro_workflow::command_log::{command_log_path, read_json_string_blob, read_log_slice};
-use fabro_workflow::operations::RenderMode;
 use fabro_workflow::run_status::RunStatus;
 use fabro_workflow::{Error as WorkflowError, operations};
 use tokio::fs;
@@ -674,17 +673,14 @@ async fn run_preflight(
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
-    let validated = match run_manifest::validate_prepared_manifest(
-        &prepared,
-        RenderMode::Strict,
-        state.catalog(),
-    ) {
+    let mut validated = match run_manifest::validate_prepared_manifest(&prepared, state.catalog()) {
         Ok(validated) => validated,
         Err(WorkflowError::Parse(_)) => {
             return ApiError::bad_request("Validation failed").into_response();
         }
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
+    validated.promote_template_undefined_variables_to_errors();
     let response = match run_manifest::run_preflight(&state, &prepared, &validated).await {
         Ok((response, _ok)) => response,
         Err(err) => {
@@ -705,11 +701,7 @@ async fn validate_run_manifest(
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
-    let validated = match run_manifest::validate_prepared_manifest(
-        &prepared,
-        RenderMode::Structural,
-        state.catalog(),
-    ) {
+    let validated = match run_manifest::validate_prepared_manifest(&prepared, state.catalog()) {
         Ok(validated) => validated,
         Err(WorkflowError::Parse(_)) => {
             return ApiError::bad_request("Validation failed").into_response();

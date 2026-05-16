@@ -1,1 +1,2 @@
 lib/crates/fabro-spa/assets/** linguist-generated=true -diff
+lib/packages/fabro-api-client/src/** linguist-generated=true

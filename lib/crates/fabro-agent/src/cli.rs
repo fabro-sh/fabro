@@ -32,8 +32,8 @@ use crate::error::InterruptReason;
 use crate::subagent::{SessionFactory, SubAgentManager};
 use crate::tools::WebFetchSummarizer;
 use crate::{
-    AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, LocalSandbox, OpenAiProfile,
-    Sandbox, Session, SessionOptions, Turn,
+    AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, LocalSandbox, Message,
+    OpenAiProfile, Sandbox, Session, SessionOptions,
 };
 
 /// Public arguments for the agent command, usable from an external CLI.
@@ -352,7 +352,7 @@ fn format_tool_args(args: &serde_json::Value, cwd: &str) -> String {
 )]
 fn print_output(session: &Session, styles: &Styles) {
     for turn in session.history().turns() {
-        if let Turn::Assistant { content, .. } = turn {
+        if let Message::Assistant { content, .. } = turn {
             if !content.is_empty() {
                 println!("{}", styles.render_markdown(content));
             }
@@ -367,7 +367,7 @@ fn print_output(session: &Session, styles: &Styles) {
 fn print_summary(session: &Session, styles: &Styles) {
     let (mut turn_count, mut tool_call_count, mut total_tokens) = (0usize, 0usize, 0i64);
     for turn in session.history().turns() {
-        if let Turn::Assistant {
+        if let Message::Assistant {
             tool_calls, usage, ..
         } = turn
         {

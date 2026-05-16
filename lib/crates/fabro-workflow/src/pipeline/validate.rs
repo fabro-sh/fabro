@@ -12,9 +12,14 @@ pub fn validate(
     catalog: &Catalog,
     extra_rules: &[&dyn LintRule],
 ) -> Validated {
-    let Transformed { graph, source } = transformed;
-    let diagnostics = fabro_validate::validate_with_catalog(&graph, catalog, extra_rules);
-    Validated::new(graph, source, diagnostics)
+    let Transformed {
+        graph,
+        source,
+        diagnostics: mut transform_diagnostics,
+    } = transformed;
+    let lint_diagnostics = fabro_validate::validate_with_catalog(&graph, catalog, extra_rules);
+    transform_diagnostics.extend(lint_diagnostics);
+    Validated::new(graph, source, transform_diagnostics)
 }
 
 #[cfg(test)]

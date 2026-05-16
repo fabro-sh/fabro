@@ -15,6 +15,8 @@ tags:
     description: Browser authentication and demo-mode controls
   - name: Runs
     description: Run management operations
+  - name: Sessions
+    description: Persistent Fabro agent sessions
   - name: Human-in-the-Loop
     description: Questions, answers, and steering for runs
   - name: Run Outputs
@@ -810,6 +812,268 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Sessions ──────────────────────────────────────────────────────────
+
+  /api/v1/sessions:
+    get:
+      operationId: listSessions
+      tags: [Sessions]
+      summary: List sessions
+      responses:
+        "200":
+          description: Durable session summaries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedSessionList"
+    post:
+      operationId: createSession
+      tags: [Sessions]
+      summary: Create session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionRequest"
+      responses:
+        "201":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionRecord"
+        "400":
+          description: Invalid input
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/sessions/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/SessionId"
+    get:
+      operationId: getSession
+      tags: [Sessions]
+      summary: Get session
+      responses:
+        "200":
+          description: Session record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionRecord"
+        "404":
+          description: Session not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateSession
+      tags: [Sessions]
+      summary: Update session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSessionRequest"
+      responses:
+        "200":
+          description: Updated session record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionRecord"
+    delete:
+      operationId: deleteSession
+      tags: [Sessions]
+      summary: Delete session
+      responses:
+        "204":
+          description: Session deleted
+
+  /api/v1/sessions/{id}/turns:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/SessionId"
+    get:
+      operationId: listSessionTurns
+      tags: [Sessions]
+      summary: List session turns
+      responses:
+        "200":
+          description: Session turns
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedTurnList"
+    post:
+      operationId: submitSessionTurn
+      tags: [Sessions]
+      summary: Submit a session turn
+      description: Starts a streamed turn immediately. Background turns are not supported in this API version.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitTurnRequest"
+      responses:
+        "200":
+          description: Streamed session events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          description: Invalid input
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Session not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Session already has an active turn
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/sessions/{id}/turns/{turnId}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/SessionId"
+      - name: turnId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/TurnId"
+    get:
+      operationId: getSessionTurn
+      tags: [Sessions]
+      summary: Get session turn
+      responses:
+        "200":
+          description: Turn record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TurnRecord"
+        "404":
+          description: Turn not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/sessions/{id}/turns/{turnId}/interrupt:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/SessionId"
+      - name: turnId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/TurnId"
+    post:
+      operationId: interruptSessionTurn
+      tags: [Sessions]
+      summary: Interrupt a session turn
+      responses:
+        "202":
+          description: Interrupt requested
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEventEnvelope"
+        "404":
+          description: Session turn not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Turn is already terminal or is not active for this session
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/sessions/{id}/events:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/SessionId"
+    get:
+      operationId: listSessionEvents
+      tags: [Sessions]
+      summary: List or stream session events
+      description: Returns JSON replay by default. When the `Accept` header includes `text/event-stream`, replays durable events from `since_seq` or `Last-Event-ID`, then stays attached for live events.
+      parameters:
+        - name: since_seq
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Durable session events or live SSE stream
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedSessionEventList"
+            text/event-stream:
+              schema:
+                type: string
 
   # ── Runs ──────────────────────────────────────────────────────────────
 
@@ -4395,6 +4659,248 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Run"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+
+    SessionId:
+      description: Durable session identifier.
+      type: string
+      example: 01HZX6M0P7SE4VJ9Y3X2B8E9QF
+
+    TurnId:
+      description: Durable session turn identifier.
+      type: string
+      example: 01HZX6M29F1CD5YYMHT1F5D7WQ
+
+    SessionStatus:
+      type: string
+      enum: [idle, running, failed, closed, deleted]
+
+    TurnStatus:
+      type: string
+      enum: [running, succeeded, failed, interrupted]
+
+    SessionMessage:
+      description: Persisted full-fidelity session transcript message.
+      type: object
+      required:
+        - kind
+        - timestamp
+      properties:
+        kind:
+          type: string
+          enum: [user, assistant, tool_results, system, steering]
+        content:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        tool_calls:
+          type: array
+          items: {}
+        provider_parts:
+          type: array
+          items: {}
+        usage: {}
+        response_id:
+          type: string
+        results:
+          type: array
+          items: {}
+
+    SessionRecord:
+      description: Durable session metadata and compactable runtime context.
+      type: object
+      required:
+        - id
+        - status
+        - created_at
+        - updated_at
+        - runtime_context
+      properties:
+        id:
+          $ref: "#/components/schemas/SessionId"
+        title:
+          type: ["string", "null"]
+        status:
+          $ref: "#/components/schemas/SessionStatus"
+        working_dir:
+          type: ["string", "null"]
+        provider:
+          type: ["string", "null"]
+        model:
+          type: ["string", "null"]
+        permissions:
+          type: ["string", "null"]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        deleted_at:
+          type: ["string", "null"]
+          format: date-time
+        runtime_context:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionMessage"
+
+    SessionSummary:
+      description: List projection of a durable session.
+      type: object
+      required:
+        - id
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: "#/components/schemas/SessionId"
+        title:
+          type: ["string", "null"]
+        status:
+          $ref: "#/components/schemas/SessionStatus"
+        working_dir:
+          type: ["string", "null"]
+        provider:
+          type: ["string", "null"]
+        model:
+          type: ["string", "null"]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    TurnRecord:
+      description: One externally submitted input plus terminal output metadata. Full resumable context is stored on SessionRecord.runtime_context.
+      type: object
+      required:
+        - id
+        - session_id
+        - input
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: "#/components/schemas/TurnId"
+        session_id:
+          $ref: "#/components/schemas/SessionId"
+        input:
+          type: string
+        status:
+          $ref: "#/components/schemas/TurnStatus"
+        output:
+          type: ["string", "null"]
+        error:
+          type: ["string", "null"]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: ["string", "null"]
+          format: date-time
+
+    SessionEventEnvelope:
+      description: Append-only durable session event envelope.
+      type: object
+      required:
+        - seq
+        - session_id
+        - event
+        - properties
+        - ts
+      properties:
+        seq:
+          type: integer
+          minimum: 0
+        session_id:
+          $ref: "#/components/schemas/SessionId"
+        turn_id:
+          oneOf:
+            - $ref: "#/components/schemas/TurnId"
+            - type: "null"
+        event:
+          type: string
+          example: turn.running
+        properties: {}
+        ts:
+          type: string
+          format: date-time
+
+    CreateSessionRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        working_dir:
+          type: string
+        provider:
+          type: string
+        model:
+          type: string
+        permissions:
+          type: string
+
+    UpdateSessionRequest:
+      type: object
+      properties:
+        title:
+          type: string
+
+    SubmitTurnRequest:
+      type: object
+      required:
+        - input
+      properties:
+        input:
+          type: string
+
+    PaginatedSessionList:
+      description: Paginated list of sessions.
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionSummary"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+
+    PaginatedTurnList:
+      description: Paginated list of turns.
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/TurnRecord"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+
+    PaginatedSessionEventList:
+      description: Paginated list of session events.
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionEventEnvelope"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
 

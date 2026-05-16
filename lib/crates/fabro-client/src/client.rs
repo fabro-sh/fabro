@@ -2,21 +2,23 @@ use std::collections::VecDeque;
 use std::future::Future;
 use std::num::NonZeroU64;
 use std::path::Path;
+use std::pin::Pin;
 use std::sync::{Arc, RwLock};
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use bytes::Bytes;
 use fabro_api::types;
-use fabro_http::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE};
+use fabro_http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE};
 use fabro_http::multipart::{Form, Part};
 use fabro_model::{Model, ModelTestMode, ProviderId};
 use fabro_types::settings::run::MergeStrategy;
 use fabro_types::{
-    ArtifactUpload, EventEnvelope, Run, RunBlobId, RunEvent, RunId, RunProjection, StageId,
+    ArtifactUpload, EventEnvelope, Run, RunBlobId, RunEvent, RunId, RunProjection,
+    SessionEventEnvelope, SessionId, SessionRecord, StageId,
 };
 use fabro_util::exit::{ErrorExt, ExitClass};
-use futures::StreamExt;
 use futures::future::BoxFuture;
+use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::fs::File;
 use tokio::sync::Mutex;
@@ -42,6 +44,14 @@ pub struct RunEventStream {
     stream:          progenitor_client::ByteStream,
     pending_bytes:   Vec<u8>,
     buffered_events: VecDeque<EventEnvelope>,
+}
+
+type HttpByteStream = Pin<Box<dyn Stream<Item = Result<Bytes>> + Send>>;
+
+pub struct SessionEventStream {
+    stream:          HttpByteStream,
+    pending_bytes:   Vec<u8>,
+    buffered_events: VecDeque<SessionEventEnvelope>,
 }
 
 pub struct RewindRunResult {
@@ -146,6 +156,42 @@ impl RunEventStream {
 
             if let Some(chunk) = self.stream.next().await {
                 let chunk = chunk.map_err(anyhow::Error::new)?;
+                self.pending_bytes.extend_from_slice(&chunk);
+                self.buffer_sse_events(false)?;
+            } else {
+                self.buffer_sse_events(true)?;
+                return Ok(self.buffered_events.pop_front());
+            }
+        }
+    }
+
+    fn buffer_sse_events(&mut self, finalize: bool) -> Result<()> {
+        for payload in sse::drain_sse_payloads(&mut self.pending_bytes, finalize) {
+            self.buffered_events
+                .push_back(serde_json::from_str(&payload)?);
+        }
+        Ok(())
+    }
+}
+
+impl SessionEventStream {
+    #[must_use]
+    pub fn new(stream: HttpByteStream) -> Self {
+        Self {
+            stream,
+            pending_bytes: Vec::new(),
+            buffered_events: VecDeque::new(),
+        }
+    }
+
+    pub async fn next_event(&mut self) -> Result<Option<SessionEventEnvelope>> {
+        loop {
+            if let Some(event) = self.buffered_events.pop_front() {
+                return Ok(Some(event));
+            }
+
+            if let Some(chunk) = self.stream.next().await {
+                let chunk = chunk?;
                 self.pending_bytes.extend_from_slice(&chunk);
                 self.buffer_sse_events(false)?;
             } else {
@@ -563,6 +609,53 @@ impl Client {
             .json::<types::ServerSettings>()
             .await
             .context("server returned invalid JSON for server settings")
+    }
+
+    pub async fn create_session(&self, body: types::CreateSessionRequest) -> Result<SessionRecord> {
+        let response = self
+            .send_api(
+                |client| async move { client.create_session().body(body.clone()).send().await },
+            )
+            .await?;
+        Ok(response.into_inner())
+    }
+
+    #[expect(
+        clippy::disallowed_types,
+        reason = "Client builds raw server API request URLs for wire transit; logging redaction is handled at log boundaries."
+    )]
+    pub async fn submit_session_turn_stream(
+        &self,
+        session_id: SessionId,
+        input: impl Into<String>,
+    ) -> Result<SessionEventStream> {
+        let base_url = self.base_url();
+        let mut url = fabro_http::Url::parse(&base_url)
+            .with_context(|| format!("invalid server base URL {base_url}"))?;
+        url.path_segments_mut()
+            .map_err(|()| anyhow!("server base URL cannot accept path segments"))?
+            .extend(["api", "v1", "sessions", &session_id.to_string(), "turns"]);
+        let body = types::SubmitTurnRequest {
+            input: input.into(),
+        };
+        let response = self
+            .send_http(|http_client| {
+                let url = url.clone();
+                let body = body.clone();
+                async move {
+                    http_client
+                        .post(url)
+                        .header(ACCEPT, "text/event-stream")
+                        .json(&body)
+                        .send()
+                        .await
+                }
+            })
+            .await?;
+        let stream = response
+            .bytes_stream()
+            .map(|chunk| chunk.map_err(anyhow::Error::new));
+        Ok(SessionEventStream::new(Box::pin(stream)))
     }
 
     pub async fn create_run_from_manifest(&self, manifest: types::RunManifest) -> Result<RunId> {

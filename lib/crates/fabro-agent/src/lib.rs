@@ -59,7 +59,7 @@ pub use tools::{
     make_shell_tool, make_shell_tool_with_config, make_write_file_tool, register_core_tools,
 };
 pub use truncation::{TruncationMode, truncate_lines, truncate_output, truncate_tool_output};
-pub use types::{AgentEvent, SessionEvent, SessionState, Turn};
+pub use types::{AgentEvent, Message, SessionEvent, SessionState};
 
 #[cfg(test)]
 #[allow(

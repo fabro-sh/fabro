@@ -13,6 +13,7 @@ api/run-internals-api.ts
 api/run-outputs-api.ts
 api/runs-api.ts
 api/secrets-api.ts
+api/sessions-api.ts
 api/settings-api.ts
 api/system-api.ts
 api/workflows-api.ts
@@ -64,6 +65,7 @@ models/conclusion.ts
 models/create-completion-request.ts
 models/create-run-pull-request-request.ts
 models/create-secret-request.ts
+models/create-session-request.ts
 models/daytona-network-layer-one-of-allow-list.ts
 models/daytona-network-layer-one-of.ts
 models/daytona-network-layer.ts
@@ -188,6 +190,9 @@ models/paginated-run-file-list.ts
 models/paginated-run-list.ts
 models/paginated-run-stage-list.ts
 models/paginated-saved-query-list.ts
+models/paginated-session-event-list.ts
+models/paginated-session-list.ts
+models/paginated-turn-list.ts
 models/paginated-workflow-list-response.ts
 models/pagination-meta.ts
 models/pending-interview-record.ts
@@ -343,6 +348,11 @@ models/server-settings.ts
 models/server-slate-db-settings.ts
 models/server-storage-settings.ts
 models/server-web-settings.ts
+models/session-event-envelope.ts
+models/session-message.ts
+models/session-record.ts
+models/session-status.ts
+models/session-summary.ts
 models/slack-integration-settings.ts
 models/ssh-access-request.ts
 models/ssh-access-response.ts
@@ -361,6 +371,7 @@ models/submit-answer-request.ts
 models/submit-answer-selected-request.ts
 models/submit-answer-text-request.ts
 models/submit-answer-yes-request.ts
+models/submit-turn-request.ts
 models/success-reason.ts
 models/system-actor-kind.ts
 models/system-features.ts
@@ -370,8 +381,11 @@ models/system-repair-runs-response.ts
 models/system-run-counts.ts
 models/timeline-entry-response.ts
 models/tls-mode.ts
+models/turn-record.ts
+models/turn-status.ts
 models/update-run-parent-request.ts
 models/update-run-request.ts
+models/update-session-request.ts
 models/user-response.ts
 models/validate-response.ts
 models/vnc-preview-response.ts

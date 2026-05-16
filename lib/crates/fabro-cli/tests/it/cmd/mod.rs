@@ -58,6 +58,7 @@ mod send_panic;
 mod server_start;
 mod server_status;
 mod server_stop;
+mod session;
 mod start;
 pub(crate) mod support;
 mod system;

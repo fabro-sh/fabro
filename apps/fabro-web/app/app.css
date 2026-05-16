@@ -1,6 +1,26 @@
 @import "@xterm/xterm/css/xterm.css";
+
+/*
+ * Do NOT `import "./app.css"` from JS — Bun's CSS bundler rejects the
+ * `@layer name, name;` ordering rule between `@import` rules below. This file
+ * is built standalone by the Tailwind CLI step in `scripts/build.ts`; the
+ * generated `assets/app.css` is linked from `index.template.html`.
+ */
+
+/*
+ * Cascade layer order. @assistant-ui/react-ui ships unlayered CSS authored
+ * against Tailwind v3; in Tailwind v4 utilities live in @layer utilities, and
+ * any unlayered CSS wins over layered CSS regardless of selector specificity.
+ * Putting assistant-ui in a named layer that we declare BEFORE utilities makes
+ * Tailwind v4 utility classes cascade above assistant-ui's scoped preflight.
+ */
+@layer theme, base, assistant-ui, components, utilities;
+
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
+
+@import "@assistant-ui/react-ui/styles/index.css" layer(assistant-ui);
+@import "@assistant-ui/react-ui/styles/markdown.css" layer(assistant-ui);
 
 @layer base {
   a[href],
@@ -127,3 +147,41 @@
 .graph-svg ellipse[stroke="#357f9e"],
 .graph-svg polygon[stroke="#357f9e"] { stroke: #67B2D7; }
 .graph-svg [fill="#1a1a1a"] { fill: #c6d4e0; }
+
+/* ---------------------------------------------------------------------------
+ * assistant-ui theme overrides (--aui-* variables) — mapped to Fabro tokens.
+ * Values are HSL component triples so assistant-ui's hsl(var(...)) wrapper
+ * works. Scoped to .fabro-chat so the shadcn theme cannot leak out.
+ *
+ * Source colors come from the @theme block above:
+ *   navy-950 #0F1729 = 220 47% 11%
+ *   panel    #252C3D = 222 24% 19%
+ *   panel-alt #1a2133 = 223 33% 15%
+ *   teal-500 #67B2D7 = 200 60% 62%  (Fabro's "teal" is a sky blue)
+ *   mint     #5AC8A8 = 163 49% 57%
+ *   ice-100  #E8EDF3 = 213 27% 93%
+ *   ice-300  #A8B5C5 = 213 22% 72%
+ * ------------------------------------------------------------------------- */
+.fabro-chat {
+  --aui-background: 220 47% 11%;
+  --aui-foreground: 0 0% 100%;
+  --aui-card: 222 24% 19%;
+  --aui-card-foreground: 0 0% 100%;
+  --aui-popover: 222 24% 19%;
+  --aui-popover-foreground: 0 0% 100%;
+  --aui-primary: 200 60% 62%;
+  --aui-primary-foreground: 220 47% 11%;
+  --aui-secondary: 223 33% 15%;
+  --aui-secondary-foreground: 0 0% 100%;
+  --aui-muted: 223 33% 15%;
+  --aui-muted-foreground: 213 22% 72%;
+  --aui-accent: 163 49% 57%;
+  --aui-accent-foreground: 220 47% 11%;
+  --aui-destructive: 0 76% 66%;
+  --aui-destructive-foreground: 0 0% 100%;
+  --aui-border: 218 28% 17%;
+  --aui-input: 218 28% 17%;
+  --aui-ring: 200 60% 62%;
+  --aui-radius: 0.5rem;
+  --aui-thread-max-width: 44rem;
+}

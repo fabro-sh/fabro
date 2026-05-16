@@ -4,16 +4,15 @@ use std::sync::Arc;
 
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_graphviz::parser;
-use fabro_template::{TemplateContext, render as render_template};
 
 use super::{FileInliningTransform, Transform};
 use crate::error::Error;
 use crate::file_resolver::{FileResolver, ResolvedFile};
+use crate::static_reference::{ReferenceKind, validate_static_reference};
 
 pub struct ImportTransform {
     current_dir: PathBuf,
     resolver:    Arc<dyn FileResolver>,
-    inputs:      HashMap<String, toml::Value>,
 }
 
 struct PlaceholderOptions {
@@ -43,15 +42,10 @@ impl From<Error> for ImportPrepareError {
 
 impl ImportTransform {
     #[must_use]
-    pub fn new(
-        current_dir: PathBuf,
-        resolver: Arc<dyn FileResolver>,
-        inputs: HashMap<String, toml::Value>,
-    ) -> Self {
+    pub fn new(current_dir: PathBuf, resolver: Arc<dyn FileResolver>) -> Self {
         Self {
             current_dir,
             resolver,
-            inputs,
         }
     }
 
@@ -100,6 +94,11 @@ impl ImportTransform {
                 return Ok(());
             }
         };
+
+        if let Err(error) = validate_static_reference(import_path, ReferenceKind::Import) {
+            Self::poison_placeholder(graph, placeholder_id, &error.to_string());
+            return Ok(());
+        }
 
         let Some(resolved_file) = self.resolver.resolve(current_base_dir, import_path) else {
             Self::poison_placeholder(
@@ -153,13 +152,7 @@ impl ImportTransform {
         import_stack: &mut Vec<PathBuf>,
     ) -> Result<PreparedImport, ImportPrepareError> {
         Self::with_import_stack(import_stack, resolved_file.path.clone(), |import_stack| {
-            let rendered_source = render_template(
-                &resolved_file.content,
-                &TemplateContext::for_input_scan(self.inputs.clone()),
-            )
-            .map_err(|error| ImportPrepareError::Hard(Error::Validation(error.to_string())))?;
-
-            let mut graph = parser::parse(&rendered_source).map_err(|error| {
+            let mut graph = parser::parse(&resolved_file.content).map_err(|error| {
                 ImportPrepareError::Soft(format!(
                     "failed to parse {}: {error}",
                     resolved_file.path.display()
@@ -638,7 +631,6 @@ mod tests {
             Arc::new(FilesystemFileResolver::new(
                 fallback_dir.map(Path::to_path_buf),
             )),
-            HashMap::new(),
         )
         .apply(graph)
         .unwrap()
@@ -713,6 +705,64 @@ mod tests {
                 .classes
                 .iter()
                 .any(|class_name| class_name == "validate")
+        );
+    }
+
+    #[test]
+    fn import_preserves_prompt_templates_for_template_transform() {
+        let dir = tempfile::tempdir().unwrap();
+        write_file(
+            &dir.path().join("validate.fabro"),
+            r#"digraph validate {
+                start [shape=Mdiamond]
+                lint [prompt="Run {{ inputs.task }}"]
+                exit [shape=Msquare]
+                start -> lint -> exit
+            }"#,
+        );
+
+        let graph = apply_import(
+            r#"digraph Deploy {
+                start [shape=Mdiamond]
+                validate [import="./validate.fabro"]
+                exit [shape=Msquare]
+                start -> validate -> exit
+            }"#,
+            dir.path(),
+            None,
+        );
+
+        assert_eq!(
+            graph.nodes["validate.lint"]
+                .attrs
+                .get("prompt")
+                .and_then(AttrValue::as_str),
+            Some("Run {{ inputs.task }}")
+        );
+    }
+
+    #[test]
+    fn templated_import_path_poison_placeholder() {
+        let dir = tempfile::tempdir().unwrap();
+        let graph = apply_import(
+            r#"digraph Deploy {
+                start [shape=Mdiamond]
+                validate [import="./{{ inputs.workflow }}.fabro"]
+                exit [shape=Msquare]
+                start -> validate -> exit
+            }"#,
+            dir.path(),
+            None,
+        );
+
+        let error = graph.nodes["validate"]
+            .attrs
+            .get("import_error")
+            .and_then(AttrValue::as_str)
+            .expect("templated import path should poison placeholder");
+        assert!(
+            error.contains("templates are not supported in import references"),
+            "unexpected error: {error}"
         );
     }
 
@@ -1360,7 +1410,6 @@ mod tests {
         let graph = ImportTransform::new(
             dir.path().to_path_buf(),
             Arc::new(FilesystemFileResolver::new(None)),
-            HashMap::new(),
         )
         .apply(graph)
         .unwrap();

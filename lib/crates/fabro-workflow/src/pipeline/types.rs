@@ -41,8 +41,49 @@ pub struct Parsed {
 /// post-transform adjustments (e.g. goal override) before validation.
 #[non_exhaustive]
 pub struct Transformed {
-    pub graph:  Graph,
-    pub source: String,
+    pub graph:       Graph,
+    pub source:      String,
+    /// Diagnostics produced during the transform pass. Prepended to the
+    /// validation diagnostics so users see them before lint output.
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Lint rule name attached to diagnostics for undefined template variables.
+pub const TEMPLATE_UNDEFINED_VARIABLE_RULE: &str = "template_undefined_variable";
+
+/// Build a warning diagnostic describing an undefined template variable.
+/// Shared between the DOT-source render pass (`operations::create`) and the
+/// per-attribute render pass (`transforms::variable_expansion`).
+pub(crate) fn template_undefined_variable_diagnostic(
+    expression: Option<&str>,
+    line: Option<u32>,
+    node_id: Option<&str>,
+) -> Diagnostic {
+    let location = match (node_id, line) {
+        (Some(id), _) => format!(" in node `{id}`"),
+        (None, Some(l)) => format!(" at line {l}"),
+        (None, None) => String::new(),
+    };
+    let (name, message) = match expression {
+        Some(expr) => (
+            expr,
+            format!("undefined template variable `{expr}`{location}"),
+        ),
+        None => (
+            "<unknown>",
+            format!("undefined template variable{location}"),
+        ),
+    };
+    Diagnostic {
+        rule: TEMPLATE_UNDEFINED_VARIABLE_RULE.to_owned(),
+        severity: Severity::Warning,
+        message,
+        node_id: node_id.map(str::to_owned),
+        edge: None,
+        fix: Some(format!(
+            "bind `{name}` via `[run.inputs]` in workflow.toml, or pass `--input {name}=<value>`"
+        )),
+    }
 }
 
 /// Output of the VALIDATE phase. Always produced (even with errors).
@@ -77,12 +118,19 @@ impl Validated {
         &self.diagnostics
     }
 
-    /// Insert diagnostics at the front of the list. Used to surface
-    /// pre-structural-validation issues (e.g. template expansion warnings)
-    /// before the lint-rule output.
-    pub(crate) fn prepend_diagnostics(&mut self, mut diagnostics: Vec<Diagnostic>) {
-        diagnostics.append(&mut self.diagnostics);
-        self.diagnostics = diagnostics;
+    /// Promote diagnostics for one rule from warnings to errors. Rendering is
+    /// intentionally lenient; callers decide whether a diagnostic should block
+    /// the operation they are about to perform.
+    pub fn promote_rule_to_error(&mut self, rule: &str) {
+        for diagnostic in &mut self.diagnostics {
+            if diagnostic.rule == rule {
+                diagnostic.severity = Severity::Error;
+            }
+        }
+    }
+
+    pub fn promote_template_undefined_variables_to_errors(&mut self) {
+        self.promote_rule_to_error(TEMPLATE_UNDEFINED_VARIABLE_RULE);
     }
 
     /// True if any diagnostic has Error severity.

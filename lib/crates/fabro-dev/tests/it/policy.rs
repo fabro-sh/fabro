@@ -50,6 +50,26 @@ const CATALOG_BUILTIN_ALLOWED_PATH_FRAGMENTS: &[&str] = &[
     "/tests/policy.rs",
 ];
 
+const TEMPLATE_RENDER_ALLOWED_PATH_FRAGMENTS: &[&str] = &[
+    // The template crate owns the rendering API and its tests.
+    "lib/crates/fabro-template/src/lib.rs",
+    // Workflow-definition rendering must stay centralized here.
+    "lib/crates/fabro-workflow/src/transforms/variable_expansion.rs",
+    // Hook header/env interpolation is a separate system.
+    "lib/crates/fabro-hooks/src/executor.rs",
+    // This policy test names the forbidden patterns.
+    "/tests/it/policy.rs",
+];
+
+const TEMPLATE_RENDER_FORBIDDEN_PATTERNS: &[&str] = &[
+    "render_template(",
+    "render_lenient(",
+    "render_scan_template",
+    "render as render_template",
+    "render_lenient as",
+    "fabro_template::{",
+];
+
 #[test]
 fn bootstrap_catalog_references_stay_in_allowlist() {
     let violations = source_symbol_violations(
@@ -72,6 +92,23 @@ fn catalog_builtin_references_stay_in_allowlist() {
     assert!(
         violations.is_empty(),
         "Catalog::builtin() referenced from non-allowlisted production source files:\n{}\n\nRuntime code should use a resolved settings catalog via `Catalog::from_builtin_with_overrides(...)` or an injected `Arc<Catalog>`. If this is intentional test/bootstrap code, add the path fragment to CATALOG_BUILTIN_ALLOWED_PATH_FRAGMENTS in lib/crates/fabro-dev/tests/it/policy.rs.",
+        format_violations(violations),
+    );
+}
+
+#[test]
+fn workflow_template_rendering_call_sites_stay_in_allowlist() {
+    let mut violations = Vec::new();
+    for pattern in TEMPLATE_RENDER_FORBIDDEN_PATTERNS {
+        violations.extend(source_symbol_violations(
+            pattern,
+            TEMPLATE_RENDER_ALLOWED_PATH_FRAGMENTS,
+        ));
+    }
+
+    assert!(
+        violations.is_empty(),
+        "Workflow template rendering must go through TemplateTransform. Add an allowlist entry only for non-workflow interpolation with a reason:\n{}",
         format_violations(violations),
     );
 }

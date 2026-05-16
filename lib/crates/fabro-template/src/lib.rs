@@ -182,10 +182,16 @@ impl From<minijinja::Error> for TemplateError {
     }
 }
 
+/// Returns `true` when the string contains MiniJinja delimiter syntax.
+#[must_use]
+pub fn contains_template_syntax(template: &str) -> bool {
+    template.contains("{{") || template.contains("{%") || template.contains("{#")
+}
+
 /// Returns `true` when the string contains no MiniJinja delimiters and can
 /// be returned as-is without paying for a full template parse+render cycle.
 fn is_plain_text(template: &str) -> bool {
-    !template.contains("{{") && !template.contains("{%") && !template.contains("{#")
+    !contains_template_syntax(template)
 }
 
 pub fn render(template: &str, ctx: &TemplateContext) -> Result<String, TemplateError> {

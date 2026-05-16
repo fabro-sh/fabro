@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::convert::Infallible;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -8,6 +9,7 @@ use std::sync::{Arc as StdArc, Mutex as StdMutex};
 
 use axum::body::Body;
 use axum::http::{Method, Request, header};
+use axum::response::sse::{Event as SseEvent, Sse};
 use chrono::{Duration as ChronoDuration, Utc};
 use fabro_auth::{AuthCredential, AuthDetails};
 use fabro_config::ServerSettingsBuilder;
@@ -22,9 +24,11 @@ use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{
     AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
     InterviewQuestionRecord, Node, Outcome, QuestionType, RunBlobId, RunId, RunSpec,
-    SandboxProvider, SuccessReason, SystemActorKind, WorkflowSettings, fixtures,
+    SandboxProvider, SessionMessage, SuccessReason, SystemActorKind, WorkflowSettings, fixtures,
 };
 use fabro_util::check_report::CheckStatus;
+use futures_util::stream;
+use http_body_util::BodyExt as _;
 use httpmock::Method::{GET, POST};
 use httpmock::MockServer;
 use serde_json::json;
@@ -130,6 +134,36 @@ async fn body_json(body: Body) -> serde_json::Value {
     serde_json::from_slice(&bytes).unwrap()
 }
 
+async fn read_sse_until(body: &mut Body, expected_event: &str) -> String {
+    let mut sse_data = String::new();
+    for _ in 0..32 {
+        let frame = tokio::time::timeout(Duration::from_secs(2), body.frame())
+            .await
+            .unwrap_or_else(|_| panic!("timed out waiting for SSE event {expected_event}"))
+            .unwrap_or_else(|| panic!("SSE ended before event {expected_event}"))
+            .expect("SSE frame should be readable");
+        if let Some(data) = frame.data_ref() {
+            sse_data.push_str(&String::from_utf8_lossy(data));
+            if sse_events(&sse_data).iter().any(|event| {
+                event["event"]
+                    .as_str()
+                    .is_some_and(|name| name == expected_event)
+            }) {
+                return sse_data;
+            }
+        }
+    }
+    panic!("SSE event {expected_event} not found in {sse_data}");
+}
+
+fn sse_events(sse_data: &str) -> Vec<serde_json::Value> {
+    sse_data
+        .lines()
+        .filter_map(|line| line.strip_prefix("data:"))
+        .filter_map(|json| serde_json::from_str(json.trim()).ok())
+        .collect()
+}
+
 fn run_json_id(run: &serde_json::Value) -> Option<&str> {
     run["id"].as_str().or_else(|| run["run_id"].as_str())
 }
@@ -220,6 +254,39 @@ fn openai_responses_payload(text: &str) -> serde_json::Value {
             "output_tokens": 20
         }
     })
+}
+
+fn openai_stream_body(text: &str) -> String {
+    let created = json!({
+        "type": "response.created",
+        "response": {
+            "id": "resp_session",
+            "model": "gpt-5.4-mini"
+        }
+    });
+    let delta = json!({
+        "type": "response.output_text.delta",
+        "delta": text
+    });
+    let completed = json!({
+        "type": "response.completed",
+        "response": {
+            "id": "resp_session",
+            "model": "gpt-5.4-mini",
+            "status": "completed",
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "input_tokens_details": { "cached_tokens": 0 },
+                "output_tokens_details": { "reasoning_tokens": 0 }
+            }
+        }
+    });
+    format!(
+        "event: response.created\ndata: {created}\n\n\
+         event: response.output_text.delta\ndata: {delta}\n\n\
+         event: response.completed\ndata: {completed}\n\n"
+    )
 }
 
 macro_rules! assert_status {
@@ -2110,6 +2177,653 @@ async fn create_run(app: &Router, dot_source: &str) -> String {
     let response = app.clone().oneshot(req).await.unwrap();
     let body = body_json(response.into_body()).await;
     body["id"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn session_apis_create_list_replay_events_and_delete() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api("/sessions"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "title": "Investigate failure",
+                        "working_dir": "/tmp",
+                        "provider": "openai",
+                        "model": "gpt-5.4-mini",
+                        "permissions": "read-only"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let created = response_json!(create_response, StatusCode::CREATED).await;
+    let session_id = created["id"]
+        .as_str()
+        .expect("create session response should include id")
+        .to_string();
+    assert_eq!(created["status"], "idle");
+    assert_eq!(created["working_dir"], "/tmp");
+
+    let list_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api("/sessions"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let list = response_json!(list_response, StatusCode::OK).await;
+    assert_eq!(list["data"].as_array().unwrap().len(), 1);
+
+    let turns_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/sessions/{session_id}/turns")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let turns = response_json!(turns_response, StatusCode::OK).await;
+    assert!(turns["data"].as_array().unwrap().is_empty());
+
+    let replay_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/sessions/{session_id}/events?since_seq=1")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let replay = response_json!(replay_response, StatusCode::OK).await;
+    assert_eq!(replay["data"][0]["seq"], 1);
+    assert_eq!(replay["data"][0]["event"], "session.created");
+
+    let generated_client_replay_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/sessions/{session_id}/events?since_seq=1")))
+                .header(header::ACCEPT, "application/json,text/event-stream")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let generated_client_replay =
+        response_json!(generated_client_replay_response, StatusCode::OK).await;
+    assert_eq!(
+        generated_client_replay["data"][0]["event"],
+        "session.created"
+    );
+
+    let header_replay_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/sessions/{session_id}/events")))
+                .header("last-event-id", "1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let header_replay = response_json!(header_replay_response, StatusCode::OK).await;
+    assert!(
+        header_replay["data"]
+            .as_array()
+            .expect("events response should contain array")
+            .is_empty()
+    );
+
+    let delete_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(api(&format!("/sessions/{session_id}")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    checked_response!(delete_response, StatusCode::NO_CONTENT).await;
+
+    let get_deleted_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/sessions/{session_id}")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    checked_response!(get_deleted_response, StatusCode::NOT_FOUND).await;
+}
+
+#[tokio::test]
+async fn streaming_session_turn_persists_terminal_failure_event() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api("/sessions"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "working_dir": "/tmp",
+                        "provider": "openai",
+                        "model": "gpt-5.4-mini",
+                        "permissions": "read-only"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let created = response_json!(create_response, StatusCode::CREATED).await;
+    let session_id = created["id"].as_str().unwrap().to_string();
+
+    let stream_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/sessions/{session_id}/turns")))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"input": "hello"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stream_response.status(), StatusCode::OK);
+    let body = String::from_utf8(
+        to_bytes(stream_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(body.contains("turn.running"), "SSE body: {body}");
+    assert!(body.contains("turn.failed"), "SSE body: {body}");
+    assert!(
+        body.contains("LLM credentials not configured for provider 'openai'"),
+        "SSE body: {body}"
+    );
+
+    let turns_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/sessions/{session_id}/turns")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let turns = response_json!(turns_response, StatusCode::OK).await;
+    assert_eq!(turns["data"][0]["status"], "failed");
+
+    let events_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/sessions/{session_id}/events")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let events = response_json!(events_response, StatusCode::OK).await;
+    let event_names = events["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|event| event["event"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(event_names, vec![
+        "session.created",
+        "turn.running",
+        "turn.failed"
+    ]);
+
+    let turn_id = turns["data"][0]["id"].as_str().unwrap();
+    let interrupt_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!(
+                    "/sessions/{session_id}/turns/{turn_id}/interrupt"
+                )))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let interrupt_error = response_json!(interrupt_response, StatusCode::CONFLICT).await;
+    assert_eq!(
+        interrupt_error["errors"][0]["detail"],
+        "Turn is already terminal."
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn session_events_sse_replays_history_then_streams_live_events() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api("/sessions"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "working_dir": "/tmp",
+                        "provider": "openai",
+                        "model": "gpt-5.4-mini",
+                        "permissions": "read-only"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let created = response_json!(create_response, StatusCode::CREATED).await;
+    let session_id = created["id"].as_str().unwrap().to_string();
+
+    let events_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/sessions/{session_id}/events?since_seq=1")))
+                .header(header::ACCEPT, "text/event-stream")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(events_response.status(), StatusCode::OK);
+    assert!(
+        events_response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("text/event-stream")
+    );
+    let mut events_body = events_response.into_body();
+    let replay = read_sse_until(&mut events_body, "session.created").await;
+    assert_eq!(sse_events(&replay)[0]["event"], "session.created");
+
+    let stream_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/sessions/{session_id}/turns")))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"input": "hello"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stream_response.status(), StatusCode::OK);
+    let _ = to_bytes(stream_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+
+    let live = read_sse_until(&mut events_body, "turn.failed").await;
+    let event_names = sse_events(&live)
+        .into_iter()
+        .map(|event| event["event"].as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert!(event_names.contains(&"turn.running".to_string()));
+    assert!(event_names.contains(&"turn.failed".to_string()));
+}
+
+#[tokio::test]
+async fn streaming_session_turn_updates_runtime_context_without_copying_prior_history_to_turn() {
+    let llm = MockServer::start_async().await;
+    let response_mock = llm
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/v1/responses")
+                .header("authorization", "Bearer openai-key");
+            then.status(200)
+                .header("content-type", "text/event-stream")
+                .body(openai_stream_body("new answer"));
+        })
+        .await;
+    let openai_base_url = llm.url("/v1");
+    let state = test_app_state_with_env_lookup(
+        default_test_server_settings(),
+        RunLayer::default(),
+        5,
+        move |name| match name {
+            "OPENAI_BASE_URL" => Some(openai_base_url.clone()),
+            _ => None,
+        },
+    );
+    state
+        .vault
+        .write()
+        .await
+        .set(
+            "openai_codex",
+            &serde_json::to_string(&openai_api_key_credential("openai-key")).unwrap(),
+            SecretType::Credential,
+            None,
+        )
+        .unwrap();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api("/sessions"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "working_dir": "/tmp",
+                        "provider": "openai",
+                        "model": "gpt-5.4-mini",
+                        "permissions": "read-only"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let created = response_json!(create_response, StatusCode::CREATED).await;
+    let session_id = created["id"].as_str().unwrap().to_string();
+    let session_id_typed = session_id.parse().unwrap();
+    let now = Utc::now();
+    let mut record = state
+        .session_store()
+        .get_session(session_id_typed)
+        .await
+        .unwrap()
+        .unwrap();
+    record.runtime_context = vec![
+        SessionMessage::user("prior question", now),
+        SessionMessage::Assistant {
+            content:        "prior answer".to_string(),
+            tool_calls:     Vec::new(),
+            provider_parts: Vec::new(),
+            usage:          json!({ "input_tokens": 0, "output_tokens": 0 }),
+            response_id:    "prior_resp".to_string(),
+            timestamp:      now,
+        },
+    ];
+    state.session_store().update_session(record).await.unwrap();
+
+    let stream_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/sessions/{session_id}/turns")))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"input": "new question"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stream_response.status(), StatusCode::OK);
+    let body = String::from_utf8(
+        to_bytes(stream_response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(body.contains("turn.succeeded"), "SSE body: {body}");
+
+    let session_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/sessions/{session_id}")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let session = response_json!(session_response, StatusCode::OK).await;
+    let runtime_context = session["runtime_context"].as_array().unwrap();
+    assert_eq!(runtime_context.len(), 4);
+    assert!(
+        runtime_context
+            .iter()
+            .any(|message| message["content"] == "prior question")
+    );
+    assert!(
+        runtime_context
+            .iter()
+            .any(|message| message["content"] == "new answer")
+    );
+
+    let turns_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/sessions/{session_id}/turns")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let turns = response_json!(turns_response, StatusCode::OK).await;
+    let turn = &turns["data"][0];
+    assert_eq!(turn["input"], "new question");
+    assert_eq!(turn["output"], "new answer");
+    assert!(turn.get("messages").is_none());
+    response_mock.assert_async().await;
+}
+
+async fn hanging_openai_responses()
+-> Sse<impl futures_util::Stream<Item = Result<SseEvent, Infallible>>> {
+    let created = json!({
+        "type": "response.created",
+        "response": {
+            "id": "resp_hanging",
+            "model": "gpt-5.4-mini"
+        }
+    });
+    let first = stream::once(async move {
+        Ok(SseEvent::default()
+            .event("response.created")
+            .data(created.to_string()))
+    });
+    Sse::new(first.chain(stream::pending()))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn interrupt_active_session_turn_cancels_runtime_and_persists_interrupted() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let llm_addr = listener.local_addr().unwrap();
+    let llm_app = Router::new().route("/v1/responses", post(hanging_openai_responses));
+    let llm_handle = tokio::spawn(async move {
+        axum::serve(listener, llm_app).await.unwrap();
+    });
+    let openai_base_url = format!("http://{llm_addr}/v1");
+    let state = test_app_state_with_env_lookup(
+        default_test_server_settings(),
+        RunLayer::default(),
+        5,
+        move |name| match name {
+            "OPENAI_BASE_URL" => Some(openai_base_url.clone()),
+            _ => None,
+        },
+    );
+    state
+        .vault
+        .write()
+        .await
+        .set(
+            "openai_codex",
+            &serde_json::to_string(&openai_api_key_credential("openai-key")).unwrap(),
+            SecretType::Credential,
+            None,
+        )
+        .unwrap();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api("/sessions"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "working_dir": "/tmp",
+                        "provider": "openai",
+                        "model": "gpt-5.4-mini",
+                        "permissions": "read-only"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let created = response_json!(create_response, StatusCode::CREATED).await;
+    let session_id = created["id"].as_str().unwrap().to_string();
+
+    let stream_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/sessions/{session_id}/turns")))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"input": "please wait"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stream_response.status(), StatusCode::OK);
+    let mut stream_body = stream_response.into_body();
+    let running = read_sse_until(&mut stream_body, "turn.running").await;
+    let turn_id = sse_events(&running)
+        .into_iter()
+        .find_map(|event| {
+            (event["event"] == "turn.running")
+                .then(|| event["turn_id"].as_str().unwrap().to_string())
+        })
+        .expect("running event should include turn id");
+
+    let conflict_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/sessions/{session_id}/turns")))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"input": "second"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    checked_response!(conflict_response, StatusCode::CONFLICT).await;
+
+    let delete_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(api(&format!("/sessions/{session_id}")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let delete_error = response_json!(delete_response, StatusCode::CONFLICT).await;
+    assert_eq!(
+        delete_error["errors"][0]["detail"],
+        "Session has an active turn."
+    );
+
+    let interrupt_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!(
+                    "/sessions/{session_id}/turns/{turn_id}/interrupt"
+                )))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let interrupt_event = response_json!(interrupt_response, StatusCode::ACCEPTED).await;
+    assert_eq!(interrupt_event["event"], "turn.interrupt_requested");
+
+    let interrupted = read_sse_until(&mut stream_body, "turn.interrupted").await;
+    assert!(
+        sse_events(&interrupted)
+            .iter()
+            .any(|event| event["event"] == "turn.interrupted")
+    );
+
+    let turn_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/sessions/{session_id}/turns/{turn_id}")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let turn = response_json!(turn_response, StatusCode::OK).await;
+    assert_eq!(turn["status"], "interrupted");
+    llm_handle.abort();
 }
 
 #[tokio::test]

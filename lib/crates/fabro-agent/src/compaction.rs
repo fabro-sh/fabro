@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
 use fabro_llm::client::Client;
-use fabro_llm::types::{Message, Request};
+use fabro_llm::types::{Message as LlmMessage, Request};
 use tracing::debug;
 
 use crate::agent_profile::AgentProfile;
@@ -9,7 +9,7 @@ use crate::error::Error;
 use crate::event::Emitter;
 use crate::file_tracker::FileTracker;
 use crate::history::History;
-use crate::types::{AgentEvent, Turn};
+use crate::types::{AgentEvent, Message};
 
 /// Check whether the context window usage exceeds the configured threshold.
 /// Emits a `Warning` event with kind `"context_window"` when over the
@@ -106,8 +106,8 @@ function names, error messages, and exact values. Omit pleasantries and conversa
     let summary_request = Request {
         model:            provider_profile.model().to_string(),
         messages:         vec![
-            Message::system(summarization_prompt),
-            Message::user(format!(
+            LlmMessage::system(summarization_prompt),
+            LlmMessage::user(format!(
                 "Here is the conversation to summarize:\n\n{rendered}"
             )),
         ],
@@ -160,8 +160,8 @@ pub fn estimate_token_count(system_prompt: &str, history: &History) -> usize {
 
     for turn in history.turns() {
         match turn {
-            Turn::User { content, .. } => total_chars += content.len(),
-            Turn::Assistant {
+            Message::User { content, .. } => total_chars += content.len(),
+            Message::Assistant {
                 content,
                 tool_calls,
                 ..
@@ -175,12 +175,12 @@ pub fn estimate_token_count(system_prompt: &str, history: &History) -> usize {
                     total_chars += tc.arguments.to_string().len();
                 }
             }
-            Turn::ToolResults { results, .. } => {
+            Message::ToolResults { results, .. } => {
                 for r in results {
                     total_chars += r.content.to_string().len();
                 }
             }
-            Turn::System { content, .. } | Turn::Steering { content, .. } => {
+            Message::System { content, .. } | Message::Steering { content, .. } => {
                 total_chars += content.len();
             }
         }
@@ -191,14 +191,14 @@ pub fn estimate_token_count(system_prompt: &str, history: &History) -> usize {
 
 /// Render conversation turns into a human-readable summary format for the
 /// compaction LLM call.
-pub fn render_turns_for_summary(turns: &[Turn]) -> String {
+pub fn render_turns_for_summary(turns: &[Message]) -> String {
     let mut out = String::new();
     for turn in turns {
         match turn {
-            Turn::User { content, .. } => {
+            Message::User { content, .. } => {
                 let _ = writeln!(out, "User: {content}");
             }
-            Turn::Assistant {
+            Message::Assistant {
                 content,
                 tool_calls,
                 ..
@@ -216,7 +216,7 @@ pub fn render_turns_for_summary(turns: &[Turn]) -> String {
                     let _ = writeln!(out, "[Tool call: {}] {truncated}", tc.name);
                 }
             }
-            Turn::ToolResults { results, .. } => {
+            Message::ToolResults { results, .. } => {
                 for r in results {
                     let content_str = r.content.to_string();
                     let truncated = if content_str.len() > 500 {
@@ -230,10 +230,10 @@ pub fn render_turns_for_summary(turns: &[Turn]) -> String {
                     let _ = writeln!(out, "[Tool result: {}] {truncated}", r.tool_call_id);
                 }
             }
-            Turn::System { content, .. } => {
+            Message::System { content, .. } => {
                 let _ = writeln!(out, "System: {content}");
             }
-            Turn::Steering { content, .. } => {
+            Message::Steering { content, .. } => {
                 let _ = writeln!(out, "Steering: {content}");
             }
         }
@@ -252,16 +252,16 @@ mod tests {
     use crate::history::History;
     use crate::test_support::TestProfile;
     use crate::tool_registry::ToolRegistry;
-    use crate::types::Turn;
+    use crate::types::Message;
 
     #[test]
     fn render_turns_produces_labeled_text() {
         let turns = vec![
-            Turn::User {
+            Message::User {
                 content:   "Hello".into(),
                 timestamp: SystemTime::now(),
             },
-            Turn::Assistant {
+            Message::Assistant {
                 content:        "Let me check".into(),
                 tool_calls:     vec![ToolCall::new(
                     "c1",
@@ -273,7 +273,7 @@ mod tests {
                 response_id:    "resp_1".into(),
                 timestamp:      SystemTime::now(),
             },
-            Turn::ToolResults {
+            Message::ToolResults {
                 results:   vec![ToolResult {
                     tool_call_id:     "c1".into(),
                     content:          serde_json::json!("file contents here"),
@@ -296,7 +296,7 @@ mod tests {
     #[test]
     fn render_turns_truncates_long_tool_output() {
         let long_output = "x".repeat(1000);
-        let turns = vec![Turn::ToolResults {
+        let turns = vec![Message::ToolResults {
             results:   vec![ToolResult {
                 tool_call_id:     "c1".into(),
                 content:          serde_json::json!(long_output),
@@ -315,7 +315,7 @@ mod tests {
     #[test]
     fn estimate_token_count_basic() {
         let mut history = History::default();
-        history.push(Turn::User {
+        history.push(Message::User {
             content:   "Hello world".into(), // 11 chars
             timestamp: SystemTime::now(),
         });
@@ -337,7 +337,7 @@ mod tests {
     fn check_context_usage_above_threshold() {
         let mut history = History::default();
         // Push enough content to exceed a tiny context window
-        history.push(Turn::User {
+        history.push(Message::User {
             content:   "x".repeat(1000),
             timestamp: SystemTime::now(),
         });
