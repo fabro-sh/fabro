@@ -1,6 +1,7 @@
 [providers.gemini]
 display_name = "Gemini"
 adapter = "gemini"
+api_key_url = "https://aistudio.google.com/apikey"
 credentials = ["credential:gemini", "env:GEMINI_API_KEY", "env:GOOGLE_API_KEY"]
 priority = 80
 

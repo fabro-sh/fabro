@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString, IntoStaticStr};
 
 use crate::catalog::{Catalog, CatalogModelSettings};
-use crate::{Model, ModelCosts, Provider, ProviderId, adapter};
+use crate::{AdapterKind, Model, ModelCosts, ProviderId};
 
 const TOKENS_PER_MTOK: i128 = 1_000_000;
 const ANTHROPIC_CACHE_WRITE_5M_NUMERATOR: i64 = 5;
@@ -231,16 +231,12 @@ pub struct GeminiModelPricing {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "provider", rename_all = "snake_case")]
+#[serde(tag = "algorithm", rename_all = "snake_case")]
 pub enum ModelPricingPolicy {
+    #[serde(rename = "openai")]
     OpenAi(OpenAiModelPricing),
-    OpenAiCompatible(OpenAiModelPricing),
     Anthropic(AnthropicModelPricing),
     Gemini(GeminiModelPricing),
-    Kimi(OpenAiModelPricing),
-    Zai(OpenAiModelPricing),
-    Minimax(OpenAiModelPricing),
-    Inception(OpenAiModelPricing),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -271,65 +267,23 @@ pub struct GeminiBillingFacts {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "provider", rename_all = "snake_case")]
+#[serde(tag = "algorithm", rename_all = "snake_case")]
 pub enum ModelBillingFacts {
+    #[serde(rename = "openai")]
     OpenAi(OpenAiBillingFacts),
-    OpenAiCompatible(OpenAiBillingFacts),
     Anthropic(AnthropicBillingFacts),
     Gemini(GeminiBillingFacts),
-    Kimi(OpenAiBillingFacts),
-    Zai(OpenAiBillingFacts),
-    Minimax(OpenAiBillingFacts),
-    Inception(OpenAiBillingFacts),
 }
 
 impl ModelBillingFacts {
     #[must_use]
-    pub fn for_provider(provider: Provider) -> Self {
-        Self::for_builtin_provider(provider, &TokenCounts::default())
-    }
-
-    #[must_use]
-    pub fn for_provider_id(provider: &ProviderId, tokens: &TokenCounts) -> Self {
-        Provider::from_id(provider).map_or_else(
-            || Self::OpenAiCompatible(OpenAiBillingFacts::default()),
-            |provider| Self::for_builtin_provider(provider, tokens),
-        )
-    }
-
-    #[must_use]
-    pub fn for_provider_adapter(
-        provider: &ProviderId,
-        adapter_key: &str,
-        tokens: &TokenCounts,
-    ) -> Self {
-        if let Some(provider) = Provider::from_id(provider) {
-            return Self::for_builtin_provider(provider, tokens);
-        }
-
-        match adapter_key {
-            key if key == adapter::ANTHROPIC.key => {
-                Self::Anthropic(anthropic_billing_facts(tokens))
+    pub fn for_adapter(adapter: AdapterKind, tokens: &TokenCounts) -> Self {
+        match adapter {
+            AdapterKind::OpenAi | AdapterKind::OpenAiCompatible => {
+                Self::OpenAi(OpenAiBillingFacts::default())
             }
-            key if key == adapter::GEMINI.key => Self::Gemini(GeminiBillingFacts::default()),
-            key if key == adapter::OPENAI.key => Self::OpenAi(OpenAiBillingFacts::default()),
-            key if key == adapter::OPENAI_COMPATIBLE.key => {
-                Self::OpenAiCompatible(OpenAiBillingFacts::default())
-            }
-            _ => Self::OpenAiCompatible(OpenAiBillingFacts::default()),
-        }
-    }
-
-    fn for_builtin_provider(provider: Provider, tokens: &TokenCounts) -> Self {
-        match provider {
-            Provider::OpenAi => Self::OpenAi(OpenAiBillingFacts::default()),
-            Provider::OpenAiCompatible => Self::OpenAiCompatible(OpenAiBillingFacts::default()),
-            Provider::Anthropic => Self::Anthropic(anthropic_billing_facts(tokens)),
-            Provider::Gemini => Self::Gemini(GeminiBillingFacts::default()),
-            Provider::Kimi => Self::Kimi(OpenAiBillingFacts::default()),
-            Provider::Zai => Self::Zai(OpenAiBillingFacts::default()),
-            Provider::Minimax => Self::Minimax(OpenAiBillingFacts::default()),
-            Provider::Inception => Self::Inception(OpenAiBillingFacts::default()),
+            AdapterKind::Anthropic => Self::Anthropic(anthropic_billing_facts(tokens)),
+            AdapterKind::Gemini => Self::Gemini(GeminiBillingFacts::default()),
         }
     }
 }
@@ -467,7 +421,7 @@ impl Catalog {
         pricing_for_model_costs(
             model,
             provider.id.clone(),
-            provider.adapter.as_str(),
+            provider.adapter,
             model_ref.speed,
             &costs,
         )
@@ -478,13 +432,9 @@ impl Catalog {
         &self,
         model_ref: &ModelRef,
         tokens: &TokenCounts,
-    ) -> ModelBillingFacts {
-        self.provider(&model_ref.provider).map_or_else(
-            || ModelBillingFacts::for_provider_id(&model_ref.provider, tokens),
-            |provider| {
-                ModelBillingFacts::for_provider_adapter(&provider.id, &provider.adapter, tokens)
-            },
-        )
+    ) -> Option<ModelBillingFacts> {
+        self.provider(&model_ref.provider)
+            .map(|provider| ModelBillingFacts::for_adapter(provider.adapter, tokens))
     }
 }
 
@@ -530,28 +480,12 @@ impl Model {
             speed,
         }
     }
-
-    #[must_use]
-    pub fn pricing_for(&self, speed: Option<Speed>) -> Option<ModelPricing> {
-        if matches!(speed, Some(Speed::Fast)) {
-            return None;
-        }
-        let provider = self.builtin_provider()?;
-        let provider_id = provider.id();
-        pricing_for_model_costs(
-            self,
-            provider_id.clone(),
-            adapter::default_for_provider_id(&provider_id),
-            speed,
-            &self.costs,
-        )
-    }
 }
 
 fn pricing_for_model_costs(
     model: &Model,
     provider_id: ProviderId,
-    adapter_key: &str,
+    adapter: AdapterKind,
     speed: Option<Speed>,
     costs: &ModelCosts,
 ) -> Option<ModelPricing> {
@@ -559,8 +493,7 @@ fn pricing_for_model_costs(
     let output = costs.output_cost_per_mtok.map(PricePerMTok::from_usd)?;
     let cached_input = costs.cache_input_cost_per_mtok.map(PricePerMTok::from_usd);
 
-    let policy =
-        pricing_policy_for_provider_adapter(&provider_id, adapter_key, input, output, cached_input);
+    let policy = pricing_policy_for_adapter(adapter, input, output, cached_input);
     Some(ModelPricing {
         model: ModelRef {
             provider: provider_id,
@@ -571,91 +504,27 @@ fn pricing_for_model_costs(
     })
 }
 
-fn pricing_policy_for_provider_adapter(
-    provider_id: &ProviderId,
-    adapter_key: &str,
+fn pricing_policy_for_adapter(
+    adapter: AdapterKind,
     input: PricePerMTok,
     output: PricePerMTok,
     cached_input: Option<PricePerMTok>,
 ) -> ModelPricingPolicy {
-    if let Some(provider) = Provider::from_id(provider_id) {
-        return pricing_policy_for_builtin_provider(provider, input, output, cached_input);
-    }
-
-    match adapter_key {
-        key if key == adapter::ANTHROPIC.key => {
-            anthropic_pricing_policy(input, output, cached_input)
-        }
-        key if key == adapter::GEMINI.key => ModelPricingPolicy::Gemini(GeminiModelPricing {
+    match adapter {
+        AdapterKind::Anthropic => anthropic_pricing_policy(input, output, cached_input),
+        AdapterKind::Gemini => ModelPricingPolicy::Gemini(GeminiModelPricing {
             input,
             output,
             cached_input,
             storage: None,
         }),
-        key if key == adapter::OPENAI.key => ModelPricingPolicy::OpenAi(OpenAiModelPricing {
-            input,
-            cached_input,
-            output,
-        }),
-        key if key == adapter::OPENAI_COMPATIBLE.key => {
-            ModelPricingPolicy::OpenAiCompatible(OpenAiModelPricing {
+        AdapterKind::OpenAi | AdapterKind::OpenAiCompatible => {
+            ModelPricingPolicy::OpenAi(OpenAiModelPricing {
                 input,
                 cached_input,
                 output,
             })
         }
-        _ => ModelPricingPolicy::OpenAiCompatible(OpenAiModelPricing {
-            input,
-            cached_input,
-            output,
-        }),
-    }
-}
-
-fn pricing_policy_for_builtin_provider(
-    provider: Provider,
-    input: PricePerMTok,
-    output: PricePerMTok,
-    cached_input: Option<PricePerMTok>,
-) -> ModelPricingPolicy {
-    match provider {
-        Provider::OpenAi => ModelPricingPolicy::OpenAi(OpenAiModelPricing {
-            input,
-            cached_input,
-            output,
-        }),
-        Provider::OpenAiCompatible => ModelPricingPolicy::OpenAiCompatible(OpenAiModelPricing {
-            input,
-            cached_input,
-            output,
-        }),
-        Provider::Anthropic => anthropic_pricing_policy(input, output, cached_input),
-        Provider::Gemini => ModelPricingPolicy::Gemini(GeminiModelPricing {
-            input,
-            output,
-            cached_input,
-            storage: None,
-        }),
-        Provider::Kimi => ModelPricingPolicy::Kimi(OpenAiModelPricing {
-            input,
-            cached_input,
-            output,
-        }),
-        Provider::Zai => ModelPricingPolicy::Zai(OpenAiModelPricing {
-            input,
-            cached_input,
-            output,
-        }),
-        Provider::Minimax => ModelPricingPolicy::Minimax(OpenAiModelPricing {
-            input,
-            cached_input,
-            output,
-        }),
-        Provider::Inception => ModelPricingPolicy::Inception(OpenAiModelPricing {
-            input,
-            cached_input,
-            output,
-        }),
     }
 }
 
@@ -687,15 +556,7 @@ impl ModelPricing {
         }
 
         let bill = match (&self.policy, &input.facts) {
-            (ModelPricingPolicy::OpenAi(pricing), ModelBillingFacts::OpenAi(_))
-            | (
-                ModelPricingPolicy::OpenAiCompatible(pricing),
-                ModelBillingFacts::OpenAiCompatible(_),
-            )
-            | (ModelPricingPolicy::Kimi(pricing), ModelBillingFacts::Kimi(_))
-            | (ModelPricingPolicy::Zai(pricing), ModelBillingFacts::Zai(_))
-            | (ModelPricingPolicy::Minimax(pricing), ModelBillingFacts::Minimax(_))
-            | (ModelPricingPolicy::Inception(pricing), ModelBillingFacts::Inception(_)) => {
+            (ModelPricingPolicy::OpenAi(pricing), ModelBillingFacts::OpenAi(_)) => {
                 Some(bill_openai_like(pricing, &input.usage.tokens))
             }
             (ModelPricingPolicy::Anthropic(pricing), ModelBillingFacts::Anthropic(facts)) => {
@@ -787,8 +648,8 @@ fn bill_gemini(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Catalog;
     use crate::catalog::LlmCatalogSettings;
+    use crate::{Catalog, ProviderId};
 
     fn catalog_from_toml(source: &str) -> Catalog {
         let settings: LlmCatalogSettings =
@@ -805,7 +666,7 @@ mod tests {
             input: ModelBillingInput {
                 usage: ModelUsage {
                     model:  ModelRef {
-                        provider: Provider::OpenAi.id(),
+                        provider: ProviderId::openai(),
                         model_id: "gpt-5.4".to_string(),
                         speed:    None,
                     },
@@ -940,7 +801,7 @@ mod tests {
     fn openai_pricing_bills_cached_input_and_reasoning_output() {
         let pricing = ModelPricing {
             model:  ModelRef {
-                provider: Provider::OpenAi.id(),
+                provider: ProviderId::openai(),
                 model_id: "gpt-5.4".to_string(),
                 speed:    None,
             },
@@ -977,7 +838,7 @@ mod tests {
     fn catalog_pricing_uses_speed_cost_overrides() {
         let pricing = Catalog::builtin()
             .pricing_for(&ModelRef {
-                provider: Provider::Anthropic.id(),
+                provider: ProviderId::anthropic(),
                 model_id: "claude-opus-4-6".to_string(),
                 speed:    Some(Speed::Fast),
             })
@@ -987,7 +848,7 @@ mod tests {
             panic!("expected anthropic pricing");
         };
 
-        assert_eq!(pricing.model.provider, Provider::Anthropic.id());
+        assert_eq!(pricing.model.provider, ProviderId::anthropic());
         assert_eq!(pricing.model.model_id, "claude-opus-4-6");
         assert_eq!(pricing.model.speed, Some(Speed::Fast));
         assert_eq!(anthropic.input.usd_micros, 30_000_000);
@@ -1001,7 +862,7 @@ mod tests {
     fn catalog_pricing_standard_speed_uses_base_costs() {
         let pricing = Catalog::builtin()
             .pricing_for(&ModelRef {
-                provider: Provider::Anthropic.id(),
+                provider: ProviderId::anthropic(),
                 model_id: "claude-opus-4-6".to_string(),
                 speed:    Some(Speed::Standard),
             })
@@ -1104,8 +965,8 @@ cache_input_cost_per_mtok = 0.1
             })
             .unwrap();
 
-        let ModelPricingPolicy::OpenAiCompatible(openai_like) = pricing.policy else {
-            panic!("expected openai-compatible adapter pricing");
+        let ModelPricingPolicy::OpenAi(openai_like) = pricing.policy else {
+            panic!("expected OpenAI billing algorithm for OpenAI-compatible adapter");
         };
         assert_eq!(pricing.model.provider, ProviderId::new("proxy"));
         assert_eq!(openai_like.input.usd_micros, 1_000_000);
@@ -1177,7 +1038,7 @@ output_cost_per_mtok = 2.0
         assert!(
             Catalog::builtin()
                 .pricing_for(&ModelRef {
-                    provider: Provider::Anthropic.id(),
+                    provider: ProviderId::anthropic(),
                     model_id: "unknown".to_string(),
                     speed:    None,
                 })
@@ -1186,7 +1047,7 @@ output_cost_per_mtok = 2.0
         assert!(
             Catalog::builtin()
                 .pricing_for(&ModelRef {
-                    provider: Provider::OpenAi.id(),
+                    provider: ProviderId::openai(),
                     model_id: "gpt-5.4".to_string(),
                     speed:    Some(Speed::Fast),
                 })
@@ -1198,7 +1059,7 @@ output_cost_per_mtok = 2.0
     fn anthropic_billing_supports_distinct_cache_write_buckets() {
         let pricing = ModelPricing {
             model:  ModelRef {
-                provider: Provider::Anthropic.id(),
+                provider: ProviderId::anthropic(),
                 model_id: "claude-opus-4-6".to_string(),
                 speed:    Some(Speed::Fast),
             },
@@ -1244,7 +1105,7 @@ output_cost_per_mtok = 2.0
     fn gemini_billing_requires_storage_pricing_when_storage_facts_exist() {
         let pricing = ModelPricing {
             model:  ModelRef {
-                provider: Provider::Gemini.id(),
+                provider: ProviderId::gemini(),
                 model_id: "gemini-3.1-pro-preview".to_string(),
                 speed:    None,
             },
@@ -1303,5 +1164,64 @@ output_cost_per_mtok = 2.0
             serde_json::to_value(OpenAiBillingFacts::default()).unwrap(),
             serde_json::json!({})
         );
+    }
+
+    #[test]
+    fn pricing_policy_serializes_with_algorithm_tag() {
+        let policy = ModelPricingPolicy::OpenAi(OpenAiModelPricing {
+            input:        PricePerMTok { usd_micros: 1 },
+            cached_input: None,
+            output:       PricePerMTok { usd_micros: 2 },
+        });
+
+        assert_eq!(
+            serde_json::to_value(policy).unwrap(),
+            serde_json::json!({
+                "algorithm": "openai",
+                "input": { "usd_micros": 1 },
+                "cached_input": null,
+                "output": { "usd_micros": 2 }
+            })
+        );
+    }
+
+    #[test]
+    fn old_provider_tagged_billing_facts_are_rejected() {
+        let error = serde_json::from_value::<ModelBillingFacts>(serde_json::json!({
+            "provider": "openai"
+        }))
+        .unwrap_err();
+        assert!(error.to_string().contains("algorithm"));
+    }
+
+    #[test]
+    fn old_provider_tagged_pricing_policy_is_rejected() {
+        let error =
+            serde_json::from_value::<ModelPricingPolicy>(openai_pricing_json("provider", "kimi"))
+                .unwrap_err();
+        assert!(error.to_string().contains("algorithm"));
+    }
+
+    #[test]
+    fn openai_compatible_adapter_uses_openai_billing_algorithm() {
+        let facts =
+            ModelBillingFacts::for_adapter(AdapterKind::OpenAiCompatible, &TokenCounts::default());
+        assert_eq!(
+            facts,
+            ModelBillingFacts::OpenAi(OpenAiBillingFacts::default())
+        );
+    }
+
+    fn openai_pricing_json(tag: &str, tag_value: &str) -> serde_json::Value {
+        let mut value = serde_json::json!({
+            "input": { "usd_micros": 1 },
+            "cached_input": null,
+            "output": { "usd_micros": 2 }
+        });
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert(tag.to_string(), tag_value.into());
+        value
     }
 }

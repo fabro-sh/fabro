@@ -2,12 +2,12 @@ use std::any::{TypeId, type_name};
 
 use fabro_api::types::{
     Conclusion as ApiConclusion, ExecOutputTail as ApiExecOutputTail,
-    FailureCategory as ApiFailureCategory, FailureSignature as ApiFailureSignature,
-    RunFailure as ApiRunFailure,
+    FailureCategory as ApiFailureCategory, FailureDetail as ApiFailureDetail,
+    FailureSignature as ApiFailureSignature, RunFailure as ApiRunFailure,
 };
 use fabro_types::{
-    Conclusion, ExecOutputTail, FailureCategory, FailureReason, FailureSignature, RunFailure,
-    StageOutcome,
+    Conclusion, ExecOutputTail, FailureCategory, FailureDetail, FailureReason, FailureSignature,
+    RunFailure, StageOutcome,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 fn run_failure_family_reuses_domain_types() {
     assert_same_type::<ApiConclusion, Conclusion>();
     assert_same_type::<ApiRunFailure, RunFailure>();
+    assert_same_type::<ApiFailureDetail, FailureDetail>();
     assert_same_type::<ApiFailureCategory, FailureCategory>();
     assert_same_type::<ApiFailureSignature, FailureSignature>();
     assert_same_type::<ApiExecOutputTail, ExecOutputTail>();
@@ -25,28 +26,35 @@ fn run_failure_family_reuses_domain_types() {
 fn run_failure_json_matches_openapi_shape() {
     assert_json(
         RunFailure {
-            message:          "Failed to initialize sandbox".to_string(),
-            causes:           vec!["connection refused".to_string()],
-            reason:           FailureReason::SandboxInitFailed,
-            category:         FailureCategory::TransientInfra,
-            system_actor:     None,
-            signature:        Some(FailureSignature("init|transient_infra|docker".to_string())),
-            exec_output_tail: Some(ExecOutputTail {
-                stdout:           None,
-                stderr:           Some("last stderr line".to_string()),
-                stdout_truncated: false,
-                stderr_truncated: true,
-            }),
+            reason: FailureReason::SandboxInitFailed,
+            detail: {
+                let mut detail = FailureDetail::new(
+                    "Failed to initialize sandbox",
+                    FailureCategory::TransientInfra,
+                );
+                detail.causes = vec!["connection refused".to_string()];
+                detail.signature =
+                    Some(FailureSignature("init|transient_infra|docker".to_string()));
+                detail.exec_output_tail = Some(ExecOutputTail {
+                    stdout:           None,
+                    stderr:           Some("last stderr line".to_string()),
+                    stdout_truncated: false,
+                    stderr_truncated: true,
+                });
+                detail
+            },
         },
         json!({
-            "message": "Failed to initialize sandbox",
-            "causes": ["connection refused"],
             "reason": "sandbox_init_failed",
-            "category": "transient_infra",
-            "signature": "init|transient_infra|docker",
-            "exec_output_tail": {
-                "stderr": "last stderr line",
-                "stderr_truncated": true
+            "detail": {
+                "message": "Failed to initialize sandbox",
+                "causes": ["connection refused"],
+                "category": "transient_infra",
+                "signature": "init|transient_infra|docker",
+                "exec_output_tail": {
+                    "stderr": "last stderr line",
+                    "stderr_truncated": true
+                }
             }
         }),
     );
@@ -64,13 +72,8 @@ fn conclusion_json_uses_failure_object() {
             },
             duration_ms:          42,
             failure:              Some(RunFailure {
-                message:          "boom".to_string(),
-                causes:           Vec::new(),
-                reason:           FailureReason::WorkflowError,
-                category:         FailureCategory::Deterministic,
-                system_actor:     None,
-                signature:        None,
-                exec_output_tail: None,
+                reason: FailureReason::WorkflowError,
+                detail: FailureDetail::new("boom", FailureCategory::Deterministic),
             }),
             final_git_commit_sha: None,
             stages:               Vec::new(),
@@ -83,9 +86,11 @@ fn conclusion_json_uses_failure_object() {
             "status": "failed",
             "duration_ms": 42,
             "failure": {
-                "message": "boom",
                 "reason": "workflow_error",
-                "category": "deterministic"
+                "detail": {
+                    "message": "boom",
+                    "category": "deterministic"
+                }
             },
             "total_retries": 0,
             "diff": {}

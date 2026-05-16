@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use fabro_model::Provider;
+use fabro_model::AgentProfileKind;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
@@ -13,22 +13,15 @@ pub async fn discover_memory(
     env: &dyn Sandbox,
     git_root: &str,
     working_dir: &str,
-    provider: Provider,
+    profile_kind: AgentProfileKind,
     cancel_token: &CancellationToken,
 ) -> Result<Vec<String>, Error> {
     let directories = build_directory_walk(git_root, working_dir);
 
-    let candidate_filenames: Vec<&str> = match provider {
-        Provider::Anthropic => vec!["AGENTS.md", "CLAUDE.md"],
-        Provider::OpenAi
-        | Provider::Kimi
-        | Provider::Zai
-        | Provider::Minimax
-        | Provider::Inception
-        | Provider::OpenAiCompatible => {
-            vec!["AGENTS.md", ".codex/instructions.md"]
-        }
-        Provider::Gemini => vec!["AGENTS.md", "GEMINI.md"],
+    let candidate_filenames: Vec<&str> = match profile_kind {
+        AgentProfileKind::Anthropic => vec!["AGENTS.md", "CLAUDE.md"],
+        AgentProfileKind::OpenAi => vec!["AGENTS.md", ".codex/instructions.md"],
+        AgentProfileKind::Gemini => vec!["AGENTS.md", "GEMINI.md"],
     };
 
     let mut results = Vec::new();
@@ -145,7 +138,7 @@ mod tests {
             env.as_ref(),
             "/repo",
             "/repo",
-            Provider::Anthropic,
+            AgentProfileKind::Anthropic,
             &CancellationToken::new(),
         )
         .await
@@ -170,7 +163,7 @@ mod tests {
             env.as_ref(),
             "/repo",
             "/repo",
-            Provider::Anthropic,
+            AgentProfileKind::Anthropic,
             &CancellationToken::new(),
         )
         .await
@@ -187,7 +180,7 @@ mod tests {
             env.as_ref(),
             "/repo",
             "/repo",
-            Provider::OpenAi,
+            AgentProfileKind::OpenAi,
             &CancellationToken::new(),
         )
         .await
@@ -204,7 +197,7 @@ mod tests {
             env.as_ref(),
             "/repo",
             "/repo",
-            Provider::Gemini,
+            AgentProfileKind::Gemini,
             &CancellationToken::new(),
         )
         .await
@@ -231,7 +224,7 @@ mod tests {
             env.as_ref(),
             "/repo",
             "/repo",
-            Provider::Anthropic,
+            AgentProfileKind::Anthropic,
             &CancellationToken::new(),
         )
         .await
@@ -256,7 +249,7 @@ mod tests {
             env.as_ref(),
             "/repo",
             "/repo",
-            Provider::Anthropic,
+            AgentProfileKind::Anthropic,
             &CancellationToken::new(),
         )
         .await
@@ -278,7 +271,7 @@ mod tests {
             env.as_ref(),
             "/repo",
             "/repo/src",
-            Provider::Anthropic,
+            AgentProfileKind::Anthropic,
             &CancellationToken::new(),
         )
         .await
@@ -302,7 +295,7 @@ mod tests {
             env.as_ref(),
             "/repo",
             "/repo/src/app",
-            Provider::Anthropic,
+            AgentProfileKind::Anthropic,
             &CancellationToken::new(),
         )
         .await

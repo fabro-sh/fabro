@@ -47,6 +47,9 @@ const RUN_SUMMARY_EVENTS = new Set([
   "run.archived",
   "run.unarchived",
   "run.title.updated",
+  "pull_request.created",
+  "pull_request.linked",
+  "pull_request.unlinked",
 ]);
 const STAGE_EVENTS = new Set([
   "stage.started",

@@ -40,8 +40,7 @@ fn model_json(id: &str, provider: &str, configured: bool) -> serde_json::Value {
         "features": {
             "tools": true,
             "vision": false,
-            "reasoning": false,
-            "effort": false
+            "reasoning": false
         },
         "costs": {
             "input_cost_per_mtok": 1.0,
@@ -267,7 +266,7 @@ fn model_test_skipped_footer_sources_from_listing() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Skipped 1 model(s) (no credentials: OpenAI)"));
+    assert!(stderr.contains("Skipped 1 model(s) (no credentials: openai)"));
 }
 
 #[test]

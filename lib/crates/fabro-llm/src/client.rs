@@ -82,15 +82,7 @@ impl Client {
                     source:  None,
                 });
             };
-            let Some(factory) = factory_for(&provider.adapter) else {
-                return Err(Error::Configuration {
-                    message: format!(
-                        "Provider \"{provider_id}\" uses unsupported adapter \"{}\"",
-                        provider.adapter
-                    ),
-                    source:  None,
-                });
-            };
+            let factory = factory_for(provider.adapter);
 
             let adapter = factory(AdapterConfig {
                 provider_id:   provider.id.to_string(),
@@ -352,6 +344,7 @@ pub(crate) fn auth_value(auth_header: &ApiKeyHeader) -> String {
 mod tests {
     use async_trait::async_trait;
     use fabro_auth::{CredentialSource, ResolvedCredentials};
+    use fabro_model::ProviderId;
     use fabro_model::catalog::LlmCatalogSettings;
     use futures::stream;
 
@@ -525,8 +518,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_rejects_unsupported_reasoning_effort_before_dispatch() {
-        let catalog =
-            Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap());
+        let catalog = Arc::new(Catalog::from_builtin().unwrap());
         let mut client = Client::new(HashMap::new(), None, vec![]);
         client.catalog = Some(Arc::clone(&catalog));
         client
@@ -552,8 +544,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_rejects_unsupported_speed_before_dispatch() {
-        let catalog =
-            Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap());
+        let catalog = Arc::new(Catalog::from_builtin().unwrap());
         let mut client = Client::new(HashMap::new(), None, vec![]);
         client.catalog = Some(Arc::clone(&catalog));
         client
@@ -579,8 +570,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_accepts_standard_speed_without_catalog_declaration() {
-        let catalog =
-            Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap());
+        let catalog = Arc::new(Catalog::from_builtin().unwrap());
         let mut client = Client::new(HashMap::new(), None, vec![]);
         client.catalog = Some(Arc::clone(&catalog));
         client
@@ -600,8 +590,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_skips_control_validation_for_unknown_model_passthrough() {
-        let catalog =
-            Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap());
+        let catalog = Arc::new(Catalog::from_builtin().unwrap());
         let mut client = Client::new(HashMap::new(), None, vec![]);
         client.catalog = Some(Arc::clone(&catalog));
         client
@@ -622,8 +611,7 @@ mod tests {
 
     #[tokio::test]
     async fn stream_rejects_unsupported_speed_before_dispatch() {
-        let catalog =
-            Arc::new(Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap());
+        let catalog = Arc::new(Catalog::from_builtin().unwrap());
         let mut client = Client::new(HashMap::new(), None, vec![]);
         client.catalog = Some(Arc::clone(&catalog));
         client
@@ -655,7 +643,7 @@ mod tests {
         let client = Client::from_credentials(
             vec![
                 ApiCredential {
-                    provider:      fabro_model::Provider::Anthropic.id(),
+                    provider:      ProviderId::anthropic(),
                     auth_header:   Some(ApiKeyHeader::Custom {
                         name:  "x-api-key".to_string(),
                         value: "anthropic-key".to_string(),
@@ -667,7 +655,7 @@ mod tests {
                     project_id:    None,
                 },
                 ApiCredential {
-                    provider:      fabro_model::Provider::OpenAi.id(),
+                    provider:      ProviderId::openai(),
                     auth_header:   Some(ApiKeyHeader::Bearer("openai-key".to_string())),
                     extra_headers: HashMap::new(),
                     base_url:      None,
@@ -688,11 +676,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn from_credentials_supports_openai_compatible_provider_constants() {
+    async fn from_credentials_supports_builtin_openai_compatible_providers() {
         let catalog = catalog_with("");
         let client = Client::from_credentials(
             vec![ApiCredential {
-                provider:      fabro_model::Provider::Kimi.id(),
+                provider:      ProviderId::new("kimi"),
                 auth_header:   Some(ApiKeyHeader::Bearer("kimi-key".to_string())),
                 extra_headers: HashMap::new(),
                 base_url:      None,
@@ -742,7 +730,7 @@ mod tests {
     async fn from_source_registers_provider_from_resolved_credentials() {
         let source = StubSource {
             credentials: vec![ApiCredential {
-                provider:      fabro_model::Provider::Anthropic.id(),
+                provider:      ProviderId::anthropic(),
                 auth_header:   Some(ApiKeyHeader::Custom {
                     name:  "x-api-key".to_string(),
                     value: "anthropic-key".to_string(),
@@ -785,7 +773,6 @@ context_window = 128000
 tools = true
 vision = false
 reasoning = false
-effort = false
 "#,
         );
 
@@ -833,7 +820,6 @@ context_window = 128000
 tools = true
 vision = false
 reasoning = false
-effort = false
 "#,
         );
 
@@ -884,7 +870,7 @@ context_window = 200000
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 "#,
         );
 

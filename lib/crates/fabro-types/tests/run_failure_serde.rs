@@ -1,7 +1,7 @@
 use fabro_types::run_event::run::RunFailedProps;
 use fabro_types::{
-    Conclusion, EventBody, ExecOutputTail, FailureCategory, FailureReason, FailureSignature,
-    RunDiff, RunFailure, StageOutcome, SystemActorKind,
+    Conclusion, EventBody, ExecOutputTail, FailureCategory, FailureDetail, FailureReason,
+    FailureSignature, RunDiff, RunFailure, StageOutcome, SystemActorKind,
 };
 use serde_json::json;
 
@@ -9,23 +9,28 @@ use serde_json::json;
 fn run_failed_serializes_nested_failure_contract() {
     let body = EventBody::RunFailed(RunFailedProps {
         failure:              RunFailure {
-            message:          "Failed to initialize sandbox".to_string(),
-            causes:           vec![
-                "Failed to pull Docker image buildpack-deps:noble".to_string(),
-                "connection refused".to_string(),
-            ],
-            reason:           FailureReason::SandboxInitFailed,
-            category:         FailureCategory::TransientInfra,
-            system_actor:     Some(SystemActorKind::Engine),
-            signature:        Some(FailureSignature(
-                "init|transient_infra|docker-pull".to_string(),
-            )),
-            exec_output_tail: Some(ExecOutputTail {
-                stdout:           Some("last stdout line".to_string()),
-                stderr:           Some("last stderr line".to_string()),
-                stdout_truncated: false,
-                stderr_truncated: true,
-            }),
+            reason: FailureReason::SandboxInitFailed,
+            detail: {
+                let mut detail = FailureDetail::new(
+                    "Failed to initialize sandbox",
+                    FailureCategory::TransientInfra,
+                );
+                detail.causes = vec![
+                    "Failed to pull Docker image buildpack-deps:noble".to_string(),
+                    "connection refused".to_string(),
+                ];
+                detail.system_actor = Some(SystemActorKind::Engine);
+                detail.signature = Some(FailureSignature(
+                    "init|transient_infra|docker-pull".to_string(),
+                ));
+                detail.exec_output_tail = Some(ExecOutputTail {
+                    stdout:           Some("last stdout line".to_string()),
+                    stderr:           Some("last stderr line".to_string()),
+                    stdout_truncated: false,
+                    stderr_truncated: true,
+                });
+                detail
+            },
         },
         duration_ms:          42,
         final_git_commit_sha: Some("abc123".to_string()),
@@ -41,19 +46,21 @@ fn run_failed_serializes_nested_failure_contract() {
         value["properties"],
         json!({
             "failure": {
-                "message": "Failed to initialize sandbox",
-                "causes": [
-                    "Failed to pull Docker image buildpack-deps:noble",
-                    "connection refused"
-                ],
                 "reason": "sandbox_init_failed",
-                "category": "transient_infra",
-                "system_actor": "engine",
-                "signature": "init|transient_infra|docker-pull",
-                "exec_output_tail": {
-                    "stdout": "last stdout line",
-                    "stderr": "last stderr line",
-                    "stderr_truncated": true
+                "detail": {
+                    "message": "Failed to initialize sandbox",
+                    "causes": [
+                        "Failed to pull Docker image buildpack-deps:noble",
+                        "connection refused"
+                    ],
+                    "category": "transient_infra",
+                    "system_actor": "engine",
+                    "signature": "init|transient_infra|docker-pull",
+                    "exec_output_tail": {
+                        "stdout": "last stdout line",
+                        "stderr": "last stderr line",
+                        "stderr_truncated": true
+                    }
                 }
             },
             "duration_ms": 42,
@@ -71,13 +78,8 @@ fn run_failed_serializes_nested_failure_contract() {
 fn run_failed_omits_empty_failure_optional_fields() {
     let body = EventBody::RunFailed(RunFailedProps {
         failure:              RunFailure {
-            message:          "boom".to_string(),
-            causes:           Vec::new(),
-            reason:           FailureReason::WorkflowError,
-            category:         FailureCategory::Deterministic,
-            system_actor:     None,
-            signature:        None,
-            exec_output_tail: None,
+            reason: FailureReason::WorkflowError,
+            detail: FailureDetail::new("boom", FailureCategory::Deterministic),
         },
         duration_ms:          1,
         final_git_commit_sha: None,
@@ -92,9 +94,11 @@ fn run_failed_omits_empty_failure_optional_fields() {
         value["properties"],
         json!({
             "failure": {
-                "message": "boom",
                 "reason": "workflow_error",
-                "category": "deterministic"
+                "detail": {
+                    "message": "boom",
+                    "category": "deterministic"
+                }
             },
             "duration_ms": 1
         })
@@ -112,13 +116,12 @@ fn conclusion_serializes_rich_failure() {
         },
         duration_ms:          42,
         failure:              Some(RunFailure {
-            message:          "run failed".to_string(),
-            causes:           vec!["leaf cause".to_string()],
-            reason:           FailureReason::WorkflowError,
-            category:         FailureCategory::Deterministic,
-            system_actor:     None,
-            signature:        None,
-            exec_output_tail: None,
+            reason: FailureReason::WorkflowError,
+            detail: {
+                let mut detail = FailureDetail::new("run failed", FailureCategory::Deterministic);
+                detail.causes = vec!["leaf cause".to_string()];
+                detail
+            },
         }),
         final_git_commit_sha: None,
         stages:               Vec::new(),
@@ -129,7 +132,7 @@ fn conclusion_serializes_rich_failure() {
 
     let value = serde_json::to_value(&conclusion).expect("conclusion should serialize");
 
-    assert_eq!(value["failure"]["message"], "run failed");
-    assert_eq!(value["failure"]["causes"], json!(["leaf cause"]));
+    assert_eq!(value["failure"]["detail"]["message"], "run failed");
+    assert_eq!(value["failure"]["detail"]["causes"], json!(["leaf cause"]));
     assert!(value.get("failure_reason").is_none());
 }

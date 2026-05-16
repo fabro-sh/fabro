@@ -22,7 +22,7 @@ pub(super) async fn create_command(args: PrCreateArgs, base_ctx: &CommandContext
     if ctx.json_output() {
         print_json_pretty(&record)?;
     } else {
-        fabro_util::printout!(ctx.printer(), "{}", record.html_url);
+        fabro_util::printout!(ctx.printer(), "{}", record.html_url());
     }
 
     Ok(())

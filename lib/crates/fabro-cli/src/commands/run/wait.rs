@@ -135,8 +135,8 @@ fn print_human_output(
 #[cfg(test)]
 mod tests {
     use fabro_types::{
-        BilledTokenCounts, FailureCategory, FailureReason, RunDiff, RunFailure, RunStatus,
-        StageOutcome, SuccessReason, fixtures,
+        BilledTokenCounts, FailureCategory, FailureDetail, FailureReason, RunDiff, RunFailure,
+        RunStatus, StageOutcome, SuccessReason, fixtures,
     };
     use fabro_workflow::records::Conclusion;
 
@@ -213,13 +213,8 @@ mod tests {
             },
             duration_ms:          500,
             failure:              Some(RunFailure {
-                message:          "error".into(),
-                causes:           Vec::new(),
-                reason:           FailureReason::WorkflowError,
-                category:         FailureCategory::Deterministic,
-                system_actor:     None,
-                signature:        None,
-                exec_output_tail: None,
+                reason: FailureReason::WorkflowError,
+                detail: FailureDetail::new("error", FailureCategory::Deterministic),
             }),
             final_git_commit_sha: None,
             stages:               vec![],

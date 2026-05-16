@@ -13,25 +13,18 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { PullRequestDetails } from './pull-request-details';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { PullRequestLink } from './pull-request-link';
 
 /**
- * Persisted record of a pull request created for a run.
+ * Stored pull request link plus optional live GitHub details.
  */
 export interface PullRequest {
-    'provider': PullRequestProviderEnum;
-    'html_url': string;
-    'number': number;
-    'owner': string;
-    'repo': string;
-    'base_branch': string;
-    'head_branch': string;
-    'title': string;
+    'link': PullRequestLink;
+    'details'?: PullRequestDetails | null;
 }
-
-export const PullRequestProviderEnum = {
-    GITHUB: 'github'
-} as const;
-
-export type PullRequestProviderEnum = typeof PullRequestProviderEnum[keyof typeof PullRequestProviderEnum];
-
 

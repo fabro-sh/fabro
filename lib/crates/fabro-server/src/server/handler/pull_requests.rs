@@ -2,16 +2,19 @@ use std::sync::Arc;
 
 use super::super::{
     ApiError, AppState, CloseRunPullRequestResponse, CreateRunPullRequestRequest, IntoResponse,
-    Json, MergeRunPullRequestRequest, MergeRunPullRequestResponse, PullRequestRecord,
-    RequireRunScoped, Response, Router, RunId, State, StatusCode, get, lock_pull_request_create,
-    post, pull_request, warn, workflow_event,
+    Json, LinkRunPullRequestRequest, MergeRunPullRequestRequest, MergeRunPullRequestResponse,
+    PullRequestRecord, RequireRunScoped, Response, Router, RunId, State, StatusCode, get,
+    lock_pull_request_create, post, pull_request, warn, workflow_event,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route(
             "/runs/{id}/pull_request",
-            get(get_run_pull_request).post(create_run_pull_request),
+            get(get_run_pull_request)
+                .post(create_run_pull_request)
+                .put(link_run_pull_request)
+                .delete(unlink_run_pull_request),
         )
         .route(
             "/runs/{id}/pull_request/merge",
@@ -47,6 +50,19 @@ fn parse_github_owner_repo_from_url(url: &str, kind: &str) -> Result<(String, St
     }
 
     fabro_github::parse_github_owner_repo(url).map_err(|err| ApiError::bad_request(err.to_string()))
+}
+
+fn pull_request_record_from_link_request(
+    body: &LinkRunPullRequestRequest,
+) -> Result<PullRequestRecord, ApiError> {
+    PullRequestRecord::from_github_url(body.html_url.trim()).map_err(|err| {
+        let code = if err.contains("GitHub pull request URL") {
+            "unsupported_pull_request_provider"
+        } else {
+            "invalid_pull_request_url"
+        };
+        ApiError::with_code(StatusCode::BAD_REQUEST, err, code)
+    })
 }
 
 fn load_server_github_credentials(
@@ -92,23 +108,26 @@ fn server_github_context<'a>(
     ))
 }
 
-fn github_pull_request_not_found_error(record: &PullRequestRecord) -> ApiError {
+fn github_pull_request_not_found_error(number: u64) -> ApiError {
     ApiError::with_code(
         StatusCode::BAD_GATEWAY,
-        format!("Pull request #{} was deleted on GitHub.", record.number),
+        format!("Pull request #{number} was deleted on GitHub."),
         "github_not_found",
     )
 }
 
 struct PullRequestGithubContext {
     record: PullRequestRecord,
+    owner:  String,
+    repo:   String,
+    number: u64,
     creds:  fabro_github::GitHubCredentials,
 }
 
-async fn load_pull_request_github_context(
+async fn load_pull_request_record(
     state: &Arc<AppState>,
     id: &RunId,
-) -> Result<PullRequestGithubContext, ApiError> {
+) -> Result<PullRequestRecord, ApiError> {
     let run_store = state
         .store
         .open_run_reader(id)
@@ -118,16 +137,33 @@ async fn load_pull_request_github_context(
         .state()
         .await
         .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
-    let record = run_state.pull_request.ok_or_else(|| {
+    run_state.pull_request.ok_or_else(|| {
         ApiError::with_code(
             StatusCode::NOT_FOUND,
             format!("No pull request found in store. Create one first with: fabro pr create {id}"),
             "no_stored_record",
         )
-    })?;
-    parse_github_owner_repo_from_url(&record.html_url, "pull request URL")?;
+    })
+}
+
+fn github_coordinates_for_record(record: &PullRequestRecord) -> (String, String, u64) {
+    (record.owner.clone(), record.repo.clone(), record.number)
+}
+
+async fn load_pull_request_github_context(
+    state: &Arc<AppState>,
+    id: &RunId,
+) -> Result<PullRequestGithubContext, ApiError> {
+    let record = load_pull_request_record(state, id).await?;
+    let (owner, repo, number) = github_coordinates_for_record(&record);
     let creds = load_server_github_credentials(state.as_ref())?;
-    Ok(PullRequestGithubContext { record, creds })
+    Ok(PullRequestGithubContext {
+        record,
+        owner,
+        repo,
+        number,
+        creds,
+    })
 }
 
 struct RunPrInputs<'a> {
@@ -144,7 +180,7 @@ impl<'a> RunPrInputs<'a> {
         if let Some(record) = run_state.pull_request.as_ref() {
             return Err(ApiError::with_code(
                 StatusCode::CONFLICT,
-                format!("Pull request already exists at {}", record.html_url),
+                format!("Pull request already exists at {}", record.html_url()),
                 "pull_request_exists",
             ));
         }
@@ -216,6 +252,38 @@ impl<'a> RunPrInputs<'a> {
     }
 }
 
+fn unavailable_pull_request_response(
+    record: PullRequestRecord,
+    reason: fabro_types::PullRequestDetailsUnavailableReason,
+) -> fabro_types::PullRequestDetail {
+    fabro_types::PullRequestDetail {
+        data: fabro_types::PullRequest {
+            link:    record,
+            details: None,
+        },
+        meta: fabro_types::PullRequestMeta {
+            details_status:             fabro_types::PullRequestDetailsStatus::Unavailable,
+            details_unavailable_reason: Some(reason),
+        },
+    }
+}
+
+fn available_pull_request_response(
+    record: PullRequestRecord,
+    details: fabro_types::PullRequestDetails,
+) -> fabro_types::PullRequestDetail {
+    fabro_types::PullRequestDetail {
+        data: fabro_types::PullRequest {
+            link:    record,
+            details: Some(details),
+        },
+        meta: fabro_types::PullRequestMeta {
+            details_status:             fabro_types::PullRequestDetailsStatus::Available,
+            details_unavailable_reason: None,
+        },
+    }
+}
+
 async fn create_run_pull_request(
     RequireRunScoped(id): RequireRunScoped,
     State(state): State<Arc<AppState>>,
@@ -273,8 +341,8 @@ async fn create_run_pull_request(
         conclusion: Some(inputs.conclusion),
         run_state: Some(&run_state),
     };
-    let pull_request = match pull_request::maybe_open_pull_request(request).await {
-        Ok(Some(record)) => record,
+    let created_pull_request = match pull_request::maybe_open_pull_request(request).await {
+        Ok(Some(created)) => created,
         Ok(None) => {
             return ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -285,7 +353,68 @@ async fn create_run_pull_request(
         Err(err) => return ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
     };
 
-    let event = workflow_event::Event::pull_request_created(&pull_request, true);
+    let event = workflow_event::Event::pull_request_created(
+        &created_pull_request.link,
+        &created_pull_request.base_branch,
+        &created_pull_request.head_branch,
+        &created_pull_request.title,
+        true,
+    );
+    if let Err(err) = workflow_event::append_event(&run_store, &id, &event).await {
+        return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
+
+    Json(created_pull_request.link).into_response()
+}
+
+async fn link_run_pull_request(
+    RequireRunScoped(id): RequireRunScoped,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<LinkRunPullRequestRequest>,
+) -> Response {
+    let pull_request = match pull_request_record_from_link_request(&body) {
+        Ok(record) => record,
+        Err(err) => return err.into_response(),
+    };
+    let Ok(run_store) = state.store.open_run(&id).await else {
+        return ApiError::not_found("Run not found.").into_response();
+    };
+    let event = workflow_event::Event::PullRequestLinked {
+        pull_request: pull_request.clone(),
+    };
+    if let Err(err) = workflow_event::append_event(&run_store, &id, &event).await {
+        return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
+
+    Json(pull_request).into_response()
+}
+
+async fn unlink_run_pull_request(
+    RequireRunScoped(id): RequireRunScoped,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let _create_guard = lock_pull_request_create(&state.pull_request_create_locks, &id).await;
+    let Ok(run_store) = state.store.open_run(&id).await else {
+        return ApiError::not_found("Run not found.").into_response();
+    };
+    let run_state = match run_store.state().await {
+        Ok(run_state) => run_state,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+    let Some(pull_request) = run_state.pull_request else {
+        return ApiError::with_code(
+            StatusCode::NOT_FOUND,
+            format!("No pull request found in store. Create one first with: fabro pr create {id}"),
+            "no_stored_record",
+        )
+        .into_response();
+    };
+    let event = workflow_event::Event::PullRequestUnlinked {
+        pull_request: pull_request.clone(),
+    };
     if let Err(err) = workflow_event::append_event(&run_store, &id, &event).await {
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
@@ -297,46 +426,52 @@ async fn get_run_pull_request(
     RequireRunScoped(id): RequireRunScoped,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    let ctx = match load_pull_request_github_context(&state, &id).await {
-        Ok(ctx) => ctx,
+    let record = match load_pull_request_record(&state, &id).await {
+        Ok(record) => record,
         Err(err) => return err.into_response(),
     };
-    let github = match server_github_context(state.as_ref(), &ctx.creds) {
+    let (owner, repo, number) = github_coordinates_for_record(&record);
+    let creds = match load_server_github_credentials(state.as_ref()) {
+        Ok(creds) => creds,
+        Err(err) => {
+            warn!(error = ?err, "Returning stored pull request without live GitHub details");
+            return Json(unavailable_pull_request_response(
+                record,
+                fabro_types::PullRequestDetailsUnavailableReason::IntegrationUnavailable,
+            ))
+            .into_response();
+        }
+    };
+    let github = match server_github_context(state.as_ref(), &creds) {
         Ok(github) => github,
-        Err(err) => return err.into_response(),
+        Err(err) => {
+            warn!(error = ?err, "Returning stored pull request without live GitHub details");
+            return Json(unavailable_pull_request_response(
+                record,
+                fabro_types::PullRequestDetailsUnavailableReason::IntegrationUnavailable,
+            ))
+            .into_response();
+        }
     };
 
-    match fabro_github::get_pull_request(
-        &github,
-        &ctx.record.owner,
-        &ctx.record.repo,
-        ctx.record.number,
-    )
-    .await
-    {
-        Ok(github) => Json(fabro_types::PullRequestDetail {
-            pull_request:  ctx.record,
-            state:         github.state,
-            draft:         github.draft,
-            merged:        github.merged,
-            merged_at:     github.merged_at,
-            mergeable:     github.mergeable,
-            additions:     github.additions,
-            deletions:     github.deletions,
-            changed_files: github.changed_files,
-            comments:      0,
-            checks:        Vec::new(),
-            author:        github.user,
-            timestamps:    fabro_types::PullRequestTimestamps {
-                created_at: github.created_at,
-                updated_at: github.updated_at,
-            },
-        })
-        .into_response(),
+    match fabro_github::get_pull_request(&github, &owner, &repo, number).await {
+        Ok(github) => Json(available_pull_request_response(record, github.into())).into_response(),
         Err(fabro_github::PullRequestApiError::NotFound { .. }) => {
-            github_pull_request_not_found_error(&ctx.record).into_response()
+            warn!("Returning stored pull request because GitHub no longer has the PR");
+            Json(unavailable_pull_request_response(
+                record,
+                fabro_types::PullRequestDetailsUnavailableReason::NotFound,
+            ))
+            .into_response()
         }
-        Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err.to_string()).into_response(),
+        Err(err) => {
+            warn!(error = %err, "Returning stored pull request without live GitHub details");
+            Json(unavailable_pull_request_response(
+                record,
+                fabro_types::PullRequestDetailsUnavailableReason::FetchFailed,
+            ))
+            .into_response()
+        }
     }
 }
 
@@ -354,24 +489,18 @@ async fn merge_run_pull_request(
         Err(err) => return err.into_response(),
     };
 
-    match fabro_github::merge_pull_request(
-        &github,
-        &ctx.record.owner,
-        &ctx.record.repo,
-        ctx.record.number,
-        body.method,
-    )
-    .await
+    match fabro_github::merge_pull_request(&github, &ctx.owner, &ctx.repo, ctx.number, body.method)
+        .await
     {
         Ok(()) => Json(MergeRunPullRequestResponse {
-            number:   i64::try_from(ctx.record.number)
+            number:   i64::try_from(ctx.number)
                 .expect("stored pull request number should fit in i64"),
-            html_url: ctx.record.html_url,
+            html_url: ctx.record.html_url(),
             method:   body.method,
         })
         .into_response(),
         Err(fabro_github::PullRequestApiError::NotFound { .. }) => {
-            github_pull_request_not_found_error(&ctx.record).into_response()
+            github_pull_request_not_found_error(ctx.number).into_response()
         }
         Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err.to_string()).into_response(),
     }
@@ -390,22 +519,15 @@ async fn close_run_pull_request(
         Err(err) => return err.into_response(),
     };
 
-    match fabro_github::close_pull_request(
-        &github,
-        &ctx.record.owner,
-        &ctx.record.repo,
-        ctx.record.number,
-    )
-    .await
-    {
+    match fabro_github::close_pull_request(&github, &ctx.owner, &ctx.repo, ctx.number).await {
         Ok(()) => Json(CloseRunPullRequestResponse {
-            number:   i64::try_from(ctx.record.number)
+            number:   i64::try_from(ctx.number)
                 .expect("stored pull request number should fit in i64"),
-            html_url: ctx.record.html_url,
+            html_url: ctx.record.html_url(),
         })
         .into_response(),
         Err(fabro_github::PullRequestApiError::NotFound { .. }) => {
-            github_pull_request_not_found_error(&ctx.record).into_response()
+            github_pull_request_not_found_error(ctx.number).into_response()
         }
         Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err.to_string()).into_response(),
     }

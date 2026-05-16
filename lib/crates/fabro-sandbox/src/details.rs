@@ -4,8 +4,8 @@ use anyhow::Result;
 #[cfg(any(feature = "docker", feature = "daytona"))]
 use chrono::{DateTime, Utc};
 use fabro_types::{
-    RunId, RunSandbox, SandboxDetails, SandboxProvider, SandboxResources, SandboxState,
-    SandboxTimestamps,
+    RunId, RunSandbox, SandboxDetails, SandboxNetwork, SandboxProvider, SandboxResources,
+    SandboxState, SandboxTimestamps,
 };
 
 /// Inspect the sandbox identified by `record` and return provider-neutral
@@ -50,7 +50,9 @@ fn local_details(record: &RunSandbox) -> SandboxDetails {
         state:        SandboxState::Running,
         native_state: None,
         region:       None,
+        web_url:      None,
         resources:    SandboxResources::default(),
+        network:      SandboxNetwork::unknown(),
         labels:       BTreeMap::new(),
         timestamps:   SandboxTimestamps::default(),
     }
@@ -72,7 +74,8 @@ mod docker {
     use bollard::container::InspectContainerOptions;
     use bollard::models::{ContainerInspectResponse, ContainerStateStatusEnum, HostConfig};
     use fabro_types::{
-        RunId, RunSandbox, SandboxDetails, SandboxResources, SandboxState, SandboxTimestamps,
+        RunId, RunSandbox, SandboxDetails, SandboxNetwork, SandboxNetworkPolicy, SandboxResources,
+        SandboxState, SandboxTimestamps,
     };
 
     use super::parse_rfc3339_utc;
@@ -117,6 +120,7 @@ mod docker {
                 .and_then(|bytes| u64::try_from(bytes).ok()),
             disk_bytes:   None,
         };
+        let network = docker_network(host_config);
 
         let labels: BTreeMap<String, String> = inspect
             .config
@@ -136,12 +140,27 @@ mod docker {
             state: normalized_state,
             native_state,
             region: None,
+            web_url: None,
             resources,
+            network,
             labels,
             timestamps: SandboxTimestamps {
                 created_at,
                 last_activity_at: None,
             },
+        }
+    }
+
+    fn docker_network(host_config: Option<&HostConfig>) -> SandboxNetwork {
+        match host_config.and_then(|host| host.network_mode.as_deref()) {
+            Some("none") => {
+                let blocked = SandboxNetworkPolicy::blocked();
+                SandboxNetwork {
+                    egress:  blocked.clone(),
+                    ingress: blocked,
+                }
+            }
+            _ => SandboxNetwork::unknown(),
         }
     }
 
@@ -175,7 +194,9 @@ mod docker {
     #[cfg(test)]
     mod tests {
         use bollard::models::HostConfig;
-        use fabro_types::{RunSandbox, RunSandboxRuntime, SandboxProvider};
+        use fabro_types::{
+            RunSandbox, RunSandboxRuntime, SandboxNetwork, SandboxNetworkPolicy, SandboxProvider,
+        };
 
         use super::*;
 
@@ -252,6 +273,33 @@ mod docker {
             };
             let details = map_docker_inspect(inspect, &record());
             assert_eq!(details.resources.memory_bytes, Some(2_147_483_648));
+        }
+
+        #[test]
+        fn network_mode_none_blocks_ingress_and_egress() {
+            let inspect = ContainerInspectResponse {
+                host_config: Some(HostConfig {
+                    network_mode: Some("none".to_string()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            let details = map_docker_inspect(inspect, &record());
+            assert_eq!(details.network.egress, SandboxNetworkPolicy::blocked());
+            assert_eq!(details.network.ingress, SandboxNetworkPolicy::blocked());
+        }
+
+        #[test]
+        fn non_none_network_mode_is_unknown() {
+            let inspect = ContainerInspectResponse {
+                host_config: Some(HostConfig {
+                    network_mode: Some("bridge".to_string()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            let details = map_docker_inspect(inspect, &record());
+            assert_eq!(details.network, SandboxNetwork::unknown());
         }
 
         #[test]
@@ -350,11 +398,12 @@ mod daytona {
     use anyhow::{Context, Result, anyhow};
     use daytona_api_client::models::SandboxState as DaytonaState;
     use fabro_types::{
-        RunSandbox, SandboxDetails, SandboxResources, SandboxState, SandboxTimestamps,
+        RunSandbox, SandboxDetails, SandboxNetwork, SandboxNetworkPolicy, SandboxResources,
+        SandboxState, SandboxTimestamps,
     };
 
     use super::parse_rfc3339_utc;
-    use crate::daytona::DaytonaSandbox;
+    use crate::daytona::{DAYTONA_DASHBOARD_SANDBOXES_URL, DaytonaSandbox};
 
     pub(super) async fn daytona_details(
         record: &RunSandbox,
@@ -418,7 +467,12 @@ mod daytona {
             state: normalized_state,
             native_state,
             region,
+            web_url: Some(daytona_dashboard_url(&sandbox.id)),
             resources,
+            network: daytona_network(
+                sandbox.network_block_all,
+                sandbox.network_allow_list.as_deref(),
+            ),
             labels,
             timestamps: SandboxTimestamps {
                 created_at:       sandbox.created_at.as_deref().and_then(parse_rfc3339_utc),
@@ -441,6 +495,36 @@ mod daytona {
         )]
         let bytes = (value * 1024.0 * 1024.0 * 1024.0) as u64;
         Some(bytes)
+    }
+
+    fn daytona_dashboard_url(sandbox_id: &str) -> String {
+        format!("{DAYTONA_DASHBOARD_SANDBOXES_URL}?sandboxId={sandbox_id}")
+    }
+
+    fn daytona_network(
+        network_block_all: bool,
+        network_allow_list: Option<&str>,
+    ) -> SandboxNetwork {
+        let egress = if network_block_all {
+            SandboxNetworkPolicy::blocked()
+        } else {
+            let cidrs = network_allow_list
+                .into_iter()
+                .flat_map(|allow_list| allow_list.split(','))
+                .map(str::trim)
+                .filter(|cidr| !cidr.is_empty());
+            let cidrs: Vec<_> = cidrs.collect();
+            if cidrs.is_empty() {
+                SandboxNetworkPolicy::unknown()
+            } else {
+                SandboxNetworkPolicy::allow_cidrs(cidrs)
+            }
+        };
+
+        SandboxNetwork {
+            egress,
+            ingress: SandboxNetworkPolicy::unknown(),
+        }
     }
 
     pub(super) fn normalize_daytona_state(state: DaytonaState) -> SandboxState {
@@ -540,6 +624,43 @@ mod daytona {
         fn gibibytes_to_bytes_returns_none_for_zero() {
             assert_eq!(gibibytes_to_bytes(0.0), None);
         }
+
+        #[test]
+        fn daytona_dashboard_url_uses_sandbox_id_query_param() {
+            assert_eq!(
+                daytona_dashboard_url("ad65029a-2d01-421e-8936-49451653fcd9"),
+                "https://app.daytona.io/dashboard/sandboxes?sandboxId=ad65029a-2d01-421e-8936-49451653fcd9",
+            );
+        }
+
+        #[test]
+        fn network_block_all_blocks_egress_and_leaves_ingress_unknown() {
+            let network = daytona_network(true, Some("10.0.0.0/8"));
+            assert_eq!(network.egress, SandboxNetworkPolicy::blocked());
+            assert_eq!(network.ingress, SandboxNetworkPolicy::unknown());
+        }
+
+        #[test]
+        fn network_allow_list_maps_to_cidr_allow_list() {
+            let network = daytona_network(false, Some("10.0.0.0/8, 192.168.0.0/16 "));
+            assert_eq!(
+                network.egress,
+                SandboxNetworkPolicy::allow_cidrs(["10.0.0.0/8", "192.168.0.0/16"])
+            );
+            assert_eq!(network.ingress, SandboxNetworkPolicy::unknown());
+        }
+
+        #[test]
+        fn empty_network_allow_list_is_unknown() {
+            let network = daytona_network(false, Some(" , "));
+            assert_eq!(network, SandboxNetwork::unknown());
+        }
+
+        #[test]
+        fn default_daytona_network_is_unknown() {
+            let network = daytona_network(false, None);
+            assert_eq!(network, SandboxNetwork::unknown());
+        }
     }
 }
 
@@ -575,6 +696,7 @@ mod tests {
         assert!(details.sandbox.image.is_none());
         assert!(details.labels.is_empty());
         assert_eq!(details.resources, SandboxResources::default());
+        assert_eq!(details.network, SandboxNetwork::unknown());
         assert_eq!(details.timestamps, SandboxTimestamps::default());
     }
 }

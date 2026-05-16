@@ -147,9 +147,7 @@ mod tests {
                         "output_tokens": output_tokens
                     }
                 },
-                "facts": {
-                    "provider": "open_ai"
-                }
+                "facts": { "algorithm": "openai" }
             },
             "total_usd_micros": input_tokens + output_tokens
         }))

@@ -1,6 +1,7 @@
 [providers.zai]
 display_name = "Z.ai"
 adapter = "openai_compatible"
+api_key_url = "https://open.bigmodel.cn/usercenter/apikeys"
 base_url = "https://api.z.ai/api/coding/paas/v4"
 credentials = ["credential:zai", "env:ZAI_API_KEY"]
 priority = 60

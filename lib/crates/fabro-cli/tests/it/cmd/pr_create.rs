@@ -73,13 +73,10 @@ fn pr_create_uses_server_endpoint_and_prints_url() {
         then.status(200)
             .header("Content-Type", "application/json")
             .json_body(serde_json::json!({
-                "html_url": "https://github.com/fabro-sh/fabro/pull/123",
-                "number": 123,
                 "owner": "fabro-sh",
                 "repo": "fabro",
-                "base_branch": "main",
-                "head_branch": "fabro/run/demo",
-                "title": "Map the constellations"
+                "number": 123,
+                "html_url": "https://github.com/fabro-sh/fabro/pull/123"
             }));
     });
 
@@ -122,13 +119,10 @@ fn pr_create_passes_force_and_model_to_server() {
         then.status(200)
             .header("Content-Type", "application/json")
             .json_body(serde_json::json!({
-                "html_url": "https://github.com/fabro-sh/fabro/pull/123",
-                "number": 123,
                 "owner": "fabro-sh",
                 "repo": "fabro",
-                "base_branch": "main",
-                "head_branch": "fabro/run/demo",
-                "title": "Map the constellations"
+                "number": 123,
+                "html_url": "https://github.com/fabro-sh/fabro/pull/123"
             }));
     });
 
@@ -150,14 +144,10 @@ fn pr_create_passes_force_and_model_to_server() {
     exit_code: 0
     ----- stdout -----
     {
-      "provider": "github",
-      "html_url": "https://github.com/fabro-sh/fabro/pull/123",
-      "number": 123,
       "owner": "fabro-sh",
       "repo": "fabro",
-      "base_branch": "main",
-      "head_branch": "fabro/run/demo",
-      "title": "Map the constellations"
+      "number": 123,
+      "html_url": "https://github.com/fabro-sh/fabro/pull/123"
     }
     ----- stderr -----
     "#);

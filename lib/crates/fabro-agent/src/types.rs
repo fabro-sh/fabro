@@ -429,7 +429,7 @@ pub struct SessionEvent {
 
 #[cfg(test)]
 mod tests {
-    use fabro_model::Provider;
+    use fabro_model::ProviderId;
 
     use super::*;
 
@@ -671,7 +671,7 @@ mod tests {
         let event = AgentEvent::AssistantMessage {
             text:            "Hello".into(),
             model:           ModelRef {
-                provider: Provider::OpenAi.id(),
+                provider: ProviderId::openai(),
                 model_id: "test-model".into(),
                 speed:    None,
             },

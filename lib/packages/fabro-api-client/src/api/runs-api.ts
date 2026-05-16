@@ -34,6 +34,8 @@ import type { ForkRequest } from '../models';
 // @ts-ignore
 import type { ForkResponse } from '../models';
 // @ts-ignore
+import type { LinkRunPullRequestRequest } from '../models';
+// @ts-ignore
 import type { MergeRunPullRequestRequest } from '../models';
 // @ts-ignore
 import type { MergeRunPullRequestResponse } from '../models';
@@ -44,9 +46,9 @@ import type { PaginatedRunList } from '../models';
 // @ts-ignore
 import type { PreflightResponse } from '../models';
 // @ts-ignore
-import type { PullRequest } from '../models';
+import type { PullRequestLink } from '../models';
 // @ts-ignore
-import type { PullRequestDetails } from '../models';
+import type { PullRequestResponse } from '../models';
 // @ts-ignore
 import type { RenderWorkflowGraphRequest } from '../models';
 // @ts-ignore
@@ -367,7 +369,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Returns the stored pull request record for a run plus live GitHub details.
+         * Returns the stored pull request record for a run plus live GitHub details when available.
          * @summary Get Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -485,6 +487,51 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
             localVarRequestOptions.data = serializeDataIfNeeded(updateRunParentRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Links or replaces the GitHub pull request association for a run without modifying the remote pull request.
+         * @summary Link Run Pull Request
+         * @param {string} id Unique run identifier (ULID).
+         * @param {LinkRunPullRequestRequest} linkRunPullRequestRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        linkRunPullRequest: async (id: string, linkRunPullRequestRequest: LinkRunPullRequestRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('linkRunPullRequest', 'id', id)
+            // verify required parameter 'linkRunPullRequestRequest' is not null or undefined
+            assertParamExists('linkRunPullRequest', 'linkRunPullRequestRequest', linkRunPullRequestRequest)
+            const localVarPath = `/api/v1/runs/{id}/pull_request`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(linkRunPullRequestRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -1100,6 +1147,46 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
+         * Removes Fabro\'s stored pull request association for a run without modifying the remote pull request.
+         * @summary Unlink Run Pull Request
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        unlinkRunPullRequest: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('unlinkRunPullRequest', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/pull_request`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Resumes a paused run. Returns 409 if the run is not paused.
          * @summary Unpause Run
          * @param {string} id Unique run identifier (ULID).
@@ -1294,7 +1381,7 @@ export const RunsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async createRunPullRequest(id: string, createRunPullRequestRequest: CreateRunPullRequestRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PullRequest>> {
+        async createRunPullRequest(id: string, createRunPullRequestRequest: CreateRunPullRequestRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PullRequestLink>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.createRunPullRequest(id, createRunPullRequestRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.createRunPullRequest']?.[localVarOperationServerIndex]?.url;
@@ -1329,13 +1416,13 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Returns the stored pull request record for a run plus live GitHub details.
+         * Returns the stored pull request record for a run plus live GitHub details when available.
          * @summary Get Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async getRunPullRequest(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PullRequestDetails>> {
+        async getRunPullRequest(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PullRequestResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.getRunPullRequest(id, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.getRunPullRequest']?.[localVarOperationServerIndex]?.url;
@@ -1366,6 +1453,20 @@ export const RunsApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.linkRunParent(id, updateRunParentRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.linkRunParent']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Links or replaces the GitHub pull request association for a run without modifying the remote pull request.
+         * @summary Link Run Pull Request
+         * @param {string} id Unique run identifier (ULID).
+         * @param {LinkRunPullRequestRequest} linkRunPullRequestRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async linkRunPullRequest(id: string, linkRunPullRequestRequest: LinkRunPullRequestRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PullRequestLink>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.linkRunPullRequest(id, linkRunPullRequestRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunsApi.linkRunPullRequest']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -1560,6 +1661,19 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Removes Fabro\'s stored pull request association for a run without modifying the remote pull request.
+         * @summary Unlink Run Pull Request
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async unlinkRunPullRequest(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PullRequestLink>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.unlinkRunPullRequest(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunsApi.unlinkRunPullRequest']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Resumes a paused run. Returns 409 if the run is not paused.
          * @summary Unpause Run
          * @param {string} id Unique run identifier (ULID).
@@ -1656,7 +1770,7 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        createRunPullRequest(id: string, createRunPullRequestRequest: CreateRunPullRequestRequest, options?: RawAxiosRequestConfig): AxiosPromise<PullRequest> {
+        createRunPullRequest(id: string, createRunPullRequestRequest: CreateRunPullRequestRequest, options?: RawAxiosRequestConfig): AxiosPromise<PullRequestLink> {
             return localVarFp.createRunPullRequest(id, createRunPullRequestRequest, options).then((request) => request(axios, basePath));
         },
         /**
@@ -1682,13 +1796,13 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.forkRun(id, forkRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Returns the stored pull request record for a run plus live GitHub details.
+         * Returns the stored pull request record for a run plus live GitHub details when available.
          * @summary Get Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getRunPullRequest(id: string, options?: RawAxiosRequestConfig): AxiosPromise<PullRequestDetails> {
+        getRunPullRequest(id: string, options?: RawAxiosRequestConfig): AxiosPromise<PullRequestResponse> {
             return localVarFp.getRunPullRequest(id, options).then((request) => request(axios, basePath));
         },
         /**
@@ -1711,6 +1825,17 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
          */
         linkRunParent(id: string, updateRunParentRequest: UpdateRunParentRequest, options?: RawAxiosRequestConfig): AxiosPromise<Run> {
             return localVarFp.linkRunParent(id, updateRunParentRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Links or replaces the GitHub pull request association for a run without modifying the remote pull request.
+         * @summary Link Run Pull Request
+         * @param {string} id Unique run identifier (ULID).
+         * @param {LinkRunPullRequestRequest} linkRunPullRequestRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        linkRunPullRequest(id: string, linkRunPullRequestRequest: LinkRunPullRequestRequest, options?: RawAxiosRequestConfig): AxiosPromise<PullRequestLink> {
+            return localVarFp.linkRunPullRequest(id, linkRunPullRequestRequest, options).then((request) => request(axios, basePath));
         },
         /**
          * Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves. Archived runs are hidden by default; pass `include_archived=true` to include them under the `archived` column.
@@ -1862,6 +1987,16 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.unlinkRunParent(id, options).then((request) => request(axios, basePath));
         },
         /**
+         * Removes Fabro\'s stored pull request association for a run without modifying the remote pull request.
+         * @summary Unlink Run Pull Request
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        unlinkRunPullRequest(id: string, options?: RawAxiosRequestConfig): AxiosPromise<PullRequestLink> {
+            return localVarFp.unlinkRunPullRequest(id, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Resumes a paused run. Returns 409 if the run is not paused.
          * @summary Unpause Run
          * @param {string} id Unique run identifier (ULID).
@@ -1980,7 +2115,7 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Returns the stored pull request record for a run plus live GitHub details.
+     * Returns the stored pull request record for a run plus live GitHub details when available.
      * @summary Get Run Pull Request
      * @param {string} id Unique run identifier (ULID).
      * @param {*} [options] Override http request option.
@@ -2011,6 +2146,18 @@ export class RunsApi extends BaseAPI {
      */
     public linkRunParent(id: string, updateRunParentRequest: UpdateRunParentRequest, options?: RawAxiosRequestConfig) {
         return RunsApiFp(this.configuration).linkRunParent(id, updateRunParentRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Links or replaces the GitHub pull request association for a run without modifying the remote pull request.
+     * @summary Link Run Pull Request
+     * @param {string} id Unique run identifier (ULID).
+     * @param {LinkRunPullRequestRequest} linkRunPullRequestRequest 
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public linkRunPullRequest(id: string, linkRunPullRequestRequest: LinkRunPullRequestRequest, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).linkRunPullRequest(id, linkRunPullRequestRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -2174,6 +2321,17 @@ export class RunsApi extends BaseAPI {
      */
     public unlinkRunParent(id: string, options?: RawAxiosRequestConfig) {
         return RunsApiFp(this.configuration).unlinkRunParent(id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Removes Fabro\'s stored pull request association for a run without modifying the remote pull request.
+     * @summary Unlink Run Pull Request
+     * @param {string} id Unique run identifier (ULID).
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public unlinkRunPullRequest(id: string, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).unlinkRunPullRequest(id, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

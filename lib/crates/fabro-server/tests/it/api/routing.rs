@@ -112,18 +112,30 @@ async fn install_routes_are_absent_in_normal_mode() {
 }
 
 #[tokio::test]
-async fn moved_routes_not_at_root_of_api_prefix() {
+async fn api_v1_root_is_not_routed() {
     let app = fabro_server::test_support::build_test_router(test_app_state());
 
-    for path in ["/api/v1/health", "/api/v1/"] {
-        let req = Request::builder()
-            .method("GET")
-            .uri(path)
-            .body(Body::empty())
-            .unwrap();
-        let response = app.clone().oneshot(req).await.unwrap();
-        response_status(response, StatusCode::NOT_FOUND, format!("GET {path}")).await;
-    }
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/v1/")
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    response_status(response, StatusCode::NOT_FOUND, "GET /api/v1/").await;
+}
+
+#[tokio::test]
+async fn health_responds_at_versioned_path() {
+    let app = fabro_server::test_support::build_test_router(test_app_state());
+
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/v1/health")
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json(response, StatusCode::OK, "GET /api/v1/health").await;
+    assert_eq!(body["status"], "ok");
 }
 
 #[tokio::test]

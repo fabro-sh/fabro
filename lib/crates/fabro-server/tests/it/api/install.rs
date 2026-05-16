@@ -13,7 +13,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_config::{ServerSettingsBuilder, Storage};
 use fabro_install::OBJECT_STORE_MANAGED_COMMENT;
-use fabro_model::Provider;
+use fabro_model::ProviderId;
 use fabro_server::install::{
     InstallAppState, InstallFinishHook, InstallFinishInfo, build_install_router,
 };
@@ -1247,6 +1247,60 @@ async fn token_install_finish_invokes_shutdown_callback_after_accepting() {
 }
 
 #[tokio::test]
+async fn install_llm_accepts_catalog_openai_compatible_provider() {
+    let llm_mock = MockServer::start_async().await;
+    llm_mock
+        .mock_async(|when, then| {
+            when.method("GET")
+                .path("/v1/models")
+                .header("authorization", "Bearer kimi-test-key");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"data":[{"id":"kimi-k2-5"}]}"#);
+        })
+        .await;
+
+    let app = build_install_router(
+        InstallAppState::for_test("test-install-token")
+            .with_provider_base_url(ProviderId::new("kimi"), format!("{}/v1", llm_mock.url(""))),
+    );
+
+    let test_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/install/llm/test")
+                .header("authorization", "Bearer test-install-token")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"provider":"kimi","api_key":"kimi-test-key"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json(test_response, StatusCode::OK, "POST /install/llm/test").await;
+    assert_eq!(body["ok"], true);
+
+    let put_response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/install/llm")
+                .header("authorization", "Bearer test-install-token")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"providers":[{"provider":"kimi","api_key":"kimi-test-key"}]}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    response_status(put_response, StatusCode::NO_CONTENT, "PUT /install/llm").await;
+}
+
+#[tokio::test]
 async fn install_validation_endpoints_validate_credentials_and_github_token() {
     let llm_mock = MockServer::start_async().await;
     llm_mock
@@ -1279,7 +1333,7 @@ async fn install_validation_endpoints_validate_credentials_and_github_token() {
 
     let app = build_install_router(
         InstallAppState::for_test("test-install-token")
-            .with_provider_base_url(Provider::Anthropic, format!("{}/v1", llm_mock.url("")))
+            .with_provider_base_url(ProviderId::anthropic(), format!("{}/v1", llm_mock.url("")))
             .with_github_api_base_url(github_mock.url("")),
     );
 

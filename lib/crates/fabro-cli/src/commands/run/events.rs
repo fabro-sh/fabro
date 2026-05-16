@@ -455,7 +455,7 @@ fn format_event_pretty_value(envelope: &serde_json::Value, styles: &Styles) -> O
         }
         "run.failed" => {
             let error = prop_field(envelope, "failure")
-                .and_then(|failure| failure.get("message"))
+                .and_then(failure_message)
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("unknown error");
             Some(format!(
@@ -766,6 +766,18 @@ fn format_event_pretty_value(envelope: &serde_json::Value, styles: &Styles) -> O
                 url,
             ))
         }
+        "pull_request.linked" => Some(format_pull_request_record_event(
+            envelope,
+            styles,
+            &ts,
+            "PR linked:",
+        )),
+        "pull_request.unlinked" => Some(format_pull_request_record_event(
+            envelope,
+            styles,
+            &ts,
+            "PR unlinked:",
+        )),
         "pull_request.failed" => {
             let error = prop_str_field(envelope, "error").unwrap_or("unknown error");
             Some(format!(
@@ -795,6 +807,31 @@ fn prop_field<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a serde_j
 
 fn prop_str_field<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
     prop_field(value, key)?.as_str()
+}
+
+fn failure_message(failure: &serde_json::Value) -> Option<&serde_json::Value> {
+    failure
+        .get("detail")
+        .and_then(|detail| detail.get("message"))
+        .or_else(|| failure.get("message"))
+}
+
+fn format_pull_request_record_event(
+    envelope: &serde_json::Value,
+    styles: &Styles,
+    ts: &str,
+    label: &str,
+) -> String {
+    let url = prop_field(envelope, "pull_request")
+        .and_then(|record| record.get("html_url"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("?");
+    format!(
+        "{} {} {}",
+        styles.dim.apply_to(ts),
+        styles.bold.apply_to(label),
+        url,
+    )
 }
 
 fn format_timestamp(ts: &str) -> String {
@@ -1120,6 +1157,26 @@ mod tests {
     }
 
     #[test]
+    fn pretty_pull_request_linked() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"pull_request.linked","properties":{"pull_request":{"owner":"owner","repo":"repo","number":42,"html_url":"https://github.com/owner/repo/pull/42"}}}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("PR linked:"), "got: {result}");
+        assert!(
+            result.contains("https://github.com/owner/repo/pull/42"),
+            "got: {result}"
+        );
+    }
+
+    #[test]
+    fn pretty_pull_request_unlinked() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"pull_request.unlinked","properties":{"pull_request":{"owner":"owner","repo":"repo","number":42,"html_url":"https://github.com/owner/repo/pull/42"}}}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("PR unlinked:"), "got: {result}");
+    }
+
+    #[test]
     fn pretty_pull_request_failed() {
         let styles = no_color_styles();
         let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"pull_request.failed","properties":{"error":"auth token expired"}}"#;
@@ -1263,7 +1320,7 @@ mod tests {
     #[test]
     fn pretty_workflow_run_failed() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"run.failed","properties":{"failure":{"message":"sandbox timeout","reason":"workflow_error","category":"deterministic"}}}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"run.failed","properties":{"failure":{"reason":"workflow_error","detail":{"message":"sandbox timeout","category":"deterministic"}}}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("Failed"), "got: {result}");
         assert!(result.contains("sandbox timeout"), "got: {result}");
