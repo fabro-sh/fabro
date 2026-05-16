@@ -26,7 +26,13 @@ pub(super) async fn login_command(
         )
         .await?
     } else {
-        provider_auth::authenticate_provider(args.provider, &s, printer).await?
+        provider_auth::authenticate_provider_with_catalog(
+            args.provider,
+            &s,
+            printer,
+            ctx.catalog()?,
+        )
+        .await?
     };
     let credential_id = credential_id_for(&credential).map_err(anyhow::Error::msg)?;
     let value = serde_json::to_string(&credential)?;

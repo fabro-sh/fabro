@@ -16,6 +16,7 @@ use fabro_types::{
     RunStatus, RunSummary, RunTimestamps, SandboxProvider, StageCompletion, StageHandler, StageId,
     StageOutcome, StageProjection, StageState, StartRecord, WorkflowRef, first_event_seq,
 };
+use fabro_util::error::render_compact_with_causes;
 use serde_json::Value;
 
 use crate::{Error, EventEnvelope, Result};
@@ -159,6 +160,12 @@ impl RunProjectionReducer for RunProjection {
             EventBody::RunSupersededBy(props) => {
                 self.superseded_by = Some(props.new_run_id);
             }
+            EventBody::RunParentLinked(props) => {
+                self.parent_id = Some(props.parent_id);
+            }
+            EventBody::RunParentUnlinked(_props) => {
+                self.parent_id = None;
+            }
             EventBody::RunArchived(_props) => {
                 if self.archived_at.is_some() {
                     return Ok(());
@@ -238,15 +245,16 @@ impl RunProjectionReducer for RunProjection {
             }
             EventBody::PullRequestCreated(props) => {
                 self.pull_request = Some(PullRequestRecord {
-                    provider:    "github".to_string(),
-                    html_url:    props.pr_url.clone(),
-                    number:      props.pr_number,
-                    owner:       props.owner.clone(),
-                    repo:        props.repo.clone(),
-                    base_branch: props.base_branch.clone(),
-                    head_branch: props.head_branch.clone(),
-                    title:       props.title.clone(),
+                    owner:  props.owner.clone(),
+                    repo:   props.repo.clone(),
+                    number: props.pr_number,
                 });
+            }
+            EventBody::PullRequestLinked(props) => {
+                self.pull_request = Some(props.pull_request.clone());
+            }
+            EventBody::PullRequestUnlinked(_) => {
+                self.pull_request = None;
             }
             EventBody::InterviewStarted(props) => {
                 if props.question_id.is_empty() {
@@ -522,6 +530,7 @@ fn projection_from_created(event: &EventEnvelope) -> Result<RunProjection> {
     };
 
     let mut projection = RunProjection::new(title, spec, stored.ts);
+    projection.parent_id = props.parent_id;
     projection.web_url.clone_from(&props.web_url);
     projection.sandbox = Some(planned_sandbox(&projection.spec.settings.run.sandbox));
     Ok(projection)
@@ -669,6 +678,7 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> RunSummary
 
     RunSummary {
         id: *run_id,
+        parent_id: state.parent_id,
         title: state.title().into_owned(),
         goal,
         workflow: WorkflowRef {
@@ -855,7 +865,7 @@ fn stage_completion_from_outcome(
         failure_reason: outcome
             .failure
             .as_ref()
-            .map(|failure| failure.message.clone()),
+            .map(|failure| render_compact_with_causes(&failure.message, &failure.causes)),
         timestamp,
     }
 }
@@ -951,8 +961,9 @@ mod tests {
     use fabro_types::{
         BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint, CheckpointRecord,
         CommandTermination, EventBody, FailureCategory, FailureDetail, FailureReason, Graph,
-        Outcome, QuestionType, RunBlobId, RunControlAction, RunDiff, RunEvent, RunSpec, RunStatus,
-        StageOutcome, StageState, SuccessReason, WorkflowSettings, first_event_seq, fixtures,
+        Outcome, PullRequestRecord, QuestionType, RunBlobId, RunControlAction, RunDiff, RunEvent,
+        RunSpec, RunStatus, StageOutcome, StageState, SuccessReason, WorkflowSettings,
+        first_event_seq, fixtures,
     };
     use serde_json::json;
 
@@ -998,9 +1009,7 @@ mod tests {
                         "output_tokens": output_tokens
                     }
                 },
-                "facts": {
-                    "provider": "open_ai"
-                }
+                "facts": { "algorithm": "openai" }
             },
             "total_usd_micros": input_tokens + output_tokens
         }))
@@ -1600,7 +1609,7 @@ mod tests {
                     "index": 0,
                     "failure": {
                         "message": "provider failed",
-                        "failure_class": "transient_infra"
+                        "category": "transient_infra"
                     },
                     "will_retry": false,
                     "duration_ms": 654,
@@ -2185,13 +2194,8 @@ mod tests {
                 1,
                 EventBody::RunFailed(RunFailedProps {
                     failure:              fabro_types::RunFailure {
-                        message:          "boom".to_string(),
-                        causes:           Vec::new(),
-                        reason:           FailureReason::WorkflowError,
-                        category:         FailureCategory::Deterministic,
-                        system_actor:     None,
-                        signature:        None,
-                        exec_output_tail: None,
+                        reason: FailureReason::WorkflowError,
+                        detail: FailureDetail::new("boom", FailureCategory::Deterministic),
                     },
                     duration_ms:          42,
                     final_git_commit_sha: Some("abc123".to_string()),
@@ -2305,9 +2309,11 @@ mod tests {
                 "run.failed",
                 &json!({
                     "failure": {
-                        "message": "boom",
                         "reason": "workflow_error",
-                        "category": "deterministic"
+                        "detail": {
+                            "message": "boom",
+                            "category": "deterministic"
+                        }
                     },
                     "duration_ms": 42,
                     "diff_summary": {
@@ -2337,16 +2343,18 @@ mod tests {
                 1,
                 EventBody::RunFailed(RunFailedProps {
                     failure:              fabro_types::RunFailure {
-                        message:          "Failed to initialize sandbox".to_string(),
-                        causes:           vec![
-                            "Failed to pull Docker image buildpack-deps:noble".to_string(),
-                            "connection refused".to_string(),
-                        ],
-                        reason:           FailureReason::WorkflowError,
-                        category:         FailureCategory::TransientInfra,
-                        system_actor:     None,
-                        signature:        None,
-                        exec_output_tail: None,
+                        reason: FailureReason::WorkflowError,
+                        detail: {
+                            let mut detail = FailureDetail::new(
+                                "Failed to initialize sandbox",
+                                FailureCategory::TransientInfra,
+                            );
+                            detail.causes = vec![
+                                "Failed to pull Docker image buildpack-deps:noble".to_string(),
+                                "connection refused".to_string(),
+                            ];
+                            detail
+                        },
                     },
                     duration_ms:          42,
                     final_git_commit_sha: None,
@@ -2359,8 +2367,8 @@ mod tests {
             .unwrap();
 
         let failure = state.conclusion.unwrap().failure.unwrap();
-        assert_eq!(failure.message, "Failed to initialize sandbox");
-        assert_eq!(failure.causes, vec![
+        assert_eq!(failure.detail.message, "Failed to initialize sandbox");
+        assert_eq!(failure.detail.causes, vec![
             "Failed to pull Docker image buildpack-deps:noble".to_string(),
             "connection refused".to_string(),
         ]);
@@ -2370,15 +2378,19 @@ mod tests {
     fn run_failed_projection_uses_nested_failure_reason_and_conclusion() {
         let mut state = running_projection();
         let failure = fabro_types::RunFailure {
-            message:          "Failed to initialize sandbox".to_string(),
-            causes:           vec!["connection refused".to_string()],
-            reason:           FailureReason::SandboxInitFailed,
-            category:         FailureCategory::TransientInfra,
-            system_actor:     Some(fabro_types::SystemActorKind::Engine),
-            signature:        Some(fabro_types::FailureSignature(
-                "init|transient_infra|docker".to_string(),
-            )),
-            exec_output_tail: None,
+            reason: FailureReason::SandboxInitFailed,
+            detail: {
+                let mut detail = FailureDetail::new(
+                    "Failed to initialize sandbox",
+                    FailureCategory::TransientInfra,
+                );
+                detail.causes = vec!["connection refused".to_string()];
+                detail.system_actor = Some(fabro_types::SystemActorKind::Engine);
+                detail.signature = Some(fabro_types::FailureSignature(
+                    "init|transient_infra|docker".to_string(),
+                ));
+                detail
+            },
         };
         state
             .apply_event(&test_event(
@@ -2490,13 +2502,83 @@ mod tests {
             .as_ref()
             .expect("projection should store pull request");
         assert_eq!(
-            pull_request.html_url,
+            pull_request.html_url(),
             "https://github.com/fabro-sh/fabro/pull/123"
         );
         assert_eq!(pull_request.number, 123);
 
         let summary = build_summary(&state, &fixtures::RUN_1);
         assert_eq!(summary.pull_request, state.pull_request);
+    }
+
+    #[test]
+    fn pull_request_linked_replaces_and_unlinked_clears_projection() {
+        use fabro_types::run_event::{
+            PullRequestCreatedProps, PullRequestLinkedProps, PullRequestUnlinkedProps,
+        };
+
+        let mut state = running_projection();
+        let github_pull_request = PullRequestRecord {
+            owner:  "fabro-sh".to_string(),
+            repo:   "fabro".to_string(),
+            number: 123,
+        };
+        let replacement_pull_request = PullRequestRecord {
+            owner:  "acme".to_string(),
+            repo:   "widgets".to_string(),
+            number: 42,
+        };
+
+        state
+            .apply_event(&test_event(
+                1,
+                EventBody::PullRequestCreated(PullRequestCreatedProps {
+                    pr_url:      github_pull_request.html_url(),
+                    pr_number:   github_pull_request.number,
+                    owner:       github_pull_request.owner.clone(),
+                    repo:        github_pull_request.repo.clone(),
+                    base_branch: "main".to_string(),
+                    head_branch: "fabro/run/demo".to_string(),
+                    title:       "Add run PR chip".to_string(),
+                    draft:       false,
+                }),
+                None,
+            ))
+            .unwrap();
+        assert_eq!(state.pull_request, Some(github_pull_request.clone()));
+
+        state
+            .apply_event(&test_event(
+                2,
+                EventBody::PullRequestLinked(PullRequestLinkedProps {
+                    pull_request: replacement_pull_request.clone(),
+                }),
+                None,
+            ))
+            .unwrap();
+        assert_eq!(state.pull_request, Some(replacement_pull_request.clone()));
+
+        state
+            .apply_event(&test_event(
+                3,
+                EventBody::PullRequestUnlinked(PullRequestUnlinkedProps {
+                    pull_request: replacement_pull_request,
+                }),
+                None,
+            ))
+            .unwrap();
+        assert_eq!(state.pull_request, None);
+
+        state
+            .apply_event(&test_event(
+                4,
+                EventBody::PullRequestLinked(PullRequestLinkedProps {
+                    pull_request: github_pull_request.clone(),
+                }),
+                None,
+            ))
+            .unwrap();
+        assert_eq!(state.pull_request, Some(github_pull_request));
     }
 
     #[test]
@@ -2744,7 +2826,7 @@ mod tests {
                         "cache_write_tokens": 4
                     }
                 },
-                "facts": { "provider": "open_ai" }
+                "facts": { "algorithm": "openai" }
             },
             "total_usd_micros": 123
         }))

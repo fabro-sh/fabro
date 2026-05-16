@@ -102,7 +102,7 @@ pub async fn run_acp_turn(request: AcpRunRequest) -> Result<AcpRunResult, AcpErr
                         return Err(AcpError::Cancelled);
                     }
                     Err(AcpError::TimedOut {
-                        stderr: state.stderr_tail().await,
+                        exec_output_tail: state.exec_output_tail().await,
                     })
                 }
             }
@@ -129,6 +129,9 @@ pub async fn run_acp_turn(request: AcpRunRequest) -> Result<AcpRunResult, AcpErr
             state.terminate().await?;
             if let Some(startup_error) = state.take_startup_error().await {
                 return Err(AcpError::Sandbox(startup_error));
+            }
+            if let Some(process_exit) = state.take_process_exit().await {
+                return Err(AcpError::ProcessExited(process_exit));
             }
             return Err(map_protocol_error(error));
         }

@@ -28,16 +28,17 @@ pub use fabro_api::types::{
     CompletionResponse, CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
     CreateRunPullRequestRequest, CreateSecretRequest, DeleteRunResponse, DeleteRunSandbox,
     DeleteSecretRequest, DiskUsageResponse, DiskUsageRunRow, DiskUsageSummaryRow, ForkRequest,
-    ForkResponse, MergeRunPullRequestRequest, MergeRunPullRequestResponse, ModelReference,
-    PaginatedEventList, PaginatedRunList, PaginationMeta, PreflightResponse, PreviewUrlRequest,
-    PreviewUrlResponse, PruneRunEntry, PruneRunsRequest, PruneRunsResponse,
-    RenderWorkflowGraphDirection, RenderWorkflowGraphRequest, RewindRequest, RewindResponse,
-    RunArtifactEntry, RunArtifactListResponse, RunBilling, RunBillingStage, RunBillingTotals,
-    RunError, RunManifest, RunStage, SandboxDetails, SandboxFileEntry, SandboxFileListResponse,
-    SandboxService, SandboxServiceListResponse, SshAccessRequest, SshAccessResponse, StageHandler,
-    StageState, StartRunRequest, SubmitAnswerRequest, SystemFeatures, SystemInfoResponse,
-    SystemRepairRunIssue, SystemRepairRunsResponse, SystemRunCounts, TimelineEntryResponse,
-    VncPreviewResponse, WriteBlobResponse,
+    ForkResponse, LinkRunPullRequestRequest, MergeRunPullRequestRequest,
+    MergeRunPullRequestResponse, ModelReference, PaginatedEventList, PaginatedRunList,
+    PaginationMeta, PreflightResponse, PreviewUrlRequest, PreviewUrlResponse, PruneRunEntry,
+    PruneRunsRequest, PruneRunsResponse, RenderWorkflowGraphDirection, RenderWorkflowGraphRequest,
+    RewindRequest, RewindResponse, RunArtifactEntry, RunArtifactListResponse, RunBilling,
+    RunBillingStage, RunBillingTotals, RunError, RunManifest, RunStage, SandboxDetails,
+    SandboxFileEntry, SandboxFileListResponse, SandboxService, SandboxServiceListResponse,
+    SshAccessRequest, SshAccessResponse, StageHandler, StageState, StartRunRequest,
+    SubmitAnswerRequest, SystemFeatures, SystemInfoResponse, SystemRepairRunIssue,
+    SystemRepairRunsResponse, SystemRunCounts, TimelineEntryResponse, VncPreviewResponse,
+    WriteBlobResponse,
 };
 use fabro_auth::{
     CredentialSource, VaultCredentialSource, auth_issue_message, parse_credential_secret,
@@ -84,7 +85,9 @@ use fabro_types::{
     EventBody, InterviewQuestionRecord, Principal, PullRequestRecord, QuestionType, RunBlobId,
     RunControlAction, RunEvent, RunId, ServerSettings, SessionCapability, SessionId,
 };
-use fabro_util::error::{SharedError, collect_causes, render_with_causes};
+use fabro_util::error::{
+    SharedError, collect_causes, render_compact_with_causes, render_with_causes,
+};
 use fabro_util::version::FABRO_VERSION;
 use fabro_vault::{Error as VaultError, SecretType, Vault};
 use fabro_workflow::artifact_upload::ArtifactSink;
@@ -524,6 +527,7 @@ pub struct AppState {
     /// proceed in parallel. See `crate::run_files` for semantics.
     pub(crate) files_in_flight: FilesInFlight,
     pull_request_create_locks: PullRequestCreateLocks,
+    parent_link_lock: AsyncMutex<()>,
 
     pub(crate) vault: Arc<AsyncRwLock<Vault>>,
     pub(super) server_secrets: ServerSecrets,
@@ -1633,6 +1637,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         global_event_tx,
         files_in_flight: new_files_in_flight(),
         pull_request_create_locks: Arc::new(Mutex::new(HashMap::new())),
+        parent_link_lock: AsyncMutex::new(()),
         vault,
         server_secrets,
         llm_source,
@@ -2458,7 +2463,10 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
             managed_run.status = RunStatus::Failed {
                 reason: props.failure.reason,
             };
-            managed_run.error = Some(props.failure.message.clone());
+            managed_run.error = Some(render_compact_with_causes(
+                &props.failure.detail.message,
+                &props.failure.detail.causes,
+            ));
             managed_run.active_api_stages.clear();
             managed_run.active_non_steerable_agent_stages.clear();
         }
@@ -3407,10 +3415,9 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             .conclusion
             .as_ref()
             .and_then(|conclusion| {
-                conclusion
-                    .failure
-                    .as_ref()
-                    .map(|failure| failure.message.clone())
+                conclusion.failure.as_ref().map(|failure| {
+                    render_compact_with_causes(&failure.detail.message, &failure.detail.causes)
+                })
             })
             .or_else(|| managed_run.error.clone());
         managed_run.checkpoint = final_state.current_checkpoint().cloned();

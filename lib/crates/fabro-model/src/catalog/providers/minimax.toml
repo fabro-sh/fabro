@@ -1,6 +1,7 @@
 [providers.minimax]
 display_name = "MiniMax"
 adapter = "openai_compatible"
+api_key_url = "https://platform.minimaxi.com/user-center/basic-information/interface-key"
 base_url = "https://api.minimax.io/v1"
 credentials = ["credential:minimax", "env:MINIMAX_API_KEY"]
 priority = 50

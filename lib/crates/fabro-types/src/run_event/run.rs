@@ -37,7 +37,21 @@ pub struct RunCreatedProps {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fork_source_ref:  Option<ForkSourceRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id:        Option<RunId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web_url:          Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunParentLinkedProps {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_parent_id: Option<RunId>,
+    pub parent_id:          RunId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunParentUnlinkedProps {
+    pub previous_parent_id: RunId,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

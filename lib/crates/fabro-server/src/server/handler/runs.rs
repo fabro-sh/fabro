@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -5,13 +6,14 @@ use std::sync::Arc;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use bytes::Bytes;
 use fabro_api::types::{
-    BoardColumn, BoardColumnDefinition, RunManifest, SubmitAnswerRequest, UpdateRunRequest,
+    BoardColumn, BoardColumnDefinition, RunManifest, SubmitAnswerRequest, UpdateRunParentRequest,
+    UpdateRunRequest,
 };
 use fabro_config::Storage;
 use fabro_interview::AnswerSubmission;
@@ -56,6 +58,10 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             "/runs/{id}",
             get(get_run_status).patch(update_run).delete(delete_run),
         )
+        .route(
+            "/runs/{id}/parent",
+            put(link_run_parent).delete(unlink_run_parent),
+        )
         .route("/runs/{id}/questions", get(get_questions))
         .route("/runs/{id}/questions/{qid}/answer", post(submit_answer))
         .route("/runs/{id}/state", get(get_run_state))
@@ -78,6 +84,8 @@ struct ListRunsParams {
     offset:           u32,
     #[serde(default)]
     include_archived: bool,
+    #[serde(default)]
+    parent_id:        Option<RunId>,
 }
 
 impl ListRunsParams {
@@ -156,7 +164,10 @@ async fn list_board_runs(
 ) -> Response {
     let entries = match state
         .store
-        .list_cached_runs(&fabro_store::ListRunsQuery::default())
+        .list_cached_runs(&fabro_store::ListRunsQuery {
+            parent_id: params.parent_id,
+            ..fabro_store::ListRunsQuery::default()
+        })
         .await
     {
         Ok(runs) => runs,
@@ -195,6 +206,140 @@ async fn list_board_runs(
         .into_response()
 }
 
+async fn link_run_parent(
+    subject: RequiredUser,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(req): Json<UpdateRunParentRequest>,
+) -> Response {
+    let child_id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(err) => return err.into_response(),
+    };
+    let parent_id = match req.parent_id.parse::<RunId>() {
+        Ok(parent_id) => parent_id,
+        Err(err) => {
+            return ApiError::bad_request(format!("invalid parent run ID: {err}")).into_response();
+        }
+    };
+    let _parent_link_guard = state.parent_link_lock.lock().await;
+    let child = match state.store.get_cached_summary(&child_id).await {
+        Ok(Some(summary)) => summary,
+        Ok(None) => return ApiError::not_found("Run not found.").into_response(),
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+    if parent_id == child_id {
+        return ApiError::bad_request("A run cannot be its own parent.").into_response();
+    }
+    if let Err(err) = validate_parent_link(&state, child_id, parent_id).await {
+        return err.into_response();
+    }
+    if child.parent_id == Some(parent_id) {
+        return (StatusCode::OK, Json(child)).into_response();
+    }
+
+    let Ok(run_store) = state.store.open_run(&child_id).await else {
+        return ApiError::not_found("Run not found.").into_response();
+    };
+    if let Err(err) = workflow_event::append_event(
+        &run_store,
+        &child_id,
+        &workflow_event::Event::RunParentLinked {
+            previous_parent_id: child.parent_id,
+            parent_id,
+            actor: Some(Principal::User(subject.0)),
+        },
+    )
+    .await
+    {
+        return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
+    updated_run_response(&state, &child_id).await
+}
+
+async fn unlink_run_parent(
+    subject: RequiredUser,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    let child_id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(err) => return err.into_response(),
+    };
+    let _parent_link_guard = state.parent_link_lock.lock().await;
+    let child = match state.store.get_cached_summary(&child_id).await {
+        Ok(Some(summary)) => summary,
+        Ok(None) => return ApiError::not_found("Run not found.").into_response(),
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+    let Some(previous_parent_id) = child.parent_id else {
+        return (StatusCode::OK, Json(child)).into_response();
+    };
+
+    let Ok(run_store) = state.store.open_run(&child_id).await else {
+        return ApiError::not_found("Run not found.").into_response();
+    };
+    if let Err(err) = workflow_event::append_event(
+        &run_store,
+        &child_id,
+        &workflow_event::Event::RunParentUnlinked {
+            previous_parent_id,
+            actor: Some(Principal::User(subject.0)),
+        },
+    )
+    .await
+    {
+        return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
+    updated_run_response(&state, &child_id).await
+}
+
+async fn validate_parent_link(
+    state: &AppState,
+    child_id: RunId,
+    parent_id: RunId,
+) -> Result<(), ApiError> {
+    let mut cursor = Some(parent_id);
+    let mut visited = HashSet::new();
+    while let Some(current_id) = cursor {
+        if current_id == child_id {
+            return Err(ApiError::bad_request("Parent link would create a cycle."));
+        }
+        if !visited.insert(current_id) {
+            return Err(ApiError::bad_request("Parent link would create a cycle."));
+        }
+        let summary = state
+            .store
+            .get_cached_summary(&current_id)
+            .await
+            .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+        let Some(summary) = summary else {
+            if current_id == parent_id {
+                return Err(ApiError::not_found("Parent run not found."));
+            }
+            return Ok(());
+        };
+        cursor = summary.parent_id;
+    }
+    Ok(())
+}
+
+async fn updated_run_response(state: &AppState, run_id: &RunId) -> Response {
+    match state.store.get_cached_summary(run_id).await {
+        Ok(Some(summary)) => (StatusCode::OK, Json(summary)).into_response(),
+        Ok(None) => ApiError::not_found("Run not found.").into_response(),
+        Err(err) => {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
+    }
+}
+
 async fn list_runs(
     _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
@@ -202,7 +347,10 @@ async fn list_runs(
 ) -> Response {
     match state
         .store
-        .list_cached_runs(&fabro_store::ListRunsQuery::default())
+        .list_cached_runs(&fabro_store::ListRunsQuery {
+            parent_id: params.parent_id,
+            ..fabro_store::ListRunsQuery::default()
+        })
         .await
     {
         Ok(entries) => {
@@ -399,6 +547,14 @@ async fn create_run(
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
     let run_id = prepared.run_id.unwrap_or_else(RunId::new);
+    if let Some(parent_id) = prepared.parent_id {
+        if parent_id == run_id {
+            return ApiError::bad_request("A run cannot be its own parent.").into_response();
+        }
+        if let Err(err) = validate_parent_link(&state, run_id, parent_id).await {
+            return err.into_response();
+        }
+    }
     info!(run_id = %run_id, "Run created");
 
     let web_url = state.run_web_url(&run_id);

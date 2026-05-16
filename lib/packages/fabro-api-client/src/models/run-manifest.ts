@@ -45,6 +45,10 @@ export interface RunManifest {
      */
     'run_id'?: string | null;
     /**
+     * Optional orchestration parent run ID. Fork and rewind lineage use separate fields and should not set this value.
+     */
+    'parent_id'?: string | null;
+    /**
      * Optional explicit run title. The server trims leading/trailing whitespace, rejects blank values, rejects control characters and newline characters, and requires at most 100 characters.
      */
     'title'?: string | null;

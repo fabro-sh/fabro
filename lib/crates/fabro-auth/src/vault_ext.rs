@@ -43,14 +43,14 @@ pub fn vault_credentials_for_provider(
 #[cfg(test)]
 mod tests {
     use chrono::{Duration, Utc};
-    use fabro_model::Provider;
+    use fabro_model::ProviderId;
 
     use super::*;
     use crate::credential::{AuthDetails, OAuthConfig, OAuthTokens};
 
     fn oauth_credential() -> AuthCredential {
         AuthCredential {
-            provider: Provider::OpenAi.id(),
+            provider: ProviderId::openai(),
             details:  AuthDetails::CodexOAuth {
                 tokens:     OAuthTokens {
                     access_token:  "access".to_string(),
@@ -90,14 +90,14 @@ mod tests {
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
         vault_set_credential(&mut vault, "openai_codex", &oauth_credential()).unwrap();
         vault_set_credential(&mut vault, "anthropic", &AuthCredential {
-            provider: Provider::Anthropic.id(),
+            provider: ProviderId::anthropic(),
             details:  AuthDetails::ApiKey {
                 key: "anthropic-key".to_string(),
             },
         })
         .unwrap();
 
-        let credentials = vault_credentials_for_provider(&vault, Provider::OpenAi);
+        let credentials = vault_credentials_for_provider(&vault, ProviderId::openai());
 
         assert_eq!(credentials.len(), 1);
         assert_eq!(credentials[0].0, "openai_codex");

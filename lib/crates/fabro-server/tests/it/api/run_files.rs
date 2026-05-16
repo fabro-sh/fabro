@@ -72,6 +72,7 @@ async fn append_completed_run_with_final_patch(
         manifest_blob:    None,
         git:              None,
         fork_source_ref:  None,
+        parent_id:        None,
         web_url:          None,
     })
     .await

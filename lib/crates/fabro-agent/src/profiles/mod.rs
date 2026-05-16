@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use fabro_model::{Catalog, Provider, ProviderId};
+use fabro_model::{AgentProfileKind, Catalog, ProviderId};
 
 pub mod anthropic;
 pub mod gemini;
@@ -16,14 +16,14 @@ use crate::tool_registry::ToolRegistry;
 
 /// Common fields shared by all provider profiles.
 ///
-/// Each concrete profile embeds this struct and delegates `provider()`,
+/// Each concrete profile embeds this struct and delegates `profile_kind()`,
 /// `model()`, `tool_registry()`, and `tool_registry_mut()` to it.
 pub struct BaseProfile {
-    pub provider:    Provider,
-    pub provider_id: ProviderId,
-    pub model:       String,
-    pub catalog:     Option<Arc<Catalog>>,
-    pub registry:    ToolRegistry,
+    pub profile_kind: AgentProfileKind,
+    pub provider_id:  ProviderId,
+    pub model:        String,
+    pub catalog:      Option<Arc<Catalog>>,
+    pub registry:     ToolRegistry,
 }
 
 /// Additional context for building environment blocks

@@ -9,7 +9,7 @@ use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
 use fabro_llm::types::{
     ContentPart, FinishReason, Message, Request, Response, StreamEvent, TokenCounts,
 };
-use fabro_model::Provider;
+use fabro_model::{AgentProfileKind, ProviderId};
 pub use fabro_sandbox::test_support::{MockSandbox, MutableMockSandbox};
 use futures::stream;
 
@@ -52,8 +52,12 @@ impl TestProfile {
 }
 
 impl AgentProfile for TestProfile {
-    fn provider(&self) -> Provider {
-        Provider::Anthropic
+    fn profile_kind(&self) -> AgentProfileKind {
+        AgentProfileKind::Anthropic
+    }
+
+    fn provider_id(&self) -> ProviderId {
+        ProviderId::anthropic()
     }
 
     fn model(&self) -> &'static str {
@@ -189,8 +193,8 @@ pub fn text_response(text: &str) -> Response {
 pub async fn make_client(provider: Arc<dyn ProviderAdapter>) -> Client {
     let mut providers = HashMap::new();
     providers.insert(provider.name().to_string(), provider.clone());
-    // Also register under "anthropic" so TestProfile (Provider::Anthropic) routes
-    // correctly
+    // Also register under "anthropic" so TestProfile (ProviderId::anthropic())
+    // routes correctly
     providers.insert("anthropic".to_string(), provider);
     Client::new(providers, Some("mock".into()), vec![])
 }

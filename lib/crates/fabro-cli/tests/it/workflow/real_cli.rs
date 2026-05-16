@@ -1,19 +1,19 @@
 use std::sync::Arc;
 
 use fabro_graphviz::graph::{AttrValue, Node};
-use fabro_llm::provider::Provider;
+use fabro_model::ProviderId;
 use fabro_workflow::context::Context;
 use fabro_workflow::event::Emitter;
 use fabro_workflow::handler::agent::{CodergenBackend, CodergenResult, CodergenRunRequest};
 use fabro_workflow::handler::llm::cli::AgentCliBackend;
 
 /// Run a real CLI tool via LocalSandbox and verify the full flow.
-async fn run_real_cli_test(provider: Provider, model: &str) {
+async fn run_real_cli_test(provider: ProviderId, model: &str) {
     let workspace = tempfile::tempdir().expect("real CLI test workspace should create");
     let env: Arc<dyn fabro_agent::Sandbox> = Arc::new(fabro_agent::LocalSandbox::new(
         workspace.path().to_path_buf(),
     ));
-    let backend = AgentCliBackend::new_from_env(model.to_string(), provider);
+    let backend = AgentCliBackend::new_from_env(model.to_string(), provider.clone());
 
     let mut node = Node::new("real_cli_test");
     node.attrs.insert(
@@ -57,15 +57,15 @@ async fn run_real_cli_test(provider: Provider, model: &str) {
 
 #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 async fn real_cli_claude() {
-    run_real_cli_test(Provider::Anthropic, "haiku").await;
+    run_real_cli_test(ProviderId::anthropic(), "haiku").await;
 }
 
 #[fabro_macros::e2e_test(live("OPENAI_API_KEY"))]
 async fn real_cli_codex() {
-    run_real_cli_test(Provider::OpenAi, "").await;
+    run_real_cli_test(ProviderId::openai(), "").await;
 }
 
 #[fabro_macros::e2e_test(live("GEMINI_API_KEY"))]
 async fn real_cli_gemini() {
-    run_real_cli_test(Provider::Gemini, "gemini-2.5-flash").await;
+    run_real_cli_test(ProviderId::gemini(), "gemini-2.5-flash").await;
 }

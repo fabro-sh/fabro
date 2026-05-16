@@ -556,6 +556,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/health:
+    get:
+      operationId: getApiHealth
+      tags: [Discovery]
+      summary: Health Check (API)
+      description: >
+        Returns service health status under the versioned API prefix. Mirrors
+        `/health` for callers that prefer a uniform `/api/v1` base.
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
   /api/v1/health/diagnostics:
     post:
       operationId: runDiagnostics
@@ -1070,6 +1087,7 @@ paths:
         - $ref: "#/components/parameters/PageLimit"
         - $ref: "#/components/parameters/PageOffset"
         - $ref: "#/components/parameters/IncludeArchived"
+        - $ref: "#/components/parameters/ParentRunId"
       responses:
         "200":
           description: Paginated durable run summaries
@@ -1317,6 +1335,69 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Run is active and requires `force=true`
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/parent:
+    put:
+      operationId: linkRunParent
+      tags: [Runs]
+      summary: Link Run Parent
+      description: Links a run under an orchestration parent. Parent links are mutable for all run states, including archived and terminal runs.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRunParentRequest"
+      responses:
+        "200":
+          description: Updated durable run summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "400":
+          description: Self-parent or cycle rejected
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Child or parent run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: unlinkRunParent
+      tags: [Runs]
+      summary: Unlink Run Parent
+      description: Removes a run's orchestration parent. Already-root runs are returned unchanged.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Updated durable run summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "404":
+          description: Run not found
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -1992,7 +2073,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PullRequest"
+                $ref: "#/components/schemas/PullRequestLink"
         "400":
           description: Pull request creation does not apply to this run
           headers:
@@ -2040,22 +2121,28 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-    get:
-      operationId: getRunPullRequest
+    put:
+      operationId: linkRunPullRequest
       tags: [Runs]
-      summary: Get Run Pull Request
-      description: Returns the stored pull request record for a run plus live GitHub details.
+      summary: Link Run Pull Request
+      description: Links or replaces the GitHub pull request association for a run without modifying the remote pull request.
       parameters:
         - $ref: "#/components/parameters/RunId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinkRunPullRequestRequest"
       responses:
         "200":
-          description: Pull request detail
+          description: Pull request linked
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PullRequestDetails"
+                $ref: "#/components/schemas/PullRequestLink"
         "400":
-          description: Pull request lookup does not apply to this run
+          description: Pull request link request is invalid
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -2063,6 +2150,29 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: unlinkRunPullRequest
+      tags: [Runs]
+      summary: Unlink Run Pull Request
+      description: Removes Fabro's stored pull request association for a run without modifying the remote pull request.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Pull request unlinked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PullRequestLink"
         "404":
           description: Run or stored pull request record not found
           headers:
@@ -2072,17 +2182,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-        "502":
-          description: Stored pull request record exists but GitHub could not find it
-          headers:
-            x-request-id:
-              $ref: "#/components/headers/XRequestId"
+    get:
+      operationId: getRunPullRequest
+      tags: [Runs]
+      summary: Get Run Pull Request
+      description: Returns the stored pull request record for a run plus live GitHub details when available.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Pull request detail
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "503":
-          description: GitHub integration is unavailable on the server
+                $ref: "#/components/schemas/PullRequestResponse"
+        "404":
+          description: Run or stored pull request record not found
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -3984,6 +4099,15 @@ components:
         default: false
       example: false
 
+    ParentRunId:
+      name: parent_id
+      in: query
+      required: false
+      description: Return only runs currently linked to this orchestration parent.
+      schema:
+        type: string
+      example: 01JNQVR7M0EJ5GKAT2SC4ERS1Z
+
     ForceRunDelete:
       name: force
       in: query
@@ -4958,7 +5082,6 @@ components:
         - reasoning
         - reasoning_effort
         - prompt_cache
-        - effort
       properties:
         tools:
           type: boolean
@@ -4974,10 +5097,6 @@ components:
         prompt_cache:
           type: boolean
           description: Whether the model endpoint supports prompt caching.
-        effort:
-          type: boolean
-          deprecated: true
-          description: Deprecated compatibility flag equivalent to reasoning_effort = levels.
 
     ModelCosts:
       description: Pricing per million tokens in USD.
@@ -5491,12 +5610,11 @@ components:
           type: boolean
           default: false
 
-    RunFailure:
-      description: Rich terminal run failure diagnostics.
+    FailureDetail:
+      description: Rich diagnostic detail for a failed stage or terminal run.
       type: object
       required:
         - message
-        - reason
         - category
       properties:
         message:
@@ -5505,8 +5623,6 @@ components:
           type: array
           items:
             type: string
-        reason:
-          $ref: "#/components/schemas/FailureReason"
         category:
           $ref: "#/components/schemas/FailureCategory"
         system_actor:
@@ -5521,6 +5637,18 @@ components:
           oneOf:
             - $ref: "#/components/schemas/ExecOutputTail"
             - type: "null"
+
+    RunFailure:
+      description: Terminal run failure reason and rich diagnostics.
+      type: object
+      required:
+        - reason
+        - detail
+      properties:
+        reason:
+          $ref: "#/components/schemas/FailureReason"
+        detail:
+          $ref: "#/components/schemas/FailureDetail"
 
     RunManifest:
       description: Self-contained workflow run manifest.
@@ -5539,6 +5667,10 @@ components:
           type: ["string", "null"]
           description: Optional pre-generated run ID to use instead of allocating a new ULID.
           example: "01HV6D7S5YF4Z4B2M7K4N0Q6T9"
+        parent_id:
+          type: ["string", "null"]
+          description: Optional orchestration parent run ID. Fork and rewind lineage use separate fields and should not set this value.
+          example: "01HV6D7S5YF4Z4B2M7K4N0Q6T8"
         title:
           type: ["string", "null"]
           maxLength: 100
@@ -6961,6 +7093,15 @@ components:
             - $ref: "#/components/schemas/ForkSourceRef"
             - type: "null"
 
+    UpdateRunParentRequest:
+      type: object
+      required:
+        - parent_id
+      properties:
+        parent_id:
+          type: string
+          description: Existing orchestration parent run ID.
+
     StartRecord:
       description: Metadata captured when execution starts.
       type: object
@@ -7072,6 +7213,9 @@ components:
         title:
           type: string
           description: Resolved run title from the event log.
+        parent_id:
+          type: ["string", "null"]
+          description: Current orchestration parent run ID, if linked.
         spec:
           $ref: "#/components/schemas/RunSpec"
         web_url:
@@ -7110,8 +7254,9 @@ components:
             - $ref: "#/components/schemas/RunSandbox"
             - type: "null"
         pull_request:
-          type: ["object", "null"]
-          additionalProperties: true
+          oneOf:
+            - $ref: "#/components/schemas/PullRequestLink"
+            - type: "null"
         superseded_by:
           type: ["string", "null"]
         pending_interviews:
@@ -7151,6 +7296,9 @@ components:
       properties:
         id:
           type: string
+        parent_id:
+          type: ["string", "null"]
+          description: Current orchestration parent run ID, if linked.
         title:
           type: string
         goal:
@@ -7199,7 +7347,7 @@ components:
             - type: "null"
         pull_request:
           oneOf:
-            - $ref: "#/components/schemas/PullRequest"
+            - $ref: "#/components/schemas/PullRequestLink"
             - type: "null"
         current_question:
           oneOf:
@@ -7586,44 +7734,82 @@ components:
           description: Error message.
           example: "Stage 'apply-changes' exceeded maximum retries."
 
-    PullRequest:
-      description: Persisted record of a pull request created for a run.
+    PullRequestLink:
+      description: Minimal GitHub pull request link associated with a run.
       type: object
       required:
-        - provider
-        - html_url
-        - number
         - owner
         - repo
-        - base_branch
-        - head_branch
-        - title
+        - number
+        - html_url
       properties:
-        provider:
-          type: string
-          enum: [github]
-        html_url:
-          type: string
-          format: uri
-          example: https://github.com/fabro-sh/fabro/pull/123
-        number:
-          type: integer
-          example: 123
         owner:
           type: string
           example: fabro-sh
         repo:
           type: string
           example: fabro
-        base_branch:
+        number:
+          type: integer
+          example: 123
+        html_url:
           type: string
-          example: main
-        head_branch:
-          type: string
-          example: fabro/run/demo
-        title:
-          type: string
-          example: Move PR commands server-side
+          format: uri
+          description: Computed GitHub web URL for the pull request.
+          example: https://github.com/fabro-sh/fabro/pull/123
+
+    PullRequest:
+      description: Stored pull request link plus optional live GitHub details.
+      type: object
+      required:
+        - link
+      properties:
+        link:
+          $ref: "#/components/schemas/PullRequestLink"
+        details:
+          oneOf:
+            - $ref: "#/components/schemas/PullRequestDetails"
+            - type: "null"
+
+    PullRequestMeta:
+      description: Metadata for live GitHub detail retrieval.
+      type: object
+      required:
+        - details_status
+      properties:
+        details_status:
+          $ref: "#/components/schemas/PullRequestDetailsStatus"
+        details_unavailable_reason:
+          oneOf:
+            - $ref: "#/components/schemas/PullRequestDetailsUnavailableReason"
+            - type: "null"
+
+    PullRequestResponse:
+      description: Pull request link and optional live GitHub details for a run.
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/PullRequest"
+        meta:
+          $ref: "#/components/schemas/PullRequestMeta"
+
+    PullRequestDetailsStatus:
+      description: Whether live GitHub pull request details are present.
+      type: string
+      enum:
+        - available
+        - unavailable
+
+    PullRequestDetailsUnavailableReason:
+      description: Why live GitHub pull request details are unavailable.
+      type: string
+      enum:
+        - integration_unavailable
+        - not_found
+        - fetch_failed
 
     PullRequestUser:
       description: GitHub user summary for a pull request.
@@ -7646,25 +7832,27 @@ components:
           example: fabro/run/demo
 
     PullRequestDetails:
-      description: Stored pull request record plus live GitHub-enriched fields.
+      description: Live pull request fields retrieved successfully from GitHub.
       type: object
       required:
-        - pull_request
+        - title
         - state
         - draft
         - merged
-        - merged_at
-        - mergeable
         - additions
         - deletions
         - changed_files
-        - comments
-        - checks
         - author
+        - head_branch
+        - base_branch
         - timestamps
       properties:
-        pull_request:
-          $ref: "#/components/schemas/PullRequest"
+        title:
+          type: string
+          example: Move PR commands server-side
+        body:
+          type: ["string", "null"]
+          example: Detailed description
         state:
           type: string
           example: open
@@ -7690,15 +7878,14 @@ components:
         changed_files:
           type: integer
           example: 5
-        comments:
-          type: integer
-          example: 4
-        checks:
-          type: array
-          items:
-            $ref: "#/components/schemas/CheckRun"
         author:
           $ref: "#/components/schemas/PullRequestUser"
+        head_branch:
+          type: string
+          example: fabro/run/demo
+        base_branch:
+          type: string
+          example: main
         timestamps:
           type: object
           required: [created_at, updated_at]
@@ -7724,6 +7911,18 @@ components:
           type: ["string", "null"]
           description: Optional model override for generating the pull request description.
           example: claude-sonnet-4-6
+
+    LinkRunPullRequestRequest:
+      description: Request body for linking an existing GitHub pull request to a run.
+      type: object
+      required:
+        - html_url
+      properties:
+        html_url:
+          type: string
+          format: uri
+          description: GitHub pull request URL to associate with the run. Must use the form `https://github.com/{owner}/{repo}/pull/{number}`.
+          example: https://github.com/fabro-sh/fabro/pull/123
 
     MergeMethod:
       description: GitHub merge method for a pull request.
@@ -8613,6 +8812,43 @@ components:
           minimum: 0
           description: Disk size in bytes. Null when unavailable.
 
+    SandboxNetworkPolicyMode:
+      description: Provider-neutral public-network policy for one direction.
+      type: string
+      enum:
+        - unknown
+        - open
+        - blocked
+        - cidr_allow_list
+        - essentials_only
+
+    SandboxNetworkPolicy:
+      description: Public-network policy for one direction.
+      type: object
+      required:
+        - mode
+        - cidrs
+      properties:
+        mode:
+          $ref: "#/components/schemas/SandboxNetworkPolicyMode"
+        cidrs:
+          type: array
+          items:
+            type: string
+          description: CIDR entries when `mode` is `cidr_allow_list`; empty for other modes.
+
+    SandboxNetwork:
+      description: Provider-neutral public-network policy for sandbox egress and ingress.
+      type: object
+      required:
+        - egress
+        - ingress
+      properties:
+        egress:
+          $ref: "#/components/schemas/SandboxNetworkPolicy"
+        ingress:
+          $ref: "#/components/schemas/SandboxNetworkPolicy"
+
     SandboxTimestamps:
       description: Lifecycle timestamps for a sandbox. Fields are nullable when the provider does not surface a value.
       type: object
@@ -8633,6 +8869,7 @@ components:
         - sandbox
         - state
         - resources
+        - network
         - labels
         - timestamps
       properties:
@@ -8646,8 +8883,13 @@ components:
         region:
           type: ["string", "null"]
           description: Provider region or target. Null for local-style providers.
+        web_url:
+          type: ["string", "null"]
+          description: Provider dashboard URL for this sandbox when available.
         resources:
           $ref: "#/components/schemas/SandboxResources"
+        network:
+          $ref: "#/components/schemas/SandboxNetwork"
         labels:
           type: object
           additionalProperties:

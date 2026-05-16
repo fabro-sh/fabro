@@ -33,9 +33,11 @@ use crate::{
 };
 
 pub(crate) const WORKING_DIRECTORY: &str = "/home/daytona/workspace";
-pub(crate) const REPOS_ROOT: &str = "/repos";
+pub(crate) const REPOS_ROOT: &str = "/home/daytona/repos";
 const DEFAULT_SNAPSHOT: &str = "daytona-medium";
 pub const DEFAULT_DAYTONA_API_URL: &str = "https://app.daytona.io/api";
+pub(crate) const DAYTONA_DASHBOARD_SANDBOXES_URL: &str =
+    "https://app.daytona.io/dashboard/sandboxes";
 const FABRO_SANDBOX_USER_AGENT: &str = concat!("fabro-sandbox/", env!("CARGO_PKG_VERSION"));
 const DAYTONA_PROBE_TIMEOUT: Duration = Duration::from_secs(20);
 /// Upper bound on `DaytonaSession::close` so a stalled Daytona REST call cannot
@@ -812,8 +814,11 @@ impl Sandbox for DaytonaSandbox {
                     .create_folder(WORKING_DIRECTORY, None)
                     .await
                     .map_err(|e| {
-                        let err =
-                            crate::Error::context("Failed to create Daytona workspace root", e);
+                        let err = wrap_fs_error(
+                            "Failed to create Daytona workspace root",
+                            WORKING_DIRECTORY,
+                            e,
+                        );
                         self.emit(SandboxEvent::GitCloneFailed {
                             url:    origin_url.clone(),
                             error:  err.to_string(),
@@ -822,7 +827,7 @@ impl Sandbox for DaytonaSandbox {
                         self.fail_init(init_start, err)
                     })?;
                 fs_svc.create_folder(REPOS_ROOT, None).await.map_err(|e| {
-                    let err = crate::Error::context("Failed to create Daytona repos root", e);
+                    let err = wrap_fs_error("Failed to create Daytona repos root", REPOS_ROOT, e);
                     self.emit(SandboxEvent::GitCloneFailed {
                         url:    origin_url.clone(),
                         error:  err.to_string(),
@@ -834,8 +839,9 @@ impl Sandbox for DaytonaSandbox {
                     .create_folder(&layout.repos_owner_path, None)
                     .await
                     .map_err(|e| {
-                        let err = crate::Error::context(
+                        let err = wrap_fs_error(
                             "Failed to create Daytona repos owner directory",
+                            &layout.repos_owner_path,
                             e,
                         );
                         self.emit(SandboxEvent::GitCloneFailed {
@@ -1033,7 +1039,7 @@ impl Sandbox for DaytonaSandbox {
             name:        Some(sandbox_name),
             cpu:         Some(sandbox_cpu),
             memory:      Some(sandbox_memory),
-            url:         Some("https://app.daytona.io/dashboard/sandboxes".into()),
+            url:         Some(DAYTONA_DASHBOARD_SANDBOXES_URL.into()),
         });
 
         Ok(())
@@ -1788,6 +1794,27 @@ fn daytona_callback_error(err: &crate::Error) -> DaytonaError {
     DaytonaError::general(format!("output callback failed: {err}"))
 }
 
+/// Wrap a Daytona filesystem error with a richer message that includes the
+/// attempted path and a hint when the status code suggests a configuration
+/// issue. Preserves the underlying `DaytonaError` in the source chain so
+/// callers can still inspect status/headers via downcasting.
+fn wrap_fs_error(operation: &str, path: &str, error: DaytonaError) -> crate::Error {
+    let message = match error.status_code() {
+        Some(400) => format!(
+            "{operation} '{path}' failed (HTTP 400). This usually means the sandbox user \
+             lacks write permission on the parent directory. If you're using a custom \
+             Daytona snapshot, ensure the sandbox user can write to '{path}', or use a \
+             path under the user's home directory (e.g. /home/daytona/...)."
+        ),
+        Some(status @ (401 | 403)) => format!(
+            "{operation} '{path}' rejected by Daytona (HTTP {status}) — check that your \
+             DAYTONA_API_KEY has the required permissions."
+        ),
+        _ => format!("{operation} '{path}' failed"),
+    };
+    crate::Error::context(message, error)
+}
+
 async fn finish_daytona_log_stream(
     stream_task: &mut JoinHandle<Result<(), DaytonaError>>,
 ) -> crate::Result<bool> {
@@ -2125,6 +2152,7 @@ fn wrap_bash_command(command: &str) -> String {
 #[cfg(test)]
 mod tests {
     use daytona_api_client::models::api_key_list::Permissions;
+    use fabro_util::error::collect_chain;
     use httpmock::Method::GET;
     use httpmock::MockServer;
 
@@ -2272,8 +2300,62 @@ subpath = "agents"
 
         assert_eq!(
             daytona_symlink_command(&layout),
-            "ln -s /repos/fabro-sh/fabro /home/daytona/workspace/fabro"
+            "ln -s /home/daytona/repos/fabro-sh/fabro /home/daytona/workspace/fabro"
         );
+    }
+
+    #[test]
+    fn wrap_fs_error_classifies_http_400_and_403() {
+        let err_400 = wrap_fs_error(
+            "Failed to create Daytona repos root",
+            "/home/daytona/repos",
+            DaytonaError::api(400, ""),
+        );
+        let top_400 = err_400.to_string();
+        assert!(
+            top_400.contains("/home/daytona/repos"),
+            "400 top-level message should include the attempted path, got: {top_400}"
+        );
+        assert!(
+            top_400.contains("HTTP 400") && top_400.contains("write permission"),
+            "400 top-level message should classify as a permission issue, got: {top_400}"
+        );
+
+        let chain_400 = collect_chain(&err_400);
+        assert!(
+            chain_400
+                .iter()
+                .skip(1)
+                .any(|cause| cause.contains("HTTP 400") || cause.is_empty()),
+            "400 source chain should preserve the underlying DaytonaError, got: {chain_400:?}"
+        );
+        let source_400 = std::error::Error::source(&err_400)
+            .and_then(|s| s.downcast_ref::<DaytonaError>())
+            .expect("source should be a DaytonaError");
+        assert_eq!(
+            source_400.status_code(),
+            Some(400),
+            "downcast source should preserve the original status code"
+        );
+
+        let err_403 = wrap_fs_error(
+            "Failed to create Daytona repos root",
+            "/home/daytona/repos",
+            DaytonaError::api(403, ""),
+        );
+        let top_403 = err_403.to_string();
+        assert!(
+            top_403.contains("/home/daytona/repos") && top_403.contains("HTTP 403"),
+            "403 top-level message should include the path and status, got: {top_403}"
+        );
+        assert!(
+            top_403.contains("DAYTONA_API_KEY"),
+            "403 top-level message should hint at API key permissions, got: {top_403}"
+        );
+        let source_403 = std::error::Error::source(&err_403)
+            .and_then(|s| s.downcast_ref::<DaytonaError>())
+            .expect("source should be a DaytonaError");
+        assert_eq!(source_403.status_code(), Some(403));
     }
 
     #[test]

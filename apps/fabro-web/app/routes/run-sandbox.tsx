@@ -1,11 +1,17 @@
 import { useMemo } from "react";
 import { useSearchParams } from "react-router";
+import { ArrowTopRightOnSquareIcon } from "@heroicons/react/20/solid";
 
 import TerminalView, { TERMINAL_DOCK_CLEARANCE_CLASS } from "../components/terminal-view";
 import { EmptyState, ErrorState } from "../components/state";
 import { formatAbsoluteTs } from "../lib/format";
 import { useRunSandboxDetails } from "../lib/queries";
-import type { SandboxDetails, SandboxResources, SandboxState } from "@qltysh/fabro-api-client";
+import type {
+  SandboxDetails,
+  SandboxNetwork,
+  SandboxResources,
+  SandboxState,
+} from "@qltysh/fabro-api-client";
 import FilesystemPanel from "./run-sandbox/filesystem-panel";
 import ServicesPanel from "./run-sandbox/services-panel";
 import VncPanel from "./run-sandbox/vnc-panel";
@@ -81,16 +87,39 @@ function nullableCpu(cores: number | null | undefined): string {
   return cores != null ? formatCpuCores(cores) : EMPTY_VALUE;
 }
 
+type SandboxNetworkPolicy = SandboxNetwork["egress"];
+type SandboxNetworkPolicyMode = SandboxNetworkPolicy["mode"];
+
+const NETWORK_POLICY_DISPLAY: Record<SandboxNetworkPolicyMode, string> = {
+  unknown:          "Unknown",
+  open:             "Open",
+  blocked:          "Blocked",
+  cidr_allow_list:  "CIDR allow list",
+  essentials_only:  "Essentials only",
+};
+
+function networkPolicySummary(policy: SandboxNetworkPolicy): string {
+  return NETWORK_POLICY_DISPLAY[policy.mode] ?? policy.mode;
+}
+
 interface RowProps {
   label: string;
-  value: string;
+  value: React.ReactNode;
   valueClassName?: string;
+}
+
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-sm">
+      <span className="text-fg-3">{label}</span>
+      {children}
+    </div>
+  );
 }
 
 function Row({ label, value, valueClassName }: RowProps) {
   return (
-    <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-sm">
-      <span className="text-fg-3">{label}</span>
+    <DetailRow label={label}>
       <span
         className={`text-right font-mono text-xs text-fg-2 ${
           valueClassName ?? ""
@@ -98,7 +127,23 @@ function Row({ label, value, valueClassName }: RowProps) {
       >
         {value}
       </span>
-    </div>
+    </DetailRow>
+  );
+}
+
+function LinkRow({ label, href, text }: { label: string; href: string; text: string }) {
+  return (
+    <DetailRow label={label}>
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex min-w-0 items-center gap-1.5 text-right font-mono text-xs text-teal-500 transition-colors hover:text-teal-300 focus-visible:rounded-sm focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500"
+      >
+        <span className="truncate">{text}</span>
+        <ArrowTopRightOnSquareIcon className="size-3.5 shrink-0" aria-hidden="true" />
+      </a>
+    </DetailRow>
   );
 }
 
@@ -154,6 +199,17 @@ function OverviewPanel({ details }: { details: SandboxDetails }) {
         value={details.region ? details.region : sandbox.provider === "docker" ? "local" : EMPTY_VALUE}
       />
       <Row label="Image" value={nullable(sandbox.image ?? sandbox.snapshot)} />
+      {details.web_url && (
+        <LinkRow
+          label="Provider"
+          href={details.web_url}
+          text={
+            sandbox.provider === "daytona"
+              ? "Open in Daytona"
+              : `Open in ${sandbox.provider}`
+          }
+        />
+      )}
     </Panel>
   );
 }
@@ -164,6 +220,23 @@ function ResourcesPanel({ resources }: { resources: SandboxResources }) {
       <Row label="CPU" value={nullableCpu(resources.cpu_cores)} />
       <Row label="Memory" value={nullableMemory(resources.memory_bytes)} />
       <Row label="Disk" value={nullableMemory(resources.disk_bytes)} />
+    </Panel>
+  );
+}
+
+function NetworkPanel({ network }: { network: SandboxNetwork }) {
+  const cidrRows: Array<{ label: string; policy: SandboxNetworkPolicy }> = [
+    { label: "Egress CIDRs", policy: network.egress },
+    { label: "Ingress CIDRs", policy: network.ingress },
+  ].filter(({ policy }) => policy.mode === "cidr_allow_list");
+
+  return (
+    <Panel title="Network">
+      <Row label="Egress" value={networkPolicySummary(network.egress)} />
+      <Row label="Ingress" value={networkPolicySummary(network.ingress)} />
+      {cidrRows.map(({ label, policy }) => (
+        <Row key={label} label={label} value={policy.cidrs.join(", ") || EMPTY_VALUE} />
+      ))}
     </Panel>
   );
 }
@@ -209,6 +282,7 @@ function DetailsColumn({ details }: { details: SandboxDetails | null }) {
       <StatusStrip details={details} />
       <OverviewPanel details={details} />
       <ResourcesPanel resources={details.resources} />
+      <NetworkPanel network={details.network} />
       <LabelsPanel labels={details.labels} />
       <TimestampsPanel details={details} />
     </div>

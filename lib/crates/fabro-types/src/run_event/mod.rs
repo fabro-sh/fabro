@@ -90,6 +90,10 @@ pub enum EventBody {
     RunUnarchived(RunUnarchivedProps),
     #[serde(rename = "run.title.updated")]
     RunTitleUpdated(RunTitleUpdatedProps),
+    #[serde(rename = "run.parent.linked")]
+    RunParentLinked(RunParentLinkedProps),
+    #[serde(rename = "run.parent.unlinked")]
+    RunParentUnlinked(RunParentUnlinkedProps),
     #[serde(rename = "run.completed")]
     RunCompleted(RunCompletedProps),
     #[serde(rename = "run.failed")]
@@ -300,6 +304,10 @@ pub enum EventBody {
     AgentAcpTimedOut(AgentAcpTimedOutProps),
     #[serde(rename = "pull_request.created")]
     PullRequestCreated(PullRequestCreatedProps),
+    #[serde(rename = "pull_request.linked")]
+    PullRequestLinked(PullRequestLinkedProps),
+    #[serde(rename = "pull_request.unlinked")]
+    PullRequestUnlinked(PullRequestUnlinkedProps),
     #[serde(rename = "pull_request.failed")]
     PullRequestFailed(PullRequestFailedProps),
     #[serde(rename = "devcontainer.resolved")]
@@ -392,6 +400,8 @@ impl EventBody {
             Self::RunArchived(_) => "run.archived",
             Self::RunUnarchived(_) => "run.unarchived",
             Self::RunTitleUpdated(_) => "run.title.updated",
+            Self::RunParentLinked(_) => "run.parent.linked",
+            Self::RunParentUnlinked(_) => "run.parent.unlinked",
             Self::RunCompleted(_) => "run.completed",
             Self::RunFailed(_) => "run.failed",
             Self::RunNotice(_) => "run.notice",
@@ -497,6 +507,8 @@ impl EventBody {
             Self::AgentAcpCancelled(_) => "agent.acp.cancelled",
             Self::AgentAcpTimedOut(_) => "agent.acp.timed_out",
             Self::PullRequestCreated(_) => "pull_request.created",
+            Self::PullRequestLinked(_) => "pull_request.linked",
+            Self::PullRequestUnlinked(_) => "pull_request.unlinked",
             Self::PullRequestFailed(_) => "pull_request.failed",
             Self::DevcontainerResolved(_) => "devcontainer.resolved",
             Self::DevcontainerLifecycleStarted(_) => "devcontainer.lifecycle.started",
@@ -543,6 +555,8 @@ fn is_known_event_name(event: &str) -> bool {
             | "run.superseded_by"
             | "run.archived"
             | "run.unarchived"
+            | "run.parent.linked"
+            | "run.parent.unlinked"
             | "run.completed"
             | "run.failed"
             | "run.notice"
@@ -648,6 +662,8 @@ fn is_known_event_name(event: &str) -> bool {
             | "agent.acp.cancelled"
             | "agent.acp.timed_out"
             | "pull_request.created"
+            | "pull_request.linked"
+            | "pull_request.unlinked"
             | "pull_request.failed"
             | "devcontainer.resolved"
             | "devcontainer.lifecycle.started"
@@ -1087,9 +1103,11 @@ mod tests {
                 "run.failed",
                 json!({
                     "failure": {
-                        "message": "boom",
                         "reason": "workflow_error",
-                        "category": "deterministic"
+                        "detail": {
+                            "message": "boom",
+                            "category": "deterministic"
+                        }
                     },
                     "duration_ms": 42,
                     "diff_summary": {
@@ -1486,6 +1504,80 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn pull_request_linked_round_trips_json() {
+        let event = RunEvent {
+            id:                 "evt_pr_linked".to_string(),
+            ts:                 DateTime::parse_from_rfc3339("2026-05-15T12:00:00.000Z")
+                .unwrap()
+                .with_timezone(&Utc),
+            run_id:             fixtures::RUN_1,
+            node_id:            None,
+            node_label:         None,
+            stage_id:           None,
+            parallel_group_id:  None,
+            parallel_branch_id: None,
+            session_id:         None,
+            parent_session_id:  None,
+            tool_call_id:       None,
+            actor:              None,
+            body:               EventBody::PullRequestLinked(PullRequestLinkedProps {
+                pull_request: crate::PullRequestLink {
+                    owner:  "acme".to_string(),
+                    repo:   "widgets".to_string(),
+                    number: 42,
+                },
+            }),
+        };
+
+        let value = event.to_value().unwrap();
+        assert_eq!(value["event"], "pull_request.linked");
+        assert_eq!(
+            value["properties"]["pull_request"]["html_url"],
+            "https://github.com/acme/widgets/pull/42"
+        );
+
+        let parsed = RunEvent::from_value(value).unwrap();
+        assert_eq!(parsed, event);
+    }
+
+    #[test]
+    fn pull_request_unlinked_round_trips_json() {
+        let event = RunEvent {
+            id:                 "evt_pr_unlinked".to_string(),
+            ts:                 DateTime::parse_from_rfc3339("2026-05-15T12:05:00.000Z")
+                .unwrap()
+                .with_timezone(&Utc),
+            run_id:             fixtures::RUN_1,
+            node_id:            None,
+            node_label:         None,
+            stage_id:           None,
+            parallel_group_id:  None,
+            parallel_branch_id: None,
+            session_id:         None,
+            parent_session_id:  None,
+            tool_call_id:       None,
+            actor:              None,
+            body:               EventBody::PullRequestUnlinked(PullRequestUnlinkedProps {
+                pull_request: crate::PullRequestLink {
+                    owner:  "acme".to_string(),
+                    repo:   "widgets".to_string(),
+                    number: 42,
+                },
+            }),
+        };
+
+        let value = event.to_value().unwrap();
+        assert_eq!(value["event"], "pull_request.unlinked");
+        assert_eq!(
+            value["properties"]["pull_request"]["number"],
+            serde_json::json!(42)
+        );
+
+        let parsed = RunEvent::from_value(value).unwrap();
+        assert_eq!(parsed, event);
     }
 
     #[test]

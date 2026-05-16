@@ -20,35 +20,12 @@ use fabro_auth::{
 };
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate};
-use fabro_model::catalog::LlmCatalogSettings;
-use fabro_model::{Catalog, Provider};
+use fabro_model::catalog::CatalogProvider;
+use fabro_model::{Catalog, CredentialRef, ProviderId};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use tokio::task::spawn_blocking;
 use tokio::time::timeout;
-
-// ---------------------------------------------------------------------------
-// Provider key URLs
-// ---------------------------------------------------------------------------
-
-pub(crate) fn provider_key_url(provider: Provider) -> &'static str {
-    match provider {
-        Provider::Anthropic => "https://console.anthropic.com/settings/keys",
-        Provider::OpenAi => "https://platform.openai.com/api-keys",
-        Provider::Gemini => "https://aistudio.google.com/apikey",
-        Provider::Kimi => "https://platform.moonshot.cn/console/api-keys",
-        Provider::Zai => "https://open.bigmodel.cn/usercenter/apikeys",
-        Provider::Minimax => {
-            "https://platform.minimaxi.com/user-center/basic-information/interface-key"
-        }
-        Provider::Inception => "https://console.inceptionlabs.ai/api-keys",
-        Provider::OpenAiCompatible => "",
-    }
-}
-
-pub(crate) fn provider_display_name(provider: Provider) -> &'static str {
-    provider.display_name()
-}
 
 // ---------------------------------------------------------------------------
 // Interactive prompts
@@ -80,22 +57,50 @@ pub(crate) enum ApiKeySource {
 
 fn default_catalog_for_provider_auth() -> Result<Arc<Catalog>> {
     Ok(Arc::new(
-        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-            .context("failed to build provider auth catalog")?,
+        Catalog::from_builtin().context("failed to build provider auth catalog")?,
     ))
 }
 
+pub(crate) fn provider_display_name(provider: &ProviderId, catalog: &Catalog) -> String {
+    catalog.provider(provider).map_or_else(
+        || provider.display_name(),
+        |provider| provider.display_name.clone(),
+    )
+}
+
+fn api_key_catalog_provider<'a>(
+    provider: &ProviderId,
+    catalog: &'a Catalog,
+) -> Result<&'a CatalogProvider> {
+    let catalog_provider = catalog
+        .provider(provider)
+        .with_context(|| format!("provider '{provider}' is not configured in the model catalog"))?;
+    let supports_api_key = catalog_provider.credentials.iter().any(|credential| {
+        matches!(
+            credential,
+            CredentialRef::Credential(_) | CredentialRef::Env(_)
+        )
+    });
+    anyhow::ensure!(
+        supports_api_key,
+        "provider '{}' does not define an API-key credential path",
+        catalog_provider.id
+    );
+    Ok(catalog_provider)
+}
+
 pub(crate) async fn validate_api_key(
-    provider: Provider,
+    provider: &ProviderId,
     api_key: &str,
     catalog: Arc<Catalog>,
 ) -> Result<()> {
+    api_key_catalog_provider(provider, catalog.as_ref())?;
     let client = LlmClient::from_credentials(
         vec![ApiCredential::from_api_key(
-            provider,
+            provider.clone(),
             api_key.to_string(),
             catalog.as_ref(),
-        )],
+        )?],
         Arc::clone(&catalog),
     )
     .await
@@ -106,7 +111,7 @@ pub(crate) async fn validate_api_key(
         .map_or_else(|| format!("unknown-{provider}"), |model| model.id.clone());
 
     let params = GenerateParams::new(probe_model, Arc::new(client))
-        .provider(<&'static str>::from(provider))
+        .provider(provider.to_string())
         .prompt("Say OK")
         .max_tokens(16);
 
@@ -156,7 +161,7 @@ async fn read_api_key_from_source(source: &ApiKeySource, prompt: &str) -> Result
 }
 
 async fn read_and_validate_api_key(
-    provider: Provider,
+    provider: &ProviderId,
     source: &ApiKeySource,
     env_var: &str,
     s: &Styles,
@@ -189,8 +194,8 @@ async fn read_and_validate_api_key(
     }
 }
 
-pub(crate) async fn pick_auth_method(provider: Provider) -> Result<AuthMethod> {
-    if provider != Provider::OpenAi {
+pub(crate) async fn pick_auth_method(provider: &ProviderId) -> Result<AuthMethod> {
+    if provider != &ProviderId::openai() {
         return Ok(AuthMethod::ApiKey);
     }
 
@@ -205,16 +210,27 @@ pub(crate) async fn pick_auth_method(provider: Provider) -> Result<AuthMethod> {
 }
 
 pub(crate) async fn authenticate_provider(
-    provider: Provider,
+    provider: ProviderId,
     s: &Styles,
     printer: Printer,
 ) -> Result<AuthCredential> {
-    let method = pick_auth_method(provider).await?;
-    authenticate_provider_with_method(provider, method, s, printer).await
+    authenticate_provider_with_catalog(provider, s, printer, default_catalog_for_provider_auth()?)
+        .await
+}
+
+pub(crate) async fn authenticate_provider_with_catalog(
+    provider: ProviderId,
+    s: &Styles,
+    printer: Printer,
+    catalog: Arc<Catalog>,
+) -> Result<AuthCredential> {
+    api_key_catalog_provider(&provider, catalog.as_ref())?;
+    let method = pick_auth_method(&provider).await?;
+    authenticate_provider_with_method_and_catalog(provider, method, s, printer, catalog).await
 }
 
 pub(crate) async fn authenticate_provider_with_api_key_source(
-    provider: Provider,
+    provider: ProviderId,
     source: ApiKeySource,
     s: &Styles,
     printer: Printer,
@@ -230,13 +246,14 @@ pub(crate) async fn authenticate_provider_with_api_key_source(
 }
 
 pub(crate) async fn authenticate_provider_with_api_key_source_and_catalog(
-    provider: Provider,
+    provider: ProviderId,
     source: ApiKeySource,
     s: &Styles,
     printer: Printer,
     catalog: Arc<Catalog>,
 ) -> Result<AuthCredential> {
-    let mut strategy = strategy_for(provider, AuthMethod::ApiKey);
+    api_key_catalog_provider(&provider, catalog.as_ref())?;
+    let mut strategy = strategy_for(&provider, AuthMethod::ApiKey, catalog.as_ref());
     let request = strategy.init().await?;
     present_to_user(&request, s, printer);
     let response = await_user_response_from_source(&request, &source, s, printer, catalog).await?;
@@ -244,38 +261,55 @@ pub(crate) async fn authenticate_provider_with_api_key_source_and_catalog(
 }
 
 pub(crate) async fn authenticate_provider_with_method(
-    provider: Provider,
+    provider: ProviderId,
     method: AuthMethod,
     s: &Styles,
     printer: Printer,
 ) -> Result<AuthCredential> {
-    let mut strategy = strategy_for(provider, method);
-    let request = strategy.init().await?;
-    present_to_user(&request, s, printer);
-    let response = await_user_response_from_source(
-        &request,
-        &ApiKeySource::Prompt,
+    authenticate_provider_with_method_and_catalog(
+        provider,
+        method,
         s,
         printer,
         default_catalog_for_provider_auth()?,
     )
-    .await?;
+    .await
+}
+
+pub(crate) async fn authenticate_provider_with_method_and_catalog(
+    provider: ProviderId,
+    method: AuthMethod,
+    s: &Styles,
+    printer: Printer,
+    catalog: Arc<Catalog>,
+) -> Result<AuthCredential> {
+    api_key_catalog_provider(&provider, catalog.as_ref())?;
+    let mut strategy = strategy_for(&provider, method, catalog.as_ref());
+    let request = strategy.init().await?;
+    present_to_user(&request, s, printer);
+    let response =
+        await_user_response_from_source(&request, &ApiKeySource::Prompt, s, printer, catalog)
+            .await?;
     strategy.complete(response).await
 }
 
 pub(crate) fn present_to_user(request: &AuthContextRequest, s: &Styles, printer: Printer) {
     match request {
         AuthContextRequest::ApiKey {
-            provider,
+            display_name,
             env_var_names,
+            api_key_url,
+            ..
         } => {
             let env_var = env_var_names.first().map_or("API_KEY", String::as_str);
-            let url = provider_key_url(*provider);
-            fabro_util::printerr!(
-                printer,
-                "  {}",
-                s.dim.apply_to(format!("Get your API key at: {url}"))
-            );
+            if let Some(url) = api_key_url.as_deref() {
+                fabro_util::printerr!(
+                    printer,
+                    "  {}",
+                    s.dim
+                        .apply_to(format!("Get your {display_name} API key at: {url}"))
+                );
+            }
             fabro_util::printerr!(
                 printer,
                 "  {}",
@@ -313,12 +347,13 @@ async fn await_user_response_from_source(
 ) -> Result<AuthContextResponse> {
     match request {
         AuthContextRequest::ApiKey {
-            provider,
+            provider_id,
             env_var_names,
+            ..
         } => {
             let env_var = env_var_names.first().map_or("API_KEY", String::as_str);
-            let key =
-                read_and_validate_api_key(*provider, source, env_var, s, printer, catalog).await?;
+            let key = read_and_validate_api_key(provider_id, source, env_var, s, printer, catalog)
+                .await?;
             Ok(AuthContextResponse::ApiKey { key })
         }
         AuthContextRequest::DeviceCode { .. } => {
@@ -346,15 +381,37 @@ async fn await_user_response_from_source(
 mod tests {
     use super::*;
 
-    // -- Provider key URLs --
+    #[test]
+    fn builtin_api_key_providers_have_key_urls() {
+        let catalog = Catalog::builtin();
+        for provider in [
+            ProviderId::anthropic(),
+            ProviderId::openai(),
+            ProviderId::gemini(),
+            ProviderId::new("kimi"),
+            ProviderId::new("zai"),
+            ProviderId::new("minimax"),
+            ProviderId::new("inception"),
+        ] {
+            let provider = api_key_catalog_provider(&provider, catalog).unwrap();
+            let url = provider.api_key_url.as_deref().unwrap_or_default();
+            assert!(!url.is_empty(), "{} has empty URL", provider.id);
+            assert!(url.starts_with("https://"), "{} URL: {url}", provider.id);
+        }
+    }
 
     #[test]
-    fn every_provider_has_key_url() {
-        for provider in Provider::ALL {
-            let url = provider_key_url(*provider);
-            assert!(!url.is_empty(), "{provider:?} has empty URL");
-            assert!(url.starts_with("https://"), "{provider:?} URL: {url}");
-        }
+    fn api_key_catalog_provider_rejects_unconfigured_provider() {
+        let catalog = Catalog::builtin();
+        let provider = ProviderId::new("bogus");
+
+        let err = api_key_catalog_provider(&provider, catalog).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("provider 'bogus' is not configured in the model catalog"),
+            "unexpected error: {err}"
+        );
     }
 
     // -- API key validation --
@@ -362,7 +419,7 @@ mod tests {
     #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
     async fn validate_api_key_rejects_invalid_key() {
         let result = validate_api_key(
-            Provider::Anthropic,
+            &ProviderId::anthropic(),
             "sk-invalid-key-12345",
             default_catalog_for_provider_auth().unwrap(),
         )

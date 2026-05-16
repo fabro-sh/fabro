@@ -3,22 +3,23 @@ pub use fabro_core::outcome::{
 };
 use fabro_llm::types::TokenCounts as LlmTokenCounts;
 use fabro_model::{
-    Catalog, ModelBillingFacts, ModelBillingInput, ModelRef, ModelUsage, TokenCounts,
+    BilledTokenCounts, Catalog, ModelBillingInput, ModelRef, ModelUsage, TokenCounts,
 };
 pub use fabro_types::BilledModelUsage;
 
-use crate::error::classify_failure_reason;
+use crate::error::{Error, FailureSignature, classify_failure_reason};
 
 pub type Outcome = fabro_core::Outcome<Option<BilledModelUsage>>;
 
-#[must_use]
 pub fn billed_model_usage_from_llm(
     catalog: &Catalog,
     model: &ModelRef,
     usage: &LlmTokenCounts,
-) -> BilledModelUsage {
+) -> Result<BilledModelUsage, Error> {
     let tokens = token_counts_from_llm_usage(usage);
-    let facts = catalog.billing_facts_for(model, &tokens);
+    let facts = catalog.billing_facts_for(model, &tokens).ok_or_else(|| {
+        Error::Precondition(format!("Provider \"{}\" is not configured", model.provider))
+    })?;
     let input = ModelBillingInput {
         usage: ModelUsage {
             model: model.clone(),
@@ -32,22 +33,23 @@ pub fn billed_model_usage_from_llm(
         .and_then(|pricing| pricing.bill(&input))
         .map(|amount| amount.0);
 
-    BilledModelUsage {
+    Ok(BilledModelUsage {
         input,
         total_usd_micros,
-    }
+    })
 }
 
 #[must_use]
-pub fn unpriced_model_usage_from_llm(model: ModelRef, usage: &LlmTokenCounts) -> BilledModelUsage {
+pub fn billed_token_counts_from_llm(usage: &LlmTokenCounts) -> BilledTokenCounts {
     let tokens = token_counts_from_llm_usage(usage);
-    let facts = ModelBillingFacts::for_provider_id(&model.provider, &tokens);
-    BilledModelUsage {
-        input:            ModelBillingInput {
-            usage: ModelUsage { model, tokens },
-            facts,
-        },
-        total_usd_micros: None,
+    BilledTokenCounts {
+        input_tokens:       tokens.input_tokens,
+        output_tokens:      tokens.output_tokens,
+        total_tokens:       tokens.total_tokens(),
+        reasoning_tokens:   tokens.reasoning_tokens,
+        cache_read_tokens:  tokens.cache_read_tokens,
+        cache_write_tokens: tokens.cache_write_tokens,
+        total_usd_micros:   None,
     }
 }
 
@@ -107,7 +109,7 @@ impl OutcomeExt for Outcome {
 
     fn with_signature(mut self, sig: Option<impl Into<String>>) -> Self {
         if let Some(ref mut failure) = self.failure {
-            failure.signature = sig.map(Into::into);
+            failure.signature = sig.map(|sig| FailureSignature(sig.into()));
         }
         self
     }
@@ -147,7 +149,7 @@ fn token_counts_from_llm_usage(usage: &LlmTokenCounts) -> TokenCounts {
 mod tests {
     use fabro_llm::types::TokenCounts;
     use fabro_model::catalog::LlmCatalogSettings;
-    use fabro_model::{Catalog, ModelRef, Provider, ProviderId, Speed};
+    use fabro_model::{Catalog, ModelRef, ProviderId, Speed};
 
     use super::{OutcomeExt, billed_model_usage_from_llm};
 
@@ -170,9 +172,10 @@ mod tests {
         };
         let billed = billed_model_usage_from_llm(
             Catalog::builtin(),
-            &model_ref(Provider::OpenAi.id(), "gpt-5.4", None),
+            &model_ref(ProviderId::openai(), "gpt-5.4", None),
             &usage,
-        );
+        )
+        .unwrap();
 
         assert_eq!(billed.total_usd_micros, Some(3_562_500));
         assert_eq!(billed.tokens().output_tokens, 125_000);
@@ -201,12 +204,13 @@ mod tests {
         let billed = billed_model_usage_from_llm(
             Catalog::builtin(),
             &model_ref(
-                Provider::Anthropic.id(),
+                ProviderId::anthropic(),
                 "claude-opus-4-6",
                 Some(Speed::Fast),
             ),
             &usage,
-        );
+        )
+        .unwrap();
 
         assert_eq!(billed.total_usd_micros, Some(6_435_000));
     }
@@ -252,7 +256,8 @@ output_cost_per_mtok = 2.0
             &catalog,
             &model_ref(ProviderId::new("proxy"), "canonical-model", None),
             &usage,
-        );
+        )
+        .unwrap();
 
         assert_eq!(&billed.model().provider, &ProviderId::new("proxy"));
         assert_eq!(billed.model_id(), "canonical-model");
@@ -299,7 +304,8 @@ output_cost_per_mtok = 2.0
                 output_tokens: 250_000,
                 ..TokenCounts::default()
             },
-        );
+        )
+        .unwrap();
 
         assert_eq!(billed.model_id(), "wire-model");
         assert_eq!(billed.total_usd_micros, None);
@@ -316,9 +322,10 @@ output_cost_per_mtok = 2.0
         };
         let billed = billed_model_usage_from_llm(
             Catalog::builtin(),
-            &model_ref(Provider::Anthropic.id(), "claude-opus-4-6", None),
+            &model_ref(ProviderId::anthropic(), "claude-opus-4-6", None),
             &usage,
-        );
+        )
+        .unwrap();
 
         assert_eq!(billed.tokens().clone(), usage);
     }

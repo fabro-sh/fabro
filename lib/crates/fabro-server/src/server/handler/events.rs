@@ -382,14 +382,16 @@ async fn attach_run_events(
 /// (e.g. "archive only from terminal") that a direct event append would
 /// bypass. Other run-lifecycle events flow through this endpoint legitimately:
 /// the worker subprocess emits state transitions during execution.
-fn denied_lifecycle_event_name(body: &EventBody) -> Option<&'static str> {
+fn denied_lifecycle_event_name(body: &EventBody) -> Option<&str> {
     match body {
-        EventBody::RunArchived(_) => Some("run.archived"),
-        EventBody::RunUnarchived(_) => Some("run.unarchived"),
-        EventBody::RunTitleUpdated(_) => Some("run.title.updated"),
-        EventBody::RunCancelRequested(_) => Some("run.cancel.requested"),
-        EventBody::RunPauseRequested(_) => Some("run.pause.requested"),
-        EventBody::RunUnpauseRequested(_) => Some("run.unpause.requested"),
+        EventBody::RunArchived(_)
+        | EventBody::RunUnarchived(_)
+        | EventBody::RunTitleUpdated(_)
+        | EventBody::RunCancelRequested(_)
+        | EventBody::RunPauseRequested(_)
+        | EventBody::RunUnpauseRequested(_)
+        | EventBody::PullRequestLinked(_)
+        | EventBody::PullRequestUnlinked(_) => Some(body.event_name()),
         _ => None,
     }
 }
@@ -439,6 +441,7 @@ mod stage_events_tests {
             manifest_blob:    None,
             git:              None,
             fork_source_ref:  None,
+            parent_id:        None,
             web_url:          None,
         })
         .await

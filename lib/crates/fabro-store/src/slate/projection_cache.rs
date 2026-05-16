@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use fabro_types::{RunId, RunProjection, RunSummary};
@@ -29,24 +29,83 @@ impl CachedRunProjection {
 
 #[derive(Debug, Default)]
 pub(crate) struct RunProjectionCache {
-    entries: Mutex<HashMap<RunId, CachedRunProjection>>,
+    state: Mutex<RunProjectionCacheState>,
+}
+
+#[derive(Debug, Default)]
+struct RunProjectionCacheState {
+    entries:            HashMap<RunId, CachedRunProjection>,
+    children_by_parent: HashMap<RunId, BTreeSet<RunId>>,
+}
+
+impl RunProjectionCacheState {
+    fn replace_all(&mut self, entries: Vec<CachedRunProjection>) {
+        self.entries.clear();
+        self.children_by_parent.clear();
+        for entry in entries {
+            self.insert(entry);
+        }
+    }
+
+    fn insert(&mut self, entry: CachedRunProjection) {
+        let run_id = entry.run_id;
+        let parent_id = entry.summary.parent_id;
+        if let Some(previous) = self.entries.insert(run_id, entry) {
+            self.remove_parent_index(&previous);
+        }
+        if let Some(parent_id) = parent_id {
+            self.children_by_parent
+                .entry(parent_id)
+                .or_default()
+                .insert(run_id);
+        }
+    }
+
+    fn remove(&mut self, run_id: &RunId) {
+        if let Some(entry) = self.entries.remove(run_id) {
+            self.remove_parent_index(&entry);
+        }
+    }
+
+    fn remove_parent_index(&mut self, entry: &CachedRunProjection) {
+        let Some(parent_id) = entry.summary.parent_id else {
+            return;
+        };
+        let Some(children) = self.children_by_parent.get_mut(&parent_id) else {
+            return;
+        };
+        children.remove(&entry.run_id);
+        if children.is_empty() {
+            self.children_by_parent.remove(&parent_id);
+        }
+    }
 }
 
 impl RunProjectionCache {
     pub(crate) async fn replace_all(&self, entries: Vec<CachedRunProjection>) {
-        let mut cache = self.entries.lock().await;
-        cache.clear();
-        cache.extend(entries.into_iter().map(|entry| (entry.run_id, entry)));
+        self.state.lock().await.replace_all(entries);
     }
 
     pub(crate) async fn replace(&self, entry: CachedRunProjection) {
-        self.entries.lock().await.insert(entry.run_id, entry);
+        self.state.lock().await.insert(entry);
     }
 
     pub(crate) async fn list(&self, query: &ListRunsQuery) -> Vec<CachedRunProjection> {
-        let cache = self.entries.lock().await;
-        let mut entries = cache
-            .values()
+        let entries = {
+            let state = self.state.lock().await;
+            match query.parent_id {
+                Some(parent_id) => state
+                    .children_by_parent
+                    .get(&parent_id)
+                    .into_iter()
+                    .flat_map(|children| children.iter())
+                    .filter_map(|run_id| state.entries.get(run_id).cloned())
+                    .collect::<Vec<_>>(),
+                None => state.entries.values().cloned().collect::<Vec<_>>(),
+            }
+        };
+        let mut entries = entries
+            .into_iter()
             .filter(|entry| {
                 let created_at = entry.run_id.created_at();
                 if query.start.is_some_and(|start| created_at < start) {
@@ -57,7 +116,6 @@ impl RunProjectionCache {
                 }
                 true
             })
-            .cloned()
             .collect::<Vec<_>>();
         entries.sort_by(|left, right| {
             right
@@ -70,26 +128,26 @@ impl RunProjectionCache {
     }
 
     pub(crate) async fn get(&self, run_id: &RunId) -> Option<CachedRunProjection> {
-        self.entries.lock().await.get(run_id).cloned()
+        self.state.lock().await.entries.get(run_id).cloned()
     }
 
     pub(crate) async fn get_summary(&self, run_id: &RunId) -> Option<RunSummary> {
-        self.entries
+        self.state
             .lock()
             .await
+            .entries
             .get(run_id)
             .map(|entry| entry.summary.clone())
     }
 
     pub(crate) async fn apply_event(&self, run_id: &RunId, event: &EventEnvelope) -> Result<()> {
-        let mut cache = self.entries.lock().await;
-        let Some(entry) = cache.get(run_id) else {
+        let mut state = self.state.lock().await;
+        let Some(entry) = state.entries.get(run_id).cloned() else {
             if event.seq == 1 {
                 let projection = RunProjection::apply_events(std::slice::from_ref(event))?;
-                cache.insert(
-                    *run_id,
-                    CachedRunProjection::from_projection(*run_id, projection, event.seq),
-                );
+                state.insert(CachedRunProjection::from_projection(
+                    *run_id, projection, event.seq,
+                ));
             } else {
                 return Err(Error::InvalidEvent(format!(
                     "projection cache cannot initialize run {run_id} from event seq {}",
@@ -111,14 +169,13 @@ impl RunProjectionCache {
 
         let mut projection = (*entry.projection).clone();
         projection.apply_event(event)?;
-        cache.insert(
-            *run_id,
-            CachedRunProjection::from_projection(*run_id, projection, event.seq),
-        );
+        state.insert(CachedRunProjection::from_projection(
+            *run_id, projection, event.seq,
+        ));
         Ok(())
     }
 
     pub(crate) async fn remove(&self, run_id: &RunId) {
-        self.entries.lock().await.remove(run_id);
+        self.state.lock().await.remove(run_id);
     }
 }

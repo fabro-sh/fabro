@@ -10,21 +10,21 @@ use fabro_acp::{
 use fabro_agent::{Sandbox, StaticEnvProvider, ToolEnvProvider};
 use fabro_auth::CredentialResolver;
 use fabro_graphviz::graph::Node;
-use fabro_model::catalog::LlmCatalogSettings;
-use fabro_model::{Catalog, Provider};
+use fabro_model::{AgentProfileKind, Catalog, ProviderId};
 use fabro_util::time::elapsed_ms;
 use tokio_util::sync::CancellationToken;
 
 use super::super::agent::{CodergenBackend, CodergenResult, CodergenRunRequest, OneShotRequest};
-use super::changed_files;
 use super::cli::AgentCli;
 use super::launch_env::{AgentLaunchEnvRequest, resolve_agent_launch_env};
+use super::{changed_files, routing};
 use crate::error::Error;
 use crate::event::{Emitter, Event, StageScope};
 
 pub struct AgentAcpBackend {
     model: String,
-    provider: Provider,
+    provider_id: ProviderId,
+    profile_kind: AgentProfileKind,
     tool_env: Option<Arc<dyn ToolEnvProvider>>,
     github_token_refresh_managed: bool,
     resolver: Option<CredentialResolver>,
@@ -33,27 +33,45 @@ pub struct AgentAcpBackend {
 
 impl AgentAcpBackend {
     #[must_use]
-    pub fn new(model: String, provider: Provider, resolver: CredentialResolver) -> Self {
+    pub fn new(
+        model: String,
+        provider_id: impl Into<ProviderId>,
+        resolver: CredentialResolver,
+    ) -> Self {
+        let provider_id = provider_id.into();
+        let catalog = default_catalog();
+        let profile_kind = routing::default_profile_kind(catalog.as_ref(), &provider_id);
         Self {
             model,
-            provider,
+            provider_id,
+            profile_kind,
             tool_env: None,
             github_token_refresh_managed: false,
             resolver: Some(resolver),
-            catalog: default_catalog(),
+            catalog,
         }
     }
 
     #[must_use]
-    pub fn new_from_env(model: String, provider: Provider) -> Self {
+    pub fn new_from_env(model: String, provider_id: impl Into<ProviderId>) -> Self {
+        let provider_id = provider_id.into();
+        let catalog = default_catalog();
+        let profile_kind = routing::default_profile_kind(catalog.as_ref(), &provider_id);
         Self {
             model,
-            provider,
+            provider_id,
+            profile_kind,
             tool_env: None,
             github_token_refresh_managed: false,
             resolver: None,
-            catalog: default_catalog(),
+            catalog,
         }
+    }
+
+    #[must_use]
+    pub fn with_profile_kind(mut self, profile_kind: AgentProfileKind) -> Self {
+        self.profile_kind = profile_kind;
+        self
     }
 
     #[must_use]
@@ -90,16 +108,20 @@ impl AgentAcpBackend {
     ) -> Result<CodergenResult, Error> {
         let files_before = changed_files::detect_changed_files(sandbox).await;
         let model = node.model().unwrap_or(&self.model);
-        let provider = node
-            .provider()
-            .and_then(|value| value.parse::<Provider>().ok())
-            .unwrap_or(self.provider);
+        let provider = routing::resolve_provider_context(
+            self.catalog.as_ref(),
+            &self.provider_id,
+            model,
+            node.provider(),
+        )?;
+        let provider_id = provider.provider_id;
+        let profile_kind = provider.profile_kind;
         let command =
             resolve_acp_command(node.acp_command()).map_err(acp_command_error_to_workflow)?;
 
         let launch_env = resolve_agent_launch_env(AgentLaunchEnvRequest {
-            provider,
-            cli: AgentCli::for_provider(provider),
+            provider_id: provider_id.clone(),
+            cli: AgentCli::for_profile_kind(profile_kind),
             catalog: self.catalog.as_ref(),
             resolver: self.resolver.as_ref(),
             tool_env: self.tool_env.as_ref(),
@@ -121,7 +143,7 @@ impl AgentAcpBackend {
                 node_id:  node.id.clone(),
                 visit:    stage_scope.visit,
                 mode:     "acp".to_string(),
-                provider: provider.to_string(),
+                provider: provider_id.to_string(),
                 model:    model.to_string(),
                 command:  command_display,
             },
@@ -166,7 +188,11 @@ impl AgentAcpBackend {
                 );
                 return Err(Error::Cancelled);
             }
-            Err(AcpError::TimedOut { stderr }) => {
+            Err(AcpError::TimedOut { exec_output_tail }) => {
+                let stderr = exec_output_tail
+                    .as_ref()
+                    .and_then(|tail| tail.stderr.clone())
+                    .unwrap_or_default();
                 emitter.emit_scoped(
                     &Event::AgentAcpTimedOut {
                         node_id:     node.id.clone(),
@@ -176,7 +202,9 @@ impl AgentAcpBackend {
                     },
                     stage_scope,
                 );
-                return Err(acp_error_to_workflow(AcpError::TimedOut { stderr }));
+                return Err(acp_error_to_workflow(AcpError::TimedOut {
+                    exec_output_tail,
+                }));
             }
             Err(AcpError::StopReason { stop_reason, text }) => {
                 emitter.emit_scoped(
@@ -210,10 +238,7 @@ impl AgentAcpBackend {
 }
 
 fn default_catalog() -> Arc<Catalog> {
-    Arc::new(
-        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-            .expect("default catalog should build"),
-    )
+    Arc::new(Catalog::from_builtin().expect("default catalog should build"))
 }
 
 #[async_trait]
@@ -266,18 +291,21 @@ fn acp_command_error_to_workflow(error: AcpCommandError) -> Error {
 fn acp_error_to_workflow(error: AcpError) -> Error {
     match error {
         AcpError::Cancelled => Error::Cancelled,
-        AcpError::TimedOut { stderr } => {
-            if stderr.is_empty() {
-                Error::handler("ACP turn timed out")
-            } else {
-                Error::handler(format!("ACP turn timed out: {stderr}"))
-            }
+        AcpError::TimedOut { exec_output_tail } => {
+            Error::handler_with_exec_output_tail("ACP turn timed out", exec_output_tail)
         }
         AcpError::StopReason { stop_reason, text } => {
             Error::handler(format!("ACP prompt stopped with {stop_reason}: {text}"))
         }
         AcpError::Sandbox(source) => Error::handler_with_source("ACP turn failed", source),
-        other => Error::handler_with_source("ACP turn failed", other),
+        other => {
+            let exec_output_tail = other.exec_output_tail();
+            Error::handler_with_source_and_exec_output_tail(
+                "ACP turn failed",
+                other,
+                exec_output_tail,
+            )
+        }
     }
 }
 
@@ -287,14 +315,15 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use fabro_acp::test_support::fake_acp_agent_script;
+    use fabro_acp::{AcpError, AcpProcessExit};
     use fabro_agent::{LocalSandbox, Sandbox, shell_quote};
     use fabro_graphviz::graph::{AttrValue, Node};
-    use fabro_model::Provider;
+    use fabro_model::ProviderId;
     use fabro_sandbox::test_support::MockSandbox;
-    use fabro_types::EventBody;
+    use fabro_types::{CommandTermination, EventBody, ExecOutputTail};
     use tokio_util::sync::CancellationToken;
 
-    use super::AgentAcpBackend;
+    use super::{AgentAcpBackend, acp_error_to_workflow};
     use crate::context::Context;
     use crate::event::{Emitter, StageScope};
     use crate::handler::agent::{
@@ -330,7 +359,7 @@ mod tests {
         );
 
         let backend =
-            AgentAcpBackend::new_from_env("fake-acp".to_string(), Provider::OpenAi).with_env(
+            AgentAcpBackend::new_from_env("fake-acp".to_string(), ProviderId::openai()).with_env(
                 HashMap::from([("ACP_MODE".to_string(), "write_file".to_string())]),
             );
         let sandbox: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(tempdir.path().to_path_buf()));
@@ -386,7 +415,7 @@ mod tests {
             )),
         );
 
-        let backend = AgentAcpBackend::new_from_env("fake-acp".to_string(), Provider::OpenAi)
+        let backend = AgentAcpBackend::new_from_env("fake-acp".to_string(), ProviderId::openai())
             .with_env(HashMap::from([
                 (
                     "ACP_PROMPT_RECORD".to_string(),
@@ -444,7 +473,7 @@ mod tests {
         );
 
         let backend =
-            AgentAcpBackend::new_from_env("fake-acp".to_string(), Provider::OpenAi).with_env(
+            AgentAcpBackend::new_from_env("fake-acp".to_string(), ProviderId::openai()).with_env(
                 HashMap::from([("ACP_STOP_REASON".to_string(), "cancelled".to_string())]),
             );
         let sandbox: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(tempdir.path().to_path_buf()));
@@ -497,7 +526,7 @@ mod tests {
         node.attrs
             .insert("acp_command".to_string(), AttrValue::String(raw_command));
 
-        let backend = AgentAcpBackend::new_from_env("fake-acp".to_string(), Provider::OpenAi);
+        let backend = AgentAcpBackend::new_from_env("fake-acp".to_string(), ProviderId::openai());
         let sandbox: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(tempdir.path().to_path_buf()));
         let emitter = Arc::new(Emitter::default());
         let events = Arc::new(Mutex::new(Vec::new()));
@@ -549,7 +578,7 @@ mod tests {
         node.attrs
             .insert("backend".to_string(), AttrValue::String("acp".to_string()));
 
-        let backend = AgentAcpBackend::new_from_env("fake-acp".to_string(), Provider::OpenAi);
+        let backend = AgentAcpBackend::new_from_env("fake-acp".to_string(), ProviderId::openai());
         let emitter = Arc::new(Emitter::default());
         let context = Context::new();
         let result = backend
@@ -603,7 +632,7 @@ mod tests {
         );
 
         let backend =
-            AgentAcpBackend::new_from_env("fake-acp".to_string(), Provider::OpenAi).with_env(
+            AgentAcpBackend::new_from_env("fake-acp".to_string(), ProviderId::openai()).with_env(
                 HashMap::from([("OPENAI_API_KEY".to_string(), "test-key".to_string())]),
             );
         let emitter = Arc::new(Emitter::default());
@@ -638,6 +667,59 @@ mod tests {
         assert_eq!(
             err.failure_category(),
             crate::error::FailureCategory::Deterministic
+        );
+    }
+
+    #[test]
+    fn acp_timeout_maps_stderr_to_exec_tail_not_message() {
+        let tail = ExecOutputTail {
+            stdout:           None,
+            stderr:           Some("redacted stderr tail".to_string()),
+            stdout_truncated: false,
+            stderr_truncated: true,
+        };
+        let err = acp_error_to_workflow(AcpError::TimedOut {
+            exec_output_tail: Some(tail.clone()),
+        });
+
+        let detail = err.to_failure_detail();
+        assert_eq!(detail.message, "ACP turn timed out");
+        assert!(detail.causes.is_empty());
+        assert_eq!(detail.exec_output_tail, Some(tail));
+    }
+
+    #[test]
+    fn acp_process_exit_maps_stderr_to_exec_tail_not_cause_text() {
+        let tail = ExecOutputTail {
+            stdout:           None,
+            stderr:           Some("early boom".to_string()),
+            stdout_truncated: false,
+            stderr_truncated: false,
+        };
+        let err = acp_error_to_workflow(AcpError::ProcessExited(AcpProcessExit {
+            termination:      CommandTermination::Exited,
+            exit_code:        Some(2),
+            exec_output_tail: Some(tail.clone()),
+        }));
+
+        let detail = err.to_failure_detail();
+        assert_eq!(detail.message, "ACP turn failed");
+        assert_eq!(detail.exec_output_tail, Some(tail));
+        assert!(
+            detail
+                .causes
+                .iter()
+                .any(|cause| cause.contains("exit_code=2")),
+            "cause chain should retain process exit context: {:?}",
+            detail.causes
+        );
+        assert!(
+            !detail
+                .causes
+                .iter()
+                .any(|cause| cause.contains("early boom")),
+            "raw stderr belongs in exec_output_tail, not causes: {:?}",
+            detail.causes
         );
     }
 

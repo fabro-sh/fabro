@@ -16,7 +16,7 @@ mod generated {
 pub mod types {
     pub use fabro_model::{
         Model, ModelCosts, ModelFeatures, ModelLimits, ModelRef as BillingModelRef, ModelTestMode,
-        Provider, ReasoningEffortFeature, Speed as BillingSpeed,
+        ReasoningEffortFeature, Speed as BillingSpeed,
     };
     pub use fabro_types::settings::server::{
         GithubIntegrationSettings, GithubIntegrationStrategy, IntegrationWebhooksSettings,
@@ -33,11 +33,14 @@ pub mod types {
     };
     pub use fabro_types::{
         AuthMethod, BilledTokenCounts, CommandTermination, Conclusion, DiffStats, DiffSummary,
-        DirtyStatus, EventEnvelope, ExecOutputTail, FailureCategory, FailureSignature, GitContext,
-        IdpIdentity, InterviewOption, InterviewQuestionRecord, PendingInterviewRecord,
-        PreRunPushOutcome, Principal, PullRequest, PullRequestDetails, QuestionType, RepositoryRef,
-        Run, RunClientProvenance, RunEvent, RunFailure, RunProjection, RunProvenance, RunSandbox,
-        RunSandboxRuntime, RunServerProvenance, SandboxDetails, SandboxProvider, SandboxResources,
+        DirtyStatus, EventEnvelope, ExecOutputTail, FailureCategory, FailureDetail,
+        FailureSignature, GitContext, IdpIdentity, InterviewOption, InterviewQuestionRecord,
+        PendingInterviewRecord, PreRunPushOutcome, Principal, PullRequest, PullRequestDetails,
+        PullRequestDetailsStatus, PullRequestDetailsUnavailableReason, PullRequestLink,
+        PullRequestMeta, PullRequestResponse, QuestionType, RepositoryRef, Run,
+        RunClientProvenance, RunEvent, RunFailure, RunProjection, RunProvenance, RunSandbox,
+        RunSandboxRuntime, RunServerProvenance, SandboxDetails, SandboxNetwork,
+        SandboxNetworkPolicy, SandboxNetworkPolicyMode, SandboxProvider, SandboxResources,
         SandboxService, SandboxServiceListResponse, SandboxState, SandboxTimestamps,
         SecretMetadata, SecretType, ServerSettings, SessionEventEnvelope, SessionId,
         SessionMessage, SessionRecord, SessionStatus, SessionSummary, StageCompletion,

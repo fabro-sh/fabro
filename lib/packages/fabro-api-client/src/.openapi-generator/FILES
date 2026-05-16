@@ -102,6 +102,7 @@ models/execute-query-request.ts
 models/execute-query-response-rows-inner-inner.ts
 models/execute-query-response.ts
 models/failure-category.ts
+models/failure-detail.ts
 models/failure-reason.ts
 models/features-namespace.ts
 models/file-checkpoint.ts
@@ -148,6 +149,7 @@ models/interview-option.ts
 models/interview-provider-settings.ts
 models/interview-question-record.ts
 models/ip-allow-entry.ts
+models/link-run-pull-request-request.ts
 models/literal-ip-allow-entry.ts
 models/log-destination.ts
 models/manifest-args.ts
@@ -220,9 +222,14 @@ models/project-namespace.ts
 models/prune-run-entry.ts
 models/prune-runs-request.ts
 models/prune-runs-response.ts
+models/pull-request-details-status.ts
 models/pull-request-details-timestamps.ts
+models/pull-request-details-unavailable-reason.ts
 models/pull-request-details.ts
+models/pull-request-link.ts
+models/pull-request-meta.ts
 models/pull-request-ref.ts
+models/pull-request-response.ts
 models/pull-request-settings.ts
 models/pull-request-user.ts
 models/pull-request.ts
@@ -307,6 +314,9 @@ models/run.ts
 models/sandbox-details.ts
 models/sandbox-file-entry.ts
 models/sandbox-file-list-response.ts
+models/sandbox-network-policy-mode.ts
+models/sandbox-network-policy.ts
+models/sandbox-network.ts
 models/sandbox-provider.ts
 models/sandbox-resources.ts
 models/sandbox-service-discovery-source.ts
@@ -375,6 +385,7 @@ models/timeline-entry-response.ts
 models/tls-mode.ts
 models/turn-record.ts
 models/turn-status.ts
+models/update-run-parent-request.ts
 models/update-run-request.ts
 models/update-session-request.ts
 models/user-response.ts

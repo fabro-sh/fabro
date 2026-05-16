@@ -7,8 +7,6 @@ use fabro_auth::CredentialSource;
 #[cfg(test)]
 use fabro_auth::EnvCredentialSource;
 use fabro_model::Catalog;
-#[cfg(test)]
-use fabro_model::catalog::LlmCatalogSettings;
 
 use crate::config::{HookDefinition, HookSettings};
 use crate::executor::{HookExecutor, HookExecutorImpl};
@@ -50,10 +48,7 @@ impl HookRunner {
             config,
             executor,
             llm_source: Arc::new(EnvCredentialSource::new()),
-            catalog: Arc::new(
-                Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-                    .expect("default catalog should build"),
-            ),
+            catalog: Arc::new(Catalog::from_builtin().expect("default catalog should build")),
             compiled_matchers,
         }
     }
@@ -289,10 +284,7 @@ mod tests {
     }
 
     fn test_catalog() -> Arc<Catalog> {
-        Arc::new(
-            Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-                .expect("default catalog should build"),
-        )
+        Arc::new(Catalog::from_builtin().expect("default catalog should build"))
     }
 
     fn make_hook(event: HookEvent, name: &str) -> HookDefinition {

@@ -139,7 +139,7 @@ pub(crate) async fn print_run_summary_with_client(
     let pr_url = run_state
         .pull_request
         .as_ref()
-        .map(|record: &PullRequestRecord| record.html_url.clone());
+        .map(PullRequestRecord::html_url);
     let Some(conclusion) = conclusion else {
         return Ok(());
     };
@@ -244,7 +244,7 @@ pub(crate) fn print_run_conclusion(
     }
 
     if let Some(ref failure) = conclusion.failure {
-        let rendered = render_with_causes(&failure.message, &failure.causes);
+        let rendered = render_with_causes(&failure.detail.message, &failure.detail.causes);
         fabro_util::printerr!(printer, "Failure:   {}", styles.red.apply_to(rendered));
     }
 

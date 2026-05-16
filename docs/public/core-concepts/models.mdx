@@ -90,6 +90,30 @@ output_cost_per_mtok = 16.00
 cache_input_cost_per_mtok = 0.60
 ```
 
+For [LiteLLM](/integrations/litellm), Fabro ships a disabled provider entry. Enable it in settings and declare the models your proxy exposes:
+
+```toml title="settings.toml"
+[llm.providers.litellm]
+enabled = true
+base_url = "http://localhost:4000/v1"
+
+[llm.models."litellm-gpt-5"]
+provider = "litellm"
+api_id = "gpt-5"
+display_name = "LiteLLM GPT-5"
+family = "litellm"
+default = true
+
+[llm.models."litellm-gpt-5".limits]
+context_window = 128000
+max_output = 8192
+
+[llm.models."litellm-gpt-5".features]
+tools = true
+vision = false
+reasoning = false
+```
+
 `api_id` is the model name sent to the provider API. Omit it when the Fabro model ID and provider model ID are the same.
 
 Header values and credentials are typed references, not raw secrets. Use `env:<NAME>` or `credential:<id>` for provider credentials, and `{ env = "NAME" }`, `{ credential = "id" }`, or `{ literal = "value" }` for extra headers.
@@ -97,6 +121,17 @@ Header values and credentials are typed references, not raw secrets. Use `env:<N
 <Note>
 Provider fields in configuration, APIs, and model routing are provider ID strings. Built-in names like `anthropic`, `openai`, and `gemini` still work, but custom IDs like `proxy` work anywhere a provider ID is accepted.
 </Note>
+
+### Ollama
+
+Fabro ships an Ollama provider definition that is disabled by default. Enable it in settings when you want Fabro to route through a local Ollama server:
+
+```toml title="settings.toml"
+[llm.providers.ollama]
+enabled = true
+```
+
+Enabling the provider alone does not expose any models — until #267 adds auto-discovery, add explicit `[llm.models.<id>]` blocks for each Ollama model you have pulled locally. Ollama's OpenAI-compatible endpoint accepts any bearer token, so local users can set `OLLAMA_API_KEY=ollama`.
 
 ## Default models
 

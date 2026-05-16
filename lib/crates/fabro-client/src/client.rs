@@ -10,7 +10,7 @@ use bytes::Bytes;
 use fabro_api::types;
 use fabro_http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE};
 use fabro_http::multipart::{Form, Part};
-use fabro_model::{Model, ModelTestMode, Provider};
+use fabro_model::{Model, ModelTestMode, ProviderId};
 use fabro_types::settings::run::MergeStrategy;
 use fabro_types::{
     ArtifactUpload, EventEnvelope, RunBlobId, RunEvent, RunId, RunProjection, RunSummary,
@@ -724,17 +724,12 @@ impl Client {
         provider: Option<&str>,
         query: Option<&str>,
     ) -> Result<Vec<Model>> {
-        let provider = provider
-            .map(|provider| {
-                provider
-                    .parse::<Provider>()
-                    .map_err(|_| anyhow!("unknown provider: {provider}"))
-            })
-            .transpose()?;
+        let provider = provider.map(ProviderId::new);
         let mut offset = 0u64;
         let mut models = Vec::new();
 
         loop {
+            let provider = provider.clone();
             let response = self
                 .send_api(|client| async move {
                     let mut request = client.list_models().page_limit(100u64).page_offset(offset);
@@ -1164,6 +1159,43 @@ impl Client {
             .await
             .map_err(add_pr_upgrade_hint)?;
         Ok(response.into_inner())
+    }
+
+    pub async fn link_run_pull_request(
+        &self,
+        run_id: &RunId,
+        html_url: String,
+    ) -> Result<fabro_types::PullRequestRecord> {
+        let body = types::LinkRunPullRequestRequest { html_url };
+        let response = self
+            .send_api(|client| async move {
+                client
+                    .link_run_pull_request()
+                    .id(run_id.to_string())
+                    .body(body.clone())
+                    .send()
+                    .await
+            })
+            .await
+            .map_err(add_pr_upgrade_hint)?;
+        convert_type(response.into_inner())
+    }
+
+    pub async fn unlink_run_pull_request(
+        &self,
+        run_id: &RunId,
+    ) -> Result<fabro_types::PullRequestRecord> {
+        let response = self
+            .send_api(|client| async move {
+                client
+                    .unlink_run_pull_request()
+                    .id(run_id.to_string())
+                    .send()
+                    .await
+            })
+            .await
+            .map_err(add_pr_upgrade_hint)?;
+        convert_type(response.into_inner())
     }
 
     pub async fn merge_run_pull_request(
@@ -1799,7 +1831,7 @@ mod tests {
 
     use chrono::Duration as ChronoDuration;
     use fabro_util::exit;
-    use httpmock::Method::POST;
+    use httpmock::Method::{GET, POST};
     use httpmock::MockServer;
     use serde_json::json;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -1930,6 +1962,33 @@ mod tests {
 
         assert_eq!(chunk, Bytes::from_static(b"data: hello\n\n"));
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn list_models_allows_custom_provider_filters() {
+        let server = MockServer::start_async().await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path("/api/v1/models")
+                    .query_param("provider", "bedrock");
+                then.status(200)
+                    .header("Content-Type", "application/json")
+                    .body(
+                        serde_json::json!({
+                            "data": [],
+                            "meta": { "has_more": false }
+                        })
+                        .to_string(),
+                    );
+            })
+            .await;
+
+        let client = Client::new_no_proxy(&server.url("")).unwrap();
+        let models = client.list_models(Some("bedrock"), None).await.unwrap();
+
+        mock.assert_async().await;
+        assert!(models.is_empty());
     }
 
     async fn oauth_client(

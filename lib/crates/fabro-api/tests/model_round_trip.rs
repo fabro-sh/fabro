@@ -2,7 +2,7 @@ use std::any::{TypeId, type_name};
 
 use fabro_api::types::Model as ApiModel;
 use fabro_model::{
-    Model, ModelCosts, ModelFeatures, ModelLimits, Provider, ReasoningEffortFeature,
+    Model, ModelCosts, ModelFeatures, ModelLimits, ProviderId, ReasoningEffortFeature,
 };
 
 #[test]
@@ -14,7 +14,7 @@ fn model_reuses_canonical_type() {
 fn model_json_matches_openapi_shape() {
     let model = Model {
         id:                   "claude-opus-4-7".to_string(),
-        provider:             Provider::Anthropic.id(),
+        provider:             ProviderId::anthropic(),
         family:               "claude-4".to_string(),
         display_name:         "Claude Opus 4.7".to_string(),
         limits:               ModelLimits {
@@ -29,7 +29,6 @@ fn model_json_matches_openapi_shape() {
             reasoning:        true,
             reasoning_effort: ReasoningEffortFeature::Levels,
             prompt_cache:     true,
-            effort:           true,
         },
         costs:                ModelCosts {
             input_cost_per_mtok:       Some(5.0),
@@ -48,7 +47,6 @@ fn model_json_matches_openapi_shape() {
     assert_eq!(json["knowledge_cutoff"], "May 2025");
     assert_eq!(json["features"]["reasoning_effort"], "levels");
     assert_eq!(json["features"]["prompt_cache"], true);
-    assert_eq!(json["features"]["effort"], true);
     assert_eq!(json["estimated_output_tps"], 25.0);
     assert_eq!(json["configured"], true);
 

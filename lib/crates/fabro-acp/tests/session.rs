@@ -370,7 +370,7 @@ async fn timeout_terminates_process_and_returns_timeout() {
 }
 
 #[tokio::test]
-async fn malformed_json_returns_protocol_error() {
+async fn malformed_json_returns_diagnostic_without_raw_stderr_in_message() {
     let tempdir = tempfile::tempdir().expect("create tempdir");
 
     let err = run_fake_agent(
@@ -382,11 +382,33 @@ async fn malformed_json_returns_protocol_error() {
     .await
     .expect_err("malformed JSON should error");
 
-    assert!(matches!(err, AcpError::Protocol(_)));
+    match err {
+        AcpError::Protocol(error) => {
+            let message = error.to_string();
+            assert!(
+                !message.contains("malformed json"),
+                "protocol error display should not include raw stderr: {message}"
+            );
+        }
+        AcpError::ProcessExited(exit) => {
+            let message = exit.to_string();
+            assert!(
+                !message.contains("malformed json"),
+                "process exit display should not include raw stderr: {message}"
+            );
+            assert_eq!(
+                exit.exec_output_tail
+                    .as_ref()
+                    .and_then(|tail| tail.stderr.as_deref()),
+                Some("malformed json\n")
+            );
+        }
+        other => panic!("expected protocol or process exit error, got {other:?}"),
+    }
 }
 
 #[tokio::test]
-async fn early_exit_returns_protocol_error_with_stderr() {
+async fn early_exit_returns_process_exit_with_redacted_stderr_tail() {
     let tempdir = tempfile::tempdir().expect("create tempdir");
 
     let err = run_fake_agent(
@@ -398,17 +420,23 @@ async fn early_exit_returns_protocol_error_with_stderr() {
     .await
     .expect_err("early exit should error");
 
-    let AcpError::Protocol(error) = err else {
-        panic!("expected protocol error");
+    let AcpError::ProcessExited(exit) = err else {
+        panic!("expected process exit error");
     };
-    let message = error.to_string();
+    let message = exit.to_string();
     assert!(
         message.contains("exit_code=2"),
         "early exit should include exit code in diagnostic: {message}"
     );
     assert!(
-        message.contains("early boom"),
-        "early exit should include stderr tail in diagnostic: {message}"
+        !message.contains("early boom"),
+        "early exit display should not include raw stderr: {message}"
+    );
+    assert_eq!(
+        exit.exec_output_tail
+            .as_ref()
+            .and_then(|tail| tail.stderr.as_deref()),
+        Some("early boom\n")
     );
 }
 

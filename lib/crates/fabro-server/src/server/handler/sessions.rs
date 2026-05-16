@@ -16,7 +16,7 @@ use fabro_agent::{
     ToolApprovalAdapter, WebFetchSummarizer,
 };
 use fabro_llm::client::Client as LlmClient;
-use fabro_model::{Catalog, ModelHandle, Provider};
+use fabro_model::{AgentProfileKind, Catalog, ModelHandle, ProviderId};
 use fabro_types::{
     SessionEventEnvelope, SessionId, SessionMessage, SessionRecord, SessionStatus, TurnId,
     TurnRecord, TurnStatus,
@@ -610,37 +610,38 @@ async fn mark_turn_finished(
 }
 
 async fn build_agent_session(state: &AppState, record: &SessionRecord) -> anyhow::Result<Session> {
-    let provider = record
+    let catalog = state.catalog();
+    let requested_provider_id = record
         .provider
         .as_deref()
-        .unwrap_or("anthropic")
-        .parse::<Provider>()
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "unknown provider: {}",
-                record.provider.as_deref().unwrap_or("anthropic")
-            )
+        .map_or_else(ProviderId::anthropic, ProviderId::from);
+    let (provider_id, profile_kind) = {
+        let provider = catalog.provider(&requested_provider_id).ok_or_else(|| {
+            anyhow::anyhow!("provider '{requested_provider_id}' is not configured")
         })?;
-    let catalog = state.catalog();
+        (
+            provider.id.clone(),
+            provider.adapter.metadata().default_profile,
+        )
+    };
     let model = record
         .model
         .clone()
         .or_else(|| {
             catalog
-                .default_for_provider(&provider.id())
+                .default_for_provider(&provider_id)
                 .map(|model| model.id.clone())
         })
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "provider '{provider}' has no default model in the catalog; pass --model explicitly"
+                "provider '{provider_id}' has no default model in the catalog; pass --model explicitly"
             )
         })?;
     let llm_result = state.resolve_llm_client().await?;
     for (provider, issue) in &llm_result.auth_issues {
         warn!(provider = %provider, error = %issue, "LLM provider unavailable due to auth issue");
     }
-    let provider_id = provider.id().to_string();
-    if !llm_result.client.has_provider(&provider_id) {
+    if !llm_result.client.has_provider(provider_id.as_str()) {
         anyhow::bail!("LLM credentials not configured for provider '{provider_id}'");
     }
 
@@ -648,7 +649,13 @@ async fn build_agent_session(state: &AppState, record: &SessionRecord) -> anyhow
     let sandbox: Arc<dyn fabro_agent::Sandbox> = Arc::new(ReadBeforeWriteSandbox::new(Arc::new(
         LocalSandbox::new(working_dir.clone()),
     )));
-    let profile = build_profile(provider, &model, &llm_result.client, Arc::clone(&catalog));
+    let profile = build_profile(
+        provider_id,
+        profile_kind,
+        &model,
+        &llm_result.client,
+        Arc::clone(&catalog),
+    );
     let config = SessionOptions {
         git_root: Some(working_dir.to_string_lossy().into_owned()),
         tool_hooks: Some(Arc::new(ToolApprovalAdapter(build_tool_approval(
@@ -685,51 +692,55 @@ async fn resolve_working_dir(record: &SessionRecord) -> anyhow::Result<PathBuf> 
 }
 
 fn build_profile(
-    provider: Provider,
+    provider_id: ProviderId,
+    profile_kind: AgentProfileKind,
     model: &str,
     llm_client: &LlmClient,
     catalog: Arc<Catalog>,
 ) -> Arc<dyn AgentProfile> {
     let summarizer = Some(WebFetchSummarizer {
         client:   llm_client.clone(),
-        model_id: summarizer_model_id(provider),
+        model_id: summarizer_model_id(&provider_id, profile_kind, &catalog, model),
     });
-    let profile: Box<dyn AgentProfile> = match provider {
-        Provider::OpenAi => {
-            Box::new(OpenAiProfile::with_summarizer(model, summarizer).with_catalog(catalog))
-        }
-        Provider::Kimi
-        | Provider::Zai
-        | Provider::Minimax
-        | Provider::Inception
-        | Provider::OpenAiCompatible => Box::new(
+    let profile: Box<dyn AgentProfile> = match profile_kind {
+        AgentProfileKind::OpenAi => Box::new(
             OpenAiProfile::with_summarizer(model, summarizer)
-                .with_provider(provider)
+                .with_provider_id(provider_id)
                 .with_catalog(catalog),
         ),
-        Provider::Gemini => {
-            Box::new(GeminiProfile::with_summarizer(model, summarizer).with_catalog(catalog))
-        }
-        Provider::Anthropic => {
-            Box::new(AnthropicProfile::with_summarizer(model, summarizer).with_catalog(catalog))
-        }
+        AgentProfileKind::Gemini => Box::new(
+            GeminiProfile::with_summarizer(model, summarizer)
+                .with_provider_id(provider_id)
+                .with_catalog(catalog),
+        ),
+        AgentProfileKind::Anthropic => Box::new(
+            AnthropicProfile::with_summarizer(model, summarizer)
+                .with_provider_id(provider_id)
+                .with_catalog(catalog),
+        ),
     };
     Arc::from(profile)
 }
 
-fn summarizer_model_id(provider: Provider) -> ModelHandle {
+fn summarizer_model_id(
+    provider_id: &ProviderId,
+    profile_kind: AgentProfileKind,
+    catalog: &Catalog,
+    selected_model: &str,
+) -> ModelHandle {
     ModelHandle::ByName {
-        provider: provider.id(),
-        model:    match provider {
-            Provider::OpenAi | Provider::OpenAiCompatible => "gpt-4o-mini",
-            Provider::Gemini => "gemini-2.0-flash",
-            Provider::Anthropic => "claude-haiku-4-5",
-            Provider::Kimi => "kimi-k2.5",
-            Provider::Zai => "glm-4.7",
-            Provider::Minimax => "minimax-m2.5",
-            Provider::Inception => "mercury",
-        }
-        .to_string(),
+        provider: provider_id.clone(),
+        model:    catalog
+            .default_for_provider(provider_id)
+            .map_or_else(
+                || match profile_kind {
+                    AgentProfileKind::Anthropic => "claude-haiku-4-5",
+                    AgentProfileKind::OpenAi => selected_model,
+                    AgentProfileKind::Gemini => "gemini-2.0-flash",
+                },
+                |model| model.id.as_str(),
+            )
+            .to_string(),
     }
 }
 
