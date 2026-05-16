@@ -84,7 +84,9 @@ use fabro_types::{
     EventBody, InterviewQuestionRecord, Principal, PullRequestRecord, QuestionType, RunBlobId,
     RunControlAction, RunEvent, RunId, ServerSettings, SessionCapability,
 };
-use fabro_util::error::{SharedError, collect_causes, render_with_causes};
+use fabro_util::error::{
+    SharedError, collect_causes, render_compact_with_causes, render_with_causes,
+};
 use fabro_util::version::FABRO_VERSION;
 use fabro_vault::{Error as VaultError, SecretType, Vault};
 use fabro_workflow::artifact_upload::ArtifactSink;
@@ -2412,7 +2414,10 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
             managed_run.status = RunStatus::Failed {
                 reason: props.failure.reason,
             };
-            managed_run.error = Some(props.failure.message.clone());
+            managed_run.error = Some(render_compact_with_causes(
+                &props.failure.detail.message,
+                &props.failure.detail.causes,
+            ));
             managed_run.active_api_stages.clear();
             managed_run.active_non_steerable_agent_stages.clear();
         }
@@ -3361,10 +3366,9 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             .conclusion
             .as_ref()
             .and_then(|conclusion| {
-                conclusion
-                    .failure
-                    .as_ref()
-                    .map(|failure| failure.message.clone())
+                conclusion.failure.as_ref().map(|failure| {
+                    render_compact_with_causes(&failure.detail.message, &failure.detail.causes)
+                })
             })
             .or_else(|| managed_run.error.clone());
         managed_run.checkpoint = final_state.current_checkpoint().cloned();

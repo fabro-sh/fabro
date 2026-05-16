@@ -191,6 +191,7 @@ fn main() {
         ("FailureReason", "fabro_types::status::FailureReason", &[]),
         ("FailureCategory", "fabro_types::FailureCategory", &[]),
         ("FailureSignature", "fabro_types::FailureSignature", &[]),
+        ("FailureDetail", "fabro_types::FailureDetail", &[]),
         ("RunFailure", "fabro_types::RunFailure", &[]),
         ("BlockedReason", "fabro_types::status::BlockedReason", &[]),
         (

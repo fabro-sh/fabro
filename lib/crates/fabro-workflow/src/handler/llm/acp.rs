@@ -166,7 +166,11 @@ impl AgentAcpBackend {
                 );
                 return Err(Error::Cancelled);
             }
-            Err(AcpError::TimedOut { stderr }) => {
+            Err(AcpError::TimedOut { exec_output_tail }) => {
+                let stderr = exec_output_tail
+                    .as_ref()
+                    .and_then(|tail| tail.stderr.clone())
+                    .unwrap_or_default();
                 emitter.emit_scoped(
                     &Event::AgentAcpTimedOut {
                         node_id:     node.id.clone(),
@@ -176,7 +180,9 @@ impl AgentAcpBackend {
                     },
                     stage_scope,
                 );
-                return Err(acp_error_to_workflow(AcpError::TimedOut { stderr }));
+                return Err(acp_error_to_workflow(AcpError::TimedOut {
+                    exec_output_tail,
+                }));
             }
             Err(AcpError::StopReason { stop_reason, text }) => {
                 emitter.emit_scoped(
@@ -266,18 +272,21 @@ fn acp_command_error_to_workflow(error: AcpCommandError) -> Error {
 fn acp_error_to_workflow(error: AcpError) -> Error {
     match error {
         AcpError::Cancelled => Error::Cancelled,
-        AcpError::TimedOut { stderr } => {
-            if stderr.is_empty() {
-                Error::handler("ACP turn timed out")
-            } else {
-                Error::handler(format!("ACP turn timed out: {stderr}"))
-            }
+        AcpError::TimedOut { exec_output_tail } => {
+            Error::handler_with_exec_output_tail("ACP turn timed out", exec_output_tail)
         }
         AcpError::StopReason { stop_reason, text } => {
             Error::handler(format!("ACP prompt stopped with {stop_reason}: {text}"))
         }
         AcpError::Sandbox(source) => Error::handler_with_source("ACP turn failed", source),
-        other => Error::handler_with_source("ACP turn failed", other),
+        other => {
+            let exec_output_tail = other.exec_output_tail();
+            Error::handler_with_source_and_exec_output_tail(
+                "ACP turn failed",
+                other,
+                exec_output_tail,
+            )
+        }
     }
 }
 
@@ -287,14 +296,15 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use fabro_acp::test_support::fake_acp_agent_script;
+    use fabro_acp::{AcpError, AcpProcessExit};
     use fabro_agent::{LocalSandbox, Sandbox, shell_quote};
     use fabro_graphviz::graph::{AttrValue, Node};
     use fabro_model::Provider;
     use fabro_sandbox::test_support::MockSandbox;
-    use fabro_types::EventBody;
+    use fabro_types::{CommandTermination, EventBody, ExecOutputTail};
     use tokio_util::sync::CancellationToken;
 
-    use super::AgentAcpBackend;
+    use super::{AgentAcpBackend, acp_error_to_workflow};
     use crate::context::Context;
     use crate::event::{Emitter, StageScope};
     use crate::handler::agent::{
@@ -638,6 +648,59 @@ mod tests {
         assert_eq!(
             err.failure_category(),
             crate::error::FailureCategory::Deterministic
+        );
+    }
+
+    #[test]
+    fn acp_timeout_maps_stderr_to_exec_tail_not_message() {
+        let tail = ExecOutputTail {
+            stdout:           None,
+            stderr:           Some("redacted stderr tail".to_string()),
+            stdout_truncated: false,
+            stderr_truncated: true,
+        };
+        let err = acp_error_to_workflow(AcpError::TimedOut {
+            exec_output_tail: Some(tail.clone()),
+        });
+
+        let detail = err.to_failure_detail();
+        assert_eq!(detail.message, "ACP turn timed out");
+        assert!(detail.causes.is_empty());
+        assert_eq!(detail.exec_output_tail, Some(tail));
+    }
+
+    #[test]
+    fn acp_process_exit_maps_stderr_to_exec_tail_not_cause_text() {
+        let tail = ExecOutputTail {
+            stdout:           None,
+            stderr:           Some("early boom".to_string()),
+            stdout_truncated: false,
+            stderr_truncated: false,
+        };
+        let err = acp_error_to_workflow(AcpError::ProcessExited(AcpProcessExit {
+            termination:      CommandTermination::Exited,
+            exit_code:        Some(2),
+            exec_output_tail: Some(tail.clone()),
+        }));
+
+        let detail = err.to_failure_detail();
+        assert_eq!(detail.message, "ACP turn failed");
+        assert_eq!(detail.exec_output_tail, Some(tail));
+        assert!(
+            detail
+                .causes
+                .iter()
+                .any(|cause| cause.contains("exit_code=2")),
+            "cause chain should retain process exit context: {:?}",
+            detail.causes
+        );
+        assert!(
+            !detail
+                .causes
+                .iter()
+                .any(|cause| cause.contains("early boom")),
+            "raw stderr belongs in exec_output_tail, not causes: {:?}",
+            detail.causes
         );
     }
 

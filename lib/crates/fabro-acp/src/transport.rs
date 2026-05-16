@@ -9,10 +9,10 @@ use agent_client_protocol::{
     Agent, Client, ConnectTo, Error as ProtocolError, Lines, Result as AcpProtocolResult,
 };
 use fabro_sandbox::{
-    Error as SandboxError, Result as SandboxResult, Sandbox, StderrCollector, StdioProcessHandle,
-    StdioProcessTermination,
+    DEFAULT_EXEC_OUTPUT_TAIL_BYTES, Error as SandboxError, Result as SandboxResult, Sandbox,
+    StderrCollector, StdioProcessHandle, StdioProcessTermination,
 };
-use fabro_types::CommandTermination;
+use fabro_types::{CommandTermination, ExecOutputTail};
 use futures::io::BufReader;
 use futures::sink::unfold;
 use futures::{AsyncBufReadExt, AsyncWriteExt, Stream};
@@ -21,6 +21,7 @@ use tokio::time::timeout;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::command::AcpCommand;
+use crate::error::AcpProcessExit;
 
 const CLEAN_EXIT_PROTOCOL_GRACE: Duration = Duration::from_millis(500);
 
@@ -29,6 +30,7 @@ pub(crate) struct TransportState {
     handle:        Arc<TokioMutex<Option<StdioProcessHandle>>>,
     stderr:        Arc<TokioMutex<Option<StderrCollector>>>,
     startup_error: Arc<TokioMutex<Option<SandboxError>>>,
+    process_exit:  Arc<TokioMutex<Option<AcpProcessExit>>>,
 }
 
 impl TransportState {
@@ -37,6 +39,7 @@ impl TransportState {
             handle:        Arc::new(TokioMutex::new(None)),
             stderr:        Arc::new(TokioMutex::new(None)),
             startup_error: Arc::new(TokioMutex::new(None)),
+            process_exit:  Arc::new(TokioMutex::new(None)),
         }
     }
 
@@ -49,8 +52,20 @@ impl TransportState {
         *self.startup_error.lock().await = Some(error);
     }
 
+    async fn set_process_exit(&self, termination: StdioProcessTermination, stderr: &str) {
+        *self.process_exit.lock().await = Some(AcpProcessExit {
+            termination:      termination.termination,
+            exit_code:        termination.exit_code,
+            exec_output_tail: redacted_stderr_tail(stderr),
+        });
+    }
+
     pub(crate) async fn take_startup_error(&self) -> Option<SandboxError> {
         self.startup_error.lock().await.take()
+    }
+
+    pub(crate) async fn take_process_exit(&self) -> Option<AcpProcessExit> {
+        self.process_exit.lock().await.take()
     }
 
     pub(crate) async fn terminate(&self) -> SandboxResult<()> {
@@ -65,6 +80,11 @@ impl TransportState {
             return stderr.tail_string().await;
         }
         String::new()
+    }
+
+    pub(crate) async fn exec_output_tail(&self) -> Option<ExecOutputTail> {
+        let stderr = self.stderr_tail().await;
+        redacted_stderr_tail(&stderr)
     }
 }
 
@@ -156,21 +176,17 @@ impl ConnectTo<Client> for SandboxAcpTransport {
                         return result;
                     }
                 }
-                Err(process_exited_before_protocol_completed(termination, &stderr))
+                self.state.set_process_exit(termination, &stderr).await;
+                Err(process_exited_before_protocol_completed())
             }
         }
     }
 }
 
-fn process_exited_before_protocol_completed(
-    termination: StdioProcessTermination,
-    stderr: &str,
-) -> ProtocolError {
-    let exit_code = termination
-        .exit_code
-        .map_or_else(|| "unknown".to_string(), |code| code.to_string());
-    internal_error(format!(
-        "ACP process exited before protocol completed: termination={}, exit_code={exit_code}, stderr={stderr}",
-        termination.termination,
-    ))
+fn redacted_stderr_tail(stderr: &str) -> Option<ExecOutputTail> {
+    fabro_sandbox::redacted_output_tail("", stderr, DEFAULT_EXEC_OUTPUT_TAIL_BYTES)
+}
+
+fn process_exited_before_protocol_completed() -> ProtocolError {
+    internal_error("ACP process exited before protocol completed")
 }

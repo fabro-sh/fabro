@@ -725,9 +725,11 @@ mod tests {
             "run.failed",
             &serde_json::json!({
                 "failure": {
-                    "message": "cancelled",
                     "reason": "cancelled",
-                    "category": "canceled"
+                    "detail": {
+                        "message": "cancelled",
+                        "category": "canceled"
+                    }
                 },
                 "duration_ms": 1,
             }),
@@ -1126,9 +1128,11 @@ mod tests {
             "run.failed",
             &serde_json::json!({
                 "failure": {
-                    "message": "workflow failed",
                     "reason": "workflow_error",
-                    "category": "deterministic"
+                    "detail": {
+                        "message": "workflow failed",
+                        "category": "deterministic"
+                    }
                 },
                 "duration_ms": 1,
             }),

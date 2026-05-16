@@ -4959,12 +4959,11 @@ components:
           type: boolean
           default: false
 
-    RunFailure:
-      description: Rich terminal run failure diagnostics.
+    FailureDetail:
+      description: Rich diagnostic detail for a failed stage or terminal run.
       type: object
       required:
         - message
-        - reason
         - category
       properties:
         message:
@@ -4973,8 +4972,6 @@ components:
           type: array
           items:
             type: string
-        reason:
-          $ref: "#/components/schemas/FailureReason"
         category:
           $ref: "#/components/schemas/FailureCategory"
         system_actor:
@@ -4989,6 +4986,18 @@ components:
           oneOf:
             - $ref: "#/components/schemas/ExecOutputTail"
             - type: "null"
+
+    RunFailure:
+      description: Terminal run failure reason and rich diagnostics.
+      type: object
+      required:
+        - reason
+        - detail
+      properties:
+        reason:
+          $ref: "#/components/schemas/FailureReason"
+        detail:
+          $ref: "#/components/schemas/FailureDetail"
 
     RunManifest:
       description: Self-contained workflow run manifest.

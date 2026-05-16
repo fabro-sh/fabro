@@ -1087,9 +1087,11 @@ mod tests {
                 "run.failed",
                 json!({
                     "failure": {
-                        "message": "boom",
                         "reason": "workflow_error",
-                        "category": "deterministic"
+                        "detail": {
+                            "message": "boom",
+                            "category": "deterministic"
+                        }
                     },
                     "duration_ms": 42,
                     "diff_summary": {

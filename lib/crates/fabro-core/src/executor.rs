@@ -448,11 +448,23 @@ mod tests {
     use crate::context::Context;
     use crate::error::HandlerErrorDetail;
     use crate::lifecycle::RunLifecycle;
-    use crate::outcome::StageOutcome;
+    use crate::outcome::{FailureCategory, FailureDetail, StageOutcome};
     use crate::retry::{BackoffPolicy, RetryPolicy};
     use crate::test_fixtures::*;
 
     type NextNodeLog = Arc<Mutex<Vec<(String, Option<String>)>>>;
+
+    fn handler_error(message: &str, retryable: bool) -> HandlerErrorDetail {
+        let category = if retryable {
+            FailureCategory::TransientInfra
+        } else {
+            FailureCategory::Deterministic
+        };
+        HandlerErrorDetail {
+            retryable,
+            failure: FailureDetail::new(message, category),
+        }
+    }
 
     // Helper to build and run an executor with default settings
     async fn run_linear(
@@ -1015,20 +1027,8 @@ mod tests {
     async fn executor_retry_on_retryable_error() {
         let handler = Arc::new(
             CountingHandler::new(vec![
-                Err(Error::handler(HandlerErrorDetail {
-                    message:      "fail1".into(),
-                    retryable:    true,
-                    category:     None,
-                    system_actor: None,
-                    signature:    None,
-                })),
-                Err(Error::handler(HandlerErrorDetail {
-                    message:      "fail2".into(),
-                    retryable:    true,
-                    category:     None,
-                    system_actor: None,
-                    signature:    None,
-                })),
+                Err(Error::handler(handler_error("fail1", true))),
+                Err(Error::handler(handler_error("fail2", true))),
                 Ok(Outcome::success()),
             ])
             .with_retry_policy(RetryPolicy {
@@ -1092,14 +1092,8 @@ mod tests {
     #[tokio::test]
     async fn executor_retry_non_retryable_error_no_retry() {
         let handler = Arc::new(
-            CountingHandler::new(vec![Err(Error::handler(HandlerErrorDetail {
-                message:      "fatal".into(),
-                retryable:    false,
-                category:     None,
-                system_actor: None,
-                signature:    None,
-            }))])
-            .with_retry_policy(RetryPolicy::with_max_attempts(3)),
+            CountingHandler::new(vec![Err(Error::handler(handler_error("fatal", false)))])
+                .with_retry_policy(RetryPolicy::with_max_attempts(3)),
         );
         let result = run_linear(
             &["start", "end"],
@@ -1116,13 +1110,7 @@ mod tests {
     async fn executor_retry_no_retry_by_default() {
         // Default policy is RetryPolicy::none() (max_attempts=1)
         let handler = Arc::new(CountingHandler::new(vec![Err(Error::handler(
-            HandlerErrorDetail {
-                message:      "fail".into(),
-                retryable:    true,
-                category:     None,
-                system_actor: None,
-                signature:    None,
-            },
+            handler_error("fail", true),
         ))]));
         let result = run_linear(
             &["start", "end"],
@@ -1239,13 +1227,7 @@ mod tests {
         }
         let handler = Arc::new(
             CountingHandler::new(vec![
-                Err(Error::handler(HandlerErrorDetail {
-                    message:      "r".into(),
-                    retryable:    true,
-                    category:     None,
-                    system_actor: None,
-                    signature:    None,
-                })),
+                Err(Error::handler(handler_error("r", true))),
                 Ok(Outcome::success()),
             ])
             .with_retry_policy(RetryPolicy {
@@ -1284,13 +1266,7 @@ mod tests {
         }
         let handler = Arc::new(
             CountingHandler::new(vec![
-                Err(Error::handler(HandlerErrorDetail {
-                    message:      "r".into(),
-                    retryable:    true,
-                    category:     None,
-                    system_actor: None,
-                    signature:    None,
-                })),
+                Err(Error::handler(handler_error("r", true))),
                 Ok(Outcome::success()),
             ])
             .with_retry_policy(RetryPolicy {
@@ -1335,13 +1311,7 @@ mod tests {
         }
         let handler = Arc::new(
             CountingHandler::new(vec![
-                Err(Error::handler(HandlerErrorDetail {
-                    message:      "r".into(),
-                    retryable:    true,
-                    category:     None,
-                    system_actor: None,
-                    signature:    None,
-                })),
+                Err(Error::handler(handler_error("r", true))),
                 Ok(Outcome::success()), // should not be reached
             ])
             .with_retry_policy(RetryPolicy {
@@ -2139,13 +2109,7 @@ mod tests {
                 if c == 0 {
                     // First call: fail with retryable, then cancel stall during backoff
                     self.stall.cancel();
-                    Err(Error::handler(HandlerErrorDetail {
-                        message:      "transient".into(),
-                        retryable:    true,
-                        category:     None,
-                        system_actor: None,
-                        signature:    None,
-                    }))
+                    Err(Error::handler(handler_error("transient", true)))
                 } else {
                     Ok(Outcome::success())
                 }

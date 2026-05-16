@@ -100,6 +100,7 @@ models/execute-query-request.ts
 models/execute-query-response-rows-inner-inner.ts
 models/execute-query-response.ts
 models/failure-category.ts
+models/failure-detail.ts
 models/failure-reason.ts
 models/features-namespace.ts
 models/file-checkpoint.ts

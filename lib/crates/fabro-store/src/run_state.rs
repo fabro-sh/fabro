@@ -16,6 +16,7 @@ use fabro_types::{
     RunStatus, RunSummary, RunTimestamps, SandboxProvider, StageCompletion, StageHandler, StageId,
     StageOutcome, StageProjection, StageState, StartRecord, WorkflowRef, first_event_seq,
 };
+use fabro_util::error::render_compact_with_causes;
 use serde_json::Value;
 
 use crate::{Error, EventEnvelope, Result};
@@ -855,7 +856,7 @@ fn stage_completion_from_outcome(
         failure_reason: outcome
             .failure
             .as_ref()
-            .map(|failure| failure.message.clone()),
+            .map(|failure| render_compact_with_causes(&failure.message, &failure.causes)),
         timestamp,
     }
 }
@@ -1600,7 +1601,7 @@ mod tests {
                     "index": 0,
                     "failure": {
                         "message": "provider failed",
-                        "failure_class": "transient_infra"
+                        "category": "transient_infra"
                     },
                     "will_retry": false,
                     "duration_ms": 654,
@@ -2185,13 +2186,8 @@ mod tests {
                 1,
                 EventBody::RunFailed(RunFailedProps {
                     failure:              fabro_types::RunFailure {
-                        message:          "boom".to_string(),
-                        causes:           Vec::new(),
-                        reason:           FailureReason::WorkflowError,
-                        category:         FailureCategory::Deterministic,
-                        system_actor:     None,
-                        signature:        None,
-                        exec_output_tail: None,
+                        reason: FailureReason::WorkflowError,
+                        detail: FailureDetail::new("boom", FailureCategory::Deterministic),
                     },
                     duration_ms:          42,
                     final_git_commit_sha: Some("abc123".to_string()),
@@ -2305,9 +2301,11 @@ mod tests {
                 "run.failed",
                 &json!({
                     "failure": {
-                        "message": "boom",
                         "reason": "workflow_error",
-                        "category": "deterministic"
+                        "detail": {
+                            "message": "boom",
+                            "category": "deterministic"
+                        }
                     },
                     "duration_ms": 42,
                     "diff_summary": {
@@ -2337,16 +2335,18 @@ mod tests {
                 1,
                 EventBody::RunFailed(RunFailedProps {
                     failure:              fabro_types::RunFailure {
-                        message:          "Failed to initialize sandbox".to_string(),
-                        causes:           vec![
-                            "Failed to pull Docker image buildpack-deps:noble".to_string(),
-                            "connection refused".to_string(),
-                        ],
-                        reason:           FailureReason::WorkflowError,
-                        category:         FailureCategory::TransientInfra,
-                        system_actor:     None,
-                        signature:        None,
-                        exec_output_tail: None,
+                        reason: FailureReason::WorkflowError,
+                        detail: {
+                            let mut detail = FailureDetail::new(
+                                "Failed to initialize sandbox",
+                                FailureCategory::TransientInfra,
+                            );
+                            detail.causes = vec![
+                                "Failed to pull Docker image buildpack-deps:noble".to_string(),
+                                "connection refused".to_string(),
+                            ];
+                            detail
+                        },
                     },
                     duration_ms:          42,
                     final_git_commit_sha: None,
@@ -2359,8 +2359,8 @@ mod tests {
             .unwrap();
 
         let failure = state.conclusion.unwrap().failure.unwrap();
-        assert_eq!(failure.message, "Failed to initialize sandbox");
-        assert_eq!(failure.causes, vec![
+        assert_eq!(failure.detail.message, "Failed to initialize sandbox");
+        assert_eq!(failure.detail.causes, vec![
             "Failed to pull Docker image buildpack-deps:noble".to_string(),
             "connection refused".to_string(),
         ]);
@@ -2370,15 +2370,19 @@ mod tests {
     fn run_failed_projection_uses_nested_failure_reason_and_conclusion() {
         let mut state = running_projection();
         let failure = fabro_types::RunFailure {
-            message:          "Failed to initialize sandbox".to_string(),
-            causes:           vec!["connection refused".to_string()],
-            reason:           FailureReason::SandboxInitFailed,
-            category:         FailureCategory::TransientInfra,
-            system_actor:     Some(fabro_types::SystemActorKind::Engine),
-            signature:        Some(fabro_types::FailureSignature(
-                "init|transient_infra|docker".to_string(),
-            )),
-            exec_output_tail: None,
+            reason: FailureReason::SandboxInitFailed,
+            detail: {
+                let mut detail = FailureDetail::new(
+                    "Failed to initialize sandbox",
+                    FailureCategory::TransientInfra,
+                );
+                detail.causes = vec!["connection refused".to_string()];
+                detail.system_actor = Some(fabro_types::SystemActorKind::Engine);
+                detail.signature = Some(fabro_types::FailureSignature(
+                    "init|transient_infra|docker".to_string(),
+                ));
+                detail
+            },
         };
         state
             .apply_event(&test_event(

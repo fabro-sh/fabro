@@ -25,7 +25,7 @@ pub enum CodergenResult {
         files_touched:     Vec<String>,
         last_file_touched: Option<String>,
     },
-    Full(Outcome),
+    Full(Box<Outcome>),
 }
 
 pub struct CodergenRunRequest<'a> {
@@ -313,7 +313,7 @@ impl Handler for AgentHandler {
                     })
                     .await;
                 match result {
-                    Ok(CodergenResult::Full(outcome)) => return Ok(outcome),
+                    Ok(CodergenResult::Full(outcome)) => return Ok(*outcome),
                     Ok(CodergenResult::Text {
                         text,
                         usage,

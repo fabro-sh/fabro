@@ -8,7 +8,7 @@ use crate::context::Context;
 use crate::error::{Error, HandlerErrorDetail, Result};
 use crate::graph::{EdgeSelection, EdgeSpec, Graph, NodeSpec};
 use crate::handler::NodeHandler;
-use crate::outcome::{Outcome, StageOutcome};
+use crate::outcome::{FailureCategory, FailureDetail, Outcome, StageOutcome};
 use crate::retry::RetryPolicy;
 
 // ---- Test node ----
@@ -388,11 +388,8 @@ impl ErrorHandler {
     pub fn retryable(message: &str, policy: RetryPolicy) -> Self {
         Self {
             detail:       HandlerErrorDetail {
-                message:      message.to_string(),
-                retryable:    true,
-                category:     None,
-                system_actor: None,
-                signature:    None,
+                retryable: true,
+                failure:   FailureDetail::new(message, FailureCategory::TransientInfra),
             },
             retry_policy: policy,
         }
@@ -401,11 +398,8 @@ impl ErrorHandler {
     pub fn non_retryable(message: &str) -> Self {
         Self {
             detail:       HandlerErrorDetail {
-                message:      message.to_string(),
-                retryable:    false,
-                category:     None,
-                system_actor: None,
-                signature:    None,
+                retryable: false,
+                failure:   FailureDetail::new(message, FailureCategory::Deterministic),
             },
             retry_policy: RetryPolicy::none(),
         }

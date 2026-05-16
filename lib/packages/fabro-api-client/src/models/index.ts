@@ -78,6 +78,7 @@ export * from './execute-query-request';
 export * from './execute-query-response';
 export * from './execute-query-response-rows-inner-inner';
 export * from './failure-category';
+export * from './failure-detail';
 export * from './failure-reason';
 export * from './features-namespace';
 export * from './file-checkpoint';
