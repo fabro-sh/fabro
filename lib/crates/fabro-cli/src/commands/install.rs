@@ -30,6 +30,7 @@ use fabro_install::{
     InstallListenConfig, PendingSettingsWrite, merge_server_settings as merge_server_settings_impl,
     persist_install_outputs_direct, write_github_app_settings, write_token_settings,
 };
+use fabro_model::catalog::CatalogProvider;
 use fabro_model::{Catalog, CredentialRef, ProviderId};
 use fabro_server::serve;
 use fabro_store::ArtifactStore;
@@ -70,26 +71,22 @@ const GITHUB_APP_PRIVATE_KEY_KEY: &str = "GITHUB_APP_PRIVATE_KEY";
 const GITHUB_APP_CLIENT_SECRET_KEY: &str = "GITHUB_APP_CLIENT_SECRET";
 const GITHUB_APP_WEBHOOK_SECRET_KEY: &str = "GITHUB_APP_WEBHOOK_SECRET";
 
-const INSTALL_LLM_PROVIDERS: &[&str] = &[
-    ProviderId::ANTHROPIC,
-    ProviderId::OPENAI,
-    ProviderId::GEMINI,
-];
-
-fn install_llm_provider_ids() -> Vec<ProviderId> {
-    INSTALL_LLM_PROVIDERS
-        .iter()
-        .copied()
-        .map(ProviderId::from)
-        .collect()
+fn supports_install_api_key(provider: &CatalogProvider) -> bool {
+    provider.credentials.iter().any(|credential| {
+        matches!(
+            credential,
+            CredentialRef::Credential(_) | CredentialRef::Env(_)
+        )
+    })
 }
 
-fn ensure_install_llm_provider_supported(provider: &ProviderId) -> Result<()> {
-    anyhow::ensure!(
-        INSTALL_LLM_PROVIDERS.contains(&provider.as_str()),
-        "{provider} is not supported by install in v1"
-    );
-    Ok(())
+fn install_llm_provider_ids(catalog: &Catalog) -> Vec<ProviderId> {
+    catalog
+        .providers()
+        .iter()
+        .filter(|provider| supports_install_api_key(provider))
+        .map(|provider| provider.id.clone())
+        .collect()
 }
 
 fn provider_env_var_label(provider: &ProviderId, catalog: &Catalog) -> String {
@@ -448,7 +445,7 @@ impl InstallInputSource for InteractiveInstallInputSource {
         }
 
         if !openai_configured {
-            let primary_providers = install_llm_provider_ids();
+            let primary_providers = install_llm_provider_ids(catalog);
             let primary_labels: Vec<String> = primary_providers
                 .iter()
                 .map(|p| provider_display_name(p, catalog))
@@ -468,7 +465,8 @@ impl InstallInputSource for InteractiveInstallInputSource {
             spawn_blocking(|| prompt_confirm("Set up additional LLM providers?", false)).await??;
 
         if add_more {
-            let remaining_labels: Vec<String> = install_llm_provider_ids()
+            let install_providers = install_llm_provider_ids(catalog);
+            let remaining_labels: Vec<String> = install_providers
                 .iter()
                 .filter(|p| !configured_providers.contains(p))
                 .map(|p| {
@@ -476,7 +474,7 @@ impl InstallInputSource for InteractiveInstallInputSource {
                     format!("{} ({})", provider_display_name(p, catalog), env_vars)
                 })
                 .collect();
-            let remaining_providers: Vec<ProviderId> = install_llm_provider_ids()
+            let remaining_providers: Vec<ProviderId> = install_providers
                 .iter()
                 .filter(|p| !configured_providers.contains(p))
                 .cloned()
@@ -685,7 +683,6 @@ impl InstallInputSource for NonInteractiveInstallInputSource {
             .llm_provider
             .clone()
             .context("non-interactive install requires --llm-provider")?;
-        ensure_install_llm_provider_supported(&provider)?;
         let credential =
             authenticate_provider_with_api_key_source(provider, self.api_key_source()?, s, printer)
                 .await?;
@@ -3067,6 +3064,22 @@ root = "{}"
         .unwrap();
         assert_eq!(value["fabro_version"], "test-version");
         assert!(value["created_at"].as_str().is_some());
+    }
+
+    #[test]
+    fn install_llm_providers_come_from_catalog_api_key_providers() {
+        let ids = install_llm_provider_ids(Catalog::builtin());
+
+        assert!(ids.contains(&ProviderId::anthropic()));
+        assert!(ids.contains(&ProviderId::openai()));
+        assert!(ids.contains(&ProviderId::gemini()));
+        assert!(ids.contains(&ProviderId::new("kimi")));
+        assert!(ids.contains(&ProviderId::new("zai")));
+        assert!(ids.contains(&ProviderId::new("minimax")));
+        assert!(ids.contains(&ProviderId::new("inception")));
+        assert!(ids.contains(&ProviderId::new("venice")));
+        assert!(!ids.contains(&ProviderId::new("ollama")));
+        assert!(!ids.contains(&ProviderId::new("litellm")));
     }
 
     #[test]
