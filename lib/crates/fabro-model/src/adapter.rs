@@ -1,12 +1,11 @@
 //! Adapter metadata vocabulary shared by the model catalog and LLM factories.
 //!
-//! Adapters are Rust-owned: each registered adapter key maps to a static
+//! Adapters are Rust-owned: each [`AdapterKind`] maps to static
 //! [`AdapterMetadata`] describing how the adapter dispatches agent profiles,
 //! formats API key headers, and which native control values it supports.
 //!
-//! Provider/model catalog rows reference adapters by key. Both the catalog
-//! (in `fabro-model`) and the LLM factory registry (in `fabro-llm`) must agree
-//! on the same set of adapter keys; the parity is enforced by tests.
+//! Provider/model catalog rows parse adapter strings into [`AdapterKind`].
+//! Runtime code should carry the typed kind instead of re-matching on strings.
 
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString, IntoStaticStr, VariantArray};
@@ -109,9 +108,6 @@ pub struct AdapterControlCapabilities {
 pub struct AdapterMetadata {
     /// Typed stable adapter identity.
     pub kind:            AdapterKind,
-    /// Stable adapter key referenced from `[llm.providers.<id>] adapter =
-    /// "..."`.
-    pub key:             &'static str,
     /// Default agent profile dispatched for providers that use this adapter.
     pub default_profile: AgentProfileKind,
     /// How API keys for this adapter are converted into auth headers.
@@ -129,7 +125,6 @@ const FAST_SPEEDS: &[Speed] = &[Speed::Fast];
 /// Anthropic — `anthropic` adapter.
 pub const ANTHROPIC: AdapterMetadata = AdapterMetadata {
     kind:            AdapterKind::Anthropic,
-    key:             "anthropic",
     default_profile: AgentProfileKind::Anthropic,
     api_key_header:  ApiKeyHeaderPolicy::Custom { name: "x-api-key" },
     controls:        AdapterControlCapabilities {
@@ -141,7 +136,6 @@ pub const ANTHROPIC: AdapterMetadata = AdapterMetadata {
 /// OpenAI — `openai` adapter.
 pub const OPENAI: AdapterMetadata = AdapterMetadata {
     kind:            AdapterKind::OpenAi,
-    key:             "openai",
     default_profile: AgentProfileKind::OpenAi,
     api_key_header:  ApiKeyHeaderPolicy::Bearer,
     controls:        AdapterControlCapabilities {
@@ -153,7 +147,6 @@ pub const OPENAI: AdapterMetadata = AdapterMetadata {
 /// Google Gemini — `gemini` adapter.
 pub const GEMINI: AdapterMetadata = AdapterMetadata {
     kind:            AdapterKind::Gemini,
-    key:             "gemini",
     default_profile: AgentProfileKind::Gemini,
     api_key_header:  ApiKeyHeaderPolicy::Custom {
         name: "x-goog-api-key",
@@ -169,7 +162,6 @@ pub const GEMINI: AdapterMetadata = AdapterMetadata {
 /// per provider settings.
 pub const OPENAI_COMPATIBLE: AdapterMetadata = AdapterMetadata {
     kind:            AdapterKind::OpenAiCompatible,
-    key:             "openai_compatible",
     default_profile: AgentProfileKind::OpenAi,
     api_key_header:  ApiKeyHeaderPolicy::Bearer,
     controls:        AdapterControlCapabilities {
@@ -183,18 +175,6 @@ pub const OPENAI_COMPATIBLE: AdapterMetadata = AdapterMetadata {
 
 /// All built-in adapter metadata, in stable iteration order.
 pub const ALL_ADAPTERS: &[AdapterMetadata] = &[ANTHROPIC, OPENAI, GEMINI, OPENAI_COMPATIBLE];
-
-/// Look up adapter metadata by stable key.
-#[must_use]
-pub fn get(key: impl AsRef<str>) -> Option<&'static AdapterMetadata> {
-    let key = key.as_ref();
-    ALL_ADAPTERS.iter().find(|a| a.key == key)
-}
-
-/// Iterate every registered adapter key.
-pub fn keys() -> impl Iterator<Item = &'static str> {
-    ALL_ADAPTERS.iter().map(|a| a.key)
-}
 
 #[cfg(test)]
 mod tests {
@@ -212,26 +192,12 @@ mod tests {
     }
 
     #[test]
-    fn lookup_by_known_key() {
-        assert_eq!(get("anthropic").unwrap().key, "anthropic");
-        assert_eq!(get("openai").unwrap().key, "openai");
-        assert_eq!(get("gemini").unwrap().key, "gemini");
-        assert_eq!(get("openai_compatible").unwrap().key, "openai_compatible");
-    }
-
-    #[test]
-    fn lookup_unknown_key_returns_none() {
-        assert!(get("does_not_exist").is_none());
-    }
-
-    #[test]
-    fn keys_are_unique_and_match_all_adapters() {
-        let keys: Vec<&'static str> = keys().collect();
-        let mut sorted = keys.clone();
-        sorted.sort_unstable();
-        sorted.dedup();
-        assert_eq!(sorted.len(), keys.len(), "duplicate adapter key");
-        assert_eq!(sorted.len(), ALL_ADAPTERS.len());
+    fn metadata_kind_matches_adapter_kind_variants() {
+        let kinds: Vec<AdapterKind> = ALL_ADAPTERS.iter().map(|adapter| adapter.kind).collect();
+        assert_eq!(kinds, AdapterKind::VARIANTS);
+        for kind in AdapterKind::VARIANTS {
+            assert_eq!(kind.metadata().kind, *kind);
+        }
     }
 
     #[test]
@@ -264,7 +230,7 @@ mod tests {
                 adapter.controls.native_reasoning_effort.len(),
                 FULL_REASONING_EFFORTS.len(),
                 "adapter {} should expose all reasoning-effort values",
-                adapter.key,
+                adapter.kind,
             );
         }
     }

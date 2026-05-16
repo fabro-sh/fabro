@@ -1,9 +1,8 @@
-//! Adapter factory registry keyed by stable adapter strings.
+//! Adapter factory registry keyed by [`fabro_model::AdapterKind`].
 //!
-//! Mirrors the static [`fabro_model::adapter`] metadata: every metadata key
+//! Mirrors the static [`fabro_model::adapter`] metadata: every adapter kind
 //! ships with a matching factory in this module. Tests in this file enforce
-//! that the registry covers every metadata key and never adds keys that have
-//! no metadata.
+//! that the registry covers every adapter kind.
 //!
 //! Factories take a pre-built [`AdapterConfig`] derived from resolved
 //! credentials + provider settings, and produce a boxed
@@ -16,8 +15,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use fabro_auth::ApiKeyHeader;
-use fabro_model::Catalog;
-use fabro_model::adapter::{self as model_adapter, AdapterMetadata};
+use fabro_model::adapter::AdapterMetadata;
+use fabro_model::{AdapterKind, Catalog};
 
 use crate::client::auth_value;
 use crate::provider::ProviderAdapter;
@@ -175,74 +174,65 @@ fn build_openai_compatible(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
     Arc::new(build_openai_compatible_adapter(config))
 }
 
-/// Single source of truth pairing every adapter key with its factory. Both
-/// `factory_for` and `registered_keys` derive from this table.
-const FACTORIES: &[(&str, AdapterFactory)] = &[
-    (model_adapter::ANTHROPIC.key, build_anthropic),
-    (model_adapter::OPENAI.key, build_openai),
-    (model_adapter::GEMINI.key, build_gemini),
-    (
-        model_adapter::OPENAI_COMPATIBLE.key,
-        build_openai_compatible,
-    ),
+/// Single source of truth pairing every adapter kind with its factory. Both
+/// `factory_for` and `registered_kinds` derive from this table.
+const FACTORIES: &[(AdapterKind, AdapterFactory)] = &[
+    (AdapterKind::Anthropic, build_anthropic),
+    (AdapterKind::OpenAi, build_openai),
+    (AdapterKind::Gemini, build_gemini),
+    (AdapterKind::OpenAiCompatible, build_openai_compatible),
 ];
 
-/// Look up a factory by adapter key. Returns `None` if the key has no factory
-/// registered.
+/// Look up a factory by adapter kind. Returns `None` if the kind has no
+/// factory registered.
 #[must_use]
-pub fn factory_for(adapter_key: impl AsRef<str>) -> Option<AdapterFactory> {
-    let adapter_key = adapter_key.as_ref();
+pub fn factory_for(adapter_kind: AdapterKind) -> Option<AdapterFactory> {
     FACTORIES
         .iter()
-        .find_map(|(key, factory)| (*key == adapter_key).then_some(*factory))
+        .find_map(|(kind, factory)| (*kind == adapter_kind).then_some(*factory))
 }
 
-/// Iterate every adapter key with a factory registered.
-pub fn registered_keys() -> impl Iterator<Item = &'static str> {
-    FACTORIES.iter().map(|(key, _)| *key)
+/// Iterate every adapter kind with a factory registered.
+pub fn registered_kinds() -> impl Iterator<Item = AdapterKind> {
+    FACTORIES.iter().map(|(kind, _)| *kind)
 }
 
-/// Look up adapter metadata by key, ensuring the metadata + factory pair
-/// remains in sync.
+/// Look up adapter metadata by kind.
 #[must_use]
-pub fn metadata_for(adapter_key: impl AsRef<str>) -> Option<&'static AdapterMetadata> {
-    model_adapter::get(adapter_key)
+pub fn metadata_for(adapter_kind: AdapterKind) -> &'static AdapterMetadata {
+    adapter_kind.metadata()
 }
 
 #[cfg(test)]
 mod tests {
+    use strum::VariantArray as _;
+
     use super::*;
 
     #[test]
-    fn every_metadata_key_has_a_factory() {
-        for key in model_adapter::keys() {
+    fn every_adapter_kind_has_a_factory() {
+        for kind in AdapterKind::VARIANTS {
             assert!(
-                factory_for(key).is_some(),
-                "adapter metadata key `{key}` has no matching factory in fabro-llm",
+                factory_for(*kind).is_some(),
+                "adapter kind `{kind}` has no matching factory in fabro-llm",
             );
         }
     }
 
     #[test]
     fn every_factory_has_metadata() {
-        for key in registered_keys() {
-            assert!(
-                metadata_for(key).is_some(),
-                "fabro-llm factory `{key}` has no matching metadata in fabro-model",
-            );
+        for kind in registered_kinds() {
+            assert_eq!(metadata_for(kind).kind, kind);
         }
     }
 
     #[test]
-    fn registered_factory_set_matches_metadata_set() {
-        let metadata: std::collections::BTreeSet<&str> = model_adapter::keys().collect();
-        let factories: std::collections::BTreeSet<&str> = registered_keys().collect();
-        assert_eq!(metadata, factories);
-    }
-
-    #[test]
-    fn unknown_key_returns_none_factory() {
-        assert!(factory_for("does_not_exist").is_none());
+    fn registered_factory_set_matches_adapter_kind_set() {
+        let factories: Vec<AdapterKind> = registered_kinds().collect();
+        assert_eq!(factories.len(), AdapterKind::VARIANTS.len());
+        for kind in AdapterKind::VARIANTS {
+            assert!(factories.contains(kind));
+        }
     }
 
     #[test]
@@ -251,7 +241,7 @@ mod tests {
             name:  "x-api-key".to_string(),
             value: "test-key".to_string(),
         });
-        let adapter = factory_for("anthropic").unwrap()(config);
+        let adapter = factory_for(AdapterKind::Anthropic).unwrap()(config);
         assert_eq!(adapter.name(), "anthropic");
     }
 
@@ -267,7 +257,7 @@ mod tests {
             project_id:    None,
             catalog:       None,
         };
-        let adapter = factory_for("openai_compatible").unwrap()(config);
+        let adapter = factory_for(AdapterKind::OpenAiCompatible).unwrap()(config);
         assert_eq!(adapter.name(), "kimi");
     }
 
@@ -338,6 +328,6 @@ mod tests {
     #[should_panic(expected = "openai_compatible adapter requires a base_url")]
     fn openai_compatible_factory_panics_without_base_url() {
         let config = AdapterConfig::new("kimi", ApiKeyHeader::Bearer("k".to_string()));
-        let _ = factory_for("openai_compatible").unwrap()(config);
+        let _ = factory_for(AdapterKind::OpenAiCompatible).unwrap()(config);
     }
 }

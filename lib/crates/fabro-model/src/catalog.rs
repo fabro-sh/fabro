@@ -1235,7 +1235,7 @@ fn build_model_controls(
         if !adapter.controls.native_reasoning_effort.contains(value) {
             return Err(CatalogBuildError::UnsupportedReasoningEffort {
                 model:   model_id.to_string(),
-                adapter: adapter.key.to_string(),
+                adapter: adapter.kind.to_string(),
                 value:   *value,
             });
         }
@@ -1293,7 +1293,7 @@ fn parse_speed_control(
     if !adapter.controls.additional_speeds.contains(&speed) {
         return Err(CatalogBuildError::UnsupportedSpeed {
             model: model_id.to_string(),
-            adapter: adapter.key.to_string(),
+            adapter: adapter.kind.to_string(),
             speed,
         });
     }
