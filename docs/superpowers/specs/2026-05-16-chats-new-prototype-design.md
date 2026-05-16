@@ -53,7 +53,19 @@ Below the top nav the chat page is a two-column layout:
 - `app/lib/chats-script.ts` — the scripted reply bank (see Section: Scripted
   replies).
 - `app/lib/chats-runtime.ts` — `ChatModelAdapter` factory that consumes the
-  store and produces streaming replies for assistant-ui.
+  store and produces streaming replies for assistant-ui; also exports
+  `toThreadMessages()` for converting `CompletionMessage[]` to
+  assistant-ui's `ThreadMessageLike[]` for `initialMessages`.
+- `app/components/composer-chips.tsx` — the three decorative Listbox chips
+  (project, branch, model).
+- `app/components/custom-composer.tsx` — wraps `ComposerPrimitive.Root` with the
+  textarea, chip row, and send / cancel buttons; passed to `<Thread>` via
+  `components={{ Composer }}`.
+- `app/components/tool-fallback.tsx` — required `ToolFallback` renderer for tool
+  calls (header with tool name, arguments JSON, result JSON). Without this,
+  Thread renders nothing for tool calls.
+- `app/app.css` — adds the cascade-layer declaration and CSS-variable theme
+  overrides on `.fabro-chat` (see Visual styling).
 
 ## Visual styling
 
@@ -65,17 +77,63 @@ variables to align with Fabro's existing palette.
 - Use `<Thread>` from `@assistant-ui/react-ui` as the message list + composer
   surface. Customize the composer footer via assistant-ui's slot props to inject
   the Fabro chips described below.
-- Add a small block to `app/app.css` that maps assistant-ui's CSS variables
-  (`--background`, `--foreground`, `--primary`, `--accent`, `--border`,
-  `--muted`, `--ring`) to Fabro tokens (page bg, fg, teal, line, etc.).
+- Add a small block to `apps/fabro-web/app/app.css` that maps assistant-ui's CSS
+  variables — they are prefixed `--aui-*` (e.g. `--aui-background`,
+  `--aui-foreground`, `--aui-primary`, `--aui-accent`, `--aui-border`,
+  `--aui-muted`, `--aui-ring`) — to Fabro tokens (page bg, fg, teal, line, etc.).
+  Values are HSL component triples (`220 12% 6%`), wrapped at consumption time
+  with `hsl(var(--aui-*))`.
 - Scope the override to a `.fabro-chat` wrapper around the chat layout so the
   shadcn theme cannot bleed into the rest of the app.
-- **Verification step during implementation:** assistant-ui's stylesheet is
-  authored against Tailwind v3; Fabro uses Tailwind v4. Render the chat once and
-  spot-check that critical styles (rounded corners, focus rings, message
-  background) come through. If they do not, fall back to importing only
-  `@assistant-ui/react` headless primitives and styling them with Fabro tokens
-  (more work, kept as a contingency).
+- Opt into markdown rendering by passing
+  `assistantMessage={{ components: { Text: makeMarkdownText(), ToolFallback } }}`
+  to `<Thread>`. Without `Text: makeMarkdownText()` the renderer outputs plain
+  `<p>` text and ignores all formatting. Without `ToolFallback` the renderer
+  outputs **nothing** for tool calls (silent failure).
+
+### Tailwind v4 + cascade-layer ordering — required
+
+This is a real Tailwind v3 vs v4 interaction and is **not optional**.
+Prototype verification confirmed the behavior and the fix below.
+
+- `@assistant-ui/react-ui/styles/index.css` is authored against Tailwind v3 and
+  ships **unlayered**. It scopes its preflight reset to `:where(.aui-root)`
+  descendants (e.g. `:where(.aui-root) h1, h2, h3, h4, h5, h6 { font-size:
+  inherit; font-weight: inherit }`).
+- Tailwind v4 places all utility classes inside `@layer utilities`.
+- CSS cascade-layer rule: **unlayered CSS wins over any `@layer` regardless of
+  selector specificity.** So inside `.aui-root`, assistant-ui's scoped reset
+  beats Tailwind v4's `text-5xl` / `font-semibold` even though specificity would
+  predict the utility wins. The symptom is silent — h1/h2/h3 inside Thread (or
+  inside any `.aui-root` wrapper) render at base font-size / weight, with no
+  console warning.
+- **Fix:** wrap assistant-ui's CSS imports in a named cascade layer that is
+  declared before `utilities`:
+
+  ```css
+  @layer theme, base, assistant-ui, components, utilities;
+
+  @import "tailwindcss";
+  @import "@assistant-ui/react-ui/styles/index.css" layer(assistant-ui);
+  @import "@assistant-ui/react-ui/styles/markdown.css" layer(assistant-ui);
+  ```
+
+  With this in place, Tailwind v4 utilities cascade above assistant-ui's scoped
+  resets and any custom Thread children (custom message renderers, ToolFallback
+  variants, embedded forms) can use the full Tailwind utility surface safely.
+
+- **Verification:** add a temporary `<h1 className="text-5xl font-semibold">`
+  inside a `.aui-root` wrapper and assert computed `font-size: 48px` and
+  `font-weight: 600`. Remove once confirmed. (Prototype script confirmed
+  `{"fontSize":"48px","fontWeight":"600","parentClass":true}`.)
+
+### `.aui-root` scoping
+
+`<Thread>` from `@assistant-ui/react-ui` already wraps itself in
+`<div class="aui-root aui-thread-root">`. Do not add an outer `.aui-root`
+wrapper around the chat shell — it adds the scoped preflight to the empty
+state, sidebar, and any other non-Thread content for no benefit. The chat shell
+lives outside `.aui-root`; the Thread brings its own scope.
 
 ## Composer chips (decorative)
 
