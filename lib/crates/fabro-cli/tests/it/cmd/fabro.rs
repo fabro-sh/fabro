@@ -12,6 +12,7 @@ fn help() {
     Usage: fabro [OPTIONS] [COMMAND]
 
     Commands:
+      session     Run a persistent Fabro agent session
       run         Launch a workflow run
       create      Create a workflow run (allocate run dir, persist spec)
       start       Start a created workflow run on the server
