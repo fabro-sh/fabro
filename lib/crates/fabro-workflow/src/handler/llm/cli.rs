@@ -478,12 +478,7 @@ impl CodergenBackend for AgentCliBackend {
             model,
             node,
         )?;
-        let controls = effective_request_controls(
-            self.catalog.as_ref(),
-            &self.run_model_controls,
-            model,
-            node,
-        )?;
+        let controls = effective_request_controls(&self.run_model_controls, node)?;
 
         let cli = AgentCli::for_profile_kind(profile_kind);
         verify_cli_available(cli, sandbox, &cancel_token).await?;

@@ -199,16 +199,14 @@ fn build_profile(
 }
 
 pub(super) fn effective_request_controls(
-    catalog: &Catalog,
     run_model_controls: &RunModelControls,
-    model: &str,
     node: &Node,
 ) -> Result<EffectiveRequestControls, Error> {
     let reasoning_effort = match control_attr(node, "reasoning_effort")
         .or(run_model_controls.reasoning_effort.as_deref())
     {
         Some(value) => Some(parse_reasoning_effort(node, value)?),
-        None => legacy_reasoning_effort_default(catalog, model),
+        None => None,
     };
     let speed = control_attr(node, "speed")
         .or(run_model_controls.speed.as_deref())
@@ -260,21 +258,6 @@ where
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-fn legacy_reasoning_effort_default(catalog: &Catalog, model: &str) -> Option<ReasoningEffort> {
-    match catalog.model_settings(model) {
-        Some(settings)
-            if settings
-                .controls
-                .reasoning_effort
-                .contains(&ReasoningEffort::High) =>
-        {
-            Some(ReasoningEffort::High)
-        }
-        Some(_) => None,
-        None => Some(ReasoningEffort::High),
-    }
 }
 
 /// Shared state for tracking file modifications from agent tool calls.
@@ -471,12 +454,8 @@ impl AgentApiBackend {
         self
     }
 
-    fn effective_request_controls(
-        &self,
-        model: &str,
-        node: &Node,
-    ) -> Result<EffectiveRequestControls, Error> {
-        effective_request_controls(self.catalog.as_ref(), &self.run_model_controls, model, node)
+    fn effective_request_controls(&self, node: &Node) -> Result<EffectiveRequestControls, Error> {
+        effective_request_controls(&self.run_model_controls, node)
     }
 
     fn resolve_provider_context(
@@ -543,8 +522,7 @@ impl AgentApiBackend {
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
         mcp_servers: Vec<McpServerSettings>,
     ) -> Result<Session, Error> {
-        let controls =
-            effective_request_controls(catalog.as_ref(), run_model_controls, model, node)?;
+        let controls = effective_request_controls(run_model_controls, node)?;
         let client = Client::from_source(source, Arc::clone(&catalog))
             .await
             .map_err(|e| Error::handler_with_source("Failed to create LLM client", e))?;
@@ -694,7 +672,7 @@ impl CodergenBackend for AgentApiBackend {
         let model = node.model().unwrap_or(&self.model);
         let provider = self.resolve_provider_context(model, node.provider())?;
         let provider_id = provider.provider_id.to_string();
-        let controls = self.effective_request_controls(model, node)?;
+        let controls = self.effective_request_controls(node)?;
 
         let max_tokens = node
             .max_tokens()
@@ -774,7 +752,7 @@ impl CodergenBackend for AgentApiBackend {
                             .get(&target.model)
                             .and_then(|m| m.limits.max_output)
                     });
-                    let fallback_controls = self.effective_request_controls(&target.model, node)?;
+                    let fallback_controls = self.effective_request_controls(node)?;
 
                     let fallback_request = Request {
                         model: target.model.clone(),
@@ -1117,7 +1095,7 @@ impl CodergenBackend for AgentApiBackend {
             }
         }
 
-        let billing_controls = self.effective_request_controls(session.model(), node)?;
+        let billing_controls = self.effective_request_controls(node)?;
         let stage_usage = billed_model_usage_from_llm(
             self.catalog.as_ref(),
             &ModelRef {
@@ -1493,9 +1471,7 @@ reasoning = false
         });
         let node = Node::new("work");
 
-        let controls = backend
-            .effective_request_controls("gpt-5.4", &node)
-            .unwrap();
+        let controls = backend.effective_request_controls(&node).unwrap();
 
         assert_eq!(controls.reasoning_effort, Some(ReasoningEffort::Low));
         assert_eq!(controls.speed, Some(Speed::Fast));
@@ -1523,27 +1499,23 @@ reasoning = false
             fabro_graphviz::graph::AttrValue::String("standard".to_string()),
         );
 
-        let controls = backend
-            .effective_request_controls("gpt-5.4", &node)
-            .unwrap();
+        let controls = backend.effective_request_controls(&node).unwrap();
 
         assert_eq!(controls.reasoning_effort, Some(ReasoningEffort::High));
         assert_eq!(controls.speed, Some(Speed::Standard));
     }
 
     #[test]
-    fn known_model_without_effort_omits_legacy_high_default() {
+    fn omitted_reasoning_effort_stays_unset() {
         let backend = AgentApiBackend::new_from_env(
-            "kimi-k2.5".to_string(),
-            ProviderId::kimi(),
+            "gpt-5.4".to_string(),
+            ProviderId::openai(),
             Vec::new(),
             SteeringHub::for_tests(),
         );
         let node = Node::new("work");
 
-        let controls = backend
-            .effective_request_controls("kimi-k2.5", &node)
-            .unwrap();
+        let controls = backend.effective_request_controls(&node).unwrap();
 
         assert_eq!(controls.reasoning_effort, None);
     }
