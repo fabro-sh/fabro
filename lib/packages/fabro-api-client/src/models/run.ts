@@ -61,6 +61,10 @@ import type { WorkflowRef } from './workflow-ref';
  */
 export interface Run {
     'id': string;
+    /**
+     * Current orchestration parent run ID, if linked.
+     */
+    'parent_id'?: string | null;
     'title': string;
     'goal': string;
     'workflow': WorkflowRef;

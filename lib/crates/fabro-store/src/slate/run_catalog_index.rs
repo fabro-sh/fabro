@@ -139,8 +139,9 @@ mod tests {
         assert_eq!(
             index
                 .list(&ListRunsQuery {
-                    start: Some(second.created_at()),
-                    end:   Some(second.created_at() + ChronoDuration::seconds(1)),
+                    start:     Some(second.created_at()),
+                    end:       Some(second.created_at() + ChronoDuration::seconds(1)),
+                    parent_id: None,
                 })
                 .await
                 .unwrap(),

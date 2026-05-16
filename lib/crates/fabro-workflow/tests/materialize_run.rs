@@ -1,6 +1,6 @@
 use fabro_graphviz::graph::Graph;
 use fabro_graphviz::parser;
-use fabro_model::{Catalog, Provider};
+use fabro_model::{Catalog, ProviderId};
 use fabro_types::WorkflowSettings;
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{PullRequestSettings, RunGoal, RunModelSettings, RunNamespace};
@@ -75,7 +75,7 @@ fn materialize_run_uses_configured_provider_defaults() {
         WorkflowSettings::default(),
         &graph(source),
         Catalog::builtin(),
-        &[Provider::OpenAi.id()],
+        &[ProviderId::openai()],
     );
     let resolved = &materialized.run;
 

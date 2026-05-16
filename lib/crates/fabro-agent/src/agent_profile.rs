@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use fabro_llm::types::ToolDefinition;
-use fabro_model::{Catalog, Model, Provider, ProviderId};
+use fabro_model::{AgentProfileKind, Catalog, Model, ProviderId};
 use tokio::sync::Mutex;
 
 use crate::profiles::EnvContext;
@@ -14,10 +14,8 @@ use crate::subagent::{
 use crate::tool_registry::ToolRegistry;
 
 pub trait AgentProfile: Send + Sync {
-    fn provider(&self) -> Provider;
-    fn provider_id(&self) -> ProviderId {
-        self.provider().id()
-    }
+    fn profile_kind(&self) -> AgentProfileKind;
+    fn provider_id(&self) -> ProviderId;
     fn model(&self) -> &str;
     fn catalog(&self) -> Option<&Catalog> {
         None
@@ -79,7 +77,7 @@ pub trait AgentProfile: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use fabro_model::Provider;
+    use fabro_model::{AgentProfileKind, ProviderId};
 
     use super::*;
     use crate::test_support::{MockSandbox, TestProfile};
@@ -87,7 +85,8 @@ mod tests {
     #[test]
     fn profile_provider_and_model() {
         let profile = TestProfile::new();
-        assert_eq!(profile.provider(), Provider::Anthropic);
+        assert_eq!(profile.profile_kind(), AgentProfileKind::Anthropic);
+        assert_eq!(profile.provider_id(), ProviderId::anthropic());
         assert_eq!(profile.model(), "mock-model");
     }
 

@@ -7,7 +7,7 @@ use crate::shared::print_json_pretty;
 
 pub(super) async fn view_command(args: PrViewArgs, base_ctx: &CommandContext) -> Result<()> {
     let (ctx, client, run_id) =
-        super::resolve_run_for_pr(base_ctx, &args.server, &args.run_id).await?;
+        super::resolve_run_selector(base_ctx, &args.server, &args.run_id).await?;
     let detail = client.get_run_pull_request(&run_id).await?;
     let pull_request = &detail.data.link;
     let github_details = detail.data.details.as_ref();

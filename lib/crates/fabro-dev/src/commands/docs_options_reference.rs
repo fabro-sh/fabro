@@ -271,7 +271,6 @@ vision = false
 reasoning = true
 reasoning_effort = "levels"
 prompt_cache = true
-effort = true
 
 [llm.models."team-code-large".controls]
 reasoning_effort = ["low", "medium", "high"]
@@ -317,7 +316,6 @@ cache_input_cost_per_mtok = 0.60
 | `reasoning` | boolean | `false` | Whether the model has reasoning behavior. |
 | `reasoning_effort` | `"levels"` \| `"none"` | `"none"` | How Fabro may expose reasoning effort for this model. |
 | `prompt_cache` | boolean | `false` | Whether prompt cache pricing/usage applies. |
-| `effort` | boolean | `false` | Whether the provider exposes a native effort parameter. |
 
 ## `[llm.models.<id>.controls]`
 

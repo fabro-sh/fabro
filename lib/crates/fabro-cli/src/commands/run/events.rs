@@ -455,7 +455,7 @@ fn format_event_pretty_value(envelope: &serde_json::Value, styles: &Styles) -> O
         }
         "run.failed" => {
             let error = prop_field(envelope, "failure")
-                .and_then(|failure| failure.get("message"))
+                .and_then(failure_message)
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("unknown error");
             Some(format!(
@@ -807,6 +807,13 @@ fn prop_field<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a serde_j
 
 fn prop_str_field<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
     prop_field(value, key)?.as_str()
+}
+
+fn failure_message(failure: &serde_json::Value) -> Option<&serde_json::Value> {
+    failure
+        .get("detail")
+        .and_then(|detail| detail.get("message"))
+        .or_else(|| failure.get("message"))
 }
 
 fn format_pull_request_record_event(
@@ -1313,7 +1320,7 @@ mod tests {
     #[test]
     fn pretty_workflow_run_failed() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"run.failed","properties":{"failure":{"message":"sandbox timeout","reason":"workflow_error","category":"deterministic"}}}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"run.failed","properties":{"failure":{"reason":"workflow_error","detail":{"message":"sandbox timeout","category":"deterministic"}}}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("Failed"), "got: {result}");
         assert!(result.contains("sandbox timeout"), "got: {result}");

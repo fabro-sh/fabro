@@ -169,7 +169,7 @@ fn validate_deep_result(result: &GenerateResult) -> Result<(), String> {
 mod tests {
     use std::collections::HashMap;
 
-    use fabro_model::{ModelCosts, ModelFeatures, ModelLimits, Provider, ReasoningEffortFeature};
+    use fabro_model::{ModelCosts, ModelFeatures, ModelLimits, ProviderId, ReasoningEffortFeature};
 
     use super::*;
     use crate::types::{FinishReason, Message, Response, StepResult, TokenCounts, ToolResult};
@@ -177,7 +177,7 @@ mod tests {
     fn test_model_with(features: ModelFeatures) -> Model {
         Model {
             id: "test-model".to_string(),
-            provider: Provider::Anthropic.id(),
+            provider: ProviderId::anthropic(),
             family: "test".to_string(),
             display_name: "Test Model".to_string(),
             limits: ModelLimits {
@@ -225,7 +225,6 @@ mod tests {
             reasoning:        true,
             reasoning_effort: ReasoningEffortFeature::Levels,
             prompt_cache:     false,
-            effort:           true,
         });
 
         let outcome = run_model_test(&info, ModelTestMode::Deep, empty_test_client()).await;

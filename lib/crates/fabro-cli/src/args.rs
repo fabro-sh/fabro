@@ -293,6 +293,10 @@ pub(crate) struct RunArgs {
     #[arg(long = "label", value_name = "KEY=VALUE")]
     pub(crate) label: Vec<String>,
 
+    /// Link this run to an existing orchestration parent run
+    #[arg(long, value_name = "RUN")]
+    pub(crate) parent: Option<String>,
+
     /// Keep the sandbox alive after the run finishes (for debugging)
     #[arg(long)]
     pub(crate) preserve_sandbox: bool,
@@ -376,6 +380,10 @@ pub(crate) struct RunsListArgs {
     /// Only display run IDs
     #[arg(short = 'q', long)]
     pub(crate) quiet: bool,
+
+    /// Only display runs linked to this orchestration parent
+    #[arg(long, value_name = "RUN")]
+    pub(crate) parent: Option<String>,
 }
 
 #[derive(Args)]
@@ -771,7 +779,7 @@ pub(crate) struct ProviderLoginArgs {
 
     /// LLM provider to authenticate with
     #[arg(long)]
-    pub(crate) provider: fabro_model::Provider,
+    pub(crate) provider: fabro_model::ProviderId,
 
     /// Read an API key from stdin instead of prompting
     #[arg(long)]
@@ -906,6 +914,26 @@ pub(crate) struct PrUnlinkArgs {
 
     /// Run ID or prefix
     pub(crate) run_id: String,
+}
+
+#[derive(Args)]
+pub(crate) struct ParentLinkArgs {
+    #[command(flatten)]
+    pub(crate) server: ServerTargetArgs,
+
+    /// Child run selector
+    pub(crate) child_run:  String,
+    /// Parent run selector
+    pub(crate) parent_run: String,
+}
+
+#[derive(Args)]
+pub(crate) struct ParentUnlinkArgs {
+    #[command(flatten)]
+    pub(crate) server: ServerTargetArgs,
+
+    /// Child run selector
+    pub(crate) child_run: String,
 }
 
 #[derive(Args)]
@@ -1202,6 +1230,8 @@ pub(crate) enum Commands {
     Auth(AuthNamespace),
     /// Pull request operations
     Pr(PrNamespace),
+    /// Manage run parent links
+    Parent(ParentNamespace),
     /// Manage server-owned secrets
     Secret(SecretNamespace),
     /// Inspect effective settings
@@ -1310,6 +1340,10 @@ impl Commands {
                 PrCommand::Merge(_) => "pr merge",
                 PrCommand::Close(_) => "pr close",
             },
+            Self::Parent(ns) => match &ns.command {
+                ParentCommand::Link(_) => "parent link",
+                ParentCommand::Unlink(_) => "parent unlink",
+            },
             Self::Secret(ns) => match &ns.command {
                 SecretCommand::List(_) => "secret list",
                 SecretCommand::Rm(_) => "secret rm",
@@ -1367,6 +1401,20 @@ pub(crate) enum PrCommand {
     Merge(PrMergeArgs),
     /// Close a pull request
     Close(PrCloseArgs),
+}
+
+#[derive(Args)]
+pub(crate) struct ParentNamespace {
+    #[command(subcommand)]
+    pub(crate) command: ParentCommand,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum ParentCommand {
+    /// Link or replace a run's orchestration parent
+    Link(ParentLinkArgs),
+    /// Unlink a run from its orchestration parent
+    Unlink(ParentUnlinkArgs),
 }
 
 #[derive(Args)]
@@ -1579,7 +1627,7 @@ pub(crate) struct InstallGithubArgs {
 #[derive(Args, Debug, Clone, Default)]
 pub(crate) struct InstallNonInteractiveArgs {
     #[arg(long, hide = true)]
-    pub(crate) llm_provider: Option<fabro_model::Provider>,
+    pub(crate) llm_provider: Option<fabro_model::ProviderId>,
 
     #[arg(long, hide = true)]
     pub(crate) llm_api_key_stdin: bool,

@@ -25,6 +25,8 @@ pub fn event_name(event: &Event) -> &'static str {
         Event::RunArchived { .. } => "run.archived",
         Event::RunUnarchived { .. } => "run.unarchived",
         Event::RunTitleUpdated { .. } => "run.title.updated",
+        Event::RunParentLinked { .. } => "run.parent.linked",
+        Event::RunParentUnlinked { .. } => "run.parent.unlinked",
         Event::WorkflowRunCompleted { .. } => "run.completed",
         Event::WorkflowRunFailed { .. } => "run.failed",
         Event::RunNotice { .. } => "run.notice",

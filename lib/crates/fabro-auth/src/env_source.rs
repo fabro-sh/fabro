@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_model::catalog::CatalogProvider;
-use fabro_model::{Catalog, CredentialRef, HeaderValueRef, Provider, ProviderId, adapter};
+use fabro_model::{Catalog, CredentialRef, HeaderValueRef, ProviderId};
 use fabro_static::EnvVars;
 
 use crate::credential_source::{CredentialSource, ResolvedCredentials};
@@ -54,10 +54,7 @@ impl EnvCredentialSource {
         }
 
         let auth_header = key.map(|key| {
-            let policy = adapter::get(&provider.adapter)
-                .map_or(fabro_model::ApiKeyHeaderPolicy::Bearer, |adapter| {
-                    adapter.api_key_header
-                });
+            let policy = provider.adapter.metadata().api_key_header;
             build_api_key_header(policy, key)
         });
 
@@ -73,7 +70,7 @@ impl EnvCredentialSource {
         cred.base_url = self
             .env_base_url(&provider.id)
             .or_else(|| provider.base_url.clone());
-        if provider.id == Provider::OpenAi.id() && cred.auth_header.is_some() {
+        if provider.id == ProviderId::openai() && cred.auth_header.is_some() {
             cred.org_id = self.lookup(EnvVars::OPENAI_ORG_ID);
             cred.project_id = self.lookup(EnvVars::OPENAI_PROJECT_ID);
             if let Some(account_id) = self.lookup(EnvVars::CHATGPT_ACCOUNT_ID) {
@@ -89,13 +86,11 @@ impl EnvCredentialSource {
     }
 
     fn env_base_url(&self, provider: &ProviderId) -> Option<String> {
-        match Provider::from_id(provider) {
-            Some(Provider::Anthropic) => self.lookup(EnvVars::ANTHROPIC_BASE_URL),
-            Some(Provider::OpenAi) => self.lookup(EnvVars::OPENAI_BASE_URL),
-            Some(Provider::Gemini) => self.lookup(EnvVars::GEMINI_BASE_URL),
-            Some(Provider::OpenAiCompatible) => self.lookup(EnvVars::OPENAI_COMPATIBLE_BASE_URL),
-            Some(Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception)
-            | None => None,
+        match provider.as_str() {
+            ProviderId::ANTHROPIC => self.lookup(EnvVars::ANTHROPIC_BASE_URL),
+            ProviderId::OPENAI => self.lookup(EnvVars::OPENAI_BASE_URL),
+            ProviderId::GEMINI => self.lookup(EnvVars::GEMINI_BASE_URL),
+            _ => None,
         }
     }
 
@@ -179,7 +174,7 @@ mod tests {
     use std::sync::Arc;
 
     use fabro_model::catalog::LlmCatalogSettings;
-    use fabro_model::{Catalog, Provider, ProviderId};
+    use fabro_model::{Catalog, ProviderId};
 
     use super::EnvCredentialSource;
     use crate::CredentialSource;
@@ -207,7 +202,7 @@ mod tests {
         let catalog = default_catalog();
 
         assert_eq!(source.configured_providers(&catalog).await, vec![
-            Provider::Anthropic.id()
+            ProviderId::anthropic()
         ]);
     }
 
@@ -234,7 +229,7 @@ mod tests {
         let resolved = source.resolve(&catalog).await.unwrap();
         let credential = resolved.credentials.first().unwrap();
 
-        assert_eq!(credential.provider, Provider::OpenAi.id());
+        assert_eq!(credential.provider, ProviderId::openai());
         assert!(credential.codex_mode);
         assert_eq!(
             credential.base_url.as_deref(),
@@ -255,7 +250,7 @@ mod tests {
         let resolved = source.resolve(&catalog).await.unwrap();
         let credential = resolved.credentials.first().unwrap();
 
-        assert_eq!(credential.provider, Provider::Kimi.id());
+        assert_eq!(credential.provider, ProviderId::new("kimi"));
         assert_eq!(
             credential.base_url.as_deref(),
             Some("https://api.moonshot.ai/v1")
@@ -285,7 +280,6 @@ context_window = 128000
 tools = true
 vision = false
 reasoning = false
-effort = false
 "#,
         );
         let source = test_source(&[("ACME_API_KEY", "acme-key")]);
@@ -333,7 +327,7 @@ context_window = 200000
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 "#,
         );
         let source = test_source(&[("PORTKEY_API_KEY", "pk-live")]);
@@ -381,7 +375,7 @@ context_window = 200000
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 "#,
         );
         let source = test_source(&[]);

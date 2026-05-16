@@ -15,31 +15,17 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { ExecOutputTail } from './exec-output-tail';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { FailureCategory } from './failure-category';
+import type { FailureDetail } from './failure-detail';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { FailureReason } from './failure-reason';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { SystemActorKind } from './system-actor-kind';
 
 /**
- * Rich terminal run failure diagnostics.
+ * Terminal run failure reason and rich diagnostics.
  */
 export interface RunFailure {
-    'message': string;
-    'causes'?: Array<string>;
     'reason': FailureReason;
-    'category': FailureCategory;
-    'system_actor'?: SystemActorKind | null;
-    /**
-     * Stable normalized signature for grouping related failures.
-     */
-    'signature'?: string | null;
-    'exec_output_tail'?: ExecOutputTail | null;
+    'detail': FailureDetail;
 }
 
 

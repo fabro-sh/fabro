@@ -54,6 +54,7 @@ fn help() {
           --verbose              Enable verbose output [env: FABRO_VERBOSE=]
       -a, --all                  Show all runs, not just running (like docker ps -a)
       -q, --quiet                Only display run IDs
+          --parent <RUN>         Only display runs linked to this orchestration parent
       -h, --help                 Print help
     ----- stderr -----
     ");
@@ -370,6 +371,116 @@ fn ps_uses_configured_server_target_without_server_flag() {
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0]["workflow_name"], "Remote Workflow");
     assert_eq!(runs[0]["source_directory"], "/srv/repo");
+}
+
+#[test]
+fn ps_parent_resolves_parent_and_filters_on_server() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let child_id = unique_run_id();
+    let parent_id = unique_run_id();
+    let resolve_mock = super::support::mock_resolved_run(&server, "nightly-parent", &parent_id);
+    let mut summary = remote_run_summary_json(
+        &child_id,
+        "Child Workflow",
+        "child-workflow",
+        "Child goal",
+        &serde_json::json!({
+            "kind": "succeeded",
+            "reason": "completed"
+        }),
+        "2026-04-20T12:00:00Z",
+    );
+    summary["parent_id"] = serde_json::json!(parent_id);
+    let list_mock = server.mock(|when, then| {
+        when.method("GET")
+            .path("/api/v1/runs")
+            .query_param("parent_id", parent_id.as_str());
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "data": [summary],
+                    "meta": { "has_more": false }
+                })
+                .to_string(),
+            );
+    });
+
+    let output = context
+        .ps()
+        .args([
+            "-a",
+            "--json",
+            "--server",
+            &format!("{}/api/v1", server.base_url()),
+            "--parent",
+            "nightly-parent",
+        ])
+        .output()
+        .expect("ps should execute");
+
+    assert!(output.status.success(), "ps should succeed");
+    let runs: Vec<Value> = serde_json::from_slice(&output.stdout).expect("ps JSON should parse");
+    resolve_mock.assert();
+    list_mock.assert();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0]["run_id"], child_id);
+    assert_eq!(runs[0]["parent_id"], parent_id);
+}
+
+#[test]
+fn ps_table_adds_parent_column_for_unfiltered_child_runs() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let child_id = unique_run_id();
+    let parent_id = unique_run_id();
+    let mut summary = remote_run_summary_json(
+        &child_id,
+        "Child Workflow",
+        "child-workflow",
+        "Child goal",
+        &serde_json::json!({
+            "kind": "succeeded",
+            "reason": "completed"
+        }),
+        "2026-04-20T12:00:00Z",
+    );
+    summary["parent_id"] = serde_json::json!(parent_id);
+    let list_mock = server.mock(|when, then| {
+        when.method("GET").path("/api/v1/runs");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "data": [summary],
+                    "meta": { "has_more": false }
+                })
+                .to_string(),
+            );
+    });
+
+    let output = context
+        .ps()
+        .args(["-a", "--server", &format!("{}/api/v1", server.base_url())])
+        .output()
+        .expect("ps should execute");
+
+    assert!(output.status.success(), "ps should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    list_mock.assert();
+    assert!(
+        stdout.contains("PARENT"),
+        "table should include parent column:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(&child_id[..12]),
+        "table should include child run id:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(&parent_id[..12]),
+        "table should include parent run id:\n{stdout}"
+    );
 }
 
 #[test]

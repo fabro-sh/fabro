@@ -41,6 +41,7 @@ fn help() {
       uninstall   Uninstall Fabro from this machine
       auth        Manage CLI authentication state
       pr          Pull request operations
+      parent      Manage run parent links
       secret      Manage server-owned secrets
       settings    Inspect effective settings
       workflow    Workflow operations

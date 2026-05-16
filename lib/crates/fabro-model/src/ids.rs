@@ -5,6 +5,7 @@
 //! keeping wire format compatible with plain strings.
 
 use std::fmt;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
@@ -21,11 +22,6 @@ impl ProviderId {
     pub const ANTHROPIC: &'static str = "anthropic";
     pub const OPENAI: &'static str = "openai";
     pub const GEMINI: &'static str = "gemini";
-    pub const KIMI: &'static str = "kimi";
-    pub const ZAI: &'static str = "zai";
-    pub const MINIMAX: &'static str = "minimax";
-    pub const INCEPTION: &'static str = "inception";
-    pub const OPENAI_COMPATIBLE: &'static str = "openai_compatible";
 
     /// Construct a provider ID from any string-like value without validation.
     /// Catalog construction is responsible for canonicalisation; consumers
@@ -62,28 +58,8 @@ impl ProviderId {
     }
 
     #[must_use]
-    pub fn kimi() -> Self {
-        Self::new(Self::KIMI)
-    }
-
-    #[must_use]
-    pub fn zai() -> Self {
-        Self::new(Self::ZAI)
-    }
-
-    #[must_use]
-    pub fn minimax() -> Self {
-        Self::new(Self::MINIMAX)
-    }
-
-    #[must_use]
-    pub fn inception() -> Self {
-        Self::new(Self::INCEPTION)
-    }
-
-    #[must_use]
-    pub fn openai_compatible() -> Self {
-        Self::new(Self::OPENAI_COMPATIBLE)
+    pub fn display_name(&self) -> String {
+        self.0.clone()
     }
 }
 
@@ -108,6 +84,14 @@ impl From<&str> for ProviderId {
 impl From<String> for ProviderId {
     fn from(s: String) -> Self {
         Self(s)
+    }
+}
+
+impl FromStr for ProviderId {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from(s))
     }
 }
 

@@ -31,9 +31,7 @@ use fabro_interview::{
     Answer, AnswerValue, AutoApproveInterviewer, CallbackInterviewer, Interviewer,
     QueueInterviewer, RecordingInterviewer,
 };
-use fabro_llm::provider::Provider;
-use fabro_model::Catalog;
-use fabro_model::catalog::LlmCatalogSettings;
+use fabro_model::{AgentProfileKind, Catalog, ProviderId};
 use fabro_store::{ArtifactKey, ArtifactStore, Database};
 use fabro_types::{CommandTermination, RunEvent, RunId, StageId, WorkflowSettings, parse_blob_ref};
 use fabro_validate::{Severity, validate, validate_or_raise};
@@ -64,10 +62,7 @@ use tokio_util::sync::CancellationToken;
 use ulid::Ulid;
 
 fn default_catalog() -> Arc<Catalog> {
-    Arc::new(
-        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-            .expect("default catalog should build"),
-    )
+    Arc::new(Catalog::from_builtin().expect("default catalog should build"))
 }
 
 fn local_env() -> Arc<dyn fabro_agent::Sandbox> {
@@ -6865,7 +6860,7 @@ mod real_llm {
 
 fn openai_api_key_credential(key: &str) -> fabro_auth::AuthCredential {
     fabro_auth::AuthCredential {
-        provider: fabro_model::Provider::OpenAi.id(),
+        provider: ProviderId::openai(),
         details:  fabro_auth::AuthDetails::ApiKey {
             key: key.to_string(),
         },
@@ -9816,7 +9811,7 @@ async fn cli_backend_run_writes_prompt_and_calls_exec() {
     let claude_output = r#"{"type":"result","result":"I fixed the bug.","usage":{"input_tokens":500,"output_tokens":200}}"#;
     let test_env = Arc::new(CliTestEnv::new(claude_output));
     let env: Arc<dyn fabro_agent::Sandbox> = test_env.clone();
-    let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+    let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), ProviderId::anthropic());
 
     let node = Node::new("fix_code");
     let context = Context::new();
@@ -9886,7 +9881,7 @@ async fn cli_backend_run_detects_changed_files() {
     let claude_output = r#"{"type":"result","result":"Created new file.","usage":{"input_tokens":100,"output_tokens":50}}"#;
     let env: Arc<dyn fabro_agent::Sandbox> =
         Arc::new(CliTestEnv::new(claude_output).with_git_diff_after("src/main.rs\nsrc/lib.rs\n"));
-    let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+    let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), ProviderId::anthropic());
 
     let node = Node::new("implement");
     let context = Context::new();
@@ -9916,7 +9911,7 @@ async fn cli_backend_run_with_codex_provider() {
     let codex_output = "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"Implemented the feature.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":300,\"output_tokens\":150}}";
     let test_env = Arc::new(CliTestEnv::new(codex_output));
     let env: Arc<dyn fabro_agent::Sandbox> = test_env.clone();
-    let backend = AgentCliBackend::new_from_env("gpt-5.3-codex".into(), Provider::OpenAi);
+    let backend = AgentCliBackend::new_from_env("gpt-5.3-codex".into(), ProviderId::openai());
 
     let node = Node::new("implement");
     let context = Context::new();
@@ -10079,7 +10074,7 @@ async fn cli_backend_run_fails_on_nonzero_exit() {
     }
 
     let failing_env: Arc<dyn fabro_agent::Sandbox> = Arc::new(FailingCliEnv);
-    let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+    let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), ProviderId::anthropic());
     let node = Node::new("step");
     let context = Context::new();
     let emitter = Arc::new(Emitter::default());
@@ -10114,7 +10109,7 @@ async fn cli_backend_run_fails_on_nonzero_exit() {
 #[tokio::test]
 async fn cli_backend_run_fails_on_unparseable_output() {
     let env: Arc<dyn fabro_agent::Sandbox> = Arc::new(CliTestEnv::new("this is not json at all"));
-    let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+    let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), ProviderId::anthropic());
 
     let node = Node::new("step");
     let context = Context::new();
@@ -10147,7 +10142,7 @@ async fn cli_backend_run_uses_node_model_override() {
         r#"{"type":"result","result":"ok","usage":{"input_tokens":10,"output_tokens":5}}"#;
     let test_env = Arc::new(CliTestEnv::new(claude_output));
     let env: Arc<dyn fabro_agent::Sandbox> = test_env.clone();
-    let backend = AgentCliBackend::new_from_env("default-model".into(), Provider::Anthropic);
+    let backend = AgentCliBackend::new_from_env("default-model".into(), ProviderId::anthropic());
 
     let mut node = Node::new("step");
     node.attrs.insert(
@@ -10185,7 +10180,7 @@ async fn cli_backend_run_uses_node_provider_override() {
     let codex_output = "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"ok\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}";
     let test_env = Arc::new(CliTestEnv::new(codex_output));
     let env: Arc<dyn fabro_agent::Sandbox> = test_env.clone();
-    let backend = AgentCliBackend::new_from_env("default-model".into(), Provider::Anthropic);
+    let backend = AgentCliBackend::new_from_env("default-model".into(), ProviderId::anthropic());
 
     let mut node = Node::new("step");
     node.attrs.insert(
@@ -10220,7 +10215,7 @@ async fn cli_backend_run_returns_text_and_usage() {
     let claude_output =
         r#"{"type":"result","result":"done","usage":{"input_tokens":10,"output_tokens":5}}"#;
     let env: Arc<dyn fabro_agent::Sandbox> = Arc::new(CliTestEnv::new(claude_output));
-    let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+    let backend = AgentCliBackend::new_from_env("claude-opus-4-6".into(), ProviderId::anthropic());
 
     let node = Node::new("step");
     let context = Context::new();
@@ -10248,7 +10243,7 @@ async fn cli_backend_run_returns_text_and_usage() {
 // -- BackendRouter e2e: delegates to correct backend --
 
 fn test_acp_backend() -> AgentAcpBackend {
-    AgentAcpBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic)
+    AgentAcpBackend::new_from_env("claude-opus-4-6".into(), ProviderId::anthropic())
 }
 
 #[tokio::test]
@@ -10257,7 +10252,7 @@ async fn backend_router_delegates_to_cli_for_cli_node() {
     let env: Arc<dyn fabro_agent::Sandbox> = Arc::new(CliTestEnv::new(claude_output));
 
     let api_backend = Box::new(MockCodergenBackend); // would return "Response for ..."
-    let cli = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+    let cli = AgentCliBackend::new_from_env("claude-opus-4-6".into(), ProviderId::anthropic());
     let router = BackendRouter::new(api_backend, cli, test_acp_backend());
 
     let mut node = Node::new("cli_step");
@@ -10298,7 +10293,7 @@ async fn backend_router_delegates_to_api_for_normal_node() {
     let env = local_env();
 
     let api_backend = Box::new(MockCodergenBackend);
-    let cli = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+    let cli = AgentCliBackend::new_from_env("claude-opus-4-6".into(), ProviderId::anthropic());
     let router = BackendRouter::new(api_backend, cli, test_acp_backend());
 
     let mut node = Node::new("api_step");
@@ -10338,7 +10333,7 @@ async fn backend_router_delegates_to_cli_for_backend_attr() {
     let env: Arc<dyn fabro_agent::Sandbox> = Arc::new(CliTestEnv::new(codex_output));
 
     let api_backend = Box::new(MockCodergenBackend);
-    let cli = AgentCliBackend::new_from_env("gpt-5.3-codex".into(), Provider::OpenAi);
+    let cli = AgentCliBackend::new_from_env("gpt-5.3-codex".into(), ProviderId::openai());
     let router = BackendRouter::new(api_backend, cli, test_acp_backend());
 
     let mut node = Node::new("codex_step");
@@ -10381,11 +10376,11 @@ async fn backend_router_delegates_to_acp_for_acp_node() {
         Arc::new(fabro_agent::LocalSandbox::new(tempdir.path().to_path_buf()));
 
     let api_backend = Box::new(MockCodergenBackend);
-    let cli = AgentCliBackend::new_from_env("gpt-5.3-codex".into(), Provider::OpenAi);
+    let cli = AgentCliBackend::new_from_env("gpt-5.3-codex".into(), ProviderId::openai());
     let router = BackendRouter::new(
         api_backend,
         cli,
-        AgentAcpBackend::new_from_env("fake-acp".into(), Provider::OpenAi),
+        AgentAcpBackend::new_from_env("fake-acp".into(), ProviderId::openai()),
     );
 
     let mut node = Node::new("acp_step");
@@ -10482,7 +10477,7 @@ async fn full_pipeline_with_cli_backend_node() {
 
     // Build engine with BackendRouter
     let api = MockCodergenBackend;
-    let cli = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+    let cli = AgentCliBackend::new_from_env("claude-opus-4-6".into(), ProviderId::anthropic());
     let router = BackendRouter::new(Box::new(api), cli, test_acp_backend());
     let codergen_handler = AgentHandler::new(Some(Box::new(router)));
 
@@ -10494,7 +10489,8 @@ async fn full_pipeline_with_cli_backend_node() {
         Box::new(AgentHandler::new(Some(Box::new({
             // Second BackendRouter for the "agent" handler
             let api2 = MockCodergenBackend;
-            let cli2 = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+            let cli2 =
+                AgentCliBackend::new_from_env("claude-opus-4-6".into(), ProviderId::anthropic());
             BackendRouter::new(Box::new(api2), cli2, test_acp_backend())
         })))),
     );
@@ -10602,14 +10598,14 @@ async fn stylesheet_backend_property_routes_to_cli() {
 
     // Run the pipeline
     let api = MockCodergenBackend;
-    let cli = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+    let cli = AgentCliBackend::new_from_env("claude-opus-4-6".into(), ProviderId::anthropic());
     let router = BackendRouter::new(Box::new(api), cli, test_acp_backend());
 
     let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(Some(Box::new(router)))));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     let api2 = MockCodergenBackend;
-    let cli2 = AgentCliBackend::new_from_env("claude-opus-4-6".into(), Provider::Anthropic);
+    let cli2 = AgentCliBackend::new_from_env("claude-opus-4-6".into(), ProviderId::anthropic());
     let router2 = BackendRouter::new(Box::new(api2), cli2, test_acp_backend());
     registry.register(
         "agent",
@@ -10657,7 +10653,7 @@ fn parse_real_claude_stream_json() {
     let output = r#"{"type":"system","subtype":"init","cwd":"/tmp","session_id":"abc"}
 {"type":"assistant","message":{"content":[{"type":"text","text":"4"}]}}
 {"type":"result","subtype":"success","is_error":false,"duration_ms":2000,"num_turns":1,"result":"4","usage":{"input_tokens":9,"output_tokens":5}}"#;
-    let response = parse_cli_response(Provider::Anthropic, output).unwrap();
+    let response = parse_cli_response(AgentProfileKind::Anthropic, output).unwrap();
     assert_eq!(response.text, "4");
     assert_eq!(response.input_tokens, 9);
     assert_eq!(response.output_tokens, 5);
@@ -10672,7 +10668,7 @@ fn parse_real_codex_ndjson() {
 {"type":"item.completed","item":{"id":"item_0","type":"reasoning","text":"**Confirming simple numeric reply**"}}
 {"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"4"}}
 {"type":"turn.completed","usage":{"input_tokens":7999,"cached_input_tokens":7040,"output_tokens":33}}"#;
-    let response = parse_cli_response(Provider::OpenAi, output).unwrap();
+    let response = parse_cli_response(AgentProfileKind::OpenAi, output).unwrap();
     assert_eq!(response.text, "4");
     assert_eq!(response.input_tokens, 7999);
     assert_eq!(response.output_tokens, 33);
@@ -10684,7 +10680,7 @@ fn parse_real_gemini_json() {
     // Real output captured from: gemini "What is 2+2?" -m gemini-2.5-flash
     // --sandbox -o json
     let output = r#"{"session_id":"abc","response":"4","stats":{"models":{"gemini-2.5-flash":{"api":{"totalRequests":1,"totalErrors":0,"totalLatencyMs":618},"tokens":{"input":123,"prompt":8911,"candidates":1,"total":8912,"cached":8788,"thoughts":0,"tool":0}}},"tools":{"totalCalls":0},"files":{"totalLinesAdded":0,"totalLinesRemoved":0}}}"#;
-    let response = parse_cli_response(Provider::Gemini, output).unwrap();
+    let response = parse_cli_response(AgentProfileKind::Gemini, output).unwrap();
     assert_eq!(response.text, "4");
     assert_eq!(response.input_tokens, 123);
     assert_eq!(response.output_tokens, 1);

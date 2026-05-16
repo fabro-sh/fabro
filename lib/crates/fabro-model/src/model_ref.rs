@@ -59,13 +59,13 @@ impl fmt::Debug for ModelHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ProviderId;
     use crate::catalog::Catalog;
-    use crate::provider::Provider;
 
     #[test]
     fn by_name_display() {
         let r = ModelHandle::ByName {
-            provider: Provider::Anthropic.id(),
+            provider: ProviderId::anthropic(),
             model:    "claude-opus-4-6".to_string(),
         };
         assert_eq!(r.to_string(), "anthropic:claude-opus-4-6");
@@ -74,11 +74,11 @@ mod tests {
     #[test]
     fn by_name_accessors() {
         let r = ModelHandle::ByName {
-            provider: Provider::OpenAi.id(),
+            provider: ProviderId::openai(),
             model:    "gpt-5.4".to_string(),
         };
         assert_eq!(r.model_id(), "gpt-5.4");
-        assert_eq!(r.provider(), &Provider::OpenAi.id());
+        assert_eq!(r.provider(), &ProviderId::openai());
     }
 
     #[test]
@@ -93,13 +93,13 @@ mod tests {
         let info = Catalog::builtin().get("gpt-5.4").unwrap().clone();
         let r = ModelHandle::Resolved(Arc::new(info));
         assert_eq!(r.model_id(), "gpt-5.4");
-        assert_eq!(r.provider(), &Provider::OpenAi.id());
+        assert_eq!(r.provider(), &ProviderId::openai());
     }
 
     #[test]
     fn debug_format() {
         let r = ModelHandle::ByName {
-            provider: Provider::Gemini.id(),
+            provider: ProviderId::gemini(),
             model:    "gemini-3.1-pro-preview".to_string(),
         };
         let debug = format!("{r:?}");

@@ -64,6 +64,8 @@ import type { StartRunRequest } from '../models';
 // @ts-ignore
 import type { TimelineEntryResponse } from '../models';
 // @ts-ignore
+import type { UpdateRunParentRequest } from '../models';
+// @ts-ignore
 import type { UpdateRunRequest } from '../models';
 // @ts-ignore
 import type { ValidateResponse } from '../models';
@@ -447,6 +449,51 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
+         * Links a run under an orchestration parent. Parent links are mutable for all run states, including archived and terminal runs.
+         * @summary Link Run Parent
+         * @param {string} id Unique run identifier (ULID).
+         * @param {UpdateRunParentRequest} updateRunParentRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        linkRunParent: async (id: string, updateRunParentRequest: UpdateRunParentRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('linkRunParent', 'id', id)
+            // verify required parameter 'updateRunParentRequest' is not null or undefined
+            assertParamExists('linkRunParent', 'updateRunParentRequest', updateRunParentRequest)
+            const localVarPath = `/api/v1/runs/{id}/parent`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(updateRunParentRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Links or replaces the GitHub pull request association for a run without modifying the remote pull request.
          * @summary Link Run Pull Request
          * @param {string} id Unique run identifier (ULID).
@@ -548,10 +595,11 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {boolean} [includeArchived] Whether to include archived runs in the response. Defaults to &#x60;false&#x60;.
+         * @param {string} [parentId] Return only runs currently linked to this orchestration parent.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listRuns: async (pageLimit?: number, pageOffset?: number, includeArchived?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        listRuns: async (pageLimit?: number, pageOffset?: number, includeArchived?: boolean, parentId?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/v1/runs`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -580,6 +628,10 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
 
             if (includeArchived !== undefined) {
                 localVarQueryParameter['include_archived'] = includeArchived;
+            }
+
+            if (parentId !== undefined) {
+                localVarQueryParameter['parent_id'] = parentId;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -1055,6 +1107,46 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
+         * Removes a run\'s orchestration parent. Already-root runs are returned unchanged.
+         * @summary Unlink Run Parent
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        unlinkRunParent: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('unlinkRunParent', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/parent`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Removes Fabro\'s stored pull request association for a run without modifying the remote pull request.
          * @summary Unlink Run Pull Request
          * @param {string} id Unique run identifier (ULID).
@@ -1350,6 +1442,20 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Links a run under an orchestration parent. Parent links are mutable for all run states, including archived and terminal runs.
+         * @summary Link Run Parent
+         * @param {string} id Unique run identifier (ULID).
+         * @param {UpdateRunParentRequest} updateRunParentRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async linkRunParent(id: string, updateRunParentRequest: UpdateRunParentRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<Run>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.linkRunParent(id, updateRunParentRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunsApi.linkRunParent']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Links or replaces the GitHub pull request association for a run without modifying the remote pull request.
          * @summary Link Run Pull Request
          * @param {string} id Unique run identifier (ULID).
@@ -1384,11 +1490,12 @@ export const RunsApiFp = function(configuration?: Configuration) {
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {boolean} [includeArchived] Whether to include archived runs in the response. Defaults to &#x60;false&#x60;.
+         * @param {string} [parentId] Return only runs currently linked to this orchestration parent.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async listRuns(pageLimit?: number, pageOffset?: number, includeArchived?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedRunList>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.listRuns(pageLimit, pageOffset, includeArchived, options);
+        async listRuns(pageLimit?: number, pageOffset?: number, includeArchived?: boolean, parentId?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedRunList>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listRuns(pageLimit, pageOffset, includeArchived, parentId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.listRuns']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -1538,6 +1645,19 @@ export const RunsApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.unarchiveRun(id, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.unarchiveRun']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Removes a run\'s orchestration parent. Already-root runs are returned unchanged.
+         * @summary Unlink Run Parent
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async unlinkRunParent(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<Run>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.unlinkRunParent(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunsApi.unlinkRunParent']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -1696,6 +1816,17 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.getRunTimeline(id, options).then((request) => request(axios, basePath));
         },
         /**
+         * Links a run under an orchestration parent. Parent links are mutable for all run states, including archived and terminal runs.
+         * @summary Link Run Parent
+         * @param {string} id Unique run identifier (ULID).
+         * @param {UpdateRunParentRequest} updateRunParentRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        linkRunParent(id: string, updateRunParentRequest: UpdateRunParentRequest, options?: RawAxiosRequestConfig): AxiosPromise<Run> {
+            return localVarFp.linkRunParent(id, updateRunParentRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Links or replaces the GitHub pull request association for a run without modifying the remote pull request.
          * @summary Link Run Pull Request
          * @param {string} id Unique run identifier (ULID).
@@ -1724,11 +1855,12 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {boolean} [includeArchived] Whether to include archived runs in the response. Defaults to &#x60;false&#x60;.
+         * @param {string} [parentId] Return only runs currently linked to this orchestration parent.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listRuns(pageLimit?: number, pageOffset?: number, includeArchived?: boolean, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedRunList> {
-            return localVarFp.listRuns(pageLimit, pageOffset, includeArchived, options).then((request) => request(axios, basePath));
+        listRuns(pageLimit?: number, pageOffset?: number, includeArchived?: boolean, parentId?: string, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedRunList> {
+            return localVarFp.listRuns(pageLimit, pageOffset, includeArchived, parentId, options).then((request) => request(axios, basePath));
         },
         /**
          * Merges the stored pull request for a run on GitHub.
@@ -1843,6 +1975,16 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
          */
         unarchiveRun(id: string, options?: RawAxiosRequestConfig): AxiosPromise<Run> {
             return localVarFp.unarchiveRun(id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Removes a run\'s orchestration parent. Already-root runs are returned unchanged.
+         * @summary Unlink Run Parent
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        unlinkRunParent(id: string, options?: RawAxiosRequestConfig): AxiosPromise<Run> {
+            return localVarFp.unlinkRunParent(id, options).then((request) => request(axios, basePath));
         },
         /**
          * Removes Fabro\'s stored pull request association for a run without modifying the remote pull request.
@@ -1995,6 +2137,18 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
+     * Links a run under an orchestration parent. Parent links are mutable for all run states, including archived and terminal runs.
+     * @summary Link Run Parent
+     * @param {string} id Unique run identifier (ULID).
+     * @param {UpdateRunParentRequest} updateRunParentRequest 
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public linkRunParent(id: string, updateRunParentRequest: UpdateRunParentRequest, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).linkRunParent(id, updateRunParentRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Links or replaces the GitHub pull request association for a run without modifying the remote pull request.
      * @summary Link Run Pull Request
      * @param {string} id Unique run identifier (ULID).
@@ -2025,11 +2179,12 @@ export class RunsApi extends BaseAPI {
      * @param {number} [pageLimit] Maximum number of items to return per page.
      * @param {number} [pageOffset] Number of items to skip before returning results.
      * @param {boolean} [includeArchived] Whether to include archived runs in the response. Defaults to &#x60;false&#x60;.
+     * @param {string} [parentId] Return only runs currently linked to this orchestration parent.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public listRuns(pageLimit?: number, pageOffset?: number, includeArchived?: boolean, options?: RawAxiosRequestConfig) {
-        return RunsApiFp(this.configuration).listRuns(pageLimit, pageOffset, includeArchived, options).then((request) => request(this.axios, this.basePath));
+    public listRuns(pageLimit?: number, pageOffset?: number, includeArchived?: boolean, parentId?: string, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).listRuns(pageLimit, pageOffset, includeArchived, parentId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -2155,6 +2310,17 @@ export class RunsApi extends BaseAPI {
      */
     public unarchiveRun(id: string, options?: RawAxiosRequestConfig) {
         return RunsApiFp(this.configuration).unarchiveRun(id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Removes a run\'s orchestration parent. Already-root runs are returned unchanged.
+     * @summary Unlink Run Parent
+     * @param {string} id Unique run identifier (ULID).
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public unlinkRunParent(id: string, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).unlinkRunParent(id, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

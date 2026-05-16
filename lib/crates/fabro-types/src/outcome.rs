@@ -8,7 +8,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use strum::{Display, EnumString, IntoStaticStr};
 
-use crate::SystemActorKind;
+use crate::{ExecOutputTail, FailureSignature, SystemActorKind};
 
 pub trait OutcomeMeta:
     Default + Clone + Send + Sync + fmt::Debug + Serialize + DeserializeOwned + 'static
@@ -229,26 +229,27 @@ impl FailureCategory {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FailureDetail {
-    pub message:      String,
-    #[serde(rename = "failure_class")]
-    pub category:     FailureCategory,
+    pub message:          String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub causes:           Vec<String>,
+    pub category:         FailureCategory,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub system_actor: Option<SystemActorKind>,
-    #[serde(
-        rename = "failure_signature",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub signature:    Option<String>,
+    pub system_actor:     Option<SystemActorKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature:        Option<FailureSignature>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exec_output_tail: Option<ExecOutputTail>,
 }
 
 impl FailureDetail {
     pub fn new(message: impl Into<String>, category: FailureCategory) -> Self {
         Self {
             message: message.into(),
+            causes: Vec::new(),
             category,
             system_actor: None,
             signature: None,
+            exec_output_tail: None,
         }
     }
 }
@@ -305,10 +306,12 @@ impl<M: OutcomeMeta> Outcome<M> {
                 retry_requested: false,
             },
             failure: Some(FailureDetail {
-                message:      message.to_string(),
-                category:     FailureCategory::Deterministic,
-                system_actor: None,
-                signature:    None,
+                message:          message.to_string(),
+                causes:           Vec::new(),
+                category:         FailureCategory::Deterministic,
+                system_actor:     None,
+                signature:        None,
+                exec_output_tail: None,
             }),
             ..Self::default()
         }
@@ -327,7 +330,7 @@ impl<M: OutcomeMeta> Outcome<M> {
 mod tests {
     use serde_json::json;
 
-    use super::{StageOutcome, StageState};
+    use super::{FailureCategory, FailureDetail, StageOutcome, StageState};
 
     #[test]
     fn stage_outcome_failed_serde_is_lossy_for_retry_intent() {
@@ -365,6 +368,35 @@ mod tests {
         assert!(StageState::Cancelled.is_terminal());
         assert!(!StageState::Retrying.is_terminal());
         assert!(!StageState::Running.is_terminal());
+    }
+
+    #[test]
+    fn failure_detail_serializes_rich_diagnostics() {
+        use crate::{ExecOutputTail, FailureSignature};
+
+        let mut failure = FailureDetail::new("ACP turn failed", FailureCategory::Deterministic);
+        failure.causes = vec![
+            "ACP protocol error".to_string(),
+            "agent exited before initialize completed".to_string(),
+        ];
+        failure.signature = Some(FailureSignature("work|deterministic|acp".to_string()));
+        failure.exec_output_tail = Some(ExecOutputTail {
+            stdout:           None,
+            stderr:           Some("redacted stderr tail".to_string()),
+            stdout_truncated: false,
+            stderr_truncated: true,
+        });
+
+        let value = serde_json::to_value(&failure).expect("failure detail should serialize");
+
+        assert_eq!(value["message"], "ACP turn failed");
+        assert_eq!(value["causes"][0], "ACP protocol error");
+        assert_eq!(value["category"], "deterministic");
+        assert_eq!(value["signature"], "work|deterministic|acp");
+        assert_eq!(value["exec_output_tail"]["stderr"], "redacted stderr tail");
+        assert_eq!(value["exec_output_tail"]["stderr_truncated"], true);
+        assert!(value.get("failure_class").is_none());
+        assert!(value.get("failure_signature").is_none());
     }
 }
 

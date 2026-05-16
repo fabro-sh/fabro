@@ -14,6 +14,8 @@ use crate::{
 pub struct RunProjection {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub title:              String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id:          Option<RunId>,
     pub spec:               RunSpec,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web_url:            Option<String>,
@@ -156,6 +158,7 @@ impl RunProjection {
     pub fn new(title: String, spec: RunSpec, created_at: DateTime<Utc>) -> Self {
         Self {
             title,
+            parent_id: None,
             spec,
             web_url: None,
             start: None,

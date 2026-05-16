@@ -60,6 +60,7 @@ fn help() {
       -v, --verbose                Enable verbose output
           --sandbox <SANDBOX>      Sandbox for agent tools [possible values: local, docker, daytona]
           --label <KEY=VALUE>      Attach a label to this run (repeatable, format: KEY=VALUE)
+          --parent <RUN>           Link this run to an existing orchestration parent run
           --preserve-sandbox       Keep the sandbox alive after the run finishes (for debugging)
       -d, --detach                 Run the workflow in the background and print the run ID
       -h, --help                   Print help
@@ -126,6 +127,46 @@ fn create_uses_configured_server_target_without_server_flag() {
         String::from_utf8_lossy(&output.stderr)
     );
     mock.assert();
+    assert_eq!(output_stdout(&output).trim(), run_id.as_str());
+}
+
+#[test]
+fn create_parent_resolves_parent_and_sends_parent_id_in_manifest() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+    let parent_id = unique_run_id();
+    let resolve_mock = super::support::mock_resolved_run(&server, "nightly-parent", &parent_id);
+    let create_mock = server.mock(|when, then| {
+        when.method("POST")
+            .path("/api/v1/runs")
+            .json_body_includes(format!(r#"{{"parent_id":"{parent_id}"}}"#));
+        then.status(201)
+            .header("Content-Type", "application/json")
+            .body(run_status_response(run_id.as_str(), "submitted").to_string());
+    });
+
+    let output = context
+        .create_cmd()
+        .args([
+            "--server",
+            &format!("{}/api/v1", server.base_url()),
+            "--dry-run",
+            "--parent",
+            "nightly-parent",
+            fixture("simple.fabro").to_str().unwrap(),
+        ])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "command failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    resolve_mock.assert();
+    create_mock.assert();
     assert_eq!(output_stdout(&output).trim(), run_id.as_str());
 }
 

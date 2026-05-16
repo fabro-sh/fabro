@@ -300,7 +300,7 @@ impl AuthStrategy for CodexDeviceStrategy {
                 .map_err(anyhow::Error::msg)?;
 
                 Ok(AuthCredential {
-                    provider: fabro_model::Provider::OpenAi.id(),
+                    provider: fabro_model::ProviderId::openai(),
                     details:  AuthDetails::CodexOAuth {
                         tokens:     OAuthTokens {
                             access_token:  token_response.access_token,

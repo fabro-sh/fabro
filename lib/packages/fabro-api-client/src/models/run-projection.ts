@@ -52,6 +52,10 @@ export interface RunProjection {
      * Resolved run title from the event log.
      */
     'title'?: string;
+    /**
+     * Current orchestration parent run ID, if linked.
+     */
+    'parent_id'?: string | null;
     'spec': RunSpec;
     /**
      * Absolute web UI URL for this run when server web settings are configured.

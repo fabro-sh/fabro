@@ -1,6 +1,6 @@
 use std::pin::Pin;
 
-pub use fabro_model::{ModelHandle, Provider};
+pub use fabro_model::{ModelHandle, ProviderId};
 use futures::Stream;
 
 use crate::error::Error;

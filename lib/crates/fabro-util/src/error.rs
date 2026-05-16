@@ -57,9 +57,20 @@ pub fn render_with_causes(message: &str, causes: &[String]) -> String {
     rendered
 }
 
+pub fn render_compact_with_causes(message: &str, causes: &[String]) -> String {
+    let Some(cause) = causes.first() else {
+        return message.to_string();
+    };
+    if cause == message {
+        message.to_string()
+    } else {
+        format!("{message}: {cause}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::SharedError;
+    use super::{SharedError, render_compact_with_causes};
 
     #[test]
     fn shared_error_preserves_chain_without_duplicating_top_level() {
@@ -91,5 +102,23 @@ mod tests {
                 "missing original cause {original_cause:?} in {wrapped_chain:#?}"
             );
         }
+    }
+
+    #[test]
+    fn compact_cause_rendering_adds_first_cause_without_multiline_noise() {
+        assert_eq!(
+            render_compact_with_causes("Failed to initialize sandbox", &[
+                "connection refused".to_string()
+            ]),
+            "Failed to initialize sandbox: connection refused"
+        );
+    }
+
+    #[test]
+    fn compact_cause_rendering_deduplicates_matching_cause() {
+        assert_eq!(
+            render_compact_with_causes("boom", &["boom".to_string()]),
+            "boom"
+        );
     }
 }

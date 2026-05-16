@@ -1,8 +1,6 @@
 use std::fmt;
 
-use fabro_types::SystemActorKind;
-
-use crate::outcome::{FailureCategory, FailureDetail, Outcome, OutcomeMeta, StageOutcome};
+use crate::outcome::{FailureDetail, Outcome, OutcomeMeta, StageOutcome};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VisitLimitSource {
@@ -24,16 +22,13 @@ impl fmt::Display for VisitLimitSource {
 /// to_fail_outcome().
 #[derive(Debug, Clone)]
 pub struct HandlerErrorDetail {
-    pub message:      String,
-    pub retryable:    bool,
-    pub category:     Option<FailureCategory>,
-    pub system_actor: Option<SystemActorKind>,
-    pub signature:    Option<String>,
+    pub retryable: bool,
+    pub failure:   FailureDetail,
 }
 
 impl fmt::Display for HandlerErrorDetail {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.message)
+        write!(f, "{}", self.failure.message)
     }
 }
 
@@ -59,14 +54,16 @@ pub enum Error {
     #[error("stall timeout on node \"{node_id}\"")]
     StallTimeout { node_id: String },
     #[error("{detail}")]
-    Handler { detail: HandlerErrorDetail },
+    Handler { detail: Box<HandlerErrorDetail> },
     #[error("{0}")]
     Other(String),
 }
 
 impl Error {
     pub fn handler(detail: HandlerErrorDetail) -> Self {
-        Self::Handler { detail }
+        Self::Handler {
+            detail: Box::new(detail),
+        }
     }
 
     pub fn blocked(message: impl Into<String>) -> Self {
@@ -85,12 +82,7 @@ impl Error {
                 status: StageOutcome::Failed {
                     retry_requested: false,
                 },
-                failure: Some(FailureDetail {
-                    message:      detail.message.clone(),
-                    category:     detail.category.unwrap_or(FailureCategory::Deterministic),
-                    system_actor: detail.system_actor,
-                    signature:    detail.signature.clone(),
-                }),
+                failure: Some(detail.failure.clone()),
                 ..Outcome::default()
             },
             other => Outcome::fail(&other.to_string()),
@@ -103,6 +95,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::outcome::FailureCategory;
 
     #[test]
     fn core_error_display() {
@@ -148,33 +141,27 @@ mod tests {
     #[test]
     fn core_error_handler_is_retryable() {
         let retryable = Error::handler(HandlerErrorDetail {
-            message:      "timeout".into(),
-            retryable:    true,
-            category:     None,
-            system_actor: None,
-            signature:    None,
+            retryable: true,
+            failure:   FailureDetail::new("timeout", FailureCategory::TransientInfra),
         });
         assert!(retryable.is_retryable());
 
         let not_retryable = Error::handler(HandlerErrorDetail {
-            message:      "bad input".into(),
-            retryable:    false,
-            category:     None,
-            system_actor: None,
-            signature:    None,
+            retryable: false,
+            failure:   FailureDetail::new("bad input", FailureCategory::Deterministic),
         });
         assert!(!not_retryable.is_retryable());
     }
 
     #[test]
     fn core_error_handler_to_fail_outcome() {
-        use crate::outcome::FailureCategory;
         let err = Error::handler(HandlerErrorDetail {
-            message:      "api down".into(),
-            retryable:    true,
-            category:     Some(FailureCategory::TransientInfra),
-            system_actor: None,
-            signature:    Some("sig123".into()),
+            retryable: true,
+            failure:   {
+                let mut failure = FailureDetail::new("api down", FailureCategory::TransientInfra);
+                failure.signature = Some(fabro_types::FailureSignature("sig123".into()));
+                failure
+            },
         });
         let outcome: Outcome = err.to_fail_outcome();
         assert_eq!(outcome.status, StageOutcome::Failed {
@@ -183,7 +170,14 @@ mod tests {
         let failure = outcome.failure.unwrap();
         assert_eq!(failure.message, "api down");
         assert_eq!(failure.category, FailureCategory::TransientInfra);
-        assert_eq!(failure.signature.as_deref(), Some("sig123"));
+        assert_eq!(
+            failure
+                .signature
+                .as_ref()
+                .map(ToString::to_string)
+                .as_deref(),
+            Some("sig123")
+        );
     }
 
     #[test]

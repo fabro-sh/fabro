@@ -228,11 +228,6 @@ impl Node {
     }
 
     #[must_use]
-    pub fn reasoning_effort(&self) -> &str {
-        self.str_attr("reasoning_effort").unwrap_or("high")
-    }
-
-    #[must_use]
     pub fn speed(&self) -> Option<&str> {
         self.str_attr("speed")
     }
@@ -581,7 +576,6 @@ mod tests {
         assert_eq!(node.timeout(), None);
         assert_eq!(node.model(), None);
         assert_eq!(node.provider(), None);
-        assert_eq!(node.reasoning_effort(), "high");
         assert_eq!(node.speed(), None);
         assert!(!node.auto_status());
         assert!(!node.allow_partial());

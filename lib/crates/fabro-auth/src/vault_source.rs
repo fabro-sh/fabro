@@ -85,8 +85,7 @@ mod tests {
     use std::sync::Arc;
 
     use chrono::{Duration, Utc};
-    use fabro_model::catalog::LlmCatalogSettings;
-    use fabro_model::{Catalog, Provider};
+    use fabro_model::{Catalog, ProviderId};
     use fabro_vault::{SecretType, Vault};
     use tokio::sync::RwLock as AsyncRwLock;
 
@@ -94,10 +93,10 @@ mod tests {
     use crate::credential::{AuthCredential, AuthDetails, OAuthConfig, OAuthTokens};
     use crate::{CredentialSource, ResolveError};
 
-    fn api_key_credential(provider: Provider, key: &str) -> AuthCredential {
+    fn api_key_credential(provider: ProviderId, key: &str) -> AuthCredential {
         AuthCredential {
-            provider: provider.id(),
-            details:  AuthDetails::ApiKey {
+            provider,
+            details: AuthDetails::ApiKey {
                 key: key.to_string(),
             },
         }
@@ -105,7 +104,7 @@ mod tests {
 
     fn expired_openai_credential() -> AuthCredential {
         AuthCredential {
-            provider: Provider::OpenAi.id(),
+            provider: ProviderId::openai(),
             details:  AuthDetails::CodexOAuth {
                 tokens:     OAuthTokens {
                     access_token:  "expired-access".to_string(),
@@ -126,7 +125,7 @@ mod tests {
     }
 
     fn default_catalog() -> Catalog {
-        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default()).unwrap()
+        Catalog::from_builtin().unwrap()
     }
 
     #[tokio::test]
@@ -144,8 +143,11 @@ mod tests {
         vault
             .set(
                 "anthropic",
-                &serde_json::to_string(&api_key_credential(Provider::Anthropic, "anthropic-key"))
-                    .unwrap(),
+                &serde_json::to_string(&api_key_credential(
+                    ProviderId::anthropic(),
+                    "anthropic-key",
+                ))
+                .unwrap(),
                 SecretType::Credential,
                 None,
             )
@@ -158,14 +160,14 @@ mod tests {
         let resolved = source.resolve(&catalog).await.unwrap();
 
         assert_eq!(resolved.credentials.len(), 1);
-        assert_eq!(resolved.credentials[0].provider, Provider::Anthropic.id());
+        assert_eq!(resolved.credentials[0].provider, ProviderId::anthropic());
         assert_eq!(resolved.auth_issues.len(), 1);
         assert!(matches!(
             &resolved.auth_issues[0].1,
             ResolveError::RefreshFailed {
                 provider,
                 ..
-            } if provider == &Provider::OpenAi.id()
+            } if provider == &ProviderId::openai()
         ));
     }
 
@@ -176,7 +178,7 @@ mod tests {
         vault
             .set(
                 "openai",
-                &serde_json::to_string(&api_key_credential(Provider::OpenAi, "openai-key"))
+                &serde_json::to_string(&api_key_credential(ProviderId::openai(), "openai-key"))
                     .unwrap(),
                 SecretType::Credential,
                 None,
@@ -185,8 +187,11 @@ mod tests {
         vault
             .set(
                 "anthropic",
-                &serde_json::to_string(&api_key_credential(Provider::Anthropic, "anthropic-key"))
-                    .unwrap(),
+                &serde_json::to_string(&api_key_credential(
+                    ProviderId::anthropic(),
+                    "anthropic-key",
+                ))
+                .unwrap(),
                 SecretType::Credential,
                 None,
             )
@@ -196,8 +201,8 @@ mod tests {
         let catalog = default_catalog();
 
         assert_eq!(source.configured_providers(&catalog).await, vec![
-            Provider::Anthropic.id(),
-            Provider::OpenAi.id()
+            ProviderId::anthropic(),
+            ProviderId::openai()
         ]);
     }
 }

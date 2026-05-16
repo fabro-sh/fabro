@@ -15,12 +15,13 @@ use fabro_agent::{
 };
 use fabro_auth::EnvCredentialSource;
 use fabro_llm::client::Client;
-use fabro_llm::provider::{Provider, ProviderAdapter};
+use fabro_llm::provider::ProviderAdapter;
 use fabro_llm::providers::OpenAiAdapter;
-use fabro_model::catalog::LlmCatalogSettings;
-use fabro_model::{Catalog, ModelHandle};
+use fabro_model::{Catalog, ModelHandle, ProviderId};
 use fabro_test::{TwinScenario, TwinScenarios, TwinToolCall, twin_openai};
 use tokio::sync::Mutex as AsyncMutex;
+
+type Provider = ProviderId;
 
 #[derive(Clone)]
 struct OpenAiTwinOptions {
@@ -28,49 +29,41 @@ struct OpenAiTwinOptions {
     api_key:  String,
 }
 
-fn summarizer_model_id(provider: Provider) -> ModelHandle {
-    match provider {
-        Provider::OpenAi
-        | Provider::Kimi
-        | Provider::Zai
-        | Provider::Minimax
-        | Provider::Inception
-        | Provider::OpenAiCompatible => ModelHandle::ByName {
-            provider: Provider::OpenAi.id(),
+fn summarizer_model_id(provider: &Provider) -> ModelHandle {
+    match provider.as_str() {
+        ProviderId::OPENAI | "kimi" | "zai" | "minimax" | "inception" => ModelHandle::ByName {
+            provider: ProviderId::openai(),
             model:    "gpt-5.4-mini".to_string(),
         },
-        Provider::Gemini => ModelHandle::ByName {
-            provider: Provider::Gemini.id(),
+        ProviderId::GEMINI => ModelHandle::ByName {
+            provider: ProviderId::gemini(),
             model:    "gemini-3-flash-preview".to_string(),
         },
-        Provider::Anthropic => ModelHandle::ByName {
-            provider: Provider::Anthropic.id(),
+        ProviderId::ANTHROPIC => ModelHandle::ByName {
+            provider: ProviderId::anthropic(),
             model:    "claude-haiku-4-5".to_string(),
         },
+        other => panic!("unexpected provider {other}"),
     }
 }
 
-fn build_summarizer(provider: Provider, client: &Client) -> WebFetchSummarizer {
+fn build_summarizer(provider: &Provider, client: &Client) -> WebFetchSummarizer {
     WebFetchSummarizer {
         client:   client.clone(),
         model_id: summarizer_model_id(provider),
     }
 }
 
-fn build_profile(provider: Provider, model: &str, client: &Client) -> Box<dyn AgentProfile> {
+fn build_profile(provider: &Provider, model: &str, client: &Client) -> Box<dyn AgentProfile> {
     let summarizer = Some(build_summarizer(provider, client));
-    match provider {
-        Provider::Anthropic => Box::new(AnthropicProfile::with_summarizer(model, summarizer)),
-        Provider::OpenAi => Box::new(OpenAiProfile::with_summarizer(model, summarizer)),
-        Provider::Kimi
-        | Provider::Zai
-        | Provider::Minimax
-        | Provider::Inception
-        | Provider::OpenAiCompatible => Box::new(
-            OpenAiProfile::with_summarizer(model, summarizer)
-                .with_identity(provider, provider.id()),
+    match provider.as_str() {
+        ProviderId::ANTHROPIC => Box::new(AnthropicProfile::with_summarizer(model, summarizer)),
+        ProviderId::OPENAI => Box::new(OpenAiProfile::with_summarizer(model, summarizer)),
+        "kimi" | "zai" | "minimax" | "inception" => Box::new(
+            OpenAiProfile::with_summarizer(model, summarizer).with_provider_id(provider.clone()),
         ),
-        Provider::Gemini => Box::new(GeminiProfile::with_summarizer(model, summarizer)),
+        ProviderId::GEMINI => Box::new(GeminiProfile::with_summarizer(model, summarizer)),
+        other => panic!("unexpected provider {other}"),
     }
 }
 
@@ -80,8 +73,8 @@ async fn make_session(
     cwd: &Path,
     twin: Option<OpenAiTwinOptions>,
 ) -> Session {
-    let client = make_client(provider, twin.as_ref()).await;
-    let mut profile = build_profile(provider, model, &client);
+    let client = make_client(&provider, twin.as_ref()).await;
+    let mut profile = build_profile(&provider, model, &client);
     let env = Arc::new(LocalSandbox::new(cwd.to_path_buf()));
 
     // Register subagent tools so spawn_agent / wait / send_input / close_agent are
@@ -90,28 +83,26 @@ async fn make_session(
     let factory_client = client.clone();
     let factory_model: String = model.to_string();
     let factory_cwd = cwd.to_path_buf();
+    let factory_provider = provider.clone();
     let factory: SessionFactory = Arc::new(move || {
         let sub_profile: Arc<dyn AgentProfile> = {
-            let summarizer = Some(build_summarizer(provider, &factory_client));
-            match provider {
-                Provider::Anthropic => Arc::new(AnthropicProfile::with_summarizer(
+            let summarizer = Some(build_summarizer(&factory_provider, &factory_client));
+            match factory_provider.as_str() {
+                ProviderId::ANTHROPIC => Arc::new(AnthropicProfile::with_summarizer(
                     &factory_model,
                     summarizer,
                 )),
-                Provider::OpenAi => {
+                ProviderId::OPENAI => {
                     Arc::new(OpenAiProfile::with_summarizer(&factory_model, summarizer))
                 }
-                Provider::Kimi
-                | Provider::Zai
-                | Provider::Minimax
-                | Provider::Inception
-                | Provider::OpenAiCompatible => Arc::new(
+                "kimi" | "zai" | "minimax" | "inception" => Arc::new(
                     OpenAiProfile::with_summarizer(&factory_model, summarizer)
-                        .with_identity(provider, provider.id()),
+                        .with_provider_id(factory_provider.clone()),
                 ),
-                Provider::Gemini => {
+                ProviderId::GEMINI => {
                     Arc::new(GeminiProfile::with_summarizer(&factory_model, summarizer))
                 }
+                other => panic!("unexpected provider {other}"),
             }
         };
         let sub_env = Arc::new(LocalSandbox::new(factory_cwd.clone()));
@@ -140,22 +131,19 @@ async fn make_session_with_config(
     config: SessionOptions,
     twin: Option<OpenAiTwinOptions>,
 ) -> Session {
-    let client = make_client(provider, twin.as_ref()).await;
-    let profile: Arc<dyn AgentProfile> = Arc::from(build_profile(provider, model, &client));
+    let client = make_client(&provider, twin.as_ref()).await;
+    let profile: Arc<dyn AgentProfile> = Arc::from(build_profile(&provider, model, &client));
     let env = Arc::new(LocalSandbox::new(cwd.to_path_buf()));
     Session::new(client, profile, env, config, None)
 }
 
-async fn make_client(provider: Provider, twin: Option<&OpenAiTwinOptions>) -> Client {
-    if provider == Provider::OpenAi && fabro_test::TestMode::from_env().is_twin() {
+async fn make_client(provider: &Provider, twin: Option<&OpenAiTwinOptions>) -> Client {
+    if provider == &ProviderId::openai() && fabro_test::TestMode::from_env().is_twin() {
         return make_twin_client(twin.expect("openai twin config should be provided"));
     }
 
     let source = EnvCredentialSource::new();
-    let catalog = Arc::new(
-        Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-            .expect("default catalog should build"),
-    );
+    let catalog = Arc::new(Catalog::from_builtin().expect("default catalog should build"));
     Client::from_source(&source, catalog)
         .await
         .expect("Client::from_source failed")
@@ -196,7 +184,7 @@ macro_rules! openai_twin_provider_test {
                         .await;
                 }
                 let mut session = make_session(
-                    Provider::OpenAi,
+                    ProviderId::openai(),
                     "gpt-5.4-mini",
                     tmp.path(),
                     Some(twin),
@@ -212,21 +200,21 @@ macro_rules! provider_tests {
     ($scenario:ident) => {
         provider_test!(
             $scenario,
-            Provider::Anthropic,
+            ProviderId::anthropic(),
             "claude-haiku-4-5",
             anthropic,
             keys = ["ANTHROPIC_API_KEY"]
         );
         provider_test!(
             $scenario,
-            Provider::Gemini,
+            ProviderId::gemini(),
             "gemini-3-flash-preview",
             gemini,
             keys = ["GEMINI_API_KEY"]
         );
         provider_test!(
             $scenario,
-            Provider::Kimi,
+            ProviderId::new("kimi"),
             "kimi-k2.5",
             kimi,
             keys = ["KIMI_API_KEY"]
@@ -234,14 +222,14 @@ macro_rules! provider_tests {
         #[cfg(feature = "quarantine")]
         provider_test!(
             $scenario,
-            Provider::Zai,
+            ProviderId::new("zai"),
             "glm-4.7",
             zai,
             keys = ["ZAI_API_KEY"]
         );
         provider_test!(
             $scenario,
-            Provider::Minimax,
+            ProviderId::new("minimax"),
             "minimax-m2.5",
             minimax,
             keys = ["MINIMAX_API_KEY"]
@@ -249,7 +237,7 @@ macro_rules! provider_tests {
         #[cfg(feature = "quarantine")]
         provider_test!(
             $scenario,
-            Provider::Inception,
+            ProviderId::new("inception"),
             "mercury-2",
             inception,
             keys = ["INCEPTION_API_KEY"]
@@ -282,28 +270,28 @@ provider_tests!(subagent_spawn);
 
 provider_test!(
     web_fetch,
-    Provider::Anthropic,
+    ProviderId::anthropic(),
     "claude-haiku-4-5",
     anthropic,
     keys = ["ANTHROPIC_API_KEY"]
 );
 provider_test!(
     web_fetch,
-    Provider::OpenAi,
+    ProviderId::openai(),
     "gpt-5.4-mini",
     openai,
     keys = ["OPENAI_API_KEY"]
 );
 provider_test!(
     web_fetch,
-    Provider::Gemini,
+    ProviderId::gemini(),
     "gemini-3-flash-preview",
     gemini,
     keys = ["GEMINI_API_KEY"]
 );
 provider_test!(
     web_fetch,
-    Provider::Kimi,
+    ProviderId::new("kimi"),
     "kimi-k2.5",
     kimi,
     keys = ["KIMI_API_KEY", "OPENAI_API_KEY"]
@@ -311,14 +299,14 @@ provider_test!(
 #[cfg(feature = "quarantine")]
 provider_test!(
     web_fetch,
-    Provider::Zai,
+    ProviderId::new("zai"),
     "glm-4.7",
     zai,
     keys = ["ZAI_API_KEY", "OPENAI_API_KEY"]
 );
 provider_test!(
     web_fetch,
-    Provider::Minimax,
+    ProviderId::new("minimax"),
     "minimax-m2.5",
     minimax,
     keys = ["MINIMAX_API_KEY", "OPENAI_API_KEY"]
@@ -326,7 +314,7 @@ provider_test!(
 #[cfg(feature = "quarantine")]
 provider_test!(
     web_fetch,
-    Provider::Inception,
+    ProviderId::new("inception"),
     "mercury-2",
     inception,
     keys = ["INCEPTION_API_KEY", "OPENAI_API_KEY"]
@@ -334,28 +322,28 @@ provider_test!(
 
 provider_test!(
     web_search,
-    Provider::Anthropic,
+    ProviderId::anthropic(),
     "claude-haiku-4-5",
     anthropic,
     keys = ["ANTHROPIC_API_KEY", "BRAVE_SEARCH_API_KEY"]
 );
 provider_test!(
     web_search,
-    Provider::OpenAi,
+    ProviderId::openai(),
     "gpt-5.4-mini",
     openai,
     keys = ["OPENAI_API_KEY", "BRAVE_SEARCH_API_KEY"]
 );
 provider_test!(
     web_search,
-    Provider::Gemini,
+    ProviderId::gemini(),
     "gemini-3-flash-preview",
     gemini,
     keys = ["GEMINI_API_KEY", "BRAVE_SEARCH_API_KEY"]
 );
 provider_test!(
     web_search,
-    Provider::Kimi,
+    ProviderId::new("kimi"),
     "kimi-k2.5",
     kimi,
     keys = ["KIMI_API_KEY", "BRAVE_SEARCH_API_KEY"]
@@ -363,14 +351,14 @@ provider_test!(
 #[cfg(feature = "quarantine")]
 provider_test!(
     web_search,
-    Provider::Zai,
+    ProviderId::new("zai"),
     "glm-4.7",
     zai,
     keys = ["ZAI_API_KEY", "BRAVE_SEARCH_API_KEY"]
 );
 provider_test!(
     web_search,
-    Provider::Minimax,
+    ProviderId::new("minimax"),
     "minimax-m2.5",
     minimax,
     keys = ["MINIMAX_API_KEY", "BRAVE_SEARCH_API_KEY"]
@@ -378,7 +366,7 @@ provider_test!(
 #[cfg(feature = "quarantine")]
 provider_test!(
     web_search,
-    Provider::Inception,
+    ProviderId::new("inception"),
     "mercury-2",
     inception,
     keys = ["INCEPTION_API_KEY", "BRAVE_SEARCH_API_KEY"]
@@ -401,21 +389,21 @@ macro_rules! non_openai_provider_tests {
     ($scenario:ident) => {
         provider_test!(
             $scenario,
-            Provider::Anthropic,
+            ProviderId::anthropic(),
             "claude-haiku-4-5",
             anthropic,
             keys = ["ANTHROPIC_API_KEY"]
         );
         provider_test!(
             $scenario,
-            Provider::Gemini,
+            ProviderId::gemini(),
             "gemini-3-flash-preview",
             gemini,
             keys = ["GEMINI_API_KEY"]
         );
         provider_test!(
             $scenario,
-            Provider::Kimi,
+            ProviderId::new("kimi"),
             "kimi-k2.5",
             kimi,
             keys = ["KIMI_API_KEY"]
@@ -423,14 +411,14 @@ macro_rules! non_openai_provider_tests {
         #[cfg(feature = "quarantine")]
         provider_test!(
             $scenario,
-            Provider::Zai,
+            ProviderId::new("zai"),
             "glm-4.7",
             zai,
             keys = ["ZAI_API_KEY"]
         );
         provider_test!(
             $scenario,
-            Provider::Minimax,
+            ProviderId::new("minimax"),
             "minimax-m2.5",
             minimax,
             keys = ["MINIMAX_API_KEY"]
@@ -438,7 +426,7 @@ macro_rules! non_openai_provider_tests {
         #[cfg(feature = "quarantine")]
         provider_test!(
             $scenario,
-            Provider::Inception,
+            ProviderId::new("inception"),
             "mercury-2",
             inception,
             keys = ["INCEPTION_API_KEY"]
@@ -684,7 +672,7 @@ macro_rules! reasoning_effort_tests {
 }
 
 reasoning_effort_tests!(
-    Provider::Anthropic,
+    ProviderId::anthropic(),
     "claude-haiku-4-5",
     anthropic_reasoning_effort,
     keys = ["ANTHROPIC_API_KEY"]
@@ -692,33 +680,33 @@ reasoning_effort_tests!(
 // gpt-5-mini does not support the reasoning.effort parameter, so no OpenAI
 // test.
 reasoning_effort_tests!(
-    Provider::Gemini,
+    ProviderId::gemini(),
     "gemini-3-flash-preview",
     gemini_reasoning_effort,
     keys = ["GEMINI_API_KEY"]
 );
 reasoning_effort_tests!(
-    Provider::Kimi,
+    ProviderId::new("kimi"),
     "kimi-k2.5",
     kimi_reasoning_effort,
     keys = ["KIMI_API_KEY"]
 );
 #[cfg(feature = "quarantine")]
 reasoning_effort_tests!(
-    Provider::Zai,
+    ProviderId::new("zai"),
     "glm-4.7",
     zai_reasoning_effort,
     keys = ["ZAI_API_KEY"]
 );
 reasoning_effort_tests!(
-    Provider::Minimax,
+    ProviderId::new("minimax"),
     "minimax-m2.5",
     minimax_reasoning_effort,
     keys = ["MINIMAX_API_KEY"]
 );
 #[cfg(feature = "quarantine")]
 reasoning_effort_tests!(
-    Provider::Inception,
+    ProviderId::new("inception"),
     "mercury-2",
     inception_reasoning_effort,
     keys = ["INCEPTION_API_KEY"]
@@ -763,45 +751,45 @@ macro_rules! loop_detection_tests {
 }
 
 loop_detection_tests!(
-    Provider::Anthropic,
+    ProviderId::anthropic(),
     "claude-haiku-4-5",
     anthropic_loop_detection,
     keys = ["ANTHROPIC_API_KEY"]
 );
 loop_detection_tests!(
-    Provider::OpenAi,
+    ProviderId::openai(),
     "gpt-5.4-mini",
     openai_loop_detection,
     keys = ["OPENAI_API_KEY"]
 );
 loop_detection_tests!(
-    Provider::Gemini,
+    ProviderId::gemini(),
     "gemini-3-flash-preview",
     gemini_loop_detection,
     keys = ["GEMINI_API_KEY"]
 );
 loop_detection_tests!(
-    Provider::Kimi,
+    ProviderId::new("kimi"),
     "kimi-k2.5",
     kimi_loop_detection,
     keys = ["KIMI_API_KEY"]
 );
 #[cfg(feature = "quarantine")]
 loop_detection_tests!(
-    Provider::Zai,
+    ProviderId::new("zai"),
     "glm-4.7",
     zai_loop_detection,
     keys = ["ZAI_API_KEY"]
 );
 loop_detection_tests!(
-    Provider::Minimax,
+    ProviderId::new("minimax"),
     "minimax-m2.5",
     minimax_loop_detection,
     keys = ["MINIMAX_API_KEY"]
 );
 #[cfg(feature = "quarantine")]
 loop_detection_tests!(
-    Provider::Inception,
+    ProviderId::new("inception"),
     "mercury-2",
     inception_loop_detection,
     keys = ["INCEPTION_API_KEY"]

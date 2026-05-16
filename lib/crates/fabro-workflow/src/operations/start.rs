@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use fabro_auth::{CredentialSource, EnvCredentialSource, VaultCredentialSource};
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
-use fabro_model::{Catalog, FallbackTarget, ProviderId, adapter};
+use fabro_model::{Catalog, FallbackTarget, ProviderId};
 use fabro_sandbox::config::{
     DaytonaNetwork, DaytonaSnapshotSettings, DaytonaVolumeMount,
     DockerfileSource as SandboxDockerfileSource,
@@ -348,17 +348,7 @@ impl RunSession {
         let catalog_provider = catalog.provider(&provider_id).ok_or_else(|| {
             Error::Precondition(format!("Provider \"{provider_id}\" is not configured"))
         })?;
-        let profile_kind = adapter::get(&catalog_provider.adapter)
-            .map(|metadata| metadata.default_profile)
-            .ok_or_else(|| {
-                Error::Precondition(format!(
-                    "Provider \"{provider_id}\" uses unknown adapter \"{}\"",
-                    catalog_provider.adapter,
-                ))
-            })?;
-        let provider_enum =
-            adapter::profile_provider_for_provider_id(&provider_id, &catalog_provider.adapter);
-
+        let profile_kind = catalog_provider.adapter.metadata().default_profile;
         let fallback_chain =
             resolve_fallback_chain(catalog.as_ref(), &provider_id, &model, &resolved.model);
         let mcp_servers = resolved
@@ -436,7 +426,6 @@ impl RunSession {
             sandbox,
             llm: LlmSpec {
                 model: model.clone(),
-                provider: provider_enum,
                 provider_id: provider_id.clone(),
                 profile_kind,
                 fallback_chain,
@@ -1121,8 +1110,6 @@ mod tests {
         DaytonaSandboxLayer, DaytonaVolumeLayer, RunCloneLayer, RunExecutionLayer, RunLayer,
         RunSandboxLayer, WorkflowSettingsBuilder,
     };
-    use fabro_model::Provider;
-    use fabro_model::catalog::LlmCatalogSettings;
     use fabro_store::Database;
     use fabro_types::settings::ModelRef;
     use fabro_types::settings::run::RunMode;
@@ -1175,10 +1162,7 @@ mod tests {
     }
 
     fn test_catalog() -> Arc<Catalog> {
-        Arc::new(
-            Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-                .expect("default catalog should build"),
-        )
+        Arc::new(Catalog::from_builtin().expect("default catalog should build"))
     }
 
     #[test]
@@ -1191,7 +1175,7 @@ mod tests {
 
         let chain = resolve_fallback_chain(
             catalog.as_ref(),
-            &Provider::Anthropic.id(),
+            &ProviderId::anthropic(),
             "claude-opus-4-6",
             &settings,
         );
@@ -1212,7 +1196,7 @@ mod tests {
 
         let chain = resolve_fallback_chain(
             catalog.as_ref(),
-            &Provider::Anthropic.id(),
+            &ProviderId::anthropic(),
             "claude-opus-4-6",
             &settings,
         );
@@ -1322,6 +1306,7 @@ mod tests {
                 title: None,
                 git: None,
                 fork_source_ref: None,
+                parent_id: None,
                 provenance: None,
                 configured_providers: Vec::new(),
                 web_url: None,
@@ -1513,6 +1498,7 @@ mod tests {
                 title: None,
                 git: None,
                 fork_source_ref: None,
+                parent_id: None,
                 provenance: None,
                 configured_providers: Vec::new(),
                 web_url: None,

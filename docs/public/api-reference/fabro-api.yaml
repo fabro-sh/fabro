@@ -823,6 +823,7 @@ paths:
         - $ref: "#/components/parameters/PageLimit"
         - $ref: "#/components/parameters/PageOffset"
         - $ref: "#/components/parameters/IncludeArchived"
+        - $ref: "#/components/parameters/ParentRunId"
       responses:
         "200":
           description: Paginated durable run summaries
@@ -1070,6 +1071,69 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Run is active and requires `force=true`
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/parent:
+    put:
+      operationId: linkRunParent
+      tags: [Runs]
+      summary: Link Run Parent
+      description: Links a run under an orchestration parent. Parent links are mutable for all run states, including archived and terminal runs.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRunParentRequest"
+      responses:
+        "200":
+          description: Updated durable run summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "400":
+          description: Self-parent or cycle rejected
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Child or parent run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: unlinkRunParent
+      tags: [Runs]
+      summary: Unlink Run Parent
+      description: Removes a run's orchestration parent. Already-root runs are returned unchanged.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Updated durable run summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "404":
+          description: Run not found
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -3771,6 +3835,15 @@ components:
         default: false
       example: false
 
+    ParentRunId:
+      name: parent_id
+      in: query
+      required: false
+      description: Return only runs currently linked to this orchestration parent.
+      schema:
+        type: string
+      example: 01JNQVR7M0EJ5GKAT2SC4ERS1Z
+
     ForceRunDelete:
       name: force
       in: query
@@ -4477,7 +4550,6 @@ components:
         - reasoning
         - reasoning_effort
         - prompt_cache
-        - effort
       properties:
         tools:
           type: boolean
@@ -4493,10 +4565,6 @@ components:
         prompt_cache:
           type: boolean
           description: Whether the model endpoint supports prompt caching.
-        effort:
-          type: boolean
-          deprecated: true
-          description: Deprecated compatibility flag equivalent to reasoning_effort = levels.
 
     ModelCosts:
       description: Pricing per million tokens in USD.
@@ -5010,12 +5078,11 @@ components:
           type: boolean
           default: false
 
-    RunFailure:
-      description: Rich terminal run failure diagnostics.
+    FailureDetail:
+      description: Rich diagnostic detail for a failed stage or terminal run.
       type: object
       required:
         - message
-        - reason
         - category
       properties:
         message:
@@ -5024,8 +5091,6 @@ components:
           type: array
           items:
             type: string
-        reason:
-          $ref: "#/components/schemas/FailureReason"
         category:
           $ref: "#/components/schemas/FailureCategory"
         system_actor:
@@ -5040,6 +5105,18 @@ components:
           oneOf:
             - $ref: "#/components/schemas/ExecOutputTail"
             - type: "null"
+
+    RunFailure:
+      description: Terminal run failure reason and rich diagnostics.
+      type: object
+      required:
+        - reason
+        - detail
+      properties:
+        reason:
+          $ref: "#/components/schemas/FailureReason"
+        detail:
+          $ref: "#/components/schemas/FailureDetail"
 
     RunManifest:
       description: Self-contained workflow run manifest.
@@ -5058,6 +5135,10 @@ components:
           type: ["string", "null"]
           description: Optional pre-generated run ID to use instead of allocating a new ULID.
           example: "01HV6D7S5YF4Z4B2M7K4N0Q6T9"
+        parent_id:
+          type: ["string", "null"]
+          description: Optional orchestration parent run ID. Fork and rewind lineage use separate fields and should not set this value.
+          example: "01HV6D7S5YF4Z4B2M7K4N0Q6T8"
         title:
           type: ["string", "null"]
           maxLength: 100
@@ -6480,6 +6561,15 @@ components:
             - $ref: "#/components/schemas/ForkSourceRef"
             - type: "null"
 
+    UpdateRunParentRequest:
+      type: object
+      required:
+        - parent_id
+      properties:
+        parent_id:
+          type: string
+          description: Existing orchestration parent run ID.
+
     StartRecord:
       description: Metadata captured when execution starts.
       type: object
@@ -6591,6 +6681,9 @@ components:
         title:
           type: string
           description: Resolved run title from the event log.
+        parent_id:
+          type: ["string", "null"]
+          description: Current orchestration parent run ID, if linked.
         spec:
           $ref: "#/components/schemas/RunSpec"
         web_url:
@@ -6671,6 +6764,9 @@ components:
       properties:
         id:
           type: string
+        parent_id:
+          type: ["string", "null"]
+          description: Current orchestration parent run ID, if linked.
         title:
           type: string
         goal:

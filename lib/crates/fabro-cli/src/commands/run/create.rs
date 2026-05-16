@@ -11,6 +11,7 @@ use super::output::{api_diagnostics_to_local, print_workflow_summary};
 use super::overrides::run_args_overrides;
 use crate::args::RunArgs;
 use crate::command_context::CommandContext;
+use crate::commands::resolve_run_id;
 use crate::manifest_args::run_manifest_args;
 
 pub(crate) struct CreatedRun {
@@ -40,7 +41,7 @@ pub(crate) async fn create_run(
         .transpose()
         .context("invalid run ID")?;
 
-    let built = build_run_manifest(ManifestBuildInput {
+    let mut built = build_run_manifest(ManifestBuildInput {
         workflow: workflow_path.clone(),
         cwd,
         run_overrides: cli_args_config.run,
@@ -50,6 +51,16 @@ pub(crate) async fn create_run(
         run_id,
         user_settings_path: Some(active_settings_path(None)),
     })?;
+
+    let client = if let Some(parent_selector) = args.parent.as_deref() {
+        let client = ctx.server().await?;
+        let parent_id = resolve_run_id(client.as_ref(), parent_selector).await?;
+        built.manifest.parent_id = Some(parent_id.to_string());
+        Some(client)
+    } else {
+        None
+    };
+
     let validation = manifest_validation::validate_manifest(
         &RunLayer::default(),
         &built.manifest,
@@ -72,7 +83,10 @@ pub(crate) async fn create_run(
         bail!("Validation failed");
     }
 
-    let client = ctx.server().await?;
+    let client = match client {
+        Some(client) => client,
+        None => ctx.server().await?,
+    };
     let created_run_id = client
         .create_run_from_manifest(built.manifest)
         .await

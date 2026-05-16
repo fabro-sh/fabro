@@ -10,3 +10,18 @@ impl fmt::Display for FailureSignature {
         f.write_str(&self.0)
     }
 }
+
+impl FailureSignature {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for FailureSignature {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}

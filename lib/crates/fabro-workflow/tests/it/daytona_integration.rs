@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
-use fabro_llm::provider::Provider;
+use fabro_model::ProviderId;
 use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
 use fabro_static::EnvVars;
 use fabro_store::{ArtifactKey, ArtifactStore, Database};
@@ -1002,7 +1002,7 @@ use fabro_workflow::handler::llm::AgentCliBackend;
 ///
 /// Installs the CLI tool in the sandbox, then runs the AgentCliBackend against
 /// it.
-async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: &str) {
+async fn run_daytona_cli_test(provider: ProviderId, model: &str, install_command: &str) {
     let creds = load_github_app_credentials();
     let config = DaytonaConfig {
         snapshot: Some(DaytonaSnapshotConfig {
@@ -1066,7 +1066,7 @@ async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: 
         install_result.stdout
     );
 
-    let backend = AgentCliBackend::new_from_env(model.to_string(), provider);
+    let backend = AgentCliBackend::new_from_env(model.to_string(), provider.clone());
     let node = Node::new("daytona_cli_test");
     let context = Context::new();
     let emitter = Arc::new(Emitter::default());
@@ -1109,7 +1109,7 @@ async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: 
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_cli_claude() {
     run_daytona_cli_test(
-        Provider::Anthropic,
+        ProviderId::anthropic(),
         "haiku",
         "curl -fsSL https://claude.ai/install.sh | bash",
     )
@@ -1118,13 +1118,18 @@ async fn daytona_cli_claude() {
 
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_cli_codex() {
-    run_daytona_cli_test(Provider::OpenAi, "o4-mini", "npm install -g @openai/codex").await;
+    run_daytona_cli_test(
+        ProviderId::openai(),
+        "o4-mini",
+        "npm install -g @openai/codex",
+    )
+    .await;
 }
 
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_cli_gemini() {
     run_daytona_cli_test(
-        Provider::Gemini,
+        ProviderId::gemini(),
         "gemini-2.5-flash",
         "npm install -g @google/gemini-cli",
     )
@@ -1863,7 +1868,7 @@ async fn daytona_cp_upload_download_round_trip() {
             clone_origin_url:  None,
             clone_branch:      None,
             workspace_root:    Some("/home/daytona/workspace".to_string()),
-            repos_root:        Some("/repos".to_string()),
+            repos_root:        Some("/home/daytona/repos".to_string()),
             primary_repo_path: None,
             primary_repo_link: None,
         }),

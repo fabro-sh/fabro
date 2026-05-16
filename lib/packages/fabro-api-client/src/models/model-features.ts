@@ -38,11 +38,6 @@ export interface ModelFeatures {
      * Whether the model endpoint supports prompt caching.
      */
     'prompt_cache': boolean;
-    /**
-     * Deprecated compatibility flag equivalent to reasoning_effort = levels.
-     * @deprecated
-     */
-    'effort': boolean;
 }
 
 

@@ -337,6 +337,7 @@ mod tests {
         let created_at = Utc.with_ymd_and_hms(2026, 5, 11, 12, 0, seconds).unwrap();
         Run {
             id:               id.parse().expect("test run id should parse"),
+            parent_id:        None,
             title:            "test".to_string(),
             goal:             "test".to_string(),
             workflow:         WorkflowRef {

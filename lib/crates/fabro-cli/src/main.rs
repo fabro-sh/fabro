@@ -329,6 +329,9 @@ async fn main_inner(worker_token: Option<String>) -> (String, Result<()>) {
             Commands::Pr(ns) => {
                 Box::pin(commands::pr::dispatch(ns, &base_ctx)).await?;
             }
+            Commands::Parent(ns) => {
+                commands::parent::dispatch(ns, &base_ctx).await?;
+            }
             Commands::Secret(ns) => {
                 commands::secret::dispatch(ns, &base_ctx).await?;
             }
@@ -619,7 +622,7 @@ destination = "{destination}"
             Commands::Provider(ProviderNamespace {
                 command: ProviderCommand::Login(args),
             }) => {
-                assert_eq!(args.provider, fabro_model::Provider::OpenAi);
+                assert_eq!(args.provider, fabro_model::ProviderId::openai());
             }
             _ => panic!("unexpected command variant"),
         }
@@ -633,7 +636,7 @@ destination = "{destination}"
             Commands::Provider(ProviderNamespace {
                 command: ProviderCommand::Login(args),
             }) => {
-                assert_eq!(args.provider, fabro_model::Provider::Anthropic);
+                assert_eq!(args.provider, fabro_model::ProviderId::anthropic());
             }
             _ => panic!("unexpected command variant"),
         }
@@ -654,7 +657,7 @@ destination = "{destination}"
             Commands::Provider(ProviderNamespace {
                 command: ProviderCommand::Login(args),
             }) => {
-                assert_eq!(args.provider, fabro_model::Provider::Anthropic);
+                assert_eq!(args.provider, fabro_model::ProviderId::anthropic());
                 assert!(args.api_key_stdin);
             }
             _ => panic!("unexpected command variant"),
@@ -1156,9 +1159,17 @@ destination = "{destination}"
     }
 
     #[test]
-    fn parse_provider_login_bogus_provider() {
-        let result = Cli::try_parse_from(["fabro", "provider", "login", "--provider", "bogus"]);
-        assert!(result.is_err(), "should fail with unknown provider");
+    fn parse_provider_login_accepts_open_ended_provider_id() {
+        let cli = Cli::try_parse_from(["fabro", "provider", "login", "--provider", "bogus"])
+            .expect("provider IDs are resolved against the catalog at runtime");
+        match *cli.command.unwrap() {
+            Commands::Provider(ProviderNamespace {
+                command: ProviderCommand::Login(args),
+            }) => {
+                assert_eq!(args.provider, fabro_model::ProviderId::new("bogus"));
+            }
+            _ => panic!("expected provider login command"),
+        }
     }
 
     #[test]
@@ -1178,12 +1189,89 @@ destination = "{destination}"
     }
 
     #[test]
+    fn parse_create_parent_flag() {
+        let cli = Cli::try_parse_from([
+            "fabro",
+            "create",
+            "--parent",
+            "nightly-parent",
+            "workflow.toml",
+        ])
+        .expect("should parse");
+        match *cli.command.unwrap() {
+            Commands::RunCmd(RunCommands::Create(args)) => {
+                assert_eq!(args.parent.as_deref(), Some("nightly-parent"));
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
     fn parse_run_input_short_flag() {
         let cli = Cli::try_parse_from(["fabro", "run", "workflow.toml", "-I", "foo=bar"])
             .expect("should parse");
         match *cli.command.unwrap() {
             Commands::RunCmd(RunCommands::Run(args)) => {
                 assert_eq!(args.inputs.values, vec!["foo=bar"]);
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_run_parent_flag() {
+        let cli = Cli::try_parse_from([
+            "fabro",
+            "run",
+            "--parent",
+            "nightly-parent",
+            "workflow.toml",
+        ])
+        .expect("should parse");
+        match *cli.command.unwrap() {
+            Commands::RunCmd(RunCommands::Run(args)) => {
+                assert_eq!(args.parent.as_deref(), Some("nightly-parent"));
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_ps_parent_flag() {
+        let cli = Cli::try_parse_from(["fabro", "ps", "--parent", "nightly-parent"])
+            .expect("should parse");
+        match *cli.command.unwrap() {
+            Commands::RunsCmd(args::RunsCommands::Ps(args)) => {
+                assert_eq!(args.parent.as_deref(), Some("nightly-parent"));
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_parent_link_command() {
+        let cli = Cli::try_parse_from(["fabro", "parent", "link", "child-run", "parent-run"])
+            .expect("should parse");
+        match *cli.command.unwrap() {
+            Commands::Parent(args::ParentNamespace {
+                command: args::ParentCommand::Link(args),
+            }) => {
+                assert_eq!(args.child_run, "child-run");
+                assert_eq!(args.parent_run, "parent-run");
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_parent_unlink_command() {
+        let cli =
+            Cli::try_parse_from(["fabro", "parent", "unlink", "child-run"]).expect("should parse");
+        match *cli.command.unwrap() {
+            Commands::Parent(args::ParentNamespace {
+                command: args::ParentCommand::Unlink(args),
+            }) => {
+                assert_eq!(args.child_run, "child-run");
             }
             _ => panic!("unexpected command variant"),
         }

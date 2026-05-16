@@ -653,14 +653,14 @@ mod tests {
     use fabro_auth::{AuthCredential, AuthDetails};
     use fabro_config::Storage;
     use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question};
-    use fabro_model::Provider;
+    use fabro_model::ProviderId;
     use fabro_types::run_event::{
         InterviewCompletedProps, InterviewStartedProps, RunCompletedProps, RunControlEffectProps,
         RunFailedProps, RunStatusTransitionProps,
     };
     use fabro_types::{
-        AuthMethod, EventBody, FailureCategory, FailureReason, IdpIdentity, Principal,
-        QuestionType, RunFailure, SuccessReason, fixtures,
+        AuthMethod, EventBody, FailureCategory, FailureDetail, FailureReason, IdpIdentity,
+        Principal, QuestionType, RunFailure, SuccessReason, fixtures,
     };
     use fabro_vault::{SecretType, Vault};
     use fabro_workflow::event::RunEventSink;
@@ -786,13 +786,8 @@ mod tests {
         assert_eq!(
             worker_title_phase_for_event(&EventBody::RunFailed(RunFailedProps {
                 failure:              RunFailure {
-                    message:          "cancelled".to_string(),
-                    causes:           Vec::new(),
-                    reason:           FailureReason::Cancelled,
-                    category:         FailureCategory::Canceled,
-                    system_actor:     None,
-                    signature:        None,
-                    exec_output_tail: None,
+                    reason: FailureReason::Cancelled,
+                    detail: FailureDetail::new("cancelled", FailureCategory::Canceled),
                 },
                 duration_ms:          10,
                 final_git_commit_sha: None,
@@ -805,13 +800,8 @@ mod tests {
         assert_eq!(
             worker_title_phase_for_event(&EventBody::RunFailed(RunFailedProps {
                 failure:              RunFailure {
-                    message:          "boom".to_string(),
-                    causes:           Vec::new(),
-                    reason:           FailureReason::Terminated,
-                    category:         FailureCategory::Deterministic,
-                    system_actor:     None,
-                    signature:        None,
-                    exec_output_tail: None,
+                    reason: FailureReason::Terminated,
+                    detail: FailureDetail::new("boom", FailureCategory::Deterministic),
                 },
                 duration_ms:          10,
                 final_git_commit_sha: None,
@@ -994,7 +984,7 @@ mod tests {
             .set(
                 "anthropic",
                 &serde_json::to_string(&AuthCredential {
-                    provider: Provider::Anthropic.id(),
+                    provider: ProviderId::anthropic(),
                     details:  AuthDetails::ApiKey {
                         key: "vault-key".to_string(),
                     },

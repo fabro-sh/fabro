@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, anyhow, bail};
@@ -13,7 +13,9 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router, middleware};
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD as BASE64_STANDARD, URL_SAFE_NO_PAD};
-use fabro_auth::{AuthCredential, AuthDetails, credential_id_for};
+use fabro_auth::{
+    ApiKeyHeader, AuthCredential, AuthDetails, build_api_key_header, credential_id_for,
+};
 use fabro_config::Storage;
 use fabro_config::bind::{Bind, BindRequest};
 use fabro_config::envfile::EnvFileUpdate;
@@ -23,7 +25,8 @@ use fabro_install::{
     merge_server_settings, persist_install_outputs_direct, write_github_app_settings,
     write_object_store_settings, write_sandbox_settings, write_token_settings,
 };
-use fabro_model::Provider;
+use fabro_model::catalog::CatalogProvider;
+use fabro_model::{AdapterKind, Catalog, CredentialRef, ProviderId};
 use fabro_sandbox::daytona;
 use fabro_static::EnvVars;
 use fabro_store::ArtifactStore;
@@ -75,7 +78,7 @@ pub type InstallFinishHook = Arc<dyn Fn(&InstallFinishInfo) -> anyhow::Result<()
 
 #[derive(Clone, Debug, Default)]
 struct InstallUpstreamConfig {
-    provider_base_urls:      HashMap<Provider, String>,
+    provider_base_urls:      HashMap<ProviderId, String>,
     github_api_base_url:     Option<String>,
     daytona_api_base_url:    Option<String>,
     daytona_organization_id: Option<String>,
@@ -95,6 +98,10 @@ const DEFAULT_GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com
 const REDACTED_SECRET_VALUE: &str = "[REDACTED]";
 const VALIDATION_TIMEOUT: Duration = Duration::from_secs(20);
 const VALIDATION_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+static INSTALL_CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
+    Catalog::from_builtin().expect("embedded install model catalog should be valid")
+});
 
 impl InstallAppState {
     #[must_use]
@@ -190,12 +197,12 @@ impl InstallAppState {
     #[must_use]
     pub fn with_provider_base_url(
         mut self,
-        provider: Provider,
+        provider: impl Into<ProviderId>,
         base_url: impl Into<String>,
     ) -> Self {
         self.upstreams
             .provider_base_urls
-            .insert(provider, base_url.into());
+            .insert(provider.into(), base_url.into());
         self
     }
 
@@ -248,7 +255,7 @@ struct LlmProvidersInput {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct LlmProviderInput {
-    provider: Provider,
+    provider: ProviderId,
     api_key:  String,
 }
 
@@ -487,7 +494,7 @@ struct GithubAppInstall {
 
 #[derive(Clone, Debug, Deserialize)]
 struct InstallLlmTestInput {
-    provider: Provider,
+    provider: ProviderId,
     api_key:  String,
 }
 
@@ -773,7 +780,7 @@ async fn post_install_llm_test(
     }
     observe_operator(&state, &headers);
 
-    if let Some(error) = unsupported_install_provider_error(input.provider) {
+    if let Err(error) = install_catalog_provider(&input.provider) {
         return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, error);
     }
 
@@ -804,7 +811,7 @@ async fn put_install_llm(
     // completed with zero credentials. `/install/finish` still requires the
     // step to be present, just not populated.
     for provider in &input.providers {
-        if let Some(error) = unsupported_install_provider_error(provider.provider) {
+        if let Err(error) = install_catalog_provider(&provider.provider) {
             return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, error);
         }
         if provider.api_key.trim().is_empty() {
@@ -820,10 +827,23 @@ async fn put_install_llm(
     StatusCode::NO_CONTENT.into_response()
 }
 
-fn unsupported_install_provider_error(provider: Provider) -> Option<&'static str> {
-    match provider {
-        Provider::OpenAiCompatible => Some("openai_compatible is not supported by install in v1"),
-        _ => None,
+fn install_catalog_provider(provider: &ProviderId) -> Result<&'static CatalogProvider, String> {
+    let catalog_provider = INSTALL_CATALOG
+        .provider(provider)
+        .ok_or_else(|| format!("provider '{provider}' is not configured in the model catalog"))?;
+    let supports_api_key = catalog_provider.credentials.iter().any(|credential| {
+        matches!(
+            credential,
+            CredentialRef::Credential(_) | CredentialRef::Env(_)
+        )
+    });
+    if supports_api_key {
+        Ok(catalog_provider)
+    } else {
+        Err(format!(
+            "provider '{}' does not define an API-key credential path",
+            catalog_provider.id
+        ))
     }
 }
 
@@ -1525,7 +1545,7 @@ async fn post_install_finish(
     }
     for provider in llm.providers {
         let credential = AuthCredential {
-            provider: provider.provider.id(),
+            provider: provider.provider,
             details:  AuthDetails::ApiKey {
                 key: provider.api_key,
             },
@@ -1888,7 +1908,7 @@ fn redacted_llm(pending_install: &PendingInstall) -> serde_json::Value {
         |llm| {
             serde_json::json!({
                 "providers": llm.providers.iter().map(|provider| serde_json::json!({
-                    "provider": <&'static str>::from(provider.provider),
+                    "provider": provider.provider.to_string(),
                     "configured": true,
                 })).collect::<Vec<_>>()
             })
@@ -2041,27 +2061,17 @@ async fn validate_llm_provider(
     state: &InstallAppState,
     input: &InstallLlmTestInput,
 ) -> anyhow::Result<()> {
-    let (auth_header, auth_value) = match input.provider {
-        Provider::Anthropic => ("x-api-key", input.api_key.clone()),
-        Provider::OpenAi => ("Authorization", format!("Bearer {}", input.api_key)),
-        Provider::Gemini => ("x-goog-api-key", input.api_key.clone()),
-        Provider::Kimi
-        | Provider::Zai
-        | Provider::Minimax
-        | Provider::Inception
-        | Provider::OpenAiCompatible => {
-            bail!("{} is not supported by install validation", input.provider);
-        }
-    };
-
-    let base_url = provider_base_url(state, input.provider);
+    let provider = install_catalog_provider(&input.provider).map_err(anyhow::Error::msg)?;
+    let auth_header = build_api_key_header(
+        provider.adapter.metadata().api_key_header,
+        input.api_key.clone(),
+    );
+    let base_url = provider_base_url(state, provider)?;
     let endpoint = install_upstream_endpoint(&base_url, &["models"])?;
     let client = install_http_client_for_url(&base_url)?;
-    let mut request = client
-        .get(endpoint)
-        .header(auth_header, auth_value)
-        .header("User-Agent", "fabro-server");
-    if matches!(input.provider, Provider::Anthropic) {
+    let mut request = client.get(endpoint).header("User-Agent", "fabro-server");
+    request = add_api_key_header(request, auth_header);
+    if provider.adapter == AdapterKind::Anthropic {
         request = request.header("anthropic-version", "2023-06-01");
     }
 
@@ -2085,29 +2095,44 @@ async fn validate_llm_provider(
     clippy::disallowed_methods,
     reason = "Install flow checks documented provider base-url overrides while building defaults."
 )]
-fn provider_base_url(state: &InstallAppState, provider: Provider) -> String {
+fn provider_base_url(
+    state: &InstallAppState,
+    provider: &CatalogProvider,
+) -> anyhow::Result<String> {
     state
         .upstreams
         .provider_base_urls
-        .get(&provider)
+        .get(&provider.id)
         .cloned()
-        .or_else(|| match provider {
-            Provider::Anthropic => std::env::var(EnvVars::ANTHROPIC_BASE_URL).ok(),
-            Provider::OpenAi => std::env::var(EnvVars::OPENAI_BASE_URL).ok(),
-            Provider::Gemini => std::env::var(EnvVars::GEMINI_BASE_URL).ok(),
-            Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => None,
-            Provider::OpenAiCompatible => std::env::var(EnvVars::OPENAI_COMPATIBLE_BASE_URL).ok(),
+        .or_else(|| match provider.id.as_str() {
+            ProviderId::ANTHROPIC => std::env::var(EnvVars::ANTHROPIC_BASE_URL).ok(),
+            ProviderId::OPENAI => std::env::var(EnvVars::OPENAI_BASE_URL).ok(),
+            ProviderId::GEMINI => std::env::var(EnvVars::GEMINI_BASE_URL).ok(),
+            _ => None,
         })
-        .unwrap_or_else(|| match provider {
-            Provider::Anthropic => DEFAULT_ANTHROPIC_BASE_URL.to_string(),
-            Provider::OpenAi => DEFAULT_OPENAI_BASE_URL.to_string(),
-            Provider::Gemini => DEFAULT_GEMINI_BASE_URL.to_string(),
-            Provider::Kimi
-            | Provider::Zai
-            | Provider::Minimax
-            | Provider::Inception
-            | Provider::OpenAiCompatible => String::new(),
+        .or_else(|| provider.base_url.clone())
+        .or_else(|| match provider.adapter {
+            AdapterKind::Anthropic => Some(DEFAULT_ANTHROPIC_BASE_URL.to_string()),
+            AdapterKind::OpenAi => Some(DEFAULT_OPENAI_BASE_URL.to_string()),
+            AdapterKind::Gemini => Some(DEFAULT_GEMINI_BASE_URL.to_string()),
+            AdapterKind::OpenAiCompatible => None,
         })
+        .with_context(|| {
+            format!(
+                "provider '{}' does not define an install validation base URL",
+                provider.id
+            )
+        })
+}
+
+fn add_api_key_header(
+    request: fabro_http::RequestBuilder,
+    auth_header: ApiKeyHeader,
+) -> fabro_http::RequestBuilder {
+    match auth_header {
+        ApiKeyHeader::Bearer(value) => request.header("Authorization", format!("Bearer {value}")),
+        ApiKeyHeader::Custom { name, value } => request.header(name, value),
+    }
 }
 
 async fn validate_github_token(state: &InstallAppState, token: &str) -> anyhow::Result<String> {

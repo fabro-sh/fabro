@@ -11,6 +11,7 @@ use fabro_workflow::run_status::RunStatus;
 use super::short_run_id;
 use crate::args::RunsListArgs;
 use crate::command_context::CommandContext;
+use crate::commands::resolve_run_id;
 use crate::server_runs::{ServerSummaryLookup, filter_server_runs};
 use crate::shared::{color_if, format_duration_ms, run_status_kind, tilde_path};
 
@@ -21,7 +22,16 @@ pub(crate) async fn list_command(
 ) -> Result<()> {
     let ctx = base_ctx.with_target(&args.server)?;
     let printer = ctx.printer();
-    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
+    let client = ctx.server().await?;
+    let parent_id = match args.parent.as_deref() {
+        Some(selector) => Some(resolve_run_id(client.as_ref(), selector).await?),
+        None => None,
+    };
+    let filtered_by_parent = parent_id.is_some();
+    let lookup = match parent_id {
+        Some(parent_id) => ServerSummaryLookup::from_client_by_parent(client, parent_id).await?,
+        None => ServerSummaryLookup::from_client(client).await?,
+    };
     let label_filters = parse_label_filters(&args.filter.label);
     let filtered = filter_server_runs(
         lookup.runs(),
@@ -37,6 +47,7 @@ pub(crate) async fn list_command(
             .map(|run| {
                 serde_json::json!({
                     "run_id": run.run_id(),
+                    "parent_id": run.parent_id(),
                     "workflow_name": run.workflow_name(),
                     "workflow_slug": run.workflow_slug(),
                     "status": run.status(),
@@ -75,17 +86,22 @@ pub(crate) async fn list_command(
 
     let mut display_runs = filtered;
     display_runs.reverse();
+    let show_parent_column =
+        !filtered_by_parent && display_runs.iter().any(|run| run.parent_id().is_some());
 
     let use_color = styles.use_color;
     let now = Utc::now();
-    let title = vec![
-        "RUN ID".cell().bold(use_color),
+    let mut title = vec!["RUN ID".cell().bold(use_color)];
+    if show_parent_column {
+        title.push("PARENT".cell().bold(use_color));
+    }
+    title.extend([
         "WORKFLOW".cell().bold(use_color),
         "STATUS".cell().bold(use_color),
         "DIRECTORY".cell().bold(use_color),
         "DURATION".cell().bold(use_color),
         "GOAL".cell().bold(use_color),
-    ];
+    ]);
 
     let rows: Vec<Vec<CellStruct>> = display_runs
         .iter()
@@ -105,10 +121,23 @@ pub(crate) async fn list_command(
                 .map_or_else(|| "-".to_string(), |p| tilde_path(Path::new(p)));
             let run_id = run.run_id().to_string();
 
-            vec![
+            let mut row = vec![
                 short_run_id(&run_id)
                     .cell()
                     .foreground_color(color_if(use_color, Color::Ansi256(8))),
+            ];
+            if show_parent_column {
+                let parent_display = run.parent_id().map_or_else(
+                    || "-".to_string(),
+                    |parent_id| short_run_id(&parent_id.to_string()).to_string(),
+                );
+                row.push(
+                    parent_display
+                        .cell()
+                        .foreground_color(color_if(use_color, Color::Ansi256(8))),
+                );
+            }
+            row.extend([
                 run.workflow_name().cell(),
                 status_cell(run.status(), use_color),
                 dir_display.cell(),
@@ -116,7 +145,8 @@ pub(crate) async fn list_command(
                 truncate_goal(&run.goal(), 50)
                     .cell()
                     .foreground_color(color_if(use_color, Color::Ansi256(8))),
-            ]
+            ]);
+            row
         })
         .collect();
 

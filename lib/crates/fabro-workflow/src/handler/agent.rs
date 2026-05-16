@@ -25,7 +25,7 @@ pub enum CodergenResult {
         files_touched:     Vec<String>,
         last_file_touched: Option<String>,
     },
-    Full(Outcome),
+    Full(Box<Outcome>),
 }
 
 pub struct CodergenRunRequest<'a> {
@@ -266,7 +266,7 @@ impl Handler for AgentHandler {
         let prompt_provider = node
             .provider()
             .map(String::from)
-            .or_else(|| Some(services.run.provider.to_string()));
+            .or_else(|| Some(services.run.provider_id.to_string()));
         let prompt_model = node.model().map(String::from);
         let stage_scope = StageScope::for_handler(context, &node.id);
         services.run.emitter.emit_scoped(
@@ -313,7 +313,7 @@ impl Handler for AgentHandler {
                     })
                     .await;
                 match result {
-                    Ok(CodergenResult::Full(outcome)) => return Ok(outcome),
+                    Ok(CodergenResult::Full(outcome)) => return Ok(*outcome),
                     Ok(CodergenResult::Text {
                         text,
                         usage,
@@ -345,7 +345,7 @@ impl Handler for AgentHandler {
         let response_provider = node
             .provider()
             .map(String::from)
-            .or_else(|| Some(services.run.provider.to_string()))
+            .or_else(|| Some(services.run.provider_id.to_string()))
             .unwrap_or_default();
         services.run.emitter.emit_scoped(
             &Event::PromptCompleted {
@@ -482,6 +482,7 @@ mod tests {
                 manifest_blob:    None,
                 git:              None,
                 fork_source_ref:  None,
+                parent_id:        None,
                 web_url:          None,
             },
         )

@@ -2,6 +2,7 @@ use std::convert::TryFrom;
 
 use chrono::{DateTime, Utc};
 use fabro_types::{BilledModelUsage, EventBody, RunEvent};
+use fabro_util::error;
 use fabro_workflow::event::RunNoticeLevel;
 use serde_json::Value;
 
@@ -361,7 +362,7 @@ pub(super) fn from_run_event(stored: &RunEvent) -> Option<ProgressEvent> {
             name: node_label,
             error: props.failure.as_ref().map_or_else(
                 || "unknown error".to_string(),
-                |failure| failure.message.clone(),
+                |failure| error::render_compact_with_causes(&failure.message, &failure.causes),
             ),
         }),
         EventBody::StageRetrying(props) => Some(ProgressEvent::StageRetrying {

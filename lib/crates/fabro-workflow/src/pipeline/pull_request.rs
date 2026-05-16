@@ -6,8 +6,6 @@ use fabro_graphviz::parser;
 use fabro_llm::client::Client;
 use fabro_llm::generate::{GenerateParams, generate_object};
 use fabro_model::Catalog;
-#[cfg(test)]
-use fabro_model::catalog::LlmCatalogSettings;
 use fabro_store::RunProjection;
 use fabro_types::PullRequestLink;
 use fabro_types::settings::run::MergeStrategy;
@@ -680,6 +678,7 @@ mod tests {
     use fabro_llm::client::Client;
     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
     use fabro_llm::types::{FinishReason, Message, Request, Response, StreamEvent, TokenCounts};
+    use fabro_model::ProviderId;
     use fabro_store::Database;
     use fabro_types::{
         BilledTokenCounts, RunProjection, RunSpec, SuccessReason, WorkflowSettings,
@@ -780,10 +779,7 @@ mod tests {
     }
 
     fn test_catalog() -> Arc<Catalog> {
-        Arc::new(
-            Catalog::from_builtin_with_overrides(&LlmCatalogSettings::default())
-                .expect("default catalog should build"),
-        )
+        Arc::new(Catalog::from_builtin().expect("default catalog should build"))
     }
 
     fn explicit_client(provider_name: &str, text: &str) -> Arc<Client> {
@@ -826,7 +822,7 @@ mod tests {
 
     fn openai_api_key_credential(key: &str) -> AuthCredential {
         AuthCredential {
-            provider: fabro_model::Provider::OpenAi.id(),
+            provider: ProviderId::openai(),
             details:  AuthDetails::ApiKey {
                 key: key.to_string(),
             },
@@ -1168,6 +1164,7 @@ mod tests {
             manifest_blob:    None,
             git:              run_spec.git.clone(),
             fork_source_ref:  None,
+            parent_id:        None,
             web_url:          None,
         })
         .await
@@ -1235,6 +1232,7 @@ mod tests {
             manifest_blob:    None,
             git:              run_spec.git.clone(),
             fork_source_ref:  None,
+            parent_id:        None,
             web_url:          None,
         })
         .await
@@ -1591,6 +1589,7 @@ mod tests {
             manifest_blob:    None,
             git:              None,
             fork_source_ref:  None,
+            parent_id:        None,
             web_url:          None,
         })
         .await
@@ -1710,6 +1709,7 @@ mod tests {
             manifest_blob:    None,
             git:              None,
             fork_source_ref:  None,
+            parent_id:        None,
             web_url:          None,
         })
         .await
@@ -1880,6 +1880,7 @@ mod tests {
             manifest_blob:    None,
             git:              None,
             fork_source_ref:  None,
+            parent_id:        None,
             web_url:          None,
         })
         .await

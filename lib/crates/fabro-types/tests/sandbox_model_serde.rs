@@ -62,7 +62,7 @@ fn sandbox_details_requires_canonical_id_and_working_directory() {
                 clone_origin_url:  None,
                 clone_branch:      None,
                 workspace_root:    Some("/home/daytona/workspace".to_string()),
-                repos_root:        Some("/repos".to_string()),
+                repos_root:        Some("/home/daytona/repos".to_string()),
                 primary_repo_path: None,
                 primary_repo_link: None,
             }),
@@ -99,7 +99,10 @@ fn sandbox_details_requires_canonical_id_and_working_directory() {
         value["sandbox"]["runtime"]["workspace_root"],
         "/home/daytona/workspace"
     );
-    assert_eq!(value["sandbox"]["runtime"]["repos_root"], "/repos");
+    assert_eq!(
+        value["sandbox"]["runtime"]["repos_root"],
+        "/home/daytona/repos"
+    );
     assert_eq!(
         value["web_url"],
         "https://app.daytona.io/dashboard/sandboxes?sandboxId=ad65029a-2d01-421e-8936-49451653fcd9"

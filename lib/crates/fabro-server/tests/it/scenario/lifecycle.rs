@@ -353,7 +353,7 @@ async fn cancel_at_human_gate_persists_cancelled_terminal_event() {
                 event["properties"]["failure"]["reason"]
                     .as_str()
                     .map(ToOwned::to_owned),
-                event["properties"]["failure"]["message"]
+                event["properties"]["failure"]["detail"]["message"]
                     .as_str()
                     .map(ToOwned::to_owned),
             )
