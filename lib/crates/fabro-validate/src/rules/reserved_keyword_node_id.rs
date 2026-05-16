@@ -23,19 +23,21 @@ impl LintRule for Rule {
             .values()
             .filter(|node| DOT_RESERVED_KEYWORDS.contains(&node.id.to_lowercase().as_str()))
             .map(|node| Diagnostic {
-                rule:     self.name().to_string(),
+                rule: self.name().to_string(),
                 severity: Severity::Warning,
-                message:  format!(
+                message: format!(
                     "Node ID '{}' is a DOT reserved keyword and may cause parsing failures",
                     node.id
                 ),
-                node_id:  Some(node.id.clone()),
-                edge:     None,
-                fix:      Some(format!(
+                node_id: Some(node.id.clone()),
+                edge: None,
+                fix: Some(format!(
                     "Rename '{}' to '{}_step' or another non-reserved ID",
                     node.id,
                     node.id.to_lowercase()
                 )),
+
+                ..Diagnostic::default()
             })
             .collect()
     }

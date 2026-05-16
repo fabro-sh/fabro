@@ -28,7 +28,7 @@ use crate::pipeline::{self, Persisted, TransformOptions, Validated};
 use crate::records::RunSpec;
 use crate::run_lookup::default_scratch_base;
 use crate::run_materialization::materialize_run;
-use crate::transforms::Transform;
+use crate::transforms::{RenderMode, Transform};
 use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
 
 #[derive(Clone, Debug)]
@@ -66,6 +66,7 @@ struct PersistCreateOptions {
     run_id:               Option<RunId>,
     run_dir:              Option<PathBuf>,
     workflow_slug:        Option<String>,
+    source_name:          Option<String>,
     labels:               HashMap<String, String>,
     source_directory:     Option<String>,
     git:                  Option<GitContext>,
@@ -132,6 +133,10 @@ pub async fn create(
     };
 
     let raw_source = resolved.raw_source.clone();
+    let source_name = resolved
+        .dot_path
+        .as_ref()
+        .map(|path| path.display().to_string());
     let persisted = spawn_blocking(move || {
         create_from_source(
             &raw_source,
@@ -140,6 +145,7 @@ pub async fn create(
                 run_id: Some(run_id),
                 run_dir: Some(persisted_run_dir),
                 workflow_slug: workflow_slug.or(resolved_workflow_slug),
+                source_name,
                 labels,
                 source_directory,
                 git,
@@ -288,11 +294,13 @@ fn create_from_source(
 ) -> Result<Persisted, Error> {
     let mut validated = preprocess_and_validate(
         dot_source,
+        options.source_name.clone(),
         current_dir,
         file_resolver,
         Vec::new(),
         Some(&options.settings),
         goal_override,
+        RenderMode::Structural,
         &options.catalog,
     )?;
 
@@ -308,11 +316,13 @@ fn create_from_source(
 
 pub(super) fn preprocess_and_validate(
     dot_source: &str,
+    source_name: Option<String>,
     current_dir: Option<PathBuf>,
     file_resolver: Option<Arc<dyn FileResolver>>,
     custom_transforms: Vec<Box<dyn Transform>>,
     settings: Option<&WorkflowSettings>,
     goal_override: Option<&str>,
+    render_mode: RenderMode,
     catalog: &Arc<Catalog>,
 ) -> Result<Validated, Error> {
     let inputs = run_inputs(settings);
@@ -323,6 +333,8 @@ pub(super) fn preprocess_and_validate(
         current_dir,
         file_resolver,
         inputs,
+        source_name,
+        render_mode,
         custom_transforms,
         catalog: Arc::clone(catalog),
     })?;
@@ -353,6 +365,7 @@ fn persist_validated(
         run_id,
         run_dir,
         workflow_slug,
+        source_name: _,
         labels,
         source_directory,
         git,
@@ -415,6 +428,7 @@ mod tests {
     use fabro_types::settings::InterpString;
     use fabro_types::settings::run::RunMode;
     use fabro_types::{WorkflowSettings, fixtures};
+    use fabro_util::error::collect_chain;
     use fabro_validate::Severity;
     use object_store::local::LocalFileSystem;
     use object_store::memory::InMemory;
@@ -525,6 +539,73 @@ mod tests {
             .find(|d| d.rule == TEMPLATE_UNDEFINED_VARIABLE_RULE)
             .expect("expected template diagnostic");
         assert_eq!(diagnostic.severity, Severity::Error);
+    }
+
+    #[test]
+    fn strict_template_error_for_inline_prompt_names_workflow_file_and_node() {
+        let dot = r#"digraph ValidatePlan {
+            start [shape=Mdiamond, label="Start"]
+            exit  [shape=Msquare, label="Exit"]
+            test_inline_prompt [label="moo" prompt="{{ inputs.foo }}"]
+            start -> test_inline_prompt -> exit
+        }"#;
+
+        let result = preprocess_and_validate(
+            dot,
+            Some("workflow.fabro".to_string()),
+            Some(PathBuf::from(".")),
+            None,
+            Vec::new(),
+            Some(&WorkflowSettings::default()),
+            None,
+            RenderMode::Strict,
+            &test_catalog(),
+        );
+        let Err(err) = result else {
+            panic!("expected strict mode to hard-fail on unbound inline prompt");
+        };
+
+        let rendered = collect_chain(&err).join(": ");
+        assert!(rendered.contains("workflow.fabro"), "{rendered}");
+        assert!(rendered.contains("test_inline_prompt"), "{rendered}");
+        assert!(rendered.contains("prompt"), "{rendered}");
+        assert!(!rendered.contains("<string>"), "{rendered}");
+    }
+
+    #[test]
+    fn imported_prompt_template_error_names_prompt_file_and_node() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("test.md");
+        std::fs::write(&prompt_path, "{{ inputs.foo }}").unwrap();
+        let dot = r#"digraph ValidatePlan {
+            start [shape=Mdiamond, label="Start"]
+            exit  [shape=Msquare, label="Exit"]
+            test_imported_prompt [label="moo" prompt="@test.md"]
+            start -> test_imported_prompt -> exit
+        }"#;
+
+        let result = preprocess_and_validate(
+            dot,
+            Some("workflow.fabro".to_string()),
+            Some(dir.path().to_path_buf()),
+            Some(Arc::new(crate::file_resolver::FilesystemFileResolver::new(
+                None,
+            ))),
+            Vec::new(),
+            Some(&WorkflowSettings::default()),
+            None,
+            RenderMode::Strict,
+            &test_catalog(),
+        );
+        let Err(err) = result else {
+            panic!("expected strict mode to hard-fail on unbound imported prompt");
+        };
+
+        let rendered = collect_chain(&err).join(": ");
+        assert!(rendered.contains("test.md"), "{rendered}");
+        assert!(rendered.contains("test_imported_prompt"), "{rendered}");
+        assert!(rendered.contains("prompt"), "{rendered}");
+        assert!(!rendered.contains("<string>"), "{rendered}");
     }
 
     #[test]

@@ -18,28 +18,32 @@ impl LintRule for Rule {
         for edge in &graph.edges {
             if !graph.nodes.contains_key(&edge.to) {
                 diagnostics.push(Diagnostic {
-                    rule:     self.name().to_string(),
+                    rule: self.name().to_string(),
                     severity: Severity::Error,
-                    message:  format!(
+                    message: format!(
                         "Edge from '{}' targets non-existent node '{}'",
                         edge.from, edge.to
                     ),
-                    node_id:  None,
-                    edge:     Some((edge.from.clone(), edge.to.clone())),
-                    fix:      Some(format!("Define node '{}' or fix the edge target", edge.to)),
+                    node_id: None,
+                    edge: Some((edge.from.clone(), edge.to.clone())),
+                    fix: Some(format!("Define node '{}' or fix the edge target", edge.to)),
+
+                    ..Diagnostic::default()
                 });
             }
             if !graph.nodes.contains_key(&edge.from) {
                 diagnostics.push(Diagnostic {
-                    rule:     self.name().to_string(),
+                    rule: self.name().to_string(),
                     severity: Severity::Error,
-                    message:  format!("Edge source '{}' references non-existent node", edge.from),
-                    node_id:  None,
-                    edge:     Some((edge.from.clone(), edge.to.clone())),
-                    fix:      Some(format!(
+                    message: format!("Edge source '{}' references non-existent node", edge.from),
+                    node_id: None,
+                    edge: Some((edge.from.clone(), edge.to.clone())),
+                    fix: Some(format!(
                         "Define node '{}' or fix the edge source",
                         edge.from
                     )),
+
+                    ..Diagnostic::default()
                 });
             }
         }

@@ -44,14 +44,16 @@ impl LintRule for Rule {
         unreachable
             .into_iter()
             .map(|node_id| Diagnostic {
-                rule:     self.name().to_string(),
+                rule: self.name().to_string(),
                 severity: Severity::Warning,
-                message:  format!("Node '{node_id}' is not reachable from the start node"),
-                node_id:  Some(node_id.to_string()),
-                edge:     None,
-                fix:      Some(format!(
+                message: format!("Node '{node_id}' is not reachable from the start node"),
+                node_id: Some(node_id.to_string()),
+                edge: None,
+                fix: Some(format!(
                     "Add an edge path from the start node to '{node_id}'"
                 )),
+
+                ..Diagnostic::default()
             })
             .collect()
     }

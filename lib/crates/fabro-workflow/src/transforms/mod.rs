@@ -21,4 +21,4 @@ pub use import::ImportTransform;
 pub use model_resolution::ModelResolutionTransform;
 pub use preamble::PreambleTransform;
 pub use stylesheet_application::StylesheetApplicationTransform;
-pub use variable_expansion::TemplateTransform;
+pub use variable_expansion::{RenderMode, TemplateTransform};

@@ -15,11 +15,14 @@ pub fn validate(
     let Transformed {
         graph,
         source,
-        diagnostics: mut transform_diagnostics,
+        mut diagnostics,
     } = transformed;
-    let lint_diagnostics = fabro_validate::validate_with_catalog(&graph, catalog, extra_rules);
-    transform_diagnostics.extend(lint_diagnostics);
-    Validated::new(graph, source, transform_diagnostics)
+    diagnostics.extend(fabro_validate::validate_with_catalog(
+        &graph,
+        catalog,
+        extra_rules,
+    ));
+    Validated::new(graph, source, diagnostics)
 }
 
 #[cfg(test)]
@@ -42,6 +45,8 @@ mod tests {
             current_dir:       None,
             file_resolver:     None,
             inputs:            std::collections::HashMap::new(),
+            source_name:       None,
+            render_mode:       crate::operations::RenderMode::Strict,
             custom_transforms: vec![],
             catalog:           std::sync::Arc::clone(&catalog),
         })

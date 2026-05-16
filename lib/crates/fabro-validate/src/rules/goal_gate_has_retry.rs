@@ -34,7 +34,8 @@ impl LintRule for Rule {
                         fix: Some(
                             "Add retry_target or fallback_retry_target attribute".to_string(),
                         ),
-                    });
+
+                    ..Diagnostic::default()});
                 }
             }
         }

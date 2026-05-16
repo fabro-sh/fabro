@@ -35,7 +35,8 @@ impl LintRule for Rule {
                         fix: Some(
                             "Remove extra freeform=true edges so at most one remains".to_string(),
                         ),
-                    });
+
+                    ..Diagnostic::default()});
                 }
             }
         }

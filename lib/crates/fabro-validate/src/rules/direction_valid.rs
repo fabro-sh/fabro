@@ -23,12 +23,14 @@ impl LintRule for Rule {
             return Vec::new();
         }
         vec![Diagnostic {
-            rule:     self.name().to_string(),
+            rule: self.name().to_string(),
             severity: Severity::Warning,
-            message:  format!("Graph has invalid rankdir '{rankdir}'"),
-            node_id:  None,
-            edge:     None,
-            fix:      Some(format!("Use one of: {}", VALID_DIRECTIONS.join(", "))),
+            message: format!("Graph has invalid rankdir '{rankdir}'"),
+            node_id: None,
+            edge: None,
+            fix: Some(format!("Use one of: {}", VALID_DIRECTIONS.join(", "))),
+
+            ..Diagnostic::default()
         }]
     }
 }

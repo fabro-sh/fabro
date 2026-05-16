@@ -23,3 +23,4 @@ pub use timeline::{ForkTarget, RunTimeline, TimelineEntry, build_timeline, timel
 pub use validate::{ValidateInput, validate};
 
 pub use crate::pipeline::{DevcontainerSpec, LlmSpec, SandboxEnvSpec};
+pub use crate::transforms::RenderMode;

@@ -60,7 +60,8 @@ impl LintRule for Rule {
                         "Use a relative path; the engine sets the working directory to the worktree automatically"
                             .to_string(),
                     ),
-                });
+
+                ..Diagnostic::default()});
             }
         }
         diagnostics

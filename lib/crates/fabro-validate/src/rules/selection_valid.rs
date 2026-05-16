@@ -21,12 +21,14 @@ impl LintRule for Rule {
             if let Some(sel) = node.attrs.get("selection").and_then(AttrValue::as_str) {
                 if !VALID_SELECTIONS.contains(&sel) {
                     diagnostics.push(Diagnostic {
-                        rule:     self.name().to_string(),
+                        rule: self.name().to_string(),
                         severity: Severity::Warning,
-                        message:  format!("Node '{}' has invalid selection mode '{sel}'", node.id),
-                        node_id:  Some(node.id.clone()),
-                        edge:     None,
-                        fix:      Some(format!("Use one of: {}", VALID_SELECTIONS.join(", "))),
+                        message: format!("Node '{}' has invalid selection mode '{sel}'", node.id),
+                        node_id: Some(node.id.clone()),
+                        edge: None,
+                        fix: Some(format!("Use one of: {}", VALID_SELECTIONS.join(", "))),
+
+                        ..Diagnostic::default()
                     });
                 }
             }

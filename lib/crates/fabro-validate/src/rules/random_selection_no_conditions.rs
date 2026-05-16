@@ -36,7 +36,8 @@ impl LintRule for Rule {
                     fix: Some(
                         "Remove the condition attributes from outgoing edges, or remove selection=\"random\" from the node".to_string(),
                     ),
-                });
+
+                ..Diagnostic::default()});
             }
         }
         diagnostics

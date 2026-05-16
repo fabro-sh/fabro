@@ -21,26 +21,30 @@ impl LintRule for Rule {
             .count();
         if start_count == 0 {
             return vec![Diagnostic {
-                rule:     self.name().to_string(),
+                rule: self.name().to_string(),
                 severity: Severity::Error,
                 message:
                     "Pipeline must have exactly one start node (shape=Mdiamond or id start/Start)"
                         .to_string(),
-                node_id:  None,
-                edge:     None,
-                fix:      Some("Add a node with shape=Mdiamond or id 'start'".to_string()),
+                node_id: None,
+                edge: None,
+                fix: Some("Add a node with shape=Mdiamond or id 'start'".to_string()),
+
+                ..Diagnostic::default()
             }];
         }
         if start_count > 1 {
             return vec![Diagnostic {
-                rule:     self.name().to_string(),
+                rule: self.name().to_string(),
                 severity: Severity::Error,
-                message:  format!(
+                message: format!(
                     "Pipeline has {start_count} start nodes but must have exactly one"
                 ),
-                node_id:  None,
-                edge:     None,
-                fix:      Some("Remove extra start nodes".to_string()),
+                node_id: None,
+                edge: None,
+                fix: Some("Remove extra start nodes".to_string()),
+
+                ..Diagnostic::default()
             }];
         }
         Vec::new()

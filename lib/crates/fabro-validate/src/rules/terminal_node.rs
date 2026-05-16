@@ -27,26 +27,30 @@ impl LintRule for Rule {
             .count();
         if terminal_count == 0 {
             return vec![Diagnostic {
-                rule:     self.name().to_string(),
+                rule: self.name().to_string(),
                 severity: Severity::Error,
                 message:
                     "Pipeline must have exactly one terminal node (shape=Msquare or id exit/end)"
                         .to_string(),
-                node_id:  None,
-                edge:     None,
-                fix:      Some("Add a node with shape=Msquare or id 'exit'/'end'".to_string()),
+                node_id: None,
+                edge: None,
+                fix: Some("Add a node with shape=Msquare or id 'exit'/'end'".to_string()),
+
+                ..Diagnostic::default()
             }];
         }
         if terminal_count > 1 {
             return vec![Diagnostic {
-                rule:     self.name().to_string(),
+                rule: self.name().to_string(),
                 severity: Severity::Error,
-                message:  format!(
+                message: format!(
                     "Pipeline must have exactly one terminal node, found {terminal_count}"
                 ),
-                node_id:  None,
-                edge:     None,
-                fix:      Some("Remove extra terminal nodes so exactly one remains".to_string()),
+                node_id: None,
+                edge: None,
+                fix: Some("Remove extra terminal nodes so exactly one remains".to_string()),
+
+                ..Diagnostic::default()
             }];
         }
         Vec::new()

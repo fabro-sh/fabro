@@ -19,12 +19,14 @@ impl LintRule for Rule {
             if let Some(node_type) = node.node_type() {
                 if !is_known_handler_type(node_type) {
                     diagnostics.push(Diagnostic {
-                        rule:     self.name().to_string(),
+                        rule: self.name().to_string(),
                         severity: Severity::Warning,
-                        message:  format!("Node '{}' has unrecognized type '{node_type}'", node.id),
-                        node_id:  Some(node.id.clone()),
-                        edge:     None,
-                        fix:      Some(format!("Use one of: {}", KNOWN_HANDLER_TYPES.join(", "))),
+                        message: format!("Node '{}' has unrecognized type '{node_type}'", node.id),
+                        node_id: Some(node.id.clone()),
+                        edge: None,
+                        fix: Some(format!("Use one of: {}", KNOWN_HANDLER_TYPES.join(", "))),
+
+                        ..Diagnostic::default()
                     });
                 }
             }

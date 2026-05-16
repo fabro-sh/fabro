@@ -1,12 +1,18 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use fabro_graphviz::graph::{AttrValue, Graph};
+use fabro_template::TemplateContext;
+use fabro_validate::Diagnostic;
 
 use super::Transform;
 use crate::error::Error;
-use crate::file_resolver::FileResolver;
+use crate::file_resolver::{FileResolver, ResolvedFile};
 use crate::static_reference::{ReferenceKind, validate_static_reference};
+use crate::transforms::variable_expansion::{
+    RenderMode, TemplateRenderTarget, TemplateTransform, render_template_for_target,
+};
 
 /// Resolve a potential `@path` file reference.
 ///
@@ -30,8 +36,13 @@ pub fn resolve_file_ref(
 
 /// Inlines `@file` references in node prompts and the graph-level goal.
 pub struct FileInliningTransform {
-    current_dir: PathBuf,
-    resolver:    Arc<dyn FileResolver>,
+    current_dir:   PathBuf,
+    resolver:      Arc<dyn FileResolver>,
+    inputs:        HashMap<String, toml::Value>,
+    source_name:   Option<String>,
+    source_text:   Option<String>,
+    goal_override: Option<String>,
+    render_mode:   RenderMode,
 }
 
 impl FileInliningTransform {
@@ -40,37 +51,152 @@ impl FileInliningTransform {
         Self {
             current_dir,
             resolver,
+            inputs: HashMap::new(),
+            source_name: None,
+            source_text: None,
+            goal_override: None,
+            render_mode: RenderMode::Strict,
         }
+    }
+
+    #[must_use]
+    pub fn with_template_options(
+        mut self,
+        inputs: HashMap<String, toml::Value>,
+        source_name: Option<String>,
+        source_text: Option<String>,
+        render_mode: RenderMode,
+    ) -> Self {
+        self.inputs = inputs;
+        self.source_name = source_name;
+        self.source_text = source_text;
+        self.render_mode = render_mode;
+        self
+    }
+
+    #[must_use]
+    pub fn with_goal_override(mut self, goal: Option<String>) -> Self {
+        self.goal_override = goal;
+        self
+    }
+
+    pub(crate) fn apply_with_diagnostics(
+        &self,
+        graph: Graph,
+    ) -> Result<(Graph, Vec<Diagnostic>), Error> {
+        let mut graph = graph;
+        let mut diagnostics = Vec::new();
+        self.inline_graph_goal(&mut graph, &mut diagnostics)?;
+
+        let resolved_goal = match &self.goal_override {
+            Some(goal) => goal.clone(),
+            None => TemplateTransform {
+                inputs:      self.inputs.clone(),
+                source_name: self.source_name.clone(),
+                source_text: self.source_text.clone(),
+                render_mode: self.render_mode,
+            }
+            .resolved_goal(&graph, &mut diagnostics)?,
+        };
+        let ctx = TemplateContext::new()
+            .with_goal(resolved_goal)
+            .with_inputs(self.inputs.clone());
+
+        for (node_id, node) in &mut graph.nodes {
+            let Some(AttrValue::String(prompt)) = node.attrs.get("prompt") else {
+                continue;
+            };
+            let target = TemplateRenderTarget::node_attr(
+                self.source_name.clone(),
+                node_id.clone(),
+                "prompt",
+            )
+            .with_source_text(self.source_text.as_deref(), prompt);
+            let rendered = render_template_for_target(
+                prompt,
+                &ctx,
+                self.render_mode,
+                &target,
+                &mut diagnostics,
+            )?;
+            let value = self
+                .render_resolved_file_ref(&rendered, &ctx, target, &mut diagnostics)?
+                .unwrap_or(rendered);
+            node.attrs
+                .insert("prompt".to_string(), AttrValue::String(value));
+        }
+
+        Ok((graph, diagnostics))
+    }
+
+    fn inline_graph_goal(
+        &self,
+        graph: &mut Graph,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<(), Error> {
+        let Some(AttrValue::String(goal)) = graph.attrs.get("goal") else {
+            return Ok(());
+        };
+        let ctx = TemplateContext::for_input_scan(self.inputs.clone());
+        let target = TemplateRenderTarget::graph_attr(self.source_name.clone(), "goal")
+            .with_source_text(self.source_text.as_deref(), goal);
+        let rendered =
+            render_template_for_target(goal, &ctx, self.render_mode, &target, diagnostics)?;
+        let value = self
+            .render_resolved_file_ref(&rendered, &ctx, target, diagnostics)?
+            .unwrap_or(rendered);
+        graph
+            .attrs
+            .insert("goal".to_string(), AttrValue::String(value));
+        Ok(())
+    }
+
+    fn render_resolved_file_ref(
+        &self,
+        value: &str,
+        ctx: &TemplateContext,
+        owner_target: TemplateRenderTarget,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Option<String>, Error> {
+        let Some(path_str) = value.strip_prefix('@') else {
+            return Ok(None);
+        };
+        validate_static_reference(path_str, ReferenceKind::FileInline)
+            .map_err(|error| Error::Validation(error.to_string()))?;
+        let Some(resolved) = self.resolver.resolve(&self.current_dir, path_str) else {
+            return Ok(None);
+        };
+        let target = owner_target
+            .with_source_name(resolved.path.display().to_string())
+            .with_source_text(Some(&resolved.content), &resolved.content);
+        Ok(Some(render_file_contents(
+            &resolved,
+            ctx,
+            self.render_mode,
+            &target,
+            diagnostics,
+        )?))
     }
 }
 
 impl Transform for FileInliningTransform {
     fn apply(&self, graph: Graph) -> Result<Graph, Error> {
-        let mut graph = graph;
-
-        // Inline @file refs in node prompts
-        for node in graph.nodes.values_mut() {
-            if let Some(AttrValue::String(prompt)) = node.attrs.get("prompt") {
-                let resolved = resolve_file_ref(prompt, &self.current_dir, self.resolver.as_ref())?;
-                if resolved != *prompt {
-                    node.attrs
-                        .insert("prompt".to_string(), AttrValue::String(resolved));
-                }
-            }
+        let (graph, diagnostics) = self.apply_with_diagnostics(graph)?;
+        if !diagnostics.is_empty() {
+            return Err(Error::ValidationFailed { diagnostics });
         }
-
-        // Inline @file refs in graph-level goal
-        if let Some(AttrValue::String(goal)) = graph.attrs.get("goal") {
-            let resolved = resolve_file_ref(goal, &self.current_dir, self.resolver.as_ref())?;
-            if resolved != *goal {
-                graph
-                    .attrs
-                    .insert("goal".to_string(), AttrValue::String(resolved));
-            }
-        }
-
         Ok(graph)
     }
+}
+
+pub(crate) fn render_file_contents(
+    resolved: &ResolvedFile,
+    ctx: &TemplateContext,
+    render_mode: RenderMode,
+    target: &TemplateRenderTarget,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<String, Error> {
+    render_template_for_target(&resolved.content, ctx, render_mode, target, diagnostics)
 }
 
 #[cfg(test)]

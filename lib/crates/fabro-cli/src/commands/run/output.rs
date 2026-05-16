@@ -70,19 +70,40 @@ pub(crate) fn print_workflow_summary(
 
 fn api_diagnostic_to_local(diagnostic: &types::WorkflowDiagnostic) -> fabro_validate::Diagnostic {
     fabro_validate::Diagnostic {
-        rule:     diagnostic.rule.clone(),
-        severity: match diagnostic.severity {
+        rule:        diagnostic.rule.clone(),
+        severity:    match diagnostic.severity {
             types::WorkflowDiagnosticSeverity::Error => fabro_validate::Severity::Error,
             types::WorkflowDiagnosticSeverity::Warning => fabro_validate::Severity::Warning,
             types::WorkflowDiagnosticSeverity::Info => fabro_validate::Severity::Info,
         },
-        message:  diagnostic.message.clone(),
-        node_id:  diagnostic.node_id.clone(),
-        edge:     diagnostic
+        message:     diagnostic.message.clone(),
+        node_id:     diagnostic.node_id.clone(),
+        edge:        diagnostic
             .edge
             .as_ref()
             .map(|edge| (edge[0].clone(), edge[1].clone())),
-        fix:      diagnostic.fix.clone(),
+        fix:         diagnostic.fix.clone(),
+        source_path: diagnostic.source_path.clone(),
+        line:        diagnostic.line.and_then(|value| u32::try_from(value).ok()),
+        column:      diagnostic
+            .column
+            .and_then(|value| u32::try_from(value).ok()),
+        span_start:  diagnostic
+            .span_start
+            .and_then(|value| usize::try_from(value).ok()),
+        span_len:    diagnostic
+            .span_len
+            .and_then(|value| usize::try_from(value).ok()),
+        related:     diagnostic
+            .related
+            .iter()
+            .map(|related| fabro_validate::RelatedDiagnostic {
+                message:     related.message.clone(),
+                source_path: related.source_path.clone(),
+                line:        related.line.and_then(|value| u32::try_from(value).ok()),
+                column:      related.column.and_then(|value| u32::try_from(value).ok()),
+            })
+            .collect(),
     }
 }
 

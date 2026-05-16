@@ -19,6 +19,8 @@ pub(super) fn check_model_known(
         node_id,
         edge: None,
         fix: Some("Use a model ID from `fabro model list`".to_string()),
+
+        ..Diagnostic::default()
     })
 }
 
@@ -48,5 +50,7 @@ pub(super) fn check_provider_known(
         node_id,
         edge: None,
         fix: Some(format!("Use one of: {valid_str}")),
+
+        ..Diagnostic::default()
     })
 }

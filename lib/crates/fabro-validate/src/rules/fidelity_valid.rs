@@ -32,15 +32,17 @@ impl LintRule for Rule {
             if let Some(fidelity) = node.fidelity() {
                 if fidelity.parse::<Fidelity>().is_err() {
                     diagnostics.push(Diagnostic {
-                        rule:     self.name().to_string(),
+                        rule: self.name().to_string(),
                         severity: Severity::Warning,
-                        message:  format!(
+                        message: format!(
                             "Node '{}' has invalid fidelity mode '{fidelity}'",
                             node.id
                         ),
-                        node_id:  Some(node.id.clone()),
-                        edge:     None,
-                        fix:      Some(Self::fix_message()),
+                        node_id: Some(node.id.clone()),
+                        edge: None,
+                        fix: Some(Self::fix_message()),
+
+                        ..Diagnostic::default()
                     });
                 }
             }
@@ -49,15 +51,17 @@ impl LintRule for Rule {
             if let Some(fidelity) = edge.fidelity() {
                 if fidelity.parse::<Fidelity>().is_err() {
                     diagnostics.push(Diagnostic {
-                        rule:     self.name().to_string(),
+                        rule: self.name().to_string(),
                         severity: Severity::Warning,
-                        message:  format!(
+                        message: format!(
                             "Edge {} -> {} has invalid fidelity mode '{fidelity}'",
                             edge.from, edge.to
                         ),
-                        node_id:  None,
-                        edge:     Some((edge.from.clone(), edge.to.clone())),
-                        fix:      Some(Self::fix_message()),
+                        node_id: None,
+                        edge: Some((edge.from.clone(), edge.to.clone())),
+                        fix: Some(Self::fix_message()),
+
+                        ..Diagnostic::default()
                     });
                 }
             }
@@ -65,12 +69,14 @@ impl LintRule for Rule {
         if let Some(fidelity) = graph.default_fidelity() {
             if fidelity.parse::<Fidelity>().is_err() {
                 diagnostics.push(Diagnostic {
-                    rule:     self.name().to_string(),
+                    rule: self.name().to_string(),
                     severity: Severity::Warning,
-                    message:  format!("Graph has invalid default_fidelity '{fidelity}'"),
-                    node_id:  None,
-                    edge:     None,
-                    fix:      Some(Self::fix_message()),
+                    message: format!("Graph has invalid default_fidelity '{fidelity}'"),
+                    node_id: None,
+                    edge: None,
+                    fix: Some(Self::fix_message()),
+
+                    ..Diagnostic::default()
                 });
             }
         }

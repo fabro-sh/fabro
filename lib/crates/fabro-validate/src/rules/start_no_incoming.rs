@@ -20,16 +20,18 @@ impl LintRule for Rule {
         let incoming = graph.incoming_edges(&start.id);
         if !incoming.is_empty() {
             return vec![Diagnostic {
-                rule:     self.name().to_string(),
+                rule: self.name().to_string(),
                 severity: Severity::Error,
-                message:  format!(
+                message: format!(
                     "Start node '{}' has {} incoming edge(s) but must have none",
                     start.id,
                     incoming.len()
                 ),
-                node_id:  Some(start.id.clone()),
-                edge:     None,
-                fix:      Some("Remove incoming edges to the start node".to_string()),
+                node_id: Some(start.id.clone()),
+                edge: None,
+                fix: Some("Remove incoming edges to the start node".to_string()),
+
+                ..Diagnostic::default()
             }];
         }
         Vec::new()

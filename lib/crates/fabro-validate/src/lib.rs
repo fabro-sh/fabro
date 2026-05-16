@@ -15,12 +15,46 @@ pub enum Severity {
 /// A validation diagnostic produced by a lint rule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Diagnostic {
-    pub rule:     String,
-    pub severity: Severity,
-    pub message:  String,
-    pub node_id:  Option<String>,
-    pub edge:     Option<(String, String)>,
-    pub fix:      Option<String>,
+    pub rule:        String,
+    pub severity:    Severity,
+    pub message:     String,
+    pub node_id:     Option<String>,
+    pub edge:        Option<(String, String)>,
+    pub fix:         Option<String>,
+    pub source_path: Option<String>,
+    pub line:        Option<u32>,
+    pub column:      Option<u32>,
+    pub span_start:  Option<usize>,
+    pub span_len:    Option<usize>,
+    #[serde(default)]
+    pub related:     Vec<RelatedDiagnostic>,
+}
+
+impl Default for Diagnostic {
+    fn default() -> Self {
+        Self {
+            rule:        String::new(),
+            severity:    Severity::Info,
+            message:     String::new(),
+            node_id:     None,
+            edge:        None,
+            fix:         None,
+            source_path: None,
+            line:        None,
+            column:      None,
+            span_start:  None,
+            span_len:    None,
+            related:     Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelatedDiagnostic {
+    pub message:     String,
+    pub source_path: Option<String>,
+    pub line:        Option<u32>,
+    pub column:      Option<u32>,
 }
 
 /// A lint rule that validates a graph.
@@ -254,12 +288,14 @@ reasoning = false
             }
             fn apply(&self, _graph: &Graph) -> Vec<Diagnostic> {
                 vec![Diagnostic {
-                    rule:     "always_warn".to_string(),
+                    rule: "always_warn".to_string(),
                     severity: Severity::Warning,
-                    message:  "custom warning".to_string(),
-                    node_id:  None,
-                    edge:     None,
-                    fix:      None,
+                    message: "custom warning".to_string(),
+                    node_id: None,
+                    edge: None,
+                    fix: None,
+
+                    ..Diagnostic::default()
                 }]
             }
         }

@@ -19,32 +19,36 @@ impl LintRule for Rule {
             if let Some(target) = node.retry_target() {
                 if !graph.nodes.contains_key(target) {
                     diagnostics.push(Diagnostic {
-                        rule:     self.name().to_string(),
+                        rule: self.name().to_string(),
                         severity: Severity::Warning,
-                        message:  format!(
+                        message: format!(
                             "Node '{}' has retry_target '{}' that does not exist",
                             node.id, target
                         ),
-                        node_id:  Some(node.id.clone()),
-                        edge:     None,
-                        fix:      Some(format!("Define node '{target}' or fix retry_target")),
+                        node_id: Some(node.id.clone()),
+                        edge: None,
+                        fix: Some(format!("Define node '{target}' or fix retry_target")),
+
+                        ..Diagnostic::default()
                     });
                 }
             }
             if let Some(target) = node.fallback_retry_target() {
                 if !graph.nodes.contains_key(target) {
                     diagnostics.push(Diagnostic {
-                        rule:     self.name().to_string(),
+                        rule: self.name().to_string(),
                         severity: Severity::Warning,
-                        message:  format!(
+                        message: format!(
                             "Node '{}' has fallback_retry_target '{}' that does not exist",
                             node.id, target
                         ),
-                        node_id:  Some(node.id.clone()),
-                        edge:     None,
-                        fix:      Some(format!(
+                        node_id: Some(node.id.clone()),
+                        edge: None,
+                        fix: Some(format!(
                             "Define node '{target}' or fix fallback_retry_target"
                         )),
+
+                        ..Diagnostic::default()
                     });
                 }
             }
@@ -52,28 +56,32 @@ impl LintRule for Rule {
         if let Some(target) = graph.retry_target() {
             if !graph.nodes.contains_key(target) {
                 diagnostics.push(Diagnostic {
-                    rule:     self.name().to_string(),
+                    rule: self.name().to_string(),
                     severity: Severity::Warning,
-                    message:  format!("Graph has retry_target '{target}' that does not exist"),
-                    node_id:  None,
-                    edge:     None,
-                    fix:      Some(format!("Define node '{target}' or fix graph retry_target")),
+                    message: format!("Graph has retry_target '{target}' that does not exist"),
+                    node_id: None,
+                    edge: None,
+                    fix: Some(format!("Define node '{target}' or fix graph retry_target")),
+
+                    ..Diagnostic::default()
                 });
             }
         }
         if let Some(target) = graph.fallback_retry_target() {
             if !graph.nodes.contains_key(target) {
                 diagnostics.push(Diagnostic {
-                    rule:     self.name().to_string(),
+                    rule: self.name().to_string(),
                     severity: Severity::Warning,
-                    message:  format!(
+                    message: format!(
                         "Graph has fallback_retry_target '{target}' that does not exist"
                     ),
-                    node_id:  None,
-                    edge:     None,
-                    fix:      Some(format!(
+                    node_id: None,
+                    edge: None,
+                    fix: Some(format!(
                         "Define node '{target}' or fix graph fallback_retry_target"
                     )),
+
+                    ..Diagnostic::default()
                 });
             }
         }

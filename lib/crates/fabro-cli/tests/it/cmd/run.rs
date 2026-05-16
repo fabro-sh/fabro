@@ -693,6 +693,14 @@ fn run_rejects_unbound_template_inputs_before_creating_remote_run() {
         stderr.contains("inputs.app_dir"),
         "stderr should name the unbound variable: {stderr}"
     );
+    assert!(
+        stderr.contains("templated_unbound.fabro"),
+        "stderr should name the workflow source: {stderr}"
+    );
+    assert!(
+        !stderr.contains("<string>"),
+        "stderr should not expose MiniJinja's generic source name: {stderr}"
+    );
 }
 
 #[test]

@@ -25,16 +25,18 @@ impl LintRule for Rule {
                 let outgoing = graph.outgoing_edges(&node.id);
                 if !outgoing.is_empty() {
                     diagnostics.push(Diagnostic {
-                        rule:     self.name().to_string(),
+                        rule: self.name().to_string(),
                         severity: Severity::Error,
-                        message:  format!(
+                        message: format!(
                             "Exit node '{}' has {} outgoing edge(s) but must have none",
                             node.id,
                             outgoing.len()
                         ),
-                        node_id:  Some(node.id.clone()),
-                        edge:     None,
-                        fix:      Some("Remove outgoing edges from the exit node".to_string()),
+                        node_id: Some(node.id.clone()),
+                        edge: None,
+                        fix: Some("Remove outgoing edges from the exit node".to_string()),
+
+                        ..Diagnostic::default()
                     });
                 }
             }

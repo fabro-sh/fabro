@@ -22,12 +22,14 @@ impl LintRule for Rule {
         match parse_stylesheet(stylesheet) {
             Ok(_) => Vec::new(),
             Err(e) => vec![Diagnostic {
-                rule:     self.name().to_string(),
+                rule: self.name().to_string(),
                 severity: Severity::Error,
-                message:  format!("Model stylesheet parse error: {e}"),
-                node_id:  None,
-                edge:     None,
-                fix:      Some("Fix the model_stylesheet syntax".to_string()),
+                message: format!("Model stylesheet parse error: {e}"),
+                node_id: None,
+                edge: None,
+                fix: Some("Fix the model_stylesheet syntax".to_string()),
+
+                ..Diagnostic::default()
             }],
         }
     }

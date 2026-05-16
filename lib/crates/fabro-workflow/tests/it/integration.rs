@@ -4307,6 +4307,8 @@ async fn import_e2e_through_engine() {
             fabro_workflow::file_resolver::FilesystemFileResolver::new(None),
         )),
         inputs:            std::collections::HashMap::new(),
+        source_name:       None,
+        render_mode:       fabro_workflow::operations::RenderMode::Strict,
         custom_transforms: vec![],
         catalog:           std::sync::Arc::clone(&catalog),
     })

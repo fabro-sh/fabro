@@ -36,7 +36,8 @@ impl LintRule for Rule {
                     fix: Some(
                         "Add at least one unconditional edge as a fallback".to_string(),
                     ),
-                });
+
+                ..Diagnostic::default()});
             }
         }
         diagnostics

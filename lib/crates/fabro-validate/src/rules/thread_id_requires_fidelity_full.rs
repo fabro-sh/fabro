@@ -25,15 +25,17 @@ impl LintRule for Rule {
             if node.thread_id().is_some() && node.fidelity() != Some("full") && !graph_default_full
             {
                 diagnostics.push(Diagnostic {
-                    rule:     self.name().to_string(),
+                    rule: self.name().to_string(),
                     severity: Severity::Warning,
-                    message:  format!(
+                    message: format!(
                         "Node '{}' has thread_id but fidelity is not 'full'",
                         node.id
                     ),
-                    node_id:  Some(node.id.clone()),
-                    edge:     None,
-                    fix:      Some(Self::FIX.to_string()),
+                    node_id: Some(node.id.clone()),
+                    edge: None,
+                    fix: Some(Self::FIX.to_string()),
+
+                    ..Diagnostic::default()
                 });
             }
         }
@@ -45,15 +47,17 @@ impl LintRule for Rule {
                     graph.nodes.get(&edge.to).and_then(|n| n.fidelity()) == Some("full");
                 if !edge_full && !target_full && !graph_default_full {
                     diagnostics.push(Diagnostic {
-                        rule:     self.name().to_string(),
+                        rule: self.name().to_string(),
                         severity: Severity::Warning,
-                        message:  format!(
+                        message: format!(
                             "Edge {} -> {} has thread_id but fidelity is not 'full'",
                             edge.from, edge.to
                         ),
-                        node_id:  None,
-                        edge:     Some((edge.from.clone(), edge.to.clone())),
-                        fix:      Some(Self::FIX.to_string()),
+                        node_id: None,
+                        edge: Some((edge.from.clone(), edge.to.clone())),
+                        fix: Some(Self::FIX.to_string()),
+
+                        ..Diagnostic::default()
                     });
                 }
             }
@@ -61,12 +65,14 @@ impl LintRule for Rule {
 
         if graph.default_thread().is_some() && !graph_default_full {
             diagnostics.push(Diagnostic {
-                rule:     self.name().to_string(),
+                rule: self.name().to_string(),
                 severity: Severity::Warning,
-                message:  "Graph has default_thread but default_fidelity is not 'full'".to_string(),
-                node_id:  None,
-                edge:     None,
-                fix:      Some(Self::FIX.to_string()),
+                message: "Graph has default_thread but default_fidelity is not 'full'".to_string(),
+                node_id: None,
+                edge: None,
+                fix: Some(Self::FIX.to_string()),
+
+                ..Diagnostic::default()
             });
         }
 

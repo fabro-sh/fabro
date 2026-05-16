@@ -22,29 +22,33 @@ impl LintRule for Rule {
                     Some(Err(_)) => {
                         let expected = LlmBackend::expected_values();
                         diagnostics.push(Diagnostic {
-                            rule:     self.name().to_string(),
+                            rule: self.name().to_string(),
                             severity: Severity::Error,
-                            message:  format!(
+                            message: format!(
                                 "unsupported LLM backend \"{backend}\"; expected one of: {expected}"
                             ),
-                            node_id:  Some(node.id.clone()),
-                            edge:     None,
-                            fix:      Some(format!("Use one of: {expected}")),
+                            node_id: Some(node.id.clone()),
+                            edge: None,
+                            fix: Some(format!("Use one of: {expected}")),
+
+                            ..Diagnostic::default()
                         });
                     }
                     Some(Ok(LlmBackend::Acp)) if acp_command_missing(node) => {
                         diagnostics.push(Diagnostic {
-                            rule:     self.name().to_string(),
+                            rule: self.name().to_string(),
                             severity: Severity::Error,
-                            message:  "backend=\"acp\" requires acp_command because Fabro does \
+                            message: "backend=\"acp\" requires acp_command because Fabro does \
                                        not install ACP agents"
                                 .to_string(),
-                            node_id:  Some(node.id.clone()),
-                            edge:     None,
-                            fix:      Some(
+                            node_id: Some(node.id.clone()),
+                            edge: None,
+                            fix: Some(
                                 "Set acp_command to a stdio ACP command available in the sandbox"
                                     .to_string(),
                             ),
+
+                            ..Diagnostic::default()
                         });
                     }
                     Some(Ok(_)) | None => {}

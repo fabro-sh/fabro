@@ -3050,6 +3050,68 @@ reasoning = false
     );
 }
 
+#[tokio::test]
+async fn validate_endpoint_returns_template_source_coordinates() {
+    let app = test_app_with();
+    let dot = r#"digraph ValidatePlan {
+        start [shape=Mdiamond, label="Start"]
+        exit  [shape=Msquare, label="Exit"]
+        test_imported_prompt [label="moo" prompt="@test.md"]
+        start -> test_imported_prompt -> exit
+    }"#;
+    let manifest = serde_json::json!({
+        "version": 1,
+        "cwd": "/tmp",
+        "target": {
+            "identifier": "workflow.fabro",
+            "path": "workflow.fabro",
+        },
+        "workflows": {
+            "workflow.fabro": {
+                "source": dot,
+                "files": {
+                    "test.md": {
+                        "content": "{{ inputs.foo }}",
+                        "ref": {
+                            "type": "file_inline",
+                            "original": "test.md",
+                            "from": "workflow.fabro",
+                        },
+                    },
+                },
+            },
+        },
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api("/validate"))
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&manifest).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let diagnostics = body["workflow"]["diagnostics"].as_array().unwrap();
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic["rule"] == "template_undefined_variable")
+        .expect("expected template diagnostic");
+
+    assert_eq!(diagnostic["source_path"], "test.md");
+    assert_eq!(diagnostic["line"], 1);
+    assert_eq!(diagnostic["column"], 4);
+    assert!(
+        diagnostic["node_id"]
+            .as_str()
+            .unwrap()
+            .contains("test_imported_prompt")
+    );
+}
+
 async fn create_run_for_target(app: &Router, target_path: &str, dot_source: &str) -> String {
     let req = Request::builder()
         .method("POST")

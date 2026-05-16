@@ -25,15 +25,14 @@ impl LintRule for Rule {
                     .is_some_and(|l| !l.is_empty());
                 if !has_prompt && !has_label {
                     diagnostics.push(Diagnostic {
-                        rule:     self.name().to_string(),
+                        rule: self.name().to_string(),
                         severity: Severity::Warning,
-                        message:  format!(
-                            "LLM node '{}' has no prompt or label attribute",
-                            node.id
-                        ),
-                        node_id:  Some(node.id.clone()),
-                        edge:     None,
-                        fix:      Some("Add a prompt or label attribute".to_string()),
+                        message: format!("LLM node '{}' has no prompt or label attribute", node.id),
+                        node_id: Some(node.id.clone()),
+                        edge: None,
+                        fix: Some("Add a prompt or label attribute".to_string()),
+
+                        ..Diagnostic::default()
                     });
                 }
             }

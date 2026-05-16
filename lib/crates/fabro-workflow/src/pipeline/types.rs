@@ -27,7 +27,7 @@ use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::runtime_store::RunStoreHandle;
 use crate::services::{EngineServices, RunServices};
 use crate::steering_hub::SteeringHub;
-use crate::transforms::Transform;
+use crate::transforms::{RenderMode, Transform};
 use crate::workflow_bundle::WorkflowBundle;
 
 /// Output of the PARSE phase.
@@ -50,41 +50,6 @@ pub struct Transformed {
 
 /// Lint rule name attached to diagnostics for undefined template variables.
 pub const TEMPLATE_UNDEFINED_VARIABLE_RULE: &str = "template_undefined_variable";
-
-/// Build a warning diagnostic describing an undefined template variable.
-/// Shared between the DOT-source render pass (`operations::create`) and the
-/// per-attribute render pass (`transforms::variable_expansion`).
-pub(crate) fn template_undefined_variable_diagnostic(
-    expression: Option<&str>,
-    line: Option<u32>,
-    node_id: Option<&str>,
-) -> Diagnostic {
-    let location = match (node_id, line) {
-        (Some(id), _) => format!(" in node `{id}`"),
-        (None, Some(l)) => format!(" at line {l}"),
-        (None, None) => String::new(),
-    };
-    let (name, message) = match expression {
-        Some(expr) => (
-            expr,
-            format!("undefined template variable `{expr}`{location}"),
-        ),
-        None => (
-            "<unknown>",
-            format!("undefined template variable{location}"),
-        ),
-    };
-    Diagnostic {
-        rule: TEMPLATE_UNDEFINED_VARIABLE_RULE.to_owned(),
-        severity: Severity::Warning,
-        message,
-        node_id: node_id.map(str::to_owned),
-        edge: None,
-        fix: Some(format!(
-            "bind `{name}` via `[run.inputs]` in workflow.toml, or pass `--input {name}=<value>`"
-        )),
-    }
-}
 
 /// Output of the VALIDATE phase. Always produced (even with errors).
 /// Caller inspects diagnostics and decides whether to proceed.
@@ -365,6 +330,8 @@ pub struct TransformOptions {
     pub current_dir:       Option<PathBuf>,
     pub file_resolver:     Option<Arc<dyn FileResolver>>,
     pub inputs:            HashMap<String, toml::Value>,
+    pub source_name:       Option<String>,
+    pub render_mode:       RenderMode,
     pub custom_transforms: Vec<Box<dyn Transform>>,
     pub catalog:           Arc<fabro_model::Catalog>,
 }

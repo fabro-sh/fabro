@@ -2413,6 +2413,7 @@ version = "0.235.0-nightly.0"
 dependencies = [
  "anyhow",
  "fabro-util",
+ "miette",
  "minijinja",
  "serde",
  "thiserror 2.0.18",
@@ -2564,6 +2565,7 @@ dependencies = [
  "hex",
  "httpmock",
  "md5",
+ "miette",
  "mime_guess",
  "object_store",
  "predicates",

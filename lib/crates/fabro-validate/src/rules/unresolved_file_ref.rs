@@ -29,7 +29,8 @@ impl LintRule for Rule {
                         node_id: Some(node.id.clone()),
                         edge: None,
                         fix: Some("Check that the path is relative to the workflow file's directory and the file exists".to_string()),
-                    });
+
+                    ..Diagnostic::default()});
                 }
             }
         }
@@ -43,7 +44,8 @@ impl LintRule for Rule {
                     node_id: None,
                     edge: None,
                     fix: Some("Check that the path is relative to the workflow file's directory and the file exists".to_string()),
-                });
+
+                ..Diagnostic::default()});
             }
         }
 

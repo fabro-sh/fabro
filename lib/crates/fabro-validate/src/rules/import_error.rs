@@ -19,26 +19,30 @@ impl LintRule for Rule {
         for node in graph.nodes.values() {
             if let Some(AttrValue::String(message)) = node.attrs.get("import_error") {
                 diagnostics.push(Diagnostic {
-                    rule:     self.name().to_string(),
+                    rule: self.name().to_string(),
                     severity: Severity::Error,
-                    message:  message.clone(),
-                    node_id:  Some(node.id.clone()),
-                    edge:     None,
-                    fix:      Some("Fix the imported workflow or import path".to_string()),
+                    message: message.clone(),
+                    node_id: Some(node.id.clone()),
+                    edge: None,
+                    fix: Some("Fix the imported workflow or import path".to_string()),
+
+                    ..Diagnostic::default()
                 });
             }
 
             if node.attrs.contains_key("import") {
                 diagnostics.push(Diagnostic {
-                    rule:     self.name().to_string(),
+                    rule: self.name().to_string(),
                     severity: Severity::Error,
-                    message:  "unresolved import (no base directory available)".to_string(),
-                    node_id:  Some(node.id.clone()),
-                    edge:     None,
-                    fix:      Some(
+                    message: "unresolved import (no base directory available)".to_string(),
+                    node_id: Some(node.id.clone()),
+                    edge: None,
+                    fix: Some(
                         "Load the workflow from a file so imports can resolve relative to it"
                             .to_string(),
                     ),
+
+                    ..Diagnostic::default()
                 });
             }
         }

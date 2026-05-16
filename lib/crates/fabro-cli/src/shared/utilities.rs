@@ -54,17 +54,32 @@ pub(crate) fn print_diagnostics(diagnostics: &[Diagnostic], styles: &Styles, pri
             (_, Some((from, to))) => format!(" [edge: {from} -> {to}]"),
             _ => String::new(),
         };
+        let source_prefix = source_prefix(d);
         match d.severity {
-            Severity::Error => fabro_util::printerr!(
+            Severity::Error if source_prefix.is_empty() => fabro_util::printerr!(
                 printer,
                 "{}{location}: {} ({})",
                 styles.red.apply_to("error"),
                 d.message,
                 styles.dim.apply_to(&d.rule),
             ),
-            Severity::Warning => fabro_util::printerr!(
+            Severity::Error => fabro_util::printerr!(
+                printer,
+                "{}: {source_prefix}{}{location} ({})",
+                styles.red.apply_to("error"),
+                d.message,
+                styles.dim.apply_to(&d.rule),
+            ),
+            Severity::Warning if source_prefix.is_empty() => fabro_util::printerr!(
                 printer,
                 "{}{location}: {} ({})",
+                styles.yellow.apply_to("warning"),
+                d.message,
+                styles.dim.apply_to(&d.rule),
+            ),
+            Severity::Warning => fabro_util::printerr!(
+                printer,
+                "{}: {source_prefix}{}{location} ({})",
                 styles.yellow.apply_to("warning"),
                 d.message,
                 styles.dim.apply_to(&d.rule),
@@ -72,11 +87,42 @@ pub(crate) fn print_diagnostics(diagnostics: &[Diagnostic], styles: &Styles, pri
             Severity::Info => fabro_util::printerr!(
                 printer,
                 "{}",
-                styles
-                    .dim
-                    .apply_to(format!("info{location}: {} ({})", d.message, d.rule)),
+                styles.dim.apply_to(if source_prefix.is_empty() {
+                    format!("info{location}: {} ({})", d.message, d.rule)
+                } else {
+                    format!("info: {source_prefix}{}{location} ({})", d.message, d.rule)
+                }),
             ),
         }
+    }
+}
+
+fn source_prefix(diagnostic: &Diagnostic) -> String {
+    match (
+        diagnostic.source_path.as_deref(),
+        diagnostic.line,
+        diagnostic.column,
+    ) {
+        (Some(path), Some(line), Some(column)) => {
+            format!("{}:{line}:{column}: ", display_diagnostic_path(path))
+        }
+        (Some(path), Some(line), None) => {
+            format!("{}:{line}: ", display_diagnostic_path(path))
+        }
+        (Some(path), None, _) => format!("{}: ", display_diagnostic_path(path)),
+        _ => String::new(),
+    }
+}
+
+fn display_diagnostic_path(path: &str) -> String {
+    let path = Path::new(path);
+    if let Ok(canonical) = path.canonicalize() {
+        return relative_path(&canonical);
+    }
+    if path.is_absolute() {
+        relative_path(path)
+    } else {
+        path.display().to_string()
     }
 }
 

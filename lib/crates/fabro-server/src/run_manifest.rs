@@ -1263,19 +1263,40 @@ fn diagnostics_to_api(
     diagnostics
         .iter()
         .map(|diagnostic| types::WorkflowDiagnostic {
-            edge:     diagnostic
+            column:      diagnostic
+                .column
+                .and_then(|value| i32::try_from(value).ok()),
+            edge:        diagnostic
                 .edge
                 .as_ref()
                 .map(|edge: &(String, String)| [edge.0.clone(), edge.1.clone()]),
-            fix:      diagnostic.fix.clone(),
-            message:  diagnostic.message.clone(),
-            node_id:  diagnostic.node_id.clone(),
-            rule:     diagnostic.rule.clone(),
-            severity: match diagnostic.severity {
+            fix:         diagnostic.fix.clone(),
+            line:        diagnostic.line.and_then(|value| i32::try_from(value).ok()),
+            message:     diagnostic.message.clone(),
+            node_id:     diagnostic.node_id.clone(),
+            related:     diagnostic
+                .related
+                .iter()
+                .map(|related| types::RelatedWorkflowDiagnostic {
+                    column:      related.column.and_then(|value| i32::try_from(value).ok()),
+                    line:        related.line.and_then(|value| i32::try_from(value).ok()),
+                    message:     related.message.clone(),
+                    source_path: related.source_path.clone(),
+                })
+                .collect(),
+            rule:        diagnostic.rule.clone(),
+            severity:    match diagnostic.severity {
                 Severity::Error => types::WorkflowDiagnosticSeverity::Error,
                 Severity::Warning => types::WorkflowDiagnosticSeverity::Warning,
                 Severity::Info => types::WorkflowDiagnosticSeverity::Info,
             },
+            source_path: diagnostic.source_path.clone(),
+            span_len:    diagnostic
+                .span_len
+                .and_then(|value| i64::try_from(value).ok()),
+            span_start:  diagnostic
+                .span_start
+                .and_then(|value| i64::try_from(value).ok()),
         })
         .collect()
 }

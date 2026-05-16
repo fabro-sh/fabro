@@ -6021,6 +6021,41 @@ components:
             type: string
         fix:
           type: ["string", "null"]
+        source_path:
+          type: ["string", "null"]
+        line:
+          type: ["integer", "null"]
+          format: int32
+        column:
+          type: ["integer", "null"]
+          format: int32
+        span_start:
+          type: ["integer", "null"]
+          format: int64
+        span_len:
+          type: ["integer", "null"]
+          format: int64
+        related:
+          type: array
+          items:
+            $ref: "#/components/schemas/RelatedWorkflowDiagnostic"
+          default: []
+
+    RelatedWorkflowDiagnostic:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+        source_path:
+          type: ["string", "null"]
+        line:
+          type: ["integer", "null"]
+          format: int32
+        column:
+          type: ["integer", "null"]
+          format: int32
 
     PreflightCheckReport:
       type: object

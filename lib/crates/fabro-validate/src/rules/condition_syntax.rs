@@ -25,19 +25,21 @@ impl LintRule for Rule {
             }
             if let Err(e) = parse_condition(condition) {
                 diagnostics.push(Diagnostic {
-                    rule:     self.name().to_string(),
+                    rule: self.name().to_string(),
                     severity: Severity::Error,
-                    message:  format!(
+                    message: format!(
                         "Condition '{condition}' on edge {} -> {} failed parse: {e}",
                         edge.from, edge.to
                     ),
-                    node_id:  None,
-                    edge:     Some((edge.from.clone(), edge.to.clone())),
-                    fix:      Some(
+                    node_id: None,
+                    edge: Some((edge.from.clone(), edge.to.clone())),
+                    fix: Some(
                         "Use key=value, key!=value, key>value, key contains value, \
                          key matches pattern, or bare key syntax"
                             .to_string(),
                     ),
+
+                    ..Diagnostic::default()
                 });
             }
         }

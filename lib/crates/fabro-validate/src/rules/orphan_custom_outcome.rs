@@ -48,7 +48,8 @@ impl LintRule for Rule {
                         "Add an unconditional edge as a safety net for unmatched outcomes"
                             .to_string(),
                     ),
-                });
+
+                ..Diagnostic::default()});
             }
         }
         diagnostics

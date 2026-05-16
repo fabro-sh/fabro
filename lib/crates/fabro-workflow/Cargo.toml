@@ -61,6 +61,7 @@ md5.workspace = true
 hex.workspace = true
 sha2 = { workspace = true }
 mime_guess.workspace = true
+miette.workspace = true
 shlex = "1"
 git2.workspace = true
 tokio-util.workspace = true
