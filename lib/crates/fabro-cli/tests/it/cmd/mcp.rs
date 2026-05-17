@@ -556,6 +556,8 @@ async fn mcp_create_and_search_manage_real_runs_with_cli_auth() {
       "runs": [
         {
           "run_id": "[RUN_ID]",
+          "parent_id": null,
+          "children_count": 0,
           "workflow_name": "Simple",
           "workflow_slug": "simple",
           "status": "queued",
@@ -1160,6 +1162,8 @@ async fn mcp_lifecycle_tools_manage_real_run() {
         "runs": [
           {
             "run_id": "[RUN_ID]",
+            "parent_id": null,
+            "children_count": 0,
             "workflow_name": "Simple",
             "workflow_slug": "simple",
             "status": "failed",
