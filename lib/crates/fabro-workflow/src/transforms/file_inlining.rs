@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use fabro_graphviz::graph::{AttrValue, Graph};
-use fabro_template::TemplateContext;
+use fabro_template::{TemplateContext, TemplateLoader};
 use fabro_validate::Diagnostic;
 
 use super::Transform;
@@ -32,6 +32,34 @@ pub fn resolve_file_ref(
     Ok(resolver
         .resolve(current_dir, path_str)
         .map_or_else(|| value.to_string(), |resolved| resolved.content))
+}
+
+pub(crate) fn template_include_loader(
+    current_dir: PathBuf,
+    resolver: Arc<dyn FileResolver>,
+) -> TemplateLoader {
+    Arc::new(move |name| {
+        if !is_safe_include_name(name) {
+            return None;
+        }
+        resolver
+            .resolve(&current_dir, name)
+            .map(|resolved| resolved.content)
+    })
+}
+
+fn is_safe_include_name(name: &str) -> bool {
+    if name.is_empty() || name.starts_with('~') || Path::new(name).is_absolute() {
+        return false;
+    }
+    name.split('/')
+        .all(|segment| !segment.starts_with('.') && !segment.contains('\\'))
+}
+
+fn parent_dir_or_dot(path: &Path) -> PathBuf {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
 }
 
 /// Inlines `@file` references in node prompts and the graph-level goal.
@@ -111,7 +139,11 @@ impl FileInliningTransform {
                 node_id.clone(),
                 "prompt",
             )
-            .with_source_text(self.source_text.as_deref(), prompt);
+            .with_source_text(self.source_text.as_deref(), prompt)
+            .with_include_loader(Some(template_include_loader(
+                self.current_dir.clone(),
+                Arc::clone(&self.resolver),
+            )));
             let rendered = render_template_for_target(
                 prompt,
                 &ctx,
@@ -139,7 +171,11 @@ impl FileInliningTransform {
         };
         let ctx = TemplateContext::for_input_scan(self.inputs.clone());
         let target = TemplateRenderTarget::graph_attr(self.source_name.clone(), "goal")
-            .with_source_text(self.source_text.as_deref(), goal);
+            .with_source_text(self.source_text.as_deref(), goal)
+            .with_include_loader(Some(template_include_loader(
+                self.current_dir.clone(),
+                Arc::clone(&self.resolver),
+            )));
         let rendered =
             render_template_for_target(goal, &ctx, self.render_mode, &target, diagnostics)?;
         let value = self
@@ -168,7 +204,11 @@ impl FileInliningTransform {
         };
         let target = owner_target
             .with_source_name(resolved.path.display().to_string())
-            .with_source_text(Some(&resolved.content), &resolved.content);
+            .with_source_text(Some(&resolved.content), &resolved.content)
+            .with_include_loader(Some(template_include_loader(
+                parent_dir_or_dot(&resolved.path),
+                Arc::clone(&self.resolver),
+            )));
         Ok(Some(render_file_contents(
             &resolved,
             ctx,
@@ -307,6 +347,73 @@ mod tests {
         assert_eq!(
             graph.attrs.get("goal").and_then(AttrValue::as_str),
             Some("Ship feature")
+        );
+    }
+
+    #[test]
+    fn file_inlining_transform_resolves_minijinja_includes_for_prompts_and_goal() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("prompts")).unwrap();
+        std::fs::create_dir_all(dir.path().join("goals")).unwrap();
+        std::fs::write(
+            dir.path().join("prompts/work.md"),
+            r#"{% include "work.tpl.md" %}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("prompts/work.tpl.md"), "file prompt").unwrap();
+        std::fs::write(dir.path().join("inline.tpl.md"), "inline prompt").unwrap();
+        std::fs::write(
+            dir.path().join("goals/goal.md"),
+            r#"{% include "goal.tpl.md" %}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("goals/goal.tpl.md"), "included goal").unwrap();
+
+        let mut graph = Graph::new("test");
+        graph.attrs.insert(
+            "goal".to_string(),
+            AttrValue::String("@goals/goal.md".to_string()),
+        );
+        let mut file_prompt = Node::new("file_prompt");
+        file_prompt.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("@prompts/work.md".to_string()),
+        );
+        graph
+            .nodes
+            .insert("file_prompt".to_string(), file_prompt);
+        let mut inline_prompt = Node::new("inline_prompt");
+        inline_prompt.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String(r#"{% include "inline.tpl.md" %}"#.to_string()),
+        );
+        graph
+            .nodes
+            .insert("inline_prompt".to_string(), inline_prompt);
+
+        let transform = FileInliningTransform::new(
+            dir.path().to_path_buf(),
+            Arc::new(FilesystemFileResolver::new(None)),
+        );
+        let graph = transform.apply(graph).unwrap();
+
+        assert_eq!(
+            graph.nodes["file_prompt"]
+                .attrs
+                .get("prompt")
+                .and_then(AttrValue::as_str),
+            Some("file prompt")
+        );
+        assert_eq!(
+            graph.nodes["inline_prompt"]
+                .attrs
+                .get("prompt")
+                .and_then(AttrValue::as_str),
+            Some("inline prompt")
+        );
+        assert_eq!(
+            graph.attrs.get("goal").and_then(AttrValue::as_str),
+            Some("included goal")
         );
     }
 

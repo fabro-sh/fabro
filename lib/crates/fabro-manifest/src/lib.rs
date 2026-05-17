@@ -297,12 +297,19 @@ fn collect_workflow_entry(
     };
     let mut files = HashMap::new();
     let mut visited_imports = HashSet::new();
+    let mut visited_template_includes = HashSet::new();
     if let Some(config) = config.as_ref() {
         let config_path = ManifestPath::from_wire(&config.path)
             .ok_or_else(|| anyhow!("invalid manifest workflow config path: {}", config.path))?;
         collect_config_dockerfile(context.cwd, &config_path, &config.source, &mut files)?;
     }
-    collect_workflow_files(context, &scan, &mut files, &mut visited_imports)?;
+    collect_workflow_files(
+        context,
+        &scan,
+        &mut files,
+        &mut visited_imports,
+        &mut visited_template_includes,
+    )?;
 
     context.workflows.insert(dot_key, types::ManifestWorkflow {
         config,
@@ -318,6 +325,7 @@ fn collect_workflow_files(
     workflow: &WorkflowScanInput,
     files: &mut HashMap<String, types::ManifestFileEntry>,
     visited_imports: &mut HashSet<String>,
+    visited_template_includes: &mut HashSet<String>,
 ) -> Result<()> {
     let graph = parser::parse(&workflow.source).map_err(|err| {
         anyhow!(
@@ -325,20 +333,43 @@ fn collect_workflow_files(
             workflow.absolute_dot_path.display()
         )
     })?;
+    let workflow_base_dir = workflow
+        .absolute_dot_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
 
     if let Some(goal_ref) = graph.attrs.get("goal").and_then(AttrValue::as_str) {
         if goal_ref.starts_with('@') {
-            collect_bundled_file(
+            let bundled = collect_bundled_file(
                 files,
-                workflow
-                    .absolute_dot_path
-                    .parent()
-                    .unwrap_or_else(|| Path::new(".")),
+                workflow_base_dir,
                 context.cwd,
                 goal_ref.trim_start_matches('@'),
                 types::ManifestFileRefType::FileInline,
                 manifest_attr_reference_kind(AttributeScope::Graph, "goal", goal_ref)?,
                 Some(workflow.dot_path.clone()),
+            )?;
+            let source = std::fs::read_to_string(&bundled.absolute_path)
+                .with_context(|| format!("Failed to read {}", bundled.absolute_path.display()))?;
+            collect_template_include_files(
+                files,
+                bundled
+                    .absolute_path
+                    .parent()
+                    .unwrap_or_else(|| Path::new(".")),
+                context.cwd,
+                &source,
+                Some(bundled.path),
+                visited_template_includes,
+            )?;
+        } else {
+            collect_template_include_files(
+                files,
+                workflow_base_dir,
+                context.cwd,
+                goal_ref,
+                Some(workflow.dot_path.clone()),
+                visited_template_includes,
             )?;
         }
     }
@@ -346,17 +377,37 @@ fn collect_workflow_files(
     for node in graph.nodes.values() {
         if let Some(prompt_ref) = node.attrs.get("prompt").and_then(AttrValue::as_str) {
             if prompt_ref.starts_with('@') {
-                collect_bundled_file(
+                let bundled = collect_bundled_file(
                     files,
-                    workflow
-                        .absolute_dot_path
-                        .parent()
-                        .unwrap_or_else(|| Path::new(".")),
+                    workflow_base_dir,
                     context.cwd,
                     prompt_ref.trim_start_matches('@'),
                     types::ManifestFileRefType::FileInline,
                     manifest_attr_reference_kind(AttributeScope::Node, "prompt", prompt_ref)?,
                     Some(workflow.dot_path.clone()),
+                )?;
+                let source = std::fs::read_to_string(&bundled.absolute_path).with_context(|| {
+                    format!("Failed to read {}", bundled.absolute_path.display())
+                })?;
+                collect_template_include_files(
+                    files,
+                    bundled
+                        .absolute_path
+                        .parent()
+                        .unwrap_or_else(|| Path::new(".")),
+                    context.cwd,
+                    &source,
+                    Some(bundled.path),
+                    visited_template_includes,
+                )?;
+            } else {
+                collect_template_include_files(
+                    files,
+                    workflow_base_dir,
+                    context.cwd,
+                    prompt_ref,
+                    Some(workflow.dot_path.clone()),
+                    visited_template_includes,
                 )?;
             }
         }
@@ -364,10 +415,7 @@ fn collect_workflow_files(
         if let Some(import_ref) = node.attrs.get("import").and_then(AttrValue::as_str) {
             let imported = collect_bundled_file(
                 files,
-                workflow
-                    .absolute_dot_path
-                    .parent()
-                    .unwrap_or_else(|| Path::new(".")),
+                workflow_base_dir,
                 context.cwd,
                 import_ref,
                 types::ManifestFileRefType::Import,
@@ -385,7 +433,13 @@ fn collect_workflow_files(
                     dot_path:          imported.path,
                     source:            imported_source,
                 };
-                collect_workflow_files(context, &imported_scan, files, visited_imports)?;
+                collect_workflow_files(
+                    context,
+                    &imported_scan,
+                    files,
+                    visited_imports,
+                    visited_template_includes,
+                )?;
             }
         }
 
@@ -400,15 +454,133 @@ fn collect_workflow_files(
             collect_workflow_entry(
                 context,
                 Path::new(child_ref),
-                workflow
-                    .absolute_dot_path
-                    .parent()
-                    .unwrap_or_else(|| Path::new(".")),
+                workflow_base_dir,
             )?;
         }
     }
 
     Ok(())
+}
+
+fn collect_template_include_files(
+    files: &mut HashMap<String, types::ManifestFileEntry>,
+    base_dir: &Path,
+    cwd: &Path,
+    template_source: &str,
+    from: Option<ManifestPath>,
+    visited_template_includes: &mut HashSet<String>,
+) -> Result<()> {
+    for reference in static_template_includes(template_source) {
+        if !is_safe_template_include_name(&reference) {
+            continue;
+        }
+        let Some(bundled) = collect_template_include_file(
+            files,
+            base_dir,
+            cwd,
+            &reference,
+            from.clone(),
+        )?
+        else {
+            continue;
+        };
+        let key = bundled.path.to_string();
+        if !visited_template_includes.insert(key) {
+            continue;
+        }
+        let source = std::fs::read_to_string(&bundled.absolute_path)
+            .with_context(|| format!("Failed to read {}", bundled.absolute_path.display()))?;
+        collect_template_include_files(
+            files,
+            base_dir,
+            cwd,
+            &source,
+            Some(bundled.path),
+            visited_template_includes,
+        )?;
+    }
+    Ok(())
+}
+
+fn collect_template_include_file(
+    files: &mut HashMap<String, types::ManifestFileEntry>,
+    base_dir: &Path,
+    cwd: &Path,
+    reference: &str,
+    from: Option<ManifestPath>,
+) -> Result<Option<BundledFile>> {
+    let Some(absolute_path) = normalize_absolute_path(base_dir, reference) else {
+        return Ok(None);
+    };
+    let path = manifest_path_from_absolute(&absolute_path, cwd)?;
+    let key = path.to_string();
+    if !files.contains_key(&key) {
+        let content = match std::fs::read_to_string(&absolute_path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("Failed to read {}", absolute_path.display()));
+            }
+        };
+        files.insert(key.clone(), types::ManifestFileEntry {
+            content,
+            ref_: types::ManifestFileRef {
+                from:     from.map(|value| value.to_string()),
+                original: reference.to_string(),
+                type_:    types::ManifestFileRefType::FileInline,
+            },
+        });
+    }
+
+    Ok(Some(BundledFile {
+        absolute_path,
+        path,
+    }))
+}
+
+fn static_template_includes(source: &str) -> Vec<String> {
+    let mut includes = Vec::new();
+    let mut rest = source;
+    while let Some(start) = rest.find("{%") {
+        rest = &rest[start + 2..];
+        let Some(end) = rest.find("%}") else {
+            break;
+        };
+        let mut tag = rest[..end].trim_start();
+        if let Some(stripped) = tag.strip_prefix('-') {
+            tag = stripped.trim_start();
+        }
+        if let Some(after_include) = tag.strip_prefix("include") {
+            if after_include
+                .chars()
+                .next()
+                .is_none_or(char::is_whitespace)
+            {
+                let value = after_include.trim_start();
+                if let Some(include) = static_quoted_value(value) {
+                    includes.push(include);
+                }
+            }
+        }
+        rest = &rest[end + 2..];
+    }
+    includes
+}
+
+fn static_quoted_value(value: &str) -> Option<String> {
+    let quote = value.chars().next().filter(|char| matches!(char, '"' | '\''))?;
+    let value = &value[quote.len_utf8()..];
+    let end = value.find(quote)?;
+    Some(value[..end].to_string())
+}
+
+fn is_safe_template_include_name(name: &str) -> bool {
+    if name.is_empty() || name.starts_with('~') || Path::new(name).is_absolute() {
+        return false;
+    }
+    name.split('/')
+        .all(|segment| !segment.starts_with('.') && !segment.contains('\\'))
 }
 
 fn manifest_attr_reference_kind(
@@ -862,6 +1034,66 @@ mod tests {
                 .manifest
                 .workflows
                 .contains_key(".fabro/workflows/child/workflow.fabro")
+        );
+    }
+
+    #[test]
+    fn build_manifest_bundles_static_minijinja_includes_from_prompts_and_goals() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path();
+        let workflow_dir = project.join(".fabro/workflows/demo");
+        std::fs::create_dir_all(workflow_dir.join("prompts")).unwrap();
+        std::fs::write(project.join(".fabro/project.toml"), "_version = 1\n").unwrap();
+        std::fs::write(
+            workflow_dir.join("workflow.toml"),
+            "_version = 1\n\n[workflow]\ngraph = \"workflow.fabro\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            workflow_dir.join("workflow.fabro"),
+            r#"digraph Demo {
+                graph [goal="@prompts/goal.md"]
+                start [shape=Mdiamond]
+                exit [shape=Msquare]
+                file_prompt [prompt="@prompts/plan.md"]
+                inline_prompt [prompt="{% include 'inline.tpl.md' %}"]
+                start -> file_prompt -> inline_prompt -> exit
+            }"#,
+        )
+        .unwrap();
+        std::fs::write(
+            workflow_dir.join("prompts/goal.md"),
+            r#"{% include "goal.tpl.md" %}"#,
+        )
+        .unwrap();
+        std::fs::write(workflow_dir.join("prompts/goal.tpl.md"), "ship it").unwrap();
+        std::fs::write(
+            workflow_dir.join("prompts/plan.md"),
+            r#"{% include "plan.tpl.md" %}"#,
+        )
+        .unwrap();
+        std::fs::write(workflow_dir.join("prompts/plan.tpl.md"), "plan it").unwrap();
+        std::fs::write(workflow_dir.join("inline.tpl.md"), "inline it").unwrap();
+
+        let built = build_run_manifest(ManifestBuildInput {
+            workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
+            cwd: project.to_path_buf(),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let root = &built.manifest.workflows[".fabro/workflows/demo/workflow.fabro"];
+        assert!(
+            root.files
+                .contains_key(".fabro/workflows/demo/prompts/goal.tpl.md")
+        );
+        assert!(
+            root.files
+                .contains_key(".fabro/workflows/demo/prompts/plan.tpl.md")
+        );
+        assert!(
+            root.files
+                .contains_key(".fabro/workflows/demo/inline.tpl.md")
         );
     }
 

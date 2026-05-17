@@ -1,0 +1,10 @@
+digraph TemplateIncludes {
+    graph [goal="@prompts/goal.md"]
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare,  label="Exit"]
+
+    file_prompt   [label="File Prompt",   prompt="@prompts/prompt.md"]
+    inline_prompt [label="Inline Prompt", prompt="{% include 'inline.tpl.md' %}"]
+
+    start -> file_prompt -> inline_prompt -> exit
+}

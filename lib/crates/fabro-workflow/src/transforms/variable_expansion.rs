@@ -2,7 +2,10 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use fabro_graphviz::graph::{AttrValue, Graph};
-use fabro_template::{TemplateContext, TemplateError, render_lenient_named, render_named};
+use fabro_template::{
+    TemplateContext, TemplateError, TemplateLoader, render_lenient_named,
+    render_lenient_named_with_loader, render_named, render_named_with_loader,
+};
 use fabro_util::error::collect_chain;
 use fabro_validate::{Diagnostic, Severity};
 
@@ -29,7 +32,7 @@ pub enum RenderMode {
     Structural,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct TemplateRenderTarget {
     pub source_name:   Option<String>,
     pub source_text:   Option<String>,
@@ -37,6 +40,7 @@ pub(crate) struct TemplateRenderTarget {
     pub node_id:       Option<String>,
     pub edge:          Option<(String, String)>,
     pub owner:         String,
+    include_loader:    Option<TemplateLoader>,
 }
 
 impl TemplateRenderTarget {
@@ -50,6 +54,7 @@ impl TemplateRenderTarget {
             node_id: None,
             edge: None,
             owner: format!("graph attribute `{attr_name}`"),
+            include_loader: None,
         }
     }
 
@@ -68,6 +73,7 @@ impl TemplateRenderTarget {
             node_id: Some(node_id.clone()),
             edge: None,
             owner: format!("node `{node_id}` attribute `{attr_name}`"),
+            include_loader: None,
         }
     }
 
@@ -88,6 +94,7 @@ impl TemplateRenderTarget {
             node_id: None,
             edge: Some((from.clone(), to.clone())),
             owner: format!("edge `{from} -> {to}` attribute `{attr_name}`"),
+            include_loader: None,
         }
     }
 
@@ -101,6 +108,12 @@ impl TemplateRenderTarget {
     pub(crate) fn with_source_text(mut self, source_text: Option<&str>, value: &str) -> Self {
         self.source_text = source_text.map(ToOwned::to_owned);
         self.source_offset = source_text.and_then(|source_text| source_text.find(value));
+        self
+    }
+
+    #[must_use]
+    pub(crate) fn with_include_loader(mut self, include_loader: Option<TemplateLoader>) -> Self {
+        self.include_loader = include_loader;
         self
     }
 
@@ -120,15 +133,23 @@ pub(crate) fn render_template_for_target(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<String, Error> {
     let source_name = target.template_source_name();
+    let render_strict = || match target.include_loader.as_ref() {
+        Some(loader) => render_named_with_loader(source_name.clone(), text, ctx, loader),
+        None => render_named(source_name.clone(), text, ctx),
+    };
     match render_mode {
-        RenderMode::Strict => render_named(source_name, text, ctx)
-            .map_err(|err| template_error_for_target(target, err)),
-        RenderMode::Structural => match render_named(source_name.clone(), text, ctx) {
+        RenderMode::Strict => {
+            render_strict().map_err(|err| template_error_for_target(target, err))
+        }
+        RenderMode::Structural => match render_strict() {
             Ok(rendered) => Ok(rendered),
             Err(err @ TemplateError::UndefinedVariable { .. }) => {
                 diagnostics.push(template_diagnostic(&err, target));
-                render_lenient_named(source_name, text, ctx)
-                    .map_err(|err| template_error_for_target(target, err))
+                match target.include_loader.as_ref() {
+                    Some(loader) => render_lenient_named_with_loader(source_name, text, ctx, loader),
+                    None => render_lenient_named(source_name, text, ctx),
+                }
+                .map_err(|err| template_error_for_target(target, err))
             }
             Err(err) => Err(template_error_for_target(target, err)),
         },

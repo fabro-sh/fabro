@@ -7,6 +7,8 @@ use miette::{LabeledSpan, NamedSource, SourceCode, SourceSpan};
 use minijinja::value::{Object, Value};
 use minijinja::{AutoEscape, Environment, ErrorKind, UndefinedBehavior};
 
+pub type TemplateLoader = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
 #[derive(Debug, Default, Clone)]
 pub struct TemplateContext {
     goal:   Option<String>,
@@ -349,7 +351,7 @@ fn is_plain_text(template: &str) -> bool {
 }
 
 pub fn render(template: &str, ctx: &TemplateContext) -> Result<String, TemplateError> {
-    render_with(None, template, ctx, UndefinedBehavior::Strict)
+    render_with(None, template, ctx, UndefinedBehavior::Strict, None)
 }
 
 pub fn render_named(
@@ -357,7 +359,22 @@ pub fn render_named(
     template: &str,
     ctx: &TemplateContext,
 ) -> Result<String, TemplateError> {
-    render_with(Some(name.into()), template, ctx, UndefinedBehavior::Strict)
+    render_with(Some(name.into()), template, ctx, UndefinedBehavior::Strict, None)
+}
+
+pub fn render_named_with_loader(
+    name: impl Into<String>,
+    template: &str,
+    ctx: &TemplateContext,
+    loader: &TemplateLoader,
+) -> Result<String, TemplateError> {
+    render_with(
+        Some(name.into()),
+        template,
+        ctx,
+        UndefinedBehavior::Strict,
+        Some(loader),
+    )
 }
 
 /// Render with chainable undefined handling: undefined variables and attribute
@@ -365,7 +382,7 @@ pub fn render_named(
 /// passes (e.g. manifest scanning, `fabro validate` on a bare `.fabro`) where
 /// the user has not yet bound inputs — strict checking happens elsewhere.
 pub fn render_lenient(template: &str, ctx: &TemplateContext) -> Result<String, TemplateError> {
-    render_with(None, template, ctx, UndefinedBehavior::Chainable)
+    render_with(None, template, ctx, UndefinedBehavior::Chainable, None)
 }
 
 pub fn render_lenient_named(
@@ -378,6 +395,22 @@ pub fn render_lenient_named(
         template,
         ctx,
         UndefinedBehavior::Chainable,
+        None,
+    )
+}
+
+pub fn render_lenient_named_with_loader(
+    name: impl Into<String>,
+    template: &str,
+    ctx: &TemplateContext,
+    loader: &TemplateLoader,
+) -> Result<String, TemplateError> {
+    render_with(
+        Some(name.into()),
+        template,
+        ctx,
+        UndefinedBehavior::Chainable,
+        Some(loader),
     )
 }
 
@@ -386,6 +419,7 @@ fn render_with(
     template: &str,
     ctx: &TemplateContext,
     undefined: UndefinedBehavior,
+    loader: Option<&TemplateLoader>,
 ) -> Result<String, TemplateError> {
     if is_plain_text(template) {
         return Ok(template.to_owned());
@@ -394,6 +428,10 @@ fn render_with(
     env.set_undefined_behavior(undefined);
     env.set_auto_escape_callback(|_| AutoEscape::None);
     env.set_debug(true);
+    if let Some(loader) = loader {
+        let loader = Arc::clone(loader);
+        env.set_loader(move |name| Ok(loader(name)));
+    }
     match name {
         Some(name) => env.render_named_str(&name, template, ctx.clone().into_value()),
         None => env.render_str(template, ctx.clone().into_value()),
@@ -521,6 +559,20 @@ mod tests {
         assert_eq!(line, Some(1));
         assert_eq!(source_name.as_deref(), Some("prompts/test.md"));
         assert!(span.is_some());
+    }
+
+    #[test]
+    fn render_named_with_loader_supports_include() {
+        let ctx = TemplateContext::new();
+        let loader: TemplateLoader = Arc::new(|name| {
+            (name == "partial.md").then(|| "included content".to_string())
+        });
+
+        let rendered =
+            render_named_with_loader("prompt.md", r#"{% include "partial.md" %}"#, &ctx, &loader)
+                .unwrap();
+
+        assert_eq!(rendered, "included content");
     }
 
     #[test]

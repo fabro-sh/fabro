@@ -1,0 +1,1 @@
+{% include "goal.tpl.md" %}

@@ -1,0 +1,9 @@
+digraph BrokenTemplateIncludes {
+    graph [goal="@prompts/goal.md"]
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare,  label="Exit"]
+
+    inline_prompt [label="Inline Prompt", prompt="{% include 'missing.tpl.md' %}"]
+
+    start -> inline_prompt -> exit
+}

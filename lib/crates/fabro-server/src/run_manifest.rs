@@ -135,7 +135,11 @@ pub(crate) fn prepare_manifest(
         .build()
         .context("failed to resolve manifest settings")?;
     settings.run.inputs.extend(args_overrides.input_overrides);
-    if let Some(goal) = manifest.goal.as_ref() {
+    if let Some(goal) = manifest
+        .goal
+        .as_ref()
+        .filter(|goal| goal.type_ != types::ManifestGoalType::Graph)
+    {
         settings.run.goal = Some(RunGoal::Inline(InterpString::parse(&goal.text)));
     }
     let title = manifest
