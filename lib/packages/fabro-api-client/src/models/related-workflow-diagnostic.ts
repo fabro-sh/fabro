@@ -14,11 +14,10 @@
 
 
 
-export interface CreateSessionRequest {
-    'title'?: string;
-    'working_dir'?: string;
-    'provider'?: string;
-    'model'?: string;
-    'permissions'?: string;
+export interface RelatedWorkflowDiagnostic {
+    'message': string;
+    'source_path'?: string | null;
+    'line'?: number | null;
+    'column'?: number | null;
 }
 

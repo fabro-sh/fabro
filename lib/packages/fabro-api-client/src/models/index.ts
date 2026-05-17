@@ -211,6 +211,7 @@ export * from './pull-request-settings';
 export * from './pull-request-user';
 export * from './question-type';
 export * from './reasoning-effort-feature';
+export * from './related-workflow-diagnostic';
 export * from './render-workflow-graph-direction';
 export * from './render-workflow-graph-format';
 export * from './render-workflow-graph-request';

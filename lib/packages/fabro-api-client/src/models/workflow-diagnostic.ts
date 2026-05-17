@@ -13,6 +13,9 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RelatedWorkflowDiagnostic } from './related-workflow-diagnostic';
 
 export interface WorkflowDiagnostic {
     'rule': string;
@@ -21,6 +24,12 @@ export interface WorkflowDiagnostic {
     'node_id'?: string | null;
     'edge'?: Array<string> | null;
     'fix'?: string | null;
+    'source_path'?: string | null;
+    'line'?: number | null;
+    'column'?: number | null;
+    'span_start'?: number | null;
+    'span_len'?: number | null;
+    'related'?: Array<RelatedWorkflowDiagnostic>;
 }
 
 export const WorkflowDiagnosticSeverityEnum = {
