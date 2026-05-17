@@ -104,6 +104,11 @@ Use `auto_status` for nodes whose failure should never block the workflow — op
 
 ## Goal gate interaction
 
+Node outcomes and workflow status are separate. A node can finish with `failed`
+and the workflow can still reach `exit` and complete successfully if routing
+handles that outcome. Mark a node with `goal_gate=true` when its failure must
+make the workflow fail.
+
 Nodes marked with `goal_gate=true` are checked when the workflow reaches the exit node. A goal gate is satisfied if its last outcome was `succeeded` **or** `partially_succeeded`. Any other outcome (`failed`, `skipped`) causes the workflow to fail, even though execution reached the exit.
 
 This means `allow_partial=true` on a goal gate node lets the gate pass even if the node exhausted its retries — the promoted `partially_succeeded` outcome counts as passing.
