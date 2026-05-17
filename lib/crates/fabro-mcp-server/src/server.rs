@@ -93,7 +93,7 @@ impl FabroMcpServer {
 
     #[tool(
         name = "fabro_run_interact",
-        description = "Get, start, message, cancel, archive, unarchive, inspect questions, or answer a Fabro run."
+        description = "Get, start, message, interrupt, cancel, archive, unarchive, inspect questions, or answer a Fabro run."
     )]
     async fn fabro_run_interact(
         &self,
