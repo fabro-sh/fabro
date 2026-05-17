@@ -2529,15 +2529,31 @@ async fn streaming_session_turn_updates_runtime_context_without_copying_prior_hi
         })
         .await;
     let openai_base_url = llm.url("/v1");
-    let state = test_app_state_with_env_lookup(
-        default_test_server_settings(),
-        RunLayer::default(),
-        5,
-        move |name| match name {
-            "OPENAI_BASE_URL" => Some(openai_base_url.clone()),
-            _ => None,
-        },
-    );
+    // Use an isolated storage root so parallel tests do not race on the
+    // shared default session storage directory. `session_store` writes
+    // `session.json` via `fs::write`, which truncates before writing; a
+    // concurrent reader can observe the empty file and fail to deserialize.
+    let storage_dir = std::env::temp_dir().join(format!("fabro-server-test-{}", Ulid::new()));
+    std::fs::create_dir_all(&storage_dir).expect("test storage dir should be creatable");
+    let server_settings = server_settings_from_toml(&format!(
+        r#"
+_version = 1
+
+[server.storage]
+root = "{}"
+
+[server.auth]
+methods = ["dev-token"]
+"#,
+        storage_dir.display()
+    ));
+    let state =
+        test_app_state_with_env_lookup(server_settings, RunLayer::default(), 5, move |name| {
+            match name {
+                "OPENAI_BASE_URL" => Some(openai_base_url.clone()),
+                _ => None,
+            }
+        });
     state
         .vault
         .write()
