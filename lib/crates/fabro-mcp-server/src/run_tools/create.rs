@@ -22,6 +22,7 @@ pub(crate) struct CreateRunSpec {
     pub(crate) workflow:         String,
     pub(crate) cwd:              Option<PathBuf>,
     pub(crate) run_id:           Option<String>,
+    pub(crate) parent_id:        Option<String>,
     pub(crate) goal:             Option<String>,
     #[serde(default)]
     pub(crate) inputs:           HashMap<String, RunInputValue>,
@@ -84,6 +85,7 @@ pub(crate) struct ValidatedCreateRunSpec {
     pub(crate) workflow:         String,
     pub(crate) cwd:              Option<PathBuf>,
     pub(crate) run_id:           Option<RunId>,
+    pub(crate) parent_id:        Option<String>,
     pub(crate) goal:             Option<String>,
     pub(crate) inputs:           HashMap<String, toml::Value>,
     pub(crate) labels:           HashMap<String, String>,
@@ -122,6 +124,15 @@ impl TryFrom<CreateRunSpec> for ValidatedCreateRunSpec {
             .map_err(|err| {
                 ToolError::message(format!("run_id must be a valid Fabro run id: {err}"))
             })?;
+        let parent_id = spec
+            .parent_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|parent_id| !parent_id.is_empty())
+            .map(ToOwned::to_owned);
+        if spec.parent_id.is_some() && parent_id.is_none() {
+            return Err(ToolError::message("parent_id must not be blank"));
+        }
         let inputs = spec
             .inputs
             .into_iter()
@@ -134,6 +145,7 @@ impl TryFrom<CreateRunSpec> for ValidatedCreateRunSpec {
             workflow: spec.workflow,
             cwd: spec.cwd,
             run_id,
+            parent_id,
             goal: spec.goal,
             inputs,
             labels: spec.labels,
@@ -155,10 +167,12 @@ pub(crate) struct CreateRunsResult {
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct CreatedRunResult {
-    pub(crate) run_id:   String,
-    pub(crate) workflow: String,
-    pub(crate) started:  bool,
-    pub(crate) status:   String,
+    pub(crate) run_id:         String,
+    pub(crate) parent_id:      Option<String>,
+    pub(crate) children_count: u64,
+    pub(crate) workflow:       String,
+    pub(crate) started:        bool,
+    pub(crate) status:         String,
 }
 
 pub(crate) async fn create_runs(
@@ -170,7 +184,15 @@ pub(crate) async fn create_runs(
     let mut created = Vec::with_capacity(params.runs.len());
     for spec in params.runs {
         let cwd = spec.cwd.clone().unwrap_or_else(|| base_cwd.to_path_buf());
-        let manifest = manifest::build_mcp_run_manifest(&spec, &cwd, user_settings_path)?;
+        let mut manifest = manifest::build_mcp_run_manifest(&spec, &cwd, user_settings_path)?;
+        if let Some(parent_selector) = spec.parent_id.as_deref() {
+            let parent_id = client
+                .resolve_run(parent_selector)
+                .await
+                .map_err(|err| ToolError::from_anyhow(&err))?
+                .id;
+            manifest.parent_id = Some(parent_id.to_string());
+        }
         let run_id = client
             .create_run_from_manifest(manifest)
             .await
@@ -189,6 +211,8 @@ pub(crate) async fn create_runs(
         };
         created.push(CreatedRunResult {
             run_id: summary.id.to_string(),
+            parent_id: summary.parent_id.map(|parent_id| parent_id.to_string()),
+            children_count: summary.children_count,
             workflow: spec.workflow,
             started,
             status: common::run_status_kind(summary.lifecycle.status).to_string(),
@@ -209,6 +233,7 @@ pub(crate) fn create_runs_text(result: &CreateRunsResult) -> String {
 mod tests {
     use schemars::SchemaGenerator;
     use serde_json::json;
+    use tokio::fs;
 
     use super::*;
 
@@ -227,5 +252,160 @@ mod tests {
                 { "type": "number" },
             ])
         );
+    }
+
+    #[test]
+    fn create_spec_accepts_parent_selector() {
+        let spec = ValidatedCreateRunSpec::try_from(CreateRunSpec {
+            workflow:         "simple.fabro".to_string(),
+            cwd:              None,
+            run_id:           None,
+            parent_id:        Some(" nightly-parent ".to_string()),
+            goal:             None,
+            inputs:           HashMap::new(),
+            labels:           HashMap::new(),
+            dry_run:          None,
+            auto_approve:     None,
+            model:            None,
+            provider:         None,
+            sandbox:          None,
+            preserve_sandbox: None,
+            start:            None,
+        })
+        .expect("parent selectors should validate without requiring exact run ids");
+
+        assert_eq!(spec.parent_id.as_deref(), Some("nightly-parent"));
+    }
+
+    #[tokio::test]
+    async fn create_runs_resolves_parent_selector_and_sends_parent_id_in_manifest() {
+        let temp = tempfile::tempdir().expect("tempdir should be created");
+        let workflow = temp.path().join("simple.fabro");
+        fs::write(
+            &workflow,
+            r#"digraph Simple {
+    graph [goal="Run tests and report results"]
+    start [shape=Mdiamond, label="Start"]
+    exit [shape=Msquare, label="Exit"]
+    start -> exit
+}
+"#,
+        )
+        .await
+        .expect("workflow should be written");
+        let settings = temp.path().join("settings.toml");
+        fs::write(&settings, "")
+            .await
+            .expect("settings should be written");
+
+        let server = httpmock::MockServer::start();
+        let child_id = run_id("01KRBZW5C00000000000000001");
+        let parent_id = run_id("01KRBZW4DW0000000000000002");
+        let resolve_parent = server.mock(|when, then| {
+            when.method("GET")
+                .path("/api/v1/runs/resolve")
+                .query_param("selector", "nightly-parent");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(run_summary_json(parent_id, None, 1));
+        });
+        let create = server.mock(|when, then| {
+            when.method("POST")
+                .path("/api/v1/runs")
+                .json_body_includes(format!(r#"{{"parent_id":"{parent_id}"}}"#));
+            then.status(201)
+                .header("Content-Type", "application/json")
+                .json_body(run_summary_json(child_id, Some(parent_id), 0));
+        });
+        let retrieve = server.mock(|when, then| {
+            when.method("GET").path(format!("/api/v1/runs/{child_id}"));
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(run_summary_json(child_id, Some(parent_id), 0));
+        });
+        let client =
+            Arc::new(Client::new_no_proxy(&server.base_url()).expect("client should build"));
+        let params = ValidatedCreateRuns::try_from(FabroRunCreateParams {
+            runs: vec![CreateRunSpec {
+                workflow:         workflow.display().to_string(),
+                cwd:              None,
+                run_id:           None,
+                parent_id:        Some("nightly-parent".to_string()),
+                goal:             None,
+                inputs:           HashMap::new(),
+                labels:           HashMap::new(),
+                dry_run:          Some(true),
+                auto_approve:     Some(true),
+                model:            None,
+                provider:         None,
+                sandbox:          None,
+                preserve_sandbox: None,
+                start:            Some(false),
+            }],
+        })
+        .expect("create params should validate");
+
+        let result = create_runs(client, temp.path(), &settings, params)
+            .await
+            .expect("run should be created");
+
+        assert_eq!(result.runs[0].parent_id, Some(parent_id.to_string()));
+        assert_eq!(result.runs[0].children_count, 0);
+        resolve_parent.assert();
+        create.assert();
+        retrieve.assert();
+    }
+
+    fn run_id(raw: &str) -> RunId {
+        raw.parse().expect("test run id should parse")
+    }
+
+    fn run_summary_json(
+        run_id: RunId,
+        parent_id: Option<RunId>,
+        children_count: u64,
+    ) -> serde_json::Value {
+        json!({
+            "id": run_id,
+            "parent_id": parent_id,
+            "children_count": children_count,
+            "title": "Test run",
+            "goal": "Test run",
+            "workflow": {
+                "slug": "simple",
+                "name": "Simple"
+            },
+            "repository": null,
+            "origin": {
+                "kind": "api"
+            },
+            "labels": {},
+            "lifecycle": {
+                "status": { "kind": "submitted" },
+                "pending_control": null,
+                "queue_position": null,
+                "error": null,
+                "archived": false,
+                "archived_at": null
+            },
+            "models": [],
+            "source_directory": "/srv/repo",
+            "timestamps": {
+                "created_at": "2026-04-05T12:00:00Z",
+                "started_at": null,
+                "last_event_at": null,
+                "completed_at": null,
+                "duration_ms": null,
+                "elapsed_secs": null
+            },
+            "billing": null,
+            "diff": null,
+            "pull_request": null,
+            "current_question": null,
+            "superseded_by": null,
+            "links": {
+                "web": null
+            }
+        })
     }
 }

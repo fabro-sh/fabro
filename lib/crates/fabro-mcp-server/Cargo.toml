@@ -30,3 +30,7 @@ serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 toml.workspace = true
+
+[dev-dependencies]
+httpmock = "0.8"
+tempfile = "3"

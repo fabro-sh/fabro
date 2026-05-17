@@ -34,6 +34,8 @@ pub(super) type ToolResult<T> = Result<T, ToolError>;
 #[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct RunSummaryResult {
     pub(crate) run_id:           String,
+    pub(crate) parent_id:        Option<String>,
+    pub(crate) children_count:   u64,
     pub(crate) workflow_name:    String,
     pub(crate) workflow_slug:    Option<String>,
     pub(crate) status:           String,
@@ -90,6 +92,8 @@ pub(super) async fn retrieve_run(client: &Client, run_id: &RunId) -> ToolResult<
 pub(super) fn run_summary_result(run: &Run) -> RunSummaryResult {
     RunSummaryResult {
         run_id:           run.id.to_string(),
+        parent_id:        run.parent_id.map(|parent_id| parent_id.to_string()),
+        children_count:   run.children_count,
         workflow_name:    run.workflow.name.clone(),
         workflow_slug:    run.workflow.slug.clone(),
         status:           run_status_kind(run.lifecycle.status).to_string(),
@@ -138,4 +142,67 @@ fn format_tool_error(err: &anyhow::Error) -> String {
         rendered.push_str("\nRun `fabro auth login` to authenticate.");
     }
     rendered
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{TimeZone, Utc};
+    use fabro_types::{RunLifecycle, RunLinks, RunOrigin, RunTimestamps, WorkflowRef};
+
+    use super::*;
+
+    #[test]
+    fn run_summary_result_includes_parent_metadata() {
+        let parent_id = run_id("01KRBZW4DW0000000000000002");
+        let run = Run {
+            id:               run_id("01KRBZW5C00000000000000001"),
+            parent_id:        Some(parent_id),
+            children_count:   3,
+            title:            "test".to_string(),
+            goal:             "test".to_string(),
+            workflow:         WorkflowRef {
+                slug: Some("simple".to_string()),
+                name: "Simple".to_string(),
+            },
+            automation:       None,
+            repository:       None,
+            created_by:       None,
+            origin:           RunOrigin::default(),
+            labels:           HashMap::new(),
+            lifecycle:        RunLifecycle {
+                status:          RunStatus::Submitted,
+                pending_control: None,
+                queue_position:  None,
+                error:           None,
+                archived:        false,
+                archived_at:     None,
+            },
+            sandbox:          None,
+            models:           Vec::new(),
+            source_directory: None,
+            timestamps:       RunTimestamps {
+                created_at:    Utc.with_ymd_and_hms(2026, 5, 11, 12, 0, 0).unwrap(),
+                started_at:    None,
+                last_event_at: None,
+                completed_at:  None,
+                duration_ms:   None,
+                elapsed_secs:  None,
+            },
+            billing:          None,
+            diff:             None,
+            pull_request:     None,
+            current_question: None,
+            superseded_by:    None,
+            links:            RunLinks { web: None },
+        };
+
+        let summary = run_summary_result(&run);
+
+        assert_eq!(summary.parent_id, Some(parent_id.to_string()));
+        assert_eq!(summary.children_count, 3);
+    }
+
+    fn run_id(raw: &str) -> RunId {
+        raw.parse().expect("test run id should parse")
+    }
 }

@@ -49,7 +49,7 @@ impl FabroMcpServer {
 
     #[tool(
         name = "fabro_run_create",
-        description = "Create one or more Fabro workflow runs, starting them by default."
+        description = "Create one or more Fabro workflow runs, optionally under a parent run, starting them by default."
     )]
     async fn fabro_run_create(
         &self,
@@ -71,7 +71,7 @@ impl FabroMcpServer {
 
     #[tool(
         name = "fabro_run_search",
-        description = "Search Fabro workflow runs by id, workflow, labels, status, archival state, and creation time."
+        description = "Search Fabro workflow runs by id, parent, workflow, labels, status, archival state, and creation time."
     )]
     async fn fabro_run_search(
         &self,
@@ -93,7 +93,7 @@ impl FabroMcpServer {
 
     #[tool(
         name = "fabro_run_interact",
-        description = "Get, start, message, cancel, archive, unarchive, inspect questions, or answer a Fabro run."
+        description = "Get, start, message, cancel, archive, unarchive, link or unlink a parent, inspect questions, or answer a Fabro run."
     )]
     async fn fabro_run_interact(
         &self,

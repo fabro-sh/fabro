@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use fabro_client::Client;
-use fabro_types::{Run, RunStatusKind};
+use fabro_types::{Run, RunId, RunStatusKind};
 use futures::future::try_join_all;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -23,6 +23,7 @@ pub(crate) struct FabroRunSearchParams {
     pub(crate) created_before: Option<String>,
     pub(crate) first:          Option<usize>,
     pub(crate) after:          Option<String>,
+    pub(crate) parent_id:      Option<String>,
 }
 
 #[derive(Debug)]
@@ -34,7 +35,7 @@ pub(crate) struct ValidatedSearchRuns {
 impl TryFrom<FabroRunSearchParams> for ValidatedSearchRuns {
     type Error = ToolError;
 
-    fn try_from(params: FabroRunSearchParams) -> Result<Self, Self::Error> {
+    fn try_from(mut params: FabroRunSearchParams) -> Result<Self, Self::Error> {
         if params.first.is_some_and(|first| first > 100) {
             return Err(ToolError::message("first must be <= 100"));
         }
@@ -61,6 +62,13 @@ impl TryFrom<FabroRunSearchParams> for ValidatedSearchRuns {
         if let Some(created_before) = params.created_before.as_deref() {
             common::parse_datetime_filter("created_before", created_before)?;
         }
+        if let Some(parent_id) = params.parent_id.take() {
+            let parent_id = parent_id.trim().to_string();
+            if parent_id.is_empty() {
+                return Err(ToolError::message("parent_id must not be blank"));
+            }
+            params.parent_id = Some(parent_id);
+        }
         Ok(Self {
             raw: params,
             status,
@@ -77,6 +85,8 @@ pub(crate) struct SearchRunsResult {
 #[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct SearchRunSummaryResult {
     pub(crate) run_id:           String,
+    pub(crate) parent_id:        Option<String>,
+    pub(crate) children_count:   u64,
     pub(crate) workflow_name:    String,
     pub(crate) workflow_slug:    Option<String>,
     pub(crate) status:           String,
@@ -97,15 +107,31 @@ pub(crate) async fn search_runs(
 ) -> ToolResult<SearchRunsResult> {
     let status = params.status;
     let raw = params.raw;
+    let parent_id = if let Some(parent_selector) = raw.parent_id.as_deref() {
+        Some(
+            client
+                .resolve_run(parent_selector)
+                .await
+                .map_err(|err| ToolError::from_anyhow(&err))?
+                .id,
+        )
+    } else {
+        None
+    };
     let runs = if let Some(run_ids) = raw.run_ids.as_ref() {
         resolve_requested_runs(&client, run_ids).await?
+    } else if let Some(parent_id) = parent_id {
+        client
+            .list_store_runs_by_parent(parent_id)
+            .await
+            .map_err(|err| ToolError::from_anyhow(&err))?
     } else {
         client
             .list_store_runs()
             .await
             .map_err(|err| ToolError::from_anyhow(&err))?
     };
-    let page = filter_sort_and_page_runs(runs, &raw, status.as_deref())?;
+    let page = filter_sort_and_page_runs(runs, &raw, status.as_deref(), parent_id)?;
 
     Ok(SearchRunsResult {
         runs:        page.runs.iter().map(search_run_summary_result).collect(),
@@ -116,6 +142,8 @@ pub(crate) async fn search_runs(
 fn search_run_summary_result(run: &Run) -> SearchRunSummaryResult {
     let RunSummaryResult {
         run_id,
+        parent_id,
+        children_count,
         workflow_name,
         workflow_slug,
         status,
@@ -132,6 +160,8 @@ fn search_run_summary_result(run: &Run) -> SearchRunSummaryResult {
 
     SearchRunSummaryResult {
         run_id,
+        parent_id,
+        children_count,
         workflow_name,
         workflow_slug,
         status,
@@ -169,7 +199,11 @@ fn filter_sort_and_page_runs(
     mut runs: Vec<Run>,
     raw: &FabroRunSearchParams,
     status: Option<&[RunStatusKind]>,
+    parent_id: Option<RunId>,
 ) -> ToolResult<RunSearchPage> {
+    if let Some(parent_id) = parent_id {
+        runs.retain(|run| run.parent_id == Some(parent_id));
+    }
     if let Some(workflow) = raw.workflow.as_deref() {
         runs.retain(|run| {
             run.workflow.name == workflow || run.workflow.slug.as_deref() == Some(workflow)
@@ -278,7 +312,9 @@ mod tests {
                 created_before: None,
                 first:          Some(10),
                 after:          Some(unrelated_cursor.id.to_string()),
+                parent_id:      None,
             },
+            None,
             None,
         )
         .expect("filtering should succeed");
@@ -304,7 +340,9 @@ mod tests {
                 created_before: None,
                 first:          Some(10),
                 after:          None,
+                parent_id:      None,
             },
+            None,
             None,
         )
         .expect("filtering should succeed");
@@ -315,14 +353,57 @@ mod tests {
 
     #[test]
     fn search_summary_uses_bounded_goal_preview() {
+        let parent_id = run_id("01KRBZW4DW0000000000000002");
         let mut run = run("01KRBZW5C00000000000000001", "keep", 30);
+        run.parent_id = Some(parent_id);
+        run.children_count = 4;
         run.goal = format!("{}tail-marker", "a".repeat(300));
 
         let summary = search_run_summary_result(&run);
 
+        assert_eq!(summary.parent_id, Some(parent_id.to_string()));
+        assert_eq!(summary.children_count, 4);
         assert!(summary.goal_truncated);
         assert!(summary.goal_preview.len() < run.goal.len());
         assert!(!summary.goal_preview.contains("tail-marker"));
+    }
+
+    #[test]
+    fn parent_filter_keeps_matching_direct_children_and_composes_with_archived_default() {
+        let parent_id = run_id("01KRBZW5000000000000000004");
+        let other_parent_id = run_id("01KRBZW4000000000000000005");
+        let mut active_child = run("01KRBZW5C00000000000000001", "keep", 30);
+        active_child.parent_id = Some(parent_id);
+        let mut archived_child = archived_run("01KRBZW4DW0000000000000002", "keep", 20);
+        archived_child.parent_id = Some(parent_id);
+        let mut unrelated_child = run("01KRBZW3EF0000000000000003", "keep", 10);
+        unrelated_child.parent_id = Some(other_parent_id);
+
+        let result = filter_sort_and_page_runs(
+            vec![
+                archived_child.clone(),
+                unrelated_child.clone(),
+                active_child.clone(),
+            ],
+            &FabroRunSearchParams {
+                run_ids:        None,
+                workflow:       None,
+                labels:         None,
+                status:         None,
+                archived:       None,
+                created_after:  None,
+                created_before: None,
+                first:          Some(10),
+                after:          None,
+                parent_id:      Some("nightly-parent".to_string()),
+            },
+            None,
+            Some(parent_id),
+        )
+        .expect("filtering should succeed");
+
+        let ids = result.runs.iter().map(|run| run.id).collect::<Vec<_>>();
+        assert_eq!(ids, vec![active_child.id]);
     }
 
     fn run(id: &str, group: &str, seconds: u32) -> Run {
@@ -331,6 +412,10 @@ mod tests {
 
     fn archived_run(id: &str, group: &str, seconds: u32) -> Run {
         run_with_archived(id, group, seconds, true)
+    }
+
+    fn run_id(raw: &str) -> fabro_types::RunId {
+        raw.parse().expect("test run id should parse")
     }
 
     fn run_with_archived(id: &str, group: &str, seconds: u32, archived: bool) -> Run {

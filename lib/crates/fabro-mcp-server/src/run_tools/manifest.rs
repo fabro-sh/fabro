@@ -164,6 +164,7 @@ mod tests {
         let spec = ValidatedCreateRunSpec::try_from(CreateRunSpec {
             workflow:         "simple".to_string(),
             run_id:           None,
+            parent_id:        None,
             cwd:              None,
             goal:             None,
             inputs:           HashMap::from([
