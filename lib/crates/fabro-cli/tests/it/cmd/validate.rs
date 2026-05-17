@@ -227,25 +227,30 @@ fn minijinja_includes_break_if_missing() {
     let context = test_context!();
     let mut cmd = context.validate();
     cmd.arg(fixture("minijinja_includes/broken.fabro"));
-    fabro_snapshot!(context.filters(), cmd, @r#"
+    let mut filters = context.filters();
+    filters.push((
+        r"(?:\.\./)*\.\.\[FIXTURES\]/".to_string(),
+        "[FIXTURES]/".to_string(),
+    ));
+    fabro_snapshot!(filters, cmd, @r#"
     success: false
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
     fabro::template::render
 
-      × template expansion failed in node `inline_prompt` attribute `prompt`: template render error at line 1: template not found: tried to include non-existing template "missing.tpl.md" (in ../../../../../../../..[FIXTURES]/minijinja_includes/broken.fabro:1)
+      × template expansion failed in node `inline_prompt` attribute `prompt`: template render error at line 1: template not found: tried to include non-existing template "missing.tpl.md" (in [FIXTURES]/minijinja_includes/broken.fabro:1)
       ├─▶ fabro::template::render
       │
       │     × template render error at line 1
-      │      ╭─[../../../../../../../..[FIXTURES]/minijinja_includes/broken.fabro:1:4]
+      │      ╭─[[FIXTURES]/minijinja_includes/broken.fabro:1:4]
       │    1 │ {% include 'missing.tpl.md' %}
       │      ·    ────────────┬───────────
       │      ·                ╰── render error
       │      ╰────
 
-      ╰─▶ template not found: tried to include non-existing template "missing.tpl.md" (in ../../../../../../../..[FIXTURES]/minijinja_includes/broken.fabro:1)
-       ╭─[../../../../../../../..[FIXTURES]/minijinja_includes/broken.fabro:1:4]
+      ╰─▶ template not found: tried to include non-existing template "missing.tpl.md" (in [FIXTURES]/minijinja_includes/broken.fabro:1)
+       ╭─[[FIXTURES]/minijinja_includes/broken.fabro:1:4]
      1 │ {% include 'missing.tpl.md' %}
        ·    ────────────┬───────────
        ·                ╰── render error
