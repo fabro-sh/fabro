@@ -36,8 +36,8 @@ pub struct ModelFeatures {
     pub tools:            bool,
     pub vision:           bool,
     pub reasoning:        bool,
-    /// Whether Fabro may expose abstract reasoning effort levels for this
-    /// model endpoint.
+    /// Whether this model endpoint supports a native reasoning-effort
+    /// parameter. User-facing allowed effort values live in catalog controls.
     #[serde(default)]
     pub reasoning_effort: ReasoningEffortFeature,
     /// Whether this model endpoint supports prompt caching annotations.

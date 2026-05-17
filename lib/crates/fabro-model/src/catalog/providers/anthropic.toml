@@ -99,6 +99,9 @@ vision = true
 reasoning = true
 prompt_cache = true
 
+[models."claude-sonnet-4-5".controls]
+reasoning_effort = ["low", "medium", "high", "xhigh", "max"]
+
 [models."claude-sonnet-4-5".costs]
 input_cost_per_mtok = 3.0
 output_cost_per_mtok = 15.0

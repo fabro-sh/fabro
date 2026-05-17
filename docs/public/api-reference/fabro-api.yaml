@@ -5041,7 +5041,7 @@ components:
           example: 128000
 
     ReasoningEffortFeature:
-      description: Whether Fabro may expose reasoning effort levels for a model.
+      description: Whether the model endpoint supports a native reasoning-effort parameter.
       type: string
       enum:
         - levels

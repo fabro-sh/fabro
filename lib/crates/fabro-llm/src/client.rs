@@ -697,6 +697,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn complete_accepts_reasoning_effort_for_anthropic_budget_fallback_model() {
+        let catalog = Arc::new(Catalog::from_builtin().unwrap());
+        let mut client = Client::new(HashMap::new(), None, vec![]);
+        client.catalog = Some(Arc::clone(&catalog));
+        client
+            .register_provider(Arc::new(MockProvider::new("anthropic", "accepted")))
+            .await
+            .unwrap();
+
+        let mut request = test_request();
+        request.model = "claude-sonnet-4-5".to_string();
+        request.provider = Some("anthropic".to_string());
+        request.reasoning_effort = Some(ReasoningEffort::Low);
+
+        let response = client.complete(&request).await.unwrap();
+
+        assert_eq!(response.text(), "accepted");
+    }
+
+    #[tokio::test]
     async fn complete_skips_control_validation_for_unknown_model_passthrough() {
         let catalog = Arc::new(Catalog::from_builtin().unwrap());
         let mut client = Client::new(HashMap::new(), None, vec![]);

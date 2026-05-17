@@ -658,10 +658,8 @@ pub enum CatalogBuildError {
         #[source]
         source: strum::ParseError,
     },
-    #[error(
-        "model '{model}' declares reasoning_effort controls but features.reasoning_effort is none"
-    )]
-    ReasoningEffortWithoutFeature { model: String },
+    #[error("model '{model}' declares reasoning_effort controls but features.reasoning is false")]
+    ReasoningEffortControlsWithoutReasoning { model: String },
     #[error("model '{model}' declares reasoning_effort feature but features.reasoning is false")]
     ReasoningEffortWithoutReasoning { model: String },
     #[error(
@@ -1469,18 +1467,19 @@ fn build_model_controls(
     features: &ModelFeatures,
     settings: &ModelCatalogSettings,
 ) -> Result<CatalogModelControls, CatalogBuildError> {
-    let supports_reasoning_effort = features.reasoning_effort == ReasoningEffortFeature::Levels;
+    let supports_native_reasoning_effort =
+        features.reasoning_effort == ReasoningEffortFeature::Levels;
     let reasoning_effort = match settings
         .controls
         .as_ref()
         .and_then(|controls| controls.reasoning_effort.as_ref())
     {
-        Some(values) if !supports_reasoning_effort && !values.is_empty() => {
-            return Err(CatalogBuildError::ReasoningEffortWithoutFeature {
+        Some(values) if !features.reasoning && !values.is_empty() => {
+            return Err(CatalogBuildError::ReasoningEffortControlsWithoutReasoning {
                 model: model_id.to_string(),
             });
         }
-        Some(values) if values.is_empty() && supports_reasoning_effort => {
+        Some(values) if values.is_empty() && supports_native_reasoning_effort => {
             return Err(CatalogBuildError::EmptyReasoningEffortControls {
                 model: model_id.to_string(),
             });
@@ -1489,7 +1488,7 @@ fn build_model_controls(
             .iter()
             .map(|value| parse_reasoning_effort(model_id, value))
             .collect::<Result<Vec<_>, _>>()?,
-        None if supports_reasoning_effort => ReasoningEffort::VARIANTS.to_vec(),
+        None if supports_native_reasoning_effort => ReasoningEffort::VARIANTS.to_vec(),
         None => Vec::new(),
     };
 
@@ -2029,6 +2028,14 @@ enabled = true
         assert_eq!(
             catalog
                 .model_settings("gpt-5.4")
+                .unwrap()
+                .controls
+                .reasoning_effort,
+            ReasoningEffort::VARIANTS
+        );
+        assert_eq!(
+            catalog
+                .model_settings("claude-sonnet-4-5")
                 .unwrap()
                 .controls
                 .reasoning_effort,
@@ -3034,7 +3041,52 @@ reasoning_effort = ["low", "medium"]
     }
 
     #[test]
-    fn catalog_from_settings_rejects_reasoning_effort_controls_when_feature_is_none() {
+    fn catalog_from_settings_accepts_reasoning_effort_controls_without_native_effort_feature() {
+        let settings = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[models.model]
+provider = "test"
+display_name = "Model"
+family = "test"
+default = true
+
+[models.model.limits]
+context_window = 1000
+
+[models.model.features]
+tools = true
+vision = false
+reasoning = true
+reasoning_effort = "none"
+
+[models.model.controls]
+reasoning_effort = ["low"]
+"#,
+        );
+
+        let catalog = Catalog::from_settings(&settings).unwrap();
+        let model = catalog.get("model").unwrap();
+        assert_eq!(
+            model.features.reasoning_effort,
+            crate::ReasoningEffortFeature::None
+        );
+        assert_eq!(
+            catalog
+                .model_settings("model")
+                .unwrap()
+                .controls
+                .reasoning_effort,
+            vec![ReasoningEffort::Low]
+        );
+    }
+
+    #[test]
+    fn catalog_from_settings_rejects_reasoning_effort_controls_without_reasoning() {
         let settings = minimal_settings(
             r#"
 [providers.test]
@@ -3053,7 +3105,7 @@ context_window = 1000
 [models.model.features]
 tools = true
 vision = false
-reasoning = true
+reasoning = false
 reasoning_effort = "none"
 
 [models.model.controls]
@@ -3063,7 +3115,7 @@ reasoning_effort = ["low"]
 
         assert!(matches!(
             Catalog::from_settings(&settings).unwrap_err(),
-            CatalogBuildError::ReasoningEffortWithoutFeature { model }
+            CatalogBuildError::ReasoningEffortControlsWithoutReasoning { model }
                 if model == "model"
         ));
     }

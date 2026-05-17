@@ -331,14 +331,14 @@ cache_input_cost_per_mtok = 0.60
 | `tools` | boolean | `false` | Whether the model supports tool calls. |
 | `vision` | boolean | `false` | Whether the model accepts image inputs. |
 | `reasoning` | boolean | `false` | Whether the model has reasoning behavior. |
-| `reasoning_effort` | `"levels"` \| `"none"` | `"none"` | How Fabro may expose reasoning effort for this model. |
+| `reasoning_effort` | `"levels"` \| `"none"` | `"none"` | Whether the model endpoint supports a native reasoning-effort parameter. |
 | `prompt_cache` | boolean | `false` | Whether prompt cache pricing/usage applies. |
 
 ## `[llm.models.<id>.controls]`
 
 | Key | Type / values | Default | Description |
 |---|---|---|---|
-| `reasoning_effort` | array<string> | all standard levels when feature is `"levels"` | User-facing reasoning effort values Fabro may send for this model. |
+| `reasoning_effort` | array<string> | all standard levels when feature is `"levels"` | User-facing reasoning effort values Fabro may send for this model. Can be set explicitly for reasoning models whose provider adapter maps effort to a non-native API shape. |
 | `speed` | array<string> | `[]` | Additional speeds beyond implicit `standard`; do not list `standard`. |
 
 ## `[llm.models.<id>.costs]`
