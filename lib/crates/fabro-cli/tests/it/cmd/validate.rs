@@ -212,8 +212,8 @@ fn minijinja_includes_in_prompts_and_goal_validate() {
     let mut cmd = context.validate();
     cmd.arg(fixture("minijinja_includes/workflow.fabro"));
     fabro_snapshot!(context.filters(), cmd, @"
-    success: false
-    exit_code: 1
+    success: true
+    exit_code: 0
     ----- stdout -----
     ----- stderr -----
     Workflow: TemplateIncludes (4 nodes, 3 edges)
