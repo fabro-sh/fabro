@@ -359,7 +359,7 @@ fn collect_workflow_files(
                     .unwrap_or_else(|| Path::new(".")),
                 context.cwd,
                 &source,
-                Some(bundled.path),
+                Some(&bundled.path),
                 visited_template_includes,
             )?;
         } else {
@@ -368,7 +368,7 @@ fn collect_workflow_files(
                 workflow_base_dir,
                 context.cwd,
                 goal_ref,
-                Some(workflow.dot_path.clone()),
+                Some(&workflow.dot_path),
                 visited_template_includes,
             )?;
         }
@@ -397,7 +397,7 @@ fn collect_workflow_files(
                         .unwrap_or_else(|| Path::new(".")),
                     context.cwd,
                     &source,
-                    Some(bundled.path),
+                    Some(&bundled.path),
                     visited_template_includes,
                 )?;
             } else {
@@ -406,7 +406,7 @@ fn collect_workflow_files(
                     workflow_base_dir,
                     context.cwd,
                     prompt_ref,
-                    Some(workflow.dot_path.clone()),
+                    Some(&workflow.dot_path),
                     visited_template_includes,
                 )?;
             }
@@ -467,7 +467,7 @@ fn collect_template_include_files(
     base_dir: &Path,
     cwd: &Path,
     template_source: &str,
-    from: Option<ManifestPath>,
+    from: Option<&ManifestPath>,
     visited_template_includes: &mut HashSet<String>,
 ) -> Result<()> {
     for reference in static_template_includes(template_source) {
@@ -479,7 +479,7 @@ fn collect_template_include_files(
             base_dir,
             cwd,
             &reference,
-            from.clone(),
+            from,
         )?
         else {
             continue;
@@ -495,7 +495,7 @@ fn collect_template_include_files(
             base_dir,
             cwd,
             &source,
-            Some(bundled.path),
+            Some(&bundled.path),
             visited_template_includes,
         )?;
     }
@@ -507,7 +507,7 @@ fn collect_template_include_file(
     base_dir: &Path,
     cwd: &Path,
     reference: &str,
-    from: Option<ManifestPath>,
+    from: Option<&ManifestPath>,
 ) -> Result<Option<BundledFile>> {
     let Some(absolute_path) = normalize_absolute_path(base_dir, reference) else {
         return Ok(None);
@@ -526,7 +526,7 @@ fn collect_template_include_file(
         files.insert(key.clone(), types::ManifestFileEntry {
             content,
             ref_: types::ManifestFileRef {
-                from:     from.map(|value| value.to_string()),
+                from:     from.map(std::string::ToString::to_string),
                 original: reference.to_string(),
                 type_:    types::ManifestFileRefType::FileInline,
             },
