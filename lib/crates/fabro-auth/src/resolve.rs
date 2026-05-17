@@ -501,10 +501,10 @@ pub async fn configured_providers_from_process_env(
 }
 
 fn primary_api_key_env_var<'a>(provider: &ProviderId, catalog: &'a Catalog) -> Option<&'a str> {
-    let ProviderAuthConfig::ApiKey { credentials, .. } = &catalog.provider(provider)?.auth else {
-        return None;
-    };
-    credentials
+    catalog
+        .provider(provider)?
+        .auth
+        .credentials()
         .iter()
         .find_map(|credential_ref| match credential_ref {
             CredentialRef::Env(name) => Some(name.as_str()),

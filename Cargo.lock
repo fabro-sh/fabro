@@ -2133,6 +2133,7 @@ name = "fabro-model"
 version = "0.236.0-nightly.0"
 dependencies = [
  "fabro-static",
+ "http",
  "insta",
  "rust-embed",
  "serde",

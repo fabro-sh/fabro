@@ -6,7 +6,7 @@ use fabro_model::{Catalog, ReasoningEffortFeature};
 use futures::stream;
 
 use crate::error::{Error, error_from_status_code};
-use crate::provider::{ProviderAdapter, StreamEventStream, validate_tool_choice};
+use crate::provider::{ProviderAdapter, StreamEventStream};
 use crate::providers::common::{
     self as common, extract_system_prompt, parse_error_body, parse_rate_limit_headers,
     parse_retry_after, send_and_read_response,
@@ -1276,9 +1276,7 @@ impl ProviderAdapter for Adapter {
     }
 
     async fn complete(&self, request: &Request) -> Result<Response, Error> {
-        if let Some(tc) = &request.tool_choice {
-            validate_tool_choice(self, tc)?;
-        }
+        self.validate_request(request)?;
 
         // Non-Anthropic providers (e.g. Kimi) require stream=true even for
         // blocking calls.  Collect the stream into a single Response.
@@ -1340,9 +1338,7 @@ impl ProviderAdapter for Adapter {
     }
 
     async fn stream(&self, request: &Request) -> Result<StreamEventStream, Error> {
-        if let Some(tc) = &request.tool_choice {
-            validate_tool_choice(self, tc)?;
-        }
+        self.validate_request(request)?;
         let (_api_request, req_builder) = build_api_request(self, request, true).await;
 
         let http_resp = req_builder

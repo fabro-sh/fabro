@@ -350,37 +350,9 @@ impl<'de> Deserialize<'de> for ApiKeyHeaderPolicy {
 }
 
 fn validate_header_name(name: &str) -> Result<(), &'static str> {
-    if name.is_empty() {
-        return Err("header name must not be empty");
-    }
-    if name.bytes().all(is_header_name_byte) {
-        Ok(())
-    } else {
-        Err("header name contains a character that is not valid in an HTTP field name")
-    }
-}
-
-fn is_header_name_byte(byte: u8) -> bool {
-    matches!(
-        byte,
-        b'!' | b'#'
-            | b'$'
-            | b'%'
-            | b'&'
-            | b'\''
-            | b'*'
-            | b'+'
-            | b'-'
-            | b'.'
-            | b'^'
-            | b'_'
-            | b'`'
-            | b'|'
-            | b'~'
-            | b'0'..=b'9'
-            | b'A'..=b'Z'
-            | b'a'..=b'z'
-    )
+    http::HeaderName::from_bytes(name.as_bytes())
+        .map(|_| ())
+        .map_err(|_| "custom header name must be a valid HTTP header name")
 }
 
 #[derive(
@@ -2922,7 +2894,11 @@ header = { custom = "bad header" }
 "#,
         )
         .unwrap_err();
-        assert!(invalid_header.to_string().contains("header name contains"));
+        assert!(
+            invalid_header
+                .to_string()
+                .contains("custom header name must be a valid HTTP header name")
+        );
 
         let none_with_credentials = toml::from_str::<LlmCatalogSettings>(
             r#"

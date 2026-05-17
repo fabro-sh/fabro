@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use fabro_auth::{ApiCredential, ApiKeyHeader, CredentialSource};
+use fabro_auth::{ApiCredential, CredentialSource};
 use fabro_model::{Catalog, ProviderId};
 use tracing::debug;
 
@@ -448,16 +448,10 @@ fn format_additional_speeds(values: &[Speed]) -> String {
     }
 }
 
-pub(crate) fn auth_value(auth_header: &ApiKeyHeader) -> String {
-    match auth_header {
-        ApiKeyHeader::Bearer(value) | ApiKeyHeader::Custom { value, .. } => value.clone(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use async_trait::async_trait;
-    use fabro_auth::{CredentialSource, ResolvedCredentials};
+    use fabro_auth::{ApiKeyHeader, CredentialSource, ResolvedCredentials};
     use fabro_model::ProviderId;
     use fabro_model::catalog::LlmCatalogSettings;
     use futures::stream;

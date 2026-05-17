@@ -41,8 +41,10 @@ use fabro_workflow::{Error as WorkflowError, ManifestPath};
 use futures_util::stream::{self, StreamExt};
 use tokio::process::Command;
 use tokio::time;
+use tracing::warn;
 
 use crate::server::AppState;
+use crate::server_secrets::LlmClientResult;
 
 #[derive(Clone)]
 pub(crate) struct PreparedManifest {
@@ -472,7 +474,14 @@ async fn build_preflight_report(
     }
 
     let catalog = state.catalog();
-    let configured_providers = state.ready_llm_provider_ids().await;
+    let llm_result = state.resolve_llm_client().await;
+    let configured_providers = match &llm_result {
+        Ok(result) => result.provider_ids(),
+        Err(err) => {
+            warn!(error = ?err, "Failed to resolve LLM client while checking ready providers");
+            Vec::new()
+        }
+    };
     let materialized = materialize_run(
         prepared.settings.clone(),
         graph,
@@ -518,12 +527,12 @@ async fn build_preflight_report(
     )
     .await;
     let llm_ok = run_llm_check(
-        state,
         &mut checks,
         graph,
         &resolved_run,
         &configured_providers,
         catalog.as_ref(),
+        llm_result,
     )
     .await;
     run_github_token_check(&mut checks, prepared, &resolved_run, github_app).await;
@@ -920,12 +929,12 @@ struct PendingModelProbe {
 }
 
 async fn run_llm_check(
-    state: &AppState,
     checks: &mut Vec<CheckResult>,
     graph: &Graph,
     settings: &RunNamespace,
     configured_providers: &[ProviderId],
     catalog: &Catalog,
+    llm_result: Result<LlmClientResult>,
 ) -> bool {
     let (model, provider) = resolve_model_provider(settings, graph, configured_providers, catalog);
     let default_provider = provider.as_deref().unwrap_or("anthropic");
@@ -956,7 +965,7 @@ async fn run_llm_check(
         return true;
     }
 
-    match state.resolve_llm_client().await {
+    match llm_result {
         Ok(result) => {
             let auth_issues = result.auth_issues;
             let registration_issues = result.registration_issues;

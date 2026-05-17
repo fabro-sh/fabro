@@ -1080,14 +1080,13 @@ impl ProviderAdapter for Adapter {
     }
 
     async fn complete(&self, request: &Request) -> Result<Response, Error> {
+        self.validate_request(request)?;
+
         // Codex endpoint requires streaming; collect the stream into a response.
         if self.codex_mode {
             return self.complete_via_stream(request).await;
         }
 
-        if let Some(tc) = &request.tool_choice {
-            validate_tool_choice(self, tc)?;
-        }
         let request_body =
             build_request_body_with_catalog(request, false, false, self.catalog.as_deref()).await;
         let url = format!("{}/responses", self.http.base_url);
@@ -1125,9 +1124,7 @@ impl ProviderAdapter for Adapter {
     }
 
     async fn stream(&self, request: &Request) -> Result<StreamEventStream, Error> {
-        if let Some(tc) = &request.tool_choice {
-            validate_tool_choice(self, tc)?;
-        }
+        self.validate_request(request)?;
         let request_body = build_request_body_with_catalog(
             request,
             true,

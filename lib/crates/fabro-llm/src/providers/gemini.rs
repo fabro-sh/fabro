@@ -935,9 +935,7 @@ impl ProviderAdapter for Adapter {
     }
 
     async fn complete(&self, request: &Request) -> Result<Response, Error> {
-        if let Some(tc) = &request.tool_choice {
-            validate_tool_choice(self, tc)?;
-        }
+        self.validate_request(request)?;
         let api_body = build_api_request(request).await;
 
         let api_model = common::api_model_id(self.catalog.as_deref(), &request.model);
@@ -1005,9 +1003,7 @@ impl ProviderAdapter for Adapter {
     }
 
     async fn stream(&self, request: &Request) -> Result<StreamEventStream, Error> {
-        if let Some(tc) = &request.tool_choice {
-            validate_tool_choice(self, tc)?;
-        }
+        self.validate_request(request)?;
         let api_body = build_api_request(request).await;
 
         let api_model = common::api_model_id(self.catalog.as_deref(), &request.model);

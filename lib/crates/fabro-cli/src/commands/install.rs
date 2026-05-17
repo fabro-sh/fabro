@@ -32,7 +32,7 @@ use fabro_install::{
     persist_install_outputs_direct, write_github_app_settings, write_token_settings,
 };
 use fabro_model::catalog::CatalogProvider;
-use fabro_model::{Catalog, CredentialRef, ProviderAuthConfig, ProviderId};
+use fabro_model::{Catalog, CredentialRef, ProviderId};
 use fabro_server::serve;
 use fabro_store::ArtifactStore;
 use fabro_types::ServerSettings;
@@ -77,7 +77,7 @@ static INSTALL_CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
 });
 
 fn supports_install_api_key(provider: &CatalogProvider) -> bool {
-    matches!(provider.auth, ProviderAuthConfig::ApiKey { .. })
+    !provider.auth.credentials().is_empty()
 }
 
 fn install_llm_provider_ids(catalog: &Catalog) -> Vec<ProviderId> {
@@ -93,10 +93,9 @@ fn provider_env_var_label(provider: &ProviderId, catalog: &Catalog) -> String {
     catalog
         .provider(provider)
         .map(|provider| {
-            let ProviderAuthConfig::ApiKey { credentials, .. } = &provider.auth else {
-                return String::new();
-            };
-            credentials
+            provider
+                .auth
+                .credentials()
                 .iter()
                 .filter_map(|credential| match credential {
                     CredentialRef::Env(name) => Some(name.as_str()),

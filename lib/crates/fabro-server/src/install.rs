@@ -26,7 +26,7 @@ use fabro_install::{
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate};
 use fabro_model::catalog::CatalogProvider;
-use fabro_model::{Catalog, ProviderAuthConfig, ProviderId};
+use fabro_model::{Catalog, ProviderId};
 use fabro_sandbox::daytona;
 use fabro_static::EnvVars;
 use fabro_store::ArtifactStore;
@@ -50,6 +50,7 @@ use zeroize::Zeroizing;
 
 use crate::error::ApiError;
 use crate::serve::{self, DEFAULT_TCP_PORT};
+use crate::server::process_env_var;
 use crate::server_secrets::{ServerSecrets, process_env_snapshot};
 use crate::{security_headers, static_files};
 
@@ -96,8 +97,8 @@ const REDACTED_SECRET_VALUE: &str = "[REDACTED]";
 const VALIDATION_TIMEOUT: Duration = Duration::from_secs(20);
 const VALIDATION_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-static INSTALL_CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
-    Catalog::from_builtin().expect("embedded install model catalog should be valid")
+static INSTALL_CATALOG: LazyLock<Arc<Catalog>> = LazyLock::new(|| {
+    Arc::new(Catalog::from_builtin().expect("embedded install model catalog should be valid"))
 });
 
 impl InstallAppState {
@@ -828,7 +829,7 @@ fn install_catalog_provider(provider: &ProviderId) -> Result<&'static CatalogPro
     let catalog_provider = INSTALL_CATALOG
         .provider(provider)
         .ok_or_else(|| format!("provider '{provider}' is not configured in the model catalog"))?;
-    let supports_api_key = matches!(catalog_provider.auth, ProviderAuthConfig::ApiKey { .. });
+    let supports_api_key = !catalog_provider.auth.credentials().is_empty();
     if supports_api_key {
         Ok(catalog_provider)
     } else {
@@ -2053,7 +2054,7 @@ async fn validate_llm_provider(
     state: &InstallAppState,
     input: &InstallLlmTestInput,
 ) -> anyhow::Result<()> {
-    let catalog = Arc::new(Catalog::from_builtin().context("failed to build install catalog")?);
+    let catalog = Arc::clone(&INSTALL_CATALOG);
     let provider = catalog.provider(&input.provider).with_context(|| {
         format!(
             "provider '{}' is not configured in the model catalog",
@@ -2097,7 +2098,7 @@ async fn validate_llm_provider(
 }
 
 fn ensure_install_api_key_provider(provider: &CatalogProvider) -> anyhow::Result<()> {
-    if matches!(provider.auth, ProviderAuthConfig::ApiKey { .. }) {
+    if !provider.auth.credentials().is_empty() {
         Ok(())
     } else {
         bail!(
@@ -2107,10 +2108,6 @@ fn ensure_install_api_key_provider(provider: &CatalogProvider) -> anyhow::Result
     }
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "Install flow checks documented provider base-url env overrides before catalog defaults."
-)]
 fn provider_base_url_override(
     state: &InstallAppState,
     provider: &CatalogProvider,
@@ -2120,7 +2117,7 @@ fn provider_base_url_override(
         .provider_base_urls
         .get(&provider.id)
         .cloned()
-        .or_else(|| provider.resolve_base_url(|name| std::env::var(name).ok()))
+        .or_else(|| provider.resolve_base_url(process_env_var))
 }
 
 async fn validate_github_token(state: &InstallAppState, token: &str) -> anyhow::Result<String> {
