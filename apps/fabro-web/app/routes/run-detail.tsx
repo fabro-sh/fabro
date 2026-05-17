@@ -421,7 +421,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
                 }`}
               >
                 {tab.name}
-                {tab.count != null && (
+                {tab.count != null && tab.count > 0 && (
                   <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-xs font-normal tabular-nums ${
                     isActive ? "bg-overlay-strong text-fg-3" : "bg-overlay text-fg-muted"
                   }`}>

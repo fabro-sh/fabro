@@ -17,6 +17,11 @@ pub(crate) enum RunInteractAction {
     Get,
     Start,
     Message,
+    /// Cancel the active API-mode agent's current LLM round and park it
+    /// waiting for a later `message`. The run sits idle until you follow up
+    /// with `message` or `cancel`. To redirect the agent, prefer `message`
+    /// (optionally with `interrupt: true`).
+    Interrupt,
     Cancel,
     Archive,
     Unarchive,
@@ -114,6 +119,7 @@ pub(crate) enum ValidatedInteractAction {
         message:   String,
         interrupt: bool,
     },
+    Interrupt,
     Cancel,
     Archive,
     Unarchive,
@@ -134,6 +140,7 @@ impl ValidatedInteractAction {
             Self::Get => RunInteractAction::Get,
             Self::Start => RunInteractAction::Start,
             Self::Message { .. } => RunInteractAction::Message,
+            Self::Interrupt => RunInteractAction::Interrupt,
             Self::Cancel => RunInteractAction::Cancel,
             Self::Archive => RunInteractAction::Archive,
             Self::Unarchive => RunInteractAction::Unarchive,
@@ -169,6 +176,7 @@ impl TryFrom<FabroRunInteractParams> for ValidatedInteractRun {
                     interrupt: params.interrupt.unwrap_or(false),
                 }
             }
+            RunInteractAction::Interrupt => ValidatedInteractAction::Interrupt,
             RunInteractAction::Cancel => ValidatedInteractAction::Cancel,
             RunInteractAction::Archive => ValidatedInteractAction::Archive,
             RunInteractAction::Unarchive => ValidatedInteractAction::Unarchive,
@@ -248,6 +256,13 @@ pub(crate) async fn interact_run(
                 .await
                 .map_err(|err| ToolError::from_anyhow(&err))?;
             json!({ "message": message, "interrupt": interrupt })
+        }
+        ValidatedInteractAction::Interrupt => {
+            client
+                .interrupt_run(&run_id)
+                .await
+                .map_err(|err| ToolError::from_anyhow(&err))?;
+            json!({ "interrupted": true })
         }
         ValidatedInteractAction::Cancel => {
             let summary = client
@@ -482,6 +497,26 @@ mod tests {
         assert!(matches!(
             validated.action,
             ValidatedInteractAction::UnlinkParent
+        ));
+    }
+
+    #[test]
+    fn interrupt_action_requires_only_run_id() {
+        let validated = ValidatedInteractRun::try_from(FabroRunInteractParams {
+            action:      RunInteractAction::Interrupt,
+            run_id:      "run_123".to_string(),
+            parent_id:   None,
+            message:     None,
+            interrupt:   None,
+            question_id: None,
+            answer:      None,
+        })
+        .expect("interrupt should validate with only run_id");
+
+        assert_eq!(validated.run_id, "run_123");
+        assert!(matches!(
+            validated.action,
+            ValidatedInteractAction::Interrupt
         ));
     }
 }

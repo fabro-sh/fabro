@@ -10,6 +10,8 @@ import { formatRelativeTime } from "../lib/format";
 import { useChildRuns, useRun } from "../lib/queries";
 import { RUNS_LIST_GRID_TEMPLATE, RunRow } from "./runs";
 
+export const handle = { wide: true };
+
 export default function RunChildren() {
   const { id } = useParams();
   const runQuery = useRun(id);

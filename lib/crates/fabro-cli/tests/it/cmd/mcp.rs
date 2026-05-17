@@ -1369,6 +1369,11 @@ async fn mcp_interact_actions_resolve_selector_and_call_expected_endpoints() {
             .json_body(serde_json::json!({ "text": "continue", "interrupt": true }));
         then.status(202);
     });
+    let interrupt = server.mock(|when, then| {
+        when.method(POST)
+            .path(format!("/api/v1/runs/{run_id}/interrupt"));
+        then.status(202);
+    });
     let cancel = server.mock(|when, then| {
         when.method(POST)
             .path(format!("/api/v1/runs/{run_id}/cancel"));
@@ -1408,6 +1413,12 @@ async fn mcp_interact_actions_resolve_selector_and_call_expected_endpoints() {
         }),
     )
     .await;
+    let interrupt_result = call_tool_json(
+        &client,
+        "fabro_run_interact",
+        serde_json::json!({ "run_id": selector, "action": "interrupt" }),
+    )
+    .await;
     let cancel_result = call_tool_json(
         &client,
         "fabro_run_interact",
@@ -1419,12 +1430,14 @@ async fn mcp_interact_actions_resolve_selector_and_call_expected_endpoints() {
     assert_eq!(start_result["result"]["summary"]["run_id"], run_id);
     assert_eq!(message_result["result"]["message"], "continue");
     assert_eq!(message_result["result"]["interrupt"], true);
+    assert_eq!(interrupt_result["result"]["interrupted"], true);
     assert_eq!(cancel_result["result"]["summary"]["run_id"], run_id);
-    resolve.assert_calls(4);
+    resolve.assert_calls(5);
     retrieve.assert_calls(1);
     projection.assert();
     start.assert();
     message.assert();
+    interrupt.assert();
     cancel.assert();
     client
         .shutdown()

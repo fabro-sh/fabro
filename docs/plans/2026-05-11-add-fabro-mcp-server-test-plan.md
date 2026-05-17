@@ -273,7 +273,7 @@ Covered action space:
 
 - CLI executable commands: `fabro mcp --help`, `fabro mcp start --help`, `fabro mcp config --help`, `fabro mcp init --help`, `fabro mcp config`, `fabro mcp config --server --storage-dir`, and `fabro mcp init claude|cursor|windsurf`.
 - MCP protocol actions: stdio process startup, `initialize`, `tools/list`, and `tools/call`.
-- MCP tool actions: `fabro_run_create`; `fabro_run_search`; `fabro_run_interact` actions `get`, `start`, `message`, `cancel`, `archive`, `unarchive`, `get_questions`, `answer`; `fabro_run_gather`; `fabro_run_events` actions `list`, `details`, and `search`.
+- MCP tool actions: `fabro_run_create`; `fabro_run_search`; `fabro_run_interact` actions `get`, `start`, `message`, `interrupt`, `cancel`, `archive`, `unarchive`, `get_questions`, `answer`; `fabro_run_gather`; `fabro_run_events` actions `list`, `details`, and `search`.
 - Error and boundary behavior: invalid local parameters, too many run ids, null input conversion, missing action fields, unsupported answer shapes, invalid agent config JSON, missing auth, unreachable server after local validation, timeout expiry, and service liveness after tool errors.
 - Integration boundaries: CLI auth store reuse, Fabro API client, real local Fabro server, run manifest construction/validation, event store, generated API answer types, and existing `fabro-mcp` client crate.
 - Performance smoke: initialize plus `tools/list` without auth/server.
