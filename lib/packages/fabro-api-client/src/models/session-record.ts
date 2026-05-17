@@ -15,6 +15,9 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { PermissionLevel } from './permission-level';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { SessionMessage } from './session-message';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -33,7 +36,7 @@ export interface SessionRecord {
     'working_dir'?: string | null;
     'provider'?: string | null;
     'model'?: string | null;
-    'permissions'?: string | null;
+    'permissions': PermissionLevel;
     'created_at': string;
     'updated_at': string;
     'deleted_at'?: string | null;

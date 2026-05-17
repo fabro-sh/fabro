@@ -90,6 +90,29 @@ macro_rules! ulid_id {
 ulid_id!(SessionId);
 ulid_id!(TurnId);
 
+/// Agent tool permission level applied to a session.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    IntoStaticStr,
+)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
+#[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
+pub enum PermissionLevel {
+    ReadOnly,
+    ReadWrite,
+    Full,
+}
+
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString, IntoStaticStr,
 )]
@@ -135,7 +158,7 @@ pub struct SessionRecord {
     pub working_dir:     Option<String>,
     pub provider:        Option<String>,
     pub model:           Option<String>,
-    pub permissions:     Option<String>,
+    pub permissions:     PermissionLevel,
     pub created_at:      DateTime<Utc>,
     pub updated_at:      DateTime<Utc>,
     pub deleted_at:      Option<DateTime<Utc>>,
@@ -152,7 +175,7 @@ impl SessionRecord {
             working_dir: None,
             provider: None,
             model: None,
-            permissions: None,
+            permissions: PermissionLevel::ReadWrite,
             created_at: now,
             updated_at: now,
             deleted_at: None,

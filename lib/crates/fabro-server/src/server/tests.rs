@@ -2180,6 +2180,46 @@ async fn create_run(app: &Router, dot_source: &str) -> String {
 }
 
 #[tokio::test]
+async fn create_session_rejects_missing_permissions() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api("/sessions"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"working_dir": "/tmp"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn create_session_rejects_unknown_permission_value() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api("/sessions"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"permissions": "readonly"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
 async fn session_apis_create_list_replay_events_and_delete() {
     let state = test_app_state_with_isolated_storage();
     let app = crate::test_support::build_test_router(Arc::clone(&state));

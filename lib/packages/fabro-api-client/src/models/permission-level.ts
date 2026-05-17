@@ -13,17 +13,18 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { PermissionLevel } from './permission-level';
 
-export interface CreateSessionRequest {
-    'title'?: string;
-    'working_dir'?: string;
-    'provider'?: string;
-    'model'?: string;
-    'permissions': PermissionLevel;
-}
+/**
+ * Agent tool permission level applied to a session.
+ */
+
+export const PermissionLevel = {
+    READ_ONLY: 'read-only',
+    READ_WRITE: 'read-write',
+    FULL: 'full'
+} as const;
+
+export type PermissionLevel = typeof PermissionLevel[keyof typeof PermissionLevel];
 
 
 

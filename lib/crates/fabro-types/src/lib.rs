@@ -102,8 +102,8 @@ pub use sandbox_services::{
 };
 pub use secret::{SecretMetadata, SecretType};
 pub use session::{
-    SessionEventEnvelope, SessionId, SessionMessage, SessionRecord, SessionStatus, SessionSummary,
-    TurnId, TurnRecord, TurnStatus,
+    PermissionLevel, SessionEventEnvelope, SessionId, SessionMessage, SessionRecord, SessionStatus,
+    SessionSummary, TurnId, TurnRecord, TurnStatus,
 };
 pub use stage_completion::StageCompletion;
 pub use stage_handler::StageHandler;

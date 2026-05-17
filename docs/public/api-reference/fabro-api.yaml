@@ -4714,6 +4714,7 @@ components:
       required:
         - id
         - status
+        - permissions
         - created_at
         - updated_at
         - runtime_context
@@ -4731,7 +4732,7 @@ components:
         model:
           type: ["string", "null"]
         permissions:
-          type: ["string", "null"]
+          $ref: "#/components/schemas/PermissionLevel"
         created_at:
           type: string
           format: date-time
@@ -4745,6 +4746,14 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SessionMessage"
+
+    PermissionLevel:
+      description: Agent tool permission level applied to a session.
+      type: string
+      enum:
+        - read-only
+        - read-write
+        - full
 
     SessionSummary:
       description: List projection of a durable session.
@@ -4836,6 +4845,8 @@ components:
 
     CreateSessionRequest:
       type: object
+      required:
+        - permissions
       properties:
         title:
           type: string
@@ -4846,7 +4857,7 @@ components:
         model:
           type: string
         permissions:
-          type: string
+          $ref: "#/components/schemas/PermissionLevel"
 
     UpdateSessionRequest:
       type: object

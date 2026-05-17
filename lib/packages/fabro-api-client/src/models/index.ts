@@ -172,6 +172,7 @@ export * from './paginated-turn-list';
 export * from './paginated-workflow-list-response';
 export * from './pagination-meta';
 export * from './pending-interview-record';
+export * from './permission-level';
 export * from './pre-run-push-outcome';
 export * from './pre-run-push-outcome-failed';
 export * from './pre-run-push-outcome-not-attempted';
