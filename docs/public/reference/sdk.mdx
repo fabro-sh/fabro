@@ -372,7 +372,7 @@ For env-backed usage, `EnvCredentialSource` checks for API key environment varia
 | `MINIMAX_API_KEY` | Minimax |
 | `INCEPTION_API_KEY` | Inception |
 
-The first provider registered becomes the default. Optional base URL overrides (e.g. `ANTHROPIC_BASE_URL`) are also read. For vault-backed usage inside Fabro, use `fabro_auth::VaultCredentialSource` instead.
+The first provider registered becomes the default. Provider base URLs come from the model catalog. For vault-backed usage inside Fabro, use `fabro_auth::VaultCredentialSource` instead.
 
 #### Creating manually
 

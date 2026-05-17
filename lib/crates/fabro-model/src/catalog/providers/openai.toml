@@ -1,11 +1,8 @@
 [providers.openai]
 display_name = "OpenAI"
 adapter = "openai"
-agent_profile = "openai"
-billing_policy = "openai"
 api_key_url = "https://platform.openai.com/api-keys"
 base_url = "https://api.openai.com/v1"
-base_url_env = "OPENAI_BASE_URL"
 priority = 90
 
 [providers.openai.auth]

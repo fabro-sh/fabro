@@ -69,9 +69,6 @@ pub struct ProviderSettings {
     pub api_key_url:    Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url:       Option<String>,
-    /// Environment variable name that overrides `base_url` when set.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_url_env:   Option<String>,
     /// Extra HTTP headers attached to every outgoing provider request after
     /// credential resolution. Header values are typed so secret-bearing values
     /// stay as references until a later resolution phase.
@@ -700,6 +697,17 @@ unknown_field = true
     }
 
     #[test]
+    fn rejects_removed_provider_base_url_env_field() {
+        let toml = r#"
+[providers.kimi]
+adapter = "openai_compatible"
+base_url_env = "KIMI_BASE_URL"
+"#;
+        let err = toml::from_str::<LlmLayer>(toml).unwrap_err();
+        assert!(err.to_string().contains("base_url_env"));
+    }
+
+    #[test]
     fn rejects_unknown_model_field() {
         let toml = r#"
 [models.foo]
@@ -717,14 +725,12 @@ mystery = 1
         let high = ProviderSettings {
             adapter: Some("openai_compatible".to_string()),
             base_url: Some("https://override.example".to_string()),
-            base_url_env: Some("OVERRIDE_BASE_URL".to_string()),
             agent_profile: Some(fabro_model::AgentProfileKind::Anthropic),
             ..ProviderSettings::default()
         };
         let low = ProviderSettings {
             adapter: Some("anthropic".to_string()),
             base_url: Some("https://defaults.example".to_string()),
-            base_url_env: Some("DEFAULT_BASE_URL".to_string()),
             display_name: Some("Default".to_string()),
             priority: Some(10),
             agent_profile: Some(fabro_model::AgentProfileKind::OpenAi),
@@ -733,7 +739,6 @@ mystery = 1
         let merged = high.combine(low);
         assert_eq!(merged.adapter.as_deref(), Some("openai_compatible"));
         assert_eq!(merged.base_url.as_deref(), Some("https://override.example"));
-        assert_eq!(merged.base_url_env.as_deref(), Some("OVERRIDE_BASE_URL"));
         assert_eq!(merged.display_name.as_deref(), Some("Default"));
         assert_eq!(merged.priority, Some(10));
         assert_eq!(

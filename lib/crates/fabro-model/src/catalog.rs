@@ -52,8 +52,6 @@ pub struct ProviderCatalogSettings {
     #[serde(default)]
     pub base_url:       Option<String>,
     #[serde(default)]
-    pub base_url_env:   Option<String>,
-    #[serde(default)]
     pub extra_headers:  Option<HashMap<String, HeaderValueRef>>,
     #[serde(default)]
     pub priority:       Option<i32>,
@@ -544,23 +542,9 @@ pub struct CatalogProvider {
     pub billing_policy: BillingPolicy,
     pub api_key_url:    Option<String>,
     pub base_url:       Option<String>,
-    pub base_url_env:   Option<String>,
     pub extra_headers:  HashMap<String, HeaderValueRef>,
     pub priority:       i32,
     pub aliases:        Vec<String>,
-}
-
-impl CatalogProvider {
-    #[must_use]
-    pub fn resolve_base_url<F>(&self, mut lookup: F) -> Option<String>
-    where
-        F: FnMut(&str) -> Option<String>,
-    {
-        self.base_url_env
-            .as_deref()
-            .and_then(&mut lookup)
-            .or_else(|| self.base_url.clone())
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1096,7 +1080,6 @@ fn merge_provider_settings(
         billing_policy: higher.billing_policy.or(fallback.billing_policy),
         api_key_url:    higher.api_key_url.or(fallback.api_key_url),
         base_url:       higher.base_url.or(fallback.base_url),
-        base_url_env:   higher.base_url_env.or(fallback.base_url_env),
         extra_headers:  higher.extra_headers.or(fallback.extra_headers),
         priority:       higher.priority.or(fallback.priority),
         enabled:        higher.enabled.or(fallback.enabled),
@@ -1232,13 +1215,8 @@ fn build_providers(
                 adapter:  adapter_name,
             }
         })?;
-        let agent_profile =
-            settings
-                .agent_profile
-                .ok_or_else(|| CatalogBuildError::MissingProviderField {
-                    provider: provider_id.clone(),
-                    field:    "agent_profile",
-                })?;
+        let defaults = adapter_defaults(adapter);
+        let agent_profile = settings.agent_profile.unwrap_or(defaults.agent_profile);
         let auth = settings.auth.clone().unwrap_or(ProviderAuthConfig::None);
         validate_provider_auth(&provider_id, &auth, settings.extra_headers.as_ref())?;
 
@@ -1248,16 +1226,38 @@ fn build_providers(
             adapter,
             agent_profile,
             auth,
-            billing_policy: settings.billing_policy.unwrap_or(BillingPolicy::None),
+            billing_policy: settings.billing_policy.unwrap_or(defaults.billing_policy),
             api_key_url: settings.api_key_url.clone(),
             base_url: settings.base_url.clone(),
-            base_url_env: settings.base_url_env.clone(),
             extra_headers: settings.extra_headers.clone().unwrap_or_default(),
             priority: settings.priority.unwrap_or_default(),
             aliases: settings.aliases.clone().unwrap_or_default(),
         });
     }
     Ok(providers)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AdapterDefaults {
+    agent_profile:  AgentProfileKind,
+    billing_policy: BillingPolicy,
+}
+
+fn adapter_defaults(adapter: AdapterKind) -> AdapterDefaults {
+    match adapter {
+        AdapterKind::Anthropic => AdapterDefaults {
+            agent_profile:  AgentProfileKind::Anthropic,
+            billing_policy: BillingPolicy::Anthropic,
+        },
+        AdapterKind::OpenAi | AdapterKind::OpenAiCompatible => AdapterDefaults {
+            agent_profile:  AgentProfileKind::OpenAi,
+            billing_policy: BillingPolicy::OpenAi,
+        },
+        AdapterKind::Gemini => AdapterDefaults {
+            agent_profile:  AgentProfileKind::Gemini,
+            billing_policy: BillingPolicy::Gemini,
+        },
+    }
 }
 
 fn validate_provider_auth(
@@ -1761,38 +1761,6 @@ reasoning = false
     }
 
     #[test]
-    fn provider_base_url_env_resolves_before_static_base_url() {
-        let settings = minimal_settings(
-            r#"
-[providers.acme]
-display_name = "Acme"
-adapter = "openai_compatible"
-agent_profile = "openai"
-base_url = "https://default.example.com/v1"
-base_url_env = "ACME_BASE_URL"
-"#,
-        );
-
-        let providers = build_providers(&settings).unwrap();
-        let provider = providers
-            .iter()
-            .find(|provider| provider.id == ProviderId::new("acme"))
-            .unwrap();
-
-        assert_eq!(provider.base_url_env.as_deref(), Some("ACME_BASE_URL"));
-        assert_eq!(
-            provider.resolve_base_url(|name| {
-                (name == "ACME_BASE_URL").then(|| "https://env.example.com/v1".to_string())
-            }),
-            Some("https://env.example.com/v1".to_string())
-        );
-        assert_eq!(
-            provider.resolve_base_url(|_| None),
-            Some("https://default.example.com/v1".to_string())
-        );
-    }
-
-    #[test]
     fn builtin_ollama_provider_is_opt_in() {
         let ollama = ProviderId::new("ollama");
         let builtin = Catalog::builtin();
@@ -1816,6 +1784,7 @@ enabled = true
             provider.base_url.as_deref(),
             Some("http://localhost:11434/v1")
         );
+        assert_eq!(provider.billing_policy, BillingPolicy::None);
 
         assert!(catalog.list(Some(&ollama)).is_empty());
         assert!(catalog.default_for_provider(&ollama).is_none());
@@ -2633,6 +2602,52 @@ reasoning = false
     }
 
     #[test]
+    fn adapter_defaults_provider_agent_profile_and_billing_policy() {
+        let settings = minimal_settings(
+            r#"
+[providers.anthropic]
+display_name = "Anthropic"
+adapter = "anthropic"
+
+[providers.openai]
+display_name = "OpenAI"
+adapter = "openai"
+
+[providers.gemini]
+display_name = "Gemini"
+adapter = "gemini"
+
+[providers.compat]
+display_name = "Compatible"
+adapter = "openai_compatible"
+"#,
+        );
+
+        let providers = build_providers(&settings).unwrap();
+        let provider = |id: &str| {
+            providers
+                .iter()
+                .find(|provider| provider.id.as_str() == id)
+                .unwrap()
+        };
+
+        assert_eq!(
+            provider("anthropic").agent_profile,
+            AgentProfileKind::Anthropic
+        );
+        assert_eq!(
+            provider("anthropic").billing_policy,
+            BillingPolicy::Anthropic
+        );
+        assert_eq!(provider("openai").agent_profile, AgentProfileKind::OpenAi);
+        assert_eq!(provider("openai").billing_policy, BillingPolicy::OpenAi);
+        assert_eq!(provider("gemini").agent_profile, AgentProfileKind::Gemini);
+        assert_eq!(provider("gemini").billing_policy, BillingPolicy::Gemini);
+        assert_eq!(provider("compat").agent_profile, AgentProfileKind::OpenAi);
+        assert_eq!(provider("compat").billing_policy, BillingPolicy::OpenAi);
+    }
+
+    #[test]
     fn model_agent_profile_overrides_provider_profile_for_same_provider() {
         let layer = minimal_settings(
             r#"
@@ -2729,7 +2744,7 @@ reasoning = false
     }
 
     #[test]
-    fn omitted_agent_profile_is_rejected() {
+    fn omitted_agent_profile_uses_adapter_default() {
         let layer = minimal_settings(
             r#"
 [providers.test]
@@ -2752,13 +2767,19 @@ reasoning = false
 "#,
         );
 
-        let err = Catalog::from_settings(&layer).unwrap_err();
+        let catalog = Catalog::from_settings(&layer).unwrap();
 
-        assert!(matches!(
-            err,
-            CatalogBuildError::MissingProviderField { provider, field }
-                if provider == ProviderId::new("test") && field == "agent_profile"
-        ));
+        assert_eq!(
+            catalog
+                .provider(&ProviderId::new("test"))
+                .unwrap()
+                .agent_profile,
+            AgentProfileKind::Gemini
+        );
+        assert_eq!(
+            catalog.effective_agent_profile(&ProviderId::new("test"), Some("default_model")),
+            Some(AgentProfileKind::Gemini)
+        );
     }
 
     #[test]
@@ -2768,8 +2789,6 @@ reasoning = false
 [providers.bearer]
 display_name = "Bearer"
 adapter = "openai"
-agent_profile = "openai"
-billing_policy = "openai"
 
 [providers.bearer.auth]
 type = "api_key"
@@ -2779,8 +2798,6 @@ header = "bearer"
 [providers.custom]
 display_name = "Custom"
 adapter = "gemini"
-agent_profile = "gemini"
-billing_policy = "gemini"
 
 [providers.custom.auth]
 type = "api_key"
@@ -2790,8 +2807,6 @@ header = { custom = "x-api-key" }
 [providers.headers]
 display_name = "Headers"
 adapter = "anthropic"
-agent_profile = "anthropic"
-billing_policy = "anthropic"
 
 [providers.headers.auth]
 type = "header_only"
@@ -2802,7 +2817,6 @@ x-provider-key = { env = "PROVIDER_KEY" }
 [providers.none]
 display_name = "No Auth"
 adapter = "openai_compatible"
-agent_profile = "openai"
 billing_policy = "none"
 
 [providers.none.auth]

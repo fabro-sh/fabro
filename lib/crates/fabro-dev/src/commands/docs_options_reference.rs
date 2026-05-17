@@ -221,10 +221,7 @@ providers can be added when they use an adapter Fabro already supports.
 [llm.providers.proxy]
 display_name = "Acme Gateway"
 adapter = "openai_compatible"
-agent_profile = "openai"
-billing_policy = "openai"
 base_url = "https://llm-gateway.example.com/v1"
-base_url_env = "ACME_GATEWAY_BASE_URL"
 priority = 50
 enabled = true
 aliases = ["gateway"]
@@ -244,10 +241,9 @@ x-team-secret = { credential = "gateway_team_secret" }
 |---|---|---|---|
 | `display_name` | string | provider ID | Human-readable provider name. |
 | `adapter` | string | built-in value | Adapter registry key, such as `"anthropic"`, `"openai"`, `"gemini"`, or `"openai_compatible"`. Required for new providers. |
-| `agent_profile` | `"anthropic"` \| `"openai"` \| `"gemini"` | built-in value | Agent profile used for project memory, CLI/ACP command selection, and native session routing. Required for new providers. |
-| `billing_policy` | `"openai"` \| `"anthropic"` \| `"gemini"` \| `"none"` | `"none"` | Provider-owned billing algorithm for usage estimates. |
+| `agent_profile` | `"anthropic"` \| `"openai"` \| `"gemini"` | derived from `adapter` | Agent profile used for project memory, CLI/ACP command selection, and native session routing. Override only when a provider needs profile behavior different from its adapter. |
+| `billing_policy` | `"openai"` \| `"anthropic"` \| `"gemini"` \| `"none"` | derived from `adapter` | Provider-owned billing algorithm for usage estimates. Override for exceptional providers such as local no-billing runtimes. |
 | `base_url` | string | built-in value or adapter runtime default | Provider API base URL. Required for most custom OpenAI-compatible providers. |
-| `base_url_env` | string | built-in value | Environment variable name that overrides `base_url` when set. |
 | `auth` | table | `{ type = "none" }` | Provider auth mode. Use `[llm.providers.<id>.auth]` for nested TOML. |
 | `auth.type` | `"api_key"` \| `"header_only"` \| `"none"` | `"none"` | API-key auth adds a primary auth header, header-only auth relies on `extra_headers`, and no-auth registers the provider without credentials. |
 | `auth.credentials` | array<string> | None | Ordered refs for `api_key` auth. Accepted forms are `credential:<id>` and `env:<NAME>`. Literal secret strings are rejected. |

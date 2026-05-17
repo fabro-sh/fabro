@@ -1,8 +1,6 @@
 [providers.kimi]
 display_name = "Kimi"
 adapter = "openai_compatible"
-agent_profile = "openai"
-billing_policy = "openai"
 api_key_url = "https://platform.moonshot.cn/console/api-keys"
 base_url = "https://api.moonshot.ai/v1"
 priority = 70

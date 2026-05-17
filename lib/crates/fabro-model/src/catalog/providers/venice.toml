@@ -1,8 +1,6 @@
 [providers.venice]
 display_name = "Venice"
 adapter = "openai_compatible"
-agent_profile = "openai"
-billing_policy = "openai"
 base_url = "https://api.venice.ai/api/v1"
 priority = 35
 aliases = ["venice-ai"]

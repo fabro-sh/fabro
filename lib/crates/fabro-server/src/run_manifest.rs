@@ -2126,13 +2126,14 @@ provider = "daytona"
                     }));
             })
             .await;
-        let base_url = server.url("/v1");
-        let state = crate::test_support::test_app_state_with_env_lookup(
-            crate::test_support::default_test_server_settings(),
-            RunLayer::default(),
-            5,
-            move |name| (name == "OPENAI_BASE_URL").then(|| base_url.clone()),
-        );
+        let state = crate::test_support::TestAppStateBuilder::new()
+            .runtime_settings(
+                crate::test_support::default_test_server_settings(),
+                RunLayer::default(),
+            )
+            .max_concurrent_runs(5)
+            .provider_base_url("openai", server.url("/v1"))
+            .build();
         state
             .vault
             .write()

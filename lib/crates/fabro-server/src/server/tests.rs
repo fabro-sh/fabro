@@ -1368,17 +1368,15 @@ async fn resolve_llm_client_uses_env_lookup_for_openai_settings() {
                 .json_body(openai_responses_payload("hello from env lookup"));
         })
         .await;
-    let base_url = server.url("/v1");
-    let state = test_app_state_with_env_lookup(
-        default_test_server_settings(),
-        RunLayer::default(),
-        5,
-        move |name| match name {
-            "OPENAI_BASE_URL" => Some(base_url.clone()),
+    let state = TestAppStateBuilder::new()
+        .runtime_settings(default_test_server_settings(), RunLayer::default())
+        .max_concurrent_runs(5)
+        .env_lookup(|name| match name {
             "OPENAI_ORG_ID" => Some("env-org".to_string()),
             _ => None,
-        },
-    );
+        })
+        .provider_base_url("openai", server.url("/v1"))
+        .build();
     state
         .vault
         .write()
@@ -2528,7 +2526,6 @@ async fn streaming_session_turn_updates_runtime_context_without_copying_prior_hi
                 .body(openai_stream_body("new answer"));
         })
         .await;
-    let openai_base_url = llm.url("/v1");
     // Use an isolated storage root so parallel tests do not race on the
     // shared default session storage directory. `session_store` writes
     // `session.json` via `fs::write`, which truncates before writing; a
@@ -2547,13 +2544,11 @@ methods = ["dev-token"]
 "#,
         storage_dir.display()
     ));
-    let state =
-        test_app_state_with_env_lookup(server_settings, RunLayer::default(), 5, move |name| {
-            match name {
-                "OPENAI_BASE_URL" => Some(openai_base_url.clone()),
-                _ => None,
-            }
-        });
+    let state = TestAppStateBuilder::new()
+        .runtime_settings(server_settings, RunLayer::default())
+        .max_concurrent_runs(5)
+        .provider_base_url("openai", llm.url("/v1"))
+        .build();
     state
         .vault
         .write()
@@ -2701,7 +2696,6 @@ async fn interrupt_active_session_turn_cancels_runtime_and_persists_interrupted(
     let llm_handle = tokio::spawn(async move {
         axum::serve(listener, llm_app).await.unwrap();
     });
-    let openai_base_url = format!("http://{llm_addr}/v1");
     // Use an isolated storage root so that other tests' AppState startup does
     // not run `recover_stale_running_state` against this test's session
     // directory and mark its in-flight turn as Interrupted.
@@ -2719,13 +2713,11 @@ methods = ["dev-token"]
 "#,
         storage_dir.display()
     ));
-    let state =
-        test_app_state_with_env_lookup(server_settings, RunLayer::default(), 5, move |name| {
-            match name {
-                "OPENAI_BASE_URL" => Some(openai_base_url.clone()),
-                _ => None,
-            }
-        });
+    let state = TestAppStateBuilder::new()
+        .runtime_settings(server_settings, RunLayer::default())
+        .max_concurrent_runs(5)
+        .provider_base_url("openai", format!("http://{llm_addr}/v1"))
+        .build();
     state
         .vault
         .write()
@@ -4430,6 +4422,20 @@ fn create_github_token_app_state_with_env_lookup(
     github_api_base_url: Option<String>,
     env_lookup: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
 ) -> Arc<AppState> {
+    create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
+        token,
+        github_api_base_url,
+        env_lookup,
+        LlmCatalogSettings::default(),
+    )
+}
+
+fn create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
+    token: Option<&str>,
+    github_api_base_url: Option<String>,
+    env_lookup: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
+    llm_catalog_settings: LlmCatalogSettings,
+) -> Arc<AppState> {
     let (store, artifact_store) = test_store_bundle();
     let vault_path = test_secret_store_path();
     let server_env_path = vault_path.with_file_name("server.env");
@@ -4437,7 +4443,7 @@ fn create_github_token_app_state_with_env_lookup(
         resolved_settings: resolved_runtime_settings_for_tests(
             github_token_settings(),
             RunLayer::default(),
-            LlmCatalogSettings::default(),
+            llm_catalog_settings,
         ),
         registry_factory_override: None,
         max_concurrent_runs: 5,
@@ -6136,14 +6142,11 @@ async fn create_run_pull_request_creates_and_persists_record() {
                 ));
         })
         .await;
-    let openai_base_url = llm.url("/v1");
-    let state = create_github_token_app_state_with_env_lookup(
+    let state = create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
         Some("ghu_test"),
         Some(github.base_url()),
-        move |name| match name {
-            "OPENAI_BASE_URL" => Some(openai_base_url.clone()),
-            _ => None,
-        },
+        |_| None,
+        llm_catalog_settings_with_provider_base_url("openai", llm.url("/v1")),
     );
     state
         .vault

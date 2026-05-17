@@ -1,8 +1,6 @@
 [providers.inception]
 display_name = "Inception"
 adapter = "openai_compatible"
-agent_profile = "openai"
-billing_policy = "openai"
 api_key_url = "https://console.inceptionlabs.ai/api-keys"
 base_url = "https://api.inceptionlabs.ai/v1"
 priority = 40

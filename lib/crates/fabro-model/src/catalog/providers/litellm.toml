@@ -1,8 +1,6 @@
 [providers.litellm]
 display_name = "LiteLLM"
 adapter = "openai_compatible"
-agent_profile = "openai"
-billing_policy = "openai"
 base_url = "http://localhost:4000/v1"
 priority = 50
 enabled = false

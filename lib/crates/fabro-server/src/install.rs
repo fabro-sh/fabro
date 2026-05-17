@@ -50,7 +50,6 @@ use zeroize::Zeroizing;
 
 use crate::error::ApiError;
 use crate::serve::{self, DEFAULT_TCP_PORT};
-use crate::server::process_env_var;
 use crate::server_secrets::{ServerSecrets, process_env_snapshot};
 use crate::{security_headers, static_files};
 
@@ -2116,7 +2115,7 @@ fn provider_base_url_override(
         .provider_base_urls
         .get(&provider.id)
         .cloned()
-        .or_else(|| provider.resolve_base_url(process_env_var))
+        .or_else(|| provider.base_url.clone())
 }
 
 async fn validate_github_token(state: &InstallAppState, token: &str) -> anyhow::Result<String> {
@@ -2258,6 +2257,7 @@ mod tests {
 
     use axum::http::HeaderMap;
     use fabro_install::{OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV};
+    use fabro_model::{Catalog, ProviderId};
     use fabro_static::EnvVars;
     use object_store::Error as ObjectStoreError;
     use serde_json::json;
@@ -2267,8 +2267,8 @@ mod tests {
         InstallFinishGuard, InstallObjectStoreCredentialMode, InstallObjectStoreInput,
         InstallObjectStoreProvider, InstallObjectStoreState, PendingInstall, ServerSecrets,
         classify_object_store_validation_error, detect_canonical_url, install_object_store_lookup,
-        lock_unpoisoned, resolve_install_object_store_state, token_is_valid,
-        write_artifact_store_metadata,
+        lock_unpoisoned, provider_base_url_override, resolve_install_object_store_state,
+        token_is_valid, write_artifact_store_metadata,
     };
 
     #[test]
@@ -2338,6 +2338,31 @@ mod tests {
         assert_eq!(
             DEFAULT_INSTALL_GITHUB_API_BASE_URL,
             "https://api.github.com"
+        );
+    }
+
+    #[test]
+    fn install_provider_base_url_falls_back_to_catalog_base_url() {
+        let state = InstallAppState::for_test("expected");
+        let catalog = Catalog::builtin();
+        let provider = catalog.provider(&ProviderId::openai()).unwrap();
+
+        assert_eq!(
+            provider_base_url_override(&state, provider).as_deref(),
+            Some("https://api.openai.com/v1")
+        );
+    }
+
+    #[test]
+    fn install_provider_base_url_prefers_state_override() {
+        let state = InstallAppState::for_test("expected")
+            .with_provider_base_url(ProviderId::openai(), "https://proxy.example.com/v1");
+        let catalog = Catalog::builtin();
+        let provider = catalog.provider(&ProviderId::openai()).unwrap();
+
+        assert_eq!(
+            provider_base_url_override(&state, provider).as_deref(),
+            Some("https://proxy.example.com/v1")
         );
     }
 

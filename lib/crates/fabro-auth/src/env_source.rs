@@ -68,12 +68,11 @@ impl EnvCredentialSource {
             provider: provider.id.clone(),
             auth_header,
             extra_headers,
-            base_url: None,
+            base_url: provider.base_url.clone(),
             codex_mode: false,
             org_id: None,
             project_id: None,
         };
-        cred.base_url = provider.resolve_base_url(|name| self.lookup(name));
         if provider.id == ProviderId::openai() && cred.auth_header.is_some() {
             cred.org_id = self.lookup(EnvVars::OPENAI_ORG_ID);
             cred.project_id = self.lookup(EnvVars::OPENAI_PROJECT_ID);
@@ -299,55 +298,6 @@ reasoning = false
         assert_eq!(
             credential.base_url.as_deref(),
             Some("https://api.acme.test/v1")
-        );
-    }
-
-    #[tokio::test]
-    async fn resolve_uses_catalog_base_url_env_before_static_base_url() {
-        let catalog = catalog_with(
-            r#"
-[providers.acme]
-display_name = "Acme"
-adapter = "openai_compatible"
-agent_profile = "openai"
-base_url = "https://default.example.com/v1"
-base_url_env = "ACME_BASE_URL"
-
-[providers.acme.auth]
-type = "api_key"
-credentials = ["env:ACME_API_KEY"]
-header = "bearer"
-
-[models."acme-large"]
-provider = "acme"
-display_name = "Acme Large"
-family = "acme"
-default = true
-
-[models."acme-large".limits]
-context_window = 128000
-
-[models."acme-large".features]
-tools = true
-vision = false
-reasoning = false
-"#,
-        );
-        let source = test_source(&[
-            ("ACME_API_KEY", "acme-key"),
-            ("ACME_BASE_URL", "https://env.example.com/v1"),
-        ]);
-
-        let resolved = source.resolve(&catalog).await.unwrap();
-        let credential = resolved
-            .credentials
-            .iter()
-            .find(|credential| credential.provider == ProviderId::new("acme"))
-            .expect("custom provider should resolve from env credentials");
-
-        assert_eq!(
-            credential.base_url.as_deref(),
-            Some("https://env.example.com/v1")
         );
     }
 

@@ -689,7 +689,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::test_support::{default_test_server_settings, test_app_state_with_env_lookup};
+    use crate::test_support::{TestAppStateBuilder, default_test_server_settings};
 
     #[test]
     fn short_error_line_returns_fallback_for_empty_input() {
@@ -726,16 +726,11 @@ mod tests {
                     }));
             })
             .await;
-        let base_url = server.url("/v1");
-        let state = test_app_state_with_env_lookup(
-            default_test_server_settings(),
-            RunLayer::default(),
-            5,
-            move |name| match name {
-                "OPENAI_BASE_URL" => Some(base_url.clone()),
-                _ => None,
-            },
-        );
+        let state = TestAppStateBuilder::new()
+            .runtime_settings(default_test_server_settings(), RunLayer::default())
+            .max_concurrent_runs(5)
+            .provider_base_url("openai", server.url("/v1"))
+            .build();
         let credential = AuthCredential {
             provider: ProviderId::openai(),
             details:  AuthDetails::ApiKey {

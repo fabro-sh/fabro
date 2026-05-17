@@ -306,15 +306,10 @@ impl CredentialResolver {
         (self.env_lookup)(name).or_else(|| vault.get(name).map(str::to_string))
     }
 
-    fn provider_base_url_for_catalog(
-        &self,
-        vault: &Vault,
-        provider: &ProviderId,
-        catalog: &Catalog,
-    ) -> Option<String> {
-        catalog.provider(provider).and_then(|provider| {
-            provider.resolve_base_url(|name| self.lookup_env_or_vault(vault, name))
-        })
+    fn provider_base_url_for_catalog(provider: &ProviderId, catalog: &Catalog) -> Option<String> {
+        catalog
+            .provider(provider)
+            .and_then(|provider| provider.base_url.clone())
     }
 
     fn resolved_extra_headers_for_catalog(
@@ -347,7 +342,7 @@ impl CredentialResolver {
         credential: &AuthCredential,
         catalog: &Catalog,
     ) -> Result<ApiCredential, ResolveError> {
-        let base_url = self.provider_base_url_for_catalog(vault, &credential.provider, catalog);
+        let base_url = Self::provider_base_url_for_catalog(&credential.provider, catalog);
         match &credential.details {
             AuthDetails::ApiKey { key } => {
                 let provider = catalog
@@ -412,7 +407,7 @@ impl CredentialResolver {
             provider: provider.id.clone(),
             auth_header: None,
             extra_headers,
-            base_url: self.provider_base_url_for_catalog(vault, &provider.id, catalog),
+            base_url: Self::provider_base_url_for_catalog(&provider.id, catalog),
             codex_mode: false,
             org_id: None,
             project_id: None,
@@ -755,69 +750,6 @@ reasoning = false
             api.base_url.as_deref(),
             Some("https://default.example.com/v1")
         );
-    }
-
-    #[tokio::test]
-    async fn custom_openai_compatible_resolves_with_catalog_base_url_env_from_vault() {
-        let catalog = catalog_with(
-            r#"
-[providers.acme]
-display_name = "Acme"
-adapter = "openai_compatible"
-agent_profile = "openai"
-base_url = "https://default.example.com/v1"
-base_url_env = "ACME_BASE_URL"
-
-[providers.acme.auth]
-type = "api_key"
-credentials = ["credential:acme"]
-header = "bearer"
-
-[models."compat-model"]
-provider = "acme"
-display_name = "Compat Model"
-family = "openai"
-default = true
-
-[models."compat-model".limits]
-context_window = 128000
-
-[models."compat-model".features]
-tools = true
-vision = false
-reasoning = false
-"#,
-        );
-        let dir = tempfile::tempdir().unwrap();
-        let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
-        vault_set_credential(
-            &mut vault,
-            "acme",
-            &api_key_credential(ProviderId::new("acme"), "compat-key"),
-        )
-        .unwrap();
-        vault
-            .set(
-                "ACME_BASE_URL",
-                "https://env.example.com/v1",
-                fabro_vault::SecretType::Environment,
-                None,
-            )
-            .unwrap();
-        let resolver = test_resolver(vault, Arc::new(|_| None));
-        let resolved = resolver
-            .resolve(
-                ProviderId::new("acme"),
-                CredentialUsage::ApiRequest,
-                &catalog,
-            )
-            .await
-            .unwrap();
-
-        let ResolvedCredential::Api(api) = resolved else {
-            panic!("expected api credential");
-        };
-        assert_eq!(api.base_url.as_deref(), Some("https://env.example.com/v1"));
     }
 
     #[tokio::test]

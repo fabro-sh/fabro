@@ -1,11 +1,8 @@
 [providers.gemini]
 display_name = "Gemini"
 adapter = "gemini"
-agent_profile = "gemini"
-billing_policy = "gemini"
 api_key_url = "https://aistudio.google.com/apikey"
 base_url = "https://generativelanguage.googleapis.com/v1beta"
-base_url_env = "GEMINI_BASE_URL"
 priority = 80
 
 [providers.gemini.auth]

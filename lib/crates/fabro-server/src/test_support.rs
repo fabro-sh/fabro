@@ -15,7 +15,7 @@ use axum::{Router, middleware};
 use chrono::Duration as ChronoDuration;
 use fabro_config::{RunLayer, RunSettingsBuilder, ServerSettingsBuilder, envfile};
 use fabro_interview::Interviewer;
-use fabro_model::catalog::LlmCatalogSettings;
+use fabro_model::catalog::{LlmCatalogSettings, ProviderCatalogSettings};
 use fabro_static::EnvVars;
 use fabro_store::{ArtifactStore, Database};
 use fabro_types::settings::ServerAuthMethod;
@@ -131,6 +131,20 @@ impl TestAppStateBuilder {
         self
     }
 
+    pub fn provider_base_url(
+        mut self,
+        provider: impl Into<String>,
+        base_url: impl Into<String>,
+    ) -> Self {
+        self.llm_catalog_settings
+            .providers
+            .insert(provider.into(), ProviderCatalogSettings {
+                base_url: Some(base_url.into()),
+                ..ProviderCatalogSettings::default()
+            });
+        self
+    }
+
     pub fn server_secret_env(mut self, server_secret_env: HashMap<String, String>) -> Self {
         self.server_secret_env = server_secret_env;
         self
@@ -187,6 +201,20 @@ impl TestAppStateBuilder {
         })
         .expect("test app state should build")
     }
+}
+
+pub fn llm_catalog_settings_with_provider_base_url(
+    provider: impl Into<String>,
+    base_url: impl Into<String>,
+) -> LlmCatalogSettings {
+    let mut settings = LlmCatalogSettings::default();
+    settings
+        .providers
+        .insert(provider.into(), ProviderCatalogSettings {
+            base_url: Some(base_url.into()),
+            ..ProviderCatalogSettings::default()
+        });
+    settings
 }
 
 pub fn test_app_state() -> Arc<AppState> {
