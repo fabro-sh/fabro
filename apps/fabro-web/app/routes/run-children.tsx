@@ -3,6 +3,7 @@ import { useParams } from "react-router";
 import { ArrowPathIcon } from "@heroicons/react/20/solid";
 
 import { EmptyState, ErrorState, LoadingState } from "../components/state";
+import { SECONDARY_BUTTON_CLASS } from "../components/ui";
 import { toRunWithStatus } from "../data/runs";
 import { ApiError } from "../lib/api-client";
 import { formatRelativeTime } from "../lib/format";
@@ -90,6 +91,16 @@ export default function RunChildren() {
         <EmptyState
           title="No child runs"
           description="When you launch another run with this run as its parent, it will appear here."
+          action={
+            <a
+              href="https://docs.fabro.sh/reference/cli#fabro-parent-link"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={SECONDARY_BUTTON_CLASS}
+            >
+              Learn about parent links
+            </a>
+          }
         />
       ) : (
         <>
