@@ -445,7 +445,7 @@ describe("RunDetail full-height child routes", () => {
     expect(tabCountBadges(renderer)).toHaveLength(0);
   });
 
-  test("shows a linked pull request chip in the run header", async () => {
+  test("shows a linked pull request pill in the run header", async () => {
     const renderer = await renderRunDetail({
       initialEntry: "/runs/run_1",
       pullRequest: {
@@ -464,7 +464,10 @@ describe("RunDetail full-height child routes", () => {
 
     expect(links).toHaveLength(1);
     expect(links[0].props.target).toBe("_blank");
-    expect(links[0].children.filter((child) => typeof child !== "object").join("")).toBe("#123");
+    const numberSpan = links[0].findByType("span");
+    expect(
+      numberSpan.children.filter((child) => typeof child !== "object").join(""),
+    ).toBe("#123");
   });
 
   test("keeps blocked full-height children clear of the interview dock without an h-72 sibling", async () => {

@@ -80,8 +80,9 @@ mock.module("@pierre/diffs/react", () => ({
   ),
 }));
 
-const { default: RunSandbox, formatBytesAsMemory, normalizeSandboxMode } =
+const { default: RunSandbox, normalizeSandboxMode } =
   await import("./run-sandbox");
+const { formatBytesAsMemory } = await import("../lib/format");
 mock.restore();
 
 const mountedRenderers: TestRenderer.ReactTestRenderer[] = [];

@@ -1,7 +1,11 @@
 import { useMemo } from "react";
 
 import { EmptyState } from "../components/state";
-import { formatDurationSecs, formatTokenCount } from "../lib/format";
+import {
+  formatDurationSecs,
+  formatTokenCount,
+  formatUsdMicros,
+} from "../lib/format";
 import { useRunBilling } from "../lib/queries";
 import { IN_FLIGHT_STAGE_STATES } from "../lib/stage-sidebar";
 import { useTickingNow } from "../lib/time";
@@ -18,8 +22,8 @@ function formatTokens(n: number | null | undefined) {
   return formatTokenCount(n, { compactDecimal: true });
 }
 
-function formatUsdMicros(usdMicros?: number | null) {
-  return usdMicros == null ? EMPTY_VALUE : `$${(usdMicros / 1_000_000).toFixed(2)}`;
+function formatUsdMicrosOrDash(usdMicros?: number | null): string {
+  return formatUsdMicros(usdMicros) ?? EMPTY_VALUE;
 }
 
 function formatModelRef(model?: BillingModelRef | null): string | null {
@@ -176,7 +180,7 @@ export default function RunBilling({ params }: { params: { id: string } }) {
                   {formatDurationSecs(row.runtimeSecs)}
                 </td>
                 <td className="px-4 py-3 text-right font-mono text-xs text-fg-3">
-                  {formatUsdMicros(row.totalUsdMicros)}
+                  {formatUsdMicrosOrDash(row.totalUsdMicros)}
                 </td>
               </tr>
             ))}
@@ -193,7 +197,7 @@ export default function RunBilling({ params }: { params: { id: string } }) {
                 {formatDurationSecs(totalRuntimeSecs)}
               </td>
               <td className="px-4 py-3 text-right font-mono text-xs font-medium text-fg">
-                {formatUsdMicros(totalUsdMicros)}
+                {formatUsdMicrosOrDash(totalUsdMicros)}
               </td>
             </tr>
           </tfoot>
@@ -225,7 +229,7 @@ export default function RunBilling({ params }: { params: { id: string } }) {
                       {formatTokens(row.outputTokens)}
                     </td>
                     <td className="px-4 py-3 text-right font-mono text-xs text-fg-3">
-                      {formatUsdMicros(row.totalUsdMicros)}
+                      {formatUsdMicrosOrDash(row.totalUsdMicros)}
                     </td>
                   </tr>
                 ))}
@@ -241,7 +245,7 @@ export default function RunBilling({ params }: { params: { id: string } }) {
                     {formatTokens(totalOutput)}
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-xs font-medium text-fg">
-                    {formatUsdMicros(totalUsdMicros)}
+                    {formatUsdMicrosOrDash(totalUsdMicros)}
                   </td>
                 </tr>
               </tfoot>

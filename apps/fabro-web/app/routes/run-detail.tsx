@@ -17,8 +17,8 @@ import { Link, Outlet, useLocation, useMatches, useNavigate } from "react-router
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 
 import { EditableRunTitle } from "../components/editable-run-title";
+import { GitPullRequestIcon } from "../components/icons";
 import { InterviewDock } from "../components/interview-dock";
-import { PullRequestChip } from "../components/pull-request-chip";
 import { SteerBar, type SteerBarHandle } from "../components/steer-bar";
 import { ErrorState } from "../components/state";
 import { useToast } from "../components/toast";
@@ -341,17 +341,22 @@ export default function RunDetail({ params }: { params: { id: string } }) {
                 </span>
               </Tooltip>
             )}
-            {run.pullRequestUrl && run.number != null && (
-              <PullRequestChip
-                number={run.number}
-                url={run.pullRequestUrl}
-                iconClassName="size-3.5"
-              />
-            )}
           </div>
         </div>
 
         {demoMode && <ConnectMenu />}
+
+        {run.pullRequestUrl && run.number != null && (
+          <a
+            href={run.pullRequestUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={SECONDARY_BUTTON_CLASS}
+          >
+            <GitPullRequestIcon className="size-4 text-mint" />
+            <span className="font-mono">#{run.number}</span>
+          </a>
+        )}
 
         <ActionsMenu
           canSendInterrupt={statusKind === "running"}

@@ -4,7 +4,11 @@ import { ArrowTopRightOnSquareIcon } from "@heroicons/react/20/solid";
 
 import TerminalView, { TERMINAL_DOCK_CLEARANCE_CLASS } from "../components/terminal-view";
 import { EmptyState, ErrorState } from "../components/state";
-import { formatAbsoluteTs } from "../lib/format";
+import {
+  formatAbsoluteTs,
+  formatBytesAsMemory,
+  formatCpuCores,
+} from "../lib/format";
 import { useRunSandboxDetails } from "../lib/queries";
 import type {
   SandboxDetails,
@@ -51,25 +55,6 @@ const STATE_DISPLAY: Record<SandboxState, { label: string; dot: string; text: st
   resizing: { label: "Resizing", dot: "bg-amber", text: "text-amber" },
   error: { label: "Error", dot: "bg-coral", text: "text-coral" },
 };
-
-const BYTES_PER_GIB = 1024 * 1024 * 1024;
-const BYTES_PER_MIB = 1024 * 1024;
-
-export function formatBytesAsMemory(bytes: number): string {
-  if (bytes >= BYTES_PER_GIB) {
-    const gib = bytes / BYTES_PER_GIB;
-    return `${Number.isInteger(gib) ? gib : gib.toFixed(1)} GiB`;
-  }
-  if (bytes >= BYTES_PER_MIB) {
-    const mib = bytes / BYTES_PER_MIB;
-    return `${Number.isInteger(mib) ? mib : mib.toFixed(1)} MiB`;
-  }
-  return `${bytes} B`;
-}
-
-function formatCpuCores(cores: number): string {
-  return Number.isInteger(cores) ? cores.toString() : cores.toFixed(2);
-}
 
 function nullable(value: string | null | undefined): string {
   return value && value.length > 0 ? value : EMPTY_VALUE;

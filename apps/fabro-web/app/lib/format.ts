@@ -100,3 +100,37 @@ export function formatTokenCount(
   if (value < 1_000_000) return `${Math.round(value / 1000)}k`;
   return `${Math.round(value / 1_000_000)}M`;
 }
+
+const BYTES_PER_GIB = 1024 * 1024 * 1024;
+const BYTES_PER_MIB = 1024 * 1024;
+
+/**
+ * Format a byte count as a memory/disk size (e.g. "8 GiB", "512 MiB", "1024 B").
+ */
+export function formatBytesAsMemory(bytes: number): string {
+  if (bytes >= BYTES_PER_GIB) {
+    const gib = bytes / BYTES_PER_GIB;
+    return `${Number.isInteger(gib) ? gib : gib.toFixed(1)} GiB`;
+  }
+  if (bytes >= BYTES_PER_MIB) {
+    const mib = bytes / BYTES_PER_MIB;
+    return `${Number.isInteger(mib) ? mib : mib.toFixed(1)} MiB`;
+  }
+  return `${bytes} B`;
+}
+
+/**
+ * Format a CPU-core count for display (whole cores as integer; fractional as 2-decimal).
+ */
+export function formatCpuCores(cores: number): string {
+  return Number.isInteger(cores) ? cores.toString() : cores.toFixed(2);
+}
+
+/**
+ * Format a USD-micros amount as a dollar string ("$1.23"). Returns null when the
+ * input is null/undefined so callers can render their own empty placeholder.
+ */
+export function formatUsdMicros(usdMicros: number | null | undefined): string | null {
+  if (usdMicros == null) return null;
+  return `$${(usdMicros / 1_000_000).toFixed(2)}`;
+}

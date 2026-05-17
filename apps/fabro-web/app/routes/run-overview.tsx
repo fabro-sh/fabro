@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { graphTheme } from "../lib/graph-theme";
 import { useRun, useRunGraph, useRunStages } from "../lib/queries";
+import { RunSummaryPanel } from "../components/run-summary-panel";
 import { StageSidebar } from "../components/stage-sidebar";
 import {
   GRAPH_DEFAULT_ZOOM_INDEX,
@@ -192,7 +193,8 @@ export default function RunOverview() {
     <div className="flex gap-6">
       <StageSidebar stages={stages} runId={id!} />
 
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 space-y-4">
+        <RunSummaryPanel runId={id!} />
         {graphSvg === undefined && graphQuery.isLoading ? (
           <div className="py-12" />
         ) : graphSvg ? (
