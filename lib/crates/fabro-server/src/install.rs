@@ -2098,14 +2098,13 @@ async fn validate_llm_provider(
 }
 
 fn ensure_install_api_key_provider(provider: &CatalogProvider) -> anyhow::Result<()> {
-    if !provider.auth.credentials().is_empty() {
-        Ok(())
-    } else {
+    if provider.auth.credentials().is_empty() {
         bail!(
             "provider '{}' does not define an API-key credential path",
             provider.id
         )
     }
+    Ok(())
 }
 
 fn provider_base_url_override(
