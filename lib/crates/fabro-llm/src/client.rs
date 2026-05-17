@@ -20,6 +20,24 @@ pub struct Client {
     catalog:          Option<Arc<Catalog>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ProviderRegistrationIssue {
+    pub provider: ProviderId,
+    pub error:    Error,
+}
+
+#[derive(Clone)]
+pub struct ClientRegistrationReport {
+    pub client:              Client,
+    pub registration_issues: Vec<ProviderRegistrationIssue>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RegistrationMode {
+    FailFast,
+    CollectIssues,
+}
+
 impl Client {
     /// Create a new Client with explicit configuration.
     #[must_use]
@@ -56,6 +74,26 @@ impl Client {
         Self::from_credentials(resolved.credentials, catalog).await
     }
 
+    /// Create a Client report from a credential source.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error` only when the credential source itself fails. Provider
+    /// adapter construction/registration failures are recorded on the report.
+    pub async fn from_source_report(
+        source: &dyn CredentialSource,
+        catalog: Arc<Catalog>,
+    ) -> Result<ClientRegistrationReport, Error> {
+        let resolved = source
+            .resolve(&catalog)
+            .await
+            .map_err(|err| Error::Configuration {
+                message: format!("Failed to resolve LLM credentials: {err}"),
+                source:  None,
+            })?;
+        Ok(Self::from_credentials_report(resolved.credentials, catalog).await)
+    }
+
     /// Create a Client from typed provider credentials.
     ///
     /// # Errors
@@ -65,36 +103,98 @@ impl Client {
         credentials: Vec<ApiCredential>,
         catalog: Arc<Catalog>,
     ) -> Result<Self, Error> {
+        let (report, error) =
+            Self::from_credentials_internal(credentials, catalog, RegistrationMode::FailFast).await;
+        if let Some(error) = error {
+            return Err(error);
+        }
+        Ok(report.client)
+    }
+
+    /// Create a Client while collecting provider adapter registration failures.
+    ///
+    /// Providers whose credentials resolve but whose adapter cannot be
+    /// constructed or initialized are omitted from the returned client and
+    /// reported in `registration_issues`.
+    pub async fn from_credentials_report(
+        credentials: Vec<ApiCredential>,
+        catalog: Arc<Catalog>,
+    ) -> ClientRegistrationReport {
+        let (report, _) =
+            Self::from_credentials_internal(credentials, catalog, RegistrationMode::CollectIssues)
+                .await;
+        report
+    }
+
+    async fn from_credentials_internal(
+        credentials: Vec<ApiCredential>,
+        catalog: Arc<Catalog>,
+        mode: RegistrationMode,
+    ) -> (ClientRegistrationReport, Option<Error>) {
         let mut client = Self {
             providers:        HashMap::new(),
             default_provider: None,
             middleware:       Vec::new(),
             catalog:          Some(Arc::clone(&catalog)),
         };
+        let mut registration_issues = Vec::new();
 
         for credential in credentials {
             let provider_id = credential.provider.clone();
-            let Some(provider) = catalog.provider(&provider_id) else {
-                return Err(Error::Configuration {
+            let adapter = if let Some(provider) = catalog.provider(&provider_id) {
+                let factory = factory_for(provider.adapter);
+                factory(AdapterConfig {
+                    provider_id:   provider.id.to_string(),
+                    auth_header:   credential.auth_header,
+                    base_url:      credential.base_url.or_else(|| provider.base_url.clone()),
+                    extra_headers: credential.extra_headers,
+                    codex_mode:    credential.codex_mode,
+                    org_id:        credential.org_id,
+                    project_id:    credential.project_id,
+                    catalog:       Some(Arc::clone(&catalog)),
+                })
+            } else {
+                Err(Error::Configuration {
                     message: format!(
                         "Provider \"{provider_id}\" is not supported by credential-only registration"
                     ),
                     source:  None,
-                });
+                })
             };
-            let factory = factory_for(provider.adapter);
-
-            let adapter = factory(AdapterConfig {
-                provider_id:   provider.id.to_string(),
-                auth_header:   credential.auth_header,
-                base_url:      credential.base_url.or_else(|| provider.base_url.clone()),
-                extra_headers: credential.extra_headers,
-                codex_mode:    credential.codex_mode,
-                org_id:        credential.org_id,
-                project_id:    credential.project_id,
-                catalog:       Some(Arc::clone(&catalog)),
-            })?;
-            client.register_provider(adapter).await?;
+            match adapter {
+                Ok(adapter) => {
+                    if let Err(error) = client.register_provider(adapter).await {
+                        if mode == RegistrationMode::FailFast {
+                            return (
+                                ClientRegistrationReport {
+                                    client,
+                                    registration_issues,
+                                },
+                                Some(error),
+                            );
+                        }
+                        registration_issues.push(ProviderRegistrationIssue {
+                            provider: provider_id,
+                            error,
+                        });
+                    }
+                }
+                Err(error) => {
+                    if mode == RegistrationMode::FailFast {
+                        return (
+                            ClientRegistrationReport {
+                                client,
+                                registration_issues,
+                            },
+                            Some(error),
+                        );
+                    }
+                    registration_issues.push(ProviderRegistrationIssue {
+                        provider: provider_id,
+                        error,
+                    });
+                }
+            }
         }
 
         debug!(
@@ -103,7 +203,13 @@ impl Client {
             "LLM client initialized from typed credentials"
         );
 
-        Ok(client)
+        (
+            ClientRegistrationReport {
+                client,
+                registration_issues,
+            },
+            None,
+        )
     }
 
     /// Register a provider adapter. Calls `initialize()` on the adapter
@@ -732,6 +838,74 @@ mod tests {
                 ..
             } if message == "Provider \"custom\" is not supported by credential-only registration"
         ));
+    }
+
+    #[tokio::test]
+    async fn from_credentials_report_skips_provider_that_cannot_register() {
+        let catalog = catalog_with(
+            r#"
+[providers.acme]
+display_name = "Acme"
+adapter = "openai_compatible"
+agent_profile = "openai"
+
+[providers.acme.auth]
+type = "api_key"
+credentials = ["env:ACME_API_KEY"]
+header = "bearer"
+
+[models."acme-large"]
+provider = "acme"
+display_name = "Acme Large"
+family = "acme"
+default = true
+
+[models."acme-large".limits]
+context_window = 128000
+
+[models."acme-large".features]
+tools = true
+vision = false
+reasoning = false
+"#,
+        );
+        let report = Client::from_credentials_report(
+            vec![
+                ApiCredential {
+                    provider:      ProviderId::new("acme"),
+                    auth_header:   Some(ApiKeyHeader::Bearer("acme-key".to_string())),
+                    extra_headers: HashMap::new(),
+                    base_url:      None,
+                    codex_mode:    false,
+                    org_id:        None,
+                    project_id:    None,
+                },
+                ApiCredential {
+                    provider:      ProviderId::openai(),
+                    auth_header:   Some(ApiKeyHeader::Bearer("openai-key".to_string())),
+                    extra_headers: HashMap::new(),
+                    base_url:      None,
+                    codex_mode:    false,
+                    org_id:        None,
+                    project_id:    None,
+                },
+            ],
+            Arc::clone(&catalog),
+        )
+        .await;
+
+        assert_eq!(report.client.provider_names(), vec!["openai"]);
+        assert_eq!(report.registration_issues.len(), 1);
+        assert_eq!(
+            report.registration_issues[0].provider,
+            ProviderId::new("acme")
+        );
+        assert!(
+            report.registration_issues[0]
+                .error
+                .to_string()
+                .contains("uses openai_compatible adapter but does not configure base_url")
+        );
     }
 
     #[tokio::test]

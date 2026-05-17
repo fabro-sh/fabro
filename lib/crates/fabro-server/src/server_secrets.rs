@@ -3,7 +3,7 @@ use std::path::Path;
 
 use fabro_auth::ResolveError;
 use fabro_config::envfile;
-use fabro_llm::client::Client;
+use fabro_llm::client::{Client, ProviderRegistrationIssue};
 use fabro_model::ProviderId;
 
 #[expect(
@@ -57,8 +57,19 @@ impl std::fmt::Debug for ServerSecrets {
 }
 
 pub(crate) struct LlmClientResult {
-    pub client:      Client,
-    pub auth_issues: Vec<(ProviderId, ResolveError)>,
+    pub client:              Client,
+    pub auth_issues:         Vec<(ProviderId, ResolveError)>,
+    pub registration_issues: Vec<ProviderRegistrationIssue>,
+}
+
+impl LlmClientResult {
+    pub(crate) fn provider_ids(&self) -> Vec<ProviderId> {
+        self.client
+            .provider_names()
+            .into_iter()
+            .map(ProviderId::new)
+            .collect()
+    }
 }
 
 #[cfg(test)]

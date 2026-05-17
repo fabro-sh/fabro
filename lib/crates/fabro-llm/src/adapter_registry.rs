@@ -33,8 +33,8 @@ pub struct AdapterConfig {
     /// Authentication header constructed by `fabro-auth` from the provider's
     /// catalog auth policy and resolved credential.
     pub auth_header:   Option<ApiKeyHeader>,
-    /// Provider base URL override. `None` means use the adapter's built-in
-    /// default.
+    /// Provider base URL. Native adapters can use their direct-constructor
+    /// defaults when this is `None`; OpenAI-compatible providers require it.
     pub base_url:      Option<String>,
     /// Extra HTTP headers attached to every outgoing request.
     pub extra_headers: HashMap<String, String>,

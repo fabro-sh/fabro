@@ -715,6 +715,16 @@ impl AppState {
         resolve_llm_client_from_source(self.llm_source.as_ref(), self.catalog()).await
     }
 
+    pub(crate) async fn ready_llm_provider_ids(&self) -> Vec<ProviderId> {
+        match self.resolve_llm_client().await {
+            Ok(result) => result.provider_ids(),
+            Err(err) => {
+                warn!(error = ?err, "Failed to resolve LLM client while checking ready providers");
+                Vec::new()
+            }
+        }
+    }
+
     pub(crate) fn vault_or_env(&self, name: &str) -> Option<String> {
         process_env_var(name).or_else(|| {
             self.vault
@@ -889,13 +899,12 @@ async fn resolve_llm_client_from_source(
         .resolve(catalog.as_ref())
         .await
         .context("resolving LLM credentials")?;
-    let client = LlmClient::from_credentials(resolved.credentials, catalog)
-        .await
-        .context("creating LLM client")?;
+    let report = LlmClient::from_credentials_report(resolved.credentials, catalog).await;
 
     Ok(LlmClientResult {
-        client,
-        auth_issues: resolved.auth_issues,
+        client:              report.client,
+        auth_issues:         resolved.auth_issues,
+        registration_issues: report.registration_issues,
     })
 }
 

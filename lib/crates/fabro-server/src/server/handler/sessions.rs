@@ -797,6 +797,9 @@ async fn build_agent_session(state: &AppState, record: &SessionRecord) -> anyhow
     for (provider, issue) in &llm_result.auth_issues {
         warn!(provider = %provider, error = %issue, "LLM provider unavailable due to auth issue");
     }
+    for issue in &llm_result.registration_issues {
+        warn!(provider = %issue.provider, error = %issue.error, "LLM provider unavailable due to registration issue");
+    }
     if !llm_result.client.has_provider(provider_id.as_str()) {
         anyhow::bail!("LLM credentials not configured for provider '{provider_id}'");
     }

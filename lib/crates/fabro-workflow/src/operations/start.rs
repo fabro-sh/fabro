@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use fabro_auth::{CredentialSource, EnvCredentialSource, VaultCredentialSource};
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
+use fabro_llm::client::Client as LlmClient;
 use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_model::{Catalog, FallbackTarget, ProviderId};
 use fabro_sandbox::config::{
@@ -322,7 +323,7 @@ impl RunSession {
             };
         let catalog = Arc::clone(&services.catalog);
         let configured =
-            configured_providers_for_start(services.vault.as_ref(), catalog.as_ref()).await;
+            configured_providers_for_start(services.vault.as_ref(), Arc::clone(&catalog)).await;
         let llm = resolve_start_llm(catalog.as_ref(), &configured, resolved)?;
         let mcp_servers = resolved
             .agent
@@ -440,7 +441,7 @@ impl RunSession {
 
 async fn configured_providers_for_start(
     vault: Option<&Arc<AsyncRwLock<Vault>>>,
-    catalog: &Catalog,
+    catalog: Arc<Catalog>,
 ) -> Vec<ProviderId> {
     let source: Arc<dyn CredentialSource> = match vault {
         Some(vault) => Arc::new(VaultCredentialSource::with_env_lookup(
@@ -449,7 +450,15 @@ async fn configured_providers_for_start(
         )),
         None => Arc::new(EnvCredentialSource::new()),
     };
-    source.configured_providers(catalog).await
+    match LlmClient::from_source_report(source.as_ref(), catalog).await {
+        Ok(report) => report
+            .client
+            .provider_names()
+            .into_iter()
+            .map(ProviderId::new)
+            .collect(),
+        Err(_) => Vec::new(),
+    }
 }
 
 fn resolve_interp(value: &InterpString) -> String {

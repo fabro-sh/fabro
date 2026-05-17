@@ -4790,6 +4790,60 @@ async fn list_models_marks_configured_true_when_provider_has_credential_material
 }
 
 #[tokio::test]
+async fn list_models_marks_configured_false_when_provider_cannot_register() {
+    let llm_catalog_settings: LlmCatalogSettings = toml::from_str(
+        r#"
+[providers.acme]
+display_name = "Acme"
+adapter = "openai_compatible"
+agent_profile = "openai"
+priority = 120
+
+[providers.acme.auth]
+type = "api_key"
+credentials = ["env:ACME_API_KEY"]
+header = "bearer"
+
+[models."acme-large"]
+provider = "acme"
+display_name = "Acme Large"
+family = "acme"
+default = true
+
+[models."acme-large".limits]
+context_window = 128000
+
+[models."acme-large".features]
+tools = true
+vision = false
+reasoning = false
+"#,
+    )
+    .expect("catalog fixture should parse");
+    let state = TestAppStateBuilder::new()
+        .runtime_settings(default_test_server_settings(), RunLayer::default())
+        .max_concurrent_runs(5)
+        .env_lookup(|name| (name == "ACME_API_KEY").then(|| "acme-key".to_string()))
+        .llm_catalog_settings(llm_catalog_settings)
+        .build();
+    let app = crate::test_support::build_test_router(state);
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/models?provider=acme"))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let models = body["data"].as_array().unwrap();
+
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0]["id"], "acme-large");
+    assert_eq!(models[0]["configured"].as_bool(), Some(false));
+}
+
+#[tokio::test]
 async fn list_models_marks_configured_false_when_no_credential_material() {
     let state = test_app_state_with_env_lookup(
         default_test_server_settings(),

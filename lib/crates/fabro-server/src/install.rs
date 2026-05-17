@@ -2000,8 +2000,8 @@ fn install_http_client_for_url(base_url: &str) -> anyhow::Result<fabro_http::Htt
 
 /// Parse and validate an install-time upstream URL.
 ///
-/// In production the base URL is a hardcoded constant
-/// (`DEFAULT_INSTALL_GITHUB_API_BASE_URL`, `DEFAULT_ANTHROPIC_BASE_URL`, …).
+/// In production the base URL comes from installer defaults and provider
+/// catalog base-url settings.
 /// Only test code can override via
 /// [`InstallAppState::with_github_api_base_url`]
 /// or [`InstallAppState::with_provider_base_url`], but CodeQL sees those
@@ -2120,13 +2120,7 @@ fn provider_base_url_override(
         .provider_base_urls
         .get(&provider.id)
         .cloned()
-        .or_else(|| match provider.id.as_str() {
-            ProviderId::ANTHROPIC => std::env::var(EnvVars::ANTHROPIC_BASE_URL).ok(),
-            ProviderId::OPENAI => std::env::var(EnvVars::OPENAI_BASE_URL).ok(),
-            ProviderId::GEMINI => std::env::var(EnvVars::GEMINI_BASE_URL).ok(),
-            _ => None,
-        })
-        .or_else(|| provider.base_url.clone())
+        .or_else(|| provider.resolve_base_url(|name| std::env::var(name).ok()))
 }
 
 async fn validate_github_token(state: &InstallAppState, token: &str) -> anyhow::Result<String> {

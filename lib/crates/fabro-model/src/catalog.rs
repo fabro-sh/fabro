@@ -52,6 +52,8 @@ pub struct ProviderCatalogSettings {
     #[serde(default)]
     pub base_url:       Option<String>,
     #[serde(default)]
+    pub base_url_env:   Option<String>,
+    #[serde(default)]
     pub extra_headers:  Option<HashMap<String, HeaderValueRef>>,
     #[serde(default)]
     pub priority:       Option<i32>,
@@ -570,9 +572,23 @@ pub struct CatalogProvider {
     pub billing_policy: BillingPolicy,
     pub api_key_url:    Option<String>,
     pub base_url:       Option<String>,
+    pub base_url_env:   Option<String>,
     pub extra_headers:  HashMap<String, HeaderValueRef>,
     pub priority:       i32,
     pub aliases:        Vec<String>,
+}
+
+impl CatalogProvider {
+    #[must_use]
+    pub fn resolve_base_url<F>(&self, mut lookup: F) -> Option<String>
+    where
+        F: FnMut(&str) -> Option<String>,
+    {
+        self.base_url_env
+            .as_deref()
+            .and_then(&mut lookup)
+            .or_else(|| self.base_url.clone())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1110,6 +1126,7 @@ fn merge_provider_settings(
         billing_policy: higher.billing_policy.or(fallback.billing_policy),
         api_key_url:    higher.api_key_url.or(fallback.api_key_url),
         base_url:       higher.base_url.or(fallback.base_url),
+        base_url_env:   higher.base_url_env.or(fallback.base_url_env),
         extra_headers:  higher.extra_headers.or(fallback.extra_headers),
         priority:       higher.priority.or(fallback.priority),
         enabled:        higher.enabled.or(fallback.enabled),
@@ -1264,6 +1281,7 @@ fn build_providers(
             billing_policy: settings.billing_policy.unwrap_or(BillingPolicy::None),
             api_key_url: settings.api_key_url.clone(),
             base_url: settings.base_url.clone(),
+            base_url_env: settings.base_url_env.clone(),
             extra_headers: settings.extra_headers.clone().unwrap_or_default(),
             priority: settings.priority.unwrap_or_default(),
             aliases: settings.aliases.clone().unwrap_or_default(),
@@ -1769,6 +1787,38 @@ reasoning = false
         let model = catalog.get("al").expect("model alias should resolve");
         assert_eq!(model.id, "acme-large");
         assert_eq!(model.provider, ProviderId::new("acme"));
+    }
+
+    #[test]
+    fn provider_base_url_env_resolves_before_static_base_url() {
+        let settings = minimal_settings(
+            r#"
+[providers.acme]
+display_name = "Acme"
+adapter = "openai_compatible"
+agent_profile = "openai"
+base_url = "https://default.example.com/v1"
+base_url_env = "ACME_BASE_URL"
+"#,
+        );
+
+        let providers = build_providers(&settings).unwrap();
+        let provider = providers
+            .iter()
+            .find(|provider| provider.id == ProviderId::new("acme"))
+            .unwrap();
+
+        assert_eq!(provider.base_url_env.as_deref(), Some("ACME_BASE_URL"));
+        assert_eq!(
+            provider.resolve_base_url(|name| {
+                (name == "ACME_BASE_URL").then(|| "https://env.example.com/v1".to_string())
+            }),
+            Some("https://env.example.com/v1".to_string())
+        );
+        assert_eq!(
+            provider.resolve_base_url(|_| None),
+            Some("https://default.example.com/v1".to_string())
+        );
     }
 
     #[test]

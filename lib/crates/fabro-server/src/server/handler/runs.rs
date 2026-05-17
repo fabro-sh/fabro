@@ -558,10 +558,7 @@ async fn create_run(
 
     let web_url = state.run_web_url(&run_id);
     let catalog = state.catalog();
-    let configured_providers = state
-        .llm_source
-        .configured_providers(catalog.as_ref())
-        .await;
+    let configured_providers = state.ready_llm_provider_ids().await;
     let mut create_input =
         run_manifest::create_run_input(prepared.clone(), configured_providers, web_url.clone());
     create_input.run_id = Some(run_id);

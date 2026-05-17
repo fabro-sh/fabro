@@ -91,7 +91,10 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
             };
         }
     };
-    if result.client.provider_names().is_empty() && result.auth_issues.is_empty() {
+    if result.client.provider_names().is_empty()
+        && result.auth_issues.is_empty()
+        && result.registration_issues.is_empty()
+    {
         return CheckResult {
             name:        "LLM Providers".to_string(),
             status:      CheckStatus::Error,
@@ -110,6 +113,14 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
             summary_line: short_error_line(&message),
         });
         details.push(CheckDetail::new(message));
+    }
+    for issue in &result.registration_issues {
+        let message = issue.error.to_string();
+        failures.push(ProviderFailure {
+            provider:     issue.provider.to_string(),
+            summary_line: short_error_line(&message),
+        });
+        details.push(CheckDetail::new(format!("{}: {message}", issue.provider)));
     }
 
     let providers: Vec<ProviderId> = result

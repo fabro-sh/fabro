@@ -316,10 +316,7 @@ async fn create_run_pull_request(
         model
     } else {
         let catalog = state.catalog();
-        let configured = state
-            .llm_source
-            .configured_providers(catalog.as_ref())
-            .await;
+        let configured = state.ready_llm_provider_ids().await;
         catalog.default_for_configured_ids(&configured).id.clone()
     };
     let catalog = state.catalog();

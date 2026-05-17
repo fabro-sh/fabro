@@ -164,6 +164,9 @@ async fn create_completion(
     for (provider, issue) in &llm_result.auth_issues {
         warn!(provider = %provider, error = %issue, "LLM provider unavailable due to auth issue");
     }
+    for issue in &llm_result.registration_issues {
+        warn!(provider = %issue.provider, error = %issue.error, "LLM provider unavailable due to registration issue");
+    }
     let client = llm_result.client;
     if let Some(provider) = explicit_provider.as_deref() {
         if !client.has_provider(provider) {

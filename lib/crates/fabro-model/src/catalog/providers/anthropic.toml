@@ -5,6 +5,7 @@ agent_profile = "anthropic"
 billing_policy = "anthropic"
 api_key_url = "https://console.anthropic.com/settings/keys"
 base_url = "https://api.anthropic.com/v1"
+base_url_env = "ANTHROPIC_BASE_URL"
 priority = 100
 
 [providers.anthropic.auth]

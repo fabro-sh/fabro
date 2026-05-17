@@ -312,16 +312,8 @@ impl CredentialResolver {
         provider: &ProviderId,
         catalog: &Catalog,
     ) -> Option<String> {
-        let env_base_url = match provider.as_str() {
-            ProviderId::ANTHROPIC => self.lookup_env_or_vault(vault, EnvVars::ANTHROPIC_BASE_URL),
-            ProviderId::OPENAI => self.lookup_env_or_vault(vault, EnvVars::OPENAI_BASE_URL),
-            ProviderId::GEMINI => self.lookup_env_or_vault(vault, EnvVars::GEMINI_BASE_URL),
-            _ => None,
-        };
-        env_base_url.or_else(|| {
-            catalog
-                .provider(provider)
-                .and_then(|provider| provider.base_url.clone())
+        catalog.provider(provider).and_then(|provider| {
+            provider.resolve_base_url(|name| self.lookup_env_or_vault(vault, name))
         })
     }
 
@@ -763,6 +755,69 @@ reasoning = false
             api.base_url.as_deref(),
             Some("https://default.example.com/v1")
         );
+    }
+
+    #[tokio::test]
+    async fn custom_openai_compatible_resolves_with_catalog_base_url_env_from_vault() {
+        let catalog = catalog_with(
+            r#"
+[providers.acme]
+display_name = "Acme"
+adapter = "openai_compatible"
+agent_profile = "openai"
+base_url = "https://default.example.com/v1"
+base_url_env = "ACME_BASE_URL"
+
+[providers.acme.auth]
+type = "api_key"
+credentials = ["credential:acme"]
+header = "bearer"
+
+[models."compat-model"]
+provider = "acme"
+display_name = "Compat Model"
+family = "openai"
+default = true
+
+[models."compat-model".limits]
+context_window = 128000
+
+[models."compat-model".features]
+tools = true
+vision = false
+reasoning = false
+"#,
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
+        vault_set_credential(
+            &mut vault,
+            "acme",
+            &api_key_credential(ProviderId::new("acme"), "compat-key"),
+        )
+        .unwrap();
+        vault
+            .set(
+                "ACME_BASE_URL",
+                "https://env.example.com/v1",
+                fabro_vault::SecretType::Environment,
+                None,
+            )
+            .unwrap();
+        let resolver = test_resolver(vault, Arc::new(|_| None));
+        let resolved = resolver
+            .resolve(
+                ProviderId::new("acme"),
+                CredentialUsage::ApiRequest,
+                &catalog,
+            )
+            .await
+            .unwrap();
+
+        let ResolvedCredential::Api(api) = resolved else {
+            panic!("expected api credential");
+        };
+        assert_eq!(api.base_url.as_deref(), Some("https://env.example.com/v1"));
     }
 
     #[tokio::test]

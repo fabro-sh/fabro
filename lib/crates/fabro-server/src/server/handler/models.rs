@@ -41,12 +41,8 @@ async fn list_models(
     let limit = params.limit.clamp(1, 100) as usize;
     let offset = params.offset.min(MAX_PAGE_OFFSET) as usize;
     let catalog = state.catalog();
-    let configured: HashSet<ProviderId> = state
-        .llm_source
-        .configured_providers(catalog.as_ref())
-        .await
-        .into_iter()
-        .collect();
+    let configured: HashSet<ProviderId> =
+        state.ready_llm_provider_ids().await.into_iter().collect();
 
     let mut data = catalog
         .list(provider_id.as_ref())

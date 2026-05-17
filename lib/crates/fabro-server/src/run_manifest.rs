@@ -472,10 +472,7 @@ async fn build_preflight_report(
     }
 
     let catalog = state.catalog();
-    let configured_providers = state
-        .llm_source
-        .configured_providers(catalog.as_ref())
-        .await;
+    let configured_providers = state.ready_llm_provider_ids().await;
     let materialized = materialize_run(
         prepared.settings.clone(),
         graph,
@@ -962,6 +959,7 @@ async fn run_llm_check(
     match state.resolve_llm_client().await {
         Ok(result) => {
             let auth_issues = result.auth_issues;
+            let registration_issues = result.registration_issues;
             let client = Arc::new(result.client);
 
             let mut all_ok = true;
@@ -980,6 +978,18 @@ async fn run_llm_check(
                         summary:     model_id.clone(),
                         details:     vec![CheckDetail::new(format!("Provider: {provider_name}"))],
                         remediation: Some(auth_issue_message(&provider_id, issue)),
+                    }));
+                } else if let Some(issue) = registration_issues
+                    .iter()
+                    .find(|issue| issue.provider == provider_id)
+                {
+                    all_ok = false;
+                    completed_checks.push((index, CheckResult {
+                        name:        "LLM".into(),
+                        status:      CheckStatus::Warning,
+                        summary:     model_id.clone(),
+                        details:     vec![CheckDetail::new(format!("Provider: {provider_name}"))],
+                        remediation: Some(issue.error.to_string()),
                     }));
                 } else if !client.has_provider(provider_name) {
                     all_ok = false;
