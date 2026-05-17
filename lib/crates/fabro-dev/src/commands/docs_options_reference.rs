@@ -260,6 +260,7 @@ agent_profile = "anthropic"
 display_name = "Team Code Large"
 family = "team-code"
 default = true
+probe = true
 enabled = true
 aliases = ["team-code"]
 estimated_output_tps = 80
@@ -300,6 +301,7 @@ cache_input_cost_per_mtok = 0.60
 | `training` | string | None | Training data cutoff label. |
 | `knowledge_cutoff` | string or TOML date | None | Public knowledge cutoff label; TOML dates normalize to `YYYY-MM-DD`. |
 | `default` | boolean | `false` | Whether this is the provider default model. |
+| `probe` | boolean | `false` | Whether this model should be preferred for provider connectivity probes. Set `false` in a higher-precedence layer to clear an inherited probe marker. |
 | `enabled` | boolean | `true` | Set `false` to disable a model after lower-precedence layers define it. |
 | `aliases` | array<string> | `[]` | Additional model names accepted by routing and fallback config. |
 | `estimated_output_tps` | number | None | Estimated output tokens per second for catalog display and planning. |

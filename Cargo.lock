@@ -2140,6 +2140,7 @@ dependencies = [
  "strum",
  "thiserror 2.0.18",
  "toml 0.8.23",
+ "tracing",
 ]
 
 [[package]]

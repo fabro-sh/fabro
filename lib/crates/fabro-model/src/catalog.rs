@@ -6,6 +6,7 @@ use std::sync::LazyLock;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use toml::de::Error as TomlDeError;
+use tracing::warn;
 
 use crate::Speed;
 use crate::adapter::{AdapterKind, AdapterMetadata, AgentProfileKind};
@@ -76,6 +77,8 @@ pub struct ModelCatalogSettings {
     pub knowledge_cutoff:     Option<String>,
     #[serde(default)]
     pub default:              Option<bool>,
+    #[serde(default)]
+    pub probe:                Option<bool>,
     #[serde(default)]
     pub enabled:              Option<bool>,
     #[serde(default)]
@@ -386,6 +389,7 @@ pub struct CatalogModelSettings {
     pub agent_profile: AgentProfileKind,
     pub controls:      CatalogModelControls,
     pub speed_costs:   HashMap<Speed, ModelCosts>,
+    probe:             bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -604,6 +608,7 @@ impl Catalog {
         }
 
         models_with_settings.sort_by(|(left, _), (right, _)| model_order(left, right));
+        warn_multiple_probe_models(&models_with_settings);
         let mut model_settings_by_id = HashMap::new();
         let mut models = Vec::new();
         for (model, settings) in models_with_settings {
@@ -799,15 +804,14 @@ impl Catalog {
     #[must_use]
     pub fn probe_for_provider(&self, p: &ProviderId) -> Option<&Model> {
         let provider_id = self.provider(p).map_or(p, |provider| &provider.id);
-        let override_id: Option<&str> = match provider_id.as_str() {
-            ProviderId::ANTHROPIC => Some("claude-haiku-4-5"),
-            ProviderId::OPENAI => Some("gpt-5.4-mini"),
-            _ => None,
-        };
-        if let Some(id) = override_id {
-            if let Some(info) = self.get(id) {
-                return Some(info);
-            }
+        if let Some(model) = self.models.iter().find(|model| {
+            &model.provider == provider_id
+                && self
+                    .model_settings
+                    .get(&model.id)
+                    .is_some_and(|settings| settings.probe)
+        }) {
+            return Some(model);
         }
         self.default_for_provider(provider_id)
     }
@@ -939,6 +943,7 @@ fn merge_model_settings(
         training:             higher.training.or(fallback.training),
         knowledge_cutoff:     higher.knowledge_cutoff.or(fallback.knowledge_cutoff),
         default:              higher.default.or(fallback.default),
+        probe:                higher.probe.or(fallback.probe),
         enabled:              higher.enabled.or(fallback.enabled),
         aliases:              higher.aliases.or(fallback.aliases),
         estimated_output_tps: higher
@@ -1156,8 +1161,31 @@ fn build_model(
         agent_profile: settings.agent_profile.unwrap_or(provider.agent_profile),
         controls,
         speed_costs,
+        probe: settings.probe.unwrap_or_default(),
     };
     Ok((model, catalog_settings))
+}
+
+fn warn_multiple_probe_models(models_with_settings: &[(Model, CatalogModelSettings)]) {
+    let mut probes_by_provider = BTreeMap::<ProviderId, Vec<String>>::new();
+    for (model, settings) in models_with_settings {
+        if settings.probe {
+            probes_by_provider
+                .entry(model.provider.clone())
+                .or_default()
+                .push(model.id.clone());
+        }
+    }
+
+    for (provider, models) in probes_by_provider {
+        if models.len() > 1 {
+            warn!(
+                provider = %provider,
+                models = ?models,
+                "Multiple probe models configured for provider"
+            );
+        }
+    }
 }
 
 fn build_model_features(
@@ -2101,6 +2129,231 @@ reasoning = false
             catalog.closest(&alias, reference).unwrap().id,
             "default_model"
         );
+    }
+
+    #[test]
+    fn probe_for_provider_prefers_enabled_probe_model_over_provider_default() {
+        let layer = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+
+[models.default_model]
+provider = "test"
+display_name = "Default Model"
+family = "test"
+default = true
+
+[models.default_model.limits]
+context_window = 1000
+
+[models.default_model.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.probe_model]
+provider = "test"
+display_name = "Probe Model"
+family = "test"
+probe = true
+
+[models.probe_model.limits]
+context_window = 1000
+
+[models.probe_model.features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        );
+        let catalog = Catalog::from_settings(&layer).unwrap();
+
+        assert_eq!(
+            catalog
+                .probe_for_provider(&ProviderId::new("test"))
+                .unwrap()
+                .id,
+            "probe_model"
+        );
+    }
+
+    #[test]
+    fn probe_for_provider_falls_back_to_provider_default_when_no_probe_marked() {
+        let layer = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+
+[models.default_model]
+provider = "test"
+display_name = "Default Model"
+family = "test"
+default = true
+
+[models.default_model.limits]
+context_window = 1000
+
+[models.default_model.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.other_model]
+provider = "test"
+display_name = "Other Model"
+family = "test"
+
+[models.other_model.limits]
+context_window = 1000
+
+[models.other_model.features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        );
+        let catalog = Catalog::from_settings(&layer).unwrap();
+
+        assert_eq!(
+            catalog
+                .probe_for_provider(&ProviderId::new("test"))
+                .unwrap()
+                .id,
+            "default_model"
+        );
+    }
+
+    #[test]
+    fn probe_false_override_clears_inherited_builtin_probe_marker() {
+        let catalog = Catalog::from_builtin_with_overrides(&minimal_settings(
+            r#"
+[models."gpt-5.4-mini"]
+probe = false
+"#,
+        ))
+        .expect("sparse built-in model override should build");
+
+        assert_eq!(
+            catalog
+                .probe_for_provider(&ProviderId::openai())
+                .unwrap()
+                .id,
+            "gpt-5.4"
+        );
+    }
+
+    #[test]
+    fn probe_for_provider_resolves_provider_alias() {
+        let layer = minimal_settings(
+            r#"
+[providers.canonical]
+display_name = "Canonical"
+adapter = "openai"
+aliases = ["alias"]
+
+[models.default_model]
+provider = "canonical"
+display_name = "Default Model"
+family = "test"
+default = true
+
+[models.default_model.limits]
+context_window = 1000
+
+[models.default_model.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.probe_model]
+provider = "canonical"
+display_name = "Probe Model"
+family = "test"
+probe = true
+
+[models.probe_model.limits]
+context_window = 1000
+
+[models.probe_model.features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        );
+        let catalog = Catalog::from_settings(&layer).unwrap();
+
+        assert_eq!(
+            catalog
+                .probe_for_provider(&ProviderId::new("alias"))
+                .unwrap()
+                .id,
+            "probe_model"
+        );
+    }
+
+    #[test]
+    fn multiple_probe_models_are_non_fatal_and_select_a_probe_model() {
+        let layer = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+
+[models.default_model]
+provider = "test"
+display_name = "Default Model"
+family = "test"
+default = true
+
+[models.default_model.limits]
+context_window = 1000
+
+[models.default_model.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.first_probe]
+provider = "test"
+display_name = "First Probe"
+family = "test"
+probe = true
+
+[models.first_probe.limits]
+context_window = 1000
+
+[models.first_probe.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.second_probe]
+provider = "test"
+display_name = "Second Probe"
+family = "test"
+probe = true
+
+[models.second_probe.limits]
+context_window = 1000
+
+[models.second_probe.features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        );
+        let catalog = Catalog::from_settings(&layer).unwrap();
+        let selected = catalog
+            .probe_for_provider(&ProviderId::new("test"))
+            .unwrap()
+            .id
+            .as_str();
+
+        assert!(["first_probe", "second_probe"].contains(&selected));
+        assert_ne!(selected, "default_model");
     }
 
     #[test]

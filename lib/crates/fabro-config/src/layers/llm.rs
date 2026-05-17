@@ -116,6 +116,10 @@ pub struct ModelSettings {
     pub knowledge_cutoff:     Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default:              Option<bool>,
+    /// Whether this model should be preferred for provider connectivity
+    /// probes. Missing or false falls back to the provider default model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe:                Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled:              Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
