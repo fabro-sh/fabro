@@ -828,8 +828,7 @@ fn install_catalog_provider(provider: &ProviderId) -> Result<&'static CatalogPro
     let catalog_provider = INSTALL_CATALOG
         .provider(provider)
         .ok_or_else(|| format!("provider '{provider}' is not configured in the model catalog"))?;
-    let supports_api_key = !catalog_provider.auth.credentials().is_empty();
-    if supports_api_key {
+    if catalog_provider.auth.is_some() {
         Ok(catalog_provider)
     } else {
         Err(format!(
@@ -2097,7 +2096,7 @@ async fn validate_llm_provider(
 }
 
 fn ensure_install_api_key_provider(provider: &CatalogProvider) -> anyhow::Result<()> {
-    if provider.auth.credentials().is_empty() {
+    if provider.auth.is_none() {
         bail!(
             "provider '{}' does not define an API-key credential path",
             provider.id

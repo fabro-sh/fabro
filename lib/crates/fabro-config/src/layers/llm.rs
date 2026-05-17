@@ -7,7 +7,7 @@
 //! display_name = "Kimi"
 //! adapter = "openai_compatible"
 //! base_url = "https://api.moonshot.ai/v1"
-//! auth = { type = "api_key", credentials = ["credential:kimi", "env:KIMI_API_KEY"], header = "bearer" }
+//! auth = { credentials = ["credential:kimi", "env:KIMI_API_KEY"], header = "bearer" }
 //! priority = 60
 //! enabled = true
 //! aliases = ["moonshot"]
@@ -479,7 +479,6 @@ enabled = true
 aliases = ["moonshot"]
 
 [providers.kimi.auth]
-type = "api_key"
 credentials = ["credential:kimi", "env:KIMI_API_KEY"]
 header = "bearer"
 "#;
@@ -488,15 +487,9 @@ header = "bearer"
         assert_eq!(kimi.display_name.as_deref(), Some("Kimi"));
         assert_eq!(kimi.adapter.as_deref(), Some("openai_compatible"));
         assert_eq!(kimi.agent_profile, Some(AgentProfileKind::OpenAi));
-        let Some(ProviderAuthConfig::ApiKey {
-            credentials,
-            header,
-        }) = &kimi.auth
-        else {
-            panic!("expected api_key auth");
-        };
-        assert_eq!(header, &ApiKeyHeaderPolicy::Bearer);
-        assert_eq!(credentials, &vec![
+        let auth = kimi.auth.as_ref().expect("expected api_key auth");
+        assert_eq!(auth.header, ApiKeyHeaderPolicy::Bearer);
+        assert_eq!(auth.credentials, vec![
             CredentialRef::Credential("kimi".to_string()),
             CredentialRef::Env("KIMI_API_KEY".to_string()),
         ]);
@@ -752,14 +745,14 @@ mystery = 1
         // Higher layer redeclares auth, so the low layer's auth table is
         // dropped entirely (whole-value replacement).
         let high = ProviderSettings {
-            auth: Some(ProviderAuthConfig::ApiKey {
+            auth: Some(ProviderAuthConfig {
                 credentials: vec![CredentialRef::Env("FOO".to_string())],
                 header:      ApiKeyHeaderPolicy::Bearer,
             }),
             ..ProviderSettings::default()
         };
         let low = ProviderSettings {
-            auth: Some(ProviderAuthConfig::ApiKey {
+            auth: Some(ProviderAuthConfig {
                 credentials: vec![
                     CredentialRef::Credential("bar".to_string()),
                     CredentialRef::Env("BAZ".to_string()),
@@ -773,7 +766,7 @@ mystery = 1
         let merged = high.combine(low);
         assert_eq!(
             merged.auth,
-            Some(ProviderAuthConfig::ApiKey {
+            Some(ProviderAuthConfig {
                 credentials: vec![CredentialRef::Env("FOO".to_string())],
                 header:      ApiKeyHeaderPolicy::Bearer,
             })
@@ -784,7 +777,7 @@ mystery = 1
     fn provider_auth_inherits_when_unset_in_higher_layer() {
         let high = ProviderSettings::default();
         let low = ProviderSettings {
-            auth: Some(ProviderAuthConfig::ApiKey {
+            auth: Some(ProviderAuthConfig {
                 credentials: vec![CredentialRef::Env("FOO".to_string())],
                 header:      ApiKeyHeaderPolicy::Bearer,
             }),
@@ -793,7 +786,7 @@ mystery = 1
         let merged = high.combine(low);
         assert_eq!(
             merged.auth,
-            Some(ProviderAuthConfig::ApiKey {
+            Some(ProviderAuthConfig {
                 credentials: vec![CredentialRef::Env("FOO".to_string())],
                 header:      ApiKeyHeaderPolicy::Bearer,
             })

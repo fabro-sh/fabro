@@ -6,7 +6,6 @@ priority = 35
 aliases = ["venice-ai"]
 
 [providers.venice.auth]
-type = "api_key"
 credentials = ["credential:venice", "env:VENICE_API_KEY"]
 header = "bearer"
 

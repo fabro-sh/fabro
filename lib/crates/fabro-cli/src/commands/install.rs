@@ -77,7 +77,7 @@ static INSTALL_CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
 });
 
 fn supports_install_api_key(provider: &CatalogProvider) -> bool {
-    !provider.auth.credentials().is_empty()
+    provider.auth.is_some()
 }
 
 fn install_llm_provider_ids(catalog: &Catalog) -> Vec<ProviderId> {
@@ -92,10 +92,9 @@ fn install_llm_provider_ids(catalog: &Catalog) -> Vec<ProviderId> {
 fn provider_env_var_label(provider: &ProviderId, catalog: &Catalog) -> String {
     catalog
         .provider(provider)
-        .map(|provider| {
-            provider
-                .auth
-                .credentials()
+        .and_then(|provider| provider.auth.as_ref())
+        .map(|auth| {
+            auth.credentials
                 .iter()
                 .filter_map(|credential| match credential {
                     CredentialRef::Env(name) => Some(name.as_str()),

@@ -6,9 +6,6 @@ base_url = "http://localhost:11434/v1"
 priority = 30
 enabled = false
 
-[providers.ollama.auth]
-type = "none"
-
 # Example model. Uncomment after `ollama pull qwen3.5` (and `enabled = true`
 # above) to expose it through the OpenAI-compatible adapter.
 #

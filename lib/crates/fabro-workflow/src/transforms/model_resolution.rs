@@ -68,7 +68,6 @@ agent_profile = "openai"
 base_url = "https://api.venice.ai/api/v1"
 
 [providers.venice.auth]
-type = "api_key"
 credentials = ["env:VENICE_API_KEY"]
 header = "bearer"
 

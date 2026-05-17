@@ -18,13 +18,17 @@ impl ApiKeyStrategy {
     pub fn new(provider: &CatalogProvider) -> Self {
         let env_var_names = provider
             .auth
-            .credentials()
-            .iter()
-            .filter_map(|credential_ref| match credential_ref {
-                CredentialRef::Env(name) => Some(name.clone()),
-                CredentialRef::Credential(_) => None,
+            .as_ref()
+            .map(|auth| {
+                auth.credentials
+                    .iter()
+                    .filter_map(|credential_ref| match credential_ref {
+                        CredentialRef::Env(name) => Some(name.clone()),
+                        CredentialRef::Credential(_) => None,
+                    })
+                    .collect()
             })
-            .collect();
+            .unwrap_or_default();
         Self {
             provider_id: provider.id.clone(),
             display_name: provider.display_name.clone(),

@@ -211,83 +211,11 @@ pub enum CredentialRefParseError {
     EmptyEnv,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ProviderAuthConfig {
-    ApiKey {
-        credentials: Vec<CredentialRef>,
-        header:      ApiKeyHeaderPolicy,
-    },
-    HeaderOnly,
-    None,
-}
-
-impl ProviderAuthConfig {
-    #[must_use]
-    pub fn credentials(&self) -> &[CredentialRef] {
-        match self {
-            Self::ApiKey { credentials, .. } => credentials,
-            Self::HeaderOnly | Self::None => &[],
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum ProviderAuthConfigKind {
-    ApiKey,
-    HeaderOnly,
-    None,
-}
-
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ProviderAuthConfigInput {
-    #[serde(rename = "type")]
-    kind:        ProviderAuthConfigKind,
-    credentials: Option<Vec<CredentialRef>>,
-    header:      Option<ApiKeyHeaderPolicy>,
-}
-
-impl<'de> Deserialize<'de> for ProviderAuthConfig {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        use serde::de::Error as _;
-
-        let input = ProviderAuthConfigInput::deserialize(deserializer)?;
-        match input.kind {
-            ProviderAuthConfigKind::ApiKey => Ok(Self::ApiKey {
-                credentials: input
-                    .credentials
-                    .ok_or_else(|| D::Error::missing_field("credentials"))?,
-                header:      input
-                    .header
-                    .ok_or_else(|| D::Error::missing_field("header"))?,
-            }),
-            ProviderAuthConfigKind::HeaderOnly => {
-                if input.credentials.is_some() {
-                    return Err(D::Error::custom(
-                        "header_only auth must not declare credentials",
-                    ));
-                }
-                if input.header.is_some() {
-                    return Err(D::Error::custom("header_only auth must not declare header"));
-                }
-                Ok(Self::HeaderOnly)
-            }
-            ProviderAuthConfigKind::None => {
-                if input.credentials.is_some() {
-                    return Err(D::Error::custom("none auth must not declare credentials"));
-                }
-                if input.header.is_some() {
-                    return Err(D::Error::custom("none auth must not declare header"));
-                }
-                Ok(Self::None)
-            }
-        }
-    }
+pub struct ProviderAuthConfig {
+    pub credentials: Vec<CredentialRef>,
+    pub header:      ApiKeyHeaderPolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -538,7 +466,7 @@ pub struct CatalogProvider {
     pub display_name:   String,
     pub adapter:        AdapterKind,
     pub agent_profile:  AgentProfileKind,
-    pub auth:           ProviderAuthConfig,
+    pub auth:           Option<ProviderAuthConfig>,
     pub billing_policy: BillingPolicy,
     pub api_key_url:    Option<String>,
     pub base_url:       Option<String>,
@@ -607,8 +535,6 @@ pub enum CatalogBuildError {
     },
     #[error("provider '{provider}' API-key auth must declare at least one credential")]
     EmptyApiKeyCredentials { provider: ProviderId },
-    #[error("provider '{provider}' header-only auth must declare at least one extra header")]
-    HeaderOnlyWithoutHeaders { provider: ProviderId },
     #[error("provider identifier '{identifier}' is declared by both '{first}' and '{second}'")]
     DuplicateProviderIdentifier {
         identifier: String,
@@ -927,8 +853,10 @@ impl Catalog {
             .providers
             .iter()
             .filter(|provider| {
-                provider.auth.credentials().iter().any(|credential| {
-                    matches!(credential, CredentialRef::Env(name) if std::env::var(name).is_ok())
+                provider.auth.as_ref().is_some_and(|auth| {
+                    auth.credentials.iter().any(|credential| {
+                        matches!(credential, CredentialRef::Env(name) if std::env::var(name).is_ok())
+                    })
                 })
             })
             .map(|provider| provider.id.clone())
@@ -1217,8 +1145,8 @@ fn build_providers(
         })?;
         let defaults = adapter_defaults(adapter);
         let agent_profile = settings.agent_profile.unwrap_or(defaults.agent_profile);
-        let auth = settings.auth.clone().unwrap_or(ProviderAuthConfig::None);
-        validate_provider_auth(&provider_id, &auth, settings.extra_headers.as_ref())?;
+        let auth = settings.auth.clone();
+        validate_provider_auth(&provider_id, auth.as_ref())?;
 
         providers.push(CatalogProvider {
             id: provider_id,
@@ -1262,23 +1190,15 @@ fn adapter_defaults(adapter: AdapterKind) -> AdapterDefaults {
 
 fn validate_provider_auth(
     provider: &ProviderId,
-    auth: &ProviderAuthConfig,
-    extra_headers: Option<&HashMap<String, HeaderValueRef>>,
+    auth: Option<&ProviderAuthConfig>,
 ) -> Result<(), CatalogBuildError> {
     match auth {
-        ProviderAuthConfig::ApiKey { credentials, .. } if credentials.is_empty() => {
+        Some(auth) if auth.credentials.is_empty() => {
             Err(CatalogBuildError::EmptyApiKeyCredentials {
                 provider: provider.clone(),
             })
         }
-        ProviderAuthConfig::HeaderOnly if extra_headers.is_none_or(HashMap::is_empty) => {
-            Err(CatalogBuildError::HeaderOnlyWithoutHeaders {
-                provider: provider.clone(),
-            })
-        }
-        ProviderAuthConfig::ApiKey { .. }
-        | ProviderAuthConfig::HeaderOnly
-        | ProviderAuthConfig::None => Ok(()),
+        _ => Ok(()),
     }
 }
 
@@ -1727,7 +1647,6 @@ priority = 120
 aliases = ["acme-ai"]
 
 [providers.acme.auth]
-type = "api_key"
 credentials = ["env:ACME_API_KEY"]
 header = "bearer"
 
@@ -2791,7 +2710,6 @@ display_name = "Bearer"
 adapter = "openai"
 
 [providers.bearer.auth]
-type = "api_key"
 credentials = ["credential:bearer", "env:BEARER_API_KEY"]
 header = "bearer"
 
@@ -2800,27 +2718,13 @@ display_name = "Custom"
 adapter = "gemini"
 
 [providers.custom.auth]
-type = "api_key"
 credentials = ["env:CUSTOM_API_KEY"]
 header = { custom = "x-api-key" }
-
-[providers.headers]
-display_name = "Headers"
-adapter = "anthropic"
-
-[providers.headers.auth]
-type = "header_only"
-
-[providers.headers.extra_headers]
-x-provider-key = { env = "PROVIDER_KEY" }
 
 [providers.none]
 display_name = "No Auth"
 adapter = "openai_compatible"
 billing_policy = "none"
-
-[providers.none.auth]
-type = "none"
 "#,
         );
 
@@ -2834,30 +2738,32 @@ type = "none"
 
         let bearer = provider("bearer");
         assert_eq!(bearer.billing_policy, BillingPolicy::OpenAi);
-        assert_eq!(bearer.auth, ProviderAuthConfig::ApiKey {
-            credentials: vec![
-                CredentialRef::Credential("bearer".to_string()),
-                CredentialRef::Env("BEARER_API_KEY".to_string()),
-            ],
-            header:      ApiKeyHeaderPolicy::Bearer,
-        });
+        assert_eq!(
+            bearer.auth,
+            Some(ProviderAuthConfig {
+                credentials: vec![
+                    CredentialRef::Credential("bearer".to_string()),
+                    CredentialRef::Env("BEARER_API_KEY".to_string()),
+                ],
+                header:      ApiKeyHeaderPolicy::Bearer,
+            })
+        );
 
         let custom = provider("custom");
         assert_eq!(custom.billing_policy, BillingPolicy::Gemini);
-        assert_eq!(custom.auth, ProviderAuthConfig::ApiKey {
-            credentials: vec![CredentialRef::Env("CUSTOM_API_KEY".to_string())],
-            header:      ApiKeyHeaderPolicy::Custom {
-                name: "x-api-key".to_string(),
-            },
-        });
-
-        let headers = provider("headers");
-        assert_eq!(headers.billing_policy, BillingPolicy::Anthropic);
-        assert_eq!(headers.auth, ProviderAuthConfig::HeaderOnly);
+        assert_eq!(
+            custom.auth,
+            Some(ProviderAuthConfig {
+                credentials: vec![CredentialRef::Env("CUSTOM_API_KEY".to_string())],
+                header:      ApiKeyHeaderPolicy::Custom {
+                    name: "x-api-key".to_string(),
+                },
+            })
+        );
 
         let no_auth = provider("none");
         assert_eq!(no_auth.billing_policy, BillingPolicy::None);
-        assert_eq!(no_auth.auth, ProviderAuthConfig::None);
+        assert!(no_auth.auth.is_none());
     }
 
     #[test]
@@ -2870,7 +2776,6 @@ adapter = "openai"
 agent_profile = "openai"
 
 [providers.test.auth]
-type = "api_key"
 credentials = []
 header = "bearer"
 "#,
@@ -2878,23 +2783,6 @@ header = "bearer"
         assert!(matches!(
             Catalog::from_settings(&empty_api_key_credentials).unwrap_err(),
             CatalogBuildError::EmptyApiKeyCredentials { provider }
-                if provider == ProviderId::new("test")
-        ));
-
-        let header_only_without_headers = minimal_settings(
-            r#"
-[providers.test]
-display_name = "Test"
-adapter = "openai"
-agent_profile = "openai"
-
-[providers.test.auth]
-type = "header_only"
-"#,
-        );
-        assert!(matches!(
-            Catalog::from_settings(&header_only_without_headers).unwrap_err(),
-            CatalogBuildError::HeaderOnlyWithoutHeaders { provider }
                 if provider == ProviderId::new("test")
         ));
     }
@@ -2909,7 +2797,6 @@ adapter = "openai"
 agent_profile = "openai"
 
 [providers.test.auth]
-type = "api_key"
 credentials = ["env:TEST_API_KEY"]
 header = { custom = "bad header" }
 "#,
@@ -2921,7 +2808,7 @@ header = { custom = "bad header" }
                 .contains("custom header name must be a valid HTTP header name")
         );
 
-        let none_with_credentials = toml::from_str::<LlmCatalogSettings>(
+        let legacy_type_tag = toml::from_str::<LlmCatalogSettings>(
             r#"
 [providers.test]
 display_name = "Test"
@@ -2929,15 +2816,15 @@ adapter = "openai"
 agent_profile = "openai"
 
 [providers.test.auth]
-type = "none"
+type = "api_key"
 credentials = ["env:TEST_API_KEY"]
+header = "bearer"
 "#,
         )
         .unwrap_err();
         assert!(
-            none_with_credentials
-                .to_string()
-                .contains("none auth must not declare credentials")
+            legacy_type_tag.to_string().contains("unknown field `type`"),
+            "expected unknown-field error for legacy `type` key, got: {legacy_type_tag}"
         );
     }
 

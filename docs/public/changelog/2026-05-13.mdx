@@ -13,7 +13,6 @@ adapter = "openai_compatible"
 base_url = "https://llm-gateway.example.com/v1"
 
 [llm.providers.proxy.auth]
-type = "api_key"
 credentials = ["env:ACME_GATEWAY_API_KEY"]
 header = "bearer"
 

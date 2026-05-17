@@ -2,9 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use fabro_model::catalog::CatalogProvider;
-use fabro_model::{
-    ApiKeyHeaderPolicy, Catalog, CredentialRef, HeaderValueRef, ProviderAuthConfig, ProviderId,
-};
+use fabro_model::{ApiKeyHeaderPolicy, Catalog, CredentialRef, HeaderValueRef, ProviderId};
 use fabro_static::EnvVars;
 use fabro_vault::Vault;
 use shlex::try_quote;
@@ -80,10 +78,10 @@ fn auth_header_for_catalog_provider(
     provider: &CatalogProvider,
     key: String,
 ) -> Result<ApiKeyHeader, ResolveError> {
-    let ProviderAuthConfig::ApiKey { header, .. } = &provider.auth else {
+    let Some(auth) = &provider.auth else {
         return Err(ResolveError::NotConfigured(provider.id.clone()));
     };
-    Ok(build_api_key_header(header.clone(), key))
+    Ok(build_api_key_header(auth.header.clone(), key))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,9 +157,7 @@ impl CredentialResolver {
         let Some(catalog_provider) = catalog.provider(&provider_id) else {
             return Err(ResolveError::NotConfigured(provider_id));
         };
-        if usage == CredentialUsage::ApiRequest
-            && !matches!(catalog_provider.auth, ProviderAuthConfig::ApiKey { .. })
-        {
+        if usage == CredentialUsage::ApiRequest && catalog_provider.auth.is_none() {
             let vault = self.vault.read().await;
             return self
                 .api_credential_from_provider_auth(&vault, catalog_provider, catalog)
@@ -250,11 +246,11 @@ impl CredentialResolver {
             }
         }
 
-        let ProviderAuthConfig::ApiKey { credentials, .. } = &provider.auth else {
+        let Some(auth) = &provider.auth else {
             return Err(ResolveError::NotConfigured(provider.id.clone()));
         };
 
-        for credential_ref in credentials {
+        for credential_ref in &auth.credentials {
             if let Some(credential) = self.credential_from_ref(vault, &provider.id, credential_ref)
             {
                 return Ok(credential);
@@ -270,18 +266,15 @@ impl CredentialResolver {
         provider: &CatalogProvider,
         catalog: &Catalog,
     ) -> bool {
-        match &provider.auth {
-            ProviderAuthConfig::ApiKey { credentials, .. } => {
-                credentials.iter().any(|credential_ref| {
-                    self.credential_from_ref(vault, &provider.id, credential_ref)
-                        .is_some()
-                })
-            }
-            ProviderAuthConfig::HeaderOnly => self
+        let Some(auth) = &provider.auth else {
+            return self
                 .resolved_extra_headers_for_catalog(vault, &provider.id, catalog)
-                .is_ok(),
-            ProviderAuthConfig::None => true,
-        }
+                .is_ok();
+        };
+        auth.credentials.iter().any(|credential_ref| {
+            self.credential_from_ref(vault, &provider.id, credential_ref)
+                .is_some()
+        })
     }
 
     fn credential_from_ref(
@@ -394,15 +387,11 @@ impl CredentialResolver {
         provider: &CatalogProvider,
         catalog: &Catalog,
     ) -> Result<ApiCredential, ResolveError> {
-        let extra_headers = match provider.auth {
-            ProviderAuthConfig::HeaderOnly => {
-                self.resolved_extra_headers_for_catalog(vault, &provider.id, catalog)?
-            }
-            ProviderAuthConfig::None => HashMap::new(),
-            ProviderAuthConfig::ApiKey { .. } => {
-                return Err(ResolveError::NotConfigured(provider.id.clone()));
-            }
-        };
+        if provider.auth.is_some() {
+            return Err(ResolveError::NotConfigured(provider.id.clone()));
+        }
+        let extra_headers =
+            self.resolved_extra_headers_for_catalog(vault, &provider.id, catalog)?;
         Ok(ApiCredential {
             provider: provider.id.clone(),
             auth_header: None,
@@ -412,19 +401,6 @@ impl CredentialResolver {
             org_id: None,
             project_id: None,
         })
-    }
-
-    pub async fn header_only_api_credential(
-        &self,
-        provider: &CatalogProvider,
-        catalog: &Catalog,
-    ) -> Result<Option<ApiCredential>, ResolveError> {
-        if !matches!(provider.auth, ProviderAuthConfig::HeaderOnly) {
-            return Ok(None);
-        }
-        let vault = self.vault.read().await;
-        self.api_credential_from_provider_auth(&vault, provider, catalog)
-            .map(Some)
     }
 
     fn to_cli_credential(
@@ -499,7 +475,8 @@ fn primary_api_key_env_var<'a>(provider: &ProviderId, catalog: &'a Catalog) -> O
     catalog
         .provider(provider)?
         .auth
-        .credentials()
+        .as_ref()?
+        .credentials
         .iter()
         .find_map(|credential_ref| match credential_ref {
             CredentialRef::Env(name) => Some(name.as_str()),
@@ -702,7 +679,6 @@ agent_profile = "openai"
 base_url = "https://default.example.com/v1"
 
 [providers.acme.auth]
-type = "api_key"
 credentials = ["credential:acme"]
 header = "bearer"
 
@@ -962,7 +938,6 @@ agent_profile = "openai"
 base_url = "https://api.acme.test/v1"
 
 [providers.acme.auth]
-type = "api_key"
 credentials = ["credential:acme"]
 header = "bearer"
 

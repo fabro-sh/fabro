@@ -699,7 +699,6 @@ base_url = "https://api.acme.test/v1"
 agent_profile = "anthropic"
 
 [llm.providers.acme.auth]
-type = "api_key"
 credentials = ["env:ACME_API_KEY"]
 header = "bearer"
 

@@ -6,7 +6,6 @@ base_url = "https://api.z.ai/api/coding/paas/v4"
 priority = 60
 
 [providers.zai.auth]
-type = "api_key"
 credentials = ["credential:zai", "env:ZAI_API_KEY"]
 header = "bearer"
 

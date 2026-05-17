@@ -53,17 +53,7 @@ impl CredentialSource for VaultCredentialSource {
             {
                 Ok(ResolvedCredential::Api(credential)) => credentials.push(credential),
                 Ok(ResolvedCredential::Cli(_)) => {}
-                Err(ResolveError::NotConfigured(_)) => {
-                    match self
-                        .resolver
-                        .header_only_api_credential(provider, catalog)
-                        .await
-                    {
-                        Ok(Some(credential)) => credentials.push(credential),
-                        Ok(None) => {}
-                        Err(err) => auth_issues.push((provider.id.clone(), err)),
-                    }
-                }
+                Err(ResolveError::NotConfigured(_)) if provider.auth.is_some() => {}
                 Err(err) => auth_issues.push((provider.id.clone(), err)),
             }
         }

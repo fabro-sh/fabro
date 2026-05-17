@@ -6,7 +6,6 @@ base_url = "https://api.openai.com/v1"
 priority = 90
 
 [providers.openai.auth]
-type = "api_key"
 credentials = ["credential:openai", "credential:openai_codex", "env:OPENAI_API_KEY"]
 header = "bearer"
 

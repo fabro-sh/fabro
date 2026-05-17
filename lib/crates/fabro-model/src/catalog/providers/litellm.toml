@@ -6,7 +6,6 @@ priority = 50
 enabled = false
 
 [providers.litellm.auth]
-type = "api_key"
 credentials = ["credential:litellm", "env:LITELLM_API_KEY"]
 header = "bearer"
 

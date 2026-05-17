@@ -6,7 +6,6 @@ base_url = "https://api.minimax.io/v1"
 priority = 50
 
 [providers.minimax.auth]
-type = "api_key"
 credentials = ["credential:minimax", "env:MINIMAX_API_KEY"]
 header = "bearer"
 

@@ -121,7 +121,7 @@ reasoning = false
 
 `api_id` is the model name sent to the provider API. Omit it when the Fabro model ID and provider model ID are the same.
 
-Provider auth is declared in `[llm.providers.<id>.auth]`. API-key providers use ordered `env:<NAME>` or `credential:<id>` refs plus `header = "bearer"` or `header = { custom = "Header-Name" }`. Header-only providers set `type = "header_only"` and put typed `{ env = "NAME" }`, `{ credential = "id" }`, or `{ literal = "value" }` values in `extra_headers`.
+Provider auth is declared in `[llm.providers.<id>.auth]` with ordered `env:<NAME>` or `credential:<id>` refs plus `header = "bearer"` or `header = { custom = "Header-Name" }`. Omit the `[llm.providers.<id>.auth]` block entirely for providers that need no API key (e.g. Ollama). Custom headers for any provider — including providers that need only typed headers and no API-key auth — go in `extra_headers` as `{ env = "NAME" }`, `{ credential = "id" }`, or `{ literal = "value" }`.
 
 Provider `agent_profile` defaults from `adapter` and controls profile-specific behavior such as project-memory filenames, CLI/ACP command selection, and native session routing. Valid values are `anthropic`, `openai`, and `gemini`; model-level values override provider-level values.
 

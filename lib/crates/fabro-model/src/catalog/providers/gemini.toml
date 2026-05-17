@@ -6,7 +6,6 @@ base_url = "https://generativelanguage.googleapis.com/v1beta"
 priority = 80
 
 [providers.gemini.auth]
-type = "api_key"
 credentials = ["credential:gemini", "env:GEMINI_API_KEY", "env:GOOGLE_API_KEY"]
 header = { custom = "x-goog-api-key" }
 

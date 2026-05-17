@@ -864,7 +864,6 @@ adapter = "openai_compatible"
 agent_profile = "openai"
 
 [providers.acme.auth]
-type = "api_key"
 credentials = ["env:ACME_API_KEY"]
 header = "bearer"
 
@@ -957,7 +956,6 @@ base_url = "https://api.acme.test/v1"
 aliases = ["acme-ai"]
 
 [providers.acme.auth]
-type = "api_key"
 credentials = ["env:ACME_API_KEY"]
 header = "bearer"
 
@@ -1009,7 +1007,6 @@ base_url = "https://api.acme.test/v1"
 aliases = ["acme-ai"]
 
 [providers.acme.auth]
-type = "api_key"
 credentials = ["env:ACME_API_KEY"]
 header = "bearer"
 
@@ -1052,7 +1049,7 @@ reasoning = false
     }
 
     #[tokio::test]
-    async fn from_credentials_registers_header_only_provider() {
+    async fn from_credentials_registers_no_auth_provider_with_extra_headers() {
         let catalog = catalog_with(
             r#"
 [providers.portkey]
