@@ -3,10 +3,13 @@
     reason = "Live provider integration tests read required API keys from process env."
 )]
 
+use std::sync::Arc;
+
 use fabro_llm::error::ProviderErrorKind;
 use fabro_llm::provider::ProviderAdapter;
 use fabro_llm::providers::{AnthropicAdapter, GeminiAdapter, OpenAiAdapter};
 use fabro_llm::types::{FinishReason, Message, Request};
+use fabro_model::Catalog;
 use fabro_static::EnvVars;
 
 fn make_request(model: &str) -> Request {
@@ -49,7 +52,10 @@ async fn anthropic_complete() {
 async fn openai_complete() {
     let (base_url, api_key) = fabro_test::e2e_openai!();
     let adapter = OpenAiAdapter::new(api_key).with_base_url(base_url);
-    let request = make_request("gpt-4o-mini");
+    let request = Request {
+        temperature: None,
+        ..make_request("gpt-5.2")
+    };
     let response = adapter.complete(&request).await.unwrap();
 
     assert!(
@@ -172,6 +178,7 @@ async fn run_multi_turn_cache_test(
     adapter: &dyn ProviderAdapter,
     model: &str,
     min_cache_ratio: f64,
+    temperature: Option<f64>,
 ) {
     // Claude Haiku 4.5 requires 4096 tokens minimum for prompt caching.
     // Each repeat is ~78 tokens; 70 repeats ≈ 5460 tokens, safely above the
@@ -202,19 +209,19 @@ async fn run_multi_turn_cache_test(
 
     for turn in 0..6 {
         let request = Request {
-            model:            model.to_string(),
-            messages:         messages.clone(),
-            provider:         None,
-            tools:            None,
-            tool_choice:      None,
-            response_format:  None,
-            temperature:      Some(0.0),
-            top_p:            None,
-            max_tokens:       Some(100),
-            stop_sequences:   None,
+            model: model.to_string(),
+            messages: messages.clone(),
+            provider: None,
+            tools: None,
+            tool_choice: None,
+            response_format: None,
+            temperature,
+            top_p: None,
+            max_tokens: Some(100),
+            stop_sequences: None,
             reasoning_effort: None,
-            speed:            None,
-            metadata:         None,
+            speed: None,
+            metadata: None,
             provider_options: None,
         };
 
@@ -248,20 +255,21 @@ async fn run_multi_turn_cache_test(
 #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 async fn anthropic_multi_turn_cache() {
     let api_key = std::env::var(EnvVars::ANTHROPIC_API_KEY).expect("ANTHROPIC_API_KEY must be set");
-    let adapter = AnthropicAdapter::new(api_key);
-    run_multi_turn_cache_test(&adapter, "claude-haiku-4-5", 0.5).await;
+    let adapter =
+        AnthropicAdapter::new(api_key).with_catalog(Arc::new(Catalog::from_builtin().unwrap()));
+    run_multi_turn_cache_test(&adapter, "claude-haiku-4-5", 0.5, Some(0.0)).await;
 }
 
 #[fabro_macros::e2e_test(live("OPENAI_API_KEY"))]
 async fn openai_multi_turn_cache() {
     let api_key = std::env::var(EnvVars::OPENAI_API_KEY).expect("OPENAI_API_KEY must be set");
     let adapter = OpenAiAdapter::new(api_key);
-    run_multi_turn_cache_test(&adapter, "gpt-4o-mini", 0.5).await;
+    run_multi_turn_cache_test(&adapter, "gpt-5.2", 0.5, None).await;
 }
 
 #[fabro_macros::e2e_test(live("GEMINI_API_KEY"))]
 async fn gemini_multi_turn_cache() {
     let api_key = std::env::var(EnvVars::GEMINI_API_KEY).expect("GEMINI_API_KEY must be set");
     let adapter = GeminiAdapter::new(api_key);
-    run_multi_turn_cache_test(&adapter, "gemini-2.5-flash", 0.5).await;
+    run_multi_turn_cache_test(&adapter, "gemini-2.5-flash", 0.5, Some(0.0)).await;
 }
