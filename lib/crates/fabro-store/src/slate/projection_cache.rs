@@ -79,6 +79,17 @@ impl RunProjectionCacheState {
             self.children_by_parent.remove(&parent_id);
         }
     }
+
+    fn count_children(&self, run_id: &RunId) -> u64 {
+        self.children_by_parent
+            .get(run_id)
+            .map_or(0, |children| children.len() as u64)
+    }
+
+    fn with_children_count(&self, mut entry: CachedRunProjection) -> CachedRunProjection {
+        entry.summary.children_count = self.count_children(&entry.run_id);
+        entry
+    }
 }
 
 impl RunProjectionCache {
@@ -93,7 +104,7 @@ impl RunProjectionCache {
     pub(crate) async fn list(&self, query: &ListRunsQuery) -> Vec<CachedRunProjection> {
         let entries = {
             let state = self.state.lock().await;
-            match query.parent_id {
+            let raw = match query.parent_id {
                 Some(parent_id) => state
                     .children_by_parent
                     .get(&parent_id)
@@ -102,7 +113,10 @@ impl RunProjectionCache {
                     .filter_map(|run_id| state.entries.get(run_id).cloned())
                     .collect::<Vec<_>>(),
                 None => state.entries.values().cloned().collect::<Vec<_>>(),
-            }
+            };
+            raw.into_iter()
+                .map(|entry| state.with_children_count(entry))
+                .collect::<Vec<_>>()
         };
         let mut entries = entries
             .into_iter()
@@ -128,16 +142,21 @@ impl RunProjectionCache {
     }
 
     pub(crate) async fn get(&self, run_id: &RunId) -> Option<CachedRunProjection> {
-        self.state.lock().await.entries.get(run_id).cloned()
+        let state = self.state.lock().await;
+        state
+            .entries
+            .get(run_id)
+            .cloned()
+            .map(|entry| state.with_children_count(entry))
     }
 
     pub(crate) async fn get_summary(&self, run_id: &RunId) -> Option<Run> {
-        self.state
-            .lock()
-            .await
-            .entries
-            .get(run_id)
-            .map(|entry| entry.summary.clone())
+        let state = self.state.lock().await;
+        state.entries.get(run_id).map(|entry| {
+            let mut summary = entry.summary.clone();
+            summary.children_count = state.count_children(run_id);
+            summary
+        })
     }
 
     pub(crate) async fn apply_event(&self, run_id: &RunId, event: &EventEnvelope) -> Result<()> {

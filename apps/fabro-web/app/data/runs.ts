@@ -136,6 +136,16 @@ export function columnForRun(run: Run): BoardColumn | null {
   return columnForStatus(run.lifecycle.status);
 }
 
+export function toRunWithStatus(run: Run): RunWithStatus {
+  const item = mapRunListItem(run);
+  const column = columnForRun(run) ?? "queued";
+  return {
+    ...item,
+    status: column,
+    statusLabel: columnStatusDisplay[column].label,
+  };
+}
+
 export function deriveCiStatus(checks: CheckRun[]): CiStatus {
   if (checks.some((c) => c.status === "failure")) return "failing";
   if (checks.some((c) => c.status === "pending" || c.status === "queued")) return "pending";

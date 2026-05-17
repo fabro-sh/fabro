@@ -438,6 +438,12 @@ mod tests {
                     .cast_unsigned(),
                 3,
             ),
+            "run-4" => (
+                dt("2026-03-27T12:00:30Z")
+                    .timestamp_millis()
+                    .cast_unsigned(),
+                4,
+            ),
             _ => panic!("unknown test run id: {label}"),
         };
         RunId::from(ulid::Ulid::from_parts(timestamp_ms, random))
@@ -834,6 +840,51 @@ mod tests {
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].id, test_run_id("run-2"));
         assert_eq!(summaries[0].parent_id, Some(test_run_id("run-1")));
+    }
+
+    #[tokio::test]
+    async fn run_summary_includes_children_count() {
+        let (_object_store, store) = make_store();
+        let parent = store.create_run(&test_run_id("run-1")).await.unwrap();
+        let child_a = store.create_run(&test_run_id("run-2")).await.unwrap();
+        let child_b = store.create_run(&test_run_id("run-3")).await.unwrap();
+        let unrelated = store.create_run(&test_run_id("run-4")).await.unwrap();
+        append_created(&parent, "run-1", dt("2026-03-27T12:00:00Z")).await;
+        append_created_with_parent(
+            &child_a,
+            "run-2",
+            dt("2026-03-27T12:00:10Z"),
+            test_run_id("run-1"),
+        )
+        .await;
+        append_created_with_parent(
+            &child_b,
+            "run-3",
+            dt("2026-03-27T12:00:20Z"),
+            test_run_id("run-1"),
+        )
+        .await;
+        append_created(&unrelated, "run-4", dt("2026-03-27T12:00:30Z")).await;
+
+        let summaries = store.list_runs(&ListRunsQuery::default()).await.unwrap();
+
+        let parent_summary = summaries
+            .iter()
+            .find(|r| r.id == test_run_id("run-1"))
+            .expect("parent summary should be present");
+        assert_eq!(parent_summary.children_count, 2);
+
+        let child_summary = summaries
+            .iter()
+            .find(|r| r.id == test_run_id("run-2"))
+            .expect("child summary should be present");
+        assert_eq!(child_summary.children_count, 0);
+
+        let unrelated_summary = summaries
+            .iter()
+            .find(|r| r.id == test_run_id("run-4"))
+            .expect("unrelated summary should be present");
+        assert_eq!(unrelated_summary.children_count, 0);
     }
 
     #[tokio::test]

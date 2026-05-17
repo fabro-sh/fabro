@@ -143,6 +143,16 @@ export function useRunFiles(
   );
 }
 
+export function useChildRuns(parentId: string | undefined) {
+  return useSWR<PaginatedRunList | null>(
+    parentId ? queryKeys.runs.children(parentId) : null,
+    () =>
+      apiNullableData(() =>
+        runsApi.listRuns(undefined, undefined, false, parentId!),
+      ),
+  );
+}
+
 export function useRunCommits(id: string | undefined) {
   return useSWR<PaginatedRunCommitList | null>(
     id ? queryKeys.runs.commits(id) : null,

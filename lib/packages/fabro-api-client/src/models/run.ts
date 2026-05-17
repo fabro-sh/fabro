@@ -65,6 +65,10 @@ export interface Run {
      * Current orchestration parent run ID, if linked.
      */
     'parent_id'?: string | null;
+    /**
+     * Number of runs currently linked to this run as their orchestration parent.
+     */
+    'children_count': number;
     'title': string;
     'goal': string;
     'workflow': WorkflowRef;

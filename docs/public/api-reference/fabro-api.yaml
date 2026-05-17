@@ -7302,12 +7302,18 @@ components:
         - current_question
         - superseded_by
         - links
+        - children_count
       properties:
         id:
           type: string
         parent_id:
           type: ["string", "null"]
           description: Current orchestration parent run ID, if linked.
+        children_count:
+          type: integer
+          format: uint64
+          minimum: 0
+          description: Number of runs currently linked to this run as their orchestration parent.
         title:
           type: string
         goal:

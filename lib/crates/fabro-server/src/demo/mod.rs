@@ -1057,6 +1057,7 @@ mod runs {
         Run {
             id: run_id,
             parent_id: None,
+            children_count: 0,
             title: fabro_types::infer_run_title(goal),
             goal: goal.into(),
             workflow: WorkflowRef {

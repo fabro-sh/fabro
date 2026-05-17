@@ -50,6 +50,7 @@ export const queryKeys = {
         queryKeys.runs.files(id, runFileScopeSelection(scope)),
       ),
     commits: (id: string) => ["runs", "commits", id] as const,
+    children: (parentId: string) => ["runs", "children", parentId] as const,
     stages: (id: string) => ["runs", "stages", id] as const,
     graph: (id: string, direction?: RunGraphDirection) =>
       ["runs", "graph", id, direction ?? null] as const,

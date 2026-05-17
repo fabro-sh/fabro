@@ -13,6 +13,8 @@ pub struct Run {
     pub id:               RunId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_id:        Option<RunId>,
+    #[serde(default)]
+    pub children_count:   u64,
     pub title:            String,
     pub goal:             String,
     pub workflow:         WorkflowRef,

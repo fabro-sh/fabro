@@ -679,6 +679,7 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> Run {
     Run {
         id: *run_id,
         parent_id: state.parent_id,
+        children_count: 0,
         title: state.title().into_owned(),
         goal,
         workflow: WorkflowRef {

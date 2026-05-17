@@ -581,7 +581,9 @@ function createdCutoffMsFor(filter: CreatedFilter): number | null {
   }
 }
 
-function RunRow({ run }: { run: RunWithStatus }) {
+export const RUNS_LIST_GRID_TEMPLATE = "auto 5rem auto 1fr auto auto 8rem auto";
+
+export function RunRow({ run }: { run: RunWithStatus }) {
   const lifecycleLabel = listLifecycleStatusLabel(run);
   const statusDisplay = columnStatusDisplay[run.status];
 
@@ -995,7 +997,7 @@ export default function Runs() {
         ) : (
           <>
             {filteredRuns > 0 && (
-              <div className="grid gap-2" style={{ gridTemplateColumns: "auto 5rem auto 1fr auto auto 8rem auto" }}>
+              <div className="grid gap-2" style={{ gridTemplateColumns: RUNS_LIST_GRID_TEMPLATE }}>
                 {visibleColumns.flatMap((col) =>
                   col.items.map((item) => (
                     <RunRow key={item.id} run={{ ...item, status: col.id, statusLabel: col.name }} />

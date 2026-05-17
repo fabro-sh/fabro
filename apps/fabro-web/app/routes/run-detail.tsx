@@ -62,6 +62,7 @@ const allTabs = [
   { name: "Overview", path: "", count: null, demoOnly: false },
   { name: "Stages", path: "/stages", count: null, demoOnly: false },
   { name: "Files Changed", path: "/files", count: null, demoOnly: false },
+  { name: "Children", path: "/children", count: null, demoOnly: false },
   { name: "Sandbox", path: "/sandbox", count: null, demoOnly: false, requiresSandbox: true },
   { name: "Billing", path: "/billing", count: null, demoOnly: false },
 ];
@@ -189,11 +190,14 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const [deletePending, setDeletePending] = useState(false);
   const { push, dismiss } = useToast();
   const filesCount = runQuery.data?.diff?.files_changed ?? null;
+  const childrenCount = runQuery.data?.children_count ?? null;
   const hasSandbox = runHasSandbox(runStateQuery.data);
   const tabs = allTabs
-    .map((tab) =>
-      tab.name === "Files Changed" ? { ...tab, count: filesCount } : tab,
-    )
+    .map((tab) => {
+      if (tab.name === "Files Changed") return { ...tab, count: filesCount };
+      if (tab.name === "Children") return { ...tab, count: childrenCount };
+      return tab;
+    })
     .filter((t) => (!t.demoOnly || demoMode) && (!t.requiresSandbox || hasSandbox));
   const lifecycleToastStateRef = useRef<LifecycleToastState>(INITIAL_LIFECYCLE_TOAST_STATE);
   const steerBarRef = useRef<SteerBarHandle | null>(null);

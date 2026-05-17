@@ -25,6 +25,7 @@ fn run_summary_json_matches_openapi_shape() {
     let summary = Run {
         id:               run_id,
         parent_id:        None,
+        children_count:   2,
         title:            "API title".to_string(),
         goal:             String::new(),
         workflow:         WorkflowRef {
@@ -83,6 +84,7 @@ fn run_summary_json_matches_openapi_shape() {
         serde_json::to_value(&summary).unwrap(),
         json!({
             "id": run_id.to_string(),
+            "children_count": 2,
             "title": "API title",
             "goal": "",
             "workflow": {
@@ -188,6 +190,7 @@ fn run_summary_deserializes_when_optional_fields_are_absent() {
     .unwrap();
 
     assert_eq!(summary.id, run_id);
+    assert_eq!(summary.children_count, 0);
     assert_eq!(summary.workflow.name, "unnamed");
     assert_eq!(summary.workflow.slug, None);
     assert_eq!(summary.goal, "ship it");
