@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString, IntoStaticStr};
 
-use crate::catalog::{Catalog, CatalogModelSettings};
-use crate::{AdapterKind, Model, ModelCosts, ProviderId};
+use crate::catalog::{BillingPolicy, Catalog, CatalogModelSettings};
+use crate::{Model, ModelCosts, ProviderId};
 
 const TOKENS_PER_MTOK: i128 = 1_000_000;
 const ANTHROPIC_CACHE_WRITE_5M_NUMERATOR: i64 = 5;
@@ -277,13 +277,12 @@ pub enum ModelBillingFacts {
 
 impl ModelBillingFacts {
     #[must_use]
-    pub fn for_adapter(adapter: AdapterKind, tokens: &TokenCounts) -> Self {
-        match adapter {
-            AdapterKind::OpenAi | AdapterKind::OpenAiCompatible => {
-                Self::OpenAi(OpenAiBillingFacts::default())
-            }
-            AdapterKind::Anthropic => Self::Anthropic(anthropic_billing_facts(tokens)),
-            AdapterKind::Gemini => Self::Gemini(GeminiBillingFacts::default()),
+    pub fn for_policy(policy: BillingPolicy, tokens: &TokenCounts) -> Option<Self> {
+        match policy {
+            BillingPolicy::OpenAi => Some(Self::OpenAi(OpenAiBillingFacts::default())),
+            BillingPolicy::Anthropic => Some(Self::Anthropic(anthropic_billing_facts(tokens))),
+            BillingPolicy::Gemini => Some(Self::Gemini(GeminiBillingFacts::default())),
+            BillingPolicy::None => None,
         }
     }
 }
@@ -421,7 +420,7 @@ impl Catalog {
         pricing_for_model_costs(
             model,
             provider.id.clone(),
-            provider.adapter,
+            provider.billing_policy,
             model_ref.speed,
             &costs,
         )
@@ -434,7 +433,7 @@ impl Catalog {
         tokens: &TokenCounts,
     ) -> Option<ModelBillingFacts> {
         self.provider(&model_ref.provider)
-            .map(|provider| ModelBillingFacts::for_adapter(provider.adapter, tokens))
+            .and_then(|provider| ModelBillingFacts::for_policy(provider.billing_policy, tokens))
     }
 }
 
@@ -485,7 +484,7 @@ impl Model {
 fn pricing_for_model_costs(
     model: &Model,
     provider_id: ProviderId,
-    adapter: AdapterKind,
+    billing_policy: BillingPolicy,
     speed: Option<Speed>,
     costs: &ModelCosts,
 ) -> Option<ModelPricing> {
@@ -493,7 +492,7 @@ fn pricing_for_model_costs(
     let output = costs.output_cost_per_mtok.map(PricePerMTok::from_usd)?;
     let cached_input = costs.cache_input_cost_per_mtok.map(PricePerMTok::from_usd);
 
-    let policy = pricing_policy_for_adapter(adapter, input, output, cached_input);
+    let policy = pricing_policy_for_billing_policy(billing_policy, input, output, cached_input)?;
     Some(ModelPricing {
         model: ModelRef {
             provider: provider_id,
@@ -504,27 +503,26 @@ fn pricing_for_model_costs(
     })
 }
 
-fn pricing_policy_for_adapter(
-    adapter: AdapterKind,
+fn pricing_policy_for_billing_policy(
+    billing_policy: BillingPolicy,
     input: PricePerMTok,
     output: PricePerMTok,
     cached_input: Option<PricePerMTok>,
-) -> ModelPricingPolicy {
-    match adapter {
-        AdapterKind::Anthropic => anthropic_pricing_policy(input, output, cached_input),
-        AdapterKind::Gemini => ModelPricingPolicy::Gemini(GeminiModelPricing {
+) -> Option<ModelPricingPolicy> {
+    match billing_policy {
+        BillingPolicy::Anthropic => Some(anthropic_pricing_policy(input, output, cached_input)),
+        BillingPolicy::Gemini => Some(ModelPricingPolicy::Gemini(GeminiModelPricing {
             input,
             output,
             cached_input,
             storage: None,
-        }),
-        AdapterKind::OpenAi | AdapterKind::OpenAiCompatible => {
-            ModelPricingPolicy::OpenAi(OpenAiModelPricing {
-                input,
-                cached_input,
-                output,
-            })
-        }
+        })),
+        BillingPolicy::OpenAi => Some(ModelPricingPolicy::OpenAi(OpenAiModelPricing {
+            input,
+            cached_input,
+            output,
+        })),
+        BillingPolicy::None => None,
     }
 }
 
@@ -886,6 +884,8 @@ mod tests {
 [providers.test_anthropic]
 display_name = "Test Anthropic"
 adapter = "anthropic"
+agent_profile = "anthropic"
+billing_policy = "anthropic"
 
 [models.test-opus]
 provider = "test_anthropic"
@@ -934,6 +934,8 @@ cache_input_cost_per_mtok = 0.25
 [providers.proxy]
 display_name = "Proxy"
 adapter = "openai_compatible"
+agent_profile = "openai"
+billing_policy = "openai"
 base_url = "https://proxy.example/v1"
 
 [models.proxy-model]
@@ -981,6 +983,8 @@ cache_input_cost_per_mtok = 0.1
 [providers.proxy]
 display_name = "Proxy"
 adapter = "openai_compatible"
+agent_profile = "openai"
+billing_policy = "openai"
 base_url = "https://proxy.example/v1"
 
 [models.canonical-model]
@@ -1203,9 +1207,9 @@ output_cost_per_mtok = 2.0
     }
 
     #[test]
-    fn openai_compatible_adapter_uses_openai_billing_algorithm() {
+    fn openai_billing_policy_uses_openai_billing_algorithm() {
         let facts =
-            ModelBillingFacts::for_adapter(AdapterKind::OpenAiCompatible, &TokenCounts::default());
+            ModelBillingFacts::for_policy(BillingPolicy::OpenAi, &TokenCounts::default()).unwrap();
         assert_eq!(
             facts,
             ModelBillingFacts::OpenAi(OpenAiBillingFacts::default())

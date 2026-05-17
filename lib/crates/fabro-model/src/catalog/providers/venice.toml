@@ -1,10 +1,16 @@
 [providers.venice]
 display_name = "Venice"
 adapter = "openai_compatible"
+agent_profile = "openai"
+billing_policy = "openai"
 base_url = "https://api.venice.ai/api/v1"
-credentials = ["credential:venice", "env:VENICE_API_KEY"]
 priority = 35
 aliases = ["venice-ai"]
+
+[providers.venice.auth]
+type = "api_key"
+credentials = ["credential:venice", "env:VENICE_API_KEY"]
+header = "bearer"
 
 [models."venice-uncensored-1-2"]
 provider = "venice"

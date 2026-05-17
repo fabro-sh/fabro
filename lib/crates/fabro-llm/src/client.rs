@@ -93,7 +93,7 @@ impl Client {
                 org_id:        credential.org_id,
                 project_id:    credential.project_id,
                 catalog:       Some(Arc::clone(&catalog)),
-            });
+            })?;
             client.register_provider(adapter).await?;
         }
 
@@ -219,6 +219,7 @@ impl Client {
         let provider = self.resolve_provider(request)?;
 
         if self.middleware.is_empty() {
+            provider.validate_request(request)?;
             return provider.complete(request).await;
         }
 
@@ -226,7 +227,10 @@ impl Client {
         let provider_clone = provider.clone();
         let base: NextFn = Arc::new(move |req: Request| {
             let p = provider_clone.clone();
-            Box::pin(async move { p.complete(&req).await })
+            Box::pin(async move {
+                p.validate_request(&req)?;
+                p.complete(&req).await
+            })
         });
 
         let chain = self.middleware.iter().rev().fold(base, |next, mw| {
@@ -253,6 +257,7 @@ impl Client {
         let provider = self.resolve_provider(request)?;
 
         if self.middleware.is_empty() {
+            provider.validate_request(request)?;
             return provider.stream(request).await;
         }
 
@@ -260,7 +265,10 @@ impl Client {
         let provider_clone = provider.clone();
         let base: NextStreamFn = Arc::new(move |req: Request| {
             let p = provider_clone.clone();
-            Box::pin(async move { p.stream(&req).await })
+            Box::pin(async move {
+                p.validate_request(&req)?;
+                p.stream(&req).await
+            })
         });
 
         let chain = self.middleware.iter().rev().fold(base, |next, mw| {
@@ -756,9 +764,14 @@ mod tests {
 [providers.acme]
 display_name = "Acme"
 adapter = "openai_compatible"
+agent_profile = "openai"
 base_url = "https://api.acme.test/v1"
-credentials = ["env:ACME_API_KEY"]
 aliases = ["acme-ai"]
+
+[providers.acme.auth]
+type = "api_key"
+credentials = ["env:ACME_API_KEY"]
+header = "bearer"
 
 [models."acme-large"]
 provider = "acme"
@@ -803,9 +816,14 @@ reasoning = false
 [providers.acme]
 display_name = "Acme"
 adapter = "openai_compatible"
+agent_profile = "openai"
 base_url = "https://api.acme.test/v1"
-credentials = ["env:ACME_API_KEY"]
 aliases = ["acme-ai"]
+
+[providers.acme.auth]
+type = "api_key"
+credentials = ["env:ACME_API_KEY"]
+header = "bearer"
 
 [models."acme-large"]
 provider = "acme"
@@ -852,6 +870,7 @@ reasoning = false
 [providers.portkey]
 display_name = "Portkey Bedrock"
 adapter = "anthropic"
+agent_profile = "anthropic"
 base_url = "https://api.portkey.ai/v1"
 
 [providers.portkey.extra_headers]

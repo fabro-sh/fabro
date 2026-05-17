@@ -18,6 +18,7 @@ use fabro_auth::ApiKeyHeader;
 use fabro_model::{AdapterKind, Catalog};
 
 use crate::client::auth_value;
+use crate::error::Error;
 use crate::provider::ProviderAdapter;
 use crate::providers;
 
@@ -29,8 +30,8 @@ pub struct AdapterConfig {
     /// Provider ID this adapter will register under (used as the registry
     /// name on the resulting adapter).
     pub provider_id:   String,
-    /// Authentication header constructed by `fabro-auth` from the resolved
-    /// credential and the adapter's [`fabro_model::ApiKeyHeaderPolicy`].
+    /// Authentication header constructed by `fabro-auth` from the provider's
+    /// catalog auth policy and resolved credential.
     pub auth_header:   Option<ApiKeyHeader>,
     /// Provider base URL override. `None` means use the adapter's built-in
     /// default.
@@ -65,10 +66,9 @@ impl AdapterConfig {
 /// Factory function signature. Takes a fully-resolved [`AdapterConfig`] and
 /// returns a registered-ready [`ProviderAdapter`].
 ///
-/// Adapter constructors are infallible today; if a future adapter needs to
-/// fail at construction time, add a separate fallible factory variant
-/// rather than re-shaping every existing factory.
-pub type AdapterFactory = fn(AdapterConfig) -> Arc<dyn ProviderAdapter>;
+/// Adapter constructors validate provider-specific construction requirements
+/// before a provider is registered with the client.
+pub type AdapterFactory = fn(AdapterConfig) -> Result<Arc<dyn ProviderAdapter>, Error>;
 
 fn auth_value_optional(auth_header: Option<&ApiKeyHeader>) -> Option<String> {
     auth_header.map(auth_value)
@@ -91,8 +91,12 @@ fn build_anthropic_adapter(config: AdapterConfig) -> providers::AnthropicAdapter
     adapter
 }
 
-fn build_anthropic(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
-    Arc::new(build_anthropic_adapter(config))
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "Adapter factories share a fallible signature; openai_compatible validates base_url."
+)]
+fn build_anthropic(config: AdapterConfig) -> Result<Arc<dyn ProviderAdapter>, Error> {
+    Ok(Arc::new(build_anthropic_adapter(config)))
 }
 
 fn build_openai_adapter(config: AdapterConfig) -> providers::OpenAiAdapter {
@@ -121,8 +125,12 @@ fn build_openai_adapter(config: AdapterConfig) -> providers::OpenAiAdapter {
     adapter
 }
 
-fn build_openai(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
-    Arc::new(build_openai_adapter(config))
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "Adapter factories share a fallible signature; openai_compatible validates base_url."
+)]
+fn build_openai(config: AdapterConfig) -> Result<Arc<dyn ProviderAdapter>, Error> {
+    Ok(Arc::new(build_openai_adapter(config)))
 }
 
 fn build_gemini_adapter(config: AdapterConfig) -> providers::GeminiAdapter {
@@ -142,19 +150,24 @@ fn build_gemini_adapter(config: AdapterConfig) -> providers::GeminiAdapter {
     adapter
 }
 
-fn build_gemini(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
-    Arc::new(build_gemini_adapter(config))
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "Adapter factories share a fallible signature; openai_compatible validates base_url."
+)]
+fn build_gemini(config: AdapterConfig) -> Result<Arc<dyn ProviderAdapter>, Error> {
+    Ok(Arc::new(build_gemini_adapter(config)))
 }
 
-fn build_openai_compatible_adapter(config: AdapterConfig) -> providers::OpenAiCompatibleAdapter {
-    // `openai_compatible` providers vary widely in base URL; the catalog must
-    // pre-resolve `[llm.providers.<id>].base_url` before constructing
-    // `AdapterConfig`. There is no sensible default — silently routing to one
-    // provider's host would produce wrong-host requests for every other.
-    let base_url = config.base_url.expect(
-        "openai_compatible adapter requires a base_url; resolve it from provider settings before \
-         building AdapterConfig",
-    );
+fn build_openai_compatible_adapter(
+    config: AdapterConfig,
+) -> Result<providers::OpenAiCompatibleAdapter, Error> {
+    let base_url = config.base_url.ok_or_else(|| Error::Configuration {
+        message: format!(
+            "provider '{}' uses openai_compatible adapter but does not configure base_url",
+            config.provider_id
+        ),
+        source:  None,
+    })?;
     let mut adapter = providers::OpenAiCompatibleAdapter::new_optional_auth(
         auth_value_optional(config.auth_header.as_ref()),
         base_url,
@@ -166,11 +179,11 @@ fn build_openai_compatible_adapter(config: AdapterConfig) -> providers::OpenAiCo
     if let Some(catalog) = config.catalog {
         adapter = adapter.with_catalog(catalog);
     }
-    adapter
+    Ok(adapter)
 }
 
-fn build_openai_compatible(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
-    Arc::new(build_openai_compatible_adapter(config))
+fn build_openai_compatible(config: AdapterConfig) -> Result<Arc<dyn ProviderAdapter>, Error> {
+    Ok(Arc::new(build_openai_compatible_adapter(config)?))
 }
 
 /// Return the factory for a known adapter kind.
@@ -194,7 +207,7 @@ mod tests {
             name:  "x-api-key".to_string(),
             value: "test-key".to_string(),
         });
-        let adapter = factory_for(AdapterKind::Anthropic)(config);
+        let adapter = factory_for(AdapterKind::Anthropic)(config).unwrap();
         assert_eq!(adapter.name(), "anthropic");
     }
 
@@ -210,7 +223,7 @@ mod tests {
             project_id:    None,
             catalog:       None,
         };
-        let adapter = factory_for(AdapterKind::OpenAiCompatible)(config);
+        let adapter = factory_for(AdapterKind::OpenAiCompatible)(config).unwrap();
         assert_eq!(adapter.name(), "kimi");
     }
 
@@ -236,7 +249,7 @@ mod tests {
             catalog:       None,
         };
 
-        let adapter = build_openai_compatible_adapter(config);
+        let adapter = build_openai_compatible_adapter(config).unwrap();
 
         assert_eq!(adapter.name(), "portkey");
         assert_eq!(
@@ -278,9 +291,14 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "openai_compatible adapter requires a base_url")]
-    fn openai_compatible_factory_panics_without_base_url() {
+    fn openai_compatible_factory_errors_without_base_url() {
         let config = AdapterConfig::new("kimi", ApiKeyHeader::Bearer("k".to_string()));
-        let _ = factory_for(AdapterKind::OpenAiCompatible)(config);
+        let Err(err) = factory_for(AdapterKind::OpenAiCompatible)(config) else {
+            panic!("expected missing base_url error");
+        };
+        assert!(
+            err.to_string()
+                .contains("uses openai_compatible adapter but does not configure base_url")
+        );
     }
 }

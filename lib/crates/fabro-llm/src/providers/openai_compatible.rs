@@ -4,7 +4,9 @@ use fabro_model::Catalog;
 use futures::{StreamExt, stream};
 
 use crate::error::{Error, ProviderErrorDetail, ProviderErrorKind, error_from_status_code};
-use crate::provider::{ProviderAdapter, StreamEventStream, validate_tool_choice};
+use crate::provider::{
+    ProviderAdapter, StreamEventStream, validate_standard_speed, validate_tool_choice,
+};
 use crate::providers::common::{
     api_model_id, parse_error_body, parse_rate_limit_headers, parse_retry_after,
     send_and_read_response,
@@ -484,6 +486,14 @@ fn merge_provider_options(
 impl ProviderAdapter for Adapter {
     fn name(&self) -> &str {
         &self.provider_name
+    }
+
+    fn validate_request(&self, request: &Request) -> Result<(), Error> {
+        validate_standard_speed(self, request)?;
+        if let Some(tc) = &request.tool_choice {
+            validate_tool_choice(self, tc)?;
+        }
+        Ok(())
     }
 
     async fn complete(&self, request: &Request) -> Result<Response, Error> {
@@ -1361,8 +1371,13 @@ mod tests {
 [providers.acme]
 display_name = "Acme"
 adapter = "openai_compatible"
+agent_profile = "openai"
 base_url = "https://api.acme.test/v1"
+
+[providers.acme.auth]
+type = "api_key"
 credentials = ["env:ACME_API_KEY"]
+header = "bearer"
 
 [models."acme-large"]
 provider = "acme"

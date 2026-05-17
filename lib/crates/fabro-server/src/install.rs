@@ -13,9 +13,7 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router, middleware};
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD as BASE64_STANDARD, URL_SAFE_NO_PAD};
-use fabro_auth::{
-    ApiKeyHeader, AuthCredential, AuthDetails, build_api_key_header, credential_id_for,
-};
+use fabro_auth::{AuthCredential, AuthDetails, credential_id_for};
 use fabro_config::Storage;
 use fabro_config::bind::{Bind, BindRequest};
 use fabro_config::envfile::EnvFileUpdate;
@@ -25,8 +23,10 @@ use fabro_install::{
     merge_server_settings, persist_install_outputs_direct, write_github_app_settings,
     write_object_store_settings, write_sandbox_settings, write_token_settings,
 };
+use fabro_llm::client::Client as LlmClient;
+use fabro_llm::generate::{GenerateParams, generate};
 use fabro_model::catalog::CatalogProvider;
-use fabro_model::{AdapterKind, Catalog, CredentialRef, ProviderId};
+use fabro_model::{Catalog, ProviderAuthConfig, ProviderId};
 use fabro_sandbox::daytona;
 use fabro_static::EnvVars;
 use fabro_store::ArtifactStore;
@@ -92,9 +92,6 @@ struct InstallOperatorFingerprint {
 
 pub const DEFAULT_INSTALL_GITHUB_API_BASE_URL: &str = "https://api.github.com";
 const DEFAULT_INSTALL_TCP_LISTEN_ADDRESS: &str = "127.0.0.1:32276";
-const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com/v1";
-const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
-const DEFAULT_GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 const REDACTED_SECRET_VALUE: &str = "[REDACTED]";
 const VALIDATION_TIMEOUT: Duration = Duration::from_secs(20);
 const VALIDATION_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -831,12 +828,7 @@ fn install_catalog_provider(provider: &ProviderId) -> Result<&'static CatalogPro
     let catalog_provider = INSTALL_CATALOG
         .provider(provider)
         .ok_or_else(|| format!("provider '{provider}' is not configured in the model catalog"))?;
-    let supports_api_key = catalog_provider.credentials.iter().any(|credential| {
-        matches!(
-            credential,
-            CredentialRef::Credential(_) | CredentialRef::Env(_)
-        )
-    });
+    let supports_api_key = matches!(catalog_provider.auth, ProviderAuthConfig::ApiKey { .. });
     if supports_api_key {
         Ok(catalog_provider)
     } else {
@@ -2061,44 +2053,68 @@ async fn validate_llm_provider(
     state: &InstallAppState,
     input: &InstallLlmTestInput,
 ) -> anyhow::Result<()> {
-    let provider = install_catalog_provider(&input.provider).map_err(anyhow::Error::msg)?;
-    let auth_header = build_api_key_header(
-        provider.adapter.metadata().api_key_header,
+    let catalog = Arc::new(Catalog::from_builtin().context("failed to build install catalog")?);
+    let provider = catalog.provider(&input.provider).with_context(|| {
+        format!(
+            "provider '{}' is not configured in the model catalog",
+            input.provider
+        )
+    })?;
+    ensure_install_api_key_provider(provider)?;
+
+    let mut credential = fabro_auth::ApiCredential::from_api_key(
+        input.provider.clone(),
         input.api_key.clone(),
-    );
-    let base_url = provider_base_url(state, provider)?;
-    let endpoint = install_upstream_endpoint(&base_url, &["models"])?;
-    let client = install_http_client_for_url(&base_url)?;
-    let mut request = client.get(endpoint).header("User-Agent", "fabro-server");
-    request = add_api_key_header(request, auth_header);
-    if provider.adapter == AdapterKind::Anthropic {
-        request = request.header("anthropic-version", "2023-06-01");
+        catalog.as_ref(),
+    )?;
+    if let Some(base_url) = provider_base_url_override(state, provider) {
+        credential.base_url = Some(base_url);
     }
 
-    let response = request
-        .timeout(Duration::from_secs(10))
-        .send()
+    let client = LlmClient::from_credentials(vec![credential], Arc::clone(&catalog))
         .await
-        .map_err(anyhow::Error::new)?;
-    if response.status().is_success() {
+        .context("failed to create LLM client for install validation")?;
+    let probe_model = catalog
+        .probe_for_provider(&input.provider)
+        .with_context(|| {
+            format!(
+                "provider '{}' does not define a probe model",
+                input.provider
+            )
+        })?
+        .id
+        .clone();
+    let params = GenerateParams::new(probe_model, Arc::new(client))
+        .provider(input.provider.to_string())
+        .prompt("Say OK")
+        .max_tokens(16);
+
+    timeout(Duration::from_secs(30), generate(params))
+        .await
+        .context("LLM provider validation timed out")?
+        .map(|_| ())
+        .context("LLM provider validation request failed")
+}
+
+fn ensure_install_api_key_provider(provider: &CatalogProvider) -> anyhow::Result<()> {
+    if matches!(provider.auth, ProviderAuthConfig::ApiKey { .. }) {
         Ok(())
     } else {
         bail!(
-            "{} model lookup failed ({})",
-            input.provider,
-            response.status()
+            "provider '{}' does not define an API-key credential path",
+            provider.id
         )
     }
 }
 
 #[expect(
     clippy::disallowed_methods,
-    reason = "Install flow checks documented provider base-url overrides while building defaults."
+    reason = "Install flow checks documented provider base-url env overrides before catalog defaults."
 )]
-fn provider_base_url(
+fn provider_base_url_override(
     state: &InstallAppState,
     provider: &CatalogProvider,
-) -> anyhow::Result<String> {
+) -> Option<String> {
     state
         .upstreams
         .provider_base_urls
@@ -2111,28 +2127,6 @@ fn provider_base_url(
             _ => None,
         })
         .or_else(|| provider.base_url.clone())
-        .or_else(|| match provider.adapter {
-            AdapterKind::Anthropic => Some(DEFAULT_ANTHROPIC_BASE_URL.to_string()),
-            AdapterKind::OpenAi => Some(DEFAULT_OPENAI_BASE_URL.to_string()),
-            AdapterKind::Gemini => Some(DEFAULT_GEMINI_BASE_URL.to_string()),
-            AdapterKind::OpenAiCompatible => None,
-        })
-        .with_context(|| {
-            format!(
-                "provider '{}' does not define an install validation base URL",
-                provider.id
-            )
-        })
-}
-
-fn add_api_key_header(
-    request: fabro_http::RequestBuilder,
-    auth_header: ApiKeyHeader,
-) -> fabro_http::RequestBuilder {
-    match auth_header {
-        ApiKeyHeader::Bearer(value) => request.header("Authorization", format!("Bearer {value}")),
-        ApiKeyHeader::Custom { name, value } => request.header(name, value),
-    }
 }
 
 async fn validate_github_token(state: &InstallAppState, token: &str) -> anyhow::Result<String> {

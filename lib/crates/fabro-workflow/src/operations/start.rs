@@ -1221,8 +1221,8 @@ mod tests {
             r#"
 [providers.acme]
 adapter = "openai_compatible"
-base_url = "https://api.acme.test/v1"
 agent_profile = "openai"
+base_url = "https://api.acme.test/v1"
 
 [models.acme-claude]
 provider = "acme"

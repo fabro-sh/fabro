@@ -3013,8 +3013,13 @@ async fn validate_endpoint_uses_app_state_catalog_for_model_diagnostics() {
 [providers.acme]
 display_name = "Acme"
 adapter = "openai_compatible"
+agent_profile = "openai"
 base_url = "https://api.acme.test/v1"
+
+[providers.acme.auth]
+type = "api_key"
 credentials = ["env:ACME_API_KEY"]
+header = "bearer"
 
 [models."acme-large"]
 provider = "acme"
@@ -4835,9 +4840,14 @@ async fn list_models_uses_app_state_catalog_overrides() {
 [providers.acme]
 display_name = "Acme"
 adapter = "openai_compatible"
+agent_profile = "openai"
 base_url = "https://api.acme.test/v1"
-credentials = ["env:ACME_API_KEY"]
 priority = 120
+
+[providers.acme.auth]
+type = "api_key"
+credentials = ["env:ACME_API_KEY"]
+header = "bearer"
 
 [models."acme-large"]
 provider = "acme"
@@ -10400,9 +10410,14 @@ async fn create_completion_default_model_uses_app_state_catalog() {
 [providers.acme]
 display_name = "Acme"
 adapter = "openai_compatible"
+agent_profile = "openai"
 base_url = "https://api.acme.test/v1"
-credentials = ["env:ACME_API_KEY"]
 priority = 120
+
+[providers.acme.auth]
+type = "api_key"
+credentials = ["env:ACME_API_KEY"]
+header = "bearer"
 
 [models."acme-large"]
 provider = "acme"

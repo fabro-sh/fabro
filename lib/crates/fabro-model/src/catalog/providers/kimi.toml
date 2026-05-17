@@ -1,10 +1,16 @@
 [providers.kimi]
 display_name = "Kimi"
 adapter = "openai_compatible"
+agent_profile = "openai"
+billing_policy = "openai"
 api_key_url = "https://platform.moonshot.cn/console/api-keys"
 base_url = "https://api.moonshot.ai/v1"
-credentials = ["credential:kimi", "env:KIMI_API_KEY"]
 priority = 70
+
+[providers.kimi.auth]
+type = "api_key"
+credentials = ["credential:kimi", "env:KIMI_API_KEY"]
+header = "bearer"
 
 [models."kimi-k2.5"]
 provider = "kimi"

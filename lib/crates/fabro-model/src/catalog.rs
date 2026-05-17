@@ -5,11 +5,12 @@ use std::sync::LazyLock;
 
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use strum::VariantArray;
 use toml::de::Error as TomlDeError;
 use tracing::warn;
 
 use crate::Speed;
-use crate::adapter::{AdapterKind, AdapterMetadata, AgentProfileKind};
+use crate::adapter::{AdapterKind, AgentProfileKind};
 use crate::ids::ProviderId;
 use crate::reasoning::ReasoningEffort;
 use crate::types::{Model, ModelCosts, ModelFeatures, ModelLimits, ReasoningEffortFeature};
@@ -37,25 +38,27 @@ pub struct LlmCatalogSettings {
 #[serde(deny_unknown_fields)]
 pub struct ProviderCatalogSettings {
     #[serde(default)]
-    pub display_name:  Option<String>,
+    pub display_name:   Option<String>,
     #[serde(default)]
-    pub adapter:       Option<String>,
+    pub adapter:        Option<String>,
     #[serde(default)]
-    pub agent_profile: Option<AgentProfileKind>,
+    pub agent_profile:  Option<AgentProfileKind>,
     #[serde(default)]
-    pub api_key_url:   Option<String>,
+    pub auth:           Option<ProviderAuthConfig>,
     #[serde(default)]
-    pub base_url:      Option<String>,
+    pub billing_policy: Option<BillingPolicy>,
     #[serde(default)]
-    pub credentials:   Option<Vec<CredentialRef>>,
+    pub api_key_url:    Option<String>,
     #[serde(default)]
-    pub extra_headers: Option<HashMap<String, HeaderValueRef>>,
+    pub base_url:       Option<String>,
     #[serde(default)]
-    pub priority:      Option<i32>,
+    pub extra_headers:  Option<HashMap<String, HeaderValueRef>>,
     #[serde(default)]
-    pub enabled:       Option<bool>,
+    pub priority:       Option<i32>,
     #[serde(default)]
-    pub aliases:       Option<Vec<String>>,
+    pub enabled:        Option<bool>,
+    #[serde(default)]
+    pub aliases:        Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -206,6 +209,200 @@ pub enum CredentialRefParseError {
     EmptyCredential,
     #[error("credential reference is missing a name after `env:`")]
     EmptyEnv,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ProviderAuthConfig {
+    ApiKey {
+        credentials: Vec<CredentialRef>,
+        header:      ApiKeyHeaderPolicy,
+    },
+    HeaderOnly,
+    None,
+}
+
+impl ProviderAuthConfig {
+    #[must_use]
+    pub fn credentials(&self) -> &[CredentialRef] {
+        match self {
+            Self::ApiKey { credentials, .. } => credentials,
+            Self::HeaderOnly | Self::None => &[],
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ProviderAuthConfigKind {
+    ApiKey,
+    HeaderOnly,
+    None,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProviderAuthConfigInput {
+    #[serde(rename = "type")]
+    kind:        ProviderAuthConfigKind,
+    credentials: Option<Vec<CredentialRef>>,
+    header:      Option<ApiKeyHeaderPolicy>,
+}
+
+impl<'de> Deserialize<'de> for ProviderAuthConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+
+        let input = ProviderAuthConfigInput::deserialize(deserializer)?;
+        match input.kind {
+            ProviderAuthConfigKind::ApiKey => Ok(Self::ApiKey {
+                credentials: input
+                    .credentials
+                    .ok_or_else(|| D::Error::missing_field("credentials"))?,
+                header:      input
+                    .header
+                    .ok_or_else(|| D::Error::missing_field("header"))?,
+            }),
+            ProviderAuthConfigKind::HeaderOnly => {
+                if input.credentials.is_some() {
+                    return Err(D::Error::custom(
+                        "header_only auth must not declare credentials",
+                    ));
+                }
+                if input.header.is_some() {
+                    return Err(D::Error::custom("header_only auth must not declare header"));
+                }
+                Ok(Self::HeaderOnly)
+            }
+            ProviderAuthConfigKind::None => {
+                if input.credentials.is_some() {
+                    return Err(D::Error::custom("none auth must not declare credentials"));
+                }
+                if input.header.is_some() {
+                    return Err(D::Error::custom("none auth must not declare header"));
+                }
+                Ok(Self::None)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ApiKeyHeaderPolicy {
+    Bearer,
+    Custom { name: String },
+}
+
+impl Serialize for ApiKeyHeaderPolicy {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Bearer => serializer.serialize_str("bearer"),
+            Self::Custom { name } => {
+                use serde::ser::SerializeMap;
+
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("custom", name)?;
+                map.end()
+            }
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ApiKeyHeaderPolicyInput {
+    String(String),
+    Table(ApiKeyHeaderPolicyTable),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApiKeyHeaderPolicyTable {
+    custom: String,
+}
+
+impl<'de> Deserialize<'de> for ApiKeyHeaderPolicy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+
+        match ApiKeyHeaderPolicyInput::deserialize(deserializer)? {
+            ApiKeyHeaderPolicyInput::String(value) if value == "bearer" => Ok(Self::Bearer),
+            ApiKeyHeaderPolicyInput::String(value) => Err(D::Error::custom(format!(
+                "API key header must be `bearer`, got `{value}`"
+            ))),
+            ApiKeyHeaderPolicyInput::Table(table) => {
+                validate_header_name(&table.custom).map_err(D::Error::custom)?;
+                Ok(Self::Custom { name: table.custom })
+            }
+        }
+    }
+}
+
+fn validate_header_name(name: &str) -> Result<(), &'static str> {
+    if name.is_empty() {
+        return Err("header name must not be empty");
+    }
+    if name.bytes().all(is_header_name_byte) {
+        Ok(())
+    } else {
+        Err("header name contains a character that is not valid in an HTTP field name")
+    }
+}
+
+fn is_header_name_byte(byte: u8) -> bool {
+    matches!(
+        byte,
+        b'!' | b'#'
+            | b'$'
+            | b'%'
+            | b'&'
+            | b'\''
+            | b'*'
+            | b'+'
+            | b'-'
+            | b'.'
+            | b'^'
+            | b'_'
+            | b'`'
+            | b'|'
+            | b'~'
+            | b'0'..=b'9'
+            | b'A'..=b'Z'
+            | b'a'..=b'z'
+    )
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum BillingPolicy {
+    #[serde(rename = "openai")]
+    #[strum(to_string = "openai")]
+    OpenAi,
+    Anthropic,
+    Gemini,
+    None,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -365,16 +562,17 @@ pub struct FallbackTarget {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CatalogProvider {
-    pub id:            ProviderId,
-    pub display_name:  String,
-    pub adapter:       AdapterKind,
-    pub agent_profile: AgentProfileKind,
-    pub api_key_url:   Option<String>,
-    pub base_url:      Option<String>,
-    pub credentials:   Vec<CredentialRef>,
-    pub extra_headers: HashMap<String, HeaderValueRef>,
-    pub priority:      i32,
-    pub aliases:       Vec<String>,
+    pub id:             ProviderId,
+    pub display_name:   String,
+    pub adapter:        AdapterKind,
+    pub agent_profile:  AgentProfileKind,
+    pub auth:           ProviderAuthConfig,
+    pub billing_policy: BillingPolicy,
+    pub api_key_url:    Option<String>,
+    pub base_url:       Option<String>,
+    pub extra_headers:  HashMap<String, HeaderValueRef>,
+    pub priority:       i32,
+    pub aliases:        Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -435,8 +633,10 @@ pub enum CatalogBuildError {
         provider: ProviderId,
         adapter:  String,
     },
-    #[error("provider '{provider}' uses adapter 'openai_compatible' without base_url")]
-    MissingOpenAiCompatibleBaseUrl { provider: ProviderId },
+    #[error("provider '{provider}' API-key auth must declare at least one credential")]
+    EmptyApiKeyCredentials { provider: ProviderId },
+    #[error("provider '{provider}' header-only auth must declare at least one extra header")]
+    HeaderOnlyWithoutHeaders { provider: ProviderId },
     #[error("provider identifier '{identifier}' is declared by both '{first}' and '{second}'")]
     DuplicateProviderIdentifier {
         identifier: String,
@@ -471,14 +671,6 @@ pub enum CatalogBuildError {
         source: strum::ParseError,
     },
     #[error(
-        "model '{model}' declares unsupported reasoning_effort '{value}' for adapter '{adapter}'"
-    )]
-    UnsupportedReasoningEffort {
-        model:   String,
-        adapter: String,
-        value:   ReasoningEffort,
-    },
-    #[error(
         "model '{model}' declares reasoning_effort controls but features.reasoning_effort is none"
     )]
     ReasoningEffortWithoutFeature { model: String },
@@ -497,12 +689,6 @@ pub enum CatalogBuildError {
     },
     #[error("model '{model}' must not declare standard in controls.speed")]
     StandardSpeedControl { model: String },
-    #[error("model '{model}' declares unsupported speed '{speed}' for adapter '{adapter}'")]
-    UnsupportedSpeed {
-        model:   String,
-        adapter: String,
-        speed:   Speed,
-    },
     #[error("model '{model}' has costs.speed.{speed} without declaring controls.speed")]
     UndeclaredSpeedCost { model: String, speed: Speed },
 }
@@ -771,7 +957,7 @@ impl Catalog {
             .providers
             .iter()
             .filter(|provider| {
-                provider.credentials.iter().any(|credential| {
+                provider.auth.credentials().iter().any(|credential| {
                     matches!(credential, CredentialRef::Env(name) if std::env::var(name).is_ok())
                 })
             })
@@ -917,16 +1103,17 @@ fn merge_provider_settings(
     fallback: ProviderCatalogSettings,
 ) -> ProviderCatalogSettings {
     ProviderCatalogSettings {
-        display_name:  higher.display_name.or(fallback.display_name),
-        adapter:       higher.adapter.or(fallback.adapter),
-        agent_profile: higher.agent_profile.or(fallback.agent_profile),
-        api_key_url:   higher.api_key_url.or(fallback.api_key_url),
-        base_url:      higher.base_url.or(fallback.base_url),
-        credentials:   higher.credentials.or(fallback.credentials),
-        extra_headers: higher.extra_headers.or(fallback.extra_headers),
-        priority:      higher.priority.or(fallback.priority),
-        enabled:       higher.enabled.or(fallback.enabled),
-        aliases:       higher.aliases.or(fallback.aliases),
+        display_name:   higher.display_name.or(fallback.display_name),
+        adapter:        higher.adapter.or(fallback.adapter),
+        agent_profile:  higher.agent_profile.or(fallback.agent_profile),
+        auth:           higher.auth.or(fallback.auth),
+        billing_policy: higher.billing_policy.or(fallback.billing_policy),
+        api_key_url:    higher.api_key_url.or(fallback.api_key_url),
+        base_url:       higher.base_url.or(fallback.base_url),
+        extra_headers:  higher.extra_headers.or(fallback.extra_headers),
+        priority:       higher.priority.or(fallback.priority),
+        enabled:        higher.enabled.or(fallback.enabled),
+        aliases:        higher.aliases.or(fallback.aliases),
     }
 }
 
@@ -1058,28 +1245,53 @@ fn build_providers(
                 adapter:  adapter_name,
             }
         })?;
-        if adapter == AdapterKind::OpenAiCompatible && settings.base_url.is_none() {
-            return Err(CatalogBuildError::MissingOpenAiCompatibleBaseUrl {
-                provider: provider_id,
-            });
-        }
+        let agent_profile =
+            settings
+                .agent_profile
+                .ok_or_else(|| CatalogBuildError::MissingProviderField {
+                    provider: provider_id.clone(),
+                    field:    "agent_profile",
+                })?;
+        let auth = settings.auth.clone().unwrap_or(ProviderAuthConfig::None);
+        validate_provider_auth(&provider_id, &auth, settings.extra_headers.as_ref())?;
 
         providers.push(CatalogProvider {
             id: provider_id,
             display_name: settings.display_name.clone().unwrap_or_else(|| id.clone()),
             adapter,
-            agent_profile: settings
-                .agent_profile
-                .unwrap_or_else(|| adapter.metadata().default_profile),
+            agent_profile,
+            auth,
+            billing_policy: settings.billing_policy.unwrap_or(BillingPolicy::None),
             api_key_url: settings.api_key_url.clone(),
             base_url: settings.base_url.clone(),
-            credentials: settings.credentials.clone().unwrap_or_default(),
             extra_headers: settings.extra_headers.clone().unwrap_or_default(),
             priority: settings.priority.unwrap_or_default(),
             aliases: settings.aliases.clone().unwrap_or_default(),
         });
     }
     Ok(providers)
+}
+
+fn validate_provider_auth(
+    provider: &ProviderId,
+    auth: &ProviderAuthConfig,
+    extra_headers: Option<&HashMap<String, HeaderValueRef>>,
+) -> Result<(), CatalogBuildError> {
+    match auth {
+        ProviderAuthConfig::ApiKey { credentials, .. } if credentials.is_empty() => {
+            Err(CatalogBuildError::EmptyApiKeyCredentials {
+                provider: provider.clone(),
+            })
+        }
+        ProviderAuthConfig::HeaderOnly if extra_headers.is_none_or(HashMap::is_empty) => {
+            Err(CatalogBuildError::HeaderOnlyWithoutHeaders {
+                provider: provider.clone(),
+            })
+        }
+        ProviderAuthConfig::ApiKey { .. }
+        | ProviderAuthConfig::HeaderOnly
+        | ProviderAuthConfig::None => Ok(()),
+    }
 }
 
 fn build_provider_aliases(
@@ -1130,8 +1342,7 @@ fn build_model(
                 field: "features",
             })?;
     let model_features = build_model_features(model_id, features)?;
-    let adapter = provider.adapter.metadata();
-    let controls = build_model_controls(model_id, &model_features, settings, adapter)?;
+    let controls = build_model_controls(model_id, &model_features, settings)?;
     let costs = build_model_costs(settings.costs.as_ref());
     let speed_costs = build_speed_costs(model_id, settings.costs.as_ref(), &controls)?;
 
@@ -1267,7 +1478,6 @@ fn build_model_controls(
     model_id: &str,
     features: &ModelFeatures,
     settings: &ModelCatalogSettings,
-    adapter: &'static AdapterMetadata,
 ) -> Result<CatalogModelControls, CatalogBuildError> {
     let supports_reasoning_effort = features.reasoning_effort == ReasoningEffortFeature::Levels;
     let reasoning_effort = match settings
@@ -1289,18 +1499,9 @@ fn build_model_controls(
             .iter()
             .map(|value| parse_reasoning_effort(model_id, value))
             .collect::<Result<Vec<_>, _>>()?,
-        None if supports_reasoning_effort => adapter.controls.native_reasoning_effort.to_vec(),
+        None if supports_reasoning_effort => ReasoningEffort::VARIANTS.to_vec(),
         None => Vec::new(),
     };
-    for value in &reasoning_effort {
-        if !adapter.controls.native_reasoning_effort.contains(value) {
-            return Err(CatalogBuildError::UnsupportedReasoningEffort {
-                model:   model_id.to_string(),
-                adapter: adapter.kind.to_string(),
-                value:   *value,
-            });
-        }
-    }
 
     let speed = settings
         .controls
@@ -1309,7 +1510,7 @@ fn build_model_controls(
         .map(|values| {
             values
                 .iter()
-                .map(|value| parse_speed_control(model_id, value, adapter))
+                .map(|value| parse_speed_control(model_id, value))
                 .collect::<Result<Vec<_>, _>>()
         })
         .transpose()?
@@ -1340,22 +1541,11 @@ fn parse_speed(model_id: &str, value: &str) -> Result<Speed, CatalogBuildError> 
     })
 }
 
-fn parse_speed_control(
-    model_id: &str,
-    value: &str,
-    adapter: &'static AdapterMetadata,
-) -> Result<Speed, CatalogBuildError> {
+fn parse_speed_control(model_id: &str, value: &str) -> Result<Speed, CatalogBuildError> {
     let speed = parse_speed(model_id, value)?;
     if speed == Speed::Standard {
         return Err(CatalogBuildError::StandardSpeedControl {
             model: model_id.to_string(),
-        });
-    }
-    if !adapter.controls.additional_speeds.contains(&speed) {
-        return Err(CatalogBuildError::UnsupportedSpeed {
-            model: model_id.to_string(),
-            adapter: adapter.kind.to_string(),
-            speed,
         });
     }
     Ok(speed)
@@ -1542,10 +1732,15 @@ enabled = false
 [providers.acme]
 display_name = "Acme"
 adapter = "openai_compatible"
+agent_profile = "openai"
 base_url = "https://api.acme.test/v1"
-credentials = ["env:ACME_API_KEY"]
 priority = 120
 aliases = ["acme-ai"]
+
+[providers.acme.auth]
+type = "api_key"
+credentials = ["env:ACME_API_KEY"]
+header = "bearer"
 
 [models."acme-large"]
 provider = "acme"
@@ -1846,6 +2041,7 @@ enabled = true
 [providers.test]
 display_name = "Test"
 adapter = "openai"
+agent_profile = "openai"
 enabled = true
 
 [models.one]
@@ -1894,6 +2090,7 @@ reasoning = false
 [providers.enabled]
 display_name = "Enabled"
 adapter = "openai"
+agent_profile = "openai"
 enabled = true
 
 [providers.disabled]
@@ -1961,11 +2158,13 @@ reasoning = false
 [providers.low]
 display_name = "Low"
 adapter = "openai"
+agent_profile = "openai"
 priority = 10
 
 [providers.high]
 display_name = "High"
 adapter = "openai"
+agent_profile = "openai"
 priority = 20
 
 [models.low_default]
@@ -2021,11 +2220,13 @@ reasoning = false
 [providers.zeta]
 display_name = "Zeta"
 adapter = "openai"
+agent_profile = "openai"
 priority = 20
 
 [providers.alpha]
 display_name = "Alpha"
 adapter = "openai"
+agent_profile = "openai"
 priority = 10
 
 [models.zeta_two]
@@ -2089,6 +2290,7 @@ reasoning = false
 [providers.canonical]
 display_name = "Canonical"
 adapter = "openai"
+agent_profile = "openai"
 aliases = ["alias"]
 
 [models.default_model]
@@ -2138,6 +2340,7 @@ reasoning = false
 [providers.test]
 display_name = "Test"
 adapter = "openai"
+agent_profile = "openai"
 
 [models.default_model]
 provider = "test"
@@ -2186,6 +2389,7 @@ reasoning = false
 [providers.test]
 display_name = "Test"
 adapter = "openai"
+agent_profile = "openai"
 
 [models.default_model]
 provider = "test"
@@ -2252,6 +2456,7 @@ probe = false
 [providers.canonical]
 display_name = "Canonical"
 adapter = "openai"
+agent_profile = "openai"
 aliases = ["alias"]
 
 [models.default_model]
@@ -2301,6 +2506,7 @@ reasoning = false
 [providers.test]
 display_name = "Test"
 adapter = "openai"
+agent_profile = "openai"
 
 [models.default_model]
 provider = "test"
@@ -2494,7 +2700,7 @@ reasoning = false
     }
 
     #[test]
-    fn omitted_agent_profile_preserves_adapter_default() {
+    fn omitted_agent_profile_is_rejected() {
         let layer = minimal_settings(
             r#"
 [providers.test]
@@ -2517,11 +2723,174 @@ reasoning = false
 "#,
         );
 
-        let catalog = Catalog::from_settings(&layer).unwrap();
+        let err = Catalog::from_settings(&layer).unwrap_err();
 
-        assert_eq!(
-            catalog.effective_agent_profile(&ProviderId::new("test"), Some("default_model")),
-            Some(AgentProfileKind::Gemini)
+        assert!(matches!(
+            err,
+            CatalogBuildError::MissingProviderField { provider, field }
+                if provider == ProviderId::new("test") && field == "agent_profile"
+        ));
+    }
+
+    #[test]
+    fn provider_auth_modes_and_billing_policy_are_catalog_owned() {
+        let settings = minimal_settings(
+            r#"
+[providers.bearer]
+display_name = "Bearer"
+adapter = "openai"
+agent_profile = "openai"
+billing_policy = "openai"
+
+[providers.bearer.auth]
+type = "api_key"
+credentials = ["credential:bearer", "env:BEARER_API_KEY"]
+header = "bearer"
+
+[providers.custom]
+display_name = "Custom"
+adapter = "gemini"
+agent_profile = "gemini"
+billing_policy = "gemini"
+
+[providers.custom.auth]
+type = "api_key"
+credentials = ["env:CUSTOM_API_KEY"]
+header = { custom = "x-api-key" }
+
+[providers.headers]
+display_name = "Headers"
+adapter = "anthropic"
+agent_profile = "anthropic"
+billing_policy = "anthropic"
+
+[providers.headers.auth]
+type = "header_only"
+
+[providers.headers.extra_headers]
+x-provider-key = { env = "PROVIDER_KEY" }
+
+[providers.none]
+display_name = "No Auth"
+adapter = "openai_compatible"
+agent_profile = "openai"
+billing_policy = "none"
+
+[providers.none.auth]
+type = "none"
+"#,
+        );
+
+        let providers = build_providers(&settings).unwrap();
+        let provider = |id: &str| {
+            providers
+                .iter()
+                .find(|provider| provider.id.as_str() == id)
+                .unwrap()
+        };
+
+        let bearer = provider("bearer");
+        assert_eq!(bearer.billing_policy, BillingPolicy::OpenAi);
+        assert_eq!(bearer.auth, ProviderAuthConfig::ApiKey {
+            credentials: vec![
+                CredentialRef::Credential("bearer".to_string()),
+                CredentialRef::Env("BEARER_API_KEY".to_string()),
+            ],
+            header:      ApiKeyHeaderPolicy::Bearer,
+        });
+
+        let custom = provider("custom");
+        assert_eq!(custom.billing_policy, BillingPolicy::Gemini);
+        assert_eq!(custom.auth, ProviderAuthConfig::ApiKey {
+            credentials: vec![CredentialRef::Env("CUSTOM_API_KEY".to_string())],
+            header:      ApiKeyHeaderPolicy::Custom {
+                name: "x-api-key".to_string(),
+            },
+        });
+
+        let headers = provider("headers");
+        assert_eq!(headers.billing_policy, BillingPolicy::Anthropic);
+        assert_eq!(headers.auth, ProviderAuthConfig::HeaderOnly);
+
+        let no_auth = provider("none");
+        assert_eq!(no_auth.billing_policy, BillingPolicy::None);
+        assert_eq!(no_auth.auth, ProviderAuthConfig::None);
+    }
+
+    #[test]
+    fn catalog_from_settings_rejects_invalid_provider_auth_configs() {
+        let empty_api_key_credentials = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[providers.test.auth]
+type = "api_key"
+credentials = []
+header = "bearer"
+"#,
+        );
+        assert!(matches!(
+            Catalog::from_settings(&empty_api_key_credentials).unwrap_err(),
+            CatalogBuildError::EmptyApiKeyCredentials { provider }
+                if provider == ProviderId::new("test")
+        ));
+
+        let header_only_without_headers = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[providers.test.auth]
+type = "header_only"
+"#,
+        );
+        assert!(matches!(
+            Catalog::from_settings(&header_only_without_headers).unwrap_err(),
+            CatalogBuildError::HeaderOnlyWithoutHeaders { provider }
+                if provider == ProviderId::new("test")
+        ));
+    }
+
+    #[test]
+    fn provider_auth_deserialization_rejects_invalid_auth_shape() {
+        let invalid_header = toml::from_str::<LlmCatalogSettings>(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[providers.test.auth]
+type = "api_key"
+credentials = ["env:TEST_API_KEY"]
+header = { custom = "bad header" }
+"#,
+        )
+        .unwrap_err();
+        assert!(invalid_header.to_string().contains("header name contains"));
+
+        let none_with_credentials = toml::from_str::<LlmCatalogSettings>(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[providers.test.auth]
+type = "none"
+credentials = ["env:TEST_API_KEY"]
+"#,
+        )
+        .unwrap_err();
+        assert!(
+            none_with_credentials
+                .to_string()
+                .contains("none auth must not declare credentials")
         );
     }
 
@@ -2532,6 +2901,7 @@ reasoning = false
 [providers.test]
 display_name = "Test"
 adapter = "openai"
+agent_profile = "openai"
 
 [models.model]
 provider = "test"
@@ -2563,6 +2933,7 @@ reasoning_effort = ["turbo"]
 [providers.test]
 display_name = "Test"
 adapter = "anthropic"
+agent_profile = "anthropic"
 
 [models.model]
 provider = "test"
@@ -2596,6 +2967,7 @@ input_cost_per_mtok = 1.0
 [providers.test]
 display_name = "Test"
 adapter = "openai"
+agent_profile = "openai"
 
 [models.model]
 provider = "test"
@@ -2642,6 +3014,7 @@ reasoning_effort = ["low", "medium"]
 [providers.test]
 display_name = "Test"
 adapter = "openai"
+agent_profile = "openai"
 
 [models.model]
 provider = "test"
@@ -2676,6 +3049,7 @@ reasoning_effort = ["low"]
 [providers.test]
 display_name = "Test"
 adapter = "openai"
+agent_profile = "openai"
 
 [models.model]
 provider = "test"

@@ -778,10 +778,7 @@ async fn build_agent_session(state: &AppState, record: &SessionRecord) -> anyhow
         let provider = catalog.provider(&requested_provider_id).ok_or_else(|| {
             anyhow::anyhow!("provider '{requested_provider_id}' is not configured")
         })?;
-        (
-            provider.id.clone(),
-            provider.adapter.metadata().default_profile,
-        )
+        (provider.id.clone(), provider.agent_profile)
     };
     let model = record
         .model

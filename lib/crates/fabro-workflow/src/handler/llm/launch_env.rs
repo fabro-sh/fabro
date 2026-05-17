@@ -80,7 +80,7 @@ pub(crate) async fn resolve_agent_launch_env(
     } else {
         let mut env = HashMap::new();
         if let Some(provider) = request.catalog.provider(&request.provider_id) {
-            for credential_ref in &provider.credentials {
+            for credential_ref in provider.auth.credentials() {
                 let CredentialRef::Env(name) = credential_ref else {
                     continue;
                 };

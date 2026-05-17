@@ -7,7 +7,7 @@
 //! display_name = "Kimi"
 //! adapter = "openai_compatible"
 //! base_url = "https://api.moonshot.ai/v1"
-//! credentials = ["credential:kimi", "env:KIMI_API_KEY"]
+//! auth = { type = "api_key", credentials = ["credential:kimi", "env:KIMI_API_KEY"], header = "bearer" }
 //! priority = 60
 //! enabled = true
 //! aliases = ["moonshot"]
@@ -19,7 +19,7 @@
 //!
 //! Per-provider and per-model entries field-merge across layers (default →
 //! user → server → project → workflow/run). Inner arrays such as
-//! `credentials`, `aliases`, `controls.reasoning_effort`, and
+//! `auth.credentials`, `aliases`, `controls.reasoning_effort`, and
 //! `controls.speed` replace as whole arrays.
 //!
 //! Adapter keys (`adapter = "..."`) are parsed as plain strings here.
@@ -28,8 +28,8 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use fabro_model::AgentProfileKind;
 use fabro_model::catalog::deserialize_knowledge_cutoff;
+use fabro_model::{AgentProfileKind, BillingPolicy, ProviderAuthConfig};
 pub use fabro_model::{
     CredentialRef, CredentialRefParseError, HeaderValueRef, ReasoningEffortFeature,
 };
@@ -54,34 +54,33 @@ pub struct LlmLayer {
 #[serde(deny_unknown_fields)]
 pub struct ProviderSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub display_name:  Option<String>,
+    pub display_name:   Option<String>,
     /// Adapter registry key (e.g. `"openai_compatible"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub adapter:       Option<String>,
+    pub adapter:        Option<String>,
     /// Agent profile used for routing/profile-specific behavior.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_profile: Option<AgentProfileKind>,
+    pub agent_profile:  Option<AgentProfileKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub api_key_url:   Option<String>,
+    pub auth:           Option<ProviderAuthConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_url:      Option<String>,
-    /// Ordered list of credential references — first successful wins. Each
-    /// entry must be a typed `CredentialRef` (`credential:<id>` or
-    /// `env:<NAME>`); literal secret strings fail deserialization.
+    pub billing_policy: Option<BillingPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub credentials:   Option<Vec<CredentialRef>>,
+    pub api_key_url:    Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url:       Option<String>,
     /// Extra HTTP headers attached to every outgoing provider request after
     /// credential resolution. Header values are typed so secret-bearing values
     /// stay as references until a later resolution phase.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub extra_headers: Option<HashMap<String, HeaderValueRef>>,
+    pub extra_headers:  Option<HashMap<String, HeaderValueRef>>,
     /// Higher wins; missing → `0`; ties broken by canonical provider ID.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub priority:      Option<i32>,
+    pub priority:       Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enabled:       Option<bool>,
+    pub enabled:        Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub aliases:       Option<Vec<String>>,
+    pub aliases:        Option<Vec<String>>,
 }
 
 /// One entry in `[llm.models.<id>]`.
@@ -204,6 +203,8 @@ pub struct CostRates {
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
+
+    use fabro_model::ApiKeyHeaderPolicy;
 
     use super::*;
     use crate::layers::Combine;
@@ -471,24 +472,38 @@ agent_profile = "gemini"
 [providers.kimi]
 display_name = "Kimi"
 adapter = "openai_compatible"
+agent_profile = "openai"
 base_url = "https://api.moonshot.ai/v1"
-credentials = ["credential:kimi", "env:KIMI_API_KEY"]
 priority = 60
 enabled = true
 aliases = ["moonshot"]
+
+[providers.kimi.auth]
+type = "api_key"
+credentials = ["credential:kimi", "env:KIMI_API_KEY"]
+header = "bearer"
 "#;
         let layer: LlmLayer = toml::from_str(toml).unwrap();
         let kimi = layer.providers.get("kimi").unwrap();
         assert_eq!(kimi.display_name.as_deref(), Some("Kimi"));
         assert_eq!(kimi.adapter.as_deref(), Some("openai_compatible"));
+        assert_eq!(kimi.agent_profile, Some(AgentProfileKind::OpenAi));
+        let Some(ProviderAuthConfig::ApiKey {
+            credentials,
+            header,
+        }) = &kimi.auth
+        else {
+            panic!("expected api_key auth");
+        };
+        assert_eq!(header, &ApiKeyHeaderPolicy::Bearer);
+        assert_eq!(credentials, &vec![
+            CredentialRef::Credential("kimi".to_string()),
+            CredentialRef::Env("KIMI_API_KEY".to_string()),
+        ]);
         assert_eq!(kimi.base_url.as_deref(), Some("https://api.moonshot.ai/v1"));
         assert_eq!(kimi.priority, Some(60));
         assert_eq!(kimi.enabled, Some(true));
         assert_eq!(kimi.aliases.as_deref(), Some(&["moonshot".to_string()][..]));
-        assert_eq!(kimi.credentials.as_ref().unwrap(), &vec![
-            CredentialRef::Credential("kimi".to_string()),
-            CredentialRef::Env("KIMI_API_KEY".to_string()),
-        ]);
     }
 
     #[test]
@@ -508,7 +523,7 @@ x-portkey-config = { credential = "portkey_config" }
         let layer: LlmLayer = toml::from_str(toml).unwrap();
         let portkey = layer.providers.get("portkey").unwrap();
 
-        assert!(portkey.credentials.is_none());
+        assert!(portkey.auth.is_none());
         let headers = portkey.extra_headers.as_ref().unwrap();
         assert_eq!(
             headers.get("x-portkey-api-key"),
@@ -722,37 +737,56 @@ mystery = 1
     }
 
     #[test]
-    fn provider_credentials_array_replaces_wholesale() {
-        // Higher layer redeclares credentials → low layer's list is dropped
-        // entirely (whole-array replacement).
+    fn provider_auth_replaces_wholesale() {
+        // Higher layer redeclares auth, so the low layer's auth table is
+        // dropped entirely (whole-value replacement).
         let high = ProviderSettings {
-            credentials: Some(vec![CredentialRef::Env("FOO".to_string())]),
+            auth: Some(ProviderAuthConfig::ApiKey {
+                credentials: vec![CredentialRef::Env("FOO".to_string())],
+                header:      ApiKeyHeaderPolicy::Bearer,
+            }),
             ..ProviderSettings::default()
         };
         let low = ProviderSettings {
-            credentials: Some(vec![
-                CredentialRef::Credential("bar".to_string()),
-                CredentialRef::Env("BAZ".to_string()),
-            ]),
+            auth: Some(ProviderAuthConfig::ApiKey {
+                credentials: vec![
+                    CredentialRef::Credential("bar".to_string()),
+                    CredentialRef::Env("BAZ".to_string()),
+                ],
+                header:      ApiKeyHeaderPolicy::Custom {
+                    name: "x-api-key".to_string(),
+                },
+            }),
             ..ProviderSettings::default()
         };
         let merged = high.combine(low);
-        assert_eq!(merged.credentials.unwrap(), vec![CredentialRef::Env(
-            "FOO".to_string()
-        )]);
+        assert_eq!(
+            merged.auth,
+            Some(ProviderAuthConfig::ApiKey {
+                credentials: vec![CredentialRef::Env("FOO".to_string())],
+                header:      ApiKeyHeaderPolicy::Bearer,
+            })
+        );
     }
 
     #[test]
-    fn provider_credentials_inherits_when_unset_in_higher_layer() {
+    fn provider_auth_inherits_when_unset_in_higher_layer() {
         let high = ProviderSettings::default();
         let low = ProviderSettings {
-            credentials: Some(vec![CredentialRef::Env("FOO".to_string())]),
+            auth: Some(ProviderAuthConfig::ApiKey {
+                credentials: vec![CredentialRef::Env("FOO".to_string())],
+                header:      ApiKeyHeaderPolicy::Bearer,
+            }),
             ..ProviderSettings::default()
         };
         let merged = high.combine(low);
-        assert_eq!(merged.credentials.unwrap(), vec![CredentialRef::Env(
-            "FOO".to_string()
-        )]);
+        assert_eq!(
+            merged.auth,
+            Some(ProviderAuthConfig::ApiKey {
+                credentials: vec![CredentialRef::Env("FOO".to_string())],
+                header:      ApiKeyHeaderPolicy::Bearer,
+            })
+        );
     }
 
     #[test]

@@ -8,9 +8,7 @@ pub mod model_test;
 pub mod reasoning;
 pub mod types;
 
-pub use adapter::{
-    AdapterControlCapabilities, AdapterKind, AdapterMetadata, AgentProfileKind, ApiKeyHeaderPolicy,
-};
+pub use adapter::{AdapterKind, AgentProfileKind};
 pub use billing::{
     AnthropicBillingFacts, AnthropicModelPricing, BilledModelUsage, BilledTokenCounts,
     GeminiBillingFacts, GeminiModelPricing, GeminiStoragePricing, GeminiStorageSegment,
@@ -18,7 +16,8 @@ pub use billing::{
     OpenAiBillingFacts, OpenAiModelPricing, PricePerMTok, Speed, TokenCounts, UsdMicros,
 };
 pub use catalog::{
-    Catalog, CredentialRef, CredentialRefParseError, FallbackTarget, HeaderValueRef,
+    ApiKeyHeaderPolicy, BillingPolicy, Catalog, CredentialRef, CredentialRefParseError,
+    FallbackTarget, HeaderValueRef, ProviderAuthConfig,
 };
 pub use ids::{ModelId, ProviderId};
 pub use model_ref::ModelHandle;

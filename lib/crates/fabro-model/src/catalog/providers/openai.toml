@@ -1,9 +1,16 @@
 [providers.openai]
 display_name = "OpenAI"
 adapter = "openai"
+agent_profile = "openai"
+billing_policy = "openai"
 api_key_url = "https://platform.openai.com/api-keys"
-credentials = ["credential:openai", "credential:openai_codex", "env:OPENAI_API_KEY"]
+base_url = "https://api.openai.com/v1"
 priority = 90
+
+[providers.openai.auth]
+type = "api_key"
+credentials = ["credential:openai", "credential:openai_codex", "env:OPENAI_API_KEY"]
+header = "bearer"
 
 [models."gpt-5.2"]
 provider = "openai"

@@ -1,9 +1,16 @@
 [providers.anthropic]
 display_name = "Anthropic"
 adapter = "anthropic"
+agent_profile = "anthropic"
+billing_policy = "anthropic"
 api_key_url = "https://console.anthropic.com/settings/keys"
-credentials = ["credential:anthropic", "env:ANTHROPIC_API_KEY"]
+base_url = "https://api.anthropic.com/v1"
 priority = 100
+
+[providers.anthropic.auth]
+type = "api_key"
+credentials = ["credential:anthropic", "env:ANTHROPIC_API_KEY"]
+header = { custom = "x-api-key" }
 
 [models."claude-opus-4-7"]
 provider = "anthropic"

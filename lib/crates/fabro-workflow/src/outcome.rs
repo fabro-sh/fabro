@@ -222,6 +222,8 @@ mod tests {
 [providers.proxy]
 display_name = "Proxy"
 adapter = "openai_compatible"
+agent_profile = "openai"
+billing_policy = "openai"
 base_url = "https://proxy.example/v1"
 
 [models.canonical-model]
@@ -271,6 +273,8 @@ output_cost_per_mtok = 2.0
 [providers.proxy]
 display_name = "Proxy"
 adapter = "openai_compatible"
+agent_profile = "openai"
+billing_policy = "openai"
 base_url = "https://proxy.example/v1"
 
 [models.canonical-model]

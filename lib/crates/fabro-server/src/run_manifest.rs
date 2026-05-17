@@ -2220,8 +2220,13 @@ digraph Demo {
 [providers.acme]
 display_name = "Acme"
 adapter = "openai_compatible"
+agent_profile = "openai"
 base_url = "https://api.acme.test/v1"
+
+[providers.acme.auth]
+type = "api_key"
 credentials = ["env:ACME_API_KEY"]
+header = "bearer"
 
 [models."acme-large"]
 provider = "acme"

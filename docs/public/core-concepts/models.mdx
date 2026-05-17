@@ -48,9 +48,14 @@ Fabro's catalog starts with the built-in providers and models, then merges any `
 display_name = "Acme Gateway"
 adapter = "openai_compatible"
 agent_profile = "openai"
+billing_policy = "openai"
 base_url = "https://llm-gateway.example.com/v1"
-credentials = ["env:ACME_GATEWAY_API_KEY"]
 aliases = ["gateway"]
+
+[llm.providers.proxy.auth]
+type = "api_key"
+credentials = ["env:ACME_GATEWAY_API_KEY"]
+header = "bearer"
 
 [llm.providers.proxy.extra_headers]
 x-portkey-api-key = { env = "PORTKEY_API_KEY" }
@@ -118,9 +123,11 @@ reasoning = false
 
 `api_id` is the model name sent to the provider API. Omit it when the Fabro model ID and provider model ID are the same.
 
-Header values and credentials are typed references, not raw secrets. Use `env:<NAME>` or `credential:<id>` for provider credentials, and `{ env = "NAME" }`, `{ credential = "id" }`, or `{ literal = "value" }` for extra headers.
+Provider auth is declared in `[llm.providers.<id>.auth]`. API-key providers use ordered `env:<NAME>` or `credential:<id>` refs plus `header = "bearer"` or `header = { custom = "Header-Name" }`. Header-only providers set `type = "header_only"` and put typed `{ env = "NAME" }`, `{ credential = "id" }`, or `{ literal = "value" }` values in `extra_headers`.
 
-`agent_profile` controls profile-specific behavior such as project-memory filenames, CLI/ACP command selection, and native session routing. Valid values are `anthropic`, `openai`, and `gemini`; model-level values override provider-level values, which override the adapter default.
+`agent_profile` controls profile-specific behavior such as project-memory filenames, CLI/ACP command selection, and native session routing. Valid values are `anthropic`, `openai`, and `gemini`; model-level values override provider-level values.
+
+`billing_policy` controls usage-cost estimation. Use `openai`, `anthropic`, `gemini`, or `none`.
 
 <Note>
 Provider fields in configuration, APIs, and model routing are provider ID strings. Built-in names like `anthropic`, `openai`, and `gemini` still work, but custom IDs like `proxy` work anywhere a provider ID is accepted.

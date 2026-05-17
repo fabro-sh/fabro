@@ -1842,6 +1842,7 @@ mod tests {
 [providers.anthropic]
 display_name = "Anthropic"
 adapter = "anthropic"
+agent_profile = "anthropic"
 
 [models."test-claude"]
 provider = "anthropic"

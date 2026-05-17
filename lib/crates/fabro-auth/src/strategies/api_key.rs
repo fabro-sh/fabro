@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use fabro_model::catalog::CatalogProvider;
-use fabro_model::{CredentialRef, ProviderId};
+use fabro_model::{CredentialRef, ProviderAuthConfig, ProviderId};
 
 use crate::context::{AuthContextRequest, AuthContextResponse};
 use crate::credential::{AuthCredential, AuthDetails};
@@ -16,14 +16,16 @@ pub struct ApiKeyStrategy {
 impl ApiKeyStrategy {
     #[must_use]
     pub fn new(provider: &CatalogProvider) -> Self {
-        let env_var_names = provider
-            .credentials
-            .iter()
-            .filter_map(|credential_ref| match credential_ref {
-                CredentialRef::Env(name) => Some(name.clone()),
-                CredentialRef::Credential(_) => None,
-            })
-            .collect();
+        let env_var_names = match &provider.auth {
+            ProviderAuthConfig::ApiKey { credentials, .. } => credentials
+                .iter()
+                .filter_map(|credential_ref| match credential_ref {
+                    CredentialRef::Env(name) => Some(name.clone()),
+                    CredentialRef::Credential(_) => None,
+                })
+                .collect(),
+            ProviderAuthConfig::HeaderOnly | ProviderAuthConfig::None => Vec::new(),
+        };
         Self {
             provider_id: provider.id.clone(),
             display_name: provider.display_name.clone(),

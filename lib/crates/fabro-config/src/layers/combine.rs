@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-use fabro_model::AgentProfileKind;
+use fabro_model::{AgentProfileKind, BillingPolicy, ProviderAuthConfig};
 use fabro_types::settings::cli::{CliAuthStrategy, OutputFormat, OutputVerbosity};
 use fabro_types::settings::run::{
     AgentPermissions, ApprovalMode, DaytonaNetworkLayer, MergeStrategy, RunMode,
@@ -91,6 +91,8 @@ impl_combine_or_option!(
     WebhookStrategy,
     LogFilter,
     AgentProfileKind,
+    BillingPolicy,
+    ProviderAuthConfig,
     ReasoningEffortFeature,
 );
 

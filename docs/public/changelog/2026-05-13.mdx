@@ -10,8 +10,14 @@ Fabro can now merge LLM provider and model catalog entries from settings. Teams 
 ```toml
 [llm.providers.proxy]
 adapter = "openai_compatible"
+agent_profile = "openai"
+billing_policy = "openai"
 base_url = "https://llm-gateway.example.com/v1"
+
+[llm.providers.proxy.auth]
+type = "api_key"
 credentials = ["env:ACME_GATEWAY_API_KEY"]
+header = "bearer"
 
 [llm.providers.proxy.extra_headers]
 x-portkey-api-key = { env = "PORTKEY_API_KEY" }

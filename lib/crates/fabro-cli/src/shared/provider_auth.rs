@@ -21,7 +21,7 @@ use fabro_auth::{
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate};
 use fabro_model::catalog::CatalogProvider;
-use fabro_model::{Catalog, CredentialRef, ProviderId};
+use fabro_model::{Catalog, ProviderAuthConfig, ProviderId};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use tokio::task::spawn_blocking;
@@ -75,12 +75,7 @@ fn api_key_catalog_provider<'a>(
     let catalog_provider = catalog
         .provider(provider)
         .with_context(|| format!("provider '{provider}' is not configured in the model catalog"))?;
-    let supports_api_key = catalog_provider.credentials.iter().any(|credential| {
-        matches!(
-            credential,
-            CredentialRef::Credential(_) | CredentialRef::Env(_)
-        )
-    });
+    let supports_api_key = matches!(catalog_provider.auth, ProviderAuthConfig::ApiKey { .. });
     anyhow::ensure!(
         supports_api_key,
         "provider '{}' does not define an API-key credential path",

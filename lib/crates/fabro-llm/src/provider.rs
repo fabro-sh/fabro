@@ -4,7 +4,7 @@ pub use fabro_model::{ModelHandle, ProviderId};
 use futures::Stream;
 
 use crate::error::Error;
-use crate::types::{Request, Response, StreamEvent, ToolChoice};
+use crate::types::{Request, Response, Speed, StreamEvent, ToolChoice};
 
 // ---------------------------------------------------------------------------
 // ProviderAdapter trait
@@ -39,6 +39,22 @@ pub trait ProviderAdapter: Send + Sync {
     fn supports_tool_choice(&self, _mode: &str) -> bool {
         true
     }
+
+    /// Validate the final request before dispatching it to the provider API.
+    fn validate_request(&self, request: &Request) -> Result<(), Error> {
+        if let Some(tool_choice) = &request.tool_choice {
+            let mode = tool_choice.mode_str();
+            if !self.supports_tool_choice(mode) {
+                return Err(Error::UnsupportedToolChoice {
+                    message: format!(
+                        "provider '{}' does not support tool_choice mode '{mode}'",
+                        self.name()
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Validate that the adapter supports the requested tool choice mode.
@@ -61,6 +77,25 @@ pub fn validate_tool_choice(
                 "provider '{}' does not support tool_choice mode '{mode}'",
                 adapter.name()
             ),
+        });
+    }
+    Ok(())
+}
+
+/// Validate that an adapter without provider-native speed controls only sees
+/// standard-speed requests.
+pub fn validate_standard_speed(
+    adapter: &dyn ProviderAdapter,
+    request: &Request,
+) -> Result<(), Error> {
+    if let Some(speed) = request.speed.filter(|speed| *speed != Speed::Standard) {
+        return Err(Error::Configuration {
+            message: format!(
+                "provider '{}' does not support speed '{}'",
+                adapter.name(),
+                speed
+            ),
+            source:  None,
         });
     }
     Ok(())

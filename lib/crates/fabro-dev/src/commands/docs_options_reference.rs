@@ -222,11 +222,16 @@ providers can be added when they use an adapter Fabro already supports.
 display_name = "Acme Gateway"
 adapter = "openai_compatible"
 agent_profile = "openai"
+billing_policy = "openai"
 base_url = "https://llm-gateway.example.com/v1"
-credentials = ["env:ACME_GATEWAY_API_KEY"]
 priority = 50
 enabled = true
 aliases = ["gateway"]
+
+[llm.providers.proxy.auth]
+type = "api_key"
+credentials = ["env:ACME_GATEWAY_API_KEY"]
+header = "bearer"
 
 [llm.providers.proxy.extra_headers]
 x-portkey-api-key = { env = "PORTKEY_API_KEY" }
@@ -237,10 +242,14 @@ x-team-secret = { credential = "gateway_team_secret" }
 | Key | Type / values | Default | Description |
 |---|---|---|---|
 | `display_name` | string | provider ID | Human-readable provider name. |
-| `adapter` | string | inferred for built-ins | Adapter registry key, such as `"anthropic"`, `"openai"`, `"gemini"`, or `"openai_compatible"`. Custom providers normally use `"openai_compatible"`. |
-| `agent_profile` | `"anthropic"` \| `"openai"` \| `"gemini"` | adapter default | Agent profile used for project memory, CLI/ACP command selection, and native session routing. |
-| `base_url` | string | adapter default | Provider API base URL. Required for most custom OpenAI-compatible providers. |
-| `credentials` | array<string> | built-in env refs | Ordered credential refs. Accepted string forms are `credential:<id>` and `env:<NAME>`. Literal secret strings are rejected. |
+| `adapter` | string | built-in value | Adapter registry key, such as `"anthropic"`, `"openai"`, `"gemini"`, or `"openai_compatible"`. Required for new providers. |
+| `agent_profile` | `"anthropic"` \| `"openai"` \| `"gemini"` | built-in value | Agent profile used for project memory, CLI/ACP command selection, and native session routing. Required for new providers. |
+| `billing_policy` | `"openai"` \| `"anthropic"` \| `"gemini"` \| `"none"` | `"none"` | Provider-owned billing algorithm for usage estimates. |
+| `base_url` | string | built-in value or adapter runtime default | Provider API base URL. Required for most custom OpenAI-compatible providers. |
+| `auth` | table | `{ type = "none" }` | Provider auth mode. Use `[llm.providers.<id>.auth]` for nested TOML. |
+| `auth.type` | `"api_key"` \| `"header_only"` \| `"none"` | `"none"` | API-key auth adds a primary auth header, header-only auth relies on `extra_headers`, and no-auth registers the provider without credentials. |
+| `auth.credentials` | array<string> | None | Ordered refs for `api_key` auth. Accepted forms are `credential:<id>` and `env:<NAME>`. Literal secret strings are rejected. |
+| `auth.header` | `"bearer"` or `{ custom = "Header-Name" }` | None | Primary API-key header policy for `api_key` auth. |
 | `extra_headers` | table | `{}` | Additional headers attached to provider requests. Values must be typed refs: `{ literal = "..." }`, `{ env = "NAME" }`, or `{ credential = "id" }`. |
 | `priority` | integer | `0` | Higher-priority configured providers win default selection; ties use canonical provider ID. |
 | `enabled` | boolean | `true` | Set `false` to disable a provider after lower-precedence layers define it. |
@@ -327,7 +336,7 @@ cache_input_cost_per_mtok = 0.60
 
 | Key | Type / values | Default | Description |
 |---|---|---|---|
-| `reasoning_effort` | array<string> | adapter defaults | User-facing reasoning effort values Fabro may send for this model. |
+| `reasoning_effort` | array<string> | all standard levels when feature is `"levels"` | User-facing reasoning effort values Fabro may send for this model. |
 | `speed` | array<string> | `[]` | Additional speeds beyond implicit `standard`; do not list `standard`. |
 
 ## `[llm.models.<id>.costs]`

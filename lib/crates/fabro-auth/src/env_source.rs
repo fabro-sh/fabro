@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_model::catalog::CatalogProvider;
-use fabro_model::{Catalog, CredentialRef, HeaderValueRef, ProviderId};
+use fabro_model::{Catalog, CredentialRef, HeaderValueRef, ProviderAuthConfig, ProviderId};
 use fabro_static::EnvVars;
 
 use crate::credential_source::{CredentialSource, ResolvedCredentials};
@@ -36,27 +36,33 @@ impl EnvCredentialSource {
         &self,
         provider: &CatalogProvider,
     ) -> Result<Option<ApiCredential>, ResolveError> {
-        let key = provider.credentials.iter().find_map(|credential_ref| {
-            let CredentialRef::Env(name) = credential_ref else {
-                return None;
-            };
-            self.lookup(name)
-        });
-
-        if key.is_none() && provider.credentials.is_empty() && provider.extra_headers.is_empty() {
-            return Ok(None);
-        }
-
-        let extra_headers = self.resolved_extra_headers(provider)?;
-
-        if key.is_none() && (!provider.credentials.is_empty() || extra_headers.is_empty()) {
-            return Ok(None);
-        }
-
-        let auth_header = key.map(|key| {
-            let policy = provider.adapter.metadata().api_key_header;
-            build_api_key_header(policy, key)
-        });
+        let (auth_header, extra_headers) = match &provider.auth {
+            ProviderAuthConfig::ApiKey {
+                credentials,
+                header,
+            } => {
+                let Some(key) = credentials.iter().find_map(|credential_ref| {
+                    let CredentialRef::Env(name) = credential_ref else {
+                        return None;
+                    };
+                    self.lookup(name)
+                }) else {
+                    return Ok(None);
+                };
+                (
+                    Some(build_api_key_header(header.clone(), key)),
+                    self.resolved_extra_headers(provider)?,
+                )
+            }
+            ProviderAuthConfig::HeaderOnly => {
+                let extra_headers = self.resolved_extra_headers(provider)?;
+                if extra_headers.is_empty() {
+                    return Ok(None);
+                }
+                (None, extra_headers)
+            }
+            ProviderAuthConfig::None => (None, std::collections::HashMap::new()),
+        };
 
         let mut cred = ApiCredential {
             provider: provider.id.clone(),
@@ -137,7 +143,8 @@ impl CredentialSource for EnvCredentialSource {
             match self.credential_for(provider) {
                 Ok(Some(credential)) => credentials.push(credential),
                 Ok(None) => {}
-                Err(ResolveError::NotConfigured(_)) if !provider.credentials.is_empty() => {}
+                Err(ResolveError::NotConfigured(_))
+                    if matches!(provider.auth, ProviderAuthConfig::ApiKey { .. }) => {}
                 Err(err) => auth_issues.push((provider.id.clone(), err)),
             }
         }
@@ -153,15 +160,15 @@ impl CredentialSource for EnvCredentialSource {
             .providers()
             .iter()
             .filter(|provider| {
-                provider
-                    .credentials
-                    .iter()
-                    .any(|credential_ref| {
-                        matches!(credential_ref, CredentialRef::Env(name) if self.lookup(name).is_some())
-                    })
-                    || (!provider.extra_headers.is_empty()
-                        && provider.credentials.is_empty()
-                        && self.resolved_extra_headers(provider).is_ok())
+                match &provider.auth {
+                    ProviderAuthConfig::ApiKey { credentials, .. } => {
+                        credentials.iter().any(|credential_ref| {
+                            matches!(credential_ref, CredentialRef::Env(name) if self.lookup(name).is_some())
+                        })
+                    }
+                    ProviderAuthConfig::HeaderOnly => self.resolved_extra_headers(provider).is_ok(),
+                    ProviderAuthConfig::None => true,
+                }
             })
             .map(|provider| provider.id.clone())
             .collect()
@@ -264,8 +271,13 @@ mod tests {
 [providers.acme]
 display_name = "Acme"
 adapter = "openai_compatible"
+agent_profile = "openai"
 base_url = "https://api.acme.test/v1"
+
+[providers.acme.auth]
+type = "api_key"
 credentials = ["env:ACME_API_KEY"]
+header = "bearer"
 
 [models."acme-large"]
 provider = "acme"
@@ -308,7 +320,11 @@ reasoning = false
 [providers.portkey]
 display_name = "Portkey Bedrock"
 adapter = "anthropic"
+agent_profile = "anthropic"
 base_url = "https://api.portkey.ai/v1"
+
+[providers.portkey.auth]
+type = "header_only"
 
 [providers.portkey.extra_headers]
 x-portkey-api-key = { env = "PORTKEY_API_KEY" }
@@ -357,7 +373,11 @@ reasoning_effort = "levels"
 [providers.portkey]
 display_name = "Portkey Bedrock"
 adapter = "anthropic"
+agent_profile = "anthropic"
 base_url = "https://api.portkey.ai/v1"
+
+[providers.portkey.auth]
+type = "header_only"
 
 [providers.portkey.extra_headers]
 x-portkey-api-key = { env = "PORTKEY_API_KEY" }
