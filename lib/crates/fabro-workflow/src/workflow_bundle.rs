@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use fabro_types::ManifestPath;
 use serde::{Deserialize, Serialize};
 
-use crate::ManifestPath;
 use crate::file_resolver::{BundleFileResolver, FileResolver};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -379,9 +379,7 @@ mod tests {
             "prompt".to_string(),
             AttrValue::String("@prompts/work.md".to_string()),
         );
-        graph
-            .nodes
-            .insert("file_prompt".to_string(), file_prompt);
+        graph.nodes.insert("file_prompt".to_string(), file_prompt);
         let mut inline_prompt = Node::new("inline_prompt");
         inline_prompt.attrs.insert(
             "prompt".to_string(),

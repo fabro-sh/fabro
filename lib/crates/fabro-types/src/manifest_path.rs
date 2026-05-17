@@ -12,6 +12,9 @@ pub struct ManifestPath(PathBuf);
 impl ManifestPath {
     #[must_use]
     pub fn from_reference(current_dir: &Path, reference: &str) -> Option<Self> {
+        if !is_portable_logical_path(reference) {
+            return None;
+        }
         let path = Path::new(reference);
         if path.is_absolute() || reference.starts_with('~') {
             return None;
@@ -31,6 +34,9 @@ impl ManifestPath {
 
     #[must_use]
     pub fn from_wire(value: &str) -> Option<Self> {
+        if !is_portable_logical_path(value) {
+            return None;
+        }
         Self::from_reference(Path::new("."), value)
     }
 
@@ -49,6 +55,11 @@ impl ManifestPath {
     #[must_use]
     pub fn parent_or_dot(&self) -> &Path {
         self.0.parent().unwrap_or_else(|| Path::new("."))
+    }
+
+    #[must_use]
+    pub fn starts_with(&self, base: &Self) -> bool {
+        self.0.starts_with(base.as_path())
     }
 }
 
@@ -108,6 +119,23 @@ fn normalize_components(path: impl AsRef<Path>) -> Option<PathBuf> {
     Some(normalized)
 }
 
+fn is_portable_logical_path(path: &str) -> bool {
+    if path.contains('\\') {
+        return false;
+    }
+    let mut chars = path.chars();
+    let Some(first) = chars.next() else {
+        return true;
+    };
+    let Some(second) = chars.next() else {
+        return true;
+    };
+    if first.is_ascii_alphabetic() && second == ':' {
+        return false;
+    }
+    true
+}
+
 fn relative_path_from(path: &Path, base: &Path) -> Option<PathBuf> {
     let path_components = path.components().collect::<Vec<_>>();
     let base_components = base.components().collect::<Vec<_>>();
@@ -158,6 +186,16 @@ mod tests {
     #[test]
     fn from_reference_rejects_tilde_reference() {
         assert!(ManifestPath::from_reference(Path::new("."), "~/.fabro/workflow.fabro").is_none());
+    }
+
+    #[test]
+    fn from_reference_rejects_backslash_reference() {
+        assert!(ManifestPath::from_reference(Path::new("."), "prompts\\goal.md").is_none());
+    }
+
+    #[test]
+    fn from_reference_rejects_windows_drive_reference() {
+        assert!(ManifestPath::from_reference(Path::new("."), "C:/repo/workflow.fabro").is_none());
     }
 
     #[test]
@@ -270,6 +308,11 @@ mod tests {
     #[test]
     fn from_wire_rejects_tilde_path() {
         assert!(ManifestPath::from_wire("~/.fabro/workflow.fabro").is_none());
+    }
+
+    #[test]
+    fn from_wire_rejects_backslash_path() {
+        assert!(ManifestPath::from_wire("foo\\bar").is_none());
     }
 
     #[test]

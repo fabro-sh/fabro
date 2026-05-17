@@ -11,9 +11,9 @@ use fabro_auth::CredentialSource;
 use fabro_auth::ResolvedCredentials;
 use fabro_hooks::{HookContext, HookDecision, HookRunner};
 use fabro_model::{Catalog, ProviderId};
+use fabro_types::ManifestPath;
 use tokio_util::sync::CancellationToken;
 
-use crate::ManifestPath;
 use crate::event::Emitter;
 use crate::github_token_source::GitHubTokenSource;
 use crate::handler::HandlerRegistry;

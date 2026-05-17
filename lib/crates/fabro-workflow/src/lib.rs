@@ -230,7 +230,6 @@ mod hook_context;
     reason = "The lifecycle module remains crate-visible for tests and pending integrations."
 )]
 pub(crate) mod lifecycle;
-mod manifest_path;
 pub(crate) mod node_handler;
 pub mod operations;
 pub mod outcome;
@@ -247,7 +246,7 @@ pub use billing_rollup::{
     billing_rollup_from_projection,
 };
 pub use error::{Error, FailureCategory, FailureSignature, FailureSignatureExt, Result};
-pub use manifest_path::ManifestPath;
+pub use fabro_types::ManifestPath;
 pub use steering_hub::SteeringHub;
 pub mod run_materialization;
 pub(crate) mod run_metadata;

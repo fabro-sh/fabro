@@ -2081,6 +2081,7 @@ dependencies = [
  "fabro-config",
  "fabro-github",
  "fabro-graphviz",
+ "fabro-template",
  "fabro-types",
  "fabro-workflow",
  "git2",
@@ -2414,6 +2415,7 @@ name = "fabro-template"
 version = "0.236.0-nightly.0"
 dependencies = [
  "anyhow",
+ "fabro-types",
  "fabro-util",
  "miette",
  "minijinja",

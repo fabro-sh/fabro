@@ -207,55 +207,38 @@ fn bare_fabro_picks_up_sibling_workflow_toml_inputs() {
 }
 
 #[test]
-fn minijinja_includes_in_prompts_and_goal_validate() {
+fn validate_accepts_static_template_dependencies() {
     let context = test_context!();
     let mut cmd = context.validate();
-    cmd.arg(fixture("minijinja_includes/workflow.fabro"));
+    cmd.arg(fixture("templates/static_dependencies/workflow.fabro"));
     fabro_snapshot!(context.filters(), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
     Workflow: TemplateIncludes (4 nodes, 3 edges)
-    Graph: [FIXTURES]/minijinja_includes/workflow.fabro
+    Graph: [FIXTURES]/templates/static_dependencies/workflow.fabro
     Validation: OK
     ");
 }
 
 #[test]
-fn minijinja_includes_break_if_missing() {
+fn validate_reports_missing_template_dependency() {
     let context = test_context!();
     let mut cmd = context.validate();
-    cmd.arg(fixture("minijinja_includes/broken.fabro"));
+    cmd.arg(fixture("templates/missing_dependency/workflow.fabro"));
     let mut filters = context.filters();
     filters.push((
         r"(?:\.\./)*\.\.\[FIXTURES\]/".to_string(),
         "[FIXTURES]/".to_string(),
     ));
-    fabro_snapshot!(filters, cmd, @r#"
+    fabro_snapshot!(filters, cmd, @"
     success: false
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    fabro::template::render
-
-      × template expansion failed in node `inline_prompt` attribute `prompt`: template render error at line 1: template not found: tried to include non-existing template "missing.tpl.md" (in [FIXTURES]/minijinja_includes/broken.fabro:1)
-      ├─▶ fabro::template::render
-      │
-      │     × template render error at line 1
-      │      ╭─[[FIXTURES]/minijinja_includes/broken.fabro:1:4]
-      │    1 │ {% include 'missing.tpl.md' %}
-      │      ·    ────────────┬───────────
-      │      ·                ╰── render error
-      │      ╰────
-
-      ╰─▶ template not found: tried to include non-existing template "missing.tpl.md" (in [FIXTURES]/minijinja_includes/broken.fabro:1)
-       ╭─[[FIXTURES]/minijinja_includes/broken.fabro:1:4]
-     1 │ {% include 'missing.tpl.md' %}
-       ·    ────────────┬───────────
-       ·                ╰── render error
-       ╰────
-    "#);
+      × failed to discover template dependencies: missing template dependency `missing.tpl.md` from `[FIXTURES]/templates/missing_dependency/workflow.fabro`
+    ");
 }
 
 #[test]

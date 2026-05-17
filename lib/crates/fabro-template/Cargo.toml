@@ -15,8 +15,9 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 fabro-util = { path = "../fabro-util" }
+fabro-types = { path = "../fabro-types" }
 miette.workspace = true
-minijinja = { workspace = true, features = ["debug"] }
+minijinja = { workspace = true, features = ["debug", "unstable_machinery"] }
 serde.workspace = true
 thiserror.workspace = true
 toml.workspace = true

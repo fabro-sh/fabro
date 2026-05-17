@@ -1,5 +1,5 @@
-digraph BrokenTemplateIncludes {
-    graph [goal="@prompts/goal.md"]
+digraph MissingTemplateDependency {
+    graph [goal="ship"]
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare,  label="Exit"]
 

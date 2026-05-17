@@ -7,13 +7,12 @@ use fabro_interview::Interviewer;
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::{Catalog, FallbackTarget, ProviderId};
 use fabro_sandbox::SandboxSpec;
-use fabro_types::RunId;
 use fabro_types::settings::run::{PullRequestSettings, RunModelControls};
+use fabro_types::{ManifestPath, RunId};
 use fabro_validate::{Diagnostic, Severity};
 use fabro_vault::Vault;
 use tokio::sync::RwLock as AsyncRwLock;
 
-use crate::ManifestPath;
 use crate::artifact_upload::ArtifactSink;
 use crate::context::Context;
 use crate::error::Error;

@@ -14,6 +14,7 @@ pub mod failure_signature;
 pub mod graph;
 pub mod interview;
 pub mod llm_backend;
+pub mod manifest_path;
 pub mod outcome;
 pub mod principal;
 pub mod pull_request;
@@ -61,6 +62,7 @@ pub use graph::{
 };
 pub use interview::{InterviewQuestionRecord, QuestionType};
 pub use llm_backend::LlmBackend;
+pub use manifest_path::{ManifestPath, ManifestPathParseError};
 pub use outcome::{
     FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMeta, StageOutcome, StageState,
 };

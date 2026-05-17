@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use fabro_manifest::{ManifestBuildInput, build_run_manifest};
-use fabro_workflow::ManifestPath;
+use fabro_types::ManifestPath;
 
 #[test]
 fn cli_built_manifest_resolves_user_global_at_path() {

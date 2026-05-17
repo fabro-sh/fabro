@@ -79,7 +79,7 @@ slatedb = { version = "0.11.2", features = ["zstd"] }
 object_store = { version = "0.12.5", features = ["aws"] }
 rust-embed = "8"
 percent-encoding = "2"
-minijinja = "2"
+minijinja = "=2.19.0"
 miette = { version = "7.6", features = ["fancy"] }
 fabro-http = { path = "lib/crates/fabro-http" }
 fabro-options-metadata = { path = "lib/crates/fabro-options-metadata" }

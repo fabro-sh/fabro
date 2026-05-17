@@ -138,15 +138,15 @@ pub(crate) fn render_template_for_target(
         None => render_named(source_name.clone(), text, ctx),
     };
     match render_mode {
-        RenderMode::Strict => {
-            render_strict().map_err(|err| template_error_for_target(target, err))
-        }
+        RenderMode::Strict => render_strict().map_err(|err| template_error_for_target(target, err)),
         RenderMode::Structural => match render_strict() {
             Ok(rendered) => Ok(rendered),
             Err(err @ TemplateError::UndefinedVariable { .. }) => {
                 diagnostics.push(template_diagnostic(&err, target));
                 match target.include_loader.as_ref() {
-                    Some(loader) => render_lenient_named_with_loader(source_name, text, ctx, loader),
+                    Some(loader) => {
+                        render_lenient_named_with_loader(source_name, text, ctx, loader)
+                    }
                     None => render_lenient_named(source_name, text, ctx),
                 }
                 .map_err(|err| template_error_for_target(target, err))

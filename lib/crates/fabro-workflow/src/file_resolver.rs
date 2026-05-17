@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::ManifestPath;
+use fabro_types::ManifestPath;
 
 pub trait FileResolver: Send + Sync {
     fn resolve(&self, current_dir: &Path, reference: &str) -> Option<ResolvedFile>;
