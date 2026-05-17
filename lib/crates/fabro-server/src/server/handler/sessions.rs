@@ -9,7 +9,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
-use fabro_agent::cli::PermissionLevel;
 use fabro_agent::config::ToolApprovalFn;
 use fabro_agent::{
     AgentEvent, AgentProfile, AnthropicProfile, Error as AgentError, GeminiProfile, LocalSandbox,
@@ -19,7 +18,8 @@ use fabro_agent::{
 use fabro_llm::client::Client as LlmClient;
 use fabro_model::{AgentProfileKind, Catalog, ModelHandle, ProviderId};
 use fabro_types::{
-    SessionEventEnvelope, SessionId, SessionRecord, SessionStatus, TurnId, TurnRecord, TurnStatus,
+    PermissionLevel, SessionEventEnvelope, SessionId, SessionRecord, SessionStatus, TurnId,
+    TurnRecord, TurnStatus,
 };
 use serde_json::json;
 use tokio::fs;
@@ -65,8 +65,7 @@ struct CreateSessionRequest {
     provider:    Option<String>,
     #[serde(default)]
     model:       Option<String>,
-    #[serde(default)]
-    permissions: Option<String>,
+    permissions: PermissionLevel,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -818,7 +817,7 @@ async fn build_agent_session(state: &AppState, record: &SessionRecord) -> anyhow
     let config = SessionOptions {
         git_root: Some(working_dir.to_string_lossy().into_owned()),
         tool_hooks: Some(Arc::new(ToolApprovalAdapter(build_tool_approval(
-            record.permissions.as_deref(),
+            record.permissions,
         )))),
         ..SessionOptions::default()
     };
@@ -903,12 +902,7 @@ fn summarizer_model_id(
     }
 }
 
-fn build_tool_approval(raw: Option<&str>) -> ToolApprovalFn {
-    let level = match raw.unwrap_or("read-write") {
-        "read-only" => PermissionLevel::ReadOnly,
-        "full" => PermissionLevel::Full,
-        _ => PermissionLevel::ReadWrite,
-    };
+fn build_tool_approval(level: PermissionLevel) -> ToolApprovalFn {
     Arc::new(move |tool_name: &str, _args: &serde_json::Value| {
         if is_auto_approved(level, tool_category(tool_name)) {
             Ok(())

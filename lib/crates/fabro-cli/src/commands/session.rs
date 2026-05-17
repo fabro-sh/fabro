@@ -1,9 +1,8 @@
 use anyhow::{Result, bail};
-use fabro_agent::cli::PermissionLevel;
 use fabro_api::types::CreateSessionRequest;
-use fabro_types::SessionEventEnvelope;
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::AgentPermissions;
+use fabro_types::{PermissionLevel, SessionEventEnvelope};
 
 use crate::args::SessionArgs;
 use crate::command_context::CommandContext;
@@ -88,7 +87,7 @@ fn session_model(args: &SessionArgs, ctx: &CommandContext) -> Option<String> {
     })
 }
 
-fn session_permissions(args: &SessionArgs, ctx: &CommandContext) -> Option<String> {
+fn session_permissions(args: &SessionArgs, ctx: &CommandContext) -> PermissionLevel {
     args.permissions
         .or_else(|| {
             ctx.user_settings()
@@ -102,11 +101,7 @@ fn session_permissions(args: &SessionArgs, ctx: &CommandContext) -> Option<Strin
                     AgentPermissions::Full => PermissionLevel::Full,
                 })
         })
-        .map(|permissions| match permissions {
-            PermissionLevel::ReadOnly => "read-only".to_string(),
-            PermissionLevel::ReadWrite => "read-write".to_string(),
-            PermissionLevel::Full => "full".to_string(),
-        })
+        .unwrap_or(PermissionLevel::ReadWrite)
 }
 
 #[allow(

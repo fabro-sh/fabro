@@ -92,16 +92,7 @@ pub enum OutputFormat {
     Json,
 }
 
-/// Agent tool permission level.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize, clap::ValueEnum,
-)]
-#[serde(rename_all = "kebab-case")]
-pub enum PermissionLevel {
-    ReadOnly,
-    ReadWrite,
-    Full,
-}
+pub use fabro_types::PermissionLevel;
 
 impl AgentArgs {
     /// Fill `None` fields from settings.toml values, then hardcoded defaults.

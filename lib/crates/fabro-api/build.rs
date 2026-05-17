@@ -447,6 +447,7 @@ fn main() {
         ("TurnId", "fabro_types::TurnId", &[]),
         ("SessionStatus", "fabro_types::SessionStatus", &[]),
         ("TurnStatus", "fabro_types::TurnStatus", &[]),
+        ("PermissionLevel", "fabro_types::PermissionLevel", &[]),
         ("SessionMessage", "fabro_types::SessionMessage", &[]),
         ("SessionRecord", "fabro_types::SessionRecord", &[]),
         ("SessionSummary", "fabro_types::SessionSummary", &[]),
