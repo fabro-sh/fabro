@@ -1584,13 +1584,10 @@ version = "0.237.0-nightly.0"
 dependencies = [
  "agent-client-protocol",
  "agent-client-protocol-tokio",
- "bytes",
- "fabro-model",
  "fabro-sandbox",
  "fabro-types",
  "fabro-util",
  "futures",
- "serde",
  "serde_json",
  "shlex",
  "tempfile",
@@ -1598,7 +1595,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "uuid",
 ]
 
 [[package]]

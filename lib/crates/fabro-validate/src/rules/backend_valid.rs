@@ -74,22 +74,6 @@ fn unsupported_backend_diagnostic(rule: &str, node: &Node, backend: &str) -> Dia
 fn validate_acp_node(rule: &str, node: &Node) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    if node.legacy_acp_command_attr().is_some() {
-        diagnostics.push(Diagnostic {
-            rule: rule.to_string(),
-            severity: Severity::Error,
-            message: "acp_command is no longer supported; use acp.command for shell commands or \
-                      acp.config for JSON stdio ACP configs"
-                .to_string(),
-            node_id: Some(node.id.clone()),
-            edge: None,
-            fix: Some("Rename acp_command to acp.command".to_string()),
-
-            ..Diagnostic::default()
-        });
-        return diagnostics;
-    }
-
     if node.handler_type() != Some("agent") {
         diagnostics.push(Diagnostic {
             rule: rule.to_string(),
@@ -104,51 +88,12 @@ fn validate_acp_node(rule: &str, node: &Node) -> Vec<Diagnostic> {
         });
     }
 
-    let command = node
-        .acp_command_attr()
-        .filter(|value| !value.trim().is_empty());
-    let config = node
-        .acp_config_attr()
-        .filter(|value| !value.trim().is_empty());
-    let has_exactly_one_process_attr = command.is_some() != config.is_some();
-    if !has_exactly_one_process_attr {
-        diagnostics.push(Diagnostic {
-            rule: rule.to_string(),
-            severity: Severity::Error,
-            message: "backend=\"acp\" requires exactly one of acp.command or acp.config"
-                .to_string(),
-            node_id: Some(node.id.clone()),
-            edge: None,
-            fix: Some(
-                "Set acp.command to a shell command, or acp.config to a JSON stdio ACP config"
-                    .to_string(),
-            ),
-
-            ..Diagnostic::default()
-        });
-    }
-
-    if has_exactly_one_process_attr {
-        if let Some(config) = config {
-            if let Err(error) = AcpProcessSpec::from_config_attr(config) {
-                diagnostics.push(Diagnostic {
-                    rule: rule.to_string(),
-                    severity: Severity::Error,
-                    message: format!(
-                        "acp.config must be a JSON stdio ACP config: {}",
-                        render_acp_process_error(&error)
-                    ),
-                    node_id: Some(node.id.clone()),
-                    edge: None,
-                    fix: Some(
-                        "Provide a JSON config with type=\"stdio\", command, and optional args"
-                            .to_string(),
-                    ),
-
-                    ..Diagnostic::default()
-                });
-            }
-        }
+    if let Err(error) = AcpProcessSpec::from_attrs(
+        node.legacy_acp_command_attr(),
+        node.acp_command_attr(),
+        node.acp_config_attr(),
+    ) {
+        diagnostics.push(acp_process_diagnostic(rule, node, &error));
     }
 
     let api_only_attrs = api_only_attrs_present(node);
@@ -169,6 +114,55 @@ fn validate_acp_node(rule: &str, node: &Node) -> Vec<Diagnostic> {
     }
 
     diagnostics
+}
+
+fn acp_process_diagnostic(rule: &str, node: &Node, error: &AcpCommandError) -> Diagnostic {
+    match error {
+        AcpCommandError::LegacyCommandAttribute => Diagnostic {
+            rule: rule.to_string(),
+            severity: Severity::Error,
+            message: "acp_command is no longer supported; use acp.command for shell commands or \
+                      acp.config for JSON stdio ACP configs"
+                .to_string(),
+            node_id: Some(node.id.clone()),
+            edge: None,
+            fix: Some("Rename acp_command to acp.command".to_string()),
+
+            ..Diagnostic::default()
+        },
+        AcpCommandError::EmptyOverride
+        | AcpCommandError::MissingOverride
+        | AcpCommandError::InvalidCommandString => Diagnostic {
+            rule: rule.to_string(),
+            severity: Severity::Error,
+            message: render_acp_process_error(error),
+            node_id: Some(node.id.clone()),
+            edge: None,
+            fix: Some(
+                "Set acp.command to a shell command, or acp.config to a JSON stdio ACP config"
+                    .to_string(),
+            ),
+
+            ..Diagnostic::default()
+        },
+        AcpCommandError::InvalidConfigJson(_)
+        | AcpCommandError::InvalidConfigShape(_)
+        | AcpCommandError::UnsupportedTransport => Diagnostic {
+            rule: rule.to_string(),
+            severity: Severity::Error,
+            message: format!(
+                "acp.config must be a JSON stdio ACP config: {}",
+                render_acp_process_error(error)
+            ),
+            node_id: Some(node.id.clone()),
+            edge: None,
+            fix: Some(
+                "Provide a JSON config with type=\"stdio\", command, and optional args".to_string(),
+            ),
+
+            ..Diagnostic::default()
+        },
+    }
 }
 
 fn render_acp_process_error(error: &AcpCommandError) -> String {
@@ -427,6 +421,27 @@ mod tests {
             diagnostics[0]
                 .message
                 .contains("acp.config must be a JSON stdio ACP config")
+        );
+    }
+
+    #[test]
+    fn backend_valid_rejects_invalid_acp_command() {
+        let mut graph = minimal_graph();
+        let mut node = Node::new("command");
+        node.attrs
+            .insert("backend".to_string(), AttrValue::String("acp".to_string()));
+        node.attrs.insert(
+            "acp.command".to_string(),
+            AttrValue::String("python 'unterminated".to_string()),
+        );
+        graph.nodes.insert("command".to_string(), node);
+
+        let diagnostics = Rule.apply(&graph);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("failed to parse acp.command as a shell command")
         );
     }
 }

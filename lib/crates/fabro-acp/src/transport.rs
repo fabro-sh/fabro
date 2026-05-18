@@ -20,7 +20,7 @@ use tokio::sync::Mutex as TokioMutex;
 use tokio::time::timeout;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-use crate::command::AcpCommand;
+use crate::command::AcpProcessSpec;
 use crate::error::AcpProcessExit;
 
 const CLEAN_EXIT_PROTOCOL_GRACE: Duration = Duration::from_millis(500);
@@ -89,7 +89,7 @@ impl TransportState {
 }
 
 pub(crate) struct SandboxAcpTransport {
-    command: AcpCommand,
+    command: AcpProcessSpec,
     cwd:     String,
     env:     HashMap<String, String>,
     sandbox: Arc<dyn Sandbox>,
@@ -98,7 +98,7 @@ pub(crate) struct SandboxAcpTransport {
 
 impl SandboxAcpTransport {
     pub(crate) fn new(
-        command: AcpCommand,
+        command: AcpProcessSpec,
         cwd: String,
         env: HashMap<String, String>,
         sandbox: Arc<dyn Sandbox>,

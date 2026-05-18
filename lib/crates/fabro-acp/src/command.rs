@@ -1,16 +1,35 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use agent_client_protocol::schema::{McpServer, McpServerStdio};
+use agent_client_protocol_tokio::AcpAgent;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AcpCommand {
-    display: String,
+pub struct AcpProcessSpec {
     name:    Option<String>,
     program: PathBuf,
     args:    Vec<String>,
     env:     HashMap<String, String>,
 }
 
-impl AcpCommand {
+impl AcpProcessSpec {
+    pub fn from_attrs(
+        legacy_command: Option<&str>,
+        command: Option<&str>,
+        config: Option<&str>,
+    ) -> Result<Self, AcpCommandError> {
+        if legacy_command.is_some() {
+            return Err(AcpCommandError::LegacyCommandAttribute);
+        }
+
+        match (command, config) {
+            (Some(command), None) => Self::from_command_attr(command),
+            (None, Some(config)) => Self::from_config_attr(config),
+            (None, None) => Err(AcpCommandError::MissingOverride),
+            (Some(_), Some(_)) => Err(AcpCommandError::MissingOverride),
+        }
+    }
+
     pub fn from_command_attr(raw: &str) -> Result<Self, AcpCommandError> {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
@@ -18,19 +37,11 @@ impl AcpCommand {
         }
 
         let parts = shlex::split(trimmed).ok_or(AcpCommandError::InvalidCommandString)?;
-        let Some((program, args)) = parts.split_first() else {
-            return Err(AcpCommandError::EmptyOverride);
-        };
-        let program = PathBuf::from(program);
-        let args = args.to_vec();
-        let display = render_command(&program, &args);
-        Ok(Self {
-            display,
-            name: None,
-            program,
-            args,
-            env: HashMap::new(),
-        })
+        let agent =
+            AcpAgent::from_args(parts).map_err(|_| AcpCommandError::InvalidCommandString)?;
+        let mut spec = Self::from_server(agent.into_server())?;
+        spec.name = None;
+        Ok(spec)
     }
 
     pub fn from_config_attr(raw: &str) -> Result<Self, AcpCommandError> {
@@ -38,26 +49,32 @@ impl AcpCommand {
         if trimmed.is_empty() {
             return Err(AcpCommandError::EmptyOverride);
         }
-        let value: serde_json::Value =
-            serde_json::from_str(trimmed).map_err(AcpCommandError::InvalidConfigJson)?;
-        reject_non_stdio_json_transport(&value)?;
 
-        let name = value
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string);
-        let program = value
-            .get("command")
-            .and_then(serde_json::Value::as_str)
-            .filter(|command| !command.trim().is_empty())
-            .ok_or(AcpCommandError::InvalidConfigShape("missing command"))?;
-        let args = string_array_field(&value, "args")?.unwrap_or_default();
-        let env = env_array_field(&value)?;
+        let server = parse_config_server(trimmed)?;
+        Self::from_server(server)
+    }
 
+    fn from_server(server: McpServer) -> Result<Self, AcpCommandError> {
+        match server {
+            McpServer::Stdio(stdio) => Self::from_stdio_config(stdio),
+            _ => Err(AcpCommandError::UnsupportedTransport),
+        }
+    }
+
+    fn from_stdio_config(stdio: McpServerStdio) -> Result<Self, AcpCommandError> {
+        if stdio.command.as_os_str().is_empty() {
+            return Err(AcpCommandError::InvalidConfigShape("missing command"));
+        }
+
+        let env = stdio
+            .env
+            .into_iter()
+            .map(|env| (env.name, env.value))
+            .collect();
         Ok(Self::from_stdio_parts(
-            name,
-            PathBuf::from(program),
-            args,
+            Some(stdio.name),
+            stdio.command,
+            stdio.args,
             env,
         ))
     }
@@ -68,9 +85,7 @@ impl AcpCommand {
         args: Vec<String>,
         env: HashMap<String, String>,
     ) -> Self {
-        let display = render_command(&program, &args);
         Self {
-            display,
             name,
             program,
             args,
@@ -99,24 +114,21 @@ impl AcpCommand {
     }
 
     #[must_use]
-    pub fn display(&self) -> &str {
-        &self.display
-    }
-
-    #[must_use]
     pub fn to_shell_command(&self) -> String {
         render_command(&self.program, &self.args)
     }
 }
 
-impl std::fmt::Display for AcpCommand {
+impl std::fmt::Display for AcpProcessSpec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.display)
+        f.write_str(&self.to_shell_command())
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum AcpCommandError {
+    #[error("acp_command is no longer supported; use acp.command or acp.config")]
+    LegacyCommandAttribute,
     #[error("ACP process attribute must not be empty")]
     EmptyOverride,
     #[error("backend=\"acp\" requires exactly one of acp.command or acp.config")]
@@ -134,64 +146,37 @@ pub enum AcpCommandError {
 fn render_command(program: &Path, args: &[String]) -> String {
     std::iter::once(program.to_string_lossy().into_owned())
         .chain(args.iter().cloned())
-        .map(|part| fabro_sandbox::shell_quote(&part))
+        .map(|part| shell_quote(&part))
         .collect::<Vec<_>>()
         .join(" ")
 }
 
-fn reject_non_stdio_json_transport(value: &serde_json::Value) -> Result<(), AcpCommandError> {
+fn parse_config_server(raw: &str) -> Result<McpServer, AcpCommandError> {
+    let mut value: serde_json::Value =
+        serde_json::from_str(raw).map_err(AcpCommandError::InvalidConfigJson)?;
+
     match value.get("type").and_then(serde_json::Value::as_str) {
-        Some("stdio") | None => Ok(()),
-        Some(_) => Err(AcpCommandError::UnsupportedTransport),
+        Some("stdio") | None => {}
+        Some(_) => return Err(AcpCommandError::UnsupportedTransport),
     }
+
+    if let Some(object) = value.as_object_mut() {
+        object
+            .entry("args".to_string())
+            .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+        object
+            .entry("env".to_string())
+            .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+    }
+
+    serde_json::from_value(value).map_err(AcpCommandError::InvalidConfigJson)
 }
 
-pub type AcpProcessSpec = AcpCommand;
-
-fn string_array_field(
-    value: &serde_json::Value,
-    key: &'static str,
-) -> Result<Option<Vec<String>>, AcpCommandError> {
-    let Some(raw) = value.get(key) else {
-        return Ok(None);
-    };
-    let Some(values) = raw.as_array() else {
-        return Err(AcpCommandError::InvalidConfigShape(key));
-    };
-    values
-        .iter()
-        .map(|value| {
-            value
-                .as_str()
-                .map(str::to_string)
-                .ok_or(AcpCommandError::InvalidConfigShape(key))
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map(Some)
-}
-
-fn env_array_field(value: &serde_json::Value) -> Result<HashMap<String, String>, AcpCommandError> {
-    let Some(raw) = value.get("env") else {
-        return Ok(HashMap::new());
-    };
-    let Some(values) = raw.as_array() else {
-        return Err(AcpCommandError::InvalidConfigShape("env"));
-    };
-
-    values
-        .iter()
-        .map(|value| {
-            let name = value
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .ok_or(AcpCommandError::InvalidConfigShape("env.name"))?;
-            let value = value
-                .get("value")
-                .and_then(serde_json::Value::as_str)
-                .ok_or(AcpCommandError::InvalidConfigShape("env.value"))?;
-            Ok((name.to_string(), value.to_string()))
-        })
-        .collect()
+fn shell_quote(s: &str) -> String {
+    shlex::try_quote(s).map_or_else(
+        |_| format!("'{}'", s.replace('\'', "'\\''")),
+        |quoted| quoted.to_string(),
+    )
 }
 
 #[cfg(test)]
@@ -204,8 +189,28 @@ mod tests {
     fn command_attr_parses_shell_command() {
         let command = AcpProcessSpec::from_command_attr("python fake_agent.py").unwrap();
         assert_eq!(command.to_string(), "python fake_agent.py");
+        assert_eq!(command.name(), None);
         assert_eq!(command.program(), Path::new("python"));
         assert_eq!(command.args(), &["fake_agent.py".to_string()]);
+    }
+
+    #[test]
+    fn command_attr_parses_leading_env_assignments() {
+        let command = AcpProcessSpec::from_command_attr(
+            "RUST_LOG=debug TOKEN='secret value' python fake_agent.py",
+        )
+        .unwrap();
+
+        assert_eq!(command.to_string(), "python fake_agent.py");
+        assert_eq!(command.program(), Path::new("python"));
+        assert_eq!(
+            command.env().get("RUST_LOG").map(String::as_str),
+            Some("debug")
+        );
+        assert_eq!(
+            command.env().get("TOKEN").map(String::as_str),
+            Some("secret value")
+        );
     }
 
     #[test]

@@ -14,12 +14,12 @@ use fabro_util::time::elapsed_ms;
 use tokio::time::{sleep, timeout};
 use tokio_util::sync::CancellationToken;
 
-use crate::command::AcpCommand;
+use crate::command::AcpProcessSpec;
 use crate::error::AcpError;
 use crate::transport::{SandboxAcpTransport, TransportState};
 
 pub struct AcpRunRequest {
-    pub command:      AcpCommand,
+    pub command:      AcpProcessSpec,
     pub prompt:       String,
     pub cwd:          String,
     pub timeout_ms:   Option<u64>,

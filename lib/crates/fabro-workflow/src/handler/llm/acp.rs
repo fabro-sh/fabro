@@ -55,7 +55,6 @@ impl AgentAcpBackend {
         sandbox: &Arc<dyn Sandbox>,
         cancel_token: CancellationToken,
     ) -> Result<CodergenResult, Error> {
-        let files_before = changed_files::detect_changed_files(sandbox).await;
         let process_spec = resolve_acp_process_spec(node)?;
         let config_name = process_spec.name().map(str::to_string);
         let launch_env = self.resolve_launch_env(emitter).await?;
@@ -75,6 +74,7 @@ impl AgentAcpBackend {
             stage_scope,
         );
 
+        let files_before = changed_files::detect_changed_files(sandbox).await;
         let launch_start = std::time::Instant::now();
         let result = match fabro_acp::run_acp_turn(AcpRunRequest {
             command: process_spec,
@@ -213,6 +213,9 @@ impl CodergenBackend for AgentAcpBackend {
 
 fn acp_process_error_to_workflow(error: AcpCommandError) -> Error {
     match error {
+        AcpCommandError::LegacyCommandAttribute => {
+            Error::handler("acp_command is no longer supported; use acp.command or acp.config")
+        }
         AcpCommandError::EmptyOverride => Error::handler("ACP process attribute must not be empty"),
         AcpCommandError::MissingOverride => {
             Error::handler("backend=\"acp\" requires exactly one of acp.command or acp.config")
@@ -233,26 +236,12 @@ fn acp_process_error_to_workflow(error: AcpCommandError) -> Error {
 }
 
 fn resolve_acp_process_spec(node: &Node) -> Result<AcpProcessSpec, Error> {
-    if node.legacy_acp_command_attr().is_some() {
-        return Err(Error::handler(
-            "acp_command is no longer supported; use acp.command or acp.config",
-        ));
-    }
-
-    match (node.acp_command_attr(), node.acp_config_attr()) {
-        (Some(command), None) => {
-            AcpProcessSpec::from_command_attr(command).map_err(acp_process_error_to_workflow)
-        }
-        (None, Some(config)) => {
-            AcpProcessSpec::from_config_attr(config).map_err(acp_process_error_to_workflow)
-        }
-        (None, None) => Err(acp_process_error_to_workflow(
-            AcpCommandError::MissingOverride,
-        )),
-        (Some(_), Some(_)) => Err(Error::handler(
-            "backend=\"acp\" requires exactly one of acp.command or acp.config",
-        )),
-    }
+    AcpProcessSpec::from_attrs(
+        node.legacy_acp_command_attr(),
+        node.acp_command_attr(),
+        node.acp_config_attr(),
+    )
+    .map_err(acp_process_error_to_workflow)
 }
 
 fn acp_error_to_workflow(error: AcpError) -> Error {

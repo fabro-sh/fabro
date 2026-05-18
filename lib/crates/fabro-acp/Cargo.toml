@@ -7,6 +7,16 @@ license.workspace = true
 description = "Agent Client Protocol backend support for Fabro"
 
 [features]
+default = ["runtime"]
+runtime = [
+  "dep:fabro-sandbox",
+  "dep:fabro-types",
+  "dep:fabro-util",
+  "dep:futures",
+  "dep:tokio",
+  "dep:tokio-util",
+  "dep:tracing",
+]
 test-support = []
 
 [lib]
@@ -18,20 +28,16 @@ workspace = true
 [dependencies]
 agent-client-protocol.workspace = true
 agent-client-protocol-tokio.workspace = true
-fabro-model = { path = "../fabro-model" }
-fabro-sandbox = { path = "../fabro-sandbox" }
-fabro-types = { path = "../fabro-types" }
-fabro-util = { path = "../fabro-util" }
-bytes.workspace = true
-serde.workspace = true
+fabro-sandbox = { path = "../fabro-sandbox", optional = true }
+fabro-types = { path = "../fabro-types", optional = true }
+fabro-util = { path = "../fabro-util", optional = true }
 serde_json.workspace = true
 shlex = "1"
 thiserror.workspace = true
-tokio.workspace = true
-tokio-util = { workspace = true, features = ["compat", "io"] }
-futures.workspace = true
-uuid.workspace = true
-tracing.workspace = true
+tokio = { workspace = true, optional = true }
+tokio-util = { workspace = true, features = ["compat", "io"], optional = true }
+futures = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
 fabro-sandbox = { path = "../fabro-sandbox", features = ["test-support"] }
