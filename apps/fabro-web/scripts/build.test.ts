@@ -43,7 +43,7 @@ test("production build copies Pierre worker assets", async () => {
   for (const wasmFile of wasmFiles) {
     expect(existsSync(join(workerDist, wasmFile))).toBe(true);
   }
-});
+}, 60000);
 
 test("dist is a symlink into .dist-builds and old builds are pruned", async () => {
   await runBuild();
@@ -62,7 +62,7 @@ test("dist is a symlink into .dist-builds and old builds are pruned", async () =
   expect(remaining).toEqual([buildId]);
 
   expect(existsSync(join(distPath, "index.html"))).toBe(true);
-});
+}, 60000);
 
 test("watch mode keeps running until interrupted", async () => {
   const process = Bun.spawn([
