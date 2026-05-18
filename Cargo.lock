@@ -1592,6 +1592,7 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
+ "shlex",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -1678,7 +1679,6 @@ dependencies = [
  "httpmock",
  "serde",
  "serde_json",
- "shlex",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -2508,6 +2508,7 @@ dependencies = [
 name = "fabro-validate"
 version = "0.237.0-nightly.0"
 dependencies = [
+ "fabro-acp",
  "fabro-graphviz",
  "fabro-model",
  "fabro-types",

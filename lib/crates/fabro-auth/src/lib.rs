@@ -19,8 +19,8 @@ pub use credential_source::{CredentialSource, ResolvedCredentials};
 pub use env_source::EnvCredentialSource;
 pub use refresh::refresh_oauth_credential;
 pub use resolve::{
-    ApiCredential, CliAgentKind, CliCredential, CredentialResolver, CredentialUsage, EnvLookup,
-    ResolveError, ResolvedCredential, auth_issue_message, build_api_key_header,
+    ApiCredential, CredentialResolver, CredentialUsage, EnvLookup, ResolveError,
+    ResolvedCredential, auth_issue_message, build_api_key_header,
     configured_providers_from_process_env,
 };
 pub use strategy::{

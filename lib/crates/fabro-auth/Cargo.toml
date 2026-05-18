@@ -23,7 +23,6 @@ fabro-types = { path = "../fabro-types" }
 fabro-vault = { path = "../fabro-vault" }
 serde.workspace = true
 serde_json.workspace = true
-shlex = "1"
 thiserror.workspace = true
 tokio.workspace = true
 

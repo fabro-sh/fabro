@@ -286,14 +286,6 @@ pub enum EventBody {
     CommandStarted(CommandStartedProps),
     #[serde(rename = "command.completed")]
     CommandCompleted(CommandCompletedProps),
-    #[serde(rename = "agent.cli.started")]
-    AgentCliStarted(AgentCliStartedProps),
-    #[serde(rename = "agent.cli.completed")]
-    AgentCliCompleted(AgentCliCompletedProps),
-    #[serde(rename = "agent.cli.cancelled")]
-    AgentCliCancelled(AgentCliCancelledProps),
-    #[serde(rename = "agent.cli.timed_out")]
-    AgentCliTimedOut(AgentCliTimedOutProps),
     #[serde(rename = "agent.acp.started")]
     AgentAcpStarted(AgentAcpStartedProps),
     #[serde(rename = "agent.acp.completed")]
@@ -498,10 +490,6 @@ impl EventBody {
             Self::CliEnsureFailed(_) => "cli.ensure.failed",
             Self::CommandStarted(_) => "command.started",
             Self::CommandCompleted(_) => "command.completed",
-            Self::AgentCliStarted(_) => "agent.cli.started",
-            Self::AgentCliCompleted(_) => "agent.cli.completed",
-            Self::AgentCliCancelled(_) => "agent.cli.cancelled",
-            Self::AgentCliTimedOut(_) => "agent.cli.timed_out",
             Self::AgentAcpStarted(_) => "agent.acp.started",
             Self::AgentAcpCompleted(_) => "agent.acp.completed",
             Self::AgentAcpCancelled(_) => "agent.acp.cancelled",
@@ -653,10 +641,6 @@ fn is_known_event_name(event: &str) -> bool {
             | "cli.ensure.failed"
             | "command.started"
             | "command.completed"
-            | "agent.cli.started"
-            | "agent.cli.completed"
-            | "agent.cli.cancelled"
-            | "agent.cli.timed_out"
             | "agent.acp.started"
             | "agent.acp.completed"
             | "agent.acp.cancelled"

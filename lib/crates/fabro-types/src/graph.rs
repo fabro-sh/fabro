@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::LlmBackend;
+use crate::AgentBackend;
 
 /// Typed attribute values for nodes, edges, and graph-level attributes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -258,13 +258,23 @@ impl Node {
     }
 
     #[must_use]
-    pub fn llm_backend(&self) -> Option<Result<LlmBackend, strum::ParseError>> {
+    pub fn agent_backend(&self) -> Option<Result<AgentBackend, strum::ParseError>> {
         self.backend().map(str::parse)
     }
 
     #[must_use]
-    pub fn acp_command(&self) -> Option<&str> {
+    pub fn legacy_acp_command_attr(&self) -> Option<&str> {
         self.str_attr("acp_command")
+    }
+
+    #[must_use]
+    pub fn acp_command_attr(&self) -> Option<&str> {
+        self.str_attr("acp.command")
+    }
+
+    #[must_use]
+    pub fn acp_config_attr(&self) -> Option<&str> {
+        self.str_attr("acp.config")
     }
 
     #[must_use]

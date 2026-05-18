@@ -52,7 +52,6 @@ impl CredentialSource for VaultCredentialSource {
                 .await
             {
                 Ok(ResolvedCredential::Api(credential)) => credentials.push(credential),
-                Ok(ResolvedCredential::Cli(_)) => {}
                 Err(ResolveError::NotConfigured(_)) if provider.auth.is_some() => {}
                 Err(err) => auth_issues.push((provider.id.clone(), err)),
             }

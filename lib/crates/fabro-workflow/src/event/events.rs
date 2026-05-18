@@ -536,14 +536,6 @@ pub enum Event {
         output_bytes:   u64,
         live_streaming: bool,
     },
-    AgentCliStarted {
-        node_id:  String,
-        visit:    u32,
-        mode:     String,
-        provider: String,
-        model:    String,
-        command:  String,
-    },
     /// A top-level agent session object started its lifecycle.
     AgentSessionStarted {
         session_id:        String,
@@ -606,32 +598,12 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         visit:   Option<u32>,
     },
-    AgentCliCompleted {
-        node_id:     String,
-        stdout:      String,
-        stderr:      String,
-        exit_code:   i32,
-        duration_ms: u64,
-    },
-    AgentCliCancelled {
-        node_id:     String,
-        stdout:      String,
-        stderr:      String,
-        duration_ms: u64,
-    },
-    AgentCliTimedOut {
-        node_id:     String,
-        stdout:      String,
-        stderr:      String,
-        duration_ms: u64,
-    },
     AgentAcpStarted {
-        node_id:  String,
-        visit:    u32,
-        mode:     String,
-        provider: String,
-        model:    String,
-        command:  String,
+        node_id:     String,
+        visit:       u32,
+        command:     String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        config_name: Option<String>,
     },
     AgentAcpCompleted {
         node_id:     String,
@@ -1356,22 +1328,6 @@ impl Event {
                     "Command completed"
                 );
             }
-            Self::AgentCliStarted {
-                node_id,
-                provider,
-                model,
-                ..
-            } => {
-                debug!(node_id, provider, model, "Agent CLI started");
-            }
-            Self::AgentCliCompleted {
-                node_id,
-                exit_code,
-                duration_ms,
-                ..
-            } => {
-                debug!(node_id, exit_code, duration_ms, "Agent CLI completed");
-            }
             Self::AgentSessionStarted {
                 session_id,
                 provider,
@@ -1412,27 +1368,13 @@ impl Event {
             Self::AgentSteerDropped { reason, count, .. } => {
                 warn!(?reason, count, "Steer dropped");
             }
-            Self::AgentCliCancelled {
-                node_id,
-                duration_ms,
-                ..
-            } => {
-                debug!(node_id, duration_ms, "Agent CLI cancelled");
-            }
-            Self::AgentCliTimedOut {
-                node_id,
-                duration_ms,
-                ..
-            } => {
-                debug!(node_id, duration_ms, "Agent CLI timed out");
-            }
             Self::AgentAcpStarted {
                 node_id,
-                provider,
-                model,
+                command,
+                config_name,
                 ..
             } => {
-                debug!(node_id, provider, model, "Agent ACP started");
+                debug!(node_id, command, ?config_name, "Agent ACP started");
             }
             Self::AgentAcpCompleted {
                 node_id,

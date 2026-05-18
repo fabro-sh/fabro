@@ -3,9 +3,8 @@ use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
 use fabro_types::run_event::{
-    AgentAcpStartedProps, AgentCliStartedProps, AgentSessionActivatedProps,
-    CheckpointCompletedProps, RunCompletedProps, RunFailedProps, StageCompletedProps,
-    StagePromptProps,
+    AgentAcpStartedProps, AgentSessionActivatedProps, CheckpointCompletedProps, RunCompletedProps,
+    RunFailedProps, StageCompletedProps, StagePromptProps,
 };
 use fabro_types::settings::run::RunSandboxSettings;
 use fabro_types::{
@@ -376,13 +375,6 @@ impl RunProjectionReducer for RunProjection {
                 };
                 stage.provider_used = Some(provider_used_from_agent_session_activated(props));
             }
-            EventBody::AgentCliStarted(props) => {
-                let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
-                else {
-                    return Ok(());
-                };
-                stage.provider_used = Some(provider_used_from_agent_cli_started(props));
-            }
             EventBody::AgentAcpStarted(props) => {
                 let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
                 else {
@@ -412,42 +404,6 @@ impl RunProjectionReducer for RunProjection {
                 stage.termination = Some(props.termination);
                 stage.script_timing = Some(script_timing);
             }
-            EventBody::AgentCliCompleted(props) => {
-                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
-                    return Ok(());
-                };
-                apply_agent_terminal(
-                    "agent.cli",
-                    stage,
-                    props,
-                    merge_agent_cli_output(&props.stdout, &props.stderr),
-                    CommandTermination::Exited,
-                )?;
-            }
-            EventBody::AgentCliCancelled(props) => {
-                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
-                    return Ok(());
-                };
-                apply_agent_terminal(
-                    "agent.cli",
-                    stage,
-                    props,
-                    merge_agent_cli_output(&props.stdout, &props.stderr),
-                    CommandTermination::Cancelled,
-                )?;
-            }
-            EventBody::AgentCliTimedOut(props) => {
-                let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
-                    return Ok(());
-                };
-                apply_agent_terminal(
-                    "agent.cli",
-                    stage,
-                    props,
-                    merge_agent_cli_output(&props.stdout, &props.stderr),
-                    CommandTermination::TimedOut,
-                )?;
-            }
             EventBody::AgentAcpCompleted(props) => {
                 let Some(stage) = stage_at_current_visit(self, stored, event.seq) else {
                     return Ok(());
@@ -456,7 +412,7 @@ impl RunProjectionReducer for RunProjection {
                     "agent.acp",
                     stage,
                     props,
-                    merge_agent_cli_output(&props.stdout, &props.stderr),
+                    merge_agent_process_output(&props.stdout, &props.stderr),
                     CommandTermination::Exited,
                 )?;
             }
@@ -468,7 +424,7 @@ impl RunProjectionReducer for RunProjection {
                     "agent.acp",
                     stage,
                     props,
-                    merge_agent_cli_output(&props.stdout, &props.stderr),
+                    merge_agent_process_output(&props.stdout, &props.stderr),
                     CommandTermination::Cancelled,
                 )?;
             }
@@ -480,7 +436,7 @@ impl RunProjectionReducer for RunProjection {
                     "agent.acp",
                     stage,
                     props,
-                    merge_agent_cli_output(&props.stdout, &props.stderr),
+                    merge_agent_process_output(&props.stdout, &props.stderr),
                     CommandTermination::TimedOut,
                 )?;
             }
@@ -893,25 +849,13 @@ fn provider_used_from_agent_session_activated(props: &AgentSessionActivatedProps
     Value::Object(provider_used)
 }
 
-fn provider_used_from_agent_cli_started(props: &AgentCliStartedProps) -> Value {
-    provider_used_from_agent_process_started("cli", &props.provider, &props.model, &props.command)
-}
-
 fn provider_used_from_agent_acp_started(props: &AgentAcpStartedProps) -> Value {
-    provider_used_from_agent_process_started("acp", &props.provider, &props.model, &props.command)
-}
-
-fn provider_used_from_agent_process_started(
-    mode: &str,
-    provider: &str,
-    model: &str,
-    command: &str,
-) -> Value {
     let mut provider_used = serde_json::Map::new();
-    provider_used.insert("mode".to_string(), Value::String(mode.to_string()));
-    provider_used.insert("provider".to_string(), Value::String(provider.to_string()));
-    provider_used.insert("model".to_string(), Value::String(model.to_string()));
-    provider_used.insert("command".to_string(), Value::String(command.to_string()));
+    provider_used.insert("mode".to_string(), Value::String("acp".to_string()));
+    provider_used.insert("command".to_string(), Value::String(props.command.clone()));
+    if let Some(config_name) = props.config_name.clone() {
+        provider_used.insert("config_name".to_string(), Value::String(config_name));
+    }
     Value::Object(provider_used)
 }
 
@@ -931,7 +875,7 @@ fn apply_agent_terminal(
     Ok(())
 }
 
-fn merge_agent_cli_output(stdout: &str, stderr: &str) -> String {
+fn merge_agent_process_output(stdout: &str, stderr: &str) -> String {
     match (stdout.is_empty(), stderr.is_empty()) {
         (true, true) => String::new(),
         (false, true) => stdout.to_string(),
@@ -948,8 +892,7 @@ mod tests {
     use fabro_types::run_event::run::RunFailedProps;
     use fabro_types::run_event::{
         AgentAcpCancelledProps, AgentAcpCompletedProps, AgentAcpStartedProps,
-        AgentAcpTimedOutProps, AgentCliCancelledProps, AgentCliCompletedProps,
-        AgentCliTimedOutProps, AgentMessageProps, AgentSessionActivatedProps,
+        AgentAcpTimedOutProps, AgentMessageProps, AgentSessionActivatedProps,
         AgentSessionEndedProps, AgentSessionStartedProps, CheckpointCompletedProps,
         InterviewCompletedProps, InterviewOption, InterviewStartedProps, RunControlEffectProps,
         StageCompletedProps, StageFailedProps, StagePromptProps, StageRetryingProps,
@@ -1367,11 +1310,9 @@ mod tests {
             .apply_event(&test_stage_event(
                 4,
                 EventBody::AgentAcpStarted(AgentAcpStartedProps {
-                    visit:    1,
-                    mode:     "acp".to_string(),
-                    provider: "openai".to_string(),
-                    model:    "fake-acp".to_string(),
-                    command:  "python fake_agent.py".to_string(),
+                    visit:       1,
+                    command:     "python fake_agent.py".to_string(),
+                    config_name: Some("fake".to_string()),
                 }),
                 stage_id.clone(),
             ))
@@ -1382,9 +1323,8 @@ mod tests {
             stage.provider_used.as_ref().unwrap(),
             &json!({
                 "mode": "acp",
-                "provider": "openai",
-                "model": "fake-acp",
-                "command": "python fake_agent.py"
+                "command": "python fake_agent.py",
+                "config_name": "fake"
             })
         );
     }
@@ -1458,88 +1398,6 @@ mod tests {
         let stage = timed_out.stage(&timed_out_stage_id).unwrap();
         assert_eq!(stage.output.as_deref(), Some("partial\ntimeout"));
         assert_eq!(stage.termination, Some(CommandTermination::TimedOut));
-    }
-
-    #[test]
-    fn agent_cli_completed_updates_stage_output_projection() {
-        let mut state = initialized_projection();
-        let stage_id = StageId::new("code", 1);
-        start_stage(&mut state, &stage_id);
-
-        state
-            .apply_event(&test_stage_event(
-                4,
-                EventBody::AgentCliCompleted(AgentCliCompletedProps {
-                    stdout:      "done".to_string(),
-                    stderr:      "warn".to_string(),
-                    exit_code:   0,
-                    duration_ms: 42,
-                }),
-                stage_id.clone(),
-            ))
-            .unwrap();
-
-        let stage = state.stage(&stage_id).unwrap();
-        assert_eq!(stage.output.as_deref(), Some("done\nwarn"));
-        assert_eq!(stage.termination, Some(CommandTermination::Exited));
-        assert_eq!(
-            stage.script_timing.as_ref().unwrap()["duration_ms"],
-            serde_json::json!(42)
-        );
-    }
-
-    #[test]
-    fn agent_cli_cancelled_updates_stage_output_projection() {
-        let mut state = initialized_projection();
-        let stage_id = StageId::new("code", 1);
-        start_stage(&mut state, &stage_id);
-
-        state
-            .apply_event(&test_stage_event(
-                4,
-                EventBody::AgentCliCancelled(AgentCliCancelledProps {
-                    stdout:      "partial".to_string(),
-                    stderr:      "cancelled".to_string(),
-                    duration_ms: 7,
-                }),
-                stage_id.clone(),
-            ))
-            .unwrap();
-
-        let stage = state.stage(&stage_id).unwrap();
-        assert_eq!(stage.output.as_deref(), Some("partial\ncancelled"));
-        assert_eq!(stage.termination, Some(CommandTermination::Cancelled));
-        assert_eq!(
-            stage.script_timing.as_ref().unwrap()["duration_ms"],
-            serde_json::json!(7)
-        );
-    }
-
-    #[test]
-    fn agent_cli_timed_out_updates_stage_output_projection() {
-        let mut state = initialized_projection();
-        let stage_id = StageId::new("code", 1);
-        start_stage(&mut state, &stage_id);
-
-        state
-            .apply_event(&test_stage_event(
-                4,
-                EventBody::AgentCliTimedOut(AgentCliTimedOutProps {
-                    stdout:      "partial".to_string(),
-                    stderr:      "timeout".to_string(),
-                    duration_ms: 600,
-                }),
-                stage_id.clone(),
-            ))
-            .unwrap();
-
-        let stage = state.stage(&stage_id).unwrap();
-        assert_eq!(stage.output.as_deref(), Some("partial\ntimeout"));
-        assert_eq!(stage.termination, Some(CommandTermination::TimedOut));
-        assert_eq!(
-            stage.script_timing.as_ref().unwrap()["duration_ms"],
-            serde_json::json!(600)
-        );
     }
 
     #[test]

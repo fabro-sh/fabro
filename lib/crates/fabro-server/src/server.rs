@@ -2483,18 +2483,17 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
                 }
             }
         }
-        // Track non-steerable agent stages. CLI/ACP started/completed are
+        // Track non-steerable agent stages. ACP started/completed are
         // coarser and sometimes fail to emit terminal events on error paths;
         // stage.completed/stage.failed below are the backstops.
-        EventBody::AgentCliStarted(_) | EventBody::AgentAcpStarted(_) => {
+        EventBody::AgentAcpStarted(_) => {
             if let Some(stage_id) = event.stage_id.as_ref() {
                 managed_run
                     .active_non_steerable_agent_stages
                     .insert(stage_id.clone());
             }
         }
-        EventBody::AgentCliCompleted(_)
-        | EventBody::AgentAcpCompleted(_)
+        EventBody::AgentAcpCompleted(_)
         | EventBody::AgentAcpCancelled(_)
         | EventBody::AgentAcpTimedOut(_) => {
             if let Some(stage_id) = &event.stage_id {
@@ -2504,7 +2503,7 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
             }
         }
         // Stage lifecycle backstop: cover both completion and failure
-        // paths so a failing CLI stage doesn't strand its entry.
+        // paths so a failing ACP stage doesn't strand its entry.
         EventBody::StageCompleted(_) | EventBody::StageFailed(_) => {
             if let Some(stage_id) = &event.stage_id {
                 managed_run.active_api_stages.remove(stage_id);

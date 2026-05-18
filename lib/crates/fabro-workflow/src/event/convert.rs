@@ -1028,32 +1028,6 @@ fn event_body_from_event(event: &Event) -> EventBody {
             output_bytes:   *output_bytes,
             live_streaming: *live_streaming,
         }),
-        Event::AgentCliStarted {
-            visit,
-            mode,
-            provider,
-            model,
-            command,
-            ..
-        } => EventBody::AgentCliStarted(fabro_types::AgentCliStartedProps {
-            visit:    *visit,
-            mode:     mode.clone(),
-            provider: provider.clone(),
-            model:    model.clone(),
-            command:  command.clone(),
-        }),
-        Event::AgentCliCompleted {
-            stdout,
-            stderr,
-            exit_code,
-            duration_ms,
-            ..
-        } => EventBody::AgentCliCompleted(fabro_types::AgentCliCompletedProps {
-            stdout:      stdout.clone(),
-            stderr:      stderr.clone(),
-            exit_code:   *exit_code,
-            duration_ms: *duration_ms,
-        }),
         Event::AgentSessionStarted {
             provider, model, ..
         } => EventBody::AgentSessionStarted(fabro_types::AgentSessionStartedProps {
@@ -1096,39 +1070,15 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 count:  *count,
             })
         }
-        Event::AgentCliCancelled {
-            stdout,
-            stderr,
-            duration_ms,
-            ..
-        } => EventBody::AgentCliCancelled(fabro_types::AgentCliCancelledProps {
-            stdout:      stdout.clone(),
-            stderr:      stderr.clone(),
-            duration_ms: *duration_ms,
-        }),
-        Event::AgentCliTimedOut {
-            stdout,
-            stderr,
-            duration_ms,
-            ..
-        } => EventBody::AgentCliTimedOut(fabro_types::AgentCliTimedOutProps {
-            stdout:      stdout.clone(),
-            stderr:      stderr.clone(),
-            duration_ms: *duration_ms,
-        }),
         Event::AgentAcpStarted {
             visit,
-            mode,
-            provider,
-            model,
             command,
+            config_name,
             ..
         } => EventBody::AgentAcpStarted(fabro_types::AgentAcpStartedProps {
-            visit:    *visit,
-            mode:     mode.clone(),
-            provider: provider.clone(),
-            model:    model.clone(),
-            command:  command.clone(),
+            visit:       *visit,
+            command:     command.clone(),
+            config_name: config_name.clone(),
         }),
         Event::AgentAcpCompleted {
             stdout,
@@ -2078,48 +2028,6 @@ mod tests {
     }
 
     #[test]
-    fn agent_cli_cancelled_maps_to_event_body_with_node_id() {
-        let stored = to_run_event(&fixtures::RUN_1, &Event::AgentCliCancelled {
-            node_id:     "code".to_string(),
-            stdout:      "out".to_string(),
-            stderr:      "err".to_string(),
-            duration_ms: 42,
-        });
-
-        assert_eq!(stored.event_name(), "agent.cli.cancelled");
-        assert_eq!(stored.node_id.as_deref(), Some("code"));
-        match &stored.body {
-            EventBody::AgentCliCancelled(props) => {
-                assert_eq!(props.stdout, "out");
-                assert_eq!(props.stderr, "err");
-                assert_eq!(props.duration_ms, 42);
-            }
-            other => panic!("expected AgentCliCancelled, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn agent_cli_timed_out_maps_to_event_body_with_node_id() {
-        let stored = to_run_event(&fixtures::RUN_1, &Event::AgentCliTimedOut {
-            node_id:     "code".to_string(),
-            stdout:      "out".to_string(),
-            stderr:      "err".to_string(),
-            duration_ms: 99,
-        });
-
-        assert_eq!(stored.event_name(), "agent.cli.timed_out");
-        assert_eq!(stored.node_id.as_deref(), Some("code"));
-        match &stored.body {
-            EventBody::AgentCliTimedOut(props) => {
-                assert_eq!(props.stdout, "out");
-                assert_eq!(props.stderr, "err");
-                assert_eq!(props.duration_ms, 99);
-            }
-            other => panic!("expected AgentCliTimedOut, got {other:?}"),
-        }
-    }
-
-    #[test]
     fn agent_acp_events_map_to_event_bodies_with_stage_scope() {
         let scope = StageScope {
             node_id:            "code".to_string(),
@@ -2131,12 +2039,10 @@ mod tests {
         let started = to_run_event_at(
             &fixtures::RUN_1,
             &Event::AgentAcpStarted {
-                node_id:  "code".to_string(),
-                visit:    2,
-                mode:     "acp".to_string(),
-                provider: "openai".to_string(),
-                model:    "fake-acp".to_string(),
-                command:  "python fake_agent.py".to_string(),
+                node_id:     "code".to_string(),
+                visit:       2,
+                command:     "python fake_agent.py".to_string(),
+                config_name: Some("fake".to_string()),
             },
             Utc::now(),
             Some(&scope),
@@ -2149,10 +2055,8 @@ mod tests {
         match &started.body {
             EventBody::AgentAcpStarted(props) => {
                 assert_eq!(props.visit, 2);
-                assert_eq!(props.mode, "acp");
-                assert_eq!(props.provider, "openai");
-                assert_eq!(props.model, "fake-acp");
                 assert_eq!(props.command, "python fake_agent.py");
+                assert_eq!(props.config_name.as_deref(), Some("fake"));
             }
             other => panic!("expected AgentAcpStarted, got {other:?}"),
         }

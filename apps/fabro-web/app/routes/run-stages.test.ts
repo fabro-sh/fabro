@@ -368,13 +368,12 @@ describe("eventsToActivity", () => {
         properties: { model: "claude-opus-4-5" },
       }),
       envelope(2, {
-        event: "agent.cli.started",
+        event: "agent.session.activated",
         stage_id: "agent@1",
         node_id: "agent",
         properties: {
           provider: "anthropic",
           model: "claude-sonnet-4-6",
-          command: "claude",
         },
       }),
     ];

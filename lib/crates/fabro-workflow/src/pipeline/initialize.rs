@@ -5,8 +5,7 @@ use std::time::Instant;
 
 use fabro_agent::Sandbox;
 use fabro_auth::{
-    CredentialResolver, CredentialSource, EnvCredentialSource, VaultCredentialSource,
-    auth_issue_message,
+    CredentialSource, EnvCredentialSource, VaultCredentialSource, auth_issue_message,
 };
 use fabro_graphviz::graph;
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
@@ -29,9 +28,7 @@ use crate::devcontainer_bridge::{devcontainer_to_snapshot_config, run_devcontain
 use crate::error::Error;
 use crate::event::{Event, RunNoticeCode, RunNoticeLevel};
 use crate::github_token_source::{AppIatMinter, GitHubTokenSource};
-use crate::handler::llm::{
-    AgentAcpBackend, AgentApiBackend, AgentCliBackend, BackendRouter, routing,
-};
+use crate::handler::llm::{AgentAcpBackend, AgentApiBackend, BackendRouter, routing};
 use crate::handler::{HandlerRegistry, default_registry};
 use crate::run_metadata::{RunMetadataRuntime, build_metadata_writer, metadata_branch_name};
 use crate::run_options::{GitCheckpointOptions, RunOptions};
@@ -126,7 +123,6 @@ async fn build_registry(
     graph: &graph::Graph,
     llm_source: Arc<dyn CredentialSource>,
     catalog: Arc<Catalog>,
-    cli_resolver: Option<CredentialResolver>,
 ) -> Result<(Arc<HandlerRegistry>, bool), Error> {
     let no_backend_interviewer = Arc::clone(&interviewer);
     let build_no_backend = move || {
@@ -172,24 +168,9 @@ async fn build_registry(
             .with_run_model_controls(model_controls.clone())
             .with_tool_env_provider(tool_env_provider.clone())
             .with_mcp_servers(mcp_servers.clone());
-            let cli = cli_resolver
-                .clone()
-                .map_or_else(
-                    || AgentCliBackend::new_from_env(model.clone(), provider_id.clone()),
-                    |resolver| AgentCliBackend::new(model.clone(), provider_id.clone(), resolver),
-                )
-                .with_catalog(Arc::clone(&catalog_for_api))
-                .with_run_model_controls(model_controls.clone())
+            let acp = AgentAcpBackend::new()
                 .with_tool_env_provider(tool_env_provider.clone(), github_token_refresh_managed);
-            let acp = cli_resolver
-                .clone()
-                .map_or_else(
-                    || AgentAcpBackend::new_from_env(model.clone(), provider_id.clone()),
-                    |resolver| AgentAcpBackend::new(model.clone(), provider_id.clone(), resolver),
-                )
-                .with_catalog(Arc::clone(&catalog_for_api))
-                .with_tool_env_provider(tool_env_provider.clone(), github_token_refresh_managed);
-            Some(Box::new(BackendRouter::new(Box::new(api), cli, acp)))
+            Some(Box::new(BackendRouter::new(Box::new(api), acp)))
         }))
     };
 
@@ -350,7 +331,6 @@ pub async fn initialize(
 
     let llm_source = build_llm_source(options.vault.clone());
     let catalog = Arc::clone(&options.catalog);
-    let cli_resolver = options.vault.clone().map(CredentialResolver::new);
     let sandbox_git = Arc::new(SandboxGitRuntime::new());
     let metadata_runtime = Arc::new(RunMetadataRuntime::new());
 
@@ -518,7 +498,6 @@ pub async fn initialize(
             &graph,
             Arc::clone(&llm_source),
             Arc::clone(&catalog),
-            cli_resolver,
         )
         .await?
     };
@@ -1053,7 +1032,6 @@ mod tests {
             &graph,
             Arc::new(VaultCredentialSource::new(Arc::clone(&vault))),
             test_catalog(),
-            Some(CredentialResolver::new(vault)),
         )
         .await
         .unwrap();
@@ -1072,7 +1050,7 @@ mod tests {
         let source = format!(
             r#"digraph test {{
   start [shape=Mdiamond];
-  writer [type="agent", backend="acp", provider="openai", model="fake-acp", prompt="write hello", acp_command="python3 {}"];
+  writer [type="agent", backend="acp", prompt="write hello", acp.command="python3 {}"];
   exit [shape=Msquare];
   start -> writer;
   writer -> exit;
@@ -1093,19 +1071,11 @@ mod tests {
             .attrs
             .insert("backend".to_string(), AttrValue::String("acp".to_string()));
         writer.attrs.insert(
-            "provider".to_string(),
-            AttrValue::String("openai".to_string()),
-        );
-        writer.attrs.insert(
-            "model".to_string(),
-            AttrValue::String("fake-acp".to_string()),
-        );
-        writer.attrs.insert(
             "prompt".to_string(),
             AttrValue::String("write hello".to_string()),
         );
         writer.attrs.insert(
-            "acp_command".to_string(),
+            "acp.command".to_string(),
             AttrValue::String(format!(
                 "python3 {}",
                 fabro_sandbox::shell_quote(&script_path.to_string_lossy())

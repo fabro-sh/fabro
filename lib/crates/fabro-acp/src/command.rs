@@ -1,19 +1,88 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
-
-use agent_client_protocol::schema::McpServer;
-use agent_client_protocol_tokio::AcpAgent;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpCommand {
     display: String,
+    name:    Option<String>,
     program: PathBuf,
     args:    Vec<String>,
     env:     HashMap<String, String>,
 }
 
 impl AcpCommand {
+    pub fn from_command_attr(raw: &str) -> Result<Self, AcpCommandError> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err(AcpCommandError::EmptyOverride);
+        }
+
+        let parts = shlex::split(trimmed).ok_or(AcpCommandError::InvalidCommandString)?;
+        let Some((program, args)) = parts.split_first() else {
+            return Err(AcpCommandError::EmptyOverride);
+        };
+        let program = PathBuf::from(program);
+        let args = args.to_vec();
+        let display = render_command(&program, &args);
+        Ok(Self {
+            display,
+            name: None,
+            program,
+            args,
+            env: HashMap::new(),
+        })
+    }
+
+    pub fn from_config_attr(raw: &str) -> Result<Self, AcpCommandError> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err(AcpCommandError::EmptyOverride);
+        }
+        let value: serde_json::Value =
+            serde_json::from_str(trimmed).map_err(AcpCommandError::InvalidConfigJson)?;
+        reject_non_stdio_json_transport(&value)?;
+
+        let name = value
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        let program = value
+            .get("command")
+            .and_then(serde_json::Value::as_str)
+            .filter(|command| !command.trim().is_empty())
+            .ok_or(AcpCommandError::InvalidConfigShape("missing command"))?;
+        let args = string_array_field(&value, "args")?.unwrap_or_default();
+        let env = env_array_field(&value)?;
+
+        Ok(Self::from_stdio_parts(
+            name,
+            PathBuf::from(program),
+            args,
+            env,
+        ))
+    }
+
+    fn from_stdio_parts(
+        name: Option<String>,
+        program: PathBuf,
+        args: Vec<String>,
+        env: HashMap<String, String>,
+    ) -> Self {
+        let display = render_command(&program, &args);
+        Self {
+            display,
+            name,
+            program,
+            args,
+            env,
+        }
+    }
+
+    #[must_use]
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
     #[must_use]
     pub fn program(&self) -> &Path {
         &self.program
@@ -48,58 +117,18 @@ impl std::fmt::Display for AcpCommand {
 
 #[derive(Debug, thiserror::Error)]
 pub enum AcpCommandError {
-    #[error("acp_command must not be empty")]
+    #[error("ACP process attribute must not be empty")]
     EmptyOverride,
-    #[error(
-        "acp_command is required for backend=\"acp\" because Fabro does not install ACP agents"
-    )]
+    #[error("backend=\"acp\" requires exactly one of acp.command or acp.config")]
     MissingOverride,
     #[error("only stdio ACP commands are supported")]
     UnsupportedTransport,
-    #[error("failed to parse acp_command")]
-    Parse(#[source] agent_client_protocol::Error),
-}
-
-impl From<agent_client_protocol::Error> for AcpCommandError {
-    fn from(error: agent_client_protocol::Error) -> Self {
-        Self::Parse(error)
-    }
-}
-
-pub fn resolve_acp_command(override_command: Option<&str>) -> Result<AcpCommand, AcpCommandError> {
-    if let Some(raw) = override_command {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            return Err(AcpCommandError::EmptyOverride);
-        }
-        return parse_acp_command(trimmed);
-    }
-
-    Err(AcpCommandError::MissingOverride)
-}
-
-fn parse_acp_command(raw: &str) -> Result<AcpCommand, AcpCommandError> {
-    reject_non_stdio_json_transport(raw)?;
-
-    let agent = AcpAgent::from_str(raw)?;
-    let McpServer::Stdio(stdio) = agent.into_server() else {
-        return Err(AcpCommandError::UnsupportedTransport);
-    };
-
-    let program = stdio.command;
-    let args = stdio.args;
-    let display = render_command(&program, &args);
-
-    Ok(AcpCommand {
-        display,
-        program,
-        args,
-        env: stdio
-            .env
-            .into_iter()
-            .map(|env| (env.name, env.value))
-            .collect(),
-    })
+    #[error("failed to parse acp.command as a shell command")]
+    InvalidCommandString,
+    #[error("failed to parse acp.config as JSON")]
+    InvalidConfigJson(#[source] serde_json::Error),
+    #[error("invalid acp.config shape: {0}")]
+    InvalidConfigShape(&'static str),
 }
 
 fn render_command(program: &Path, args: &[String]) -> String {
@@ -110,20 +139,59 @@ fn render_command(program: &Path, args: &[String]) -> String {
         .join(" ")
 }
 
-fn reject_non_stdio_json_transport(raw: &str) -> Result<(), AcpCommandError> {
-    let trimmed = raw.trim_start();
-    if !trimmed.starts_with('{') {
-        return Ok(());
-    }
-
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
-        return Ok(());
-    };
-
+fn reject_non_stdio_json_transport(value: &serde_json::Value) -> Result<(), AcpCommandError> {
     match value.get("type").and_then(serde_json::Value::as_str) {
         Some("stdio") | None => Ok(()),
         Some(_) => Err(AcpCommandError::UnsupportedTransport),
     }
+}
+
+pub type AcpProcessSpec = AcpCommand;
+
+fn string_array_field(
+    value: &serde_json::Value,
+    key: &'static str,
+) -> Result<Option<Vec<String>>, AcpCommandError> {
+    let Some(raw) = value.get(key) else {
+        return Ok(None);
+    };
+    let Some(values) = raw.as_array() else {
+        return Err(AcpCommandError::InvalidConfigShape(key));
+    };
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .ok_or(AcpCommandError::InvalidConfigShape(key))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
+fn env_array_field(value: &serde_json::Value) -> Result<HashMap<String, String>, AcpCommandError> {
+    let Some(raw) = value.get("env") else {
+        return Ok(HashMap::new());
+    };
+    let Some(values) = raw.as_array() else {
+        return Err(AcpCommandError::InvalidConfigShape("env"));
+    };
+
+    values
+        .iter()
+        .map(|value| {
+            let name = value
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .ok_or(AcpCommandError::InvalidConfigShape("env.name"))?;
+            let value = value
+                .get("value")
+                .and_then(serde_json::Value::as_str)
+                .ok_or(AcpCommandError::InvalidConfigShape("env.value"))?;
+            Ok((name.to_string(), value.to_string()))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -133,41 +201,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn missing_acp_command_is_rejected() {
-        let err = resolve_acp_command(None).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("acp_command is required for backend=\"acp\"")
-        );
-    }
-
-    #[test]
-    fn explicit_acp_command_overrides_provider_default() {
-        let command = resolve_acp_command(Some("python fake_agent.py")).unwrap();
+    fn command_attr_parses_shell_command() {
+        let command = AcpProcessSpec::from_command_attr("python fake_agent.py").unwrap();
         assert_eq!(command.to_string(), "python fake_agent.py");
         assert_eq!(command.program(), Path::new("python"));
         assert_eq!(command.args(), &["fake_agent.py".to_string()]);
     }
 
     #[test]
-    fn blank_acp_command_is_rejected() {
-        let err = resolve_acp_command(Some("   ")).unwrap_err();
-        assert!(err.to_string().contains("acp_command must not be empty"));
+    fn blank_acp_process_attr_is_rejected() {
+        let err = AcpProcessSpec::from_command_attr("   ").unwrap_err();
+        assert!(err.to_string().contains("must not be empty"));
     }
 
     #[test]
-    fn json_stdio_acp_command_is_supported() {
+    fn json_stdio_acp_config_is_supported() {
         let raw = r#"{"type":"stdio","name":"fake","command":"python","args":["fake agent.py"],"env":[{"name":"MODE","value":"test"}]}"#;
-        let command = resolve_acp_command(Some(raw)).unwrap();
+        let command = AcpProcessSpec::from_config_attr(raw).unwrap();
+        assert_eq!(command.name(), Some("fake"));
         assert_eq!(command.program(), Path::new("python"));
         assert_eq!(command.args(), &["fake agent.py".to_string()]);
         assert_eq!(command.env().get("MODE").map(String::as_str), Some("test"));
     }
 
     #[test]
-    fn json_stdio_acp_command_display_omits_env_contents() {
+    fn json_stdio_acp_config_display_omits_env_contents() {
         let raw = r#"{"type":"stdio","name":"fake","command":"agent","args":["--flag","two words"],"env":[{"name":"OPENAI_API_KEY","value":"secret-key"}]}"#;
-        let command = resolve_acp_command(Some(raw)).unwrap();
+        let command = AcpProcessSpec::from_config_attr(raw).unwrap();
 
         assert_eq!(
             command.env().get("OPENAI_API_KEY").map(String::as_str),
@@ -179,12 +239,40 @@ mod tests {
     }
 
     #[test]
-    fn non_stdio_acp_command_is_rejected() {
+    fn non_stdio_acp_config_is_rejected() {
         let raw = r#"{"type":"http","name":"remote","url":"https://example.test/acp"}"#;
-        let err = resolve_acp_command(Some(raw)).unwrap_err();
+        let err = AcpProcessSpec::from_config_attr(raw).unwrap_err();
         assert!(
             err.to_string()
                 .contains("only stdio ACP commands are supported")
+        );
+    }
+
+    #[test]
+    fn command_attr_is_always_shell_command_even_when_json_shaped() {
+        let command = AcpProcessSpec::from_command_attr(r#"{"type":"stdio"}"#).unwrap();
+
+        assert_ne!(command.program(), Path::new("stdio"));
+        assert!(command.args().is_empty());
+    }
+
+    #[test]
+    fn config_attr_requires_json_stdio_config() {
+        let command = AcpProcessSpec::from_config_attr(
+            r#"{"type":"stdio","name":"fake","command":"python3","args":["agent.py"]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(command.name(), Some("fake"));
+        assert_eq!(command.program(), Path::new("python3"));
+        assert_eq!(command.args(), &["agent.py".to_string()]);
+
+        assert!(AcpProcessSpec::from_config_attr("python3 agent.py").is_err());
+        assert!(
+            AcpProcessSpec::from_config_attr(
+                r#"{"type":"http","name":"remote","url":"https://example.test/acp"}"#
+            )
+            .is_err()
         );
     }
 }

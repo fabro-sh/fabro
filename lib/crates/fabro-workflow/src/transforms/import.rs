@@ -598,7 +598,8 @@ impl ImportTransform {
                 | "reasoning_effort"
                 | "speed"
                 | "backend"
-                | "acp_command"
+                | "acp.command"
+                | "acp.config"
                 | "fidelity"
                 | "max_retries"
                 | "thread_id"
@@ -1005,7 +1006,7 @@ mod tests {
         let graph = apply_import(
             r#"digraph Deploy {
                 start [shape=Mdiamond]
-                validate [import="./validate.fabro", model="haiku", backend="acp", acp_command="python fake_agent.py", class="fast, shared"]
+                validate [import="./validate.fabro", model="haiku", backend="acp", acp.command="python fake_agent.py", class="fast, shared"]
                 exit [shape=Msquare]
                 start -> validate -> exit
             }"#,
@@ -1055,7 +1056,7 @@ mod tests {
         assert_eq!(
             graph.nodes["validate.test"]
                 .attrs
-                .get("acp_command")
+                .get("acp.command")
                 .and_then(AttrValue::as_str),
             Some("python fake_agent.py")
         );

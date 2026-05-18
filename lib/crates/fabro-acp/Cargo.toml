@@ -25,6 +25,7 @@ fabro-util = { path = "../fabro-util" }
 bytes.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+shlex = "1"
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util = { workspace = true, features = ["compat", "io"] }

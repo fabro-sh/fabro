@@ -490,7 +490,6 @@ export function buildThreadDnaItems(
 const STAGE_MODEL_EVENT_NAMES = new Set([
   "stage.prompt",
   "agent.session.activated",
-  "agent.cli.started",
 ]);
 
 export function extractStageModel(

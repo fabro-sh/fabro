@@ -229,9 +229,6 @@ fn replay_event_for_fork_projection(body: &EventBody) -> bool {
             | EventBody::InterviewTimeout(_)
             | EventBody::InterviewInterrupted(_)
             | EventBody::AgentSessionActivated(_)
-            | EventBody::AgentCliStarted(_)
-            | EventBody::AgentCliCancelled(_)
-            | EventBody::AgentCliTimedOut(_)
             | EventBody::AgentAcpStarted(_)
             | EventBody::AgentAcpCancelled(_)
             | EventBody::AgentAcpTimedOut(_)
@@ -324,11 +321,9 @@ mod tests {
     fn fork_replay_preserves_agent_acp_projection_events() {
         assert!(replay_event_for_fork_projection(
             &EventBody::AgentAcpStarted(fabro_types::run_event::AgentAcpStartedProps {
-                visit:    1,
-                mode:     "acp".to_string(),
-                provider: "openai".to_string(),
-                model:    "fake-acp".to_string(),
-                command:  "python fake_agent.py".to_string(),
+                visit:       1,
+                command:     "python fake_agent.py".to_string(),
+                config_name: Some("fake".to_string()),
             })
         ));
         assert!(replay_event_for_fork_projection(

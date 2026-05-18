@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use agent_client_protocol::schema::StopReason;
-use fabro_acp::{AcpError, AcpRunRequest, AcpRunResult, resolve_acp_command, run_acp_turn};
+use fabro_acp::{AcpError, AcpProcessSpec, AcpRunRequest, AcpRunResult, run_acp_turn};
 use fabro_sandbox::test_support::{MockSandbox, MockStdioProcess};
 use fabro_sandbox::{LocalSandbox, Sandbox, shell_quote};
 use fabro_util::error::collect_chain;
@@ -31,7 +31,7 @@ use test_support::fake_acp_agent_script;
 async fn stdio_spawn_failure_returns_sandbox_error() {
     const SANDBOX_FAILURE: &str = "ACP backend requires bidirectional stdio; the Daytona sandbox provider does not support it yet";
 
-    let command = resolve_acp_command(Some("fake-acp-agent")).expect("resolve ACP command");
+    let command = AcpProcessSpec::from_command_attr("fake-acp-agent").expect("parse ACP command");
     let mut sandbox = MockSandbox::linux();
     sandbox.stdio_process_error = Some(SANDBOX_FAILURE.to_string());
     let sandbox: Arc<dyn Sandbox> = Arc::new(sandbox);
@@ -67,7 +67,7 @@ async fn clean_stdio_exit_after_final_response_completes_turn() {
     let sandbox = MockSandbox::linux();
     sandbox.set_stdio_process(mock_acp_stdio_process("end_turn"));
     let sandbox: Arc<dyn Sandbox> = Arc::new(sandbox);
-    let command = resolve_acp_command(Some("mock-acp-agent")).expect("resolve ACP command");
+    let command = AcpProcessSpec::from_command_attr("mock-acp-agent").expect("parse ACP command");
 
     let result = run_acp_turn(AcpRunRequest {
         command,
@@ -96,7 +96,7 @@ async fn session_lifecycle_initializes_sends_prompt_and_aggregates_text() {
         .expect("write fake ACP agent");
 
     let raw_command = format!("python3 {}", shell_quote(&script_path.to_string_lossy()));
-    let command = resolve_acp_command(Some(&raw_command)).expect("resolve ACP command");
+    let command = AcpProcessSpec::from_command_attr(&raw_command).expect("parse ACP command");
     let sandbox: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(tempdir.path().to_path_buf()));
 
     let result = run_acp_turn(AcpRunRequest {
@@ -461,7 +461,7 @@ async fn run_fake_agent_with_activity(
         .await
         .expect("write fake ACP agent");
     let raw_command = format!("python3 {}", shell_quote(&script_path.to_string_lossy()));
-    let command = resolve_acp_command(Some(&raw_command)).expect("resolve ACP command");
+    let command = AcpProcessSpec::from_command_attr(&raw_command).expect("parse ACP command");
     let sandbox: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(tempdir.to_path_buf()));
 
     run_acp_turn(AcpRunRequest {

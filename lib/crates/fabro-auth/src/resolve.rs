@@ -5,7 +5,6 @@ use fabro_model::catalog::CatalogProvider;
 use fabro_model::{ApiKeyHeaderPolicy, Catalog, CredentialRef, HeaderValueRef, ProviderId};
 use fabro_static::EnvVars;
 use fabro_vault::Vault;
-use shlex::try_quote;
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio::task::spawn_blocking;
 
@@ -18,16 +17,8 @@ use crate::vault_ext::{vault_get_credential, vault_set_credential};
 pub type EnvLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CliAgentKind {
-    Claude,
-    Codex,
-    Gemini,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CredentialUsage {
     ApiRequest,
-    CliAgent(CliAgentKind),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,15 +76,8 @@ fn auth_header_for_catalog_provider(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CliCredential {
-    pub env_vars:      HashMap<String, String>,
-    pub login_command: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedCredential {
     Api(ApiCredential),
-    Cli(CliCredential),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -150,14 +134,14 @@ impl CredentialResolver {
     pub async fn resolve(
         &self,
         provider: impl Into<ProviderId>,
-        usage: CredentialUsage,
+        _usage: CredentialUsage,
         catalog: &Catalog,
     ) -> Result<ResolvedCredential, ResolveError> {
         let provider_id = provider.into();
         let Some(catalog_provider) = catalog.provider(&provider_id) else {
             return Err(ResolveError::NotConfigured(provider_id));
         };
-        if usage == CredentialUsage::ApiRequest && catalog_provider.auth.is_none() {
+        if catalog_provider.auth.is_none() {
             let vault = self.vault.read().await;
             return self
                 .api_credential_from_provider_auth(&vault, catalog_provider, catalog)
@@ -165,7 +149,7 @@ impl CredentialResolver {
         }
         let initial_credential = {
             let vault = self.vault.read().await;
-            self.find_credential(&vault, catalog_provider, usage)?
+            self.find_credential(&vault, catalog_provider)?
         };
 
         let credential = if initial_credential.needs_refresh() {
@@ -210,14 +194,8 @@ impl CredentialResolver {
         };
 
         let vault = self.vault.read().await;
-        match usage {
-            CredentialUsage::ApiRequest => self
-                .to_api_credential(&vault, &credential, catalog)
-                .map(ResolvedCredential::Api),
-            CredentialUsage::CliAgent(kind) => Ok(ResolvedCredential::Cli(
-                Self::to_cli_credential(&credential, kind, catalog),
-            )),
-        }
+        self.to_api_credential(&vault, &credential, catalog)
+            .map(ResolvedCredential::Api)
     }
 
     #[must_use]
@@ -234,18 +212,7 @@ impl CredentialResolver {
         &self,
         vault: &Vault,
         provider: &CatalogProvider,
-        usage: CredentialUsage,
     ) -> Result<AuthCredential, ResolveError> {
-        if provider.id == ProviderId::openai()
-            && usage == CredentialUsage::CliAgent(CliAgentKind::Codex)
-        {
-            for credential_id in ["openai_codex", "openai"] {
-                if let Some(credential) = vault_get_credential(vault, credential_id) {
-                    return Ok(credential);
-                }
-            }
-        }
-
         let Some(auth) = &provider.auth else {
             return Err(ResolveError::NotConfigured(provider.id.clone()));
         };
@@ -402,55 +369,6 @@ impl CredentialResolver {
             project_id: None,
         })
     }
-
-    fn to_cli_credential(
-        credential: &AuthCredential,
-        kind: CliAgentKind,
-        catalog: &Catalog,
-    ) -> CliCredential {
-        let mut env_vars = HashMap::new();
-        let is_openai = credential.provider == ProviderId::openai();
-        let login_command = match (is_openai, &credential.details, kind) {
-            (true, AuthDetails::ApiKey { key }, CliAgentKind::Codex) => {
-                env_vars.insert(EnvVars::OPENAI_API_KEY.to_string(), key.clone());
-                Some(codex_login_command(key))
-            }
-            (
-                true,
-                AuthDetails::CodexOAuth {
-                    tokens, account_id, ..
-                },
-                CliAgentKind::Codex,
-            ) => {
-                env_vars.insert(
-                    EnvVars::OPENAI_API_KEY.to_string(),
-                    tokens.access_token.clone(),
-                );
-                if let Some(account_id) = account_id {
-                    env_vars.insert(EnvVars::CHATGPT_ACCOUNT_ID.to_string(), account_id.clone());
-                }
-                Some(codex_login_command(&tokens.access_token))
-            }
-            (_, AuthDetails::ApiKey { key }, _) => {
-                if let Some(name) = primary_api_key_env_var(&credential.provider, catalog) {
-                    env_vars.insert(name.to_string(), key.clone());
-                }
-                None
-            }
-            (_, AuthDetails::CodexOAuth { tokens, .. }, _) => {
-                env_vars.insert(
-                    EnvVars::OPENAI_API_KEY.to_string(),
-                    tokens.access_token.clone(),
-                );
-                None
-            }
-        };
-
-        CliCredential {
-            env_vars,
-            login_command,
-        }
-    }
 }
 
 pub async fn configured_providers_from_process_env(
@@ -471,32 +389,8 @@ pub async fn configured_providers_from_process_env(
     }
 }
 
-fn primary_api_key_env_var<'a>(provider: &ProviderId, catalog: &'a Catalog) -> Option<&'a str> {
-    catalog
-        .provider(provider)?
-        .auth
-        .as_ref()?
-        .credentials
-        .iter()
-        .find_map(|credential_ref| match credential_ref {
-            CredentialRef::Env(name) => Some(name.as_str()),
-            CredentialRef::Credential(_) => None,
-        })
-}
-
-fn codex_login_command(api_key: &str) -> String {
-    let quoted =
-        try_quote(api_key).map_or_else(|_| api_key.to_string(), std::borrow::Cow::into_owned);
-    format!(
-        "export PATH=\"$HOME/.local/bin:$PATH\" && printf '%s\\n' {quoted} | codex login --with-api-key"
-    )
-}
-
 #[cfg(test)]
 mod tests {
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
-
     use chrono::{Duration, Utc};
     use fabro_model::catalog::LlmCatalogSettings;
     use httpmock::Method::POST;
@@ -568,9 +462,7 @@ mod tests {
             .await
             .unwrap();
 
-        let ResolvedCredential::Api(api) = resolved else {
-            panic!("expected api credential");
-        };
+        let ResolvedCredential::Api(api) = resolved;
         assert_eq!(
             api.auth_header,
             Some(ApiKeyHeader::Bearer("vault-key".to_string()))
@@ -598,9 +490,7 @@ mod tests {
             .await
             .unwrap();
 
-        let ResolvedCredential::Api(api) = resolved else {
-            panic!("expected api credential");
-        };
+        let ResolvedCredential::Api(api) = resolved;
         assert_eq!(
             api.auth_header,
             Some(ApiKeyHeader::Bearer("expired-access".to_string()))
@@ -647,17 +537,15 @@ mod tests {
         let resolver = test_resolver(vault, Arc::new(|_| None));
         let catalog = default_catalog();
 
-        let ResolvedCredential::Api(api) = resolver
+        let resolved = resolver
             .resolve(
                 ProviderId::anthropic(),
                 CredentialUsage::ApiRequest,
                 &catalog,
             )
             .await
-            .unwrap()
-        else {
-            panic!("expected api credential");
-        };
+            .unwrap();
+        let ResolvedCredential::Api(api) = resolved;
 
         assert_eq!(
             api.auth_header,
@@ -714,9 +602,7 @@ reasoning = false
             .await
             .unwrap();
 
-        let ResolvedCredential::Api(api) = resolved else {
-            panic!("expected api credential");
-        };
+        let ResolvedCredential::Api(api) = resolved;
         assert_eq!(
             api.auth_header,
             Some(ApiKeyHeader::Bearer("compat-key".to_string()))
@@ -724,151 +610,6 @@ reasoning = false
         assert_eq!(
             api.base_url.as_deref(),
             Some("https://default.example.com/v1")
-        );
-    }
-
-    #[tokio::test]
-    async fn openai_codex_cli_credential_includes_login_command_and_account_id() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
-        vault_set_credential(
-            &mut vault,
-            "openai_codex",
-            &oauth_credential(
-                "https://auth.openai.com/oauth/token".to_string(),
-                Utc::now() + Duration::hours(1),
-            ),
-        )
-        .unwrap();
-        let resolver = test_resolver(vault, Arc::new(|_| None));
-        let catalog = default_catalog();
-
-        let ResolvedCredential::Cli(cli) = resolver
-            .resolve(
-                ProviderId::openai(),
-                CredentialUsage::CliAgent(CliAgentKind::Codex),
-                &catalog,
-            )
-            .await
-            .unwrap()
-        else {
-            panic!("expected cli credential");
-        };
-
-        assert_eq!(
-            cli.env_vars.get("OPENAI_API_KEY").map(String::as_str),
-            Some("expired-access")
-        );
-        assert_eq!(
-            cli.env_vars.get("CHATGPT_ACCOUNT_ID").map(String::as_str),
-            Some("acct_123")
-        );
-        assert!(
-            cli.login_command
-                .as_deref()
-                .is_some_and(|command| command.contains("codex login --with-api-key"))
-        );
-    }
-
-    #[tokio::test]
-    async fn openai_api_key_cli_fallback_has_no_account_id() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
-        vault_set_credential(
-            &mut vault,
-            "openai",
-            &api_key_credential(ProviderId::openai(), "openai-key"),
-        )
-        .unwrap();
-        let resolver = test_resolver(vault, Arc::new(|_| None));
-        let catalog = default_catalog();
-
-        let ResolvedCredential::Cli(cli) = resolver
-            .resolve(
-                ProviderId::openai(),
-                CredentialUsage::CliAgent(CliAgentKind::Codex),
-                &catalog,
-            )
-            .await
-            .unwrap()
-        else {
-            panic!("expected cli credential");
-        };
-
-        assert_eq!(
-            cli.env_vars.get("OPENAI_API_KEY").map(String::as_str),
-            Some("openai-key")
-        );
-        assert!(!cli.env_vars.contains_key("CHATGPT_ACCOUNT_ID"));
-        assert!(cli.login_command.is_some());
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "integration-style test: writes and reads a fake codex script via sync std::fs to \
-                  verify the login_command string passes stdin correctly"
-    )]
-    async fn openai_api_key_cli_login_command_executes_codex_from_local_bin() {
-        let dir = tempfile::tempdir().unwrap();
-        let local_bin = dir.path().join(".local/bin");
-        std::fs::create_dir_all(&local_bin).unwrap();
-
-        let codex_path = local_bin.join("codex");
-        std::fs::write(
-            &codex_path,
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HOME/codex-args.txt\"\ncat > \"$HOME/codex-stdin.txt\"\n",
-        )
-        .unwrap();
-        let mut permissions = std::fs::metadata(&codex_path).unwrap().permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&codex_path, permissions).unwrap();
-
-        let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
-        vault_set_credential(
-            &mut vault,
-            "openai",
-            &api_key_credential(ProviderId::openai(), "openai-key"),
-        )
-        .unwrap();
-        let resolver = test_resolver(vault, Arc::new(|_| None));
-        let catalog = default_catalog();
-
-        let ResolvedCredential::Cli(cli) = resolver
-            .resolve(
-                ProviderId::openai(),
-                CredentialUsage::CliAgent(CliAgentKind::Codex),
-                &catalog,
-            )
-            .await
-            .unwrap()
-        else {
-            panic!("expected cli credential");
-        };
-
-        #[allow(
-            clippy::disallowed_methods,
-            reason = "This test shells through /bin/sh to verify the configured login command."
-        )]
-        let status = std::process::Command::new("/bin/sh")
-            .arg("-lc")
-            .arg(cli.login_command.unwrap())
-            .env("HOME", dir.path())
-            .env("PATH", "/usr/bin:/bin")
-            .status()
-            .unwrap();
-
-        assert!(status.success());
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("codex-args.txt")).unwrap(),
-            "login\n--with-api-key\n"
-        );
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("codex-stdin.txt"))
-                .unwrap()
-                .trim_end(),
-            "openai-key"
         );
     }
 
@@ -896,13 +637,11 @@ reasoning = false
         );
         let catalog = default_catalog();
 
-        let ResolvedCredential::Api(api) = resolver
+        let resolved = resolver
             .resolve(ProviderId::openai(), CredentialUsage::ApiRequest, &catalog)
             .await
-            .unwrap()
-        else {
-            panic!("expected api credential");
-        };
+            .unwrap();
+        let ResolvedCredential::Api(api) = resolved;
 
         assert_eq!(api.org_id.as_deref(), Some("env-org"));
     }
@@ -974,9 +713,7 @@ reasoning = false
             .await
             .unwrap();
 
-        let ResolvedCredential::Api(api) = resolved else {
-            panic!("expected api credential");
-        };
+        let ResolvedCredential::Api(api) = resolved;
         assert_eq!(api.provider, ProviderId::new("acme"));
         assert_eq!(
             api.auth_header,
@@ -1040,22 +777,17 @@ reasoning = false
         let resolver = CredentialResolver::with_env_lookup(Arc::clone(&vault), Arc::new(|_| None));
         let catalog = default_catalog();
 
-        let ResolvedCredential::Cli(cli) = resolver
-            .resolve(
-                ProviderId::openai(),
-                CredentialUsage::CliAgent(CliAgentKind::Codex),
-                &catalog,
-            )
+        let resolved = resolver
+            .resolve(ProviderId::openai(), CredentialUsage::ApiRequest, &catalog)
             .await
-            .unwrap()
-        else {
-            panic!("expected cli credential");
-        };
+            .unwrap();
+        let ResolvedCredential::Api(api) = resolved;
 
         assert_eq!(
-            cli.env_vars.get("OPENAI_API_KEY").map(String::as_str),
-            Some("new-access")
+            api.auth_header,
+            Some(ApiKeyHeader::Bearer("new-access".to_string()))
         );
+        assert!(api.codex_mode);
 
         let stored = {
             let vault = vault.read().await;
@@ -1090,11 +822,7 @@ reasoning = false
         let catalog = default_catalog();
 
         let err = resolver
-            .resolve(
-                ProviderId::openai(),
-                CredentialUsage::CliAgent(CliAgentKind::Codex),
-                &catalog,
-            )
+            .resolve(ProviderId::openai(), CredentialUsage::ApiRequest, &catalog)
             .await
             .unwrap_err();
 

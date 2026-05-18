@@ -61,7 +61,7 @@ pub use graph::{
     shape_to_handler_type,
 };
 pub use interview::{InterviewQuestionRecord, QuestionType};
-pub use llm_backend::LlmBackend;
+pub use llm_backend::AgentBackend;
 pub use manifest_path::{ManifestPath, ManifestPathParseError};
 pub use outcome::{
     FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMeta, StageOutcome, StageState,

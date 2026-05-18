@@ -219,43 +219,11 @@ pub struct CommandCompletedProps {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AgentCliStartedProps {
-    pub visit:    u32,
-    pub mode:     String,
-    pub provider: String,
-    pub model:    String,
-    pub command:  String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AgentCliCompletedProps {
-    pub stdout:      String,
-    pub stderr:      String,
-    pub exit_code:   i32,
-    pub duration_ms: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AgentCliCancelledProps {
-    pub stdout:      String,
-    pub stderr:      String,
-    pub duration_ms: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AgentCliTimedOutProps {
-    pub stdout:      String,
-    pub stderr:      String,
-    pub duration_ms: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentAcpStartedProps {
-    pub visit:    u32,
-    pub mode:     String,
-    pub provider: String,
-    pub model:    String,
-    pub command:  String,
+    pub visit:       u32,
+    pub command:     String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
