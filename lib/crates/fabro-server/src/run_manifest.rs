@@ -7,6 +7,7 @@ use std::time::Duration;
 use anyhow::{Context as _, Result, anyhow, bail};
 use fabro_api::types;
 use fabro_auth::auth_issue_message;
+use fabro_config::project::workflow_slug_from_path;
 use fabro_config::run::parse_run_layer_from_settings_toml;
 use fabro_config::{
     CliLayer, CliOutputLayer, DaytonaDockerfileLayer, RunLayer, WorkflowSettingsBuilder,
@@ -96,6 +97,7 @@ pub(crate) fn prepare_manifest(
     let workflow_run_layer = root_workflow_run_layer(&workflow_input)?;
     let mut workflow_settings_builder =
         WorkflowSettingsBuilder::new().server_run_defaults(manifest_run_defaults.clone());
+    let mut project_config_path = None;
     if let Some(run) = args_overrides.run {
         workflow_settings_builder = workflow_settings_builder.run_overrides(run);
     }
@@ -112,6 +114,11 @@ pub(crate) fn prepare_manifest(
         .filter(|config| config.type_ == types::ManifestConfigType::Project)
     {
         if let Some(source) = config.source.as_deref() {
+            project_config_path = config
+                .path
+                .as_ref()
+                .map(|_| manifest_project_config_path(config, &cwd))
+                .transpose()?;
             let mut run = parse_run_layer_from_settings_toml(source)
                 .context("Failed to parse project config TOML")?;
             if run_has_path_dockerfile(&run) {
@@ -136,6 +143,17 @@ pub(crate) fn prepare_manifest(
     let mut settings = workflow_settings_builder
         .build()
         .context("failed to resolve manifest settings")?;
+    backfill_manifest_metadata_names(
+        &mut settings,
+        &root_source,
+        &target_path,
+        workflow_input
+            .config
+            .as_ref()
+            .map(|config| config.source.as_str()),
+        project_config_path.is_some(),
+        &cwd,
+    );
     settings.run.inputs.extend(args_overrides.input_overrides);
     if let Some(goal) = manifest.goal.as_ref() {
         settings.run.goal = Some(RunGoal::Inline(InterpString::parse(&goal.text)));
@@ -169,6 +187,57 @@ pub(crate) fn prepare_manifest(
         workflow_input,
         source_directory: resolve_working_directory(&settings, &cwd),
     })
+}
+
+fn backfill_manifest_metadata_names(
+    settings: &mut WorkflowSettings,
+    root_source: &str,
+    target_path: &ManifestPath,
+    workflow_config_source: Option<&str>,
+    has_project_config: bool,
+    cwd: &Path,
+) {
+    if settings.project.name.is_none() {
+        settings.project.name = infer_project_name(has_project_config, cwd);
+    }
+    if settings.workflow.name.is_none() {
+        settings.workflow.name =
+            infer_workflow_name(workflow_config_source, root_source, target_path);
+    }
+}
+
+fn infer_project_name(has_project_config: bool, cwd: &Path) -> Option<String> {
+    if !has_project_config {
+        return None;
+    }
+    cwd.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+}
+
+fn infer_workflow_name(
+    workflow_config_source: Option<&str>,
+    root_source: &str,
+    target_path: &ManifestPath,
+) -> Option<String> {
+    infer_explicit_workflow_name(workflow_config_source)
+        .or_else(|| {
+            fabro_graphviz::parser::parse(root_source)
+                .ok()
+                .map(|graph| graph.name)
+                .filter(|name| !name.is_empty())
+        })
+        .or_else(|| workflow_slug_from_path(target_path.as_path()))
+}
+
+fn infer_explicit_workflow_name(workflow_config_source: Option<&str>) -> Option<String> {
+    let source = workflow_config_source?;
+    let table = source.parse::<toml::Table>().ok()?;
+    table
+        .get("workflow")?
+        .as_table()?
+        .get("name")?
+        .as_str()
+        .map(ToOwned::to_owned)
 }
 
 pub(crate) fn validate_prepared_manifest(
@@ -2067,6 +2136,74 @@ provider = "local"
                 .checks
                 .iter()
                 .all(|check| check.name != "GitHub Token")
+        );
+    }
+
+    #[test]
+    fn prepare_manifest_backfills_missing_project_and_workflow_names() {
+        let mut manifest = minimal_manifest();
+        manifest.workflows.get_mut("workflow.fabro").unwrap().config =
+            Some(types::ManifestWorkflowConfig {
+                path:   "workflow.toml".to_string(),
+                source: "_version = 1\n".to_string(),
+            });
+        manifest.configs.push(types::ManifestConfig {
+            path:   Some("/tmp/project/.fabro/project.toml".to_string()),
+            source: Some("_version = 1\n".to_string()),
+            type_:  types::ManifestConfigType::Project,
+        });
+
+        let prepared = prepare_manifest(
+            &manifest_run_defaults(Some(&default_settings_fixture())),
+            &manifest,
+        )
+        .unwrap();
+
+        assert_eq!(prepared.settings.project.name.as_deref(), Some("project"));
+        assert_eq!(prepared.settings.workflow.name.as_deref(), Some("Demo"));
+    }
+
+    #[test]
+    fn prepare_manifest_preserves_explicit_project_and_workflow_names() {
+        let mut manifest = minimal_manifest();
+        manifest.workflows.get_mut("workflow.fabro").unwrap().config =
+            Some(types::ManifestWorkflowConfig {
+                path:   "workflow.toml".to_string(),
+                source: r#"
+_version = 1
+
+[workflow]
+name = "Workflow Config Name"
+"#
+                .to_string(),
+            });
+        manifest.configs.push(types::ManifestConfig {
+            path:   Some("/tmp/project/.fabro/project.toml".to_string()),
+            source: Some(
+                r#"
+_version = 1
+
+[project]
+name = "Project Config Name"
+"#
+                .to_string(),
+            ),
+            type_:  types::ManifestConfigType::Project,
+        });
+
+        let prepared = prepare_manifest(
+            &manifest_run_defaults(Some(&default_settings_fixture())),
+            &manifest,
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepared.settings.project.name.as_deref(),
+            Some("Project Config Name")
+        );
+        assert_eq!(
+            prepared.settings.workflow.name.as_deref(),
+            Some("Workflow Config Name")
         );
     }
 

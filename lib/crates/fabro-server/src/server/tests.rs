@@ -7331,6 +7331,71 @@ async fn create_run_persists_run_spec() {
 }
 
 #[tokio::test]
+async fn create_run_persists_backfilled_project_and_workflow_names() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+
+    let manifest = serde_json::json!({
+        "version": 1,
+        "cwd": "/tmp/project",
+        "target": {
+            "identifier": "workflow.fabro",
+            "path": "workflow.fabro",
+        },
+        "configs": [
+            {
+                "path": "/tmp/project/.fabro/project.toml",
+                "source": "_version = 1\n",
+                "type": "project",
+            }
+        ],
+        "workflows": {
+            "workflow.fabro": {
+                "source": "digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }",
+                "config": {
+                    "path": "workflow.toml",
+                    "source": "_version = 1\n",
+                },
+                "files": {},
+            }
+        },
+    });
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api("/runs"))
+                .header("content-type", "application/json")
+                .body(Body::from(manifest.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = body_json(response.into_body()).await;
+    let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
+
+    let run_state = state
+        .store
+        .open_run_reader(&run_id)
+        .await
+        .unwrap()
+        .state()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        run_state.spec.settings.project.name.as_deref(),
+        Some("project")
+    );
+    assert_eq!(
+        run_state.spec.settings.workflow.name.as_deref(),
+        Some("Demo")
+    );
+}
+
+#[tokio::test]
 async fn stage_artifact_upload_rejects_invalid_filename() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
