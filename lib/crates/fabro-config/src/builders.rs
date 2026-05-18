@@ -700,7 +700,6 @@ agent_profile = "anthropic"
 
 [llm.providers.acme.auth]
 credentials = ["env:ACME_API_KEY"]
-header = "bearer"
 
 [llm.models."acme-large"]
 provider = "acme"

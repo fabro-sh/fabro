@@ -7,7 +7,7 @@
 //! display_name = "Kimi"
 //! adapter = "openai_compatible"
 //! base_url = "https://api.moonshot.ai/v1"
-//! auth = { credentials = ["credential:kimi", "env:KIMI_API_KEY"], header = "bearer" }
+//! auth = { credentials = ["credential:kimi", "env:KIMI_API_KEY"] }
 //! priority = 60
 //! enabled = true
 //! aliases = ["moonshot"]
@@ -480,7 +480,6 @@ aliases = ["moonshot"]
 
 [providers.kimi.auth]
 credentials = ["credential:kimi", "env:KIMI_API_KEY"]
-header = "bearer"
 "#;
         let layer: LlmLayer = toml::from_str(toml).unwrap();
         let kimi = layer.providers.get("kimi").unwrap();

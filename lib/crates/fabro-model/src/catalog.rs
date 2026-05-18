@@ -215,13 +215,17 @@ pub enum CredentialRefParseError {
 #[serde(deny_unknown_fields)]
 pub struct ProviderAuthConfig {
     pub credentials: Vec<CredentialRef>,
+    #[serde(default)]
     pub header:      ApiKeyHeaderPolicy,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ApiKeyHeaderPolicy {
+    #[default]
     Bearer,
-    Custom { name: String },
+    Custom {
+        name: String,
+    },
 }
 
 impl Serialize for ApiKeyHeaderPolicy {
@@ -1648,7 +1652,6 @@ aliases = ["acme-ai"]
 
 [providers.acme.auth]
 credentials = ["env:ACME_API_KEY"]
-header = "bearer"
 
 [models."acme-large"]
 provider = "acme"
@@ -2711,7 +2714,6 @@ adapter = "openai"
 
 [providers.bearer.auth]
 credentials = ["credential:bearer", "env:BEARER_API_KEY"]
-header = "bearer"
 
 [providers.custom]
 display_name = "Custom"
@@ -2767,6 +2769,29 @@ billing_policy = "none"
     }
 
     #[test]
+    fn provider_auth_header_defaults_to_bearer_when_omitted() {
+        let settings = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+
+[providers.test.auth]
+credentials = ["env:TEST_API_KEY"]
+"#,
+        );
+        let providers = build_providers(&settings).unwrap();
+        let test = providers
+            .iter()
+            .find(|provider| provider.id.as_str() == "test")
+            .unwrap();
+        assert_eq!(
+            test.auth.as_ref().unwrap().header,
+            ApiKeyHeaderPolicy::Bearer
+        );
+    }
+
+    #[test]
     fn catalog_from_settings_rejects_invalid_provider_auth_configs() {
         let empty_api_key_credentials = minimal_settings(
             r#"
@@ -2777,7 +2802,6 @@ agent_profile = "openai"
 
 [providers.test.auth]
 credentials = []
-header = "bearer"
 "#,
         );
         assert!(matches!(
@@ -2818,7 +2842,6 @@ agent_profile = "openai"
 [providers.test.auth]
 type = "api_key"
 credentials = ["env:TEST_API_KEY"]
-header = "bearer"
 "#,
         )
         .unwrap_err();

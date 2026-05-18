@@ -680,7 +680,6 @@ base_url = "https://default.example.com/v1"
 
 [providers.acme.auth]
 credentials = ["credential:acme"]
-header = "bearer"
 
 [models."compat-model"]
 provider = "acme"
@@ -939,7 +938,6 @@ base_url = "https://api.acme.test/v1"
 
 [providers.acme.auth]
 credentials = ["credential:acme"]
-header = "bearer"
 
 [models."acme-large"]
 provider = "acme"

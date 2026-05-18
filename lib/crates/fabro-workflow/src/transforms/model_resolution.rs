@@ -69,7 +69,6 @@ base_url = "https://api.venice.ai/api/v1"
 
 [providers.venice.auth]
 credentials = ["env:VENICE_API_KEY"]
-header = "bearer"
 
 [models."venice-large"]
 provider = "venice"

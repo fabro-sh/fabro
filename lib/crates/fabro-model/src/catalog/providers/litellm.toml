@@ -7,7 +7,6 @@ enabled = false
 
 [providers.litellm.auth]
 credentials = ["credential:litellm", "env:LITELLM_API_KEY"]
-header = "bearer"
 
 # To enable LiteLLM, add entries like these to settings.toml:
 #

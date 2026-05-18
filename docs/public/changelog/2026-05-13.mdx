@@ -14,7 +14,6 @@ base_url = "https://llm-gateway.example.com/v1"
 
 [llm.providers.proxy.auth]
 credentials = ["env:ACME_GATEWAY_API_KEY"]
-header = "bearer"
 
 [llm.providers.proxy.extra_headers]
 x-portkey-api-key = { env = "PORTKEY_API_KEY" }

@@ -7,7 +7,6 @@ priority = 40
 
 [providers.inception.auth]
 credentials = ["credential:inception", "env:INCEPTION_API_KEY"]
-header = "bearer"
 
 [models."mercury-2"]
 provider = "inception"

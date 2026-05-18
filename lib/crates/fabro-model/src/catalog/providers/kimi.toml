@@ -7,7 +7,6 @@ priority = 70
 
 [providers.kimi.auth]
 credentials = ["credential:kimi", "env:KIMI_API_KEY"]
-header = "bearer"
 
 [models."kimi-k2.5"]
 provider = "kimi"

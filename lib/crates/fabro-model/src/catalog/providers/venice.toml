@@ -7,7 +7,6 @@ aliases = ["venice-ai"]
 
 [providers.venice.auth]
 credentials = ["credential:venice", "env:VENICE_API_KEY"]
-header = "bearer"
 
 [models."venice-uncensored-1-2"]
 provider = "venice"

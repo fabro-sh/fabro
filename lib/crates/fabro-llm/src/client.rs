@@ -865,7 +865,6 @@ agent_profile = "openai"
 
 [providers.acme.auth]
 credentials = ["env:ACME_API_KEY"]
-header = "bearer"
 
 [models."acme-large"]
 provider = "acme"
@@ -957,7 +956,6 @@ aliases = ["acme-ai"]
 
 [providers.acme.auth]
 credentials = ["env:ACME_API_KEY"]
-header = "bearer"
 
 [models."acme-large"]
 provider = "acme"
@@ -1008,7 +1006,6 @@ aliases = ["acme-ai"]
 
 [providers.acme.auth]
 credentials = ["env:ACME_API_KEY"]
-header = "bearer"
 
 [models."acme-large"]
 provider = "acme"

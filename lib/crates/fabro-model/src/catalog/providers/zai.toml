@@ -7,7 +7,6 @@ priority = 60
 
 [providers.zai.auth]
 credentials = ["credential:zai", "env:ZAI_API_KEY"]
-header = "bearer"
 
 [models."glm-4.7"]
 provider = "zai"

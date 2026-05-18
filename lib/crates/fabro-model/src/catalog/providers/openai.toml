@@ -7,7 +7,6 @@ priority = 90
 
 [providers.openai.auth]
 credentials = ["credential:openai", "credential:openai_codex", "env:OPENAI_API_KEY"]
-header = "bearer"
 
 [models."gpt-5.2"]
 provider = "openai"
