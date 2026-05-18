@@ -21,7 +21,7 @@ use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{MultiSelect, Select};
 use fabro_api::types::{CreateSecretRequest, SecretType as ApiSecretType};
-use fabro_auth::{AuthCredential, AuthMethod, codex_oauth_config, credential_id_for};
+use fabro_auth::{AuthMethod, LoginResult, codex_oauth_config};
 use fabro_client::{AuthEntry, AuthStore, DevTokenEntry, ServerTarget};
 use fabro_config::bind::Bind;
 use fabro_config::daemon::ServerDaemon;
@@ -98,13 +98,28 @@ fn provider_env_var_label(provider: &ProviderId, catalog: &Catalog) -> String {
                 .iter()
                 .filter_map(|credential| match credential {
                     CredentialRef::Env(name) => Some(name.as_str()),
-                    CredentialRef::Credential(_) => None,
+                    CredentialRef::Vault(_) => None,
                 })
                 .collect::<Vec<_>>()
                 .join(" / ")
         })
         .filter(|label| !label.is_empty())
         .unwrap_or_else(|| "API_KEY".to_string())
+}
+
+fn provider_vault_secret_name(provider: &ProviderId, catalog: &Catalog) -> String {
+    catalog
+        .provider(provider)
+        .and_then(|provider| provider.auth.as_ref())
+        .and_then(|auth| {
+            auth.credentials
+                .iter()
+                .find_map(|credential| match credential {
+                    CredentialRef::Vault(name) => Some(name.clone()),
+                    CredentialRef::Env(_) => None,
+                })
+        })
+        .unwrap_or_else(|| format!("{}_API_KEY", provider.to_string().to_uppercase()))
 }
 
 // ---------------------------------------------------------------------------
@@ -307,7 +322,7 @@ struct InstallFacts {
 
 #[derive(Debug)]
 struct LlmInstallSelection {
-    credentials: Vec<AuthCredential>,
+    credentials: Vec<LoginResult>,
 }
 
 #[derive(Debug)]
@@ -1212,13 +1227,21 @@ async fn persist_vault_secrets_with(
     result
 }
 
-fn credential_secret_request(credential: &AuthCredential) -> Result<CreateSecretRequest> {
-    Ok(CreateSecretRequest {
-        name:        credential_id_for(credential).map_err(anyhow::Error::msg)?,
-        value:       serde_json::to_string(credential)?,
-        type_:       ApiSecretType::Credential,
-        description: None,
-    })
+fn credential_secret_request(result: &LoginResult) -> Result<CreateSecretRequest> {
+    match result {
+        LoginResult::ApiKey { provider, key } => Ok(CreateSecretRequest {
+            name:        provider_vault_secret_name(provider, &INSTALL_CATALOG),
+            value:       key.clone(),
+            type_:       ApiSecretType::Token,
+            description: None,
+        }),
+        LoginResult::OAuth { credential, .. } => Ok(CreateSecretRequest {
+            name:        "OPENAI_CODEX".to_string(),
+            value:       serde_json::to_string(credential)?,
+            type_:       ApiSecretType::Oauth,
+            description: None,
+        }),
+    }
 }
 
 fn server_env_updates(secrets: &[(String, String)]) -> Vec<envfile::EnvFileUpdate> {
@@ -1322,7 +1345,7 @@ fn persist_github_install_changes(
         }
         for (key, value) in &writes.vault_set {
             vault
-                .set(key, value, VaultSecretType::Environment, None)
+                .set(key, value, VaultSecretType::Token, None)
                 .map_err(anyhow::Error::from)?;
         }
 
@@ -1758,7 +1781,7 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
             vault_secrets.push(CreateSecretRequest {
                 name:        "GITHUB_TOKEN".to_string(),
                 value:       token,
-                type_:       ApiSecretType::Environment,
+                type_:       ApiSecretType::Token,
                 description: None,
             });
             Some(PendingGitHubSettings::Token)
@@ -2542,14 +2565,12 @@ client_id = "client-id"
             CreateSecretRequest {
                 name:        "GITHUB_TOKEN".to_string(),
                 value:       "gh-token".to_string(),
-                type_:       ApiSecretType::Environment,
+                type_:       ApiSecretType::Token,
                 description: None,
             },
-            credential_secret_request(&AuthCredential {
+            credential_secret_request(&LoginResult::ApiKey {
                 provider: ProviderId::anthropic(),
-                details:  fabro_auth::AuthDetails::ApiKey {
-                    key: "anthropic-key".to_string(),
-                },
+                key:      "anthropic-key".to_string(),
             })
             .unwrap(),
         ];
@@ -2562,7 +2583,7 @@ client_id = "client-id"
                     .body(
                         serde_json::json!({
                             "name": "persisted",
-                            "type": "environment",
+                            "type": "token",
                             "created_at": "2026-01-01T00:00:00Z",
                             "updated_at": "2026-01-01T00:00:00Z"
                         })
@@ -2611,7 +2632,7 @@ client_id = "client-id"
         let vault_secrets = [CreateSecretRequest {
             name:        "GITHUB_TOKEN".to_string(),
             value:       "gh-token".to_string(),
-            type_:       ApiSecretType::Environment,
+            type_:       ApiSecretType::Token,
             description: None,
         }];
         let server = MockServer::start_async().await;
@@ -2623,7 +2644,7 @@ client_id = "client-id"
                     .body(
                         serde_json::json!({
                             "name": "persisted",
-                            "type": "environment",
+                            "type": "token",
                             "created_at": "2026-01-01T00:00:00Z",
                             "updated_at": "2026-01-01T00:00:00Z"
                         })
@@ -2822,7 +2843,7 @@ client_id = "client-id"
         let vault_secrets = [CreateSecretRequest {
             name:        "GITHUB_CLI_TOKEN".to_string(),
             value:       "gh-token".to_string(),
-            type_:       ApiSecretType::Environment,
+            type_:       ApiSecretType::Token,
             description: None,
         }];
         let settings_path = dir.path().join(SETTINGS_CONFIG_FILENAME);
@@ -2870,7 +2891,7 @@ client_id = "client-id"
         let vault_secrets = [CreateSecretRequest {
             name:        "GITHUB_CLI_TOKEN".to_string(),
             value:       "gh-token".to_string(),
-            type_:       ApiSecretType::Environment,
+            type_:       ApiSecretType::Token,
             description: None,
         }];
         let settings_path = dir.path().join(SETTINGS_CONFIG_FILENAME);
@@ -2955,7 +2976,7 @@ client_id = "client-id"
             vault
                 .get_entry(GITHUB_TOKEN_SECRET_KEY)
                 .map(|entry| entry.secret_type),
-            Some(VaultSecretType::Environment)
+            Some(VaultSecretType::Token)
         );
         assert_eq!(std::fs::read_to_string(&settings_path).unwrap(), "after");
     }
@@ -2976,7 +2997,7 @@ client_id = "client-id"
             .set(
                 GITHUB_TOKEN_SECRET_KEY,
                 "token",
-                VaultSecretType::Environment,
+                VaultSecretType::Token,
                 None,
             )
             .unwrap();

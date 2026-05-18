@@ -11,9 +11,7 @@
 
 use std::process::Output;
 
-use fabro_auth::{AuthCredential, AuthDetails};
 use fabro_config::Storage;
-use fabro_model::ProviderId;
 use fabro_test::{
     TestMode, TwinOpenAi, TwinScenario, TwinScenarios, TwinToolCall, test_context, twin_openai,
 };
@@ -93,34 +91,20 @@ fn write_hook_settings(context: &fabro_test::TestContext, hook: &str) {
     context.write_home(".fabro/settings.toml", settings);
 }
 
-fn seed_openai_vault(storage_dir: &std::path::Path, base_url: &str, api_key: &str) {
+fn seed_openai_vault(storage_dir: &std::path::Path, api_key: &str) {
     let mut vault =
         Vault::load(Storage::new(storage_dir).secrets_path()).expect("test vault should load");
     vault
-        .set(
-            "openai",
-            &serde_json::to_string(&AuthCredential {
-                provider: ProviderId::openai(),
-                details:  AuthDetails::ApiKey {
-                    key: api_key.to_string(),
-                },
-            })
-            .expect("OpenAI test credential should serialize"),
-            SecretType::Credential,
-            None,
-        )
+        .set("OPENAI_API_KEY", api_key, SecretType::Token, None)
         .expect("OpenAI credential should store in test vault");
-    vault
-        .set("OPENAI_BASE_URL", base_url, SecretType::Environment, None)
-        .expect("OpenAI base URL should store in test vault");
 }
 
 fn configure_twin_server(
     context: &mut fabro_test::TestContext,
-    twin: &TwinOpenAi,
+    _twin: &TwinOpenAi,
     namespace: &str,
 ) {
-    seed_openai_vault(&twin_server_storage_dir(context), &twin.base_url, namespace);
+    seed_openai_vault(&twin_server_storage_dir(context), namespace);
     context.isolated_server();
 }
 

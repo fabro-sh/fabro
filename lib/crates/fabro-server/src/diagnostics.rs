@@ -681,7 +681,6 @@ fn check_crypto(state: &AppState) -> CheckResult {
 
 #[cfg(test)]
 mod tests {
-    use fabro_auth::{AuthCredential, AuthDetails};
     use fabro_config::RunLayer;
     use fabro_vault::SecretType;
     use httpmock::Method::POST;
@@ -731,20 +730,14 @@ mod tests {
             .max_concurrent_runs(5)
             .provider_base_url("openai", server.url("/v1"))
             .build();
-        let credential = AuthCredential {
-            provider: ProviderId::openai(),
-            details:  AuthDetails::ApiKey {
-                key: "vault-openai-key".to_string(),
-            },
-        };
         state
             .vault
             .write()
             .await
             .set(
-                "openai_codex",
-                &serde_json::to_string(&credential).unwrap(),
-                SecretType::Credential,
+                "OPENAI_API_KEY",
+                "vault-openai-key",
+                SecretType::Token,
                 None,
             )
             .unwrap();

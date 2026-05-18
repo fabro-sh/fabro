@@ -6,7 +6,7 @@ base_url = "https://api.z.ai/api/coding/paas/v4"
 priority = 60
 
 [providers.zai.auth]
-credentials = ["credential:zai", "env:ZAI_API_KEY"]
+credentials = ["env:ZAI_API_KEY", "vault:ZAI_API_KEY"]
 
 [models."glm-4.7"]
 provider = "zai"

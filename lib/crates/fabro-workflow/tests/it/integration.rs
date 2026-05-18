@@ -6869,15 +6869,6 @@ mod real_llm {
     }
 }
 
-fn openai_api_key_credential(key: &str) -> fabro_auth::AuthCredential {
-    fabro_auth::AuthCredential {
-        provider: ProviderId::openai(),
-        details:  fabro_auth::AuthDetails::ApiKey {
-            key: key.to_string(),
-        },
-    }
-}
-
 fn openai_responses_payload(text: &str) -> serde_json::Value {
     serde_json::json!({
         "id": "resp_1",
@@ -6960,9 +6951,9 @@ async fn workflow_run_with_vault_only_openai_codex_builds_pr_body() {
     let mut vault = Vault::load(vault_dir.path().join("secrets.json")).unwrap();
     vault
         .set(
-            "openai_codex",
-            &serde_json::to_string(&openai_api_key_credential("vault-openai-key")).unwrap(),
-            SecretType::Credential,
+            "OPENAI_API_KEY",
+            "vault-openai-key",
+            SecretType::Token,
             None,
         )
         .unwrap();

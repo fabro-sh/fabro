@@ -3,8 +3,7 @@ use fabro_model::catalog::CatalogProvider;
 use fabro_model::{CredentialRef, ProviderId};
 
 use crate::context::{AuthContextRequest, AuthContextResponse};
-use crate::credential::{AuthCredential, AuthDetails};
-use crate::strategy::AuthStrategy;
+use crate::strategy::{AuthStrategy, LoginResult};
 
 pub struct ApiKeyStrategy {
     provider_id:   ProviderId,
@@ -24,7 +23,7 @@ impl ApiKeyStrategy {
                     .iter()
                     .filter_map(|credential_ref| match credential_ref {
                         CredentialRef::Env(name) => Some(name.clone()),
-                        CredentialRef::Credential(_) => None,
+                        CredentialRef::Vault(_) => None,
                     })
                     .collect()
             })
@@ -49,11 +48,11 @@ impl AuthStrategy for ApiKeyStrategy {
         })
     }
 
-    async fn complete(&mut self, response: AuthContextResponse) -> anyhow::Result<AuthCredential> {
+    async fn complete(&mut self, response: AuthContextResponse) -> anyhow::Result<LoginResult> {
         match response {
-            AuthContextResponse::ApiKey { key } => Ok(AuthCredential {
+            AuthContextResponse::ApiKey { key } => Ok(LoginResult::ApiKey {
                 provider: self.provider_id.clone(),
-                details:  AuthDetails::ApiKey { key },
+                key,
             }),
             AuthContextResponse::DeviceCodeConfirmed => {
                 Err(anyhow::anyhow!("expected API key response"))

@@ -665,12 +665,7 @@ name = "custom"
         let vault_path = storage.secrets_path();
         let mut vault = Vault::load(vault_path.clone()).unwrap();
         vault
-            .set(
-                "EXISTING_SECRET",
-                "keep",
-                VaultSecretType::Environment,
-                None,
-            )
+            .set("EXISTING_SECRET", "keep", VaultSecretType::Token, None)
             .unwrap();
 
         let result = persist_install_outputs_direct(
@@ -684,7 +679,7 @@ name = "custom"
             &[VaultSecretWrite {
                 name:        "bad-secret-name".to_string(),
                 value:       "boom".to_string(),
-                secret_type: VaultSecretType::Environment,
+                secret_type: VaultSecretType::Token,
                 description: None,
             }],
             Some(&PendingSettingsWrite {

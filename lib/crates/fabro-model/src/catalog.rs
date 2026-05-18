@@ -154,14 +154,14 @@ pub struct CostRates {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
 pub enum CredentialRef {
-    Credential(String),
+    Vault(String),
     Env(String),
 }
 
 impl std::fmt::Display for CredentialRef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Credential(id) => write!(f, "credential:{id}"),
+            Self::Vault(name) => write!(f, "vault:{name}"),
             Self::Env(name) => write!(f, "env:{name}"),
         }
     }
@@ -177,11 +177,11 @@ impl FromStr for CredentialRef {
     type Err = CredentialRefParseError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        if let Some(id) = value.strip_prefix("credential:") {
-            if id.is_empty() {
-                return Err(CredentialRefParseError::EmptyCredential);
+        if let Some(name) = value.strip_prefix("vault:") {
+            if name.is_empty() {
+                return Err(CredentialRefParseError::EmptyVault);
             }
-            return Ok(Self::Credential(id.to_string()));
+            return Ok(Self::Vault(name.to_string()));
         }
         if let Some(name) = value.strip_prefix("env:") {
             if name.is_empty() {
@@ -203,10 +203,10 @@ impl TryFrom<String> for CredentialRef {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CredentialRefParseError {
-    #[error("credential reference must be `credential:<id>` or `env:<NAME>`")]
+    #[error("credential reference must be `vault:<name>` or `env:<NAME>`")]
     Invalid,
-    #[error("credential reference is missing an ID after `credential:`")]
-    EmptyCredential,
+    #[error("credential reference is missing a name after `vault:`")]
+    EmptyVault,
     #[error("credential reference is missing a name after `env:`")]
     EmptyEnv,
 }
@@ -338,7 +338,7 @@ impl std::fmt::Display for HeaderValueRef {
         match self {
             Self::Literal(_) => f.write_str("literal:<redacted>"),
             Self::Env(name) => write!(f, "env:{name}"),
-            Self::Credential(id) => write!(f, "credential:{id}"),
+            Self::Credential(id) => write!(f, "vault:{id}"),
         }
     }
 }
@@ -2713,7 +2713,7 @@ display_name = "Bearer"
 adapter = "openai"
 
 [providers.bearer.auth]
-credentials = ["credential:bearer", "env:BEARER_API_KEY"]
+credentials = ["env:BEARER_API_KEY", "vault:BEARER_API_KEY"]
 
 [providers.custom]
 display_name = "Custom"
@@ -2744,8 +2744,8 @@ billing_policy = "none"
             bearer.auth,
             Some(ProviderAuthConfig {
                 credentials: vec![
-                    CredentialRef::Credential("bearer".to_string()),
                     CredentialRef::Env("BEARER_API_KEY".to_string()),
+                    CredentialRef::Vault("BEARER_API_KEY".to_string()),
                 ],
                 header:      ApiKeyHeaderPolicy::Bearer,
             })

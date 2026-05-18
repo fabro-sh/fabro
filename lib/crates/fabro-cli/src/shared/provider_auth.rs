@@ -15,7 +15,7 @@ use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Password};
 use fabro_auth::{
-    ApiCredential, AuthContextRequest, AuthContextResponse, AuthCredential, AuthMethod,
+    ApiCredential, AuthContextRequest, AuthContextResponse, AuthMethod, LoginResult,
     codex_oauth_config, strategy_for,
 };
 use fabro_llm::client::Client as LlmClient;
@@ -207,7 +207,7 @@ pub(crate) async fn authenticate_provider(
     provider: ProviderId,
     s: &Styles,
     printer: Printer,
-) -> Result<AuthCredential> {
+) -> Result<LoginResult> {
     authenticate_provider_with_catalog(provider, s, printer, default_catalog_for_provider_auth()?)
         .await
 }
@@ -217,7 +217,7 @@ pub(crate) async fn authenticate_provider_with_catalog(
     s: &Styles,
     printer: Printer,
     catalog: Arc<Catalog>,
-) -> Result<AuthCredential> {
+) -> Result<LoginResult> {
     api_key_catalog_provider(&provider, catalog.as_ref())?;
     let method = pick_auth_method(&provider).await?;
     authenticate_provider_with_method_and_catalog(provider, method, s, printer, catalog).await
@@ -228,7 +228,7 @@ pub(crate) async fn authenticate_provider_with_api_key_source(
     source: ApiKeySource,
     s: &Styles,
     printer: Printer,
-) -> Result<AuthCredential> {
+) -> Result<LoginResult> {
     authenticate_provider_with_api_key_source_and_catalog(
         provider,
         source,
@@ -245,7 +245,7 @@ pub(crate) async fn authenticate_provider_with_api_key_source_and_catalog(
     s: &Styles,
     printer: Printer,
     catalog: Arc<Catalog>,
-) -> Result<AuthCredential> {
+) -> Result<LoginResult> {
     api_key_catalog_provider(&provider, catalog.as_ref())?;
     let mut strategy = strategy_for(&provider, AuthMethod::ApiKey, catalog.as_ref());
     let request = strategy.init().await?;
@@ -259,7 +259,7 @@ pub(crate) async fn authenticate_provider_with_method(
     method: AuthMethod,
     s: &Styles,
     printer: Printer,
-) -> Result<AuthCredential> {
+) -> Result<LoginResult> {
     authenticate_provider_with_method_and_catalog(
         provider,
         method,
@@ -276,7 +276,7 @@ pub(crate) async fn authenticate_provider_with_method_and_catalog(
     s: &Styles,
     printer: Printer,
     catalog: Arc<Catalog>,
-) -> Result<AuthCredential> {
+) -> Result<LoginResult> {
     api_key_catalog_provider(&provider, catalog.as_ref())?;
     let mut strategy = strategy_for(&provider, method, catalog.as_ref());
     let request = strategy.init().await?;

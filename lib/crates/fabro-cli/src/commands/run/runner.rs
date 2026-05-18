@@ -650,10 +650,8 @@ mod tests {
     use std::sync::Arc;
 
     use chrono::Utc;
-    use fabro_auth::{AuthCredential, AuthDetails};
     use fabro_config::Storage;
     use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question};
-    use fabro_model::ProviderId;
     use fabro_types::run_event::{
         InterviewCompletedProps, InterviewStartedProps, RunCompletedProps, RunControlEffectProps,
         RunFailedProps, RunStatusTransitionProps,
@@ -981,23 +979,12 @@ mod tests {
         let storage = Storage::new(temp.path());
         let mut vault = Vault::load(storage.secrets_path()).unwrap();
         vault
-            .set(
-                "anthropic",
-                &serde_json::to_string(&AuthCredential {
-                    provider: ProviderId::anthropic(),
-                    details:  AuthDetails::ApiKey {
-                        key: "vault-key".to_string(),
-                    },
-                })
-                .unwrap(),
-                SecretType::Credential,
-                None,
-            )
+            .set("ANTHROPIC_API_KEY", "vault-key", SecretType::Token, None)
             .unwrap();
 
         let loaded = load_worker_vault(Some(temp.path())).unwrap().unwrap();
         let guard = loaded.read().await;
-        let credential = guard.get("anthropic").unwrap();
+        let credential = guard.get("ANTHROPIC_API_KEY").unwrap();
 
         assert!(credential.contains("vault-key"));
     }

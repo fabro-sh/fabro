@@ -20,7 +20,7 @@ use crate::shared::provider_auth::prompt_password;
 
 fn api_secret_type(secret_type: SecretTypeArg) -> types::SecretType {
     match secret_type {
-        SecretTypeArg::Environment => types::SecretType::Environment,
+        SecretTypeArg::Token => types::SecretType::Token,
         SecretTypeArg::File => types::SecretType::File,
     }
 }

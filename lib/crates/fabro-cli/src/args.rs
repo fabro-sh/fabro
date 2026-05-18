@@ -654,7 +654,7 @@ pub(crate) struct SecretRmArgs {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(crate) enum SecretTypeArg {
-    Environment,
+    Token,
     File,
 }
 
@@ -668,7 +668,7 @@ pub(crate) struct SecretSetArgs {
     #[arg(long, conflicts_with = "value")]
     pub(crate) value_stdin: bool,
     /// Secret storage type
-    #[arg(long, value_enum, default_value = "environment")]
+    #[arg(long, value_enum, default_value = "token")]
     pub(crate) r#type:      SecretTypeArg,
     /// Optional human-readable description
     #[arg(long)]

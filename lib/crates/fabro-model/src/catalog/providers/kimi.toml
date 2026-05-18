@@ -6,7 +6,7 @@ base_url = "https://api.moonshot.ai/v1"
 priority = 70
 
 [providers.kimi.auth]
-credentials = ["credential:kimi", "env:KIMI_API_KEY"]
+credentials = ["env:KIMI_API_KEY", "vault:KIMI_API_KEY"]
 
 [models."kimi-k2.5"]
 provider = "kimi"

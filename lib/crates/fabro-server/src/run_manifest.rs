@@ -2331,15 +2331,9 @@ provider = "daytona"
             .write()
             .await
             .set(
-                "openai",
-                &serde_json::to_string(&fabro_auth::AuthCredential {
-                    provider: ProviderId::openai(),
-                    details:  fabro_auth::AuthDetails::ApiKey {
-                        key: "test-openai-key".to_string(),
-                    },
-                })
-                .unwrap(),
-                fabro_vault::SecretType::Credential,
+                "OPENAI_API_KEY",
+                "test-openai-key",
+                fabro_vault::SecretType::Token,
                 None,
             )
             .unwrap();

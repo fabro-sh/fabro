@@ -6,7 +6,7 @@ base_url = "https://api.inceptionlabs.ai/v1"
 priority = 40
 
 [providers.inception.auth]
-credentials = ["credential:inception", "env:INCEPTION_API_KEY"]
+credentials = ["env:INCEPTION_API_KEY", "vault:INCEPTION_API_KEY"]
 
 [models."mercury-2"]
 provider = "inception"

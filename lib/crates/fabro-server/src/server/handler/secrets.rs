@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
+use fabro_auth::OAuthCredential;
 use fabro_static::EnvVars;
 
 use super::super::{
     ApiError, AppState, CreateSecretRequest, DeleteSecretRequest, IntoResponse, Json, RequiredUser,
-    Response, Router, SecretType, State, StatusCode, VaultError, get, parse_credential_secret,
-    spawn_blocking,
+    Response, Router, SecretType, State, StatusCode, VaultError, get, spawn_blocking,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -31,12 +31,13 @@ async fn create_secret(
     let name = body.name;
     let value = body.value;
     let description = body.description;
-    if secret_type == SecretType::Credential {
-        if let Err(err) = parse_credential_secret(&name, &value) {
-            return ApiError::bad_request(err).into_response();
+    if secret_type == SecretType::Oauth {
+        if let Err(err) = serde_json::from_str::<OAuthCredential>(&value) {
+            return ApiError::bad_request(format!("invalid oauth credential JSON: {err}"))
+                .into_response();
         }
     }
-    if secret_type == SecretType::Environment && name == EnvVars::DAYTONA_API_KEY {
+    if secret_type == SecretType::Token && name == EnvVars::DAYTONA_API_KEY {
         match state.check_daytona_api_key(value.clone()).await {
             Ok(check) if check.ok() => {}
             Ok(check) => {

@@ -15,7 +15,7 @@
 
 
 /**
- * Whether Fabro may expose reasoning effort levels for a model.
+ * Whether the model endpoint supports a native reasoning-effort parameter.
  */
 
 export const ReasoningEffortFeature = {

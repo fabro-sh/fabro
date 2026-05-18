@@ -13,7 +13,6 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router, middleware};
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD as BASE64_STANDARD, URL_SAFE_NO_PAD};
-use fabro_auth::{AuthCredential, AuthDetails, credential_id_for};
 use fabro_config::Storage;
 use fabro_config::bind::{Bind, BindRequest};
 use fabro_config::envfile::EnvFileUpdate;
@@ -26,7 +25,7 @@ use fabro_install::{
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate};
 use fabro_model::catalog::CatalogProvider;
-use fabro_model::{Catalog, ProviderId};
+use fabro_model::{Catalog, CredentialRef, ProviderId};
 use fabro_sandbox::daytona;
 use fabro_static::EnvVars;
 use fabro_store::ArtifactStore;
@@ -838,6 +837,22 @@ fn install_catalog_provider(provider: &ProviderId) -> Result<&'static CatalogPro
     }
 }
 
+fn provider_secret_name(provider: &ProviderId) -> Result<String, String> {
+    let catalog_provider = install_catalog_provider(provider)?;
+    catalog_provider
+        .auth
+        .as_ref()
+        .and_then(|auth| {
+            auth.credentials
+                .iter()
+                .find_map(|credential_ref| match credential_ref {
+                    CredentialRef::Vault(name) => Some(name.clone()),
+                    CredentialRef::Env(_) => None,
+                })
+        })
+        .ok_or_else(|| format!("provider '{provider}' does not define a vault credential path"))
+}
+
 async fn put_install_server(
     State(state): State<InstallAppState>,
     headers: HeaderMap,
@@ -1530,31 +1545,19 @@ async fn post_install_finish(
         vault_secrets.push(VaultSecretWrite {
             name:        EnvVars::DAYTONA_API_KEY.to_string(),
             value:       api_key.expose_secret().to_string(),
-            secret_type: VaultSecretType::Environment,
+            secret_type: VaultSecretType::Token,
             description: None,
         });
     }
     for provider in llm.providers {
-        let credential = AuthCredential {
-            provider: provider.provider,
-            details:  AuthDetails::ApiKey {
-                key: provider.api_key,
-            },
-        };
-        let name = match credential_id_for(&credential) {
+        let name = match provider_secret_name(&provider.provider) {
             Ok(name) => name,
             Err(err) => return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, err),
         };
-        let value = match serde_json::to_string(&credential) {
-            Ok(value) => value,
-            Err(err) => {
-                return install_error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
-            }
-        };
         vault_secrets.push(VaultSecretWrite {
             name,
-            value,
-            secret_type: VaultSecretType::Credential,
+            value: provider.api_key,
+            secret_type: VaultSecretType::Token,
             description: None,
         });
     }
@@ -1575,7 +1578,7 @@ async fn post_install_finish(
             vault_secrets.push(VaultSecretWrite {
                 name:        EnvVars::GITHUB_TOKEN.to_string(),
                 value:       github.token,
-                secret_type: VaultSecretType::Environment,
+                secret_type: VaultSecretType::Token,
                 description: None,
             });
             let dev_token_path = Storage::new(state.storage_dir.as_ref())

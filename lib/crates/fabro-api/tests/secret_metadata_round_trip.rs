@@ -13,7 +13,7 @@ fn secret_metadata_reuses_canonical_type() {
 fn secret_metadata_round_trips_representative_json() {
     let value = json!({
         "name": "ANTHROPIC_API_KEY",
-        "type": "environment",
+        "type": "token",
         "description": "Anthropic API key",
         "created_at": "2026-04-29T12:34:56Z",
         "updated_at": "2026-04-29T12:40:00Z"
@@ -21,7 +21,7 @@ fn secret_metadata_round_trips_representative_json() {
 
     let metadata: SecretMetadata = serde_json::from_value(value.clone()).unwrap();
     assert_eq!(metadata.name, "ANTHROPIC_API_KEY");
-    assert_eq!(metadata.secret_type, SecretType::Environment);
+    assert_eq!(metadata.secret_type, SecretType::Token);
     assert_eq!(metadata.description, Some("Anthropic API key".to_string()));
     assert_eq!(serde_json::to_value(metadata).unwrap(), value);
 }

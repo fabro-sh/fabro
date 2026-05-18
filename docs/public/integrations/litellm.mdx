@@ -45,12 +45,12 @@ reasoning = false
 
 ## Configure credentials
 
-The LiteLLM provider checks `credential:litellm` first, then `LITELLM_API_KEY` from the Fabro process environment.
+The LiteLLM provider checks `LITELLM_API_KEY` from the Fabro process environment first, then the `vault:LITELLM_API_KEY` server secret.
 
 For a server-owned secret:
 
 ```bash
-fabro secret set litellm sk-proxy-key
+fabro secret set LITELLM_API_KEY sk-proxy-key
 ```
 
 For a process environment variable:
@@ -115,7 +115,7 @@ Only one model for a provider should set `default = true`.
 
 ## Troubleshooting
 
-**"No API key configured"** — Set `credential:litellm` with `fabro secret set litellm ...` or export `LITELLM_API_KEY` in the Fabro process environment.
+**"No API key configured"** — Set `vault:LITELLM_API_KEY` with `fabro secret set LITELLM_API_KEY ...` or export `LITELLM_API_KEY` in the Fabro process environment.
 
 **Connection refused** — Confirm the LiteLLM proxy is running and that `base_url` is reachable from the Fabro process. For Docker deployments, `localhost` means the Fabro container unless you point it at a host or service name.
 

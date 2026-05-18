@@ -6,7 +6,7 @@ priority = 50
 enabled = false
 
 [providers.litellm.auth]
-credentials = ["credential:litellm", "env:LITELLM_API_KEY"]
+credentials = ["env:LITELLM_API_KEY", "vault:LITELLM_API_KEY"]
 
 # To enable LiteLLM, add entries like these to settings.toml:
 #

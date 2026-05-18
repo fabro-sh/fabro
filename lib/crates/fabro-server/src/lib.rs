@@ -40,6 +40,7 @@ mod startup;
 pub mod static_files;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
+mod vault_legacy_migration;
 pub mod web_auth;
 mod worker_token;
 

@@ -6,10 +6,13 @@ use strum::Display;
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum SecretType {
+    /// Opaque API-key/PAT-style token value.
     #[default]
-    Environment,
+    Token,
+    /// JSON-encoded OAuth credential. Refreshable; never projected into env.
+    Oauth,
+    /// Path-shaped secret materialized to the filesystem.
     File,
-    Credential,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,4 +24,30 @@ pub struct SecretMetadata {
     pub description: Option<String>,
     pub created_at:  DateTime<Utc>,
     pub updated_at:  DateTime<Utc>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secret_type_serializes_to_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&SecretType::Token).unwrap(),
+            "\"token\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SecretType::Oauth).unwrap(),
+            "\"oauth\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SecretType::File).unwrap(),
+            "\"file\""
+        );
+    }
+
+    #[test]
+    fn secret_type_default_is_token() {
+        assert_eq!(SecretType::default(), SecretType::Token);
+    }
 }

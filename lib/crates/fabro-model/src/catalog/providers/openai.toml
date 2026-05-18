@@ -6,7 +6,7 @@ base_url = "https://api.openai.com/v1"
 priority = 90
 
 [providers.openai.auth]
-credentials = ["credential:openai", "credential:openai_codex", "env:OPENAI_API_KEY"]
+credentials = ["env:OPENAI_API_KEY", "vault:OPENAI_API_KEY", "vault:OPENAI_CODEX"]
 
 [models."gpt-5.2"]
 provider = "openai"

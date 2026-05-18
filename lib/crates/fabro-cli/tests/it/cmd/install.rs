@@ -451,6 +451,6 @@ mode = "keep-me"
         vault
             .get_entry("GITHUB_TOKEN")
             .map(|entry| entry.secret_type),
-        Some(SecretType::Environment)
+        Some(SecretType::Token)
     );
 }
