@@ -413,7 +413,7 @@ fn exec_direct_provider_auth_failure_stays_exit_1() {
     // Override anthropic base_url via settings to point to the mock server
     context.write_home(
         ".fabro/settings.toml",
-        &format!(
+        format!(
             "_version = 1\n\n[llm.providers.anthropic]\nbase_url = \"{}/v1\"\n",
             server.base_url()
         ),

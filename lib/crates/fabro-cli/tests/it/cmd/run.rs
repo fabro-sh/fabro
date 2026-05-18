@@ -358,7 +358,7 @@ fn run_uses_vault_credentials_for_worker_execution() {
     // Configure base_url via settings.toml to point to the mock server
     context.write_home(
         ".fabro/settings.toml",
-        &format!(
+        format!(
             "[server.auth]\nmethods = [\"dev-token\"]\n\n[llm.providers.anthropic]\nbase_url = \"{}/v1\"\n",
             llm_server.base_url()
         ),
