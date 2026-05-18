@@ -410,14 +410,22 @@ fn exec_direct_provider_auth_failure_stays_exit_1() {
             }));
     });
 
+    // Override anthropic base_url via settings to point to the mock server
+    context.write_home(
+        ".fabro/settings.toml",
+        &format!(
+            "_version = 1\n\n[llm.providers.anthropic]\nbase_url = \"{}/v1\"\n",
+            server.base_url()
+        ),
+    );
+
     let mut cmd = context.exec_cmd();
     cmd.env_clear();
     preserve_coverage_env!(cmd);
     cmd.env("HOME", &context.home_dir);
     cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
         .env("FABRO_HTTP_PROXY_POLICY", "disabled")
-        .env("ANTHROPIC_API_KEY", "test-key")
-        .env("ANTHROPIC_BASE_URL", format!("{}/v1", server.base_url()));
+        .env("ANTHROPIC_API_KEY", "test-key");
     cmd.args([
         "--provider",
         "anthropic",

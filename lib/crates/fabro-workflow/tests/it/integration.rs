@@ -31,6 +31,7 @@ use fabro_interview::{
     Answer, AnswerValue, AutoApproveInterviewer, CallbackInterviewer, Interviewer,
     QueueInterviewer, RecordingInterviewer,
 };
+use fabro_model::catalog::{LlmCatalogSettings, ProviderCatalogSettings};
 use fabro_model::{AgentProfileKind, Catalog, ProviderId};
 use fabro_store::{ArtifactKey, ArtifactStore, Database};
 use fabro_types::{CommandTermination, RunEvent, RunId, StageId, WorkflowSettings, parse_blob_ref};
@@ -63,6 +64,20 @@ use ulid::Ulid;
 
 fn default_catalog() -> Arc<Catalog> {
     Arc::new(Catalog::from_builtin().expect("default catalog should build"))
+}
+
+fn catalog_with_provider_base_url(provider: &str, base_url: &str) -> Arc<Catalog> {
+    let mut settings = LlmCatalogSettings::default();
+    settings
+        .providers
+        .insert(provider.to_string(), ProviderCatalogSettings {
+            base_url: Some(base_url.to_string()),
+            ..ProviderCatalogSettings::default()
+        });
+    Arc::new(
+        Catalog::from_builtin_with_overrides(&settings)
+            .expect("catalog with custom base_url should build"),
+    )
 }
 
 fn local_env() -> Arc<dyn fabro_agent::Sandbox> {
@@ -6951,14 +6966,11 @@ async fn workflow_run_with_vault_only_openai_codex_builds_pr_body() {
             None,
         )
         .unwrap();
-    let base_url = server.url("/v1");
-    let llm_source: Arc<dyn CredentialSource> = Arc::new(VaultCredentialSource::with_env_lookup(
-        Arc::new(AsyncRwLock::new(vault)),
-        move |name| match name {
-            "OPENAI_BASE_URL" => Some(base_url.clone()),
-            _ => None,
-        },
-    ));
+    let llm_source: Arc<dyn CredentialSource> = Arc::new(VaultCredentialSource::new(Arc::new(
+        AsyncRwLock::new(vault),
+    )));
+    // Use catalog settings to override base_url instead of env var
+    let catalog = catalog_with_provider_base_url("openai", &server.url("/v1"));
 
     let dir = tempfile::tempdir().unwrap();
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
@@ -7002,7 +7014,7 @@ async fn workflow_run_with_vault_only_openai_codex_builds_pr_body() {
         "gpt-5.4",
         &run_store_handle,
         llm_source.as_ref(),
-        default_catalog(),
+        catalog,
         Some(&Conclusion {
             timestamp:            Utc::now(),
             status:               StageOutcome::Succeeded,

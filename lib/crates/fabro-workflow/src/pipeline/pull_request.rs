@@ -679,6 +679,7 @@ mod tests {
     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
     use fabro_llm::types::{FinishReason, Message, Request, Response, StreamEvent, TokenCounts};
     use fabro_model::ProviderId;
+    use fabro_model::catalog::{LlmCatalogSettings, ProviderCatalogSettings};
     use fabro_store::Database;
     use fabro_types::{
         BilledTokenCounts, RunProjection, RunSpec, SuccessReason, WorkflowSettings,
@@ -780,6 +781,20 @@ mod tests {
 
     fn test_catalog() -> Arc<Catalog> {
         Arc::new(Catalog::from_builtin().expect("default catalog should build"))
+    }
+
+    fn test_catalog_with_provider_base_url(provider: &str, base_url: &str) -> Arc<Catalog> {
+        let mut settings = LlmCatalogSettings::default();
+        settings
+            .providers
+            .insert(provider.to_string(), ProviderCatalogSettings {
+                base_url: Some(base_url.to_string()),
+                ..ProviderCatalogSettings::default()
+            });
+        Arc::new(
+            Catalog::from_builtin_with_overrides(&settings)
+                .expect("catalog with custom base_url should build"),
+        )
     }
 
     fn explicit_client(provider_name: &str, text: &str) -> Arc<Client> {
@@ -1335,15 +1350,11 @@ mod tests {
                 None,
             )
             .unwrap();
-        let base_url = server.url("/v1");
-        let llm_source: Arc<dyn CredentialSource> =
-            Arc::new(VaultCredentialSource::with_env_lookup(
-                Arc::new(AsyncRwLock::new(vault)),
-                move |name| match name {
-                    "OPENAI_BASE_URL" => Some(base_url.clone()),
-                    _ => None,
-                },
-            ));
+        let llm_source: Arc<dyn CredentialSource> = Arc::new(VaultCredentialSource::new(Arc::new(
+            AsyncRwLock::new(vault),
+        )));
+        // Use catalog settings to override base_url instead of env var
+        let catalog = test_catalog_with_provider_base_url("openai", &server.url("/v1"));
 
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
@@ -1355,7 +1366,7 @@ mod tests {
             "gpt-5.4",
             &run_store_handle,
             llm_source.as_ref(),
-            test_catalog(),
+            catalog,
             Some(&make_test_conclusion()),
             None,
         )
@@ -1776,6 +1787,7 @@ mod tests {
         openai_mock_id: usize,
         github_mock_id: usize,
         llm_source:     Arc<dyn CredentialSource>,
+        catalog:        Arc<Catalog>,
         creds:          fabro_github::GitHubCredentials,
         run_store:      RunStoreHandle,
     }
@@ -1834,15 +1846,11 @@ mod tests {
                 None,
             )
             .unwrap();
-        let base_url = openai_server.url("/v1");
-        let llm_source: Arc<dyn CredentialSource> =
-            Arc::new(VaultCredentialSource::with_env_lookup(
-                Arc::new(AsyncRwLock::new(vault)),
-                move |name| match name {
-                    "OPENAI_BASE_URL" => Some(base_url.clone()),
-                    _ => None,
-                },
-            ));
+        let llm_source: Arc<dyn CredentialSource> = Arc::new(VaultCredentialSource::new(Arc::new(
+            AsyncRwLock::new(vault),
+        )));
+        // Use catalog settings to override base_url instead of env var
+        let catalog = test_catalog_with_provider_base_url("openai", &openai_server.url("/v1"));
 
         let creds = fabro_github::GitHubCredentials::Pat("test-token".to_string());
 
@@ -1917,6 +1925,7 @@ mod tests {
             openai_mock_id,
             github_mock_id,
             llm_source,
+            catalog,
             creds,
             run_store: run_store.into(),
         }
@@ -1945,7 +1954,7 @@ mod tests {
             auto_merge: None,
             run_store: &harness.run_store,
             llm_source: harness.llm_source.as_ref(),
-            catalog: test_catalog(),
+            catalog: harness.catalog.clone(),
             conclusion: None,
             run_state: None,
         })
@@ -1982,7 +1991,7 @@ mod tests {
             auto_merge: None,
             run_store: &harness.run_store,
             llm_source: harness.llm_source.as_ref(),
-            catalog: test_catalog(),
+            catalog: harness.catalog.clone(),
             conclusion: None,
             run_state: None,
         })

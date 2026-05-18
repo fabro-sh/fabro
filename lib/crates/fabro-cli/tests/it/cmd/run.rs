@@ -84,7 +84,7 @@ fn run_completed_event(run_id: &str) -> serde_json::Value {
     })
 }
 
-fn seed_anthropic_vault(storage_dir: &std::path::Path, base_url: &str) {
+fn seed_anthropic_vault(storage_dir: &std::path::Path) {
     let mut vault =
         Vault::load(Storage::new(storage_dir).secrets_path()).expect("test vault should load");
     vault
@@ -101,14 +101,6 @@ fn seed_anthropic_vault(storage_dir: &std::path::Path, base_url: &str) {
             None,
         )
         .expect("Anthropic credential should store in test vault");
-    vault
-        .set(
-            "ANTHROPIC_BASE_URL",
-            base_url,
-            SecretType::Environment,
-            None,
-        )
-        .expect("Anthropic base URL should store in test vault");
 }
 
 fn run_running_event(run_id: &str, seq: u32) -> serde_json::Value {
@@ -362,17 +354,18 @@ fn run_create_failure_shows_action_context_and_response_body() {
 #[test]
 fn run_uses_vault_credentials_for_worker_execution() {
     let mut context = test_context!();
+    let llm_server = MockServer::start();
+    // Configure base_url via settings.toml to point to the mock server
     context.write_home(
         ".fabro/settings.toml",
-        "[server.auth]\nmethods = [\"dev-token\"]\n",
+        &format!(
+            "[server.auth]\nmethods = [\"dev-token\"]\n\n[llm.providers.anthropic]\nbase_url = \"{}/v1\"\n",
+            llm_server.base_url()
+        ),
     );
     context.isolated_server();
     let run_id = unique_run_id();
-    let llm_server = MockServer::start();
-    seed_anthropic_vault(
-        &context.storage_dir,
-        &format!("{}/v1", llm_server.base_url()),
-    );
+    seed_anthropic_vault(&context.storage_dir);
 
     let llm_mock = llm_server.mock(|when, then| {
         when.method("POST")

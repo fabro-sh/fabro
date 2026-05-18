@@ -7,8 +7,8 @@ use axum::http::{Request, StatusCode};
 use fabro_config::{RunLayer, RunSandboxLayer, ServerSettingsBuilder};
 use fabro_server::server::{AppState, spawn_scheduler};
 use fabro_server::test_support::{
-    build_test_router, test_app_state as server_test_app_state,
-    test_app_state_with_runtime_settings_and_env_lookup,
+    TestAppStateBuilder, build_test_router, llm_catalog_settings_with_provider_base_url,
+    test_app_state as server_test_app_state, test_app_state_with_runtime_settings_and_env_lookup,
     test_app_state_with_runtime_settings_and_options_and_registry_factory,
 };
 use fabro_test::{
@@ -121,18 +121,19 @@ pub(crate) fn test_app_with_no_providers() -> axum::Router {
 }
 
 pub(crate) fn test_app_with_mock_anthropic(mock_base_url: &str) -> axum::Router {
-    let base_url = mock_base_url.to_string();
     let settings = test_settings();
-    let state = test_app_state_with_runtime_settings_and_env_lookup(
-        settings.server_settings,
-        settings.manifest_run_defaults,
-        5,
-        move |name| match name {
+    let state = TestAppStateBuilder::new()
+        .runtime_settings(settings.server_settings, settings.manifest_run_defaults)
+        .max_concurrent_runs(5)
+        .llm_catalog_settings(llm_catalog_settings_with_provider_base_url(
+            "anthropic",
+            mock_base_url,
+        ))
+        .env_lookup(|name| match name {
             "ANTHROPIC_API_KEY" => Some("test-key".to_string()),
-            "ANTHROPIC_BASE_URL" => Some(base_url.clone()),
             _ => None,
-        },
-    );
+        })
+        .build();
     build_test_router(state)
 }
 
