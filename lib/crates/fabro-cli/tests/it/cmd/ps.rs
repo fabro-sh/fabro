@@ -200,8 +200,9 @@ fn ps_all_json_lists_created_and_completed_runs() {
     let runs: Vec<Value> = serde_json::from_slice(&output.stdout).expect("ps JSON should parse");
     assert_eq!(runs.len(), 2, "expected submitted + completed runs");
     assert!(
-        runs.iter().all(|run| run["workflow_name"] == "Simple"),
-        "all runs should belong to the Simple workflow: {runs:#?}"
+        runs.iter()
+            .all(|run| run["workflow_name"].is_null() && run["workflow_graph_name"] == "Simple"),
+        "all runs should expose Simple as the graph name, not a workflow name: {runs:#?}"
     );
     assert!(
         runs.iter()
@@ -318,7 +319,8 @@ fn ps_filters_by_workflow_and_label() {
         "workflow+label filter should isolate one run"
     );
     let run = &runs[0];
-    assert_eq!(run["workflow_name"], "Simple");
+    assert!(run["workflow_name"].is_null());
+    assert_eq!(run["workflow_graph_name"], "Simple");
     assert_eq!(run["status"]["kind"], "succeeded");
     assert_eq!(run["status"]["reason"], "completed");
     assert_eq!(run["labels"]["suite"], "alpha");

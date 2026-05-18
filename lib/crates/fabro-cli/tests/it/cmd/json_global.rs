@@ -144,19 +144,20 @@ fn ps_supports_global_flag_and_env_var() {
             .expect("ps output should be an array")
             .iter()
             .map(|run| {
+                let nullable_string = |field: &str| {
+                    run.get(field)
+                        .unwrap_or_else(|| panic!("{field} should be present"))
+                        .as_str()
+                        .map(str::to_string)
+                };
                 (
                     run["run_id"]
                         .as_str()
                         .expect("run_id should be present")
                         .to_string(),
-                    run["workflow_name"]
-                        .as_str()
-                        .expect("workflow_name should be present")
-                        .to_string(),
-                    run["workflow_slug"]
-                        .as_str()
-                        .expect("workflow_slug should be present")
-                        .to_string(),
+                    nullable_string("workflow_name"),
+                    nullable_string("workflow_graph_name"),
+                    nullable_string("workflow_slug"),
                     run["goal"]
                         .as_str()
                         .expect("goal should be present")

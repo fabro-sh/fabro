@@ -148,7 +148,8 @@ pub(crate) fn remote_run_summary_json(
         "goal": goal,
         "workflow": {
             "slug": workflow_slug,
-            "name": workflow_name
+            "name": workflow_name,
+            "graph_name": null
         },
         "repository": {
             "name": "repo",

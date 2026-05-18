@@ -3175,6 +3175,28 @@ async fn create_run_for_target(app: &Router, target_path: &str, dot_source: &str
     body["id"].as_str().unwrap().to_string()
 }
 
+async fn create_run_for_target_with_workflow_name(
+    app: &Router,
+    target_path: &str,
+    dot_source: &str,
+    workflow_name: &str,
+) -> String {
+    let mut manifest = manifest_json(target_path, dot_source);
+    manifest["workflows"][target_path]["config"] = serde_json::json!({
+        "path": "workflow.toml",
+        "source": format!("_version = 1\n\n[workflow]\nname = {workflow_name:?}\n"),
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri(api("/runs"))
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_string(&manifest).unwrap()))
+        .unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    let body = body_json(response.into_body()).await;
+    body["id"].as_str().unwrap().to_string()
+}
+
 fn named_workflow_dot(name: &str, goal: &str) -> String {
     format!(
         r#"digraph {name} {{
@@ -5254,16 +5276,18 @@ async fn resolve_run_prefers_most_recent_exact_workflow_slug_match() {
 #[tokio::test]
 async fn resolve_run_prefers_most_recent_collapsed_workflow_name_match() {
     let app = test_app_with();
-    let older_id = create_run_for_target(
+    let older_id = create_run_for_target_with_workflow_name(
         &app,
         "nightly-alpha.fabro",
-        &named_workflow_dot("Nightly_Build", "older"),
+        &named_workflow_dot("OlderNightlyGraph", "older"),
+        "Nightly_Build",
     )
     .await;
-    let newer_id = create_run_for_target(
+    let newer_id = create_run_for_target_with_workflow_name(
         &app,
         "nightly-beta.fabro",
-        &named_workflow_dot("Nightly_Build", "newer"),
+        &named_workflow_dot("NewerNightlyGraph", "newer"),
+        "Nightly_Build",
     )
     .await;
 
@@ -7331,7 +7355,7 @@ async fn create_run_persists_run_spec() {
 }
 
 #[tokio::test]
-async fn create_run_persists_backfilled_project_and_workflow_names() {
+async fn create_run_keeps_missing_project_and_workflow_names_absent() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
 
@@ -7385,14 +7409,9 @@ async fn create_run_persists_backfilled_project_and_workflow_names() {
         .await
         .unwrap();
 
-    assert_eq!(
-        run_state.spec.settings.project.name.as_deref(),
-        Some("project")
-    );
-    assert_eq!(
-        run_state.spec.settings.workflow.name.as_deref(),
-        Some("Demo")
-    );
+    assert_eq!(run_state.spec.settings.project.name.as_deref(), None);
+    assert_eq!(run_state.spec.settings.workflow.name.as_deref(), None);
+    assert_eq!(run_state.spec.graph_name(), Some("Demo"));
 }
 
 #[tokio::test]
@@ -10778,7 +10797,8 @@ async fn boards_runs_returns_run_list_items_with_board_columns() {
     assert!(item["title"].is_string());
     assert!(item["repository"].is_object());
     assert!(item["workflow"]["slug"].is_string() || item["workflow"]["slug"].is_null());
-    assert!(item["workflow"]["name"].is_string());
+    assert!(item["workflow"]["name"].is_string() || item["workflow"]["name"].is_null());
+    assert!(item["workflow"]["graph_name"].is_string());
     assert!(item["labels"].is_object());
     assert!(run_json_status(item).is_object());
     assert!(item["timestamps"]["created_at"].is_string());
