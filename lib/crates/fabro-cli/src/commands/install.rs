@@ -21,7 +21,7 @@ use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{MultiSelect, Select};
 use fabro_api::types::{CreateSecretRequest, SecretType as ApiSecretType};
-use fabro_auth::{AuthMethod, LoginResult, codex_oauth_config};
+use fabro_auth::{AuthMethod, LoginResult, OPENAI_CODEX_VAULT_SECRET_NAME, codex_oauth_config};
 use fabro_client::{AuthEntry, AuthStore, DevTokenEntry, ServerTarget};
 use fabro_config::bind::Bind;
 use fabro_config::daemon::ServerDaemon;
@@ -108,18 +108,10 @@ fn provider_env_var_label(provider: &ProviderId, catalog: &Catalog) -> String {
 }
 
 fn provider_vault_secret_name(provider: &ProviderId, catalog: &Catalog) -> String {
-    catalog
-        .provider(provider)
-        .and_then(|provider| provider.auth.as_ref())
-        .and_then(|auth| {
-            auth.credentials
-                .iter()
-                .find_map(|credential| match credential {
-                    CredentialRef::Vault(name) => Some(name.clone()),
-                    CredentialRef::Env(_) => None,
-                })
-        })
-        .unwrap_or_else(|| format!("{}_API_KEY", provider.to_string().to_uppercase()))
+    catalog.provider_vault_secret_name(provider).map_or_else(
+        || format!("{}_API_KEY", provider.to_string().to_uppercase()),
+        str::to_string,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1236,7 +1228,7 @@ fn credential_secret_request(result: &LoginResult) -> Result<CreateSecretRequest
             description: None,
         }),
         LoginResult::OAuth { credential, .. } => Ok(CreateSecretRequest {
-            name:        "OPENAI_CODEX".to_string(),
+            name:        OPENAI_CODEX_VAULT_SECRET_NAME.to_string(),
             value:       serde_json::to_string(credential)?,
             type_:       ApiSecretType::Oauth,
             description: None,

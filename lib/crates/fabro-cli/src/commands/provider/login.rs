@@ -1,7 +1,6 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use fabro_api::types;
-use fabro_auth::LoginResult;
-use fabro_model::{Catalog, CredentialRef, ProviderId};
+use fabro_auth::{LoginResult, OPENAI_CODEX_VAULT_SECRET_NAME};
 use fabro_util::terminal::Styles;
 
 use crate::args::ProviderLoginArgs;
@@ -38,11 +37,17 @@ pub(super) async fn login_command(
 
     let (name, value, type_) = match result {
         LoginResult::ApiKey { provider, key } => {
-            let name = api_key_secret_name(&provider, ctx.catalog()?.as_ref());
+            let name = ctx
+                .catalog()?
+                .provider_vault_secret_name(&provider)
+                .with_context(|| {
+                    format!("provider '{provider}' does not define a vault credential path")
+                })?
+                .to_string();
             (name, key, types::SecretType::Token)
         }
         LoginResult::OAuth { credential, .. } => (
-            "OPENAI_CODEX".to_string(),
+            OPENAI_CODEX_VAULT_SECRET_NAME.to_string(),
             serde_json::to_string(&credential)?,
             types::SecretType::Oauth,
         ),
@@ -58,19 +63,4 @@ pub(super) async fn login_command(
         .await?;
     fabro_util::printerr!(printer, "  {} Saved {}", s.green.apply_to("✔"), name);
     Ok(())
-}
-
-fn api_key_secret_name(provider: &ProviderId, catalog: &Catalog) -> String {
-    catalog
-        .provider(provider)
-        .and_then(|provider| provider.auth.as_ref())
-        .and_then(|auth| {
-            auth.credentials
-                .iter()
-                .find_map(|credential_ref| match credential_ref {
-                    CredentialRef::Vault(name) => Some(name.clone()),
-                    CredentialRef::Env(_) => None,
-                })
-        })
-        .unwrap_or_else(|| format!("{}_API_KEY", provider.to_string().to_uppercase()))
 }

@@ -25,7 +25,7 @@ use fabro_install::{
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate};
 use fabro_model::catalog::CatalogProvider;
-use fabro_model::{Catalog, CredentialRef, ProviderId};
+use fabro_model::{Catalog, ProviderId};
 use fabro_sandbox::daytona;
 use fabro_static::EnvVars;
 use fabro_store::ArtifactStore;
@@ -838,18 +838,10 @@ fn install_catalog_provider(provider: &ProviderId) -> Result<&'static CatalogPro
 }
 
 fn provider_secret_name(provider: &ProviderId) -> Result<String, String> {
-    let catalog_provider = install_catalog_provider(provider)?;
-    catalog_provider
-        .auth
-        .as_ref()
-        .and_then(|auth| {
-            auth.credentials
-                .iter()
-                .find_map(|credential_ref| match credential_ref {
-                    CredentialRef::Vault(name) => Some(name.clone()),
-                    CredentialRef::Env(_) => None,
-                })
-        })
+    install_catalog_provider(provider)?;
+    INSTALL_CATALOG
+        .provider_vault_secret_name(provider)
+        .map(str::to_string)
         .ok_or_else(|| format!("provider '{provider}' does not define a vault credential path"))
 }
 

@@ -16,7 +16,7 @@ credentials = ["env:ACME_GATEWAY_API_KEY", "vault:ACME_GATEWAY_API_KEY"]
 
 Use `fabro secret set NAME value` for API keys and PAT-style secrets. The default secret type is now `token`; `environment` and `credential` secret schemas are no longer part of the API.
 
-Server startup performs a best-effort one-time migration for old vault files and writes a backup next to the original vault before rewriting. If migration or loading fails, Fabro logs a warning and continues with an empty in-memory vault. This compatibility shim is scheduled for removal after 2026-08-18.
+Existing server-owned secrets using the removed `environment` or `credential` schemas must be re-created with the new `token`, `oauth`, or `file` schema.
 
 ## More
 

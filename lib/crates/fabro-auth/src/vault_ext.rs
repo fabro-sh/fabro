@@ -130,8 +130,13 @@ mod tests {
     #[test]
     fn vault_get_token_errors_on_oauth_entry() {
         let mut vault = temp_vault();
-        vault_set_oauth(&mut vault, "OPENAI_CODEX", &fixture()).unwrap();
-        let err = vault_get_token(&vault, "OPENAI_CODEX").unwrap_err();
+        vault_set_oauth(
+            &mut vault,
+            crate::OPENAI_CODEX_VAULT_SECRET_NAME,
+            &fixture(),
+        )
+        .unwrap();
+        let err = vault_get_token(&vault, crate::OPENAI_CODEX_VAULT_SECRET_NAME).unwrap_err();
         assert!(matches!(err, VaultLookupError::SchemaMismatch { .. }));
     }
 
@@ -139,9 +144,16 @@ mod tests {
     fn vault_get_oauth_round_trips() {
         let mut vault = temp_vault();
         let credential = fixture();
-        vault_set_oauth(&mut vault, "OPENAI_CODEX", &credential).unwrap();
+        vault_set_oauth(
+            &mut vault,
+            crate::OPENAI_CODEX_VAULT_SECRET_NAME,
+            &credential,
+        )
+        .unwrap();
         assert_eq!(
-            vault_get_oauth(&vault, "OPENAI_CODEX").unwrap().unwrap(),
+            vault_get_oauth(&vault, crate::OPENAI_CODEX_VAULT_SECRET_NAME)
+                .unwrap()
+                .unwrap(),
             credential,
         );
     }

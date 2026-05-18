@@ -137,8 +137,7 @@ use crate::server_secrets::{LlmClientResult, ServerSecrets};
 use crate::spawn_env::{apply_render_graph_env, apply_worker_env};
 use crate::worker_token::{WorkerTokenKeys, issue_worker_token};
 use crate::{
-    canonical_host, demo, diagnostics, run_manifest, security_headers, static_files,
-    vault_legacy_migration, web_auth,
+    canonical_host, demo, diagnostics, run_manifest, security_headers, static_files, web_auth,
 };
 
 mod handler;
@@ -1557,40 +1556,8 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         shutdown,
     } = config;
 
-    match vault_legacy_migration::migrate_legacy_vault_file(&vault_path) {
-        Ok(report) if report.changed() => {
-            let backup_path = report
-                .backup_path
-                .as_ref()
-                .map_or_else(|| "<none>".to_string(), |path| path.display().to_string());
-            warn!(
-                migrated_entries = report.migrated_entries,
-                skipped_entries = report.skipped_entries,
-                backup_path = %backup_path,
-                removal_deadline = vault_legacy_migration::REMOVAL_DEADLINE,
-                "Migrated legacy vault file"
-            );
-        }
-        Ok(_) => {}
-        Err(err) => {
-            warn!(
-                error = %err,
-                removal_deadline = vault_legacy_migration::REMOVAL_DEADLINE,
-                "Legacy vault migration failed; continuing with normal vault load"
-            );
-        }
-    }
-    let vault = match Vault::load(vault_path.clone()) {
-        Ok(vault) => vault,
-        Err(err) => {
-            warn!(
-                error = %err,
-                removal_deadline = vault_legacy_migration::REMOVAL_DEADLINE,
-                "Vault load failed after legacy migration; continuing with empty vault"
-            );
-            Vault::empty(vault_path)
-        }
-    };
+    let vault = Vault::load(vault_path.clone())
+        .with_context(|| format!("load vault {}", vault_path.display()))?;
     let vault = Arc::new(AsyncRwLock::new(vault));
     let llm_source: Arc<dyn CredentialSource> = Arc::new(VaultCredentialSource::with_env_lookup(
         Arc::clone(&vault),

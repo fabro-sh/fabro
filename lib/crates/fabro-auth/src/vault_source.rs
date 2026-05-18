@@ -111,7 +111,12 @@ mod tests {
     async fn resolve_returns_credentials_and_auth_issues() {
         let dir = tempfile::tempdir().unwrap();
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
-        vault_set_oauth(&mut vault, "OPENAI_CODEX", &expired_openai_credential()).unwrap();
+        vault_set_oauth(
+            &mut vault,
+            crate::OPENAI_CODEX_VAULT_SECRET_NAME,
+            &expired_openai_credential(),
+        )
+        .unwrap();
         vault_set_token(&mut vault, "ANTHROPIC_API_KEY", "anthropic-key").unwrap();
 
         let source =

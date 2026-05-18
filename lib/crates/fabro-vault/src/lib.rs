@@ -62,13 +62,6 @@ pub struct Vault {
 }
 
 impl Vault {
-    pub fn empty(path: PathBuf) -> Self {
-        Self {
-            path,
-            entries: HashMap::new(),
-        }
-    }
-
     pub fn load(path: PathBuf) -> Result<Self, Error> {
         let entries = match std::fs::read_to_string(&path) {
             Ok(contents) => serde_json::from_str(&contents)?,

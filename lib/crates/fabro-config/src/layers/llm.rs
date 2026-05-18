@@ -367,8 +367,8 @@ agent_profile = "gemini"
     }
 
     #[test]
-    fn header_value_ref_parses_credential_form() {
-        let parsed: HeaderValueRef = toml::from_str(r#"value = { credential = "portkey_config" }"#)
+    fn header_value_ref_parses_vault_form() {
+        let parsed: HeaderValueRef = toml::from_str(r#"value = { vault = "portkey_config" }"#)
             .map(|v: toml::Value| {
                 v.as_table()
                     .unwrap()
@@ -380,10 +380,7 @@ agent_profile = "gemini"
             })
             .unwrap();
 
-        assert_eq!(
-            parsed,
-            HeaderValueRef::Credential("portkey_config".to_string())
-        );
+        assert_eq!(parsed, HeaderValueRef::Vault("portkey_config".to_string()));
         assert_eq!(parsed.to_string(), "vault:portkey_config");
     }
 
@@ -457,7 +454,7 @@ agent_profile = "gemini"
         for source in [
             r#"value = { literal = "" }"#,
             r#"value = { env = "" }"#,
-            r#"value = { credential = "" }"#,
+            r#"value = { vault = "" }"#,
         ] {
             let err = toml::from_str::<Wrap>(source).unwrap_err();
             assert!(err.to_string().contains("must not be empty"));
@@ -509,7 +506,7 @@ base_url = "https://api.portkey.ai/v1"
 [providers.portkey.extra_headers]
 x-portkey-api-key = { env = "PORTKEY_API_KEY" }
 x-portkey-provider = { literal = "@bedrock-prod" }
-x-portkey-config = { credential = "portkey_config" }
+x-portkey-config = { vault = "portkey_config" }
 "#;
 
         let layer: LlmLayer = toml::from_str(toml).unwrap();
@@ -527,7 +524,7 @@ x-portkey-config = { credential = "portkey_config" }
         );
         assert_eq!(
             headers.get("x-portkey-config"),
-            Some(&HeaderValueRef::Credential("portkey_config".to_string())),
+            Some(&HeaderValueRef::Vault("portkey_config".to_string())),
         );
     }
 
