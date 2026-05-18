@@ -1002,7 +1002,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "description": null,
               "graph": "workflow.fabro",
               "metadata": {},
-              "name": "HumanGate"
+              "name": null
             }
           },
           "source_directory": "[TEMP_DIR]",

@@ -14,7 +14,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     id:               "01ABC",
     goal:             "Fix the build",
     title:            "Fix the build",
-    workflow:         { slug: "fix_build", name: "Fix Build" },
+    workflow:         { slug: "fix_build", name: "Fix Build", graph_name: "FixBuild" },
     automation:       null,
     repository:       { name: "myrepo", origin_url: null, provider: "unknown" },
     created_by:       null,
@@ -77,7 +77,7 @@ describe("mapRunListItem", () => {
     const item = mapRunListItem(summary);
     expect(item.id).toBe("01ABC");
     expect(item.title).toBe("Server supplied title");
-    expect(item.workflow).toBe("fix_build");
+    expect(item.workflow).toBe("Fix Build");
     expect(item.repo).toBe("myrepo");
     expect(item.sourceDirectory).toBe("/home/user/myrepo");
     expect(item.elapsed).toBeDefined();
@@ -107,7 +107,7 @@ describe("mapRunToRunItem", () => {
     const item = mapRunToRunItem(summary);
     expect(item.id).toBe("01ABC");
     expect(item.title).toBe("Fix the build");
-    expect(item.workflow).toBe("fix_build");
+    expect(item.workflow).toBe("Fix Build");
     expect(item.repo).toBe("myrepo");
     expect(item.sourceDirectory).toBe("/home/user/myrepo");
     expect(item.elapsed).toBeDefined();
@@ -121,7 +121,7 @@ describe("mapRunToRunItem", () => {
       id:               "01DEF",
       goal:             "",
       title:            "",
-      workflow:         { slug: null, name: "unknown" },
+      workflow:         { slug: null, name: null, graph_name: null },
       source_directory: null,
       repository:       { name: "unknown", origin_url: null, provider: "unknown" },
       ...withStatus({ kind: "submitted" }),
@@ -141,6 +141,18 @@ describe("mapRunToRunItem", () => {
     expect(item.workflow).toBe("unknown");
     expect(item.repo).toBe("unknown");
     expect(item.sourceDirectory).toBeUndefined();
+  });
+
+  test("falls back to graph name and slug for workflow labels", () => {
+    const graphFallback = mapRunToRunItem(
+      makeRun({ workflow: { slug: "fix_build", name: null, graph_name: "FixBuild" } }),
+    );
+    const slugFallback = mapRunToRunItem(
+      makeRun({ workflow: { slug: "fix_build", name: null, graph_name: null } }),
+    );
+
+    expect(graphFallback.workflow).toBe("FixBuild");
+    expect(slugFallback.workflow).toBe("fix_build");
   });
 
   test("recognizes canonical blocked and queued run statuses", () => {
