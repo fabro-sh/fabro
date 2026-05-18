@@ -35,6 +35,19 @@ if os.environ.get("ACP_PID_RECORD"):
     with open(os.environ["ACP_PID_RECORD"], "w", encoding="utf-8") as record:
         record.write(str(os.getpid()))
 
+if os.environ.get("ACP_ENV_RECORD"):
+    keys = [
+        key.strip()
+        for key in os.environ.get(
+            "ACP_ENV_RECORD_KEYS",
+            "ANTHROPIC_API_KEY,OPENAI_API_KEY,GEMINI_API_KEY",
+        ).split(",")
+        if key.strip()
+    ]
+    snapshot = {key: os.environ[key] for key in keys if key in os.environ}
+    with open(os.environ["ACP_ENV_RECORD"], "w", encoding="utf-8") as record:
+        record.write(json.dumps(snapshot, sort_keys=True))
+
 def handle_sigterm(signum, frame):
     if os.environ.get("ACP_LINGER_TERMINATED"):
         with open(os.environ["ACP_LINGER_TERMINATED"], "w", encoding="utf-8") as record:
