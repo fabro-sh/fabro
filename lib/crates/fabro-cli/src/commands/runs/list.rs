@@ -49,6 +49,7 @@ pub(crate) async fn list_command(
                     "run_id": run.run_id(),
                     "parent_id": run.parent_id(),
                     "workflow_name": run.workflow_name(),
+                    "workflow_graph_name": run.workflow_graph_name(),
                     "workflow_slug": run.workflow_slug(),
                     "status": run.status(),
                     "start_time": run.start_time(),
@@ -138,7 +139,7 @@ pub(crate) async fn list_command(
                 );
             }
             row.extend([
-                run.workflow_name().cell(),
+                run.workflow_display_name().cell(),
                 status_cell(run.status(), use_color),
                 dir_display.cell(),
                 duration_display.cell(),

@@ -124,6 +124,25 @@ impl RunSpec {
     }
 
     #[must_use]
+    pub fn workflow_name(&self) -> Option<&str> {
+        self.settings.workflow.name.as_deref()
+    }
+
+    #[must_use]
+    pub fn graph_name(&self) -> Option<&str> {
+        if self.graph.name.is_empty() {
+            None
+        } else {
+            Some(self.graph.name.as_str())
+        }
+    }
+
+    #[must_use]
+    pub fn project_name(&self) -> Option<&str> {
+        self.settings.project.name.as_deref()
+    }
+
+    #[must_use]
     pub fn source_directory(&self) -> Option<&str> {
         self.source_directory.as_deref()
     }

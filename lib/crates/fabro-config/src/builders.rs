@@ -452,6 +452,14 @@ impl WorkflowSettingsBuilder {
         Ok(self.workflow_layer(layer))
     }
 
+    pub fn workflow_toml_with_run_layer(self, source: &str, run: RunLayer) -> Result<Self> {
+        let mut layer = source
+            .parse::<SettingsLayer>()
+            .map_err(|err| Error::parse("Failed to parse settings file", err))?;
+        layer.run = Some(run);
+        Ok(self.workflow_layer(layer))
+    }
+
     pub fn workflow_file(self, path: &Path) -> Result<Self> {
         Ok(self.workflow_layer(run::load_run_config(path)?))
     }

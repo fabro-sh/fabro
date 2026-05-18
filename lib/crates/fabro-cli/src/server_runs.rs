@@ -25,12 +25,35 @@ impl ServerRunInfo {
         self.run.parent_id
     }
 
-    pub(crate) fn workflow_name(&self) -> String {
-        self.run.workflow.name.clone()
+    pub(crate) fn workflow_name(&self) -> Option<&str> {
+        self.run.workflow.name.as_deref()
+    }
+
+    pub(crate) fn workflow_graph_name(&self) -> Option<&str> {
+        self.run.workflow.graph_name.as_deref()
     }
 
     pub(crate) fn workflow_slug(&self) -> Option<&str> {
         self.run.workflow.slug.as_deref()
+    }
+
+    pub(crate) fn workflow_display_name(&self) -> String {
+        self.workflow_name()
+            .or_else(|| self.workflow_graph_name())
+            .or_else(|| self.workflow_slug())
+            .unwrap_or("-")
+            .to_string()
+    }
+
+    pub(crate) fn workflow_matches(&self, pattern: &str) -> bool {
+        [
+            self.workflow_name(),
+            self.workflow_graph_name(),
+            self.workflow_slug(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|value| value.contains(pattern))
     }
 
     pub(crate) fn status(&self) -> RunStatus {
@@ -132,7 +155,7 @@ pub(crate) fn filter_server_runs(
                 start_time.is_empty() || start_time.as_str() < before
             })
         })
-        .filter(|run| workflow.is_none_or(|pattern| run.workflow_name().contains(pattern)))
+        .filter(|run| workflow.is_none_or(|pattern| run.workflow_matches(pattern)))
         .filter(|run| {
             labels.iter().all(|(key, value)| {
                 run.labels()

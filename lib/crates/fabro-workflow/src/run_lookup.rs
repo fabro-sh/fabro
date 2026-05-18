@@ -62,17 +62,46 @@ impl RunInfo {
             .expect("RunInfo must have a run id")
     }
 
-    pub fn workflow_name(&self) -> String {
-        self.summary.as_ref().map_or_else(
-            || "[no run spec]".to_string(),
-            |summary| summary.workflow.name.clone(),
-        )
+    pub fn workflow_name(&self) -> Option<&str> {
+        self.summary
+            .as_ref()
+            .and_then(|summary| summary.workflow.name.as_deref())
+    }
+
+    pub fn workflow_graph_name(&self) -> Option<&str> {
+        self.summary
+            .as_ref()
+            .and_then(|summary| summary.workflow.graph_name.as_deref())
     }
 
     pub fn workflow_slug(&self) -> Option<&str> {
         self.summary
             .as_ref()
             .and_then(|summary| summary.workflow.slug.as_deref())
+    }
+
+    pub fn workflow_display_name(&self) -> String {
+        self.summary.as_ref().map_or_else(
+            || "[no run spec]".to_string(),
+            |_| {
+                self.workflow_name()
+                    .or_else(|| self.workflow_graph_name())
+                    .or_else(|| self.workflow_slug())
+                    .unwrap_or("-")
+                    .to_string()
+            },
+        )
+    }
+
+    fn workflow_matches(&self, pattern: &str) -> bool {
+        [
+            self.workflow_name(),
+            self.workflow_graph_name(),
+            self.workflow_slug(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|value| value.contains(pattern))
     }
 
     pub fn status(&self) -> RunStatus {
@@ -300,7 +329,7 @@ pub fn filter_runs(
                 }
             }
             if let Some(pattern) = workflow {
-                if !run.workflow_name().contains(pattern) {
+                if !run.workflow_matches(pattern) {
                     return false;
                 }
             }
@@ -352,7 +381,7 @@ fn resolve_run_from_infos(runs: &[RunInfo], identifier: &str) -> Result<RunInfo>
                         "{} created_at={} workflow={} origin={}",
                         run.run_id(),
                         run.run_id().created_at().to_rfc3339(),
-                        run.workflow_name(),
+                        run.workflow_display_name(),
                         run.repo_origin_url().unwrap_or("-")
                     )
                 })
@@ -376,9 +405,14 @@ fn resolve_run_from_infos(runs: &[RunInfo], identifier: &str) -> Result<RunInfo>
                     return true;
                 }
             }
-            let name_lower = run.workflow_name().to_lowercase();
-            name_lower.contains(&id_lower)
-                || collapse_separators(&name_lower).contains(&id_collapsed)
+            [run.workflow_name(), run.workflow_graph_name()]
+                .into_iter()
+                .flatten()
+                .any(|name| {
+                    let name_lower = name.to_lowercase();
+                    name_lower.contains(&id_lower)
+                        || collapse_separators(&name_lower).contains(&id_collapsed)
+                })
         })
         .max_by_key(|run| run.run_id().created_at());
 

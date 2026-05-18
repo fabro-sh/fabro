@@ -33,20 +33,21 @@ pub(super) type ToolResult<T> = Result<T, ToolError>;
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct RunSummaryResult {
-    pub(crate) run_id:           String,
-    pub(crate) parent_id:        Option<String>,
-    pub(crate) children_count:   u64,
-    pub(crate) workflow_name:    String,
-    pub(crate) workflow_slug:    Option<String>,
-    pub(crate) status:           String,
-    pub(crate) archived:         bool,
-    pub(crate) created_at:       String,
-    pub(crate) started_at:       Option<String>,
-    pub(crate) completed_at:     Option<String>,
-    pub(crate) labels:           HashMap<String, String>,
-    pub(crate) source_directory: Option<String>,
-    pub(crate) repo_origin_url:  Option<String>,
-    pub(crate) goal:             String,
+    pub(crate) run_id:              String,
+    pub(crate) parent_id:           Option<String>,
+    pub(crate) children_count:      u64,
+    pub(crate) workflow_name:       Option<String>,
+    pub(crate) workflow_graph_name: Option<String>,
+    pub(crate) workflow_slug:       Option<String>,
+    pub(crate) status:              String,
+    pub(crate) archived:            bool,
+    pub(crate) created_at:          String,
+    pub(crate) started_at:          Option<String>,
+    pub(crate) completed_at:        Option<String>,
+    pub(crate) labels:              HashMap<String, String>,
+    pub(crate) source_directory:    Option<String>,
+    pub(crate) repo_origin_url:     Option<String>,
+    pub(crate) goal:                String,
 }
 
 pub(crate) fn success_result<T: Serialize>(
@@ -91,29 +92,30 @@ pub(super) async fn retrieve_run(client: &Client, run_id: &RunId) -> ToolResult<
 
 pub(super) fn run_summary_result(run: &Run) -> RunSummaryResult {
     RunSummaryResult {
-        run_id:           run.id.to_string(),
-        parent_id:        run.parent_id.map(|parent_id| parent_id.to_string()),
-        children_count:   run.children_count,
-        workflow_name:    run.workflow.name.clone(),
-        workflow_slug:    run.workflow.slug.clone(),
-        status:           run_status_kind(run.lifecycle.status).to_string(),
-        archived:         run.lifecycle.archived,
-        created_at:       run.timestamps.created_at.to_rfc3339(),
-        started_at:       run
+        run_id:              run.id.to_string(),
+        parent_id:           run.parent_id.map(|parent_id| parent_id.to_string()),
+        children_count:      run.children_count,
+        workflow_name:       run.workflow.name.clone(),
+        workflow_graph_name: run.workflow.graph_name.clone(),
+        workflow_slug:       run.workflow.slug.clone(),
+        status:              run_status_kind(run.lifecycle.status).to_string(),
+        archived:            run.lifecycle.archived,
+        created_at:          run.timestamps.created_at.to_rfc3339(),
+        started_at:          run
             .timestamps
             .started_at
             .map(|timestamp| timestamp.to_rfc3339()),
-        completed_at:     run
+        completed_at:        run
             .timestamps
             .completed_at
             .map(|timestamp| timestamp.to_rfc3339()),
-        labels:           run.labels.clone(),
-        source_directory: run.source_directory.clone(),
-        repo_origin_url:  run
+        labels:              run.labels.clone(),
+        source_directory:    run.source_directory.clone(),
+        repo_origin_url:     run
             .repository
             .as_ref()
             .and_then(|repository| repository.origin_url.clone()),
-        goal:             run.goal.clone(),
+        goal:                run.goal.clone(),
     }
 }
 
@@ -161,8 +163,9 @@ mod tests {
             title:            "test".to_string(),
             goal:             "test".to_string(),
             workflow:         WorkflowRef {
-                slug: Some("simple".to_string()),
-                name: "Simple".to_string(),
+                slug:       Some("simple".to_string()),
+                name:       Some("Simple".to_string()),
+                graph_name: Some("GraphName".to_string()),
             },
             automation:       None,
             repository:       None,
@@ -200,6 +203,8 @@ mod tests {
 
         assert_eq!(summary.parent_id, Some(parent_id.to_string()));
         assert_eq!(summary.children_count, 3);
+        assert_eq!(summary.workflow_name.as_deref(), Some("Simple"));
+        assert_eq!(summary.workflow_graph_name.as_deref(), Some("GraphName"));
     }
 
     fn run_id(raw: &str) -> RunId {

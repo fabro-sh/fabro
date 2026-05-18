@@ -85,7 +85,7 @@ export function mapRunListItem(item: Run): RunItem {
     id: item.id,
     repo: displayRepoName(item.repository?.name ?? "unknown"),
     title: displayRunTitle(item.title),
-    workflow: item.workflow.slug ?? item.workflow.name ?? "unknown",
+    workflow: item.workflow.name ?? item.workflow.graph_name ?? item.workflow.slug ?? "unknown",
     column: columnForRun(item) ?? undefined,
     lifecycleStatus,
     lifecycleStatusLabel: lifecycleStatusLabel(item.lifecycle.status, item.lifecycle.archived),

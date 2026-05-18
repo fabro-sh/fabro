@@ -29,8 +29,9 @@ fn run_summary_json_matches_openapi_shape() {
         title:            "API title".to_string(),
         goal:             String::new(),
         workflow:         WorkflowRef {
-            slug: Some("workflow".to_string()),
-            name: "workflow".to_string(),
+            slug:       Some("workflow".to_string()),
+            name:       Some("Ship workflow".to_string()),
+            graph_name: Some("GraphName".to_string()),
         },
         automation:       None,
         repository:       Some(RepositoryRef {
@@ -89,7 +90,8 @@ fn run_summary_json_matches_openapi_shape() {
             "goal": "",
             "workflow": {
                 "slug": "workflow",
-                "name": "workflow"
+                "name": "Ship workflow",
+                "graph_name": "GraphName"
             },
             "automation": null,
             "repository": {
@@ -159,7 +161,8 @@ fn run_summary_deserializes_when_optional_fields_are_absent() {
         "title": "ship it",
         "workflow": {
             "slug": null,
-            "name": "unnamed"
+            "name": null,
+            "graph_name": "GraphName"
         },
         "origin": {
             "kind": "api"
@@ -191,7 +194,8 @@ fn run_summary_deserializes_when_optional_fields_are_absent() {
 
     assert_eq!(summary.id, run_id);
     assert_eq!(summary.children_count, 0);
-    assert_eq!(summary.workflow.name, "unnamed");
+    assert_eq!(summary.workflow.name, None);
+    assert_eq!(summary.workflow.graph_name.as_deref(), Some("GraphName"));
     assert_eq!(summary.workflow.slug, None);
     assert_eq!(summary.goal, "ship it");
     assert_eq!(summary.title, "ship it");

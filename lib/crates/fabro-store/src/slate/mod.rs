@@ -626,7 +626,8 @@ mod tests {
         assert_eq!(summary.len(), 2);
         assert_eq!(summary[0].id, test_run_id("run-2"));
         assert_eq!(summary[1].id, test_run_id("run-1"));
-        assert_eq!(summary[1].workflow.name, "night-sky");
+        assert_eq!(summary[1].workflow.name, None);
+        assert_eq!(summary[1].workflow.graph_name.as_deref(), Some("night-sky"));
         assert_eq!(summary[1].goal, "map the constellations");
         assert_eq!(summary[1].lifecycle.status, RunStatus::Succeeded {
             reason: SuccessReason::Completed,

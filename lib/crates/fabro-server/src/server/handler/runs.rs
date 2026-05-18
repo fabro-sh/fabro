@@ -431,7 +431,7 @@ async fn resolve_run(
         &query.selector,
         |run| run.id.to_string(),
         |run| run.workflow.slug.clone(),
-        |run| Some(run.workflow.name.clone()),
+        |run| run.workflow.name.clone(),
         |run| run.id.created_at(),
         |run| run.id.created_at().to_rfc3339(),
         |run| {

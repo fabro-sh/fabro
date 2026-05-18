@@ -101,7 +101,7 @@ pub(crate) async fn resolve_run(
         &params.selector,
         |run| run.id.to_string(),
         |run| run.workflow.slug.clone(),
-        |run| Some(run.workflow.name.clone()),
+        |run| run.workflow.name.clone(),
         |run| run.timestamps.created_at,
         |run| run.timestamps.created_at.to_rfc3339(),
         |run| {
@@ -1061,8 +1061,9 @@ mod runs {
             title: fabro_types::infer_run_title(goal),
             goal: goal.into(),
             workflow: WorkflowRef {
-                slug: Some(workflow_slug.into()),
-                name: workflow_name.into(),
+                slug:       Some(workflow_slug.into()),
+                name:       Some(workflow_name.into()),
+                graph_name: None,
             },
             automation: None,
             repository: Some(RepositoryRef::from_origin_and_source(

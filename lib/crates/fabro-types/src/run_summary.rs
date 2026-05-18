@@ -49,8 +49,11 @@ pub struct Run {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowRef {
     #[serde(default)]
-    pub slug: Option<String>,
-    pub name: String,
+    pub slug:       Option<String>,
+    #[serde(default)]
+    pub name:       Option<String>,
+    #[serde(default)]
+    pub graph_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

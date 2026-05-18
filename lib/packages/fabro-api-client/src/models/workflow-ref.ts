@@ -16,6 +16,7 @@
 
 export interface WorkflowRef {
     'slug': string | null;
-    'name': string;
+    'name': string | null;
+    'graph_name': string | null;
 }
 

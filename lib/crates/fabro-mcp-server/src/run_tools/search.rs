@@ -84,21 +84,22 @@ pub(crate) struct SearchRunsResult {
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct SearchRunSummaryResult {
-    pub(crate) run_id:           String,
-    pub(crate) parent_id:        Option<String>,
-    pub(crate) children_count:   u64,
-    pub(crate) workflow_name:    String,
-    pub(crate) workflow_slug:    Option<String>,
-    pub(crate) status:           String,
-    pub(crate) archived:         bool,
-    pub(crate) created_at:       String,
-    pub(crate) started_at:       Option<String>,
-    pub(crate) completed_at:     Option<String>,
-    pub(crate) labels:           HashMap<String, String>,
-    pub(crate) source_directory: Option<String>,
-    pub(crate) repo_origin_url:  Option<String>,
-    pub(crate) goal_preview:     String,
-    pub(crate) goal_truncated:   bool,
+    pub(crate) run_id:              String,
+    pub(crate) parent_id:           Option<String>,
+    pub(crate) children_count:      u64,
+    pub(crate) workflow_name:       Option<String>,
+    pub(crate) workflow_graph_name: Option<String>,
+    pub(crate) workflow_slug:       Option<String>,
+    pub(crate) status:              String,
+    pub(crate) archived:            bool,
+    pub(crate) created_at:          String,
+    pub(crate) started_at:          Option<String>,
+    pub(crate) completed_at:        Option<String>,
+    pub(crate) labels:              HashMap<String, String>,
+    pub(crate) source_directory:    Option<String>,
+    pub(crate) repo_origin_url:     Option<String>,
+    pub(crate) goal_preview:        String,
+    pub(crate) goal_truncated:      bool,
 }
 
 pub(crate) async fn search_runs(
@@ -145,6 +146,7 @@ fn search_run_summary_result(run: &Run) -> SearchRunSummaryResult {
         parent_id,
         children_count,
         workflow_name,
+        workflow_graph_name,
         workflow_slug,
         status,
         archived,
@@ -163,6 +165,7 @@ fn search_run_summary_result(run: &Run) -> SearchRunSummaryResult {
         parent_id,
         children_count,
         workflow_name,
+        workflow_graph_name,
         workflow_slug,
         status,
         archived,
@@ -206,7 +209,9 @@ fn filter_sort_and_page_runs(
     }
     if let Some(workflow) = raw.workflow.as_deref() {
         runs.retain(|run| {
-            run.workflow.name == workflow || run.workflow.slug.as_deref() == Some(workflow)
+            run.workflow.name.as_deref() == Some(workflow)
+                || run.workflow.graph_name.as_deref() == Some(workflow)
+                || run.workflow.slug.as_deref() == Some(workflow)
         });
     }
     if let Some(labels) = raw.labels.as_ref() {
@@ -363,6 +368,8 @@ mod tests {
 
         assert_eq!(summary.parent_id, Some(parent_id.to_string()));
         assert_eq!(summary.children_count, 4);
+        assert_eq!(summary.workflow_name.as_deref(), Some("Simple"));
+        assert_eq!(summary.workflow_graph_name.as_deref(), Some("GraphName"));
         assert!(summary.goal_truncated);
         assert!(summary.goal_preview.len() < run.goal.len());
         assert!(!summary.goal_preview.contains("tail-marker"));
@@ -427,8 +434,9 @@ mod tests {
             title:            "test".to_string(),
             goal:             "test".to_string(),
             workflow:         WorkflowRef {
-                slug: Some("simple".to_string()),
-                name: "Simple".to_string(),
+                slug:       Some("simple".to_string()),
+                name:       Some("Simple".to_string()),
+                graph_name: Some("GraphName".to_string()),
             },
             automation:       None,
             repository:       None,

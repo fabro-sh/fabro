@@ -626,11 +626,6 @@ fn stage_at_completed_visit<'a>(
 }
 
 pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> Run {
-    let workflow_name = if state.spec.graph.name.is_empty() {
-        "unnamed".to_string()
-    } else {
-        state.spec.graph.name.clone()
-    };
     let goal = state.spec.graph.goal().to_string();
     let diff_summary = state
         .conclusion
@@ -683,8 +678,9 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> Run {
         title: state.title().into_owned(),
         goal,
         workflow: WorkflowRef {
-            slug: state.spec.workflow_slug.clone(),
-            name: workflow_name,
+            slug:       state.spec.workflow_slug.clone(),
+            name:       state.spec.workflow_name().map(ToOwned::to_owned),
+            graph_name: state.spec.graph_name().map(ToOwned::to_owned),
         },
         automation: None,
         repository: Some(RepositoryRef::from_origin_and_source(
@@ -2036,6 +2032,42 @@ mod tests {
             summary_json["lifecycle"]["status"],
             json!({ "kind": "submitted" })
         );
+    }
+
+    #[test]
+    fn summary_preserves_absent_workflow_name_and_reports_graph_name() {
+        let mut state = initialized_projection();
+        state.spec = fabro_types::RunSpec {
+            run_id:           fixtures::RUN_1,
+            settings:         WorkflowSettings::default(),
+            graph:            fabro_types::Graph::new("GraphName"),
+            graph_source:     None,
+            workflow_slug:    Some("release-flow".to_string()),
+            source_directory: Some("/tmp/repo".to_string()),
+            git:              None,
+            labels:           HashMap::new(),
+            provenance:       None,
+            manifest_blob:    None,
+            definition_blob:  None,
+            fork_source_ref:  None,
+        };
+
+        let summary = build_summary(&state, &fixtures::RUN_1);
+
+        assert_eq!(summary.workflow.name, None);
+        assert_eq!(summary.workflow.graph_name.as_deref(), Some("GraphName"));
+        assert_eq!(summary.workflow.slug.as_deref(), Some("release-flow"));
+    }
+
+    #[test]
+    fn summary_uses_explicit_workflow_name() {
+        let mut state = initialized_projection();
+        state.spec.settings.workflow.name = Some("Ship workflow".to_string());
+
+        let summary = build_summary(&state, &fixtures::RUN_1);
+
+        assert_eq!(summary.workflow.name.as_deref(), Some("Ship workflow"));
+        assert_eq!(summary.workflow.graph_name.as_deref(), Some("test"));
     }
 
     #[test]

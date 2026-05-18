@@ -1364,7 +1364,7 @@ fn build_disk_usage_response(
         if verbose {
             run_rows.push(DiskUsageRunRow {
                 run_id:        Some(run.run_id().to_string()),
-                workflow_name: Some(run.workflow_name()),
+                workflow_name: Some(run.workflow_display_name()),
                 status:        Some(run.status().to_string()),
                 start_time:    Some(run.start_time()),
                 size_bytes:    Some(to_i64(size)),
@@ -1459,7 +1459,7 @@ fn build_prune_plan(
         .map(|run| PruneRunEntry {
             run_id:        Some(run.run_id().to_string()),
             dir_name:      Some(run.dir_name.clone()),
-            workflow_name: Some(run.workflow_name()),
+            workflow_name: Some(run.workflow_display_name()),
             size_bytes:    Some(to_i64(dir_size(&run.path))),
         })
         .collect::<Vec<_>>();

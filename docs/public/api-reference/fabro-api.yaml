@@ -7386,12 +7386,14 @@ components:
 
     WorkflowRef:
       type: object
-      required: [slug, name]
+      required: [slug, name, graph_name]
       properties:
         slug:
           type: ["string", "null"]
         name:
-          type: string
+          type: ["string", "null"]
+        graph_name:
+          type: ["string", "null"]
 
     AutomationRef:
       type: object
