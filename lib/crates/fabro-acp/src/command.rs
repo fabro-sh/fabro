@@ -25,8 +25,7 @@ impl AcpProcessSpec {
         match (command, config) {
             (Some(command), None) => Self::from_command_attr(command),
             (None, Some(config)) => Self::from_config_attr(config),
-            (None, None) => Err(AcpCommandError::MissingOverride),
-            (Some(_), Some(_)) => Err(AcpCommandError::MissingOverride),
+            (None, None) | (Some(_), Some(_)) => Err(AcpCommandError::MissingOverride),
         }
     }
 
