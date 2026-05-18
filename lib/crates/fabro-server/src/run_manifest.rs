@@ -14,6 +14,7 @@ use fabro_config::{
     parse_input_overrides, parse_labels,
 };
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
+use fabro_graphviz::parser;
 use fabro_graphviz::render::apply_direction;
 use fabro_llm::model_test::{ModelTestStatus, run_basic_model_probe};
 use fabro_model::{Catalog, ProviderId};
@@ -221,7 +222,7 @@ fn infer_workflow_name(
 ) -> Option<String> {
     infer_explicit_workflow_name(workflow_config_source)
         .or_else(|| {
-            fabro_graphviz::parser::parse(root_source)
+            parser::parse(root_source)
                 .ok()
                 .map(|graph| graph.name)
                 .filter(|name| !name.is_empty())
