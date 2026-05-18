@@ -144,25 +144,6 @@ impl Vault {
         self.entries.get(name)
     }
 
-    pub fn snapshot(&self) -> HashMap<String, String> {
-        self.entries
-            .iter()
-            .filter(|(_, entry)| entry.secret_type == SecretType::Environment)
-            .map(|(name, entry)| (name.clone(), entry.value.clone()))
-            .collect()
-    }
-
-    pub fn credential_entries(&self) -> Vec<(&str, &SecretEntry)> {
-        let mut data = self
-            .entries
-            .iter()
-            .filter(|(_, entry)| entry.secret_type == SecretType::Credential)
-            .map(|(name, entry)| (name.as_str(), entry))
-            .collect::<Vec<_>>();
-        data.sort_by(|a, b| a.0.cmp(b.0));
-        data
-    }
-
     pub fn file_secrets(&self) -> Vec<(String, String)> {
         let mut data = self
             .entries
@@ -176,7 +157,7 @@ impl Vault {
 
     pub fn validate_name(name: &str, secret_type: SecretType) -> Result<(), Error> {
         match secret_type {
-            SecretType::Environment | SecretType::Credential => Self::validate_env_name(name),
+            SecretType::Token | SecretType::Oauth => Self::validate_env_name(name),
             SecretType::File => Self::validate_file_name(name),
         }
     }
@@ -282,11 +263,11 @@ mod tests {
         let mut store = Vault::load(path.clone()).unwrap();
 
         let meta = store
-            .set("OPENAI_API_KEY", "secret", SecretType::Environment, None)
+            .set("OPENAI_API_KEY", "secret", SecretType::Token, None)
             .unwrap();
 
         assert_eq!(meta.name, "OPENAI_API_KEY");
-        assert_eq!(meta.secret_type, SecretType::Environment);
+        assert_eq!(meta.secret_type, SecretType::Token);
         assert_eq!(store.get("OPENAI_API_KEY"), Some("secret"));
         assert!(path.exists());
     }
@@ -298,10 +279,10 @@ mod tests {
         let mut store = Vault::load(path).unwrap();
 
         store
-            .set("OPENAI_API_KEY", "first", SecretType::Environment, None)
+            .set("OPENAI_API_KEY", "first", SecretType::Token, None)
             .unwrap();
         store
-            .set("OPENAI_API_KEY", "second", SecretType::Environment, None)
+            .set("OPENAI_API_KEY", "second", SecretType::Token, None)
             .unwrap();
 
         assert_eq!(store.get("OPENAI_API_KEY"), Some("second"));
@@ -313,7 +294,7 @@ mod tests {
         let path = dir.path().join("secrets.json");
         let mut store = Vault::load(path.clone()).unwrap();
         store
-            .set("OPENAI_API_KEY", "secret", SecretType::Environment, None)
+            .set("OPENAI_API_KEY", "secret", SecretType::Token, None)
             .unwrap();
 
         store.remove("OPENAI_API_KEY").unwrap();
@@ -322,19 +303,23 @@ mod tests {
     }
 
     #[test]
-    fn env_secret_snapshot_excludes_file_secrets() {
+    fn file_secrets_excludes_token_and_oauth_secrets() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Vault::load(dir.path().join("secrets.json")).unwrap();
         store
-            .set("OPENAI_API_KEY", "env", SecretType::Environment, None)
+            .set("OPENAI_API_KEY", "token", SecretType::Token, None)
+            .unwrap();
+        store
+            .set("OPENAI_CODEX", "oauth-json", SecretType::Oauth, None)
             .unwrap();
         store
             .set("/tmp/key.pem", "pem", SecretType::File, None)
             .unwrap();
 
-        let snapshot = store.snapshot();
-        assert_eq!(snapshot.get("OPENAI_API_KEY"), Some(&"env".to_string()));
-        assert!(!snapshot.contains_key("/tmp/key.pem"));
+        assert_eq!(store.file_secrets(), vec![(
+            "/tmp/key.pem".to_string(),
+            "pem".to_string()
+        )]);
     }
 
     #[test]
@@ -354,21 +339,21 @@ mod tests {
     }
 
     #[test]
-    fn list_includes_credential_entries_loaded_from_disk() {
+    fn list_includes_schema_typed_entries_loaded_from_disk() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("secrets.json");
         std::fs::write(
             &path,
             serde_json::json!({
                 "OPENAI_API_KEY": {
-                    "value": "env",
-                    "type": "environment",
+                    "value": "token",
+                    "type": "token",
                     "created_at": "2026-04-12T00:00:00Z",
                     "updated_at": "2026-04-12T00:00:00Z"
                 },
-                "openai_codex": {
-                    "value": "{\"provider\":\"openai\"}",
-                    "type": "credential",
+                "OPENAI_CODEX": {
+                    "value": "{\"tokens\":{\"access_token\":\"access\",\"refresh_token\":\"refresh\",\"expires_at\":\"2026-04-12T01:00:00Z\"},\"config\":{\"auth_url\":\"https://auth.openai.com\",\"token_url\":\"https://auth.openai.com/oauth/token\",\"client_id\":\"client\",\"scopes\":[\"openid\"],\"redirect_uri\":null,\"use_pkce\":true}}",
+                    "type": "oauth",
                     "created_at": "2026-04-12T00:00:00Z",
                     "updated_at": "2026-04-12T00:00:00Z"
                 }
@@ -379,11 +364,14 @@ mod tests {
 
         let store = Vault::load(path).unwrap();
 
-        assert_eq!(store.list().len(), 2);
-        assert_eq!(store.list()[0].name, "OPENAI_API_KEY");
-        assert_eq!(store.list()[1].name, "openai_codex");
-        assert_eq!(store.list()[1].secret_type, SecretType::Credential);
-        assert_eq!(store.get("openai_codex"), Some("{\"provider\":\"openai\"}"));
+        let list = store.list();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].name, "OPENAI_API_KEY");
+        assert_eq!(list[0].secret_type, SecretType::Token);
+        assert_eq!(list[1].name, "OPENAI_CODEX");
+        assert_eq!(list[1].secret_type, SecretType::Oauth);
+        assert_eq!(store.get("OPENAI_API_KEY"), Some("token"));
+        assert!(store.get("OPENAI_CODEX").is_some());
     }
 
     #[test]
@@ -392,38 +380,30 @@ mod tests {
         let mut store = Vault::load(dir.path().join("secrets.json")).unwrap();
         store
             .set(
-                "openai_codex",
-                "credential-json",
-                SecretType::Credential,
+                "OPENAI_CODEX",
+                "oauth-json",
+                SecretType::Oauth,
                 Some("saved auth"),
             )
             .unwrap();
 
-        let entry = store.get_entry("openai_codex").unwrap();
+        let entry = store.get_entry("OPENAI_CODEX").unwrap();
 
-        assert_eq!(entry.value, "credential-json");
-        assert_eq!(entry.secret_type, SecretType::Credential);
+        assert_eq!(entry.value, "oauth-json");
+        assert_eq!(entry.secret_type, SecretType::Oauth);
         assert_eq!(entry.description.as_deref(), Some("saved auth"));
     }
 
     #[test]
-    fn credential_entries_only_returns_credentials() {
+    fn get_entry_returns_token_entries_by_name() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Vault::load(dir.path().join("secrets.json")).unwrap();
         store
-            .set("OPENAI_API_KEY", "env", SecretType::Environment, None)
-            .unwrap();
-        store
-            .set(
-                "openai_codex",
-                "credential-json",
-                SecretType::Credential,
-                None,
-            )
+            .set("OPENAI_API_KEY", "token", SecretType::Token, None)
             .unwrap();
 
-        assert_eq!(store.credential_entries().len(), 1);
-        assert_eq!(store.credential_entries()[0].0, "openai_codex");
-        assert_eq!(store.credential_entries()[0].1.value, "credential-json");
+        let entry = store.get_entry("OPENAI_API_KEY").unwrap();
+        assert_eq!(entry.value, "token");
+        assert_eq!(entry.secret_type, SecretType::Token);
     }
 }

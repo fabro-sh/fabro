@@ -15,13 +15,13 @@
 
 
 /**
- * The way a secret is consumed by the sandbox.
+ * Schema of a stored secret.
  */
 
 export const SecretType = {
-    ENVIRONMENT: 'environment',
-    FILE: 'file',
-    CREDENTIAL: 'credential'
+    TOKEN: 'token',
+    OAUTH: 'oauth',
+    FILE: 'file'
 } as const;
 
 export type SecretType = typeof SecretType[keyof typeof SecretType];

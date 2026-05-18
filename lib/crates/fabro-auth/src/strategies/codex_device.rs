@@ -10,10 +10,8 @@ use serde_json::json;
 use tokio::time::sleep;
 
 use crate::context::{AuthContextRequest, AuthContextResponse};
-use crate::credential::{
-    AuthCredential, AuthDetails, OAuthConfig, OAuthTokens, expires_at_from_now,
-};
-use crate::strategy::AuthStrategy;
+use crate::credential::{OAuthConfig, OAuthCredential, OAuthTokens, expires_at_from_now};
+use crate::strategy::{AuthStrategy, LoginResult};
 
 const DEVICE_AUTH_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const CODEX_DEVICE_VERIFICATION_URI: &str = "https://auth.openai.com/codex/device";
@@ -276,7 +274,7 @@ impl AuthStrategy for CodexDeviceStrategy {
         })
     }
 
-    async fn complete(&mut self, response: AuthContextResponse) -> anyhow::Result<AuthCredential> {
+    async fn complete(&mut self, response: AuthContextResponse) -> anyhow::Result<LoginResult> {
         match response {
             AuthContextResponse::ApiKey { .. } => Err(anyhow::anyhow!(
                 "expected device code confirmation response"
@@ -299,9 +297,9 @@ impl AuthStrategy for CodexDeviceStrategy {
                 .await
                 .map_err(anyhow::Error::msg)?;
 
-                Ok(AuthCredential {
-                    provider: fabro_model::ProviderId::openai(),
-                    details:  AuthDetails::CodexOAuth {
+                Ok(LoginResult::OAuth {
+                    provider:   fabro_model::ProviderId::openai(),
+                    credential: OAuthCredential {
                         tokens:     OAuthTokens {
                             access_token:  token_response.access_token,
                             refresh_token: token_response.refresh_token,
@@ -536,14 +534,14 @@ mod tests {
         assert!(pending_poll_mock.calls_async().await > 0);
         pending_poll_mock.delete_async().await;
 
-        let credential = complete.await.unwrap().unwrap();
+        let result = complete.await.unwrap().unwrap();
 
-        let AuthDetails::CodexOAuth {
-            tokens, account_id, ..
-        } = credential.details
-        else {
+        let LoginResult::OAuth { credential, .. } = result else {
             panic!("expected codex oauth credential");
         };
+        let OAuthCredential {
+            tokens, account_id, ..
+        } = credential;
         assert_eq!(tokens.access_token, "new-access-token");
         assert_eq!(tokens.refresh_token.as_deref(), Some("new-refresh-token"));
         assert_eq!(account_id.as_deref(), Some("acct_123"));

@@ -1,0 +1,27 @@
+---
+title: "Explicit vault-backed provider credentials"
+date: "2026-05-18"
+---
+
+## Explicit vault-backed provider credentials
+
+Fabro now separates process environment credentials from server-owned vault credentials. Provider auth refs use `env:<NAME>` for process environment lookup and `vault:<NAME>` for explicit vault lookup. API-key secrets are stored as raw `token` values, OAuth records are stored as typed `oauth` JSON, and file material remains `file`.
+
+```toml
+[llm.providers.proxy.auth]
+credentials = ["env:ACME_GATEWAY_API_KEY", "vault:ACME_GATEWAY_API_KEY"]
+```
+
+## Migration note
+
+Use `fabro secret set NAME value` for API keys and PAT-style secrets. The default secret type is now `token`; `environment` and `credential` secret schemas are no longer part of the API.
+
+Existing server-owned secrets using the removed `environment` or `credential` schemas must be re-created with the new `token`, `oauth`, or `file` schema.
+
+## More
+
+<Accordion title="Auth model">
+- Removed the old `credential:` provider ref prefix in favor of explicit `vault:`
+- OpenAI Codex OAuth credentials now live under `vault:OPENAI_CODEX`
+- Provider catalogs now check process env first, then same-name vault entries
+</Accordion>

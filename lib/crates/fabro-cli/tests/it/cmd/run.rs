@@ -3,9 +3,7 @@
     reason = "integration tests stage fixtures with sync std::fs; test infrastructure, not Tokio-hot path"
 )]
 
-use fabro_auth::{AuthCredential, AuthDetails};
 use fabro_config::Storage;
-use fabro_model::ProviderId;
 use fabro_test::{fabro_json_snapshot, fabro_snapshot, test_context};
 use fabro_vault::{SecretType, Vault};
 use httpmock::MockServer;
@@ -89,15 +87,9 @@ fn seed_anthropic_vault(storage_dir: &std::path::Path) {
         Vault::load(Storage::new(storage_dir).secrets_path()).expect("test vault should load");
     vault
         .set(
-            "anthropic",
-            &serde_json::to_string(&AuthCredential {
-                provider: ProviderId::anthropic(),
-                details:  AuthDetails::ApiKey {
-                    key: "vault-anthropic-key".to_string(),
-                },
-            })
-            .expect("Anthropic test credential should serialize"),
-            SecretType::Credential,
+            "ANTHROPIC_API_KEY",
+            "vault-anthropic-key",
+            SecretType::Token,
             None,
         )
         .expect("Anthropic credential should store in test vault");

@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use fabro_model::{Catalog, ProviderId};
 
 use crate::context::{AuthContextRequest, AuthContextResponse};
-use crate::credential::{AuthCredential, OAuthConfig};
+use crate::credential::{OAuthConfig, OAuthCredential};
 use crate::strategies::api_key::ApiKeyStrategy;
 use crate::strategies::codex_device::CodexDeviceStrategy;
 
@@ -10,10 +10,22 @@ pub const CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 pub const CODEX_AUTH_URL: &str = "https://auth.openai.com";
 pub const CODEX_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 
+#[derive(Debug, Clone)]
+pub enum LoginResult {
+    ApiKey {
+        provider: ProviderId,
+        key:      String,
+    },
+    OAuth {
+        provider:   ProviderId,
+        credential: OAuthCredential,
+    },
+}
+
 #[async_trait]
 pub trait AuthStrategy: Send {
     async fn init(&mut self) -> anyhow::Result<AuthContextRequest>;
-    async fn complete(&mut self, response: AuthContextResponse) -> anyhow::Result<AuthCredential>;
+    async fn complete(&mut self, response: AuthContextResponse) -> anyhow::Result<LoginResult>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -37,7 +37,7 @@ No single model is best at everything. Fabro lets you assign the right model to 
 | `minimax-m2.5` | minimax | `minimax` | 197K | $0.30 / $1.20 | 45 tok/s |
 | `mercury-2` | inception | `mercury` | 131K | $0.20 / $0.80 | 1000 tok/s |
 
-Each provider requires its own API key set via environment variable (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`). See the [Quick Start](/getting-started/quick-start) for setup.
+Each provider requires its own API key set via environment variable or matching vault token (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`). See the [Quick Start](/getting-started/quick-start) for setup.
 
 ## Configuring providers and models
 
@@ -51,7 +51,7 @@ base_url = "https://llm-gateway.example.com/v1"
 aliases = ["gateway"]
 
 [llm.providers.proxy.auth]
-credentials = ["env:ACME_GATEWAY_API_KEY"]
+credentials = ["env:ACME_GATEWAY_API_KEY", "vault:ACME_GATEWAY_API_KEY"]
 
 [llm.providers.proxy.extra_headers]
 x-portkey-api-key = { env = "PORTKEY_API_KEY" }
@@ -119,7 +119,7 @@ reasoning = false
 
 `api_id` is the model name sent to the provider API. Omit it when the Fabro model ID and provider model ID are the same.
 
-Provider auth is declared in `[llm.providers.<id>.auth]` with ordered `env:<NAME>` or `credential:<id>` refs. The primary auth header defaults to `bearer`; override with `header = { custom = "Header-Name" }` for providers like Anthropic that use `x-api-key`. Omit the `[llm.providers.<id>.auth]` block entirely for providers that need no API key (e.g. Ollama). Custom headers for any provider — including providers that need only typed headers and no API-key auth — go in `extra_headers` as `{ env = "NAME" }`, `{ credential = "id" }`, or `{ literal = "value" }`.
+Provider auth is declared in `[llm.providers.<id>.auth]` with ordered `env:<NAME>` or `vault:<NAME>` refs. The primary auth header defaults to `bearer`; override with `header = { custom = "Header-Name" }` for providers like Anthropic that use `x-api-key`. Omit the `[llm.providers.<id>.auth]` block entirely for providers that need no API key (e.g. Ollama). Custom headers for any provider — including providers that need only typed headers and no API-key auth — go in `extra_headers` as `{ env = "NAME" }`, `{ vault = "NAME" }`, or `{ literal = "value" }`.
 
 Provider `agent_profile` defaults from `adapter` and controls profile-specific behavior such as project-memory filenames, CLI/ACP command selection, and native session routing. Valid values are `anthropic`, `openai`, and `gemini`; model-level values override provider-level values.
 

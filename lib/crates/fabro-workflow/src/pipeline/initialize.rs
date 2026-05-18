@@ -696,7 +696,6 @@ mod tests {
     use std::time::Duration;
 
     use fabro_acp::test_support::fake_acp_agent_script;
-    use fabro_auth::{AuthCredential, AuthDetails};
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
     use fabro_interview::AutoApproveInterviewer;
     use fabro_sandbox::SandboxSpec;
@@ -996,15 +995,9 @@ mod tests {
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
         vault
             .set(
-                "anthropic",
-                &serde_json::to_string(&AuthCredential {
-                    provider: fabro_model::ProviderId::anthropic(),
-                    details:  AuthDetails::ApiKey {
-                        key: "anthropic-key".to_string(),
-                    },
-                })
-                .unwrap(),
-                SecretType::Credential,
+                "ANTHROPIC_API_KEY",
+                "anthropic-key",
+                SecretType::Token,
                 None,
             )
             .unwrap();
@@ -1094,18 +1087,7 @@ mod tests {
 
         let mut vault = Vault::load(temp.path().join("secrets.json")).unwrap();
         vault
-            .set(
-                "openai",
-                &serde_json::to_string(&AuthCredential {
-                    provider: fabro_model::ProviderId::openai(),
-                    details:  AuthDetails::ApiKey {
-                        key: "openai-key".to_string(),
-                    },
-                })
-                .unwrap(),
-                SecretType::Credential,
-                None,
-            )
+            .set("OPENAI_API_KEY", "openai-key", SecretType::Token, None)
             .unwrap();
         let vault = Arc::new(AsyncRwLock::new(vault));
 

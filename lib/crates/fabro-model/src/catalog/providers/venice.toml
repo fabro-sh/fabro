@@ -6,7 +6,7 @@ priority = 35
 aliases = ["venice-ai"]
 
 [providers.venice.auth]
-credentials = ["credential:venice", "env:VENICE_API_KEY"]
+credentials = ["env:VENICE_API_KEY", "vault:VENICE_API_KEY"]
 
 [models."venice-uncensored-1-2"]
 provider = "venice"

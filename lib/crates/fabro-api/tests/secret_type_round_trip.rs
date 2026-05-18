@@ -12,27 +12,27 @@ fn secret_type_reuses_canonical_type() {
 #[test]
 fn secret_type_serializes_as_snake_case_strings() {
     assert_eq!(
-        serde_json::to_value(SecretType::Environment).unwrap(),
-        json!("environment")
+        serde_json::to_value(SecretType::Token).unwrap(),
+        json!("token")
+    );
+    assert_eq!(
+        serde_json::to_value(SecretType::Oauth).unwrap(),
+        json!("oauth")
     );
     assert_eq!(
         serde_json::to_value(SecretType::File).unwrap(),
         json!("file")
     );
-    assert_eq!(
-        serde_json::to_value(SecretType::Credential).unwrap(),
-        json!("credential")
-    );
 }
 
 #[test]
 fn secret_type_deserializes_each_variant() {
-    let env: SecretType = serde_json::from_value(json!("environment")).unwrap();
-    assert_eq!(env, SecretType::Environment);
+    let token: SecretType = serde_json::from_value(json!("token")).unwrap();
+    assert_eq!(token, SecretType::Token);
+    let oauth: SecretType = serde_json::from_value(json!("oauth")).unwrap();
+    assert_eq!(oauth, SecretType::Oauth);
     let file: SecretType = serde_json::from_value(json!("file")).unwrap();
     assert_eq!(file, SecretType::File);
-    let cred: SecretType = serde_json::from_value(json!("credential")).unwrap();
-    assert_eq!(cred, SecretType::Credential);
 }
 
 fn assert_same_type<T: 'static, U: 'static>() {

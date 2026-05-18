@@ -1148,7 +1148,7 @@ impl CompletionCoordinator for SteeringCompletionCoordinator {
 mod tests {
     use fabro_agent::subagent::SessionFactory;
     use fabro_agent::{AgentProfile, ToolRegistry};
-    use fabro_auth::{AuthCredential, AuthDetails, EnvCredentialSource, VaultCredentialSource};
+    use fabro_auth::{EnvCredentialSource, VaultCredentialSource};
     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
     use fabro_llm::{Error as LlmError, ProviderErrorDetail, ProviderErrorKind};
     use fabro_vault::{SecretType, Vault};
@@ -1534,15 +1534,9 @@ reasoning = false
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
         vault
             .set(
-                "anthropic",
-                &serde_json::to_string(&AuthCredential {
-                    provider: ProviderId::anthropic(),
-                    details:  AuthDetails::ApiKey {
-                        key: "anthropic-key".to_string(),
-                    },
-                })
-                .unwrap(),
-                SecretType::Credential,
+                "ANTHROPIC_API_KEY",
+                "anthropic-key",
+                SecretType::Token,
                 None,
             )
             .unwrap();

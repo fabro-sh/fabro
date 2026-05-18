@@ -154,14 +154,14 @@ pub struct CostRates {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
 pub enum CredentialRef {
-    Credential(String),
+    Vault(String),
     Env(String),
 }
 
 impl std::fmt::Display for CredentialRef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Credential(id) => write!(f, "credential:{id}"),
+            Self::Vault(name) => write!(f, "vault:{name}"),
             Self::Env(name) => write!(f, "env:{name}"),
         }
     }
@@ -177,11 +177,11 @@ impl FromStr for CredentialRef {
     type Err = CredentialRefParseError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        if let Some(id) = value.strip_prefix("credential:") {
-            if id.is_empty() {
-                return Err(CredentialRefParseError::EmptyCredential);
+        if let Some(name) = value.strip_prefix("vault:") {
+            if name.is_empty() {
+                return Err(CredentialRefParseError::EmptyVault);
             }
-            return Ok(Self::Credential(id.to_string()));
+            return Ok(Self::Vault(name.to_string()));
         }
         if let Some(name) = value.strip_prefix("env:") {
             if name.is_empty() {
@@ -203,10 +203,10 @@ impl TryFrom<String> for CredentialRef {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CredentialRefParseError {
-    #[error("credential reference must be `credential:<id>` or `env:<NAME>`")]
+    #[error("credential reference must be `vault:<name>` or `env:<NAME>`")]
     Invalid,
-    #[error("credential reference is missing an ID after `credential:`")]
-    EmptyCredential,
+    #[error("credential reference is missing a name after `vault:`")]
+    EmptyVault,
     #[error("credential reference is missing a name after `env:`")]
     EmptyEnv,
 }
@@ -313,7 +313,7 @@ pub enum BillingPolicy {
 pub enum HeaderValueRef {
     Literal(String),
     Env(String),
-    Credential(String),
+    Vault(String),
 }
 
 impl Serialize for HeaderValueRef {
@@ -327,7 +327,7 @@ impl Serialize for HeaderValueRef {
         match self {
             Self::Literal(value) => map.serialize_entry("literal", value)?,
             Self::Env(value) => map.serialize_entry("env", value)?,
-            Self::Credential(value) => map.serialize_entry("credential", value)?,
+            Self::Vault(value) => map.serialize_entry("vault", value)?,
         }
         map.end()
     }
@@ -338,7 +338,7 @@ impl std::fmt::Display for HeaderValueRef {
         match self {
             Self::Literal(_) => f.write_str("literal:<redacted>"),
             Self::Env(name) => write!(f, "env:{name}"),
-            Self::Credential(id) => write!(f, "credential:{id}"),
+            Self::Vault(id) => write!(f, "vault:{id}"),
         }
     }
 }
@@ -354,11 +354,11 @@ enum HeaderValueRefInput {
 #[serde(deny_unknown_fields)]
 struct HeaderValueRefSerde {
     #[serde(default)]
-    literal:    Option<String>,
+    literal: Option<String>,
     #[serde(default)]
-    env:        Option<String>,
+    env:     Option<String>,
     #[serde(default)]
-    credential: Option<String>,
+    vault:   Option<String>,
 }
 
 impl<'de> Deserialize<'de> for HeaderValueRef {
@@ -385,7 +385,7 @@ impl TryFrom<HeaderValueRefSerde> for HeaderValueRef {
         let populated = [
             value.literal.as_ref(),
             value.env.as_ref(),
-            value.credential.as_ref(),
+            value.vault.as_ref(),
         ]
         .into_iter()
         .flatten()
@@ -399,8 +399,8 @@ impl TryFrom<HeaderValueRefSerde> for HeaderValueRef {
         if let Some(value) = value.env {
             return non_empty_header_value(value).map(Self::Env);
         }
-        if let Some(value) = value.credential {
-            return non_empty_header_value(value).map(Self::Credential);
+        if let Some(value) = value.vault {
+            return non_empty_header_value(value).map(Self::Vault);
         }
         unreachable!("populated field count was already checked");
     }
@@ -416,7 +416,7 @@ fn non_empty_header_value(value: String) -> Result<String, HeaderValueRefParseEr
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum HeaderValueRefParseError {
-    #[error("header value must contain exactly one of `literal`, `env`, or `credential`")]
+    #[error("header value must contain exactly one of `literal`, `env`, or `vault`")]
     WrongFieldCount,
     #[error("header value reference must not be empty")]
     EmptyValue,
@@ -783,6 +783,19 @@ impl Catalog {
         self.provider_index
             .get(canonical)
             .and_then(|idx| self.providers.get(*idx))
+    }
+
+    #[must_use]
+    pub fn provider_vault_secret_name(&self, id: &ProviderId) -> Option<&str> {
+        self.provider(id)?
+            .auth
+            .as_ref()?
+            .credentials
+            .iter()
+            .find_map(|credential_ref| match credential_ref {
+                CredentialRef::Vault(name) => Some(name.as_str()),
+                CredentialRef::Env(_) => None,
+            })
     }
 
     #[must_use]
@@ -2713,7 +2726,7 @@ display_name = "Bearer"
 adapter = "openai"
 
 [providers.bearer.auth]
-credentials = ["credential:bearer", "env:BEARER_API_KEY"]
+credentials = ["env:BEARER_API_KEY", "vault:BEARER_API_KEY"]
 
 [providers.custom]
 display_name = "Custom"
@@ -2744,8 +2757,8 @@ billing_policy = "none"
             bearer.auth,
             Some(ProviderAuthConfig {
                 credentials: vec![
-                    CredentialRef::Credential("bearer".to_string()),
                     CredentialRef::Env("BEARER_API_KEY".to_string()),
+                    CredentialRef::Vault("BEARER_API_KEY".to_string()),
                 ],
                 header:      ApiKeyHeaderPolicy::Bearer,
             })

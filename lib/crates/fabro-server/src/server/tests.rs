@@ -11,7 +11,6 @@ use axum::body::Body;
 use axum::http::{Method, Request, header};
 use axum::response::sse::{Event as SseEvent, Sse};
 use chrono::{Duration as ChronoDuration, Utc};
-use fabro_auth::{AuthCredential, AuthDetails};
 use fabro_config::ServerSettingsBuilder;
 use fabro_config::bind::Bind;
 use fabro_interview::{
@@ -223,13 +222,27 @@ async fn mock_daytona_current_key<'a>(
         .await
 }
 
-fn openai_api_key_credential(key: &str) -> AuthCredential {
-    AuthCredential {
-        provider: ProviderId::openai(),
-        details:  AuthDetails::ApiKey {
-            key: key.to_string(),
+fn openai_oauth_credential() -> fabro_auth::OAuthCredential {
+    fabro_auth::OAuthCredential {
+        tokens:     fabro_auth::OAuthTokens {
+            access_token:  "access".to_string(),
+            refresh_token: Some("refresh".to_string()),
+            expires_at:    Utc::now() + ChronoDuration::hours(1),
         },
+        config:     fabro_auth::OAuthConfig {
+            auth_url:     "https://auth.openai.com".to_string(),
+            token_url:    "https://auth.openai.com/oauth/token".to_string(),
+            client_id:    "client".to_string(),
+            scopes:       vec!["openid".to_string()],
+            redirect_uri: Some("https://auth.openai.com/deviceauth/callback".to_string()),
+            use_pkce:     true,
+        },
+        account_id: Some("acct_123".to_string()),
     }
+}
+
+fn openai_oauth_credential_json() -> String {
+    serde_json::to_string(&openai_oauth_credential()).unwrap()
 }
 
 fn openai_responses_payload(text: &str) -> serde_json::Value {
@@ -982,7 +995,7 @@ fn clone_sandbox_credentials_are_available_for_clone_based_providers() {
 }
 
 #[tokio::test]
-async fn create_secret_stores_file_secret_and_excludes_it_from_snapshot() {
+async fn create_secret_stores_file_secret_outside_token_lookups() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let req = Request::builder()
@@ -1007,7 +1020,10 @@ async fn create_secret_stores_file_secret_and_excludes_it_from_snapshot() {
     assert_eq!(body["description"], "Test certificate");
 
     let vault = state.vault.read().await;
-    assert!(!vault.snapshot().contains_key("/tmp/test.pem"));
+    assert_eq!(
+        vault.get_entry("/tmp/test.pem").unwrap().secret_type,
+        SecretType::File
+    );
     assert_eq!(vault.file_secrets(), vec![(
         "/tmp/test.pem".to_string(),
         "pem-data".to_string()
@@ -1083,30 +1099,9 @@ async fn github_webhook_accepts_valid_signature_with_wrong_bearer_token() {
 }
 
 #[tokio::test]
-async fn create_secret_stores_valid_credential_entries() {
+async fn create_secret_stores_valid_oauth_entries() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
-    let credential = fabro_auth::AuthCredential {
-        provider: ProviderId::openai(),
-        details:  fabro_auth::AuthDetails::CodexOAuth {
-            tokens:     fabro_auth::OAuthTokens {
-                access_token:  "access".to_string(),
-                refresh_token: Some("refresh".to_string()),
-                expires_at:    chrono::DateTime::parse_from_rfc3339("2030-01-01T00:00:00Z")
-                    .unwrap()
-                    .with_timezone(&chrono::Utc),
-            },
-            config:     fabro_auth::OAuthConfig {
-                auth_url:     "https://auth.openai.com".to_string(),
-                token_url:    "https://auth.openai.com/oauth/token".to_string(),
-                client_id:    "client".to_string(),
-                scopes:       vec!["openid".to_string()],
-                redirect_uri: Some("https://auth.openai.com/deviceauth/callback".to_string()),
-                use_pkce:     true,
-            },
-            account_id: Some("acct_123".to_string()),
-        },
-    };
 
     let req = Request::builder()
         .method("POST")
@@ -1114,9 +1109,9 @@ async fn create_secret_stores_valid_credential_entries() {
         .header("content-type", "application/json")
         .body(Body::from(
             serde_json::to_string(&serde_json::json!({
-                "name": "openai_codex",
-                "value": serde_json::to_string(&credential).unwrap(),
-                "type": "credential"
+                "name": "OPENAI_CODEX",
+                "value": openai_oauth_credential_json(),
+                "type": "oauth"
             }))
             .unwrap(),
         ))
@@ -1126,9 +1121,9 @@ async fn create_secret_stores_valid_credential_entries() {
     assert_status!(response, StatusCode::OK).await;
     let listed = state.vault.read().await.list();
     assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].name, "openai_codex");
-    assert_eq!(listed[0].secret_type, SecretType::Credential);
-    assert!(state.vault.read().await.get("openai_codex").is_some());
+    assert_eq!(listed[0].name, "OPENAI_CODEX");
+    assert_eq!(listed[0].secret_type, SecretType::Oauth);
+    assert!(state.vault.read().await.get("OPENAI_CODEX").is_some());
 }
 
 #[tokio::test]
@@ -1158,7 +1153,7 @@ async fn create_secret_rejects_under_scoped_daytona_api_key_and_leaves_vault_unc
         .set(
             EnvVars::DAYTONA_API_KEY,
             "existing",
-            SecretType::Environment,
+            SecretType::Token,
             None,
         )
         .unwrap();
@@ -1172,7 +1167,7 @@ async fn create_secret_rejects_under_scoped_daytona_api_key_and_leaves_vault_unc
             serde_json::to_string(&serde_json::json!({
                 "name": EnvVars::DAYTONA_API_KEY,
                 "value": "dtn_test",
-                "type": "environment"
+                "type": "token"
             }))
             .unwrap(),
         ))
@@ -1222,7 +1217,7 @@ async fn diagnostics_reports_under_scoped_daytona_api_key() {
         .set(
             EnvVars::DAYTONA_API_KEY,
             "dtn_test",
-            SecretType::Environment,
+            SecretType::Token,
             None,
         )
         .unwrap();
@@ -1257,7 +1252,7 @@ async fn diagnostics_reports_under_scoped_daytona_api_key() {
 }
 
 #[tokio::test]
-async fn resolve_llm_client_reads_openai_codex_credential_from_vault() {
+async fn resolve_llm_client_reads_openai_token_from_vault() {
     let state = test_app_state_with_env_lookup(
         default_test_server_settings(),
         RunLayer::default(),
@@ -1269,9 +1264,9 @@ async fn resolve_llm_client_reads_openai_codex_credential_from_vault() {
         .write()
         .await
         .set(
-            "openai_codex",
-            &serde_json::to_string(&openai_api_key_credential("vault-openai-key")).unwrap(),
-            SecretType::Credential,
+            "OPENAI_API_KEY",
+            "vault-openai-key",
+            SecretType::Token,
             None,
         )
         .unwrap();
@@ -1325,7 +1320,7 @@ async fn resolve_llm_client_from_source_preserves_credential_source_chain() {
 }
 
 #[tokio::test]
-async fn llm_source_configured_providers_reads_openai_codex_from_vault() {
+async fn llm_source_configured_providers_reads_openai_token_from_vault() {
     let state = test_app_state_with_env_lookup(
         default_test_server_settings(),
         RunLayer::default(),
@@ -1337,9 +1332,9 @@ async fn llm_source_configured_providers_reads_openai_codex_from_vault() {
         .write()
         .await
         .set(
-            "openai_codex",
-            &serde_json::to_string(&openai_api_key_credential("vault-openai-key")).unwrap(),
-            SecretType::Credential,
+            "OPENAI_API_KEY",
+            "vault-openai-key",
+            SecretType::Token,
             None,
         )
         .unwrap();
@@ -1382,9 +1377,9 @@ async fn resolve_llm_client_uses_env_lookup_for_openai_settings() {
         .write()
         .await
         .set(
-            "openai_codex",
-            &serde_json::to_string(&openai_api_key_credential("vault-openai-key")).unwrap(),
-            SecretType::Credential,
+            "OPENAI_API_KEY",
+            "vault-openai-key",
+            SecretType::Token,
             None,
         )
         .unwrap();
@@ -1416,15 +1411,15 @@ async fn resolve_llm_client_uses_env_lookup_for_openai_settings() {
 }
 
 #[tokio::test]
-async fn list_secrets_includes_credential_metadata() {
+async fn list_secrets_includes_oauth_metadata() {
     let state = test_app_state();
     {
         let mut vault = state.vault.write().await;
         vault
             .set(
-                "anthropic",
-                "{\"provider\":\"anthropic\"}",
-                SecretType::Credential,
+                "OPENAI_CODEX",
+                &openai_oauth_credential_json(),
+                SecretType::Oauth,
                 Some("saved auth"),
             )
             .unwrap();
@@ -1446,16 +1441,16 @@ async fn list_secrets_includes_credential_metadata() {
     let data = body["data"].as_array().expect("data should be an array");
     let entry = data
         .iter()
-        .find(|entry| entry["name"] == "anthropic")
-        .expect("credential metadata should be listed");
-    assert_eq!(entry["type"], "credential");
+        .find(|entry| entry["name"] == "OPENAI_CODEX")
+        .expect("oauth metadata should be listed");
+    assert_eq!(entry["type"], "oauth");
     assert_eq!(entry["description"], "saved auth");
     assert!(entry.get("updated_at").is_some());
     assert!(entry.get("value").is_none());
 }
 
 #[tokio::test]
-async fn create_secret_rejects_invalid_credential_json() {
+async fn create_secret_rejects_invalid_oauth_json() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(state);
 
@@ -1465,9 +1460,9 @@ async fn create_secret_rejects_invalid_credential_json() {
         .header("content-type", "application/json")
         .body(Body::from(
             serde_json::to_string(&serde_json::json!({
-                "name": "openai_codex",
+                "name": "OPENAI_CODEX",
                 "value": "{not-json",
-                "type": "credential"
+                "type": "oauth"
             }))
             .unwrap(),
         ))
@@ -1478,7 +1473,7 @@ async fn create_secret_rejects_invalid_credential_json() {
 }
 
 #[tokio::test]
-async fn create_secret_rejects_wrong_credential_name() {
+async fn create_secret_rejects_invalid_oauth_name() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(state);
 
@@ -1488,26 +1483,9 @@ async fn create_secret_rejects_wrong_credential_name() {
         .header("content-type", "application/json")
         .body(Body::from(
             serde_json::to_string(&serde_json::json!({
-                "name": "openai",
-                "value": serde_json::to_string(&serde_json::json!({
-                    "provider": "openai",
-                    "type": "codex_oauth",
-                    "tokens": {
-                        "access_token": "access",
-                        "refresh_token": "refresh",
-                        "expires_at": "2030-01-01T00:00:00Z"
-                    },
-                    "config": {
-                        "auth_url": "https://auth.openai.com",
-                        "token_url": "https://auth.openai.com/oauth/token",
-                        "client_id": "client",
-                        "scopes": ["openid"],
-                        "redirect_uri": "https://auth.openai.com/deviceauth/callback",
-                        "use_pkce": true
-                    }
-                }))
-                .unwrap(),
-                "type": "credential"
+                "name": "1OPENAI",
+                "value": openai_oauth_credential_json(),
+                "type": "oauth"
             }))
             .unwrap(),
         ))
@@ -2593,12 +2571,7 @@ methods = ["dev-token"]
         .vault
         .write()
         .await
-        .set(
-            "openai_codex",
-            &serde_json::to_string(&openai_api_key_credential("openai-key")).unwrap(),
-            SecretType::Credential,
-            None,
-        )
+        .set("OPENAI_API_KEY", "openai-key", SecretType::Token, None)
         .unwrap();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let create_response = app
@@ -2762,12 +2735,7 @@ methods = ["dev-token"]
         .vault
         .write()
         .await
-        .set(
-            "openai_codex",
-            &serde_json::to_string(&openai_api_key_credential("openai-key")).unwrap(),
-            SecretType::Credential,
-            None,
-        )
+        .set("OPENAI_API_KEY", "openai-key", SecretType::Token, None)
         .unwrap();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let create_response = app
@@ -4523,7 +4491,7 @@ fn create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
             .vault
             .try_write()
             .expect("test vault should not already be locked")
-            .set("GITHUB_TOKEN", token, SecretType::Credential, None)
+            .set("GITHUB_TOKEN", token, SecretType::Token, None)
             .expect("test github token should be writable");
     }
     state
@@ -6210,12 +6178,7 @@ async fn create_run_pull_request_creates_and_persists_record() {
         .vault
         .write()
         .await
-        .set(
-            "openai_codex",
-            &serde_json::to_string(&openai_api_key_credential("openai-key")).unwrap(),
-            SecretType::Credential,
-            None,
-        )
+        .set("OPENAI_API_KEY", "openai-key", SecretType::Token, None)
         .unwrap();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;

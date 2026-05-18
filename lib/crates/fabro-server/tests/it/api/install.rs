@@ -941,7 +941,7 @@ async fn token_install_finish_persists_settings_env_and_vault() {
     assert!(!server_env.contains("AWS_SECRET_ACCESS_KEY="));
 
     let vault = Vault::load(fabro_config::Storage::new(temp_dir.path()).secrets_path()).unwrap();
-    assert!(vault.get("anthropic").is_some());
+    assert!(vault.get("ANTHROPIC_API_KEY").is_some());
     assert_eq!(vault.get("GITHUB_TOKEN"), Some("ghp_test_token"));
 }
 
@@ -1028,8 +1028,8 @@ async fn browser_install_finish_with_skipped_llm_persists_no_llm_credentials() {
 
     let vault = Vault::load(fabro_config::Storage::new(temp_dir.path()).secrets_path()).unwrap();
     assert!(
-        vault.credential_entries().is_empty(),
-        "skipped LLM install should not write any credential vault entries"
+        vault.get("OPENAI_API_KEY").is_none() && vault.get("OPENAI_CODEX").is_none(),
+        "skipped LLM install should not write any OpenAI vault entries"
     );
     assert_eq!(
         vault.get("GITHUB_TOKEN"),

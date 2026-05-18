@@ -40,9 +40,7 @@ pub use fabro_api::types::{
     SystemRepairRunsResponse, SystemRunCounts, TimelineEntryResponse, VncPreviewResponse,
     WriteBlobResponse,
 };
-use fabro_auth::{
-    CredentialSource, VaultCredentialSource, auth_issue_message, parse_credential_secret,
-};
+use fabro_auth::{CredentialSource, VaultCredentialSource, auth_issue_message};
 #[cfg(test)]
 use fabro_config::RunSettingsBuilder;
 use fabro_config::daemon::ServerDaemon;
@@ -1558,7 +1556,9 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         shutdown,
     } = config;
 
-    let vault = Arc::new(AsyncRwLock::new(Vault::load(vault_path)?));
+    let vault = Vault::load(vault_path.clone())
+        .with_context(|| format!("load vault {}", vault_path.display()))?;
+    let vault = Arc::new(AsyncRwLock::new(vault));
     let llm_source: Arc<dyn CredentialSource> = Arc::new(VaultCredentialSource::with_env_lookup(
         Arc::clone(&vault),
         {

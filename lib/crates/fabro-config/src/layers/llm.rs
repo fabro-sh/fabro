@@ -7,7 +7,7 @@
 //! display_name = "Kimi"
 //! adapter = "openai_compatible"
 //! base_url = "https://api.moonshot.ai/v1"
-//! auth = { credentials = ["credential:kimi", "env:KIMI_API_KEY"] }
+//! auth = { credentials = ["env:KIMI_API_KEY", "vault:KIMI_API_KEY"] }
 //! priority = 60
 //! enabled = true
 //! aliases = ["moonshot"]
@@ -212,9 +212,9 @@ mod tests {
     // ---- CredentialRef ----------------------------------------------------
 
     #[test]
-    fn credential_ref_parses_credential_form() {
-        let r = CredentialRef::from_str("credential:openai_codex").unwrap();
-        assert_eq!(r, CredentialRef::Credential("openai_codex".to_string()));
+    fn credential_ref_parses_vault_form() {
+        let r = CredentialRef::from_str("vault:OPENAI_CODEX").unwrap();
+        assert_eq!(r, CredentialRef::Vault("OPENAI_CODEX".to_string()));
     }
 
     #[test]
@@ -225,7 +225,7 @@ mod tests {
 
     #[test]
     fn credential_ref_rejects_literal_secret() {
-        // A literal API key contains no `credential:` or `env:` prefix.
+        // A literal API key contains no `vault:` or `env:` prefix.
         let err = CredentialRef::from_str("sk-ant-1234").unwrap_err();
         assert!(err.to_string().contains("must be"));
         assert!(
@@ -235,8 +235,8 @@ mod tests {
     }
 
     #[test]
-    fn credential_ref_rejects_empty_credential_id() {
-        let err = CredentialRef::from_str("credential:").unwrap_err();
+    fn credential_ref_rejects_empty_vault_name() {
+        let err = CredentialRef::from_str("vault:").unwrap_err();
         assert!(err.to_string().contains("missing"));
     }
 
@@ -248,8 +248,8 @@ mod tests {
 
     #[test]
     fn credential_ref_round_trips_through_string() {
-        let r = CredentialRef::Credential("kimi".to_string());
-        assert_eq!(r.to_string(), "credential:kimi");
+        let r = CredentialRef::Vault("kimi".to_string());
+        assert_eq!(r.to_string(), "vault:kimi");
         let back: CredentialRef = r.to_string().parse().unwrap();
         assert_eq!(back, r);
     }
@@ -263,7 +263,7 @@ mod tests {
 
     #[test]
     fn credential_ref_deserializes_from_toml_string() {
-        let parsed: CredentialRef = toml::from_str(r#"v = "credential:foo""#)
+        let parsed: CredentialRef = toml::from_str(r#"v = "vault:foo""#)
             .map(|v: toml::Value| {
                 v.as_table()
                     .unwrap()
@@ -274,7 +274,7 @@ mod tests {
                     .unwrap()
             })
             .unwrap();
-        assert_eq!(parsed, CredentialRef::Credential("foo".to_string()));
+        assert_eq!(parsed, CredentialRef::Vault("foo".to_string()));
     }
 
     #[test]
@@ -367,8 +367,8 @@ agent_profile = "gemini"
     }
 
     #[test]
-    fn header_value_ref_parses_credential_form() {
-        let parsed: HeaderValueRef = toml::from_str(r#"value = { credential = "portkey_config" }"#)
+    fn header_value_ref_parses_vault_form() {
+        let parsed: HeaderValueRef = toml::from_str(r#"value = { vault = "portkey_config" }"#)
             .map(|v: toml::Value| {
                 v.as_table()
                     .unwrap()
@@ -380,11 +380,8 @@ agent_profile = "gemini"
             })
             .unwrap();
 
-        assert_eq!(
-            parsed,
-            HeaderValueRef::Credential("portkey_config".to_string())
-        );
-        assert_eq!(parsed.to_string(), "credential:portkey_config");
+        assert_eq!(parsed, HeaderValueRef::Vault("portkey_config".to_string()));
+        assert_eq!(parsed.to_string(), "vault:portkey_config");
     }
 
     #[test]
@@ -457,7 +454,7 @@ agent_profile = "gemini"
         for source in [
             r#"value = { literal = "" }"#,
             r#"value = { env = "" }"#,
-            r#"value = { credential = "" }"#,
+            r#"value = { vault = "" }"#,
         ] {
             let err = toml::from_str::<Wrap>(source).unwrap_err();
             assert!(err.to_string().contains("must not be empty"));
@@ -479,7 +476,7 @@ enabled = true
 aliases = ["moonshot"]
 
 [providers.kimi.auth]
-credentials = ["credential:kimi", "env:KIMI_API_KEY"]
+credentials = ["env:KIMI_API_KEY", "vault:KIMI_API_KEY"]
 "#;
         let layer: LlmLayer = toml::from_str(toml).unwrap();
         let kimi = layer.providers.get("kimi").unwrap();
@@ -489,8 +486,8 @@ credentials = ["credential:kimi", "env:KIMI_API_KEY"]
         let auth = kimi.auth.as_ref().expect("expected api_key auth");
         assert_eq!(auth.header, ApiKeyHeaderPolicy::Bearer);
         assert_eq!(auth.credentials, vec![
-            CredentialRef::Credential("kimi".to_string()),
             CredentialRef::Env("KIMI_API_KEY".to_string()),
+            CredentialRef::Vault("KIMI_API_KEY".to_string()),
         ]);
         assert_eq!(kimi.base_url.as_deref(), Some("https://api.moonshot.ai/v1"));
         assert_eq!(kimi.priority, Some(60));
@@ -509,7 +506,7 @@ base_url = "https://api.portkey.ai/v1"
 [providers.portkey.extra_headers]
 x-portkey-api-key = { env = "PORTKEY_API_KEY" }
 x-portkey-provider = { literal = "@bedrock-prod" }
-x-portkey-config = { credential = "portkey_config" }
+x-portkey-config = { vault = "portkey_config" }
 "#;
 
         let layer: LlmLayer = toml::from_str(toml).unwrap();
@@ -527,7 +524,7 @@ x-portkey-config = { credential = "portkey_config" }
         );
         assert_eq!(
             headers.get("x-portkey-config"),
-            Some(&HeaderValueRef::Credential("portkey_config".to_string())),
+            Some(&HeaderValueRef::Vault("portkey_config".to_string())),
         );
     }
 
@@ -753,7 +750,7 @@ mystery = 1
         let low = ProviderSettings {
             auth: Some(ProviderAuthConfig {
                 credentials: vec![
-                    CredentialRef::Credential("bar".to_string()),
+                    CredentialRef::Vault("bar".to_string()),
                     CredentialRef::Env("BAZ".to_string()),
                 ],
                 header:      ApiKeyHeaderPolicy::Custom {

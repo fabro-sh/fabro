@@ -91,7 +91,7 @@ base_url = "https://llm-gateway.example.com/v1"
 aliases = ["gateway"]
 
 [llm.providers.proxy.auth]
-credentials = ["env:ACME_GATEWAY_API_KEY"]
+credentials = ["env:ACME_GATEWAY_API_KEY", "vault:ACME_GATEWAY_API_KEY"]
 
 [llm.providers.proxy.extra_headers]
 x-portkey-api-key = { env = "PORTKEY_API_KEY" }
@@ -182,12 +182,12 @@ enabled = true
 aliases = ["gateway"]
 
 [llm.providers.proxy.auth]
-credentials = ["env:ACME_GATEWAY_API_KEY"]
+credentials = ["env:ACME_GATEWAY_API_KEY", "vault:ACME_GATEWAY_API_KEY"]
 
 [llm.providers.proxy.extra_headers]
 x-portkey-api-key = { env = "PORTKEY_API_KEY" }
 x-portkey-config = { literal = "@bedrock-prod" }
-x-team-secret = { credential = "gateway_team_secret" }
+x-team-secret = { vault = "gateway_team_secret" }
 ```
 
 | Key | Type / values | Default | Description |
@@ -198,9 +198,9 @@ x-team-secret = { credential = "gateway_team_secret" }
 | `billing_policy` | `"openai"` \| `"anthropic"` \| `"gemini"` \| `"none"` | derived from `adapter` | Provider-owned billing algorithm for usage estimates. Override for exceptional providers such as local no-billing runtimes. |
 | `base_url` | string | built-in value or adapter runtime default | Provider API base URL. Required for most custom OpenAI-compatible providers. |
 | `auth` | table | omitted | API-key auth config. Omit the table entirely for providers that need no API key; any `extra_headers` are still attached. |
-| `auth.credentials` | array<string> | required when `auth` present | Ordered credential refs. Accepted forms are `credential:<id>` and `env:<NAME>`. Literal secret strings are rejected. |
+| `auth.credentials` | array<string> | required when `auth` present | Ordered credential refs. Accepted forms are `vault:<NAME>` and `env:<NAME>`. Literal secret strings are rejected. |
 | `auth.header` | `"bearer"` or `{ custom = "Header-Name" }` | `"bearer"` | Primary API-key header policy. Omit when the provider uses a standard bearer token. |
-| `extra_headers` | table | `{}` | Additional headers attached to provider requests. Values must be typed refs: `{ literal = "..." }`, `{ env = "NAME" }`, or `{ credential = "id" }`. |
+| `extra_headers` | table | `{}` | Additional headers attached to provider requests. Values must be typed refs: `{ literal = "..." }`, `{ env = "NAME" }`, or `{ vault = "NAME" }`. |
 | `priority` | integer | `0` | Higher-priority configured providers win default selection; ties use canonical provider ID. |
 | `enabled` | boolean | `true` | Set `false` to disable a provider after lower-precedence layers define it. |
 | `aliases` | array<string> | `[]` | Additional provider names accepted by model routing and fallback config. |

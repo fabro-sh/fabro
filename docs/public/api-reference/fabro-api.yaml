@@ -10385,12 +10385,12 @@ components:
           example: ok
 
     SecretType:
-      description: The way a secret is consumed by the sandbox.
+      description: Schema of a stored secret.
       type: string
       enum:
-        - environment
+        - token
+        - oauth
         - file
-        - credential
 
     CreateSecretRequest:
       description: Request to store or update a secret.

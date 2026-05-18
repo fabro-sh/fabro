@@ -75,41 +75,30 @@ mod tests {
 
     use chrono::{Duration, Utc};
     use fabro_model::{Catalog, ProviderId};
-    use fabro_vault::{SecretType, Vault};
+    use fabro_vault::Vault;
     use tokio::sync::RwLock as AsyncRwLock;
 
     use super::VaultCredentialSource;
-    use crate::credential::{AuthCredential, AuthDetails, OAuthConfig, OAuthTokens};
+    use crate::credential::{OAuthConfig, OAuthCredential, OAuthTokens};
+    use crate::vault_ext::{vault_set_oauth, vault_set_token};
     use crate::{CredentialSource, ResolveError};
 
-    fn api_key_credential(provider: ProviderId, key: &str) -> AuthCredential {
-        AuthCredential {
-            provider,
-            details: AuthDetails::ApiKey {
-                key: key.to_string(),
+    fn expired_openai_credential() -> OAuthCredential {
+        OAuthCredential {
+            tokens:     OAuthTokens {
+                access_token:  "expired-access".to_string(),
+                refresh_token: Some("refresh-token".to_string()),
+                expires_at:    Utc::now() - Duration::hours(1),
             },
-        }
-    }
-
-    fn expired_openai_credential() -> AuthCredential {
-        AuthCredential {
-            provider: ProviderId::openai(),
-            details:  AuthDetails::CodexOAuth {
-                tokens:     OAuthTokens {
-                    access_token:  "expired-access".to_string(),
-                    refresh_token: Some("refresh-token".to_string()),
-                    expires_at:    Utc::now() - Duration::hours(1),
-                },
-                config:     OAuthConfig {
-                    auth_url:     "https://auth.openai.com".to_string(),
-                    token_url:    "http://127.0.0.1:9/oauth/token".to_string(),
-                    client_id:    "client".to_string(),
-                    scopes:       vec!["openid".to_string()],
-                    redirect_uri: Some("https://example.com/callback".to_string()),
-                    use_pkce:     true,
-                },
-                account_id: Some("acct_123".to_string()),
+            config:     OAuthConfig {
+                auth_url:     "https://auth.openai.com".to_string(),
+                token_url:    "http://127.0.0.1:9/oauth/token".to_string(),
+                client_id:    "client".to_string(),
+                scopes:       vec!["openid".to_string()],
+                redirect_uri: Some("https://example.com/callback".to_string()),
+                use_pkce:     true,
             },
+            account_id: Some("acct_123".to_string()),
         }
     }
 
@@ -121,26 +110,13 @@ mod tests {
     async fn resolve_returns_credentials_and_auth_issues() {
         let dir = tempfile::tempdir().unwrap();
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
-        vault
-            .set(
-                "openai_codex",
-                &serde_json::to_string(&expired_openai_credential()).unwrap(),
-                SecretType::Credential,
-                None,
-            )
-            .unwrap();
-        vault
-            .set(
-                "anthropic",
-                &serde_json::to_string(&api_key_credential(
-                    ProviderId::anthropic(),
-                    "anthropic-key",
-                ))
-                .unwrap(),
-                SecretType::Credential,
-                None,
-            )
-            .unwrap();
+        vault_set_oauth(
+            &mut vault,
+            crate::OPENAI_CODEX_VAULT_SECRET_NAME,
+            &expired_openai_credential(),
+        )
+        .unwrap();
+        vault_set_token(&mut vault, "ANTHROPIC_API_KEY", "anthropic-key").unwrap();
 
         let source =
             VaultCredentialSource::with_env_lookup(Arc::new(AsyncRwLock::new(vault)), |_| None);
@@ -164,27 +140,8 @@ mod tests {
     async fn configured_providers_reads_from_vault_without_refreshing() {
         let dir = tempfile::tempdir().unwrap();
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
-        vault
-            .set(
-                "openai",
-                &serde_json::to_string(&api_key_credential(ProviderId::openai(), "openai-key"))
-                    .unwrap(),
-                SecretType::Credential,
-                None,
-            )
-            .unwrap();
-        vault
-            .set(
-                "anthropic",
-                &serde_json::to_string(&api_key_credential(
-                    ProviderId::anthropic(),
-                    "anthropic-key",
-                ))
-                .unwrap(),
-                SecretType::Credential,
-                None,
-            )
-            .unwrap();
+        vault_set_token(&mut vault, "OPENAI_API_KEY", "openai-key").unwrap();
+        vault_set_token(&mut vault, "ANTHROPIC_API_KEY", "anthropic-key").unwrap();
         let source =
             VaultCredentialSource::with_env_lookup(Arc::new(AsyncRwLock::new(vault)), |_| None);
         let catalog = default_catalog();

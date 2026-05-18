@@ -52,7 +52,7 @@ fn test_secret_lifecycle() {
     secret(&["list"])
         .success()
         .stdout(predicates::str::contains("FOO"))
-        .stdout(predicates::str::contains("environment"));
+        .stdout(predicates::str::contains("token"));
 
     // 3. update FOO
     secret(&["set", "FOO", "updated"]).success();
@@ -96,7 +96,7 @@ fn test_secret_list_alias_ls() {
         .assert()
         .success()
         .stdout(predicates::str::contains("X"))
-        .stdout(predicates::str::contains("environment"));
+        .stdout(predicates::str::contains("token"));
 }
 
 #[test]
@@ -129,7 +129,7 @@ fn test_secret_value_with_equals() {
         .assert()
         .success()
         .stdout(predicates::str::contains("URL"))
-        .stdout(predicates::str::contains("environment"))
+        .stdout(predicates::str::contains("token"))
         .stdout(predicates::str::contains("https://x.com?a=1&b=2").not());
 }
 

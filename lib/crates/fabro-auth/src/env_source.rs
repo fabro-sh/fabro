@@ -6,6 +6,7 @@ use fabro_model::{Catalog, CredentialRef, HeaderValueRef, ProviderId};
 use fabro_static::EnvVars;
 
 use crate::credential_source::{CredentialSource, ResolvedCredentials};
+use crate::resolve::{apply_openai_api_env_context, apply_openai_codex_api_context};
 use crate::{ApiCredential, EnvLookup, ResolveError, build_api_key_header};
 
 #[derive(Clone)]
@@ -64,15 +65,10 @@ impl EnvCredentialSource {
             project_id: None,
         };
         if provider.id == ProviderId::openai() && cred.auth_header.is_some() {
-            cred.org_id = self.lookup(EnvVars::OPENAI_ORG_ID);
-            cred.project_id = self.lookup(EnvVars::OPENAI_PROJECT_ID);
             if let Some(account_id) = self.lookup(EnvVars::CHATGPT_ACCOUNT_ID) {
-                cred.base_url = Some("https://chatgpt.com/backend-api/codex".to_string());
-                cred.codex_mode = true;
-                cred.extra_headers
-                    .insert("ChatGPT-Account-Id".to_string(), account_id);
-                cred.extra_headers
-                    .insert("originator".to_string(), "fabro".to_string());
+                apply_openai_codex_api_context(&mut cred, Some(&account_id), &*self.env_lookup);
+            } else {
+                apply_openai_api_env_context(&mut cred, &*self.env_lookup);
             }
         }
         Ok(Some(cred))
@@ -89,7 +85,7 @@ impl EnvCredentialSource {
                 let value = match value_ref {
                     HeaderValueRef::Literal(value) => Some(value.clone()),
                     HeaderValueRef::Env(name) => self.lookup(name),
-                    HeaderValueRef::Credential(_) => None,
+                    HeaderValueRef::Vault(_) => None,
                 }
                 .ok_or_else(|| ResolveError::NotConfigured(provider.id.clone()))?;
                 Ok((name.clone(), value))

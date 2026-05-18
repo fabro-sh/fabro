@@ -670,15 +670,12 @@ mod tests {
     use std::time::Duration;
 
     use chrono::Utc;
-    use fabro_auth::{
-        AuthCredential, AuthDetails, CredentialSource, EnvCredentialSource, VaultCredentialSource,
-    };
+    use fabro_auth::{CredentialSource, EnvCredentialSource, VaultCredentialSource};
     use fabro_graphviz::graph::Graph;
     use fabro_llm::Error as LlmError;
     use fabro_llm::client::Client;
     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
     use fabro_llm::types::{FinishReason, Message, Request, Response, StreamEvent, TokenCounts};
-    use fabro_model::ProviderId;
     use fabro_model::catalog::{LlmCatalogSettings, ProviderCatalogSettings};
     use fabro_store::Database;
     use fabro_types::{
@@ -833,15 +830,6 @@ mod tests {
             },
             Utc::now(),
         )
-    }
-
-    fn openai_api_key_credential(key: &str) -> AuthCredential {
-        AuthCredential {
-            provider: ProviderId::openai(),
-            details:  AuthDetails::ApiKey {
-                key: key.to_string(),
-            },
-        }
     }
 
     fn openai_responses_payload(text: &str) -> serde_json::Value {
@@ -1344,9 +1332,9 @@ mod tests {
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
         vault
             .set(
-                "openai_codex",
-                &serde_json::to_string(&openai_api_key_credential("vault-openai-key")).unwrap(),
-                SecretType::Credential,
+                "OPENAI_API_KEY",
+                "vault-openai-key",
+                SecretType::Token,
                 None,
             )
             .unwrap();
@@ -1840,9 +1828,9 @@ mod tests {
         let mut vault = Vault::load(vault_dir.path().join("secrets.json")).unwrap();
         vault
             .set(
-                "openai_codex",
-                &serde_json::to_string(&openai_api_key_credential("vault-openai-key")).unwrap(),
-                SecretType::Credential,
+                "OPENAI_API_KEY",
+                "vault-openai-key",
+                SecretType::Token,
                 None,
             )
             .unwrap();

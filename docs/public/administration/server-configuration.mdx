@@ -328,7 +328,7 @@ Fabro no longer auto-loads `.env` files. Provider API keys are required for the 
 
 ### LLM provider keys
 
-Fabro's built-in provider access resolves these from `process env -> vault`.
+Fabro's built-in provider access resolves these from the process environment first, then an exact-name vault token or OAuth entry.
 
 | Variable | Provider |
 |---|---|

@@ -6,7 +6,7 @@ base_url = "https://api.anthropic.com/v1"
 priority = 100
 
 [providers.anthropic.auth]
-credentials = ["credential:anthropic", "env:ANTHROPIC_API_KEY"]
+credentials = ["env:ANTHROPIC_API_KEY", "vault:ANTHROPIC_API_KEY"]
 header = { custom = "x-api-key" }
 
 [models."claude-opus-4-7"]
