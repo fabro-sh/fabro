@@ -1,6 +1,5 @@
 use anyhow::{Result, bail};
 
-use super::short_run_id;
 use crate::args::RunsRemoveArgs;
 use crate::command_context::CommandContext;
 use crate::server_client;
@@ -57,7 +56,7 @@ async fn remove_from(args: &RunsRemoveArgs, ctx: &CommandContext) -> Result<()> 
         let run_id_string = run_id.to_string();
         removed.push(run_id_string.clone());
         if !json {
-            fabro_util::printerr!(printer, "{}", short_run_id(&run_id_string));
+            fabro_util::printerr!(printer, "{run_id_string}");
         }
     }
 
