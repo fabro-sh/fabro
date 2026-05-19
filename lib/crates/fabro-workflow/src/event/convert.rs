@@ -95,6 +95,28 @@ fn event_body_from_event(event: &Event) -> EventBody {
         Event::RunSteer { text, .. } => {
             EventBody::RunSteer(fabro_types::RunSteerProps { text: text.clone() })
         }
+        Event::RunPairStarted {
+            pair_id, target, ..
+        } => EventBody::RunPairStarted(fabro_types::RunPairStartedProps {
+            pair_id: *pair_id,
+            target:  target.clone(),
+        }),
+        Event::RunPairEnded {
+            pair_id, reason, ..
+        } => EventBody::RunPairEnded(fabro_types::RunPairEndedProps {
+            pair_id: *pair_id,
+            reason:  *reason,
+        }),
+        Event::RunPairFailed {
+            pair_id,
+            reason,
+            message,
+            ..
+        } => EventBody::RunPairFailed(fabro_types::RunPairFailedProps {
+            pair_id: *pair_id,
+            reason:  *reason,
+            message: message.clone(),
+        }),
         Event::RunBlocked { blocked_reason } => {
             EventBody::RunBlocked(fabro_types::RunBlockedProps {
                 blocked_reason: *blocked_reason,
@@ -624,6 +646,30 @@ fn event_body_from_event(event: &Event) -> EventBody {
                     visit: *visit,
                 })
             }
+            AgentEvent::PairUserMessage {
+                pair_id,
+                message_id,
+                client_message_id,
+                text,
+                ..
+            } => EventBody::AgentPairUserMessage(fabro_types::AgentPairUserMessageProps {
+                pair_id:           *pair_id,
+                message_id:        *message_id,
+                client_message_id: client_message_id.clone(),
+                text:              text.clone(),
+                visit:             *visit,
+            }),
+            AgentEvent::PairSystemMessage {
+                pair_id,
+                kind,
+                text,
+                ..
+            } => EventBody::AgentPairSystemMessage(fabro_types::AgentPairSystemMessageProps {
+                pair_id: *pair_id,
+                kind:    *kind,
+                text:    text.clone(),
+                visit:   *visit,
+            }),
             AgentEvent::CompactionStarted {
                 estimated_tokens,
                 context_window_size,
@@ -1061,6 +1107,32 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 visit: *visit,
             })
         }
+        Event::AgentPairUserMessage {
+            visit,
+            pair_id,
+            message_id,
+            client_message_id,
+            text,
+            ..
+        } => EventBody::AgentPairUserMessage(fabro_types::AgentPairUserMessageProps {
+            pair_id:           *pair_id,
+            message_id:        *message_id,
+            client_message_id: client_message_id.clone(),
+            text:              text.clone(),
+            visit:             *visit,
+        }),
+        Event::AgentPairSystemMessage {
+            visit,
+            pair_id,
+            kind,
+            text,
+            ..
+        } => EventBody::AgentPairSystemMessage(fabro_types::AgentPairSystemMessageProps {
+            pair_id: *pair_id,
+            kind:    *kind,
+            text:    text.clone(),
+            visit:   *visit,
+        }),
         Event::AgentSteerBuffered { .. } => {
             EventBody::AgentSteerBuffered(fabro_types::AgentSteerBufferedProps::default())
         }

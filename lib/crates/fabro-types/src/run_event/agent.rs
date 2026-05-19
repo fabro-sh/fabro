@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::BilledTokenCounts;
-use crate::ModelRef;
+use crate::{ModelRef, PairId, PairMessageId, PairSystemMessageKind};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentSessionStartedProps {
@@ -108,6 +108,24 @@ pub struct AgentTurnLimitReachedProps {
 pub struct AgentSteeringInjectedProps {
     pub text:  String,
     pub visit: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentPairUserMessageProps {
+    pub pair_id:           PairId,
+    pub message_id:        PairMessageId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_message_id: Option<String>,
+    pub text:              String,
+    pub visit:             u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentPairSystemMessageProps {
+    pub pair_id: PairId,
+    pub kind:    PairSystemMessageKind,
+    pub text:    String,
+    pub visit:   u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

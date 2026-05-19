@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use super::{BilledTokenCounts, ExecOutputTail, RunNoticeLevel};
 use crate::status::{BlockedReason, SuccessReason};
 use crate::{
-    DiffSummary, ForkSourceRef, GitContext, Graph, RunBlobId, RunControlAction, RunFailure, RunId,
-    RunProvenance, WorkflowSettings,
+    DiffSummary, ForkSourceRef, GitContext, Graph, PairId, PairTarget, RunBlobId, RunControlAction,
+    RunFailure, RunId, RunProvenance, WorkflowSettings,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -93,6 +93,42 @@ pub struct RunInterruptProps {}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSteerProps {
     pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunPairStartedProps {
+    pub pair_id: PairId,
+    pub target:  PairTarget,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunPairEndedReason {
+    UserRequested,
+    RunEnded,
+    SessionEnded,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunPairEndedProps {
+    pub pair_id: PairId,
+    pub reason:  RunPairEndedReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunPairFailedReason {
+    WorkerGone,
+    RuntimeFailed,
+    SessionFailed,
+    RunFailed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunPairFailedProps {
+    pub pair_id: PairId,
+    pub reason:  RunPairFailedReason,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

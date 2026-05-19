@@ -41,9 +41,38 @@ use crate::subagent::{SubAgentCallbackEvent, SubAgentEventCallback, SubAgentMana
 use crate::tool_execution::execute_tool_calls;
 use crate::types::{AgentEvent, Message, SessionEvent, SessionState};
 
-/// One queued steering message: text + the principal that authored it (None
-/// for direct internal callers like loop-detection).
-pub type SteeringItem = (String, Option<Principal>);
+/// One queued external control item for a live session.
+#[derive(Debug, Clone)]
+pub enum SteeringItem {
+    /// Existing steering behavior: inject a user-role guidance message that
+    /// remains visibly distinct from a paired user's message.
+    Steering {
+        text:  String,
+        actor: Option<Principal>,
+    },
+    PairUserMessage {
+        pair_id:           fabro_types::PairId,
+        message_id:        fabro_types::PairMessageId,
+        client_message_id: Option<String>,
+        text:              String,
+        actor:             Option<Principal>,
+    },
+    PairSystemMessage {
+        pair_id: fabro_types::PairId,
+        kind:    fabro_types::PairSystemMessageKind,
+        text:    String,
+    },
+}
+
+impl SteeringItem {
+    #[must_use]
+    pub fn actor(&self) -> Option<&Principal> {
+        match self {
+            Self::Steering { actor, .. } | Self::PairUserMessage { actor, .. } => actor.as_ref(),
+            Self::PairSystemMessage { .. } => None,
+        }
+    }
+}
 
 #[derive(Default)]
 struct ControlState {
@@ -97,7 +126,7 @@ impl SessionControlHandle {
     /// Push a steering message onto the queue and wake a session waiting
     /// after a pure interrupt.
     pub fn steer(&self, text: String, actor: Option<Principal>) {
-        self.enqueue((text, actor));
+        self.enqueue(SteeringItem::Steering { text, actor });
     }
 
     /// Cancel the current round and, if no steering text is queued, park the
@@ -115,7 +144,14 @@ impl SessionControlHandle {
 
     /// Atomically apply interrupt semantics, then enqueue steering text.
     pub fn interrupt_then_steer(&self, text: String, actor: Option<Principal>) {
-        self.interrupt_then_enqueue((text, actor));
+        self.interrupt_then_enqueue(SteeringItem::Steering { text, actor });
+    }
+
+    pub fn park_for_steer(&self) {
+        let mut control = self.control.lock().expect("control state lock poisoned");
+        if control.queue.is_empty() {
+            control.waiting_for_steer = true;
+        }
     }
 
     /// Direct enqueue used by callers such as the hub flushing buffered
@@ -1519,16 +1555,56 @@ impl Session {
                 .expect("control state lock poisoned");
             control.queue.drain(..).collect()
         };
-        for (text, actor) in messages {
-            self.history.push(Message::Steering {
-                content:   text.clone(),
-                timestamp: SystemTime::now(),
-            });
-            self.event_emitter
-                .emit(self.id.clone(), AgentEvent::SteeringInjected {
+        for item in messages {
+            match item {
+                SteeringItem::Steering { text, actor } => {
+                    self.history.push(Message::Steering {
+                        content:   text.clone(),
+                        timestamp: SystemTime::now(),
+                    });
+                    self.event_emitter
+                        .emit(self.id.clone(), AgentEvent::SteeringInjected {
+                            text,
+                            actor,
+                        });
+                }
+                SteeringItem::PairUserMessage {
+                    pair_id,
+                    message_id,
+                    client_message_id,
                     text,
                     actor,
-                });
+                } => {
+                    self.history.push(Message::User {
+                        content:   text.clone(),
+                        timestamp: SystemTime::now(),
+                    });
+                    self.event_emitter
+                        .emit(self.id.clone(), AgentEvent::PairUserMessage {
+                            pair_id,
+                            message_id,
+                            client_message_id,
+                            text,
+                            actor,
+                        });
+                }
+                SteeringItem::PairSystemMessage {
+                    pair_id,
+                    kind,
+                    text,
+                } => {
+                    self.history.push(Message::System {
+                        content:   text.clone(),
+                        timestamp: SystemTime::now(),
+                    });
+                    self.event_emitter
+                        .emit(self.id.clone(), AgentEvent::PairSystemMessage {
+                            pair_id,
+                            kind,
+                            text,
+                        });
+                }
+            }
         }
     }
 

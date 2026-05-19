@@ -2092,6 +2092,67 @@ async fn subprocess_answer_transport_interrupt_then_steer_enqueues_single_combin
 }
 
 #[tokio::test]
+async fn subprocess_answer_transport_pair_commands_enqueue_control_messages() {
+    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(3);
+    let transport = RunAnswerTransport::Subprocess { control_tx };
+    let run_id = fixtures::RUN_1;
+    let pair_id = "01HZX6M29F1CD5YYMHT1F5D7WQ".parse().unwrap();
+    let message_id = "01HZX6M4D7Y1QW0Q0P6V8Z4DR5".parse().unwrap();
+    let actor = Principal::System {
+        system_kind: SystemActorKind::Engine,
+    };
+    let target = PairTarget {
+        stage_id:         StageId::new("agent", 1),
+        node_id:          "agent".to_string(),
+        node_label:       "Agent".to_string(),
+        visit:            1,
+        agent_session_id: "ses_01".to_string(),
+        provider:         Some("openai".to_string()),
+        model:            Some("gpt-5.4".to_string()),
+    };
+
+    transport
+        .start_pair(run_id, pair_id, target.clone(), actor.clone())
+        .await
+        .unwrap();
+    transport
+        .send_pair_message(
+            pair_id,
+            message_id,
+            "inspect this".to_string(),
+            Some("client-1".to_string()),
+            actor.clone(),
+        )
+        .await
+        .unwrap();
+    transport.end_pair(pair_id, actor.clone()).await.unwrap();
+
+    assert_eq!(
+        control_rx.recv().await,
+        Some(WorkerControlEnvelope::start_pair(
+            run_id,
+            pair_id,
+            target,
+            actor.clone()
+        ))
+    );
+    assert_eq!(
+        control_rx.recv().await,
+        Some(WorkerControlEnvelope::pair_message(
+            pair_id,
+            message_id,
+            "inspect this",
+            Some("client-1".to_string()),
+            actor.clone()
+        ))
+    );
+    assert_eq!(
+        control_rx.recv().await,
+        Some(WorkerControlEnvelope::end_pair(pair_id, actor))
+    );
+}
+
+#[tokio::test]
 async fn in_process_answer_transport_cancel_run_cancels_pending_interviews() {
     let interviewer = Arc::new(ControlInterviewer::new());
     let emitter = Arc::new(fabro_workflow::event::Emitter::new(

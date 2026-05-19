@@ -1,0 +1,358 @@
+use std::fmt;
+use std::str::FromStr;
+
+use chrono::{DateTime, Utc};
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde_json::{Map, Value};
+use strum::{Display, EnumString, IntoStaticStr};
+use ulid::Ulid;
+
+use crate::{RunId, StageId};
+
+macro_rules! ulid_id {
+    ($name:ident) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub struct $name(Ulid);
+
+        impl $name {
+            pub fn new() -> Self {
+                Self(Ulid::new())
+            }
+
+            pub fn created_at(&self) -> DateTime<Utc> {
+                self.0.datetime().into()
+            }
+        }
+
+        impl Default for $name {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                self.0.fmt(f)
+            }
+        }
+
+        impl FromStr for $name {
+            type Err = ulid::DecodeError;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                Ok(Self(Ulid::from_str(s)?))
+            }
+        }
+
+        impl From<Ulid> for $name {
+            fn from(value: Ulid) -> Self {
+                Self(value)
+            }
+        }
+
+        impl From<$name> for Ulid {
+            fn from(value: $name) -> Self {
+                value.0
+            }
+        }
+
+        impl From<$name> for String {
+            fn from(value: $name) -> Self {
+                value.to_string()
+            }
+        }
+
+        impl From<&$name> for String {
+            fn from(value: &$name) -> Self {
+                value.to_string()
+            }
+        }
+
+        impl Serialize for $name {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                serializer.serialize_str(&self.to_string())
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let value = String::deserialize(deserializer)?;
+                value.parse().map_err(D::Error::custom)
+            }
+        }
+    };
+}
+
+ulid_id!(PairId);
+ulid_id!(PairMessageId);
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString, IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum PairStatus {
+    Active,
+    Ended,
+    Failed,
+}
+
+impl PairStatus {
+    pub fn as_str(self) -> &'static str {
+        self.into()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairTargetSelector {
+    pub stage_id:         StageId,
+    pub agent_session_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairTarget {
+    pub stage_id:         StageId,
+    pub node_id:          String,
+    pub node_label:       String,
+    pub visit:            u32,
+    pub agent_session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider:         Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model:            Option<String>,
+}
+
+impl PairTarget {
+    pub fn selector(&self) -> PairTargetSelector {
+        PairTargetSelector {
+            stage_id:         self.stage_id.clone(),
+            agent_session_id: self.agent_session_id.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PairRecord {
+    pub pair_id:        PairId,
+    pub run_id:         RunId,
+    pub status:         PairStatus,
+    pub started_at:     DateTime<Utc>,
+    pub ended_at:       Option<DateTime<Utc>>,
+    pub failure_reason: Option<String>,
+    pub target:         PairTarget,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunPairStatusResponse {
+    pub run_id:       RunId,
+    pub current_pair: Option<PairRecord>,
+    pub targets:      Vec<PairTarget>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairStartRequest {
+    pub target: PairTargetSelector,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairMessageRequest {
+    pub text:              String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_message_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PairMessageRecord {
+    pub message_id:        PairMessageId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_message_id: Option<String>,
+    pub pair_id:           PairId,
+    pub run_id:            RunId,
+    pub target:            PairTargetSelector,
+    pub text:              String,
+    pub accepted_at:       DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PairTranscriptResponse {
+    pub data: Vec<PairTranscriptEntry>,
+    pub meta: PairTranscriptMeta,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairTranscriptMeta {
+    pub next_since_seq: u32,
+    pub has_more:       bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum PairTranscriptEntry {
+    #[serde(rename = "user_message")]
+    UserMessage(PairTranscriptUserMessage),
+    #[serde(rename = "system_message")]
+    SystemMessage(PairTranscriptSystemMessage),
+    #[serde(rename = "assistant_message")]
+    AssistantMessage(PairTranscriptAssistantMessage),
+    #[serde(rename = "tool_call")]
+    ToolCall(PairTranscriptToolCall),
+    #[serde(rename = "error")]
+    Error(PairTranscriptError),
+    #[serde(rename = "warning")]
+    Warning(PairTranscriptWarning),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PairTranscriptUserMessage {
+    pub seq:               u32,
+    pub event_id:          String,
+    pub ts:                DateTime<Utc>,
+    pub pair_id:           PairId,
+    pub target:            PairTarget,
+    pub message_id:        PairMessageId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_message_id: Option<String>,
+    pub text:              String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PairTranscriptSystemMessage {
+    pub seq:                 u32,
+    pub event_id:            String,
+    pub ts:                  DateTime<Utc>,
+    pub pair_id:             PairId,
+    pub target:              PairTarget,
+    pub system_message_kind: PairSystemMessageKind,
+    pub text:                String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PairTranscriptAssistantMessage {
+    pub seq:             u32,
+    pub event_id:        String,
+    pub ts:              DateTime<Utc>,
+    pub pair_id:         PairId,
+    pub target:          PairTarget,
+    pub text:            String,
+    pub model:           PairTranscriptModel,
+    pub tool_call_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairTranscriptModel {
+    pub provider: String,
+    pub model_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed:    Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PairTranscriptToolCall {
+    pub seq:          u32,
+    pub event_id:     String,
+    pub ts:           DateTime<Utc>,
+    pub pair_id:      PairId,
+    pub target:       PairTarget,
+    pub tool_call_id: String,
+    pub tool_name:    String,
+    pub status:       PairTranscriptToolStatus,
+    pub summary:      String,
+    pub is_error:     bool,
+    pub truncated:    bool,
+    pub detail_ref:   PairTranscriptDetailRef,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString, IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum PairTranscriptToolStatus {
+    Started,
+    Completed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairTranscriptDetailRef {
+    pub seq:          u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PairTranscriptError {
+    pub seq:        u32,
+    pub event_id:   String,
+    pub ts:         DateTime<Utc>,
+    pub pair_id:    PairId,
+    pub target:     PairTarget,
+    pub message:    String,
+    pub detail_ref: PairTranscriptDetailRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PairTranscriptWarning {
+    pub seq:          u32,
+    pub event_id:     String,
+    pub ts:           DateTime<Utc>,
+    pub pair_id:      PairId,
+    pub target:       PairTarget,
+    pub warning_kind: String,
+    pub message:      String,
+    pub detail_ref:   PairTranscriptDetailRef,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString, IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum PairSystemMessageKind {
+    HumanJoined,
+    HumanLeft,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunEventDetailResponse {
+    pub event:              RunEventDetailEnvelope,
+    pub properties:         Map<String, Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content:            Option<RunEventDetailContent>,
+    pub truncated:          bool,
+    pub redacted:           bool,
+    pub max_content_length: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunEventDetailEnvelope {
+    pub seq:          u32,
+    pub id:           String,
+    pub ts:           DateTime<Utc>,
+    pub run_id:       RunId,
+    pub event:        String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor:        Option<crate::Principal>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id:   Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id:      Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_label:   Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage_id:     Option<StageId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunEventDetailContent {
+    pub kind:  String,
+    pub value: String,
+}

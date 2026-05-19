@@ -83,6 +83,13 @@ impl ActivationLease {
         true
     }
 
+    pub fn is_pair_active(&self) -> bool {
+        !self.released.load(Ordering::Acquire)
+            && self
+                .hub
+                .pair_is_active_for(&self.stage_id, &self.session_id)
+    }
+
     fn mark_released(&self) -> bool {
         if self
             .released

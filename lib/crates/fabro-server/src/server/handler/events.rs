@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use fabro_types::{RunEventDetailContent, RunEventDetailEnvelope, RunEventDetailResponse};
+
 use super::super::{
     ApiError, AppState, AppendEventResponse, BroadcastStream, Event, EventBody, EventEnvelope,
     EventPayload, HashSet, IntoResponse, Json, KeepAlive, PaginatedEventList, PaginationMeta, Path,
@@ -16,6 +18,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             "/runs/{id}/events",
             get(list_run_events).post(append_run_event),
         )
+        .route("/runs/{id}/events/{seq}", get(get_run_event_detail))
         .route(
             "/runs/{id}/stages/{stageId}/events",
             get(list_run_stage_events),
@@ -45,6 +48,18 @@ impl EventListParams {
 struct AttachParams {
     #[serde(default)]
     since_seq: Option<u32>,
+}
+
+#[derive(serde::Deserialize)]
+struct EventDetailParams {
+    #[serde(default)]
+    max_content_length: Option<usize>,
+}
+
+impl EventDetailParams {
+    fn max_content_length(&self) -> usize {
+        self.max_content_length.unwrap_or(20_000).clamp(1, 200_000)
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -238,6 +253,103 @@ async fn list_run_stage_events(
         },
         Err(_) => ApiError::not_found("Run not found.").into_response(),
     }
+}
+
+async fn get_run_event_detail(
+    RequireRunScoped(id): RequireRunScoped,
+    State(state): State<Arc<AppState>>,
+    Path((_id, seq)): Path<(String, u32)>,
+    Query(params): Query<EventDetailParams>,
+) -> Response {
+    let max_content_length = params.max_content_length();
+    match state.store.open_run_reader(&id).await {
+        Ok(run_store) => match run_store.list_events_from_with_limit(seq, 1).await {
+            Ok(events) => {
+                let Some(envelope) = events.into_iter().find(|event| event.seq == seq) else {
+                    return ApiError::with_code(
+                        StatusCode::NOT_FOUND,
+                        "Event not found.",
+                        "event_not_found",
+                    )
+                    .into_response();
+                };
+                Json(detail_response(envelope, max_content_length)).into_response()
+            }
+            Err(err) => {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            }
+        },
+        Err(_) => ApiError::not_found("Run not found.").into_response(),
+    }
+}
+
+fn detail_response(envelope: EventEnvelope, max_content_length: usize) -> RunEventDetailResponse {
+    let mut properties = event_properties(&envelope.event);
+    let event_name = envelope.event.event_name().to_string();
+    let mut content = None;
+    let mut truncated = false;
+    let mut redacted = false;
+
+    for key in ["text", "output", "arguments", "error", "details"] {
+        if let Some(value) = properties.remove(key) {
+            let raw = match value {
+                serde_json::Value::String(value) => value,
+                other => serde_json::to_string(&other).unwrap_or_else(|_| String::new()),
+            };
+            let redacted_value = redact_jsonl_line(&raw);
+            redacted = redacted || redacted_value != raw;
+            let (value, was_truncated) = truncate_content(redacted_value, max_content_length);
+            truncated = truncated || was_truncated;
+            content = Some(RunEventDetailContent {
+                kind: key.to_string(),
+                value,
+            });
+            break;
+        }
+    }
+
+    RunEventDetailResponse {
+        event: RunEventDetailEnvelope {
+            seq:          envelope.seq,
+            id:           envelope.event.id,
+            ts:           envelope.event.ts,
+            run_id:       envelope.event.run_id,
+            event:        event_name,
+            actor:        envelope.event.actor,
+            session_id:   envelope.event.session_id,
+            node_id:      envelope.event.node_id,
+            node_label:   envelope.event.node_label,
+            stage_id:     envelope.event.stage_id,
+            tool_call_id: envelope.event.tool_call_id,
+        },
+        properties,
+        content,
+        truncated,
+        redacted,
+        max_content_length,
+    }
+}
+
+fn event_properties(event: &RunEvent) -> serde_json::Map<String, serde_json::Value> {
+    let Ok(mut value) = serde_json::to_value(event) else {
+        return serde_json::Map::new();
+    };
+    value
+        .as_object_mut()
+        .and_then(|object| object.remove("properties"))
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default()
+}
+
+fn truncate_content(value: String, max_content_length: usize) -> (String, bool) {
+    if value.len() <= max_content_length {
+        return (value, false);
+    }
+    let mut end = max_content_length;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    (value[..end].to_string(), true)
 }
 
 async fn attach_run_events(

@@ -12,6 +12,7 @@ pub(in crate::server) mod events;
 pub(in crate::server) mod graph;
 mod lifecycle;
 mod models;
+mod pair;
 mod pull_requests;
 mod runs;
 mod sandbox;
@@ -148,6 +149,7 @@ pub(super) fn real_routes() -> Router<Arc<AppState>> {
         .merge(sandbox::routes())
         .merge(lifecycle::routes())
         .merge(steer::routes())
+        .merge(pair::routes())
         .merge(graph::manifest_routes())
         .merge(graph::run_routes())
         .merge(models::routes())

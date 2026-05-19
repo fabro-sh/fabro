@@ -1502,6 +1502,262 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/runs/{id}/pair:
+    get:
+      operationId: getRunPairStatus
+      tags: [Human-in-the-Loop]
+      summary: Get Run Pair Status
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Current pair and active pairable targets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunPairStatusResponse"
+        "404":
+          description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: startRunPair
+      tags: [Human-in-the-Loop]
+      summary: Start Run Pair
+      description: Starts pairing with exactly one selected active API-mode agent target.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PairStartRequest"
+      responses:
+        "200":
+          description: Pair mode installed for the selected target
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PairRecord"
+        "400":
+          description: Invalid request body
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Run is not pairable, already paired, or selected target is not active/pairable
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Worker control channel unavailable
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/pair/{pair_id}:
+    get:
+      operationId: getRunPair
+      tags: [Human-in-the-Loop]
+      summary: Get Run Pair
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - name: pair_id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/PairId"
+      responses:
+        "200":
+          description: Pair record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PairRecord"
+        "404":
+          description: Run or pair not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: endRunPair
+      tags: [Human-in-the-Loop]
+      summary: End Run Pair
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - name: pair_id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/PairId"
+      responses:
+        "200":
+          description: Pair ended
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PairRecord"
+        "404":
+          description: Run or pair not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Pair is not current or active
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Worker control channel unavailable
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/pair/{pair_id}/messages:
+    post:
+      operationId: sendRunPairMessage
+      tags: [Human-in-the-Loop]
+      summary: Send Run Pair Message
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - name: pair_id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/PairId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PairMessageRequest"
+      responses:
+        "202":
+          description: Pair message accepted by the runtime
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PairMessageRecord"
+        "400":
+          description: Invalid request body
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run or pair not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Pair is not current/active, target is gone, or message was rejected
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Worker control channel unavailable
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/pair/{pair_id}/transcript:
+    get:
+      operationId: getRunPairTranscript
+      tags: [Human-in-the-Loop]
+      summary: Get Run Pair Transcript
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - name: pair_id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/PairId"
+        - $ref: "#/components/parameters/SinceSeq"
+        - $ref: "#/components/parameters/EventLimit"
+      responses:
+        "200":
+          description: Compact transcript entries for the pair window
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PairTranscriptResponse"
+        "400":
+          description: Invalid query parameter
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run or pair not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/runs/{id}/interrupt:
     post:
       operationId: interruptRun
@@ -2373,6 +2629,54 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/events/{seq}:
+    get:
+      operationId: getRunEventDetail
+      tags: [Run Internals]
+      summary: Get Run Event Detail
+      description: Returns one stored run event by source event sequence with content fields separated and truncated.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - name: seq
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: max_content_length
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200000
+            default: 20000
+      responses:
+        "200":
+          description: Run event detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunEventDetailResponse"
+        "400":
+          description: Invalid query parameter
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run or event not found
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -4661,6 +4965,396 @@ components:
             $ref: "#/components/schemas/Run"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
+
+    PairId:
+      type: string
+      description: Durable run pair identifier.
+      example: 01HZX6M29F1CD5YYMHT1F5D7WQ
+
+    PairMessageId:
+      type: string
+      description: Durable pair message identifier.
+      example: 01HZX6M4D7Y1QW0Q0P6V8Z4DR5
+
+    PairStatus:
+      type: string
+      enum: [active, ended, failed]
+
+    PairTargetSelector:
+      type: object
+      required:
+        - stage_id
+        - agent_session_id
+      properties:
+        stage_id:
+          type: string
+          example: code@1
+        agent_session_id:
+          type: string
+          example: ses_01
+
+    PairTarget:
+      type: object
+      required:
+        - stage_id
+        - node_id
+        - node_label
+        - visit
+        - agent_session_id
+      properties:
+        stage_id:
+          type: string
+          example: code@1
+        node_id:
+          type: string
+          example: code
+        node_label:
+          type: string
+          example: Code
+        visit:
+          type: integer
+          minimum: 1
+          example: 1
+        agent_session_id:
+          type: string
+          example: ses_01
+        provider:
+          type: string
+        model:
+          type: string
+
+    PairRecord:
+      type: object
+      required:
+        - pair_id
+        - run_id
+        - status
+        - started_at
+        - target
+      properties:
+        pair_id:
+          $ref: "#/components/schemas/PairId"
+        run_id:
+          type: string
+        status:
+          $ref: "#/components/schemas/PairStatus"
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: ["string", "null"]
+          format: date-time
+        failure_reason:
+          type: ["string", "null"]
+        target:
+          $ref: "#/components/schemas/PairTarget"
+
+    RunPairStatusResponse:
+      type: object
+      required:
+        - run_id
+        - targets
+      properties:
+        run_id:
+          type: string
+        current_pair:
+          oneOf:
+            - $ref: "#/components/schemas/PairRecord"
+            - type: "null"
+        targets:
+          type: array
+          items:
+            $ref: "#/components/schemas/PairTarget"
+
+    PairStartRequest:
+      type: object
+      required:
+        - target
+      properties:
+        target:
+          $ref: "#/components/schemas/PairTargetSelector"
+
+    PairMessageRequest:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 8192
+        client_message_id:
+          type: string
+
+    PairMessageRecord:
+      type: object
+      required:
+        - message_id
+        - pair_id
+        - run_id
+        - target
+        - text
+        - accepted_at
+      properties:
+        message_id:
+          $ref: "#/components/schemas/PairMessageId"
+        client_message_id:
+          type: ["string", "null"]
+        pair_id:
+          $ref: "#/components/schemas/PairId"
+        run_id:
+          type: string
+        target:
+          $ref: "#/components/schemas/PairTargetSelector"
+        text:
+          type: string
+        accepted_at:
+          type: string
+          format: date-time
+
+    PairTranscriptResponse:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/PairTranscriptEntry"
+        meta:
+          type: object
+          required:
+            - next_since_seq
+            - has_more
+          properties:
+            next_since_seq:
+              type: integer
+              minimum: 1
+            has_more:
+              type: boolean
+
+    PairTranscriptEntry:
+      oneOf:
+        - $ref: "#/components/schemas/PairTranscriptUserMessage"
+        - $ref: "#/components/schemas/PairTranscriptSystemMessage"
+        - $ref: "#/components/schemas/PairTranscriptAssistantMessage"
+        - $ref: "#/components/schemas/PairTranscriptToolCall"
+        - $ref: "#/components/schemas/PairTranscriptError"
+        - $ref: "#/components/schemas/PairTranscriptWarning"
+      discriminator:
+        propertyName: kind
+
+    PairTranscriptBase:
+      type: object
+      required: [kind, seq, event_id, ts, pair_id, target]
+      properties:
+        kind:
+          type: string
+        seq:
+          type: integer
+          minimum: 1
+        event_id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        pair_id:
+          $ref: "#/components/schemas/PairId"
+        target:
+          $ref: "#/components/schemas/PairTarget"
+
+    PairTranscriptUserMessage:
+      allOf:
+        - $ref: "#/components/schemas/PairTranscriptBase"
+        - type: object
+          required: [message_id, text]
+          properties:
+            kind:
+              type: string
+              enum: [user_message]
+            message_id:
+              $ref: "#/components/schemas/PairMessageId"
+            client_message_id:
+              type: ["string", "null"]
+            text:
+              type: string
+
+    PairTranscriptSystemMessage:
+      allOf:
+        - $ref: "#/components/schemas/PairTranscriptBase"
+        - type: object
+          required: [system_message_kind, text]
+          properties:
+            kind:
+              type: string
+              enum: [system_message]
+            system_message_kind:
+              type: string
+              enum: [human_joined, human_left]
+            text:
+              type: string
+
+    PairTranscriptAssistantMessage:
+      allOf:
+        - $ref: "#/components/schemas/PairTranscriptBase"
+        - type: object
+          required: [text, model, tool_call_count]
+          properties:
+            kind:
+              type: string
+              enum: [assistant_message]
+            text:
+              type: string
+            model:
+              type: object
+              required: [provider, model_id]
+              properties:
+                provider:
+                  type: string
+                model_id:
+                  type: string
+                speed:
+                  type: ["string", "null"]
+            tool_call_count:
+              type: integer
+              minimum: 0
+
+    PairTranscriptToolCall:
+      allOf:
+        - $ref: "#/components/schemas/PairTranscriptBase"
+        - type: object
+          required: [tool_call_id, tool_name, status, summary, is_error, truncated, detail_ref]
+          properties:
+            kind:
+              type: string
+              enum: [tool_call]
+            tool_call_id:
+              type: string
+            tool_name:
+              type: string
+            status:
+              type: string
+              enum: [started, completed]
+            summary:
+              type: string
+            is_error:
+              type: boolean
+            truncated:
+              type: boolean
+            detail_ref:
+              type: object
+              required: [seq]
+              properties:
+                seq:
+                  type: integer
+                  minimum: 1
+                tool_call_id:
+                  type: string
+
+    PairTranscriptError:
+      allOf:
+        - $ref: "#/components/schemas/PairTranscriptBase"
+        - type: object
+          required: [message, detail_ref]
+          properties:
+            kind:
+              type: string
+              enum: [error]
+            message:
+              type: string
+            detail_ref:
+              type: object
+              required: [seq]
+              properties:
+                seq:
+                  type: integer
+                  minimum: 1
+                tool_call_id:
+                  type: string
+
+    PairTranscriptWarning:
+      allOf:
+        - $ref: "#/components/schemas/PairTranscriptBase"
+        - type: object
+          required: [warning_kind, message, detail_ref]
+          properties:
+            kind:
+              type: string
+              enum: [warning]
+            warning_kind:
+              type: string
+            message:
+              type: string
+            detail_ref:
+              type: object
+              required: [seq]
+              properties:
+                seq:
+                  type: integer
+                  minimum: 1
+                tool_call_id:
+                  type: string
+
+    RunEventDetailResponse:
+      type: object
+      required:
+        - event
+        - properties
+        - truncated
+        - redacted
+        - max_content_length
+      properties:
+        event:
+          type: object
+          required:
+            - seq
+            - id
+            - ts
+            - run_id
+            - event
+          properties:
+            seq:
+              type: integer
+              minimum: 1
+            id:
+              type: string
+            ts:
+              type: string
+              format: date-time
+            run_id:
+              type: string
+            event:
+              type: string
+            actor:
+              $ref: "#/components/schemas/Principal"
+            session_id:
+              type: string
+            node_id:
+              type: string
+            node_label:
+              type: string
+            stage_id:
+              type: string
+            tool_call_id:
+              type: string
+        properties:
+          type: object
+          additionalProperties: true
+        content:
+          type: object
+          required: [kind, value]
+          properties:
+            kind:
+              type: string
+            value:
+              type: string
+        truncated:
+          type: boolean
+        redacted:
+          type: boolean
+        max_content_length:
+          type: integer
 
     SessionId:
       description: Durable session identifier.

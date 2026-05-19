@@ -1135,6 +1135,10 @@ impl CompletionCoordinator for SteeringCompletionCoordinator {
         let Some(active_lease) = lease.as_ref() else {
             return false;
         };
+        if active_lease.is_pair_active() {
+            self.handle.park_for_steer();
+            return true;
+        }
         if active_lease.release_if_no_pending_control_work(&self.handle) {
             lease.take();
             false

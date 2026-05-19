@@ -77,6 +77,79 @@ fn run_event_round_trips_run_steer() {
 }
 
 #[test]
+fn run_event_round_trips_pair_lifecycle_events() {
+    assert_run_event_round_trip(json!({
+        "id": "evt_pair_started",
+        "ts": "2026-05-18T12:00:00Z",
+        "run_id": fixtures::RUN_1,
+        "event": "run.pair.started",
+        "actor": { "kind": "system", "system_kind": "engine" },
+        "properties": {
+            "pair_id": "01HZX6M29F1CD5YYMHT1F5D7WQ",
+            "target": {
+                "stage_id": "code@1",
+                "node_id": "code",
+                "node_label": "Code",
+                "visit": 1,
+                "agent_session_id": "ses_01",
+                "provider": "openai",
+                "model": "gpt-5.3"
+            }
+        }
+    }));
+
+    assert_run_event_round_trip(json!({
+        "id": "evt_pair_ended",
+        "ts": "2026-05-18T12:05:00Z",
+        "run_id": fixtures::RUN_1,
+        "event": "run.pair.ended",
+        "properties": {
+            "pair_id": "01HZX6M29F1CD5YYMHT1F5D7WQ",
+            "reason": "user_requested"
+        }
+    }));
+}
+
+#[test]
+fn run_event_round_trips_agent_pair_messages() {
+    assert_run_event_round_trip(json!({
+        "id": "evt_pair_user",
+        "ts": "2026-05-18T12:01:00Z",
+        "run_id": fixtures::RUN_1,
+        "event": "agent.pair.user_message",
+        "node_id": "code",
+        "node_label": "Code",
+        "stage_id": "code@1",
+        "session_id": "ses_01",
+        "actor": { "kind": "system", "system_kind": "engine" },
+        "properties": {
+            "pair_id": "01HZX6M29F1CD5YYMHT1F5D7WQ",
+            "message_id": "01HZX6M4D7Y1QW0Q0P6V8Z4DR5",
+            "client_message_id": "client-1",
+            "text": "Can you inspect the failing test?",
+            "visit": 1
+        }
+    }));
+
+    assert_run_event_round_trip(json!({
+        "id": "evt_pair_system",
+        "ts": "2026-05-18T12:01:01Z",
+        "run_id": fixtures::RUN_1,
+        "event": "agent.pair.system_message",
+        "node_id": "code",
+        "node_label": "Code",
+        "stage_id": "code@1",
+        "session_id": "ses_01",
+        "properties": {
+            "pair_id": "01HZX6M29F1CD5YYMHT1F5D7WQ",
+            "kind": "human_joined",
+            "text": "A human has joined this workflow run for live pairing. Wait for their next message before continuing.",
+            "visit": 1
+        }
+    }));
+}
+
+#[test]
 fn run_event_round_trips_agent_interrupt_injected() {
     let value = json!({
         "id": "evt_interrupt_injected",

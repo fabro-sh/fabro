@@ -66,6 +66,12 @@ pub enum EventBody {
     RunInterrupt(RunInterruptProps),
     #[serde(rename = "run.steer")]
     RunSteer(RunSteerProps),
+    #[serde(rename = "run.pair.started")]
+    RunPairStarted(RunPairStartedProps),
+    #[serde(rename = "run.pair.ended")]
+    RunPairEnded(RunPairEndedProps),
+    #[serde(rename = "run.pair.failed")]
+    RunPairFailed(RunPairFailedProps),
     #[serde(rename = "run.blocked")]
     RunBlocked(RunBlockedProps),
     #[serde(rename = "run.unblocked")]
@@ -184,6 +190,10 @@ pub enum EventBody {
     AgentTurnLimitReached(AgentTurnLimitReachedProps),
     #[serde(rename = "agent.steering.injected")]
     AgentSteeringInjected(AgentSteeringInjectedProps),
+    #[serde(rename = "agent.pair.user_message")]
+    AgentPairUserMessage(AgentPairUserMessageProps),
+    #[serde(rename = "agent.pair.system_message")]
+    AgentPairSystemMessage(AgentPairSystemMessageProps),
     #[serde(rename = "agent.interrupt.injected")]
     AgentInterruptInjected(AgentInterruptInjectedProps),
     #[serde(rename = "agent.steer.buffered")]
@@ -380,6 +390,9 @@ impl EventBody {
             Self::RunRunning(_) => "run.running",
             Self::RunInterrupt(_) => "run.interrupt",
             Self::RunSteer(_) => "run.steer",
+            Self::RunPairStarted(_) => "run.pair.started",
+            Self::RunPairEnded(_) => "run.pair.ended",
+            Self::RunPairFailed(_) => "run.pair.failed",
             Self::RunBlocked(_) => "run.blocked",
             Self::RunUnblocked(_) => "run.unblocked",
             Self::RunRemoving(_) => "run.removing",
@@ -439,6 +452,8 @@ impl EventBody {
             Self::AgentLoopDetected(_) => "agent.loop.detected",
             Self::AgentTurnLimitReached(_) => "agent.turn.limit",
             Self::AgentSteeringInjected(_) => "agent.steering.injected",
+            Self::AgentPairUserMessage(_) => "agent.pair.user_message",
+            Self::AgentPairSystemMessage(_) => "agent.pair.system_message",
             Self::AgentInterruptInjected(_) => "agent.interrupt.injected",
             Self::AgentSteerBuffered(_) => "agent.steer.buffered",
             Self::AgentSteerDropped(_) => "agent.steer.dropped",
@@ -537,6 +552,9 @@ fn is_known_event_name(event: &str) -> bool {
             | "run.running"
             | "run.interrupt"
             | "run.steer"
+            | "run.pair.started"
+            | "run.pair.ended"
+            | "run.pair.failed"
             | "run.blocked"
             | "run.unblocked"
             | "run.removing"
@@ -590,6 +608,8 @@ fn is_known_event_name(event: &str) -> bool {
             | "agent.loop.detected"
             | "agent.turn.limit"
             | "agent.steering.injected"
+            | "agent.pair.user_message"
+            | "agent.pair.system_message"
             | "agent.interrupt.injected"
             | "agent.steer.buffered"
             | "agent.steer.dropped"

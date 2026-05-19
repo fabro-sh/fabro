@@ -13,8 +13,10 @@ use fabro_http::multipart::{Form, Part};
 use fabro_model::{Model, ModelTestMode, ProviderId};
 use fabro_types::settings::run::MergeStrategy;
 use fabro_types::{
-    ArtifactUpload, EventEnvelope, Run, RunBlobId, RunEvent, RunId, RunProjection,
-    SessionEventEnvelope, SessionId, SessionRecord, StageId,
+    ArtifactUpload, EventEnvelope, PairId, PairMessageRecord, PairMessageRequest, PairRecord,
+    PairStartRequest, PairTargetSelector, PairTranscriptResponse, Run, RunBlobId, RunEvent,
+    RunEventDetailResponse, RunId, RunPairStatusResponse, RunProjection, SessionEventEnvelope,
+    SessionId, SessionRecord, StageId,
 };
 use fabro_util::exit::{ErrorExt, ExitClass};
 use futures::future::BoxFuture;
@@ -937,6 +939,145 @@ impl Client {
         })
         .await?;
         Ok(())
+    }
+
+    pub async fn get_run_pair_status(&self, run_id: &RunId) -> Result<RunPairStatusResponse> {
+        let response = self
+            .send_api(|client| async move {
+                client
+                    .get_run_pair_status()
+                    .id(run_id.to_string())
+                    .send()
+                    .await
+            })
+            .await?;
+        convert_type(response.into_inner())
+    }
+
+    pub async fn start_run_pair(
+        &self,
+        run_id: &RunId,
+        target: PairTargetSelector,
+    ) -> Result<PairRecord> {
+        let body = PairStartRequest { target };
+        let response = self
+            .send_api(|client| {
+                let body = body.clone();
+                async move {
+                    client
+                        .start_run_pair()
+                        .id(run_id.to_string())
+                        .body(body)
+                        .send()
+                        .await
+                }
+            })
+            .await?;
+        convert_type(response.into_inner())
+    }
+
+    pub async fn get_run_pair(&self, run_id: &RunId, pair_id: &PairId) -> Result<PairRecord> {
+        let response = self
+            .send_api(|client| async move {
+                client
+                    .get_run_pair()
+                    .id(run_id.to_string())
+                    .pair_id(*pair_id)
+                    .send()
+                    .await
+            })
+            .await?;
+        convert_type(response.into_inner())
+    }
+
+    pub async fn end_run_pair(&self, run_id: &RunId, pair_id: &PairId) -> Result<PairRecord> {
+        let response = self
+            .send_api(|client| async move {
+                client
+                    .end_run_pair()
+                    .id(run_id.to_string())
+                    .pair_id(*pair_id)
+                    .send()
+                    .await
+            })
+            .await?;
+        convert_type(response.into_inner())
+    }
+
+    pub async fn send_run_pair_message(
+        &self,
+        run_id: &RunId,
+        pair_id: &PairId,
+        request: PairMessageRequest,
+    ) -> Result<PairMessageRecord> {
+        let body = request;
+        let response = self
+            .send_api(|client| {
+                let body = body.clone();
+                async move {
+                    client
+                        .send_run_pair_message()
+                        .id(run_id.to_string())
+                        .pair_id(*pair_id)
+                        .body(body)
+                        .send()
+                        .await
+                }
+            })
+            .await?;
+        convert_type(response.into_inner())
+    }
+
+    pub async fn get_run_pair_transcript(
+        &self,
+        run_id: &RunId,
+        pair_id: &PairId,
+        since_seq: Option<u32>,
+        limit: Option<u32>,
+    ) -> Result<PairTranscriptResponse> {
+        let response = self
+            .send_api(|client| async move {
+                let mut builder = client
+                    .get_run_pair_transcript()
+                    .id(run_id.to_string())
+                    .pair_id(*pair_id);
+                if let Some(since_seq) = since_seq {
+                    builder = builder.since_seq(
+                        NonZeroU64::new(u64::from(since_seq)).expect("since_seq is non-zero"),
+                    );
+                }
+                if let Some(limit) = limit {
+                    builder = builder
+                        .limit(NonZeroU64::new(u64::from(limit)).expect("limit is non-zero"));
+                }
+                builder.send().await
+            })
+            .await?;
+        convert_type(response.into_inner())
+    }
+
+    pub async fn get_run_event_detail(
+        &self,
+        run_id: &RunId,
+        seq: u32,
+        max_content_length: Option<u32>,
+    ) -> Result<RunEventDetailResponse> {
+        let response = self
+            .send_api(|client| async move {
+                let mut builder = client
+                    .get_run_event_detail()
+                    .id(run_id.to_string())
+                    .seq(NonZeroU64::new(u64::from(seq)).expect("seq is non-zero"));
+                if let Some(max_content_length) = max_content_length {
+                    builder = builder.max_content_length(
+                        NonZeroU64::new(u64::from(max_content_length))
+                            .expect("max_content_length is non-zero"),
+                    );
+                }
+                builder.send().await
+            })
+            .await?;
+        convert_type(response.into_inner())
     }
 
     pub async fn archive_run(&self, run_id: &RunId) -> Result<Run> {

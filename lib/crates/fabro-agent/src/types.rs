@@ -263,6 +263,20 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         actor: Option<fabro_types::Principal>,
     },
+    PairUserMessage {
+        pair_id:           fabro_types::PairId,
+        message_id:        fabro_types::PairMessageId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_message_id: Option<String>,
+        text:              String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor:             Option<fabro_types::Principal>,
+    },
+    PairSystemMessage {
+        pair_id: fabro_types::PairId,
+        kind:    fabro_types::PairSystemMessageKind,
+        text:    String,
+    },
     CompactionStarted {
         estimated_tokens:    usize,
         context_window_size: usize,
@@ -416,6 +430,12 @@ impl AgentEvent {
             }
             Self::SteeringInjected { text, .. } => {
                 debug!(session_id, text_len = text.len(), "Steering injected");
+            }
+            Self::PairUserMessage { pair_id, text, .. } => {
+                debug!(session_id, %pair_id, text_len = text.len(), "Pair user message injected");
+            }
+            Self::PairSystemMessage { pair_id, kind, .. } => {
+                debug!(session_id, %pair_id, ?kind, "Pair system message injected");
             }
             Self::CompactionStarted {
                 estimated_tokens,

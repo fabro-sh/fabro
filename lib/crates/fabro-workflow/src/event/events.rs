@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 
 use ::fabro_types::{
     BilledTokenCounts, BlockedReason, CommandTermination, DiffSummary, FailureReason,
-    ForkSourceRef, GitContext, ParallelBranchId, Principal, PullRequestLink, RunBlobId, RunFailure,
-    RunId, RunNoticeLevel, RunProvenance, SandboxProvider, StageId, SuccessReason,
-    run_event as fabro_types,
+    ForkSourceRef, GitContext, PairId, PairMessageId, PairSystemMessageKind, PairTarget,
+    ParallelBranchId, Principal, PullRequestLink, RunBlobId, RunFailure, RunId, RunNoticeLevel,
+    RunPairEndedReason, RunPairFailedReason, RunProvenance, SandboxProvider, StageId,
+    SuccessReason, run_event as fabro_types,
 };
 use fabro_agent::{AgentEvent, SandboxEvent};
 use serde::{Deserialize, Serialize};
@@ -78,6 +79,25 @@ pub enum Event {
         text:  String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         actor: Option<Principal>,
+    },
+    RunPairStarted {
+        pair_id: PairId,
+        target:  PairTarget,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor:   Option<Principal>,
+    },
+    RunPairEnded {
+        pair_id: PairId,
+        reason:  RunPairEndedReason,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor:   Option<Principal>,
+    },
+    RunPairFailed {
+        pair_id: PairId,
+        reason:  RunPairFailedReason,
+        message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor:   Option<Principal>,
     },
     RunBlocked {
         blocked_reason: BlockedReason,
@@ -580,6 +600,26 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         actor:      Option<Principal>,
     },
+    AgentPairUserMessage {
+        node_id:           String,
+        visit:             u32,
+        session_id:        String,
+        pair_id:           PairId,
+        message_id:        PairMessageId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_message_id: Option<String>,
+        text:              String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor:             Option<Principal>,
+    },
+    AgentPairSystemMessage {
+        node_id:    String,
+        visit:      u32,
+        session_id: String,
+        pair_id:    PairId,
+        kind:       PairSystemMessageKind,
+        text:       String,
+    },
     /// A steer arrived with no active session and was parked in the run-wide
     /// pending buffer. The actor (steer author) is lifted to top-level.
     AgentSteerBuffered {
@@ -748,6 +788,24 @@ impl Event {
             }
             Self::RunSteer { text, .. } => {
                 info!(text_len = text.len(), "Run steer accepted");
+            }
+            Self::RunPairStarted {
+                pair_id, target, ..
+            } => {
+                info!(%pair_id, stage_id = %target.stage_id, session_id = target.agent_session_id, "Run pairing started");
+            }
+            Self::RunPairEnded {
+                pair_id, reason, ..
+            } => {
+                info!(%pair_id, ?reason, "Run pairing ended");
+            }
+            Self::RunPairFailed {
+                pair_id,
+                reason,
+                message,
+                ..
+            } => {
+                warn!(%pair_id, ?reason, message, "Run pairing failed");
             }
             Self::RunBlocked { blocked_reason } => {
                 info!(?blocked_reason, "Run blocked");
@@ -1361,6 +1419,26 @@ impl Event {
                 ..
             } => {
                 debug!(node_id, visit, session_id, "Agent interrupt injected");
+            }
+            Self::AgentPairUserMessage {
+                node_id,
+                visit,
+                session_id,
+                pair_id,
+                text,
+                ..
+            } => {
+                debug!(node_id, visit, session_id, %pair_id, text_len = text.len(), "Agent pair user message accepted");
+            }
+            Self::AgentPairSystemMessage {
+                node_id,
+                visit,
+                session_id,
+                pair_id,
+                kind,
+                ..
+            } => {
+                debug!(node_id, visit, session_id, %pair_id, ?kind, "Agent pair system message queued");
             }
             Self::AgentSteerBuffered { .. } => {
                 debug!("Steer buffered (no active session)");

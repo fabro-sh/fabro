@@ -65,6 +65,9 @@ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
         | Event::RunUnpauseRequested { actor }
         | Event::RunInterrupt { actor }
         | Event::RunSteer { actor, .. }
+        | Event::RunPairStarted { actor, .. }
+        | Event::RunPairEnded { actor, .. }
+        | Event::RunPairFailed { actor, .. }
         | Event::RunArchived { actor }
         | Event::RunUnarchived { actor, .. }
         | Event::RunTitleUpdated { actor, .. }
@@ -157,6 +160,12 @@ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
             node_id,
             visit,
             session_id,
+        }
+        | Event::AgentPairSystemMessage {
+            node_id,
+            visit,
+            session_id,
+            ..
         } => {
             let node_id_str = node_id.clone();
             let node_label = default_node_label(Some(&node_id_str), None);
@@ -173,6 +182,13 @@ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
             visit,
             session_id,
             actor,
+        }
+        | Event::AgentPairUserMessage {
+            node_id,
+            visit,
+            session_id,
+            actor,
+            ..
         } => {
             let node_id_str = node_id.clone();
             let node_label = default_node_label(Some(&node_id_str), None);
@@ -303,7 +319,9 @@ fn agent_actor_for_event(
             parent_session_id: parent_session_id.map(str::to_string),
             model:             None,
         }),
-        AgentEvent::SteeringInjected { actor, .. } => actor.clone(),
+        AgentEvent::SteeringInjected { actor, .. } | AgentEvent::PairUserMessage { actor, .. } => {
+            actor.clone()
+        }
         _ => None,
     }
 }

@@ -247,7 +247,7 @@ pub use billing_rollup::{
 };
 pub use error::{Error, FailureCategory, FailureSignature, FailureSignatureExt, Result};
 pub use fabro_types::ManifestPath;
-pub use steering_hub::SteeringHub;
+pub use steering_hub::{PairControlError, SteeringHub};
 pub mod run_materialization;
 pub(crate) mod run_metadata;
 pub mod run_options;

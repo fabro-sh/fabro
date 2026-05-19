@@ -19,9 +19,13 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
 
+use chrono::Utc;
 use fabro_agent::{SessionControlHandle, SteeringItem};
 use fabro_types::run_event::AgentSteerDroppedReason;
-use fabro_types::{Principal, StageId};
+use fabro_types::{
+    PairId, PairMessageId, PairMessageRecord, PairRecord, PairStatus, PairSystemMessageKind,
+    PairTarget, Principal, RunId, StageId,
+};
 
 use crate::event::{Emitter, Event};
 
@@ -45,14 +49,29 @@ struct ActiveEntry {
     session_id: String,
 }
 
+#[derive(Debug, Clone)]
+struct ActivePair {
+    record: PairRecord,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PairControlError {
+    AlreadyPaired,
+    PairNotCurrent,
+    PairNotActive,
+    TargetNotActive,
+    MessageNotAccepted,
+}
+
 #[allow(
     clippy::module_name_repetitions,
     reason = "external callers refer to it as SteeringHub"
 )]
 pub struct SteeringHub {
-    active:  RwLock<HashMap<StageId, ActiveEntry>>,
-    pending: Mutex<VecDeque<PendingSteer>>,
-    emitter: Arc<Emitter>,
+    active:      RwLock<HashMap<StageId, ActiveEntry>>,
+    active_pair: Mutex<Option<ActivePair>>,
+    pending:     Mutex<VecDeque<PendingSteer>>,
+    emitter:     Arc<Emitter>,
 }
 
 impl SteeringHub {
@@ -60,6 +79,7 @@ impl SteeringHub {
     pub fn new(emitter: Arc<Emitter>) -> Self {
         Self {
             active: RwLock::new(HashMap::new()),
+            active_pair: Mutex::new(None),
             pending: Mutex::new(VecDeque::new()),
             emitter,
         }
@@ -121,7 +141,10 @@ impl SteeringHub {
         for item in pending {
             Self::enqueue_into_session_queue(
                 handle,
-                (item.text, item.actor),
+                SteeringItem::Steering {
+                    text:  item.text,
+                    actor: item.actor,
+                },
                 &self.emitter,
                 Some(stage_id),
             );
@@ -208,7 +231,10 @@ impl SteeringHub {
         for (stage_id, entry) in active.iter() {
             Self::enqueue_into_session_queue(
                 &entry.handle,
-                (text.clone(), actor.clone()),
+                SteeringItem::Steering {
+                    text:  text.clone(),
+                    actor: actor.clone(),
+                },
                 &self.emitter,
                 Some(stage_id),
             );
@@ -255,14 +281,17 @@ impl SteeringHub {
         });
 
         for (stage_id, entry) in active.iter() {
-            if let Some((_, evicted_actor)) = entry.handle.interrupt_then_enqueue_bounded(
-                (text.to_string(), actor.cloned()),
+            if let Some(evicted) = entry.handle.interrupt_then_enqueue_bounded(
+                SteeringItem::Steering {
+                    text:  text.to_string(),
+                    actor: actor.cloned(),
+                },
                 PER_SESSION_QUEUE_CAP,
             ) {
                 self.emitter.emit(&Event::AgentSteerDropped {
                     reason:  AgentSteerDroppedReason::QueueFull,
                     count:   1,
-                    actor:   evicted_actor,
+                    actor:   evicted.actor().cloned(),
                     node_id: Some(stage_id.node_id().to_string()),
                     visit:   Some(stage_id.visit()),
                 });
@@ -298,6 +327,207 @@ impl SteeringHub {
         }
     }
 
+    pub fn start_pair(
+        &self,
+        run_id: RunId,
+        pair_id: PairId,
+        target: PairTarget,
+        actor: Option<Principal>,
+    ) -> Result<PairRecord, PairControlError> {
+        let active = self.active.read().expect("active lock poisoned");
+        let Some(entry) = active.get(&target.stage_id) else {
+            return Err(PairControlError::TargetNotActive);
+        };
+        if entry.session_id != target.agent_session_id {
+            return Err(PairControlError::TargetNotActive);
+        }
+
+        let mut active_pair = self.active_pair.lock().expect("active pair lock poisoned");
+        if active_pair.is_some() {
+            return Err(PairControlError::AlreadyPaired);
+        }
+
+        let record = PairRecord {
+            pair_id,
+            run_id,
+            status: PairStatus::Active,
+            started_at: Utc::now(),
+            ended_at: None,
+            failure_reason: None,
+            target,
+        };
+        self.emitter.emit(&Event::RunPairStarted {
+            pair_id,
+            target: record.target.clone(),
+            actor: actor.clone(),
+        });
+
+        let text = human_joined_text();
+        if entry.handle.queue_len() >= PER_SESSION_QUEUE_CAP {
+            return Err(PairControlError::MessageNotAccepted);
+        }
+        Self::enqueue_into_session_queue(
+            &entry.handle,
+            SteeringItem::PairSystemMessage {
+                pair_id,
+                kind: PairSystemMessageKind::HumanJoined,
+                text: text.to_string(),
+            },
+            &self.emitter,
+            Some(&record.target.stage_id),
+        );
+        entry.handle.interrupt(actor);
+        self.emitter.emit(&Event::AgentPairSystemMessage {
+            node_id: record.target.node_id.clone(),
+            visit: record.target.visit,
+            session_id: record.target.agent_session_id.clone(),
+            pair_id,
+            kind: PairSystemMessageKind::HumanJoined,
+            text: text.to_string(),
+        });
+        *active_pair = Some(ActivePair {
+            record: record.clone(),
+        });
+        Ok(record)
+    }
+
+    pub fn send_pair_message(
+        &self,
+        pair_id: PairId,
+        message_id: PairMessageId,
+        text: String,
+        client_message_id: Option<String>,
+        actor: Option<Principal>,
+    ) -> Result<PairMessageRecord, PairControlError> {
+        let active_pair = self.active_pair.lock().expect("active pair lock poisoned");
+        let Some(pair) = active_pair.as_ref() else {
+            return Err(PairControlError::PairNotActive);
+        };
+        if pair.record.pair_id != pair_id {
+            return Err(PairControlError::PairNotCurrent);
+        }
+        if pair.record.status != PairStatus::Active {
+            return Err(PairControlError::PairNotActive);
+        }
+
+        let active = self.active.read().expect("active lock poisoned");
+        let target = &pair.record.target;
+        let Some(entry) = active.get(&target.stage_id) else {
+            return Err(PairControlError::TargetNotActive);
+        };
+        if entry.session_id != target.agent_session_id {
+            return Err(PairControlError::TargetNotActive);
+        }
+
+        if entry.handle.queue_len() >= PER_SESSION_QUEUE_CAP {
+            return Err(PairControlError::MessageNotAccepted);
+        }
+        Self::enqueue_into_session_queue(
+            &entry.handle,
+            SteeringItem::PairUserMessage {
+                pair_id,
+                message_id,
+                client_message_id: client_message_id.clone(),
+                text: text.clone(),
+                actor: actor.clone(),
+            },
+            &self.emitter,
+            Some(&target.stage_id),
+        );
+        self.emitter.emit(&Event::AgentPairUserMessage {
+            node_id: target.node_id.clone(),
+            visit: target.visit,
+            session_id: target.agent_session_id.clone(),
+            pair_id,
+            message_id,
+            client_message_id: client_message_id.clone(),
+            text: text.clone(),
+            actor,
+        });
+        Ok(PairMessageRecord {
+            message_id,
+            client_message_id,
+            pair_id,
+            run_id: pair.record.run_id,
+            target: target.selector(),
+            text,
+            accepted_at: Utc::now(),
+        })
+    }
+
+    pub fn end_pair(
+        &self,
+        pair_id: PairId,
+        actor: Option<Principal>,
+    ) -> Result<PairRecord, PairControlError> {
+        let mut active_pair = self.active_pair.lock().expect("active pair lock poisoned");
+        let Some(pair) = active_pair.as_mut() else {
+            return Err(PairControlError::PairNotActive);
+        };
+        if pair.record.pair_id != pair_id {
+            return Err(PairControlError::PairNotCurrent);
+        }
+        if pair.record.status != PairStatus::Active {
+            return Err(PairControlError::PairNotActive);
+        }
+
+        let target = pair.record.target.clone();
+        let text = human_left_text();
+        if let Some(entry) = self
+            .active
+            .read()
+            .expect("active lock poisoned")
+            .get(&target.stage_id)
+            .filter(|entry| entry.session_id == target.agent_session_id)
+        {
+            if entry.handle.queue_len() >= PER_SESSION_QUEUE_CAP {
+                return Err(PairControlError::MessageNotAccepted);
+            }
+            Self::enqueue_into_session_queue(
+                &entry.handle,
+                SteeringItem::PairSystemMessage {
+                    pair_id,
+                    kind: PairSystemMessageKind::HumanLeft,
+                    text: text.to_string(),
+                },
+                &self.emitter,
+                Some(&target.stage_id),
+            );
+            self.emitter.emit(&Event::AgentPairSystemMessage {
+                node_id: target.node_id.clone(),
+                visit: target.visit,
+                session_id: target.agent_session_id.clone(),
+                pair_id,
+                kind: PairSystemMessageKind::HumanLeft,
+                text: text.to_string(),
+            });
+        }
+
+        pair.record.status = PairStatus::Ended;
+        pair.record.ended_at = Some(Utc::now());
+        self.emitter.emit(&Event::RunPairEnded {
+            pair_id,
+            reason: fabro_types::RunPairEndedReason::UserRequested,
+            actor,
+        });
+        let record = pair.record.clone();
+        *active_pair = None;
+        Ok(record)
+    }
+
+    #[must_use]
+    pub fn pair_is_active_for(&self, stage_id: &StageId, session_id: &str) -> bool {
+        self.active_pair
+            .lock()
+            .expect("active pair lock poisoned")
+            .as_ref()
+            .is_some_and(|pair| {
+                pair.record.status == PairStatus::Active
+                    && pair.record.target.stage_id == *stage_id
+                    && pair.record.target.agent_session_id == session_id
+            })
+    }
+
     /// Push an item into a session's queue, evicting the oldest entry and
     /// emitting `agent.steer.dropped { queue_full }` if the cap is hit.
     /// The push + eviction are atomic under the per-session queue lock.
@@ -307,11 +537,11 @@ impl SteeringHub {
         emitter: &Emitter,
         stage_id: Option<&StageId>,
     ) {
-        if let Some((_, evicted_actor)) = handle.enqueue_bounded(item, PER_SESSION_QUEUE_CAP) {
+        if let Some(evicted) = handle.enqueue_bounded(item, PER_SESSION_QUEUE_CAP) {
             emitter.emit(&Event::AgentSteerDropped {
                 reason:  AgentSteerDroppedReason::QueueFull,
                 count:   1,
-                actor:   evicted_actor,
+                actor:   evicted.actor().cloned(),
                 node_id: stage_id.map(|s| s.node_id().to_string()),
                 visit:   stage_id.map(StageId::visit),
             });
@@ -319,14 +549,24 @@ impl SteeringHub {
     }
 }
 
+pub fn human_joined_text() -> &'static str {
+    "A human has joined this workflow run for live pairing. Wait for their next message before continuing."
+}
+
+pub fn human_left_text() -> &'static str {
+    "The human has ended live pairing. Continue autonomously with the workflow."
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
 
     use fabro_agent::SessionControlHandle;
-    use fabro_types::{Principal, RunEvent, RunId, StageId, SystemActorKind};
+    use fabro_types::{
+        PairId, PairMessageId, PairTarget, Principal, RunEvent, RunId, StageId, SystemActorKind,
+    };
 
-    use super::SteeringHub;
+    use super::{PairControlError, SteeringHub};
     use crate::event::Emitter;
 
     fn hub_with_event_names() -> (Arc<SteeringHub>, Arc<Mutex<Vec<String>>>) {
@@ -350,6 +590,18 @@ mod tests {
             events_for_listener.lock().unwrap().push(event.clone());
         });
         (Arc::new(SteeringHub::new(emitter)), events)
+    }
+
+    fn pair_target(stage_id: &StageId, session_id: &str) -> PairTarget {
+        PairTarget {
+            stage_id:         stage_id.clone(),
+            node_id:          stage_id.node_id().to_string(),
+            node_label:       stage_id.node_id().to_string(),
+            visit:            stage_id.visit(),
+            agent_session_id: session_id.to_string(),
+            provider:         Some("openai".to_string()),
+            model:            Some("gpt-5.4".to_string()),
+        }
     }
 
     #[test]
@@ -529,6 +781,74 @@ mod tests {
         ]);
         assert_eq!(events[2].stage_id, Some(stage));
         assert_eq!(events[2].session_id.as_deref(), Some("session-a"));
+    }
+
+    #[test]
+    fn pair_start_message_and_end_emit_typed_events_for_selected_target() {
+        let (hub, events) = hub_with_events();
+        let stage_id = StageId::new("code", 1);
+        let handle = SessionControlHandle::new();
+        assert!(hub.attach_handle(&stage_id, "ses_01", &handle));
+        let pair_id = PairId::new();
+
+        let started = hub
+            .start_pair(
+                RunId::new(),
+                pair_id,
+                pair_target(&stage_id, "ses_01"),
+                None,
+            )
+            .unwrap();
+        assert_eq!(started.status, fabro_types::PairStatus::Active);
+        assert_eq!(handle.queue_len(), 1);
+        assert!(hub.pair_is_active_for(&stage_id, "ses_01"));
+
+        let message = hub
+            .send_pair_message(
+                pair_id,
+                PairMessageId::new(),
+                "please inspect this".to_string(),
+                Some("client-1".to_string()),
+                None,
+            )
+            .unwrap();
+        assert_eq!(message.text, "please inspect this");
+        assert_eq!(handle.queue_len(), 2);
+
+        let ended = hub.end_pair(pair_id, None).unwrap();
+        assert_eq!(ended.status, fabro_types::PairStatus::Ended);
+        assert!(!hub.pair_is_active_for(&stage_id, "ses_01"));
+        assert_eq!(handle.queue_len(), 3);
+
+        let names = events
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|event| event.event_name().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(names, [
+            "run.pair.started",
+            "agent.pair.system_message",
+            "agent.pair.user_message",
+            "agent.pair.system_message",
+            "run.pair.ended"
+        ]);
+    }
+
+    #[test]
+    fn pair_start_rejects_non_selected_or_missing_target() {
+        let hub = SteeringHub::for_tests();
+        let stage_id = StageId::new("code", 1);
+        let handle = SessionControlHandle::new();
+        assert!(hub.attach_handle(&stage_id, "ses_01", &handle));
+
+        let result = hub.start_pair(
+            RunId::new(),
+            PairId::new(),
+            pair_target(&stage_id, "ses_02"),
+            None,
+        );
+        assert_eq!(result.unwrap_err(), PairControlError::TargetNotActive);
     }
 
     #[test]

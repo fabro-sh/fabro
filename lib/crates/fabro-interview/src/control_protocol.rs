@@ -1,4 +1,4 @@
-use fabro_types::Principal;
+use fabro_types::{PairId, PairMessageId, PairTarget, Principal, RunId};
 use serde::{Deserialize, Serialize};
 
 use crate::{Answer, AnswerSubmission, AnswerValue};
@@ -62,6 +62,52 @@ impl WorkerControlEnvelope {
             },
         }
     }
+
+    #[must_use]
+    pub fn start_pair(
+        run_id: RunId,
+        pair_id: PairId,
+        target: PairTarget,
+        actor: Principal,
+    ) -> Self {
+        Self {
+            v:       WORKER_CONTROL_PROTOCOL_VERSION,
+            message: WorkerControlMessage::PairStart {
+                run_id,
+                pair_id,
+                target,
+                actor,
+            },
+        }
+    }
+
+    #[must_use]
+    pub fn pair_message(
+        pair_id: PairId,
+        message_id: PairMessageId,
+        text: impl Into<String>,
+        client_message_id: Option<String>,
+        actor: Principal,
+    ) -> Self {
+        Self {
+            v:       WORKER_CONTROL_PROTOCOL_VERSION,
+            message: WorkerControlMessage::PairMessage {
+                pair_id,
+                message_id,
+                text: text.into(),
+                client_message_id,
+                actor,
+            },
+        }
+    }
+
+    #[must_use]
+    pub fn end_pair(pair_id: PairId, actor: Principal) -> Self {
+        Self {
+            v:       WORKER_CONTROL_PROTOCOL_VERSION,
+            message: WorkerControlMessage::PairEnd { pair_id, actor },
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,6 +127,24 @@ pub enum WorkerControlMessage {
     Interrupt { actor: Principal },
     #[serde(rename = "run.interrupt_then_steer")]
     InterruptThenSteer { text: String, actor: Principal },
+    #[serde(rename = "pair.start")]
+    PairStart {
+        run_id:  RunId,
+        pair_id: PairId,
+        target:  PairTarget,
+        actor:   Principal,
+    },
+    #[serde(rename = "pair.message")]
+    PairMessage {
+        pair_id:           PairId,
+        message_id:        PairMessageId,
+        text:              String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_message_id: Option<String>,
+        actor:             Principal,
+    },
+    #[serde(rename = "pair.end")]
+    PairEnd { pair_id: PairId, actor: Principal },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -135,16 +199,15 @@ impl From<WorkerControlAnswer> for Answer {
 
 #[cfg(test)]
 mod tests {
+    use fabro_types::{PairTarget, Principal, StageId, SystemActorKind, fixtures};
+
     use super::*;
 
     #[test]
     fn interview_answer_round_trips_through_json() {
         let envelope = WorkerControlEnvelope::interview_answer(
             "q-1",
-            AnswerSubmission::system(
-                Answer::text("ship it"),
-                fabro_types::SystemActorKind::Engine,
-            ),
+            AnswerSubmission::system(Answer::text("ship it"), SystemActorKind::Engine),
         );
         let json = serde_json::to_string(&envelope).unwrap();
         assert_eq!(
@@ -168,8 +231,8 @@ mod tests {
 
     #[test]
     fn steer_append_round_trips_through_json() {
-        let envelope = WorkerControlEnvelope::steer("try again", fabro_types::Principal::System {
-            system_kind: fabro_types::SystemActorKind::Engine,
+        let envelope = WorkerControlEnvelope::steer("try again", Principal::System {
+            system_kind: SystemActorKind::Engine,
         });
         let json = serde_json::to_string(&envelope).unwrap();
         assert_eq!(
@@ -182,8 +245,8 @@ mod tests {
 
     #[test]
     fn interrupt_round_trips_through_json() {
-        let envelope = WorkerControlEnvelope::interrupt(fabro_types::Principal::System {
-            system_kind: fabro_types::SystemActorKind::Engine,
+        let envelope = WorkerControlEnvelope::interrupt(Principal::System {
+            system_kind: SystemActorKind::Engine,
         });
         let json = serde_json::to_string(&envelope).unwrap();
         assert_eq!(
@@ -196,12 +259,10 @@ mod tests {
 
     #[test]
     fn interrupt_then_steer_round_trips_through_json() {
-        let envelope = WorkerControlEnvelope::interrupt_then_steer(
-            "stop, do X instead",
-            fabro_types::Principal::System {
-                system_kind: fabro_types::SystemActorKind::Engine,
-            },
-        );
+        let envelope =
+            WorkerControlEnvelope::interrupt_then_steer("stop, do X instead", Principal::System {
+                system_kind: SystemActorKind::Engine,
+            });
         let json = serde_json::to_string(&envelope).unwrap();
         assert_eq!(
             json,
@@ -209,5 +270,54 @@ mod tests {
         );
         let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, envelope);
+    }
+
+    #[test]
+    fn pair_start_round_trips_through_json() {
+        let stage_id = StageId::new("code", 1);
+        let envelope = WorkerControlEnvelope::start_pair(
+            fixtures::RUN_1,
+            "01HZX6M29F1CD5YYMHT1F5D7WQ".parse().unwrap(),
+            PairTarget {
+                stage_id:         stage_id.clone(),
+                node_id:          "code".to_string(),
+                node_label:       "Code".to_string(),
+                visit:            1,
+                agent_session_id: "ses_01".to_string(),
+                provider:         Some("openai".to_string()),
+                model:            Some("gpt-5.4".to_string()),
+            },
+            Principal::System {
+                system_kind: SystemActorKind::Engine,
+            },
+        );
+        let json = serde_json::to_string(&envelope).unwrap();
+        let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, envelope);
+    }
+
+    #[test]
+    fn pair_message_and_end_round_trip_through_json() {
+        let actor = Principal::System {
+            system_kind: SystemActorKind::Engine,
+        };
+        let pair_id = "01HZX6M29F1CD5YYMHT1F5D7WQ".parse().unwrap();
+        let message_id = "01HZX6M4D7Y1QW0Q0P6V8Z4DR5".parse().unwrap();
+
+        let message = WorkerControlEnvelope::pair_message(
+            pair_id,
+            message_id,
+            "continue here",
+            Some("client-1".to_string()),
+            actor.clone(),
+        );
+        let parsed: WorkerControlEnvelope =
+            serde_json::from_str(&serde_json::to_string(&message).unwrap()).unwrap();
+        assert_eq!(parsed, message);
+
+        let end = WorkerControlEnvelope::end_pair(pair_id, actor);
+        let parsed: WorkerControlEnvelope =
+            serde_json::from_str(&serde_json::to_string(&end).unwrap()).unwrap();
+        assert_eq!(parsed, end);
     }
 }

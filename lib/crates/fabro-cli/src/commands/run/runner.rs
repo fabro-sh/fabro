@@ -275,6 +275,32 @@ async fn apply_worker_control_line(
         WorkerControlMessage::InterruptThenSteer { text, actor } => {
             steering_hub.interrupt_then_steer(&text, Some(&actor));
         }
+        WorkerControlMessage::PairStart {
+            run_id,
+            pair_id,
+            target,
+            actor,
+        } => {
+            let _ = steering_hub.start_pair(run_id, pair_id, target, Some(actor));
+        }
+        WorkerControlMessage::PairMessage {
+            pair_id,
+            message_id,
+            text,
+            client_message_id,
+            actor,
+        } => {
+            let _ = steering_hub.send_pair_message(
+                pair_id,
+                message_id,
+                text,
+                client_message_id,
+                Some(actor),
+            );
+        }
+        WorkerControlMessage::PairEnd { pair_id, actor } => {
+            let _ = steering_hub.end_pair(pair_id, Some(actor));
+        }
     }
 }
 
