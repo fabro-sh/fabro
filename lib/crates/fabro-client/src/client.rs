@@ -1041,14 +1041,11 @@ impl Client {
                     .get_run_pair_transcript()
                     .id(run_id.to_string())
                     .pair_id(*pair_id);
-                if let Some(since_seq) = since_seq {
-                    builder = builder.since_seq(
-                        NonZeroU64::new(u64::from(since_seq)).expect("since_seq is non-zero"),
-                    );
+                if let Some(since_seq) = since_seq.and_then(non_zero_u64_from_u32) {
+                    builder = builder.since_seq(since_seq);
                 }
-                if let Some(limit) = limit {
-                    builder = builder
-                        .limit(NonZeroU64::new(u64::from(limit)).expect("limit is non-zero"));
+                if let Some(limit) = limit.and_then(non_zero_u64_from_u32) {
+                    builder = builder.limit(limit);
                 }
                 builder.send().await
             })
@@ -1062,17 +1059,16 @@ impl Client {
         seq: u32,
         max_content_length: Option<u32>,
     ) -> Result<RunEventDetailResponse> {
+        let seq = non_zero_u64_from_u32(seq).context("event seq must be non-zero")?;
+        let max_content_length = max_content_length.and_then(non_zero_u64_from_u32);
         let response = self
             .send_api(|client| async move {
                 let mut builder = client
                     .get_run_event_detail()
                     .id(run_id.to_string())
-                    .seq(NonZeroU64::new(u64::from(seq)).expect("seq is non-zero"));
+                    .seq(seq);
                 if let Some(max_content_length) = max_content_length {
-                    builder = builder.max_content_length(
-                        NonZeroU64::new(u64::from(max_content_length))
-                            .expect("max_content_length is non-zero"),
-                    );
+                    builder = builder.max_content_length(max_content_length);
                 }
                 builder.send().await
             })

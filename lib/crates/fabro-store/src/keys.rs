@@ -59,6 +59,13 @@ pub(crate) fn run_event_key(run_id: &RunId, seq: u32, epoch_ms: i64) -> SlateKey
         .with(format!("{seq:06}-{epoch_ms}"))
 }
 
+pub(crate) fn run_event_seq_prefix(run_id: &RunId, seq: u32) -> SlateKey {
+    SlateKey::new("runs")
+        .with(run_id)
+        .with("events")
+        .with(format!("{seq:06}-"))
+}
+
 pub(crate) fn blobs_prefix() -> SlateKey {
     SlateKey::new("blobs").with("sha256").into_prefix()
 }

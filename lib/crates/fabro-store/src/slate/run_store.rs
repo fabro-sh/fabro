@@ -307,6 +307,10 @@ impl RunDatabase {
         list_events_from_with_limit(&self.inner.db, &self.inner.run_id, start_seq, limit).await
     }
 
+    pub async fn get_event(&self, seq: u32) -> Result<Option<EventEnvelope>> {
+        get_event(&self.inner.db, &self.inner.run_id, seq).await
+    }
+
     /// Returns up to `limit + 1` events for the given stage visit,
     /// starting at `start_seq`. The `+1` lets callers compute `has_more`.
     ///
@@ -476,6 +480,22 @@ where
     let mut events = list_events_from(db, run_id, start_seq).await?;
     events.truncate(limit.saturating_add(1));
     Ok(events)
+}
+
+async fn get_event<R>(db: &R, run_id: &RunId, seq: u32) -> Result<Option<EventEnvelope>>
+where
+    R: DbRead + Sync,
+{
+    let mut iter = db
+        .scan_prefix(keys::run_event_seq_prefix(run_id, seq))
+        .await?;
+    let Some(entry) = iter.next().await? else {
+        return Ok(None);
+    };
+    Ok(Some(EventEnvelope {
+        seq,
+        event: serde_json::from_slice(&entry.value)?,
+    }))
 }
 
 async fn list_events_for_stage_from_with_limit<R>(

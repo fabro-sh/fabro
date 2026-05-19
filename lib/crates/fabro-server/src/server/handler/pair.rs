@@ -22,6 +22,7 @@ use tokio::time::{Instant, sleep};
 use super::super::{
     AppState, PairTransportError, durable_run_status, parse_run_id_path, reject_if_archived,
 };
+use super::events::EventListParams;
 use crate::error::ApiError;
 use crate::principal_middleware::RequiredUser;
 
@@ -37,24 +38,6 @@ pub(super) fn routes() -> axum::Router<Arc<AppState>> {
             post(send_pair_message),
         )
         .route("/runs/{id}/pair/{pair_id}/transcript", get(get_transcript))
-}
-
-#[derive(serde::Deserialize)]
-struct TranscriptParams {
-    #[serde(default)]
-    since_seq: Option<u32>,
-    #[serde(default)]
-    limit:     Option<usize>,
-}
-
-impl TranscriptParams {
-    fn since_seq(&self) -> u32 {
-        self.since_seq.unwrap_or(1).max(1)
-    }
-
-    fn limit(&self) -> usize {
-        self.limit.unwrap_or(100).clamp(1, 1000)
-    }
 }
 
 async fn get_pair_status(
@@ -220,11 +203,11 @@ async fn send_pair_message(
         return ApiError::bad_request("Pair message text must be at most 8192 bytes.")
             .into_response();
     }
-    let pair = match pair_by_id(state.as_ref(), &id, pair_id).await {
+    let pair_window = match pair_window_by_id(state.as_ref(), &id, pair_id).await {
         Ok(pair) => pair,
         Err(response) => return response,
     };
-    if pair.status != PairStatus::Active {
+    if pair_window.record.status != PairStatus::Active {
         return pair_conflict("Pair is not active.", "pair_not_active");
     }
 
@@ -247,7 +230,8 @@ async fn send_pair_message(
         .await
     {
         Ok(()) => {
-            match wait_for_pair_message_record(state.as_ref(), &id, &pair, message_id).await {
+            match wait_for_pair_message_record(state.as_ref(), &id, &pair_window, message_id).await
+            {
                 Ok(record) => (StatusCode::ACCEPTED, Json(record)).into_response(),
                 Err(response) => response,
             }
@@ -260,7 +244,7 @@ async fn get_transcript(
     _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path((id, pair_id)): Path<(String, String)>,
-    Query(params): Query<TranscriptParams>,
+    Query(params): Query<EventListParams>,
 ) -> Response {
     let id = match parse_run_id_path(&id) {
         Ok(id) => id,
@@ -275,7 +259,15 @@ async fn get_transcript(
         Err(response) => return response,
     };
     let limit = params.limit();
-    let events = match list_events(state.as_ref(), &id, params.since_seq(), limit + 1).await {
+    let events = match list_transcript_candidate_events(
+        state.as_ref(),
+        &id,
+        &window,
+        params.since_seq(),
+        limit,
+    )
+    .await
+    {
         Ok(events) => events,
         Err(response) => return response,
     };
@@ -571,21 +563,21 @@ async fn wait_for_pair_record(
 async fn wait_for_pair_message_record(
     state: &AppState,
     id: &RunId,
-    pair: &PairRecord,
+    pair: &PairWindow,
     message_id: PairMessageId,
 ) -> Result<PairMessageRecord, Response> {
     let deadline = Instant::now() + PAIR_CONFIRM_TIMEOUT;
     loop {
-        let events = list_events(state, id, 1, 10_000).await?;
+        let events = list_events(state, id, pair.start_seq, 10_000).await?;
         for envelope in events {
             if let EventBody::AgentPairUserMessage(props) = &envelope.event.body {
-                if props.pair_id == pair.pair_id && props.message_id == message_id {
+                if props.pair_id == pair.record.pair_id && props.message_id == message_id {
                     return Ok(PairMessageRecord {
                         message_id:        props.message_id,
                         client_message_id: props.client_message_id.clone(),
                         pair_id:           props.pair_id,
                         run_id:            *id,
-                        target:            pair.target.selector(),
+                        target:            pair.record.target.selector(),
                         text:              props.text.clone(),
                         accepted_at:       envelope.event.ts,
                     });
@@ -636,7 +628,7 @@ async fn reconstruct_pair_windows(
     state: &AppState,
     id: &RunId,
 ) -> Result<HashMap<PairId, PairWindow>, Response> {
-    let events = list_events(state, id, 1, 10_000).await?;
+    let events = list_all_events(state, id).await?;
     let mut pairs = HashMap::new();
     for envelope in events {
         match &envelope.event.body {
@@ -674,6 +666,81 @@ async fn reconstruct_pair_windows(
         }
     }
     Ok(pairs)
+}
+
+async fn list_all_events(state: &AppState, id: &RunId) -> Result<Vec<EventEnvelope>, Response> {
+    match state.store.open_run_reader(id).await {
+        Ok(run_store) => run_store.list_events().await.map_err(|err| {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }),
+        Err(_) => match durable_run_status(state, *id).await {
+            Ok(Some(_)) => Ok(Vec::new()),
+            Ok(None) => Err(ApiError::not_found("Run not found.").into_response()),
+            Err(err) => Err(
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+            ),
+        },
+    }
+}
+
+async fn list_transcript_candidate_events(
+    state: &AppState,
+    id: &RunId,
+    window: &PairWindow,
+    since_seq: u32,
+    limit: usize,
+) -> Result<Vec<EventEnvelope>, Response> {
+    match state.store.open_run_reader(id).await {
+        Ok(run_store) => {
+            let mut next_seq = since_seq.max(window.start_seq);
+            let mut events = Vec::new();
+            loop {
+                let batch = run_store
+                    .list_events_for_stage_from_with_limit(
+                        &window.record.target.stage_id,
+                        next_seq,
+                        limit.max(256),
+                    )
+                    .await
+                    .map_err(|err| {
+                        ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                            .into_response()
+                    })?;
+                if batch.is_empty() {
+                    break;
+                }
+
+                let mut saw_more = false;
+                for envelope in batch {
+                    next_seq = envelope.seq.saturating_add(1);
+                    if envelope.seq < window.start_seq
+                        || window.end_seq.is_some_and(|end| envelope.seq > end)
+                    {
+                        continue;
+                    }
+                    if transcript_entry_from_event(&window.record, &envelope).is_some() {
+                        events.push(envelope);
+                        if events.len() > limit {
+                            saw_more = true;
+                            break;
+                        }
+                    }
+                }
+
+                if saw_more || events.len() > limit {
+                    break;
+                }
+            }
+            Ok(events)
+        }
+        Err(_) => match durable_run_status(state, *id).await {
+            Ok(Some(_)) => Ok(Vec::new()),
+            Ok(None) => Err(ApiError::not_found("Run not found.").into_response()),
+            Err(err) => Err(
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+            ),
+        },
+    }
 }
 
 async fn list_events(

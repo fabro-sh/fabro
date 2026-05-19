@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use fabro_types::{RunEventDetailContent, RunEventDetailEnvelope, RunEventDetailResponse};
+use fabro_workflow::event::build_redacted_event_payload;
 
 use super::super::{
     ApiError, AppState, AppendEventResponse, BroadcastStream, Event, EventBody, EventEnvelope,
@@ -263,9 +264,9 @@ async fn get_run_event_detail(
 ) -> Response {
     let max_content_length = params.max_content_length();
     match state.store.open_run_reader(&id).await {
-        Ok(run_store) => match run_store.list_events_from_with_limit(seq, 1).await {
-            Ok(events) => {
-                let Some(envelope) = events.into_iter().find(|event| event.seq == seq) else {
+        Ok(run_store) => match run_store.get_event(seq).await {
+            Ok(event) => {
+                let Some(envelope) = event else {
                     return ApiError::with_code(
                         StatusCode::NOT_FOUND,
                         "Event not found.",
@@ -284,11 +285,13 @@ async fn get_run_event_detail(
 }
 
 fn detail_response(envelope: EventEnvelope, max_content_length: usize) -> RunEventDetailResponse {
-    let mut properties = event_properties(&envelope.event);
+    let raw_properties = event_properties(&envelope.event);
+    let redacted_properties = redacted_event_properties(&envelope.event);
+    let redacted = raw_properties != redacted_properties;
+    let mut properties = redacted_properties;
     let event_name = envelope.event.event_name().to_string();
     let mut content = None;
     let mut truncated = false;
-    let mut redacted = false;
 
     for key in ["text", "output", "arguments", "error", "details"] {
         if let Some(value) = properties.remove(key) {
@@ -296,9 +299,7 @@ fn detail_response(envelope: EventEnvelope, max_content_length: usize) -> RunEve
                 serde_json::Value::String(value) => value,
                 other => serde_json::to_string(&other).unwrap_or_else(|_| String::new()),
             };
-            let redacted_value = redact_jsonl_line(&raw);
-            redacted = redacted || redacted_value != raw;
-            let (value, was_truncated) = truncate_content(redacted_value, max_content_length);
+            let (value, was_truncated) = truncate_content(raw, max_content_length);
             truncated = truncated || was_truncated;
             content = Some(RunEventDetailContent {
                 kind: key.to_string(),
@@ -331,14 +332,24 @@ fn detail_response(envelope: EventEnvelope, max_content_length: usize) -> RunEve
 }
 
 fn event_properties(event: &RunEvent) -> serde_json::Map<String, serde_json::Value> {
-    let Ok(mut value) = serde_json::to_value(event) else {
-        return serde_json::Map::new();
-    };
-    value
-        .as_object_mut()
-        .and_then(|object| object.remove("properties"))
+    event
+        .properties()
+        .ok()
         .and_then(|value| value.as_object().cloned())
         .unwrap_or_default()
+}
+
+fn redacted_event_properties(event: &RunEvent) -> serde_json::Map<String, serde_json::Value> {
+    build_redacted_event_payload(event, &event.run_id)
+        .ok()
+        .and_then(|payload| {
+            payload
+                .as_value()
+                .get("properties")
+                .and_then(serde_json::Value::as_object)
+                .cloned()
+        })
+        .unwrap_or_else(|| event_properties(event))
 }
 
 fn truncate_content(value: String, max_content_length: usize) -> (String, bool) {

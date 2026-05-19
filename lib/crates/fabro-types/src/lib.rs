@@ -12,6 +12,7 @@ pub mod diff;
 pub mod event_envelope;
 pub mod failure_signature;
 pub mod graph;
+mod id;
 pub mod interview;
 pub mod llm_backend;
 pub mod manifest_path;

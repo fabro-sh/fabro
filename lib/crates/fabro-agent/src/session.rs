@@ -185,6 +185,22 @@ impl SessionControlHandle {
         evicted
     }
 
+    /// Push `item` only when the queue is below `cap`. Unlike
+    /// `enqueue_bounded`, this preserves all existing queued work and returns
+    /// the rejected item when the queue is already full.
+    pub fn try_enqueue_bounded(&self, item: SteeringItem, cap: usize) -> Result<(), SteeringItem> {
+        {
+            let mut control = self.control.lock().expect("control state lock poisoned");
+            if control.queue.len() >= cap {
+                return Err(item);
+            }
+            control.queue.push_back(item);
+            control.waiting_for_steer = false;
+        }
+        self.notify.notify_waiters();
+        Ok(())
+    }
+
     /// Interrupt the current round and push `item` while enforcing a FIFO cap.
     #[must_use]
     pub fn interrupt_then_enqueue_bounded(
@@ -1568,41 +1584,17 @@ impl Session {
                             actor,
                         });
                 }
-                SteeringItem::PairUserMessage {
-                    pair_id,
-                    message_id,
-                    client_message_id,
-                    text,
-                    actor,
-                } => {
+                SteeringItem::PairUserMessage { text, .. } => {
                     self.history.push(Message::User {
                         content:   text.clone(),
                         timestamp: SystemTime::now(),
                     });
-                    self.event_emitter
-                        .emit(self.id.clone(), AgentEvent::PairUserMessage {
-                            pair_id,
-                            message_id,
-                            client_message_id,
-                            text,
-                            actor,
-                        });
                 }
-                SteeringItem::PairSystemMessage {
-                    pair_id,
-                    kind,
-                    text,
-                } => {
+                SteeringItem::PairSystemMessage { text, .. } => {
                     self.history.push(Message::System {
                         content:   text.clone(),
                         timestamp: SystemTime::now(),
                     });
-                    self.event_emitter
-                        .emit(self.id.clone(), AgentEvent::PairSystemMessage {
-                            pair_id,
-                            kind,
-                            text,
-                        });
                 }
             }
         }
