@@ -258,39 +258,23 @@ async fn get_transcript(
         Ok(window) => window,
         Err(response) => return response,
     };
-    let limit = params.limit();
-    let events = match list_transcript_candidate_events(
+    let page = match transcript_page(
         state.as_ref(),
         &id,
         &window,
         params.since_seq(),
-        limit,
+        params.limit(),
     )
     .await
     {
-        Ok(events) => events,
+        Ok(page) => page,
         Err(response) => return response,
     };
-    let has_more = events.len() > limit;
-    let mut entries = Vec::new();
-    let mut highest_seq = params.since_seq().saturating_sub(1);
-    for envelope in events {
-        highest_seq = highest_seq.max(envelope.seq);
-        if entries.len() >= limit {
-            break;
-        }
-        if envelope.seq < window.start_seq || window.end_seq.is_some_and(|end| envelope.seq > end) {
-            continue;
-        }
-        if let Some(entry) = transcript_entry_from_event(&window.record, &envelope) {
-            entries.push(entry);
-        }
-    }
     Json(PairTranscriptResponse {
-        data: entries,
+        data: page.entries,
         meta: PairTranscriptMeta {
-            next_since_seq: highest_seq.saturating_add(1),
-            has_more,
+            next_since_seq: page.next_since_seq,
+            has_more:       page.has_more,
         },
     })
     .into_response()
@@ -601,6 +585,12 @@ struct PairWindow {
     end_seq:   Option<u32>,
 }
 
+struct TranscriptPage {
+    entries:        Vec<PairTranscriptEntry>,
+    next_since_seq: u32,
+    has_more:       bool,
+}
+
 async fn pair_window_by_id(
     state: &AppState,
     id: &RunId,
@@ -683,23 +673,25 @@ async fn list_all_events(state: &AppState, id: &RunId) -> Result<Vec<EventEnvelo
     }
 }
 
-async fn list_transcript_candidate_events(
+async fn transcript_page(
     state: &AppState,
     id: &RunId,
     window: &PairWindow,
     since_seq: u32,
     limit: usize,
-) -> Result<Vec<EventEnvelope>, Response> {
+) -> Result<TranscriptPage, Response> {
     match state.store.open_run_reader(id).await {
         Ok(run_store) => {
             let mut next_seq = since_seq.max(window.start_seq);
-            let mut events = Vec::new();
+            let mut highest_scanned_seq = since_seq.saturating_sub(1);
+            let mut entries = Vec::new();
             loop {
+                let batch_limit = limit.max(256);
                 let batch = run_store
                     .list_events_for_stage_from_with_limit(
                         &window.record.target.stage_id,
                         next_seq,
-                        limit.max(256),
+                        batch_limit,
                     )
                     .await
                     .map_err(|err| {
@@ -709,32 +701,45 @@ async fn list_transcript_candidate_events(
                 if batch.is_empty() {
                     break;
                 }
+                let batch_has_more = batch.len() > batch_limit;
 
-                let mut saw_more = false;
                 for envelope in batch {
                     next_seq = envelope.seq.saturating_add(1);
                     if envelope.seq < window.start_seq
                         || window.end_seq.is_some_and(|end| envelope.seq > end)
                     {
+                        highest_scanned_seq = highest_scanned_seq.max(envelope.seq);
                         continue;
                     }
-                    if transcript_entry_from_event(&window.record, &envelope).is_some() {
-                        events.push(envelope);
-                        if events.len() > limit {
-                            saw_more = true;
-                            break;
+                    if let Some(entry) = transcript_entry_from_event(&window.record, &envelope) {
+                        if entries.len() >= limit {
+                            return Ok(TranscriptPage {
+                                entries,
+                                next_since_seq: highest_scanned_seq.saturating_add(1),
+                                has_more: true,
+                            });
                         }
+                        entries.push(entry);
                     }
+                    highest_scanned_seq = highest_scanned_seq.max(envelope.seq);
                 }
 
-                if saw_more || events.len() > limit {
+                if !batch_has_more {
                     break;
                 }
             }
-            Ok(events)
+            Ok(TranscriptPage {
+                entries,
+                next_since_seq: highest_scanned_seq.saturating_add(1),
+                has_more: false,
+            })
         }
         Err(_) => match durable_run_status(state, *id).await {
-            Ok(Some(_)) => Ok(Vec::new()),
+            Ok(Some(_)) => Ok(TranscriptPage {
+                entries:        Vec::new(),
+                next_since_seq: since_seq,
+                has_more:       false,
+            }),
             Ok(None) => Err(ApiError::not_found("Run not found.").into_response()),
             Err(err) => Err(
                 ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
@@ -816,12 +821,20 @@ fn worker_unavailable(message: &str) -> Response {
 
 #[cfg(test)]
 mod tests {
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
     use chrono::{TimeZone, Utc};
     use fabro_model::{ModelRef, ProviderId};
     use fabro_types::run_event::AgentMessageProps;
-    use fabro_types::{BilledTokenCounts, EventEnvelope, RunEvent, StageId, fixtures};
+    use fabro_types::{
+        BilledTokenCounts, EventEnvelope, Graph, PairMessageId, RunEvent, StageId,
+        WorkflowSettings, fixtures,
+    };
+    use fabro_workflow::event as workflow_event;
+    use tower::ServiceExt;
 
     use super::*;
+    use crate::test_support::{build_test_router, test_app_state};
 
     #[test]
     fn transcript_projection_includes_matching_assistant_messages() {
@@ -894,6 +907,126 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn transcript_cursor_does_not_skip_lookahead_entry() {
+        let state = test_app_state();
+        let app = build_test_router(state.clone());
+        let run_id = RunId::new();
+        let pair_id = PairId::new();
+        let target = PairTarget {
+            stage_id:         StageId::new("code", 1),
+            node_id:          "code".to_string(),
+            node_label:       "Code".to_string(),
+            visit:            1,
+            agent_session_id: "ses_01".to_string(),
+            provider:         Some("openai".to_string()),
+            model:            Some("gpt-5.4".to_string()),
+        };
+        let run_store = state
+            .store_ref()
+            .create_run(&run_id)
+            .await
+            .expect("test run should be creatable");
+        append_run_created(&run_store, run_id).await;
+        workflow_event::append_event(
+            &run_store,
+            &run_id,
+            &workflow_event::Event::RunPairStarted {
+                pair_id,
+                target: target.clone(),
+                actor: None,
+            },
+        )
+        .await
+        .expect("run.pair.started should append");
+        for text in ["first", "second"] {
+            workflow_event::append_event(
+                &run_store,
+                &run_id,
+                &workflow_event::Event::AgentPairUserMessage {
+                    node_id: target.node_id.clone(),
+                    visit: target.visit,
+                    session_id: target.agent_session_id.clone(),
+                    pair_id,
+                    message_id: PairMessageId::new(),
+                    client_message_id: None,
+                    text: text.to_string(),
+                    actor: None,
+                },
+            )
+            .await
+            .expect("pair message should append");
+        }
+
+        let first_page = app
+            .clone()
+            .oneshot(get(&format!(
+                "/api/v1/runs/{run_id}/pair/{pair_id}/transcript?limit=1"
+            )))
+            .await
+            .expect("first transcript request should complete");
+        let first_page =
+            fabro_test::expect_axum_json(first_page, StatusCode::OK, "GET pair transcript page 1")
+                .await;
+        assert_eq!(transcript_texts(&first_page), vec!["first"]);
+        assert_eq!(first_page["meta"]["has_more"], true);
+
+        let next_since_seq = first_page["meta"]["next_since_seq"]
+            .as_u64()
+            .expect("next_since_seq should be a number");
+        let second_page = app
+            .oneshot(get(&format!(
+                "/api/v1/runs/{run_id}/pair/{pair_id}/transcript?limit=1&since_seq={next_since_seq}"
+            )))
+            .await
+            .expect("second transcript request should complete");
+        let second_page =
+            fabro_test::expect_axum_json(second_page, StatusCode::OK, "GET pair transcript page 2")
+                .await;
+        assert_eq!(transcript_texts(&second_page), vec!["second"]);
+    }
+
+    async fn append_run_created(run_store: &fabro_store::RunDatabase, run_id: RunId) {
+        workflow_event::append_event(run_store, &run_id, &workflow_event::Event::RunCreated {
+            run_id,
+            title: None,
+            settings: serde_json::to_value(WorkflowSettings::default()).unwrap(),
+            graph: serde_json::to_value(Graph::new("test")).unwrap(),
+            workflow_source: None,
+            workflow_config: None,
+            labels: std::collections::BTreeMap::new(),
+            run_dir: "/tmp/test".to_string(),
+            source_directory: None,
+            workflow_slug: None,
+            db_prefix: None,
+            provenance: None,
+            manifest_blob: None,
+            git: None,
+            fork_source_ref: None,
+            parent_id: None,
+            web_url: None,
+        })
+        .await
+        .expect("run.created should append");
+    }
+
+    fn get(uri: &str) -> Request<Body> {
+        Request::builder()
+            .method("GET")
+            .uri(uri)
+            .body(Body::empty())
+            .expect("GET request should build")
+    }
+
+    fn transcript_texts(body: &serde_json::Value) -> Vec<&str> {
+        body["data"]
+            .as_array()
+            .expect("data should be an array")
+            .iter()
+            .map(|entry| entry["text"].as_str().expect("entry should have text"))
+            .collect()
     }
 
     fn envelope(

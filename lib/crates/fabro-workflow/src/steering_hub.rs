@@ -534,20 +534,27 @@ impl SteeringHub {
         session_id: &str,
         reason: RunPairEndedReason,
     ) -> bool {
-        let should_end = self
-            .active_pair
-            .lock()
-            .expect("active pair lock poisoned")
-            .as_ref()
-            .is_some_and(|pair| {
-                pair.record.status == PairStatus::Active
-                    && pair.record.target.stage_id == *stage_id
-                    && pair.record.target.agent_session_id == session_id
-            });
-        if !should_end {
-            return false;
-        }
-        self.end_active_pair(reason)
+        let pair_id = {
+            let mut active_pair = self.active_pair.lock().expect("active pair lock poisoned");
+            let Some(pair) = active_pair.as_ref() else {
+                return false;
+            };
+            if pair.record.status != PairStatus::Active
+                || pair.record.target.stage_id != *stage_id
+                || pair.record.target.agent_session_id != session_id
+            {
+                return false;
+            }
+            let pair_id = pair.record.pair_id;
+            *active_pair = None;
+            pair_id
+        };
+        self.emitter.emit(&Event::RunPairEnded {
+            pair_id,
+            reason,
+            actor: None,
+        });
+        true
     }
 
     fn end_active_pair(&self, reason: RunPairEndedReason) -> bool {
