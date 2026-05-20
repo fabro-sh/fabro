@@ -29,7 +29,8 @@ use crate::redact::redact_auth_url;
 use crate::sandbox::{optional_timeout, resolve_path};
 use crate::{
     CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GrepOptions, Sandbox,
-    SandboxEvent, SandboxEventCallback, StdioProcess, format_lines_numbered, shell_quote,
+    SandboxEvent, SandboxEventCallback, StdioProcess, format_lines_numbered, managed_labels,
+    shell_quote,
 };
 
 pub(crate) const WORKING_DIRECTORY: &str = "/home/daytona/workspace";
@@ -459,7 +460,10 @@ impl DaytonaSandbox {
         daytona_sdk::SandboxBaseParams {
             name: Some(name),
             auto_stop_interval: self.config.auto_stop_interval,
-            labels: self.config.labels.clone(),
+            labels: Some(managed_labels::merge_managed_labels(
+                self.config.labels.as_ref(),
+                self.run_id.as_ref(),
+            )),
             auto_delete_interval: Some(-1),
             ephemeral: Some(false),
             network_block_all,
@@ -2269,6 +2273,72 @@ subpath = "agents"
 
         assert_eq!(params.ephemeral, Some(false));
         assert_eq!(params.auto_delete_interval, Some(-1));
+    }
+
+    #[tokio::test]
+    async fn base_params_adds_managed_daytona_labels() {
+        let run_id: RunId = "01HY0000000000000000000000".parse().unwrap();
+        let sandbox = DaytonaSandbox::new(
+            DaytonaConfig::default(),
+            None,
+            Some(run_id),
+            None,
+            None,
+            Some("dtn_test".to_string()),
+        )
+        .await
+        .expect("sandbox config should be valid");
+
+        let labels = sandbox
+            .base_params()
+            .labels
+            .expect("managed labels should be present");
+
+        assert_eq!(
+            labels.get("sh.fabro.managed").map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            labels.get("sh.fabro.run_id").map(String::as_str),
+            Some("01HY0000000000000000000000")
+        );
+    }
+
+    #[tokio::test]
+    async fn base_params_preserves_user_labels_and_overwrites_reserved_daytona_labels() {
+        let run_id: RunId = "01HY0000000000000000000000".parse().unwrap();
+        let sandbox = DaytonaSandbox::new(
+            DaytonaConfig {
+                labels: Some(HashMap::from([
+                    ("team".to_string(), "platform".to_string()),
+                    ("sh.fabro.managed".to_string(), "false".to_string()),
+                    ("sh.fabro.run_id".to_string(), "wrong".to_string()),
+                ])),
+                ..Default::default()
+            },
+            None,
+            Some(run_id),
+            None,
+            None,
+            Some("dtn_test".to_string()),
+        )
+        .await
+        .expect("sandbox config should be valid");
+
+        let labels = sandbox
+            .base_params()
+            .labels
+            .expect("merged labels should be present");
+
+        assert_eq!(labels.get("team").map(String::as_str), Some("platform"));
+        assert_eq!(
+            labels.get("sh.fabro.managed").map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            labels.get("sh.fabro.run_id").map(String::as_str),
+            Some("01HY0000000000000000000000")
+        );
     }
 
     #[test]

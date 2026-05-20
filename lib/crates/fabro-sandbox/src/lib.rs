@@ -6,6 +6,9 @@ pub mod sandbox_spec;
 #[cfg(any(feature = "docker", feature = "daytona"))]
 mod clone_source;
 
+#[cfg(any(feature = "docker", feature = "daytona", test))]
+mod managed_labels;
+
 pub mod read_guard;
 
 #[cfg(any(feature = "docker", feature = "daytona", test))]

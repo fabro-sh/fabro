@@ -50,6 +50,14 @@ project = "fabro"
 env = "staging"
 team = "platform"
 
+<Note>
+Fabro also adds reserved labels to every managed Daytona sandbox:
+`sh.fabro.managed=true` and, when available, `sh.fabro.run_id=<run-id>`.
+These match Docker sandbox labels and are useful for filtering provider resources
+back to Fabro-managed runs. User-provided values for these reserved keys are
+overwritten.
+</Note>
+
 [run.sandbox.daytona.snapshot]
 name = "rust-dev"
 cpu = 4
