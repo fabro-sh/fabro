@@ -20,6 +20,8 @@ pub struct RefreshToken {
     pub login:        String,
     pub name:         String,
     pub email:        String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url:   Option<String>,
     pub issued_at:    DateTime<Utc>,
     pub expires_at:   DateTime<Utc>,
     pub last_used_at: DateTime<Utc>,
@@ -231,6 +233,7 @@ mod tests {
             login: "octocat".to_string(),
             name: "The Octocat".to_string(),
             email: "octocat@example.com".to_string(),
+            avatar_url: None,
             issued_at: now,
             expires_at: now + ChronoDuration::days(30),
             last_used_at: now,
@@ -292,6 +295,39 @@ mod tests {
             panic!("expected replay to return the original used row");
         };
         assert_eq!(reused.chain_id, chain_id);
+    }
+
+    #[test]
+    fn deserializes_legacy_json_without_avatar_url() {
+        let entry: RefreshToken = serde_json::from_value(serde_json::json!({
+            "token_hash": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            "chain_id": "00000000-0000-4000-8000-000000000000",
+            "identity": {
+                "issuer": "https://github.com",
+                "subject": "12345"
+            },
+            "login": "octocat",
+            "name": "The Octocat",
+            "email": "octocat@example.com",
+            "issued_at": "2026-01-01T00:00:00Z",
+            "expires_at": "2026-02-01T00:00:00Z",
+            "last_used_at": "2026-01-01T00:00:00Z",
+            "used": false,
+            "user_agent": "fabro-test"
+        }))
+        .unwrap();
+
+        assert_eq!(entry.avatar_url, None);
+    }
+
+    #[test]
+    fn serializes_avatar_url_when_present() {
+        let mut entry = refresh_token([1_u8; 32], Uuid::new_v4(), false);
+        entry.avatar_url = Some("https://example.com/octocat.png".to_string());
+
+        let json = serde_json::to_value(&entry).unwrap();
+
+        assert_eq!(json["avatar_url"], "https://example.com/octocat.png");
     }
 
     #[tokio::test]

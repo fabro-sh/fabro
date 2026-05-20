@@ -14,6 +14,8 @@ pub struct AuthCode {
     pub login:          String,
     pub name:           String,
     pub email:          String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url:     Option<String>,
     pub code_challenge: String,
     pub redirect_uri:   String,
     pub expires_at:     DateTime<Utc>,
@@ -108,6 +110,7 @@ mod tests {
             login: "octocat".to_string(),
             name: "The Octocat".to_string(),
             email: "octocat@example.com".to_string(),
+            avatar_url: None,
             code_challenge: "challenge".to_string(),
             redirect_uri: "http://127.0.0.1/callback".to_string(),
             expires_at,
@@ -127,6 +130,36 @@ mod tests {
 
         assert!(store.consume("code-1").await.unwrap().is_some());
         assert!(store.consume("code-1").await.unwrap().is_none());
+    }
+
+    #[test]
+    fn deserializes_legacy_json_without_avatar_url() {
+        let entry: AuthCode = serde_json::from_value(serde_json::json!({
+            "code": "legacy-code",
+            "identity": {
+                "issuer": "https://github.com",
+                "subject": "12345"
+            },
+            "login": "octocat",
+            "name": "The Octocat",
+            "email": "octocat@example.com",
+            "code_challenge": "challenge",
+            "redirect_uri": "http://127.0.0.1/callback",
+            "expires_at": "2026-01-01T00:00:00Z"
+        }))
+        .unwrap();
+
+        assert_eq!(entry.avatar_url, None);
+    }
+
+    #[test]
+    fn serializes_avatar_url_when_present() {
+        let mut entry = auth_code("avatar-code", chrono::Utc::now());
+        entry.avatar_url = Some("https://example.com/octocat.png".to_string());
+
+        let json = serde_json::to_value(&entry).unwrap();
+
+        assert_eq!(json["avatar_url"], "https://example.com/octocat.png");
     }
 
     #[tokio::test]
