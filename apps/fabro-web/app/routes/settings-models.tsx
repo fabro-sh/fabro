@@ -1,7 +1,6 @@
 import type { Provider } from "@qltysh/fabro-api-client";
 import { useProviders } from "../lib/queries";
 import {
-  Badge,
   Dot,
   Panel,
   PanelSkeleton,
@@ -48,34 +47,11 @@ function ProvidersPanel({ providers }: { providers: Provider[] }) {
 function ProviderRow({ provider }: { provider: Provider }) {
   return (
     <Row
-      title={
-        <span className="inline-flex items-center gap-2">
-          {provider.display_name}
-          <Badge>{provider.id}</Badge>
-        </span>
-      }
-      help={<ProviderHelp provider={provider} />}
+      title={provider.display_name || provider.id}
+      help={`${provider.model_count} ${plural(provider.model_count, "model", "models")}`}
     >
       <ProviderStatus provider={provider} />
     </Row>
-  );
-}
-
-function ProviderHelp({ provider }: { provider: Provider }) {
-  return (
-    <span className="inline-flex flex-wrap items-center gap-x-1.5">
-      <span>
-        {provider.model_count} {plural(provider.model_count, "model", "models")}
-      </span>
-      <span aria-hidden="true">·</span>
-      <span>default {provider.default_model ?? "—"}</span>
-      {provider.base_url ? (
-        <>
-          <span aria-hidden="true">·</span>
-          <span className="font-mono">{provider.base_url}</span>
-        </>
-      ) : null}
-    </span>
   );
 }
 
