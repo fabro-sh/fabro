@@ -92,4 +92,7 @@ export const queryKeys = {
   settings: {
     server: () => ["settings", "server"] as const,
   },
+  providers: {
+    list: () => ["providers", "list"] as const,
+  },
 };

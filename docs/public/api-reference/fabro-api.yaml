@@ -3864,6 +3864,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/providers:
+    get:
+      operationId: listProviders
+      tags: [Models]
+      summary: List Providers
+      description: Returns LLM providers from the catalog with effective config and configured status.
+      responses:
+        "200":
+          description: Provider list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderList"
+
   # ── Completions ───────────────────────────────────────────────────────
 
   /api/v1/completions:
@@ -5027,6 +5041,69 @@ components:
             $ref: "#/components/schemas/Model"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
+
+    ProviderList:
+      description: List of LLM providers from the catalog.
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Provider"
+
+    Provider:
+      description: An LLM provider from the catalog with effective config and configured status.
+      type: object
+      required:
+        - id
+        - display_name
+        - adapter
+        - priority
+        - model_count
+        - configured
+      properties:
+        id:
+          $ref: "#/components/schemas/ProviderId"
+        display_name:
+          type: string
+          description: Human-readable provider name.
+          example: "Anthropic"
+        adapter:
+          type: string
+          enum: [anthropic, openai, gemini, openai_compatible]
+          description: Protocol adapter the provider speaks.
+          example: "anthropic"
+        base_url:
+          type: ["string", "null"]
+          description: Operator-set base URL override, if any.
+        api_key_url:
+          type: ["string", "null"]
+          description: URL where an operator can obtain an API key for this provider.
+        priority:
+          type: integer
+          format: int32
+          description: Catalog ordering priority; higher sorts first.
+        aliases:
+          type: array
+          items:
+            type: string
+          description: Alternative identifiers that resolve to this provider.
+        model_count:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Number of catalog models belonging to this provider.
+        default_model:
+          type: ["string", "null"]
+          description: Catalog default model ID for this provider, if any.
+        configured:
+          type: boolean
+          description: |
+            Whether credential material is present for this provider on the
+            server when this response was produced. Does NOT imply requests
+            will succeed.
 
     ProviderId:
       description: LLM provider identifier.

@@ -10,6 +10,7 @@ import {
   HumanInTheLoopApi,
   InsightsApi,
   InstallApi,
+  ModelsApi,
   RunInternalsApi,
   RunInternalsApiAxiosParamCreator,
   RunOutputsApi,
@@ -83,6 +84,11 @@ export const insightsApi = new InsightsApi(
   generatedAxios,
 );
 export const installApi = new InstallApi(
+  generatedApiConfiguration,
+  "",
+  generatedAxios,
+);
+export const modelsApi = new ModelsApi(
   generatedApiConfiguration,
   "",
   generatedAxios,

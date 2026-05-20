@@ -12,6 +12,7 @@ import type {
   PaginatedRunList,
   PaginatedRunStageList,
   PaginatedWorkflowListResponse,
+  ProviderList,
   RunArtifactListResponse,
   RunBilling,
   RunProjection,
@@ -36,6 +37,7 @@ import {
   generatedAxios,
   humanInTheLoopApi,
   insightsApi,
+  modelsApi,
   runInternalsApi,
   runOutputsApi,
   runsApi,
@@ -362,6 +364,14 @@ export function useServerSettings() {
   return useSWR<ServerSettings>(
     queryKeys.settings.server(),
     () => apiData(() => settingsApi.retrieveServerSettings()),
+    immutableOptions,
+  );
+}
+
+export function useProviders() {
+  return useSWR<ProviderList>(
+    queryKeys.providers.list(),
+    () => apiData(() => modelsApi.listProviders()),
     immutableOptions,
   );
 }

@@ -5087,6 +5087,116 @@ reasoning = false
 }
 
 #[tokio::test]
+async fn list_providers_marks_configured_per_provider_and_omits_secrets() {
+    // Only `ANTHROPIC_API_KEY` is supplied, so anthropic resolves as configured
+    // while every other catalog provider does not.
+    let state = test_app_state_with_env_lookup(
+        default_test_server_settings(),
+        RunLayer::default(),
+        5,
+        |name| (name == EnvVars::ANTHROPIC_API_KEY).then(|| "test-key".to_string()),
+    );
+    let app = crate::test_support::build_test_router(state);
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/providers"))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let providers = body["data"].as_array().unwrap();
+
+    assert!(
+        providers.len() >= 2,
+        "builtin catalog should expose multiple providers"
+    );
+
+    let anthropic = providers
+        .iter()
+        .find(|provider| provider["id"] == "anthropic")
+        .expect("anthropic provider should be present");
+    assert_eq!(anthropic["configured"].as_bool(), Some(true));
+
+    // `model_count` and `default_model` must reflect the catalog truth for
+    // this exact provider, not merely be populated.
+    let catalog = Catalog::builtin();
+    let expected_model_count = catalog.list(Some(&ProviderId::anthropic())).len();
+    assert_eq!(
+        anthropic["model_count"].as_u64(),
+        Some(expected_model_count as u64),
+        "anthropic model_count should match the catalog"
+    );
+    let expected_default = catalog
+        .default_for_provider(&ProviderId::anthropic())
+        .expect("anthropic should have a catalog default model");
+    assert_eq!(
+        anthropic["default_model"].as_str(),
+        Some(expected_default.id.as_str()),
+        "anthropic default_model should match the catalog"
+    );
+
+    assert!(
+        providers
+            .iter()
+            .filter(|provider| provider["id"] != "anthropic")
+            .all(|provider| provider["configured"].as_bool() == Some(false)),
+        "providers without supplied credentials should be unconfigured"
+    );
+
+    // Internal-only catalog fields and the injected credential value must
+    // never reach the wire.
+    let serialized = body["data"].to_string();
+    assert!(!serialized.contains("\"auth\""), "leaked `auth`");
+    assert!(
+        !serialized.contains("\"extra_headers\""),
+        "leaked `extra_headers`"
+    );
+    assert!(
+        !serialized.contains("\"billing_policy\""),
+        "leaked `billing_policy`"
+    );
+    assert!(
+        !serialized.contains("\"agent_profile\""),
+        "leaked `agent_profile`"
+    );
+    assert!(
+        !serialized.contains("test-key"),
+        "leaked the injected credential value"
+    );
+}
+
+#[tokio::test]
+async fn list_providers_marks_all_unconfigured_without_credentials() {
+    let state = test_app_state_with_env_lookup(
+        default_test_server_settings(),
+        RunLayer::default(),
+        5,
+        |_| None,
+    );
+    let app = crate::test_support::build_test_router(state);
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/providers"))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let providers = body["data"].as_array().unwrap();
+
+    assert!(!providers.is_empty());
+    assert!(
+        providers
+            .iter()
+            .all(|provider| provider["configured"].as_bool() == Some(false)),
+        "no provider should be configured when no credentials are supplied"
+    );
+}
+
+#[tokio::test]
 async fn auth_login_github_redirects_to_github() {
     let source = r#"
 _version = 1

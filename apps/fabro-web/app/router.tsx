@@ -34,6 +34,7 @@ import * as InsightsNew from "./routes/insights-new";
 import * as Settings from "./routes/settings";
 import * as SettingsGeneral from "./routes/settings-general";
 import * as SettingsIntegrations from "./routes/settings-integrations";
+import * as SettingsModels from "./routes/settings-models";
 import * as SettingsSecurity from "./routes/settings-security";
 import * as SettingsStorage from "./routes/settings-storage";
 import * as SettingsLiveEvents from "./routes/settings-live-events";
@@ -135,6 +136,7 @@ export const routes: RouteObject[] = [
             children: [
               indexRoute(SettingsGeneral),
               route("integrations", SettingsIntegrations),
+              route("models", SettingsModels),
               route("security", SettingsSecurity),
               route("storage", SettingsStorage),
               route("live-events", SettingsLiveEvents),

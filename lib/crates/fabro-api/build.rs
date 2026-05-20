@@ -366,6 +366,7 @@ fn main() {
         ("ExecOutputTail", "fabro_types::ExecOutputTail", &[]),
         ("ProviderId", "fabro_model::ProviderId", &[]),
         ("Model", "fabro_model::Model", &[]),
+        ("Provider", "fabro_model::Provider", &[]),
         ("ModelLimits", "fabro_model::ModelLimits", &[]),
         (
             "ReasoningEffortFeature",

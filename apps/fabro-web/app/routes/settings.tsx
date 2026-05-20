@@ -2,6 +2,7 @@ import {
   BoltIcon,
   CircleStackIcon,
   Cog6ToothIcon,
+  CpuChipIcon,
   PuzzlePieceIcon,
   ShieldCheckIcon,
 } from "@heroicons/react/24/outline";
@@ -37,6 +38,12 @@ const navItems: NavEntry[] = [
     href: "/settings/integrations",
     icon: PuzzlePieceIcon,
     match: (p) => p.startsWith("/settings/integrations"),
+  },
+  {
+    name: "Models",
+    href: "/settings/models",
+    icon: CpuChipIcon,
+    match: (p) => p.startsWith("/settings/models"),
   },
   {
     name: "Security",

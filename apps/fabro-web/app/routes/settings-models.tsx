@@ -1,0 +1,103 @@
+import type { Provider } from "@qltysh/fabro-api-client";
+import { useProviders } from "../lib/queries";
+import {
+  Badge,
+  Dot,
+  Panel,
+  PanelSkeleton,
+  Row,
+  SettingsPageIntro,
+  plural,
+} from "../components/settings-panel";
+
+export function meta() {
+  return [{ title: "Models — Fabro" }];
+}
+
+export default function SettingsModels() {
+  const query = useProviders();
+
+  return (
+    <div className="space-y-6">
+      <SettingsPageIntro description="LLM providers configured on this Fabro server." />
+      {query.data ? (
+        <ProvidersPanel providers={query.data.data} />
+      ) : (
+        <PanelSkeleton />
+      )}
+    </div>
+  );
+}
+
+function ProvidersPanel({ providers }: { providers: Provider[] }) {
+  return (
+    <Panel title="Providers">
+      {providers.length === 0 ? (
+        <div className="px-4 py-6 text-sm text-fg-muted">
+          No LLM providers in the catalog.
+        </div>
+      ) : (
+        providers.map((provider) => (
+          <ProviderRow key={provider.id} provider={provider} />
+        ))
+      )}
+    </Panel>
+  );
+}
+
+function ProviderRow({ provider }: { provider: Provider }) {
+  return (
+    <Row
+      title={
+        <span className="inline-flex items-center gap-2">
+          {provider.display_name}
+          <Badge>{provider.id}</Badge>
+        </span>
+      }
+      help={<ProviderHelp provider={provider} />}
+    >
+      <ProviderStatus provider={provider} />
+    </Row>
+  );
+}
+
+function ProviderHelp({ provider }: { provider: Provider }) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-x-1.5">
+      <span>
+        {provider.model_count} {plural(provider.model_count, "model", "models")}
+      </span>
+      <span aria-hidden="true">·</span>
+      <span>default {provider.default_model ?? "—"}</span>
+      {provider.base_url ? (
+        <>
+          <span aria-hidden="true">·</span>
+          <span className="font-mono">{provider.base_url}</span>
+        </>
+      ) : null}
+    </span>
+  );
+}
+
+function ProviderStatus({ provider }: { provider: Provider }) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+      <span className="inline-flex items-center gap-2">
+        <Dot on={provider.configured} />
+        <span className={provider.configured ? "text-fg" : "text-fg-muted"}>
+          {provider.configured ? "Configured" : "Not configured"}
+        </span>
+      </span>
+      {!provider.configured && provider.api_key_url ? (
+        <a
+          href={provider.api_key_url}
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs text-teal-500 hover:underline"
+        >
+          Get API key →
+        </a>
+      ) : null}
+    </span>
+  );
+}
