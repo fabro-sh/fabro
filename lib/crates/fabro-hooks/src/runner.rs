@@ -9,7 +9,7 @@ use fabro_model::Catalog;
 
 use crate::config::{HookDefinition, HookSettings};
 use crate::executor::{HookExecutor, HookExecutorImpl};
-use crate::types::{HookContext, HookDecision, HookWorkDirs};
+use crate::types::{HookContext, HookDecision, HookExecutionContext};
 
 /// Central orchestrator: filters matching hooks, executes them, merges
 /// decisions.
@@ -72,7 +72,7 @@ impl HookRunner {
         &self,
         context: &HookContext,
         sandbox: Arc<dyn Sandbox>,
-        work_dirs: HookWorkDirs<'_>,
+        execution_context: HookExecutionContext,
     ) -> HookDecision {
         let matching = self.filter_hooks(context);
         if matching.is_empty() {
@@ -90,11 +90,11 @@ impl HookRunner {
 
         let decision = if any_blocking {
             // Sequential execution for blocking hooks, short-circuit on first Block
-            self.run_sequential(&matching, context, sandbox, work_dirs)
+            self.run_sequential(&matching, context, sandbox, &execution_context)
                 .await
         } else {
             // Non-blocking: run all, ignore decisions
-            self.run_non_blocking(&matching, context, sandbox, work_dirs)
+            self.run_non_blocking(&matching, context, sandbox, &execution_context)
                 .await
         };
 
@@ -142,7 +142,7 @@ impl HookRunner {
         hooks: &[&HookDefinition],
         context: &HookContext,
         sandbox: Arc<dyn Sandbox>,
-        work_dirs: HookWorkDirs<'_>,
+        execution_context: &HookExecutionContext,
     ) -> HookDecision {
         let mut merged = HookDecision::Proceed;
         for hook in hooks {
@@ -157,7 +157,7 @@ impl HookRunner {
                     hook,
                     context,
                     sandbox.clone(),
-                    work_dirs,
+                    execution_context,
                     self.llm_source.as_ref(),
                     Arc::clone(&self.catalog),
                 )
@@ -198,7 +198,7 @@ impl HookRunner {
         hooks: &[&HookDefinition],
         context: &HookContext,
         sandbox: Arc<dyn Sandbox>,
-        work_dirs: HookWorkDirs<'_>,
+        execution_context: &HookExecutionContext,
     ) -> HookDecision {
         for hook in hooks {
             tracing::debug!(
@@ -212,7 +212,7 @@ impl HookRunner {
                     hook,
                     context,
                     sandbox.clone(),
-                    work_dirs,
+                    execution_context,
                     self.llm_source.as_ref(),
                     Arc::clone(&self.catalog),
                 )
@@ -256,7 +256,7 @@ mod tests {
             definition: &HookDefinition,
             _context: &HookContext,
             _sandbox: Arc<dyn Sandbox>,
-            _work_dirs: HookWorkDirs<'_>,
+            _execution_context: &HookExecutionContext,
             _llm_source: &dyn CredentialSource,
             _catalog: Arc<Catalog>,
         ) -> HookResult {
@@ -305,7 +305,7 @@ mod tests {
         let ctx = make_context(HookEvent::RunStart);
         let sandbox = make_sandbox();
         let decision = runner
-            .run(&ctx, sandbox.clone(), HookWorkDirs::default())
+            .run(&ctx, sandbox.clone(), HookExecutionContext::default())
             .await;
         assert_eq!(decision, HookDecision::Proceed);
     }
@@ -417,7 +417,7 @@ mod tests {
         let ctx = make_context(HookEvent::RunStart);
         let sandbox = make_sandbox();
         let decision = runner
-            .run(&ctx, sandbox.clone(), HookWorkDirs::default())
+            .run(&ctx, sandbox.clone(), HookExecutionContext::default())
             .await;
         assert!(matches!(decision, HookDecision::Block { .. }));
     }
@@ -438,7 +438,7 @@ mod tests {
         let ctx = make_context(HookEvent::StageStart);
         let sandbox = make_sandbox();
         let decision = runner
-            .run(&ctx, sandbox.clone(), HookWorkDirs::default())
+            .run(&ctx, sandbox.clone(), HookExecutionContext::default())
             .await;
         assert!(matches!(decision, HookDecision::Skip { .. }));
     }
@@ -459,7 +459,7 @@ mod tests {
         let ctx = make_context(HookEvent::StageComplete);
         let sandbox = make_sandbox();
         let decision = runner
-            .run(&ctx, sandbox.clone(), HookWorkDirs::default())
+            .run(&ctx, sandbox.clone(), HookExecutionContext::default())
             .await;
         // Non-blocking hooks don't affect the decision
         assert_eq!(decision, HookDecision::Proceed);
@@ -478,7 +478,7 @@ mod tests {
         let ctx = make_context(HookEvent::RunStart);
         let sandbox = make_sandbox();
         let decision = runner
-            .run(&ctx, sandbox.clone(), HookWorkDirs::default())
+            .run(&ctx, sandbox.clone(), HookExecutionContext::default())
             .await;
         assert_eq!(decision, HookDecision::Proceed);
     }
@@ -496,7 +496,7 @@ mod tests {
         let ctx = make_context(HookEvent::RunStart);
         let sandbox = make_sandbox();
         let decision = runner
-            .run(&ctx, sandbox.clone(), HookWorkDirs::default())
+            .run(&ctx, sandbox.clone(), HookExecutionContext::default())
             .await;
         assert!(matches!(decision, HookDecision::Block { .. }));
     }

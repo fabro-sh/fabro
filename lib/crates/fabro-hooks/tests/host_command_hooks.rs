@@ -4,7 +4,8 @@ use std::sync::Arc;
 use fabro_agent::{LocalSandbox, Sandbox};
 use fabro_auth::{CredentialSource, EnvCredentialSource};
 use fabro_hooks::{
-    HookContext, HookDecision, HookDefinition, HookEvent, HookRunner, HookSettings, HookWorkDirs,
+    HookContext, HookDecision, HookDefinition, HookEvent, HookExecutionContext, HookRunner,
+    HookSettings,
 };
 use fabro_model::Catalog;
 use fabro_types::RunId;
@@ -61,9 +62,9 @@ async fn host_command_hook_uses_host_workdir_not_sandbox_workdir() {
     );
 
     let decision = runner
-        .run(&context, local_sandbox(), HookWorkDirs {
-            host:    Some(&host_work_dir),
-            sandbox: Some(container_only_work_dir),
+        .run(&context, local_sandbox(), HookExecutionContext {
+            host_source_dir:  Some(host_work_dir.clone()),
+            sandbox_work_dir: Some(container_only_work_dir.to_path_buf()),
         })
         .await;
 

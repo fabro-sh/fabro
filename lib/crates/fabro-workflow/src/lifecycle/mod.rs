@@ -7,7 +7,7 @@ pub(crate) mod git;
 pub(crate) mod hook;
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -43,6 +43,7 @@ use crate::run_metadata::{RunMetadataRuntime, RunMetadataWriterHandle};
 use crate::run_options::RunOptions;
 use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git_runtime::SandboxGitRuntime;
+use crate::services::RunLocations;
 
 type WfRunState = ExecutionState<Option<BilledModelUsage>>;
 type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
@@ -72,7 +73,7 @@ pub(crate) struct WorkflowLifecycle {
     // Config needed for context seeding
     graph:                 Arc<GvGraph>,
     run_id:                RunId,
-    working_directory:     Option<String>,
+    sandbox_work_dir:      Option<String>,
 }
 
 impl WorkflowLifecycle {
@@ -88,7 +89,7 @@ impl WorkflowLifecycle {
         run_dir: &Path,
         run_store: &RunStoreHandle,
         artifact_sink: Option<ArtifactSink>,
-        host_hook_work_dir: Option<PathBuf>,
+        locations: &RunLocations,
         run_options: &Arc<RunOptions>,
         sandbox_git: Arc<SandboxGitRuntime>,
         metadata_runtime: Arc<RunMetadataRuntime>,
@@ -110,8 +111,11 @@ impl WorkflowLifecycle {
             .as_ref()
             .and_then(|g| g.run_branch.as_ref())
             .is_some();
-        let sandbox_working_directory = if has_run_branch {
-            Some(sandbox.working_directory().to_string())
+        let run_branch_sandbox_work_dir = if has_run_branch {
+            locations
+                .sandbox_work_dir
+                .as_ref()
+                .map(|path| path.display().to_string())
         } else {
             None
         };
@@ -125,7 +129,7 @@ impl WorkflowLifecycle {
             base_branch:           run_options.base_branch.clone(),
             base_sha:              run_options.git.as_ref().and_then(|g| g.base_sha.clone()),
             run_branch:            run_options.git.as_ref().and_then(|g| g.run_branch.clone()),
-            worktree_dir:          sandbox_working_directory.clone(),
+            worktree_dir:          run_branch_sandbox_work_dir.clone(),
             goal:                  (!graph.goal().is_empty()).then(|| graph.goal().to_string()),
             checkpoint_git_result: Arc::clone(&checkpoint_git_result),
             circuit_breaker:       Arc::clone(&circuit_breaker),
@@ -134,8 +138,7 @@ impl WorkflowLifecycle {
         let hook = HookLifecycle {
             hook_runner,
             sandbox: Arc::clone(sandbox),
-            sandbox_hook_work_dir: sandbox_working_directory.clone().map(PathBuf::from),
-            host_hook_work_dir,
+            hook_execution_context: locations.hook_execution_context(),
             run_id: run_options.run_id,
             graph_name: graph.name.clone(),
         };
@@ -188,7 +191,7 @@ impl WorkflowLifecycle {
             is_initial_resume: AtomicBool::new(is_resume),
             graph,
             run_id: run_options.run_id,
-            working_directory: sandbox_working_directory,
+            sandbox_work_dir: run_branch_sandbox_work_dir,
         }
     }
 
@@ -234,7 +237,7 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
             context::keys::INTERNAL_RUN_ID,
             serde_json::json!(self.run_id),
         );
-        if let Some(ref wd) = self.working_directory {
+        if let Some(ref wd) = self.sandbox_work_dir {
             state
                 .context
                 .set(context::keys::INTERNAL_WORK_DIR, serde_json::json!(wd));

@@ -20,7 +20,9 @@ use tokio::time::timeout as tokio_timeout;
 use tokio_util::sync::CancellationToken;
 
 use crate::config::{HookDefinition, HookType, TlsMode};
-use crate::types::{HookContext, HookDecision, HookResult, HookWorkDirs, PromptHookResponse};
+use crate::types::{
+    HookContext, HookDecision, HookExecutionContext, HookResult, PromptHookResponse,
+};
 
 const HOOK_EVALUATOR_SYSTEM_PROMPT: &str = "You are a hook evaluator for a workflow engine. Given context about a workflow event, evaluate the condition.";
 
@@ -48,7 +50,7 @@ pub trait HookExecutor: Send + Sync {
         definition: &HookDefinition,
         context: &HookContext,
         sandbox: Arc<dyn Sandbox>,
-        work_dirs: HookWorkDirs<'_>,
+        execution_context: &HookExecutionContext,
         llm_source: &dyn CredentialSource,
         catalog: Arc<Catalog>,
     ) -> HookResult;
@@ -141,7 +143,7 @@ impl HookExecutorImpl {
         command: &str,
         context: &HookContext,
         sandbox: &Arc<dyn Sandbox>,
-        work_dirs: HookWorkDirs<'_>,
+        execution_context: &HookExecutionContext,
         env: &E,
     ) -> HookDecision
     where
@@ -177,8 +179,8 @@ impl HookExecutorImpl {
             if sandbox.write_file(&ctx_path, &context_json).await.is_ok() {
                 env_vars.insert("FABRO_HOOK_CONTEXT".to_string(), ctx_path.clone());
             }
-            let sandbox_work_dir = work_dirs
-                .sandbox
+            let sandbox_work_dir = execution_context
+                .command_cwd_for(definition)
                 .map(|path| path.to_string_lossy().to_string());
             match sandbox
                 .exec_command(
@@ -198,7 +200,7 @@ impl HookExecutorImpl {
         } else {
             let mut cmd = TokioCommand::new("sh");
             cmd.arg("-c").arg(&command);
-            if let Some(wd) = work_dirs.host {
+            if let Some(wd) = execution_context.command_cwd_for(definition) {
                 cmd.current_dir(wd);
             }
             for (k, v) in &env_vars {
@@ -627,7 +629,7 @@ impl HookExecutor for HookExecutorImpl {
         definition: &HookDefinition,
         context: &HookContext,
         sandbox: Arc<dyn Sandbox>,
-        work_dirs: HookWorkDirs<'_>,
+        execution_context: &HookExecutionContext,
         llm_source: &dyn CredentialSource,
         catalog: Arc<Catalog>,
     ) -> HookResult {
@@ -642,7 +644,15 @@ impl HookExecutor for HookExecutorImpl {
                 Cow::Borrowed(HookType::Command { ref command })
                 | Cow::Owned(HookType::Command { ref command }),
             ) => {
-                Self::execute_command(definition, command, context, &sandbox, work_dirs, &env).await
+                Self::execute_command(
+                    definition,
+                    command,
+                    context,
+                    &sandbox,
+                    execution_context,
+                    &env,
+                )
+                .await
             }
             Some(
                 Cow::Borrowed(HookType::Http {
@@ -845,7 +855,7 @@ mod tests {
                 &def,
                 &ctx,
                 sandbox,
-                HookWorkDirs::default(),
+                &HookExecutionContext::default(),
                 source.as_ref(),
                 test_catalog(),
             )
@@ -866,7 +876,7 @@ mod tests {
                 &def,
                 &ctx,
                 sandbox,
-                HookWorkDirs::default(),
+                &HookExecutionContext::default(),
                 source.as_ref(),
                 test_catalog(),
             )
@@ -886,7 +896,7 @@ mod tests {
                 &def,
                 &ctx,
                 sandbox,
-                HookWorkDirs::default(),
+                &HookExecutionContext::default(),
                 source.as_ref(),
                 test_catalog(),
             )
@@ -906,7 +916,7 @@ mod tests {
                 &def,
                 &ctx,
                 sandbox,
-                HookWorkDirs::default(),
+                &HookExecutionContext::default(),
                 source.as_ref(),
                 test_catalog(),
             )
@@ -930,7 +940,7 @@ mod tests {
                 &def,
                 &ctx,
                 sandbox,
-                HookWorkDirs::default(),
+                &HookExecutionContext::default(),
                 source.as_ref(),
                 test_catalog(),
             )
@@ -959,7 +969,7 @@ mod tests {
                 &def,
                 &ctx,
                 sandbox,
-                HookWorkDirs::default(),
+                &HookExecutionContext::default(),
                 source.as_ref(),
                 test_catalog(),
             )
@@ -1361,7 +1371,7 @@ mod tests {
                 &def,
                 &ctx,
                 sandbox,
-                HookWorkDirs::default(),
+                &HookExecutionContext::default(),
                 source.as_ref(),
                 test_catalog(),
             )
@@ -1380,7 +1390,7 @@ mod tests {
             "echo {{ env.MISSING_HOOK_VALUE }}",
             &make_context(),
             &sandbox,
-            HookWorkDirs::default(),
+            &HookExecutionContext::default(),
             &test_env(&[]),
         )
         .await;

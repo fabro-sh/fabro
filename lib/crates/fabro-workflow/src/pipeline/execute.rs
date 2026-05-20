@@ -83,7 +83,7 @@ pub async fn execute(init: Initialized) -> Executed {
         &run_options.run_dir,
         &engine.run.run_store,
         artifact_sink,
-        engine.run.host_hook_work_dir.clone(),
+        &engine.run.locations,
         &settings_arc,
         Arc::clone(&engine.run.sandbox_git),
         Arc::clone(&engine.run.metadata_runtime),
