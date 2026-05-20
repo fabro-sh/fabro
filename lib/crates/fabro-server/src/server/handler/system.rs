@@ -6,8 +6,8 @@ use super::super::{
     PruneRunsRequest, PruneRunsResponse, Query, RequiredUser, Response, Router, RunStatus, State,
     StatusCode, SystemInfoResponse, SystemRepairRunIssue, SystemRepairRunsResponse,
     SystemRunCounts, build_disk_usage_response, build_prune_plan, delete_run_internal, diagnostics,
-    get, post, resolve_interp_string, spawn_blocking, system_features, system_sandbox_provider,
-    to_i64,
+    get, post, resolve_interp_string, resource_sampler, spawn_blocking, system_features,
+    system_sandbox_provider, to_i64,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -17,6 +17,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/health/diagnostics", post(run_diagnostics))
         .route("/settings", get(get_server_settings))
         .route("/system/info", get(get_system_info))
+        .route("/system/resources", get(get_system_resources))
         .route("/system/df", get(get_system_df))
         .route("/system/repair/runs", get(get_system_repair_runs))
         .route("/system/prune/runs", post(prune_runs))
@@ -81,6 +82,15 @@ async fn get_system_info(_auth: RequiredUser, State(state): State<Arc<AppState>>
         )),
     };
     (StatusCode::OK, Json(response)).into_response()
+}
+
+async fn get_system_resources(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
+    match resource_sampler::sample_system_resources(&state).await {
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Err(err) => {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
+    }
 }
 
 async fn get_system_df(

@@ -4,6 +4,7 @@ import {
   Cog6ToothIcon,
   CpuChipIcon,
   PuzzlePieceIcon,
+  ServerStackIcon,
   ShieldCheckIcon,
 } from "@heroicons/react/24/outline";
 import { Link, Outlet, useLocation, useMatches } from "react-router";
@@ -56,6 +57,12 @@ const navItems: NavEntry[] = [
     href: "/settings/storage",
     icon: CircleStackIcon,
     match: (p) => p.startsWith("/settings/storage"),
+  },
+  {
+    name: "Resources",
+    href: "/settings/resources",
+    icon: ServerStackIcon,
+    match: (p) => p.startsWith("/settings/resources"),
   },
   { type: "divider", key: "after-storage" },
   {

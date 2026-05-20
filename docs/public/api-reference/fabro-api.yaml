@@ -3620,6 +3620,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/SystemInfoResponse"
 
+  /api/v1/system/resources:
+    get:
+      operationId: getSystemResources
+      tags: [System]
+      summary: Retrieve System Resources
+      description: Returns server-visible CPU, memory, and storage filesystem resource usage.
+      responses:
+        "200":
+          description: System resource usage
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemResourcesResponse"
+
   /api/v1/system/df:
     get:
       operationId: getSystemDiskUsage
@@ -10245,6 +10259,163 @@ components:
           type: integer
           format: int64
           description: Runs currently queued or executing.
+
+    SystemResourcesResponse:
+      description: Server-visible runtime resource usage for the active Fabro process environment.
+      type: object
+      required: [sampled_at, cpu, memory, disk, notes]
+      properties:
+        sampled_at:
+          type: string
+          format: date-time
+          description: Timestamp when the sample was collected.
+        cpu:
+          $ref: "#/components/schemas/SystemCpuResources"
+        memory:
+          $ref: "#/components/schemas/SystemMemoryResources"
+        disk:
+          $ref: "#/components/schemas/SystemDiskResources"
+        notes:
+          type: array
+          description: Human-readable caveats about unavailable or scoped metrics.
+          items:
+            type: string
+
+    SystemCpuResources:
+      description: CPU resources visible to the Fabro server process.
+      type: object
+      required:
+        - supported
+        - scope
+        - unavailable_reason
+        - logical_cpus
+        - usage_percent
+        - sample_window_ms
+      properties:
+        supported:
+          type: boolean
+          description: Whether CPU metrics are available on this platform.
+        scope:
+          type: string
+          description: Metric scope. Currently `server_environment`.
+        unavailable_reason:
+          type: ["string", "null"]
+          description: Reason metrics are unavailable when unsupported.
+        logical_cpus:
+          type: ["integer", "null"]
+          format: int64
+          description: Logical CPUs visible to the server process.
+        usage_percent:
+          type: ["number", "null"]
+          format: double
+          description: CPU usage percentage, null until a delta sample is available.
+        sample_window_ms:
+          type: ["integer", "null"]
+          format: int64
+          description: Expected polling interval used for delta-based CPU sampling.
+
+    SystemMemoryResources:
+      description: Memory resources visible to the Fabro server process.
+      type: object
+      required:
+        - supported
+        - scope
+        - unavailable_reason
+        - total_bytes
+        - used_bytes
+        - available_bytes
+        - used_percent
+        - host_total_bytes
+      properties:
+        supported:
+          type: boolean
+          description: Whether memory metrics are available on this platform.
+        scope:
+          type: string
+          description: "`cgroup` when Linux cgroup limits are available, otherwise `host`."
+        unavailable_reason:
+          type: ["string", "null"]
+          description: Reason metrics are unavailable when unsupported.
+        total_bytes:
+          type: ["integer", "null"]
+          format: int64
+          description: Total memory for the reported scope.
+        used_bytes:
+          type: ["integer", "null"]
+          format: int64
+          description: Used memory for the reported scope.
+        available_bytes:
+          type: ["integer", "null"]
+          format: int64
+          description: Available memory for the reported scope.
+        used_percent:
+          type: ["number", "null"]
+          format: double
+          description: Used memory percentage for the reported scope.
+        host_total_bytes:
+          type: ["integer", "null"]
+          format: int64
+          description: Host total memory, included even when reporting a cgroup scope.
+
+    SystemDiskResources:
+      description: Filesystem resources for the configured Fabro storage root.
+      type: object
+      required:
+        - supported
+        - scope
+        - unavailable_reason
+        - storage_path
+        - mount_point
+        - filesystem
+        - total_bytes
+        - used_bytes
+        - available_bytes
+        - used_percent
+        - fabro_managed_bytes
+        - fabro_reclaimable_bytes
+      properties:
+        supported:
+          type: boolean
+          description: Whether storage filesystem metrics are available.
+        scope:
+          type: string
+          description: Metric scope. Currently `storage_filesystem`.
+        unavailable_reason:
+          type: ["string", "null"]
+          description: Reason metrics are unavailable when unsupported.
+        storage_path:
+          type: string
+          description: Configured Fabro storage directory.
+        mount_point:
+          type: ["string", "null"]
+          description: Mount point for the filesystem containing the storage directory.
+        filesystem:
+          type: ["string", "null"]
+          description: Filesystem name reported by the operating system.
+        total_bytes:
+          type: ["integer", "null"]
+          format: int64
+          description: Total bytes on the storage filesystem.
+        used_bytes:
+          type: ["integer", "null"]
+          format: int64
+          description: Used bytes on the storage filesystem.
+        available_bytes:
+          type: ["integer", "null"]
+          format: int64
+          description: Available bytes on the storage filesystem.
+        used_percent:
+          type: ["number", "null"]
+          format: double
+          description: Used percentage on the storage filesystem.
+        fabro_managed_bytes:
+          type: integer
+          format: int64
+          description: Bytes managed by Fabro under the storage root.
+        fabro_reclaimable_bytes:
+          type: integer
+          format: int64
+          description: Bytes reclaimable through Fabro pruning.
 
     SystemRepairRunsResponse:
       description: Runs that need manual repair or deletion because they cannot be loaded.

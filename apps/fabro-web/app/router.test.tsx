@@ -32,4 +32,10 @@ describe("browser router", () => {
     expect(paths).toContain("/setup");
     expect(paths).not.toContain("/setup/complete");
   });
+
+  test("exposes the resources settings page", () => {
+    const paths = collectPaths(routes);
+
+    expect(paths).toContain("/settings/resources");
+  });
 });
