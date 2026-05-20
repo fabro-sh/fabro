@@ -3,9 +3,14 @@
     reason = "integration tests stage fixtures and subprocess env with sync test infrastructure"
 )]
 
+use std::net::TcpListener;
+use std::time::Duration;
+
 use fabro_config::{Storage, envfile};
 use fabro_test::{EnvVars, fabro_snapshot, test_context};
 use fabro_vault::{SecretType, Vault};
+
+const INSTALL_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[test]
 fn help() {
@@ -253,6 +258,409 @@ fn skip_llm_conflicts_with_llm_credential_flags() {
 }
 
 #[test]
+fn non_interactive_token_install_bootstraps_server_auth_for_secret_persistence() {
+    let mut context = test_context!();
+    std::fs::remove_file(context.home_dir.join(".fabro/settings.toml")).unwrap();
+    let storage_dir = context.temp_dir.join("install-storage");
+    context.manage_storage_dir(&storage_dir);
+
+    let path = fake_gh_path(&context, "ghp_install_bootstrap");
+    let web_url = unused_loopback_web_url();
+
+    let output = context
+        .command()
+        .timeout(INSTALL_COMMAND_TIMEOUT)
+        .env(EnvVars::PATH, &path)
+        .args([
+            "install",
+            "--storage-dir",
+            storage_dir.to_str().unwrap(),
+            "--web-url",
+            &web_url,
+            "--non-interactive",
+            "--skip-llm",
+            "--github-strategy",
+            "token",
+            "--github-username",
+            "octocat",
+            "--overwrite-settings",
+        ])
+        .output()
+        .expect("install command should run");
+
+    assert!(
+        output.status.success(),
+        "install should bootstrap auth before persisting secrets\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("Authentication required"),
+        "install should not require a separate auth login while bootstrapping: {stderr}"
+    );
+
+    let list_output = context
+        .command()
+        .timeout(INSTALL_COMMAND_TIMEOUT)
+        .args(["--json", "secret", "list"])
+        .output()
+        .expect("secret list command should run");
+
+    assert!(
+        list_output.status.success(),
+        "CLI auth saved by install should authenticate follow-up secret commands\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&list_output.stdout),
+        String::from_utf8_lossy(&list_output.stderr)
+    );
+    let secrets: serde_json::Value =
+        serde_json::from_slice(&list_output.stdout).expect("secret list JSON should parse");
+    assert!(
+        secrets
+            .as_array()
+            .expect("secret list should return an array")
+            .iter()
+            .any(|secret| secret["name"] == "GITHUB_TOKEN"),
+        "installed GitHub token should be persisted as a server-owned secret: {secrets}"
+    );
+}
+
+#[test]
+fn overwrite_settings_replaces_stale_unix_cli_target_fields() {
+    let mut context = test_context!();
+    let storage_dir = context.temp_dir.join("install-storage");
+    context.manage_storage_dir(&storage_dir);
+    let stale_socket = context.temp_dir.join("stale.sock");
+    write_raw_home_settings(
+        &context,
+        &format!(
+            r#"
+_version = 1
+
+[server.storage]
+root = "{}"
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.listen]
+type = "unix"
+path = "{}"
+
+[cli.target]
+type = "unix"
+path = "{}"
+
+[project.metadata]
+mode = "keep-me"
+"#,
+            storage_dir.display(),
+            stale_socket.display(),
+            stale_socket.display()
+        ),
+    );
+
+    let path = fake_gh_path(&context, "ghp_overwrite_bootstrap");
+    let web_url = unused_loopback_web_url();
+    let output = context
+        .command()
+        .timeout(INSTALL_COMMAND_TIMEOUT)
+        .env(EnvVars::PATH, path)
+        .args([
+            "install",
+            "--storage-dir",
+            storage_dir.to_str().unwrap(),
+            "--web-url",
+            &web_url,
+            "--non-interactive",
+            "--skip-llm",
+            "--github-strategy",
+            "token",
+            "--github-username",
+            "octocat",
+            "--overwrite-settings",
+        ])
+        .output()
+        .expect("install command should run");
+
+    assert!(
+        output.status.success(),
+        "install should replace stale Unix target fields when overwriting settings\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let settings = read_home_settings(&context);
+    let parsed: toml::Value = toml::from_str(&settings).unwrap();
+    let cli_target = parsed
+        .get("cli")
+        .and_then(toml::Value::as_table)
+        .and_then(|cli| cli.get("target"))
+        .and_then(toml::Value::as_table)
+        .expect("cli.target should exist");
+    assert_eq!(
+        cli_target.get("type").and_then(toml::Value::as_str),
+        Some("http")
+    );
+    assert_eq!(
+        cli_target.get("url").and_then(toml::Value::as_str),
+        Some(web_url.as_str())
+    );
+    assert!(
+        !cli_target.contains_key("path"),
+        "overwriting a Unix target with HTTP should remove stale path: {cli_target:?}"
+    );
+    assert_eq!(
+        parsed
+            .get("project")
+            .and_then(toml::Value::as_table)
+            .and_then(|project| project.get("metadata"))
+            .and_then(toml::Value::as_table)
+            .and_then(|metadata| metadata.get("mode"))
+            .and_then(toml::Value::as_str),
+        Some("keep-me")
+    );
+}
+
+#[test]
+fn keep_existing_settings_persists_secrets_without_rewriting_server_target() {
+    let mut context = test_context!();
+    let storage_dir = context.temp_dir.join("install-storage");
+    context.manage_storage_dir(&storage_dir);
+    let existing_web_url = unused_loopback_web_url();
+    let requested_web_url = unused_loopback_web_url();
+    write_http_install_settings(&context, &storage_dir, &existing_web_url, "keep-me");
+    login_with_storage_dev_token(&context, &storage_dir, &existing_web_url);
+
+    let path = fake_gh_path(&context, "ghp_keep_existing");
+    let output = context
+        .command()
+        .timeout(INSTALL_COMMAND_TIMEOUT)
+        .env(EnvVars::PATH, path)
+        .args([
+            "install",
+            "--storage-dir",
+            storage_dir.to_str().unwrap(),
+            "--web-url",
+            &requested_web_url,
+            "--non-interactive",
+            "--skip-llm",
+            "--github-strategy",
+            "token",
+            "--keep-existing-settings",
+        ])
+        .output()
+        .expect("install command should run");
+
+    assert!(
+        output.status.success(),
+        "install should keep existing server settings while persisting secrets\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let settings = read_home_settings(&context);
+    let parsed: toml::Value = toml::from_str(&settings).unwrap();
+    assert_eq!(
+        parsed
+            .get("server")
+            .and_then(toml::Value::as_table)
+            .and_then(|server| server.get("web"))
+            .and_then(toml::Value::as_table)
+            .and_then(|web| web.get("url"))
+            .and_then(toml::Value::as_str),
+        Some(existing_web_url.as_str())
+    );
+    assert_eq!(
+        parsed
+            .get("cli")
+            .and_then(toml::Value::as_table)
+            .and_then(|cli| cli.get("target"))
+            .and_then(toml::Value::as_table)
+            .and_then(|target| target.get("url"))
+            .and_then(toml::Value::as_str),
+        Some(existing_web_url.as_str())
+    );
+    assert!(
+        !settings.contains(&requested_web_url),
+        "--keep-existing-settings should not rewrite settings to the requested web URL"
+    );
+    assert_secret_list_contains(&context, &["GITHUB_TOKEN"]);
+}
+
+#[test]
+fn install_against_running_authenticated_server_persists_secrets_and_leaves_server_running() {
+    let mut context = test_context!();
+    let storage_dir = context.temp_dir.join("install-storage");
+    context.manage_storage_dir(&storage_dir);
+    let web_url = unused_loopback_web_url();
+    write_http_install_settings(&context, &storage_dir, &web_url, "running-server");
+    login_with_storage_dev_token(&context, &storage_dir, &web_url);
+
+    let start_output = context
+        .command()
+        .timeout(INSTALL_COMMAND_TIMEOUT)
+        .args([
+            "server",
+            "start",
+            "--storage-dir",
+            storage_dir.to_str().unwrap(),
+        ])
+        .output()
+        .expect("server start command should run");
+    assert!(
+        start_output.status.success(),
+        "server start should succeed before install\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&start_output.stdout),
+        String::from_utf8_lossy(&start_output.stderr)
+    );
+
+    let path = fake_gh_path(&context, "ghp_running_server");
+    let output = context
+        .command()
+        .timeout(INSTALL_COMMAND_TIMEOUT)
+        .env(EnvVars::PATH, path)
+        .args([
+            "install",
+            "--storage-dir",
+            storage_dir.to_str().unwrap(),
+            "--web-url",
+            &web_url,
+            "--non-interactive",
+            "--skip-llm",
+            "--github-strategy",
+            "token",
+            "--github-username",
+            "octocat",
+            "--overwrite-settings",
+        ])
+        .output()
+        .expect("install command should run");
+
+    assert!(
+        output.status.success(),
+        "install should persist secrets through the already-running server\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let status_output = context
+        .command()
+        .timeout(INSTALL_COMMAND_TIMEOUT)
+        .args([
+            "server",
+            "status",
+            "--json",
+            "--storage-dir",
+            storage_dir.to_str().unwrap(),
+        ])
+        .output()
+        .expect("server status command should run");
+    assert!(
+        status_output.status.success(),
+        "server should still be running after install\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&status_output.stdout),
+        String::from_utf8_lossy(&status_output.stderr)
+    );
+    let status: serde_json::Value =
+        serde_json::from_slice(&status_output.stdout).expect("server status JSON should parse");
+    assert_eq!(status["status"].as_str(), Some("running"));
+    assert_secret_list_contains(&context, &["GITHUB_TOKEN"]);
+}
+
+#[test]
+fn install_json_non_interactive_success_emits_complete_event() {
+    let mut context = test_context!();
+    std::fs::remove_file(context.home_dir.join(".fabro/settings.toml")).unwrap();
+    let storage_dir = context.temp_dir.join("install-storage");
+    context.manage_storage_dir(&storage_dir);
+    let web_url = unused_loopback_web_url();
+    login_with_storage_dev_token(&context, &storage_dir, &web_url);
+
+    let path = fake_gh_path(&context, "ghp_json_success");
+    let output = context
+        .command()
+        .timeout(INSTALL_COMMAND_TIMEOUT)
+        .env(EnvVars::PATH, path)
+        .args([
+            "--json",
+            "install",
+            "--storage-dir",
+            storage_dir.to_str().unwrap(),
+            "--web-url",
+            &web_url,
+            "--non-interactive",
+            "--skip-llm",
+            "--github-strategy",
+            "token",
+            "--github-username",
+            "octocat",
+            "--overwrite-settings",
+        ])
+        .output()
+        .expect("install command should run");
+
+    assert!(
+        output.status.success(),
+        "JSON install should succeed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let events = stdout
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(events, vec![serde_json::json!({
+        "event": "install_complete",
+        "status": "success"
+    })]);
+}
+
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
+fn install_with_anthropic_api_key_persists_llm_and_github_secrets() {
+    let mut context = test_context!();
+    std::fs::remove_file(context.home_dir.join(".fabro/settings.toml")).unwrap();
+    let storage_dir = context.temp_dir.join("install-storage");
+    context.manage_storage_dir(&storage_dir);
+    let web_url = unused_loopback_web_url();
+    login_with_storage_dev_token(&context, &storage_dir, &web_url);
+
+    let path = fake_gh_path(&context, "ghp_anthropic");
+    let output = context
+        .command()
+        .timeout(INSTALL_COMMAND_TIMEOUT)
+        .env(EnvVars::PATH, path)
+        .args([
+            "install",
+            "--storage-dir",
+            storage_dir.to_str().unwrap(),
+            "--web-url",
+            &web_url,
+            "--non-interactive",
+            "--llm-provider",
+            "anthropic",
+            "--llm-api-key-env",
+            "ANTHROPIC_API_KEY",
+            "--github-strategy",
+            "token",
+            "--github-username",
+            "octocat",
+            "--overwrite-settings",
+        ])
+        .output()
+        .expect("install command should run");
+
+    assert!(
+        output.status.success(),
+        "install should validate and persist the scripted LLM API key\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_secret_list_contains(&context, &["GITHUB_TOKEN", "ANTHROPIC_API_KEY"]);
+}
+
+#[test]
 fn github_requires_prior_install() {
     let context = test_context!();
     std::fs::remove_file(context.home_dir.join(".fabro/settings.toml")).unwrap();
@@ -453,4 +861,154 @@ mode = "keep-me"
             .map(|entry| entry.secret_type),
         Some(SecretType::Token)
     );
+}
+
+fn unused_loopback_web_url() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind unused loopback port");
+    let port = listener.local_addr().expect("read loopback addr").port();
+    drop(listener);
+    format!("http://127.0.0.1:{port}")
+}
+
+fn fake_gh_path(context: &fabro_test::TestContext, token: &str) -> String {
+    let fake_bin = context.temp_dir.join(format!("fake-bin-{token}"));
+    std::fs::create_dir_all(&fake_bin).unwrap();
+    let fake_gh = fake_bin.join("gh");
+    std::fs::write(
+        &fake_gh,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = \"auth\" ] && [ \"$2\" = \"token\" ]; then\n  printf '{}\\n'\n  exit 0\nfi\nexit 1\n",
+            token
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::set_permissions(&fake_gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var(EnvVars::PATH).unwrap()
+    )
+}
+
+fn write_raw_home_settings(context: &fabro_test::TestContext, settings: &str) {
+    let settings_path = context.home_dir.join(".fabro/settings.toml");
+    std::fs::create_dir_all(settings_path.parent().unwrap()).unwrap();
+    std::fs::write(settings_path, settings).unwrap();
+}
+
+fn read_home_settings(context: &fabro_test::TestContext) -> String {
+    std::fs::read_to_string(context.home_dir.join(".fabro/settings.toml")).unwrap()
+}
+
+fn write_http_install_settings(
+    context: &fabro_test::TestContext,
+    storage_dir: &std::path::Path,
+    web_url: &str,
+    metadata_mode: &str,
+) {
+    let address = web_url
+        .strip_prefix("http://")
+        .expect("test web URL should be an http URL");
+    write_raw_home_settings(
+        context,
+        &format!(
+            r#"
+_version = 1
+
+[server.storage]
+root = "{}"
+
+[server.api]
+url = "{}/api/v1"
+
+[server.web]
+enabled = true
+url = "{}"
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.listen]
+type = "tcp"
+address = "{}"
+
+[cli.target]
+type = "http"
+url = "{}"
+
+[project.metadata]
+mode = "{}"
+"#,
+            storage_dir.display(),
+            web_url,
+            web_url,
+            address,
+            web_url,
+            metadata_mode
+        ),
+    );
+}
+
+fn login_with_storage_dev_token(
+    context: &fabro_test::TestContext,
+    storage_dir: &std::path::Path,
+    web_url: &str,
+) {
+    let token = std::fs::read_to_string(
+        Storage::new(storage_dir)
+            .runtime_directory()
+            .dev_token_path(),
+    )
+    .unwrap();
+    let output = context
+        .command()
+        .timeout(INSTALL_COMMAND_TIMEOUT)
+        .args([
+            "auth",
+            "login",
+            "--server",
+            web_url,
+            "--dev-token",
+            token.trim(),
+        ])
+        .output()
+        .expect("auth login command should run");
+    assert!(
+        output.status.success(),
+        "auth login should seed CLI auth for {web_url}\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn assert_secret_list_contains(context: &fabro_test::TestContext, expected_names: &[&str]) {
+    let list_output = context
+        .command()
+        .timeout(INSTALL_COMMAND_TIMEOUT)
+        .args(["--json", "secret", "list"])
+        .output()
+        .expect("secret list command should run");
+    assert!(
+        list_output.status.success(),
+        "secret list should succeed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&list_output.stdout),
+        String::from_utf8_lossy(&list_output.stderr)
+    );
+    let secrets: serde_json::Value =
+        serde_json::from_slice(&list_output.stdout).expect("secret list JSON should parse");
+    let array = secrets
+        .as_array()
+        .expect("secret list should return an array");
+    for expected_name in expected_names {
+        assert!(
+            array.iter().any(|secret| secret["name"] == *expected_name),
+            "secret list should include {expected_name}: {secrets}"
+        );
+    }
 }

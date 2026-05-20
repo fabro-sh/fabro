@@ -183,6 +183,7 @@ pub fn merge_server_settings(
     let target = ensure_table(cli, "target")?;
     target.insert("type".to_string(), toml::Value::String("http".to_string()));
     target.insert("url".to_string(), toml::Value::String(web_url.to_string()));
+    target.remove("path");
 
     Ok(())
 }
@@ -524,7 +525,8 @@ pub fn persist_install_outputs_direct(
 
 #[cfg(test)]
 mod tests {
-    use fabro_config::{ServerSettingsBuilder, Storage, envfile};
+    use fabro_config::{ServerSettingsBuilder, Storage, UserSettingsBuilder, envfile};
+    use fabro_types::settings::cli::CliTargetSettings;
     use fabro_vault::{SecretType as VaultSecretType, Vault};
 
     use super::{
@@ -596,6 +598,50 @@ name = "custom"
                 .and_then(toml::Value::as_str),
             Some("custom")
         );
+    }
+
+    #[test]
+    fn merge_server_settings_replaces_stale_unix_cli_target_fields() {
+        let mut doc: toml::Value = toml::from_str(
+            r#"
+_version = 1
+
+[cli.target]
+type = "unix"
+path = "/tmp/fabro.sock"
+"#,
+        )
+        .unwrap();
+
+        merge_server_settings(
+            &mut doc,
+            &default_web_url(),
+            &InstallListenConfig::Tcp("127.0.0.1:32276".to_string()),
+        )
+        .unwrap();
+
+        let target = doc
+            .get("cli")
+            .and_then(toml::Value::as_table)
+            .and_then(|cli| cli.get("target"))
+            .and_then(toml::Value::as_table)
+            .expect("cli.target should be a table");
+        assert_eq!(
+            target.get("type").and_then(toml::Value::as_str),
+            Some("http")
+        );
+        assert_eq!(
+            target.get("url").and_then(toml::Value::as_str),
+            Some(default_web_url().as_str())
+        );
+        assert!(!target.contains_key("path"));
+
+        let toml_str = toml::to_string_pretty(&doc).expect("settings should serialize");
+        let settings = UserSettingsBuilder::from_toml(&toml_str).expect("settings should resolve");
+        assert!(matches!(
+            settings.cli.target,
+            Some(CliTargetSettings::Http { .. })
+        ));
     }
 
     #[test]

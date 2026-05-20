@@ -36,6 +36,18 @@ pub(crate) async fn connect_server(storage_dir: &Path) -> Result<Client> {
     connect_local_api_client_bundle(storage_dir, &user_config::active_settings_path(None)).await
 }
 
+pub(crate) async fn connect_server_with_dev_token(
+    storage_dir: &Path,
+    dev_token: &str,
+) -> Result<Client> {
+    connect_local_api_client_bundle_with_dev_token(
+        storage_dir,
+        &user_config::active_settings_path(None),
+        Some(dev_token),
+    )
+    .await
+}
+
 pub(crate) async fn connect_server_target(target: &ServerTarget) -> Result<Client> {
     connect_target_api_client_bundle(target).await
 }
@@ -122,6 +134,14 @@ async fn connect_local_api_client_bundle(
     storage_dir: &Path,
     active_config_path: &Path,
 ) -> Result<Client> {
+    connect_local_api_client_bundle_with_dev_token(storage_dir, active_config_path, None).await
+}
+
+async fn connect_local_api_client_bundle_with_dev_token(
+    storage_dir: &Path,
+    active_config_path: &Path,
+    bootstrap_dev_token: Option<&str>,
+) -> Result<Client> {
     let bind = start::ensure_server_running_for_storage(storage_dir, active_config_path)
         .await
         .with_context(|| format!("Failed to start fabro server for {}", storage_dir.display()))?;
@@ -130,7 +150,10 @@ async fn connect_local_api_client_bundle(
             let runtime_token_path = Storage::new(storage_dir)
                 .runtime_directory()
                 .dev_token_path();
-            let token = wait_for_runtime_dev_token(&runtime_token_path).await?;
+            let token = match bootstrap_dev_token {
+                Some(token) => token.to_string(),
+                None => wait_for_runtime_dev_token(&runtime_token_path).await?,
+            };
             let http_client = connect_unix_socket_http_client(&path, Some(&token)).await?;
             Ok(Client::builder()
                 .transport("http://fabro", http_client)
@@ -140,7 +163,10 @@ async fn connect_local_api_client_bundle(
         }
         Bind::Tcp(addr) => {
             let target = ServerTarget::http_url(format!("http://{addr}"))?;
-            let credential = resolve_target_credential(&target)?;
+            let credential = match bootstrap_dev_token {
+                Some(token) => Some(Credential::DevToken(token.to_string())),
+                None => resolve_target_credential(&target)?,
+            };
             let oauth_session = refreshable_oauth(&target, credential.as_ref());
             build_client(target, credential, oauth_session, None).await
         }

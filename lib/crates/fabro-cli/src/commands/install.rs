@@ -26,7 +26,7 @@ use fabro_client::{AuthEntry, AuthStore, DevTokenEntry, ServerTarget};
 use fabro_config::bind::Bind;
 use fabro_config::daemon::ServerDaemon;
 use fabro_config::user::{SETTINGS_CONFIG_FILENAME, default_storage_dir};
-use fabro_config::{Storage, envfile};
+use fabro_config::{Storage, UserSettingsBuilder, envfile};
 use fabro_install::{
     InstallListenConfig, PendingSettingsWrite, merge_server_settings as merge_server_settings_impl,
     persist_install_outputs_direct, write_github_app_settings, write_token_settings,
@@ -65,7 +65,7 @@ use crate::shared::provider_auth::{
     ApiKeySource, authenticate_provider, authenticate_provider_with_api_key_source,
     authenticate_provider_with_method, prompt_confirm, prompt_password, provider_display_name,
 };
-use crate::{local_server, server_client};
+use crate::{local_server, server_client, user_config};
 
 const GITHUB_TOKEN_SECRET_KEY: &str = "GITHUB_TOKEN";
 const GITHUB_APP_PRIVATE_KEY_KEY: &str = "GITHUB_APP_PRIVATE_KEY";
@@ -1262,14 +1262,24 @@ async fn persist_install_outputs(
     vault_secrets: &[CreateSecretRequest],
     settings_write: Option<PendingSettingsWrite<'_>>,
     server_was_running: bool,
+    bootstrap_dev_token: Option<&str>,
 ) -> Result<()> {
+    let bootstrap_dev_token = bootstrap_dev_token.map(str::to_string);
     persist_install_outputs_with_settings(
         storage_dir,
         server_env_secrets,
         vault_secrets,
         settings_write,
         server_was_running,
-        |path| Box::pin(server_client::connect_server(path)),
+        move |path| {
+            let bootstrap_dev_token = bootstrap_dev_token.clone();
+            Box::pin(async move {
+                match bootstrap_dev_token {
+                    Some(token) => server_client::connect_server_with_dev_token(path, &token).await,
+                    None => server_client::connect_server(path).await,
+                }
+            })
+        },
         |path, timeout| {
             Box::pin(async move { stop::stop_server(path, timeout).await.unwrap_or(false) })
         },
@@ -1916,10 +1926,18 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
             previous_contents: existing_config_contents.as_deref(),
         }),
         server_was_running,
+        dev_token_for_auth_store.as_deref(),
     )
     .await?;
     if let Some(token) = dev_token_for_auth_store {
-        let target = ServerTarget::http_url(&web_url)?;
+        let user_settings = UserSettingsBuilder::from_toml(&settings_toml)?;
+        let target = match user_config::resolve_nondefault_server_target(
+            &ServerTargetArgs::default(),
+            &user_settings,
+        )? {
+            Some(target) => target,
+            None => ServerTarget::http_url(&web_url)?,
+        };
         if let Err(err) = AuthStore::default().put(
             &target,
             AuthEntry::DevToken(DevTokenEntry {
