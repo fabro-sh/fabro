@@ -5,7 +5,48 @@ use fabro_types::{
     AuthMethod, IdpIdentity, Principal, RunClientProvenance, RunProvenance, RunServerProvenance,
     SystemActorKind, fixtures,
 };
-use serde_json::json;
+use serde_json::{Value, json};
+
+const OCTOCAT_AVATAR_URL: &str = "https://example.com/octocat.png";
+
+fn octocat_identity() -> IdpIdentity {
+    IdpIdentity::new("https://github.com", "12345").unwrap()
+}
+
+fn octocat_user() -> Principal {
+    Principal::user(
+        octocat_identity(),
+        "octocat".to_string(),
+        AuthMethod::Github,
+    )
+}
+
+fn octocat_user_with_avatar() -> Principal {
+    Principal::user_with_avatar(
+        octocat_identity(),
+        "octocat".to_string(),
+        AuthMethod::Github,
+        Some(OCTOCAT_AVATAR_URL.to_string()),
+    )
+}
+
+fn octocat_user_json() -> Value {
+    json!({
+        "kind": "user",
+        "identity": {
+            "issuer": "https://github.com",
+            "subject": "12345"
+        },
+        "login": "octocat",
+        "auth_method": "github"
+    })
+}
+
+fn octocat_user_with_avatar_json() -> Value {
+    let mut value = octocat_user_json();
+    value["avatar_url"] = json!(OCTOCAT_AVATAR_URL);
+    value
+}
 
 #[test]
 fn principal_reuses_canonical_type() {
@@ -19,26 +60,23 @@ fn run_provenance_reuses_canonical_type() {
 
 #[test]
 fn principal_round_trips_representative_json() {
-    let value = json!({
-        "kind": "user",
-        "identity": {
-            "issuer": "https://github.com",
-            "subject": "12345"
-        },
-        "login": "octocat",
-        "auth_method": "github"
-    });
+    let value = octocat_user_json();
 
     let principal: Principal = serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(
-        principal,
-        Principal::user(
-            IdpIdentity::new("https://github.com", "12345").unwrap(),
-            "octocat".to_string(),
-            AuthMethod::Github,
-        )
-    );
+    assert_eq!(principal, octocat_user());
     assert_eq!(serde_json::to_value(principal).unwrap(), value);
+}
+
+#[test]
+fn principal_user_with_avatar_round_trips_through_api_type() {
+    let value = octocat_user_with_avatar_json();
+
+    let principal: Principal = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(principal, octocat_user_with_avatar());
+
+    let api_principal: ApiPrincipal = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(api_principal, principal);
+    assert_eq!(serde_json::to_value(api_principal).unwrap(), value);
 }
 
 #[test]
@@ -59,11 +97,8 @@ fn principal_system_uses_system_kind_field() {
 #[test]
 fn principal_round_trips_every_variant_through_api_type() {
     let variants = vec![
-        Principal::user(
-            IdpIdentity::new("https://github.com", "12345").unwrap(),
-            "octocat".to_string(),
-            AuthMethod::Github,
-        ),
+        octocat_user(),
+        octocat_user_with_avatar(),
         Principal::Worker {
             run_id: fixtures::RUN_1,
         },

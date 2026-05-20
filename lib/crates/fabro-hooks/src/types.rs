@@ -1,6 +1,9 @@
+use std::path::{Path, PathBuf};
+
 use fabro_types::RunId;
 use serde::{Deserialize, Serialize};
 
+use crate::config::HookDefinition;
 pub use crate::config::HookEvent;
 
 /// Rich JSON payload sent to hooks.
@@ -116,6 +119,24 @@ impl HookDecision {
     }
 }
 
+/// Realm-specific locations available to hook execution.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HookExecutionContext {
+    pub host_source_dir:  Option<PathBuf>,
+    pub sandbox_work_dir: Option<PathBuf>,
+}
+
+impl HookExecutionContext {
+    #[must_use]
+    pub fn command_cwd_for(&self, definition: &HookDefinition) -> Option<&Path> {
+        if definition.runs_in_sandbox() {
+            self.sandbox_work_dir.as_deref()
+        } else {
+            self.host_source_dir.as_deref()
+        }
+    }
+}
+
 /// Result from executing a single hook.
 #[derive(Debug, Clone)]
 pub struct HookResult {
@@ -126,9 +147,24 @@ pub struct HookResult {
 
 #[cfg(test)]
 mod tests {
+    use std::path::{Path, PathBuf};
+
     use fabro_types::fixtures;
 
     use super::*;
+
+    fn command_hook(sandbox: bool) -> HookDefinition {
+        HookDefinition {
+            name:       Some("cwd-test".into()),
+            event:      HookEvent::RunStart,
+            command:    Some("pwd".into()),
+            hook_type:  None,
+            matcher:    None,
+            blocking:   None,
+            timeout_ms: None,
+            sandbox:    Some(sandbox),
+        }
+    }
 
     #[test]
     fn hook_context_serde_round_trip() {
@@ -166,6 +202,42 @@ mod tests {
         let json = serde_json::to_string(&ctx).unwrap();
         assert!(!json.contains("node_id"));
         assert!(!json.contains("failure_reason"));
+    }
+
+    #[test]
+    fn hook_execution_context_returns_host_source_dir_for_host_command() {
+        let context = HookExecutionContext {
+            host_source_dir:  Some(PathBuf::from("/host/project")),
+            sandbox_work_dir: Some(PathBuf::from("/workspace/project")),
+        };
+
+        assert_eq!(
+            context.command_cwd_for(&command_hook(false)),
+            Some(Path::new("/host/project"))
+        );
+    }
+
+    #[test]
+    fn hook_execution_context_returns_sandbox_work_dir_for_sandbox_command() {
+        let context = HookExecutionContext {
+            host_source_dir:  Some(PathBuf::from("/host/project")),
+            sandbox_work_dir: Some(PathBuf::from("/workspace/project")),
+        };
+
+        assert_eq!(
+            context.command_cwd_for(&command_hook(true)),
+            Some(Path::new("/workspace/project"))
+        );
+    }
+
+    #[test]
+    fn hook_execution_context_returns_none_when_matching_dir_is_missing() {
+        let context = HookExecutionContext {
+            host_source_dir:  Some(PathBuf::from("/host/project")),
+            sandbox_work_dir: None,
+        };
+
+        assert_eq!(context.command_cwd_for(&command_hook(true)), None);
     }
 
     #[test]

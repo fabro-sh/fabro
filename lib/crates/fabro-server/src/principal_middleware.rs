@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use fabro_types::{Principal, RunBlobId, RunId, StageId, UserPrincipal};
+use fabro_types::{AuthMethod, IdpIdentity, Principal, RunBlobId, RunId, StageId, UserPrincipal};
 use jsonwebtoken::decode_header;
 use strum::IntoStaticStr;
 
@@ -30,6 +30,10 @@ pub(crate) struct UserProfile {
     pub email:      String,
     pub avatar_url: String,
     pub user_url:   String,
+}
+
+pub(crate) fn non_empty_avatar_url(avatar_url: &str) -> Option<String> {
+    (!avatar_url.is_empty()).then(|| avatar_url.to_string())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, IntoStaticStr)]
@@ -84,6 +88,22 @@ impl RequestAuthContext {
     }
 
     #[must_use]
+    pub(crate) fn authenticated_user(
+        identity: IdpIdentity,
+        login: String,
+        auth_method: AuthMethod,
+        profile: UserProfile,
+    ) -> Self {
+        let principal = Principal::user_with_avatar(
+            identity,
+            login,
+            auth_method,
+            non_empty_avatar_url(&profile.avatar_url),
+        );
+        Self::authenticated(principal, Some(profile))
+    }
+
+    #[must_use]
     pub(crate) fn rejected(status: AuthStatus, code: Option<AuthErrorCode>) -> Self {
         Self {
             principal:       Principal::Anonymous,
@@ -132,10 +152,22 @@ impl AuthContextSlot {
     pub(crate) fn log_snapshot(&self) -> RequestAuthLogContext {
         let context = self.0.lock().expect("auth context lock poisoned");
         RequestAuthLogContext {
-            principal:       context.principal.clone(),
+            principal:       principal_without_log_unused_fields(&context.principal),
             auth_status:     context.auth_status,
             auth_error_code: context.auth_error_code,
         }
+    }
+}
+
+fn principal_without_log_unused_fields(principal: &Principal) -> Principal {
+    match principal {
+        Principal::User(user) => Principal::User(UserPrincipal {
+            identity:    user.identity.clone(),
+            login:       user.login.clone(),
+            auth_method: user.auth_method,
+            avatar_url:  None,
+        }),
+        principal => principal.clone(),
     }
 }
 
@@ -396,14 +428,13 @@ fn classify_user_token(token: &str, config: &ConfiguredAuth) -> RequestAuthConte
             );
         }
     };
-    let principal = Principal::user(auth.identity, auth.login, auth.auth_method);
     let profile = UserProfile {
         name:       auth.name,
         email:      auth.email,
         avatar_url: auth.avatar_url,
         user_url:   auth.user_url,
     };
-    RequestAuthContext::authenticated(principal, Some(profile))
+    RequestAuthContext::authenticated_user(auth.identity, auth.login, auth.auth_method, profile)
 }
 
 fn auth_rejection(status: AuthStatus, code: Option<AuthErrorCode>) -> ApiError {

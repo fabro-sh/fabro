@@ -142,6 +142,24 @@ describe("RunSummaryPanelView", () => {
     expect(instanceText(cellAfterLabel(tree, "Created by"))).toBe("Bbrynary");
   });
 
+  test("renders user actor avatar when avatar_url is set", () => {
+    const tree = render({
+      run: makeRun({
+        created_by: {
+          kind:        "user",
+          identity:    { issuer: "github", subject: "1" },
+          login:       "brynary",
+          auth_method: "oauth",
+          avatar_url:  "https://example.com/brynary.png",
+        },
+      }),
+    });
+    const cell = cellAfterLabel(tree, "Created by");
+    const img = cell.find((node) => node.type === "img");
+    expect(img.props.src).toBe("https://example.com/brynary.png");
+    expect(instanceText(cell)).toBe("brynary");
+  });
+
   test("renders non-user actor with kind label", () => {
     for (const kind of ["agent", "system", "slack", "webhook", "worker", "anonymous"]) {
       const tree = render({ run: makeRun({ created_by: { kind } as any }) });

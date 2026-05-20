@@ -1,4 +1,12 @@
-import { BoltIcon, Cog6ToothIcon } from "@heroicons/react/24/outline";
+import {
+  BoltIcon,
+  CircleStackIcon,
+  Cog6ToothIcon,
+  CpuChipIcon,
+  PuzzlePieceIcon,
+  ServerStackIcon,
+  ShieldCheckIcon,
+} from "@heroicons/react/24/outline";
 import { Link, Outlet, useLocation, useMatches } from "react-router";
 
 export function meta({}: any) {
@@ -8,19 +16,55 @@ export function meta({}: any) {
 export const handle = { hideHeader: true };
 
 type NavItem = {
+  type?: "link";
   name: string;
   href: string;
   icon: typeof Cog6ToothIcon;
   match: (pathname: string) => boolean;
 };
 
-const navItems: NavItem[] = [
+type NavDivider = { type: "divider"; key: string };
+
+type NavEntry = NavItem | NavDivider;
+
+const navItems: NavEntry[] = [
   {
-    name: "Settings",
+    name: "General",
     href: "/settings",
     icon: Cog6ToothIcon,
     match: (p) => p === "/settings",
   },
+  {
+    name: "Integrations",
+    href: "/settings/integrations",
+    icon: PuzzlePieceIcon,
+    match: (p) => p.startsWith("/settings/integrations"),
+  },
+  {
+    name: "Models",
+    href: "/settings/models",
+    icon: CpuChipIcon,
+    match: (p) => p.startsWith("/settings/models"),
+  },
+  {
+    name: "Security",
+    href: "/settings/security",
+    icon: ShieldCheckIcon,
+    match: (p) => p.startsWith("/settings/security"),
+  },
+  {
+    name: "Storage",
+    href: "/settings/storage",
+    icon: CircleStackIcon,
+    match: (p) => p.startsWith("/settings/storage"),
+  },
+  {
+    name: "Resources",
+    href: "/settings/resources",
+    icon: ServerStackIcon,
+    match: (p) => p.startsWith("/settings/resources"),
+  },
+  { type: "divider", key: "after-storage" },
   {
     name: "Live Events",
     href: "/settings/live-events",
@@ -29,6 +73,10 @@ const navItems: NavItem[] = [
   },
 ];
 
+function isLink(entry: NavEntry): entry is NavItem {
+  return entry.type !== "divider";
+}
+
 function classNames(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
@@ -36,7 +84,8 @@ function classNames(...classes: Array<string | false | null | undefined>) {
 export default function SettingsLayout() {
   const { pathname } = useLocation();
   const matches = useMatches();
-  const currentName = navItems.find((item) => item.match(pathname))?.name ?? "Settings";
+  const currentName =
+    navItems.filter(isLink).find((item) => item.match(pathname))?.name ?? "Settings";
   const fullHeight = matches.some(
     (m) => (m.handle as { fullHeight?: boolean } | undefined)?.fullHeight,
   );
@@ -51,12 +100,22 @@ export default function SettingsLayout() {
       <aside className="lg:w-56 lg:shrink-0">
         <nav className="sticky top-6">
           <ul role="list" className="flex gap-1 overflow-x-auto lg:flex-col lg:gap-0.5">
-            {navItems.map((item) => {
-              const current = item.match(pathname);
+            {navItems.map((entry) => {
+              if (!isLink(entry)) {
+                return (
+                  <li
+                    key={entry.key}
+                    role="separator"
+                    aria-orientation="vertical"
+                    className="mx-1 self-stretch border-l border-line lg:mx-0 lg:my-2 lg:self-auto lg:border-l-0 lg:border-t"
+                  />
+                );
+              }
+              const current = entry.match(pathname);
               return (
-                <li key={item.name}>
+                <li key={entry.name}>
                   <Link
-                    to={item.href}
+                    to={entry.href}
                     aria-current={current ? "page" : undefined}
                     className={classNames(
                       "flex items-center gap-2 rounded-md px-2.5 py-2 text-sm whitespace-nowrap transition-colors",
@@ -65,8 +124,8 @@ export default function SettingsLayout() {
                         : "text-fg-3 hover:bg-overlay hover:text-fg",
                     )}
                   >
-                    <item.icon className="size-4 shrink-0" aria-hidden="true" />
-                    {item.name}
+                    <entry.icon className="size-4 shrink-0" aria-hidden="true" />
+                    {entry.name}
                   </Link>
                 </li>
               );

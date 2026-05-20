@@ -118,9 +118,6 @@ export const SteerBar = forwardRef<SteerBarHandle, SteerBarProps>(function Steer
 function formatSteerError(err: unknown): string {
   if (err instanceof ApiError) {
     const body = err.body as { code?: string; detail?: string } | null;
-    if (body?.code === "cli_agent_not_steerable") {
-      return "All running agent stages are CLI-mode and can't be steered.";
-    }
     if (body?.code === "use_answer_endpoint") {
       return "Run is blocked on a question; answer the question first.";
     }

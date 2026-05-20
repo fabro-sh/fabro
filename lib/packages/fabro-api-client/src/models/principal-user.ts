@@ -25,6 +25,7 @@ export interface PrincipalUser {
     'identity': IdpIdentity;
     'login': string;
     'auth_method': AuthMethod;
+    'avatar_url'?: string | null;
 }
 
 export const PrincipalUserKindEnum = {

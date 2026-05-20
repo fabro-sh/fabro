@@ -37,7 +37,6 @@ fabro-proc = { path = "../fabro-proc" }
 fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona"] }
 fabro-checkpoint = { path = "../fabro-checkpoint" }
 fabro-graphviz = { path = "../fabro-graphviz" }
-graphviz-sys.workspace = true
 fabro-validate = { path = "../fabro-validate" }
 fabro-workflow = { path = "../fabro-workflow" }
 fabro-server = { path = "../fabro-server" }

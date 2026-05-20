@@ -2,14 +2,15 @@ use std::sync::Arc;
 
 use super::super::{
     ApiError, AppState, FromStr, HashSet, IntoResponse, Json, MAX_PAGE_OFFSET, ModelTestMode, Path,
-    ProviderId, Query, RequiredUser, Response, Router, State, StatusCode, auth_issue_message,
-    default_page_limit, error, get, post, run_model_test,
+    ProviderId, ProviderList, Query, RequiredUser, Response, Router, State, StatusCode,
+    auth_issue_message, default_page_limit, error, get, post, run_model_test,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/models", get(list_models))
         .route("/models/{id}/test", post(test_model))
+        .route("/providers", get(list_providers))
 }
 
 #[derive(serde::Deserialize)]
@@ -78,6 +79,18 @@ async fn list_models(
         })),
     )
         .into_response()
+}
+
+async fn list_providers(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
+    let catalog = state.catalog();
+    let configured: HashSet<ProviderId> = state
+        .configured_llm_provider_ids()
+        .await
+        .into_iter()
+        .collect();
+    let data = catalog.provider_summaries(&configured);
+
+    (StatusCode::OK, Json(ProviderList { data })).into_response()
 }
 
 async fn test_model(

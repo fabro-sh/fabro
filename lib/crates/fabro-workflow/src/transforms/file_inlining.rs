@@ -3,15 +3,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use fabro_graphviz::graph::{AttrValue, Graph};
-use fabro_template::{TemplateContext, TemplateLoader};
+use fabro_template::{TemplateContext, TemplateSource, TemplateStore};
+use fabro_types::ManifestPath;
 use fabro_validate::Diagnostic;
 
 use super::Transform;
 use crate::error::Error;
-use crate::file_resolver::{FileResolver, ResolvedFile};
+use crate::file_resolver::{FileResolver, FileResolverTemplateStore, ResolvedFile};
 use crate::static_reference::{ReferenceKind, validate_static_reference};
 use crate::transforms::variable_expansion::{
-    RenderMode, TemplateRenderTarget, TemplateTransform, render_template_for_target,
+    RenderMode, TemplateRenderStore, TemplateRenderTarget, TemplateTransform,
+    render_template_for_target,
 };
 
 /// Resolve a potential `@path` file reference.
@@ -34,32 +36,91 @@ pub fn resolve_file_ref(
         .map_or_else(|| value.to_string(), |resolved| resolved.content))
 }
 
-pub(crate) fn template_include_loader(
-    current_dir: PathBuf,
-    resolver: Arc<dyn FileResolver>,
-) -> TemplateLoader {
-    Arc::new(move |name| {
-        if !is_safe_include_name(name) {
-            return None;
-        }
-        resolver
-            .resolve(&current_dir, name)
-            .map(|resolved| resolved.content)
-    })
-}
-
-fn is_safe_include_name(name: &str) -> bool {
-    if name.is_empty() || name.starts_with('~') || Path::new(name).is_absolute() {
-        return false;
-    }
-    name.split('/')
-        .all(|segment| !segment.starts_with('.') && !segment.contains('\\'))
-}
-
 fn parent_dir_or_dot(path: &Path) -> PathBuf {
     path.parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
+}
+
+pub(crate) fn template_render_store(
+    current_dir: &Path,
+    resolver: Arc<dyn FileResolver>,
+    source_name: Option<&str>,
+    content: &str,
+) -> Result<TemplateRenderStore, Error> {
+    let root = template_root_for_current_dir(current_dir)?;
+    let source_path = template_source_path_for_current_dir(current_dir, source_name, &root)?;
+    let base_dir = template_store_base_dir(current_dir);
+    Ok(TemplateRenderStore::new(
+        TemplateSource::new(source_path, root, content.to_owned()),
+        Arc::new(FileResolverTemplateStore::new(base_dir, resolver)),
+    ))
+}
+
+fn template_store_base_dir(current_dir: &Path) -> PathBuf {
+    if current_dir.is_absolute() {
+        current_dir.to_path_buf()
+    } else {
+        PathBuf::from(".")
+    }
+}
+
+fn template_root_for_current_dir(current_dir: &Path) -> Result<ManifestPath, Error> {
+    if current_dir.is_absolute() {
+        return manifest_path(".");
+    }
+    manifest_path_from_path(current_dir)
+}
+
+fn template_source_path_for_current_dir(
+    current_dir: &Path,
+    source_name: Option<&str>,
+    root: &ManifestPath,
+) -> Result<ManifestPath, Error> {
+    if let Some(source_name) = source_name {
+        let source_path = Path::new(source_name);
+        if source_path.is_absolute() {
+            if let Some(path) = ManifestPath::from_absolute(source_path, current_dir) {
+                return Ok(path);
+            }
+        } else if let Some(path) = ManifestPath::from_wire(source_name) {
+            if root.as_path().as_os_str().is_empty() || path.starts_with(root) {
+                return Ok(path);
+            }
+            if let Some(path) = ManifestPath::from_reference(root.as_path(), source_name) {
+                return Ok(path);
+            }
+        }
+    }
+    ManifestPath::from_reference(root.as_path(), "workflow.fabro")
+        .ok_or_else(|| Error::Validation("invalid workflow template source path".to_string()))
+}
+
+fn manifest_path(value: &str) -> Result<ManifestPath, Error> {
+    ManifestPath::from_wire(value)
+        .ok_or_else(|| Error::Validation(format!("invalid manifest path: {value}")))
+}
+
+fn manifest_path_from_path(path: &Path) -> Result<ManifestPath, Error> {
+    let value = path
+        .to_str()
+        .ok_or_else(|| Error::Validation(format!("invalid UTF-8 path: {}", path.display())))?;
+    manifest_path(value)
+}
+
+fn manifest_parent_or_dot(path: &ManifestPath) -> Result<ManifestPath, Error> {
+    manifest_path_from_path(path.parent_or_dot())
+}
+
+fn manifest_path_is_within_root(path: &ManifestPath, root: &ManifestPath) -> bool {
+    if root.as_path().as_os_str().is_empty() {
+        return !path
+            .as_path()
+            .components()
+            .next()
+            .is_some_and(|component| matches!(component, std::path::Component::ParentDir));
+    }
+    path.starts_with(root)
 }
 
 /// Inlines `@file` references in node prompts and the graph-level goal.
@@ -140,10 +201,12 @@ impl FileInliningTransform {
                 "prompt",
             )
             .with_source_text(self.source_text.as_deref(), prompt)
-            .with_include_loader(Some(template_include_loader(
-                self.current_dir.clone(),
+            .with_template_store(template_render_store(
+                &self.current_dir,
                 Arc::clone(&self.resolver),
-            )));
+                self.source_name.as_deref(),
+                prompt,
+            )?);
             let rendered = render_template_for_target(
                 prompt,
                 &ctx,
@@ -172,10 +235,12 @@ impl FileInliningTransform {
         let ctx = TemplateContext::for_input_scan(self.inputs.clone());
         let target = TemplateRenderTarget::graph_attr(self.source_name.clone(), "goal")
             .with_source_text(self.source_text.as_deref(), goal)
-            .with_include_loader(Some(template_include_loader(
-                self.current_dir.clone(),
+            .with_template_store(template_render_store(
+                &self.current_dir,
                 Arc::clone(&self.resolver),
-            )));
+                self.source_name.as_deref(),
+                goal,
+            )?);
         let rendered =
             render_template_for_target(goal, &ctx, self.render_mode, &target, diagnostics)?;
         let value = self
@@ -202,13 +267,11 @@ impl FileInliningTransform {
         let Some(resolved) = self.resolver.resolve(&self.current_dir, path_str) else {
             return Ok(None);
         };
+        let (source, store) = self.template_source_for_resolved_file(&resolved)?;
         let target = owner_target
             .with_source_name(resolved.path.display().to_string())
             .with_source_text(Some(&resolved.content), &resolved.content)
-            .with_include_loader(Some(template_include_loader(
-                parent_dir_or_dot(&resolved.path),
-                Arc::clone(&self.resolver),
-            )));
+            .with_template_store(TemplateRenderStore::new(source, store));
         Ok(Some(render_file_contents(
             &resolved,
             ctx,
@@ -216,6 +279,52 @@ impl FileInliningTransform {
             &target,
             diagnostics,
         )?))
+    }
+
+    fn template_root_for_resolved_file(&self, path: &Path) -> PathBuf {
+        let parent = parent_dir_or_dot(path);
+        if self.current_dir.is_absolute() && path.starts_with(&self.current_dir) {
+            self.current_dir.clone()
+        } else {
+            parent
+        }
+    }
+
+    fn template_source_for_resolved_file(
+        &self,
+        resolved: &ResolvedFile,
+    ) -> Result<(TemplateSource, Arc<dyn TemplateStore>), Error> {
+        if resolved.path.is_absolute() {
+            let root_dir = self.template_root_for_resolved_file(&resolved.path);
+            let path = ManifestPath::from_absolute(&resolved.path, &root_dir).ok_or_else(|| {
+                Error::Validation(format!(
+                    "invalid resolved template path: {}",
+                    resolved.path.display()
+                ))
+            })?;
+            return Ok((
+                TemplateSource::new(path, manifest_path(".")?, resolved.content.clone()),
+                Arc::new(FileResolverTemplateStore::new(
+                    root_dir,
+                    Arc::clone(&self.resolver),
+                )),
+            ));
+        }
+
+        let path = manifest_path_from_path(&resolved.path)?;
+        let current_root = template_root_for_current_dir(&self.current_dir)?;
+        let root = if manifest_path_is_within_root(&path, &current_root) {
+            current_root
+        } else {
+            manifest_parent_or_dot(&path)?
+        };
+        Ok((
+            TemplateSource::new(path, root, resolved.content.clone()),
+            Arc::new(FileResolverTemplateStore::new(
+                PathBuf::from("."),
+                Arc::clone(&self.resolver),
+            )),
+        ))
     }
 }
 
@@ -249,9 +358,15 @@ mod tests {
     use std::sync::Arc;
 
     use fabro_graphviz::graph::{AttrValue, Graph, Node};
+    use fabro_template::{TemplateRenderMode, TemplateSource, render_source};
+    use fabro_types::ManifestPath;
 
     use super::*;
-    use crate::file_resolver::FilesystemFileResolver;
+    use crate::file_resolver::{BundleFileResolver, FilesystemFileResolver};
+
+    fn manifest_path(value: &str) -> ManifestPath {
+        ManifestPath::from_wire(value).expect("path should parse")
+    }
 
     #[test]
     fn resolve_file_ref_passthrough_non_at() {
@@ -413,6 +528,54 @@ mod tests {
             graph.attrs.get("goal").and_then(AttrValue::as_str),
             Some("included goal")
         );
+    }
+
+    #[test]
+    fn file_resolver_template_store_renders_sibling_partial_under_root() {
+        let resolver = Arc::new(BundleFileResolver::new(HashMap::from([(
+            manifest_path("prompts/partials/audit.partial.tpl"),
+            "shared partial".to_string(),
+        )])));
+        let store = FileResolverTemplateStore::new(PathBuf::from("."), resolver);
+        let source = TemplateSource::new(
+            manifest_path("prompts/audits/audit.prompt.md"),
+            manifest_path("prompts"),
+            r#"{% include "../partials/audit.partial.tpl" %}"#,
+        );
+
+        let rendered = render_source(
+            &source,
+            &TemplateContext::new(),
+            Arc::new(store),
+            TemplateRenderMode::Strict,
+        )
+        .unwrap();
+
+        assert_eq!(rendered, "shared partial");
+    }
+
+    #[test]
+    fn file_resolver_template_store_rejects_escaping_include() {
+        let resolver = Arc::new(BundleFileResolver::new(HashMap::from([(
+            manifest_path("outside.md"),
+            "outside".to_string(),
+        )])));
+        let store = FileResolverTemplateStore::new(PathBuf::from("."), resolver);
+        let source = TemplateSource::new(
+            manifest_path("prompts/audits/audit.prompt.md"),
+            manifest_path("prompts"),
+            r#"{% include "../../outside.md" %}"#,
+        );
+
+        let err = render_source(
+            &source,
+            &TemplateContext::new(),
+            Arc::new(store),
+            TemplateRenderMode::Strict,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, fabro_template::TemplateError::Load { .. }));
     }
 
     #[test]

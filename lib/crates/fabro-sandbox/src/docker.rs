@@ -26,6 +26,7 @@ use tokio::{fs, time};
 use tokio_util::sync::CancellationToken;
 
 use crate::clone_source::{self, CloneDecision, EmptyWorkspaceReason};
+use crate::managed_labels::{self, MANAGED_LABEL, RUN_ID_LABEL};
 use crate::redact::redact_auth_url;
 use crate::sandbox::{StdioProcessControl, optional_timeout, resolve_path};
 use crate::{
@@ -46,8 +47,6 @@ const EXEC_TERM_GRACE_SECONDS: &str = "0.02";
 #[cfg(not(test))]
 const EXEC_TERM_GRACE_SECONDS: &str = "0.2";
 
-const MANAGED_LABEL: &str = "sh.fabro.managed";
-const RUN_ID_LABEL: &str = "sh.fabro.run_id";
 static EXEC_CONTROL_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 pub fn docker_access_command(container_id: &str, working_directory: &str) -> String {
@@ -1060,14 +1059,6 @@ fn git_clone_and_link_command(
     )
 }
 
-fn container_labels(run_id: Option<&RunId>) -> HashMap<String, String> {
-    let mut labels = HashMap::from([(MANAGED_LABEL.to_string(), "true".to_string())]);
-    if let Some(run_id) = run_id {
-        labels.insert(RUN_ID_LABEL.to_string(), run_id.to_string());
-    }
-    labels
-}
-
 fn host_config(config: &DockerSandboxOptions) -> HostConfig {
     HostConfig {
         binds: None,
@@ -1095,7 +1086,7 @@ fn container_config(config: &DockerSandboxOptions, run_id: Option<&RunId>) -> Co
         } else {
             Some(config.env_vars.clone())
         },
-        labels: Some(container_labels(run_id)),
+        labels: Some(managed_labels::for_run(run_id)),
         host_config: Some(host_config(config)),
         ..Default::default()
     }
@@ -2079,7 +2070,7 @@ mod tests {
             container_name(&run_id),
             "fabro-run-01HY0000000000000000000000"
         );
-        let labels = container_labels(Some(&run_id));
+        let labels = managed_labels::for_run(Some(&run_id));
         assert_eq!(labels.get(MANAGED_LABEL).map(String::as_str), Some("true"));
         assert_eq!(
             labels.get(RUN_ID_LABEL).map(String::as_str),

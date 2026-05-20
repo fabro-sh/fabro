@@ -12,6 +12,7 @@ import type {
   PaginatedRunList,
   PaginatedRunStageList,
   PaginatedWorkflowListResponse,
+  ProviderList,
   RunArtifactListResponse,
   RunBilling,
   RunProjection,
@@ -21,6 +22,7 @@ import type {
   SandboxServiceListResponse,
   ServerSettings,
   SystemInfoResponse,
+  SystemResourcesResponse,
   VncPreviewResponse,
   WorkflowDetailResponse,
   WorkflowSettings,
@@ -36,6 +38,7 @@ import {
   generatedAxios,
   humanInTheLoopApi,
   insightsApi,
+  modelsApi,
   runInternalsApi,
   runOutputsApi,
   runsApi,
@@ -88,6 +91,14 @@ export function useSystemInfo() {
     queryKeys.system.info(),
     () => apiData(() => systemApi.getSystemInfo()),
     immutableOptions,
+  );
+}
+
+export function useSystemResources() {
+  return useSWR<SystemResourcesResponse>(
+    queryKeys.system.resources(),
+    () => apiData(() => systemApi.getSystemResources()),
+    { refreshInterval: 5_000 },
   );
 }
 
@@ -362,6 +373,14 @@ export function useServerSettings() {
   return useSWR<ServerSettings>(
     queryKeys.settings.server(),
     () => apiData(() => settingsApi.retrieveServerSettings()),
+    immutableOptions,
+  );
+}
+
+export function useProviders() {
+  return useSWR<ProviderList>(
+    queryKeys.providers.list(),
+    () => apiData(() => modelsApi.listProviders()),
     immutableOptions,
   );
 }

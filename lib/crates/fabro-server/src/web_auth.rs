@@ -12,7 +12,7 @@ use cookie::{Cookie, CookieJar, Key, SameSite};
 use fabro_redact::DisplaySafeUrl;
 use fabro_static::EnvVars;
 use fabro_types::settings::ServerAuthMethod;
-use fabro_types::{AuthMethod, IdpIdentity, Principal};
+use fabro_types::{AuthMethod, IdpIdentity};
 use fabro_util::dev_token::validate_dev_token_format;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
@@ -193,16 +193,16 @@ pub(crate) fn session_cookie_present(headers: &HeaderMap) -> bool {
 }
 
 pub(crate) fn auth_context_from_session(session: &SessionCookie) -> RequestAuthContext {
-    let identity = session.identity.clone();
-    let principal = Principal::user(identity, session.login.clone(), session.auth_method);
-    RequestAuthContext::authenticated(
-        principal,
-        Some(UserProfile {
+    RequestAuthContext::authenticated_user(
+        session.identity.clone(),
+        session.login.clone(),
+        session.auth_method,
+        UserProfile {
             name:       session.name.clone(),
             email:      session.email.clone(),
             avatar_url: session.avatar_url.clone(),
             user_url:   session.user_url.clone(),
-        }),
+        },
     )
 }
 

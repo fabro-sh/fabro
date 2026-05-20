@@ -33,6 +33,7 @@ pub use docker_sandbox::{DockerSandbox, DockerSandboxOptions};
 pub use error::{Error, InterruptReason, Result};
 pub use event::Emitter;
 pub use fabro_mcp::config::McpServerSettings;
+pub use fabro_types::SteeringMessage;
 pub use history::History;
 pub use local_sandbox::LocalSandbox;
 pub use loop_detection::detect_loop;

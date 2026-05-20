@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -8,7 +8,7 @@ use fabro_auth::{
     CredentialSource, EnvCredentialSource, VaultCredentialSource, auth_issue_message,
 };
 use fabro_graphviz::graph;
-use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
+use fabro_hooks::{HookContext, HookDecision, HookEvent, HookExecutionContext, HookRunner};
 use fabro_model::Catalog;
 use fabro_sandbox::{
     GitSetupIntent, ReadBeforeWriteSandbox, SandboxEventCallback, SandboxSpec,
@@ -33,7 +33,7 @@ use crate::handler::{HandlerRegistry, default_registry};
 use crate::run_metadata::{RunMetadataRuntime, build_metadata_writer, metadata_branch_name};
 use crate::run_options::{GitCheckpointOptions, RunOptions};
 use crate::sandbox_git_runtime::SandboxGitRuntime;
-use crate::services::{EngineServices, RunServices, WorkflowToolEnvProvider};
+use crate::services::{EngineServices, RunLocations, RunServices, WorkflowToolEnvProvider};
 use crate::steering_hub::SteeringHub;
 
 type BuiltSandboxEnv = (HashMap<String, String>, Option<Arc<GitHubTokenSource>>);
@@ -42,12 +42,12 @@ async fn run_hooks(
     hook_runner: Option<&HookRunner>,
     hook_context: &HookContext,
     sandbox: Arc<dyn Sandbox>,
-    work_dir: Option<&Path>,
+    execution_context: HookExecutionContext,
 ) -> HookDecision {
     let Some(runner) = hook_runner else {
         return HookDecision::Proceed;
     };
-    runner.run(hook_context, sandbox, work_dir).await
+    runner.run(hook_context, sandbox, execution_context).await
 }
 
 fn git_setup_intent(run_options: &RunOptions) -> GitSetupIntent {
@@ -169,7 +169,8 @@ async fn build_registry(
             .with_tool_env_provider(tool_env_provider.clone())
             .with_mcp_servers(mcp_servers.clone());
             let acp = AgentAcpBackend::new()
-                .with_tool_env_provider(tool_env_provider.clone(), github_token_refresh_managed);
+                .with_tool_env_provider(tool_env_provider.clone(), github_token_refresh_managed)
+                .with_steering_hub(Arc::clone(&steering_hub));
             Some(Box::new(BackendRouter::new(Box::new(api), acp)))
         }))
     };
@@ -325,7 +326,8 @@ pub async fn initialize(
     persisted: Persisted,
     mut options: InitOptions,
 ) -> Result<Initialized, Error> {
-    let (graph, source, _diagnostics, run_dir, _run_spec) = persisted.into_parts();
+    let (graph, source, _diagnostics, run_dir, run_spec) = persisted.into_parts();
+    let host_source_dir = run_spec.source_directory.as_deref().map(PathBuf::from);
     options.run_options.run_dir = run_dir.clone();
     options.run_options.git = options.git.clone();
 
@@ -435,6 +437,8 @@ pub async fn initialize(
             .map_err(|e| Error::engine_with_source("Failed to initialize sandbox", e))?;
     }
 
+    let locations = RunLocations::for_sandbox(host_source_dir, sandbox.as_ref(), run_dir.clone());
+
     let hook_ctx = HookContext::new(
         HookEvent::SandboxReady,
         options.run_options.run_id,
@@ -444,7 +448,7 @@ pub async fn initialize(
         hook_runner.as_deref(),
         &hook_ctx,
         Arc::clone(&sandbox),
-        None,
+        locations.hook_execution_context(),
     )
     .await;
     if let HookDecision::Block { reason } = decision {
@@ -650,6 +654,7 @@ pub async fn initialize(
         Arc::clone(&options.emitter),
         Arc::clone(&sandbox),
         hook_runner.clone(),
+        locations,
         options.run_options.cancel_token.clone(),
         options.llm.provider_id.clone(),
         options.llm.model.clone(),
@@ -962,6 +967,18 @@ mod tests {
         assert_eq!(initialized.run_options.run_dir, run_dir);
         assert_eq!(initialized.source, source);
         assert!(initialized.engine.run.hook_runner.is_none());
+        assert_eq!(
+            initialized.engine.run.locations.host_source_dir.as_deref(),
+            Some(std::env::current_dir().unwrap().as_path())
+        );
+        assert_eq!(
+            initialized.engine.run.locations.sandbox_work_dir.as_deref(),
+            Some(std::env::current_dir().unwrap().as_path())
+        );
+        assert_eq!(
+            initialized.engine.run.locations.run_scratch_dir.as_path(),
+            run_dir.as_path()
+        );
         assert_eq!(
             initialized
                 .engine

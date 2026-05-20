@@ -352,14 +352,12 @@ fn collect_workflow_files(
             )?;
             let source = std::fs::read_to_string(&bundled.absolute_path)
                 .with_context(|| format!("Failed to read {}", bundled.absolute_path.display()))?;
+            let template_root =
+                template_root_for_bundled_file(&bundled.path, &workflow_template_root)?;
             collect_template_include_files(
                 files,
                 context.cwd,
-                TemplateSource {
-                    path:    bundled.path.clone(),
-                    content: source,
-                },
-                &manifest_parent_or_dot(&bundled.path)?,
+                TemplateSource::new(bundled.path.clone(), template_root, source),
                 Some(&bundled.path),
                 &context.inputs,
             )?;
@@ -367,11 +365,11 @@ fn collect_workflow_files(
             collect_template_include_files(
                 files,
                 context.cwd,
-                TemplateSource {
-                    path:    workflow.dot_path.clone(),
-                    content: goal_ref.to_owned(),
-                },
-                &workflow_template_root,
+                TemplateSource::new(
+                    workflow.dot_path.clone(),
+                    workflow_template_root.clone(),
+                    goal_ref.to_owned(),
+                ),
                 Some(&workflow.dot_path),
                 &context.inputs,
             )?;
@@ -394,14 +392,12 @@ fn collect_workflow_files(
                     std::fs::read_to_string(&bundled.absolute_path).with_context(|| {
                         format!("Failed to read {}", bundled.absolute_path.display())
                     })?;
+                let template_root =
+                    template_root_for_bundled_file(&bundled.path, &workflow_template_root)?;
                 collect_template_include_files(
                     files,
                     context.cwd,
-                    TemplateSource {
-                        path:    bundled.path.clone(),
-                        content: source,
-                    },
-                    &manifest_parent_or_dot(&bundled.path)?,
+                    TemplateSource::new(bundled.path.clone(), template_root, source),
                     Some(&bundled.path),
                     &context.inputs,
                 )?;
@@ -409,11 +405,11 @@ fn collect_workflow_files(
                 collect_template_include_files(
                     files,
                     context.cwd,
-                    TemplateSource {
-                        path:    workflow.dot_path.clone(),
-                        content: prompt_ref.to_owned(),
-                    },
-                    &workflow_template_root,
+                    TemplateSource::new(
+                        workflow.dot_path.clone(),
+                        workflow_template_root.clone(),
+                        prompt_ref.to_owned(),
+                    ),
                     Some(&workflow.dot_path),
                     &context.inputs,
                 )?;
@@ -464,22 +460,14 @@ fn collect_template_include_files(
     files: &mut HashMap<String, types::ManifestFileEntry>,
     cwd: &Path,
     source: TemplateSource,
-    template_root: &ManifestPath,
     from: Option<&ManifestPath>,
     inputs: &HashMap<String, toml::Value>,
 ) -> Result<()> {
     let source_path = source.path.clone();
-    let store = FilesystemTemplateStore::new(cwd.to_path_buf(), template_root.clone());
+    let store = FilesystemTemplateStore::new(cwd.to_path_buf());
     let closure = discover_static_dependency_closure([source], &store)
         .map_err(|err| anyhow!("failed to discover template dependencies: {err}"))?;
-    verify_recorded_template_dependencies(
-        &source_path,
-        &closure,
-        template_root,
-        files,
-        from,
-        inputs,
-    )?;
+    verify_recorded_template_dependencies(&source_path, &closure, files, from, inputs)?;
 
     for (path, source) in closure.sources {
         if path == source_path {
@@ -500,10 +488,30 @@ fn collect_template_include_files(
     Ok(())
 }
 
+fn template_root_for_bundled_file(
+    path: &ManifestPath,
+    workflow_template_root: &ManifestPath,
+) -> Result<ManifestPath> {
+    if manifest_path_is_within_root(path, workflow_template_root) {
+        Ok(workflow_template_root.clone())
+    } else {
+        manifest_parent_or_dot(path)
+    }
+}
+
+fn manifest_path_is_within_root(path: &ManifestPath, root: &ManifestPath) -> bool {
+    if root.as_path().as_os_str().is_empty() {
+        return !matches!(
+            path.as_path().components().next(),
+            Some(Component::ParentDir)
+        );
+    }
+    path.starts_with(root)
+}
+
 fn verify_recorded_template_dependencies(
     source_path: &ManifestPath,
     closure: &fabro_template::TemplateDependencyClosure,
-    template_root: &ManifestPath,
     files: &HashMap<String, types::ManifestFileEntry>,
     from: Option<&ManifestPath>,
     inputs: &HashMap<String, toml::Value>,
@@ -522,10 +530,8 @@ fn verify_recorded_template_dependencies(
         }
     }
     let allowed = bundled_files.keys().cloned().collect();
-    let store = RecordingTemplateStore::with_allowed(
-        BundleTemplateStore::new(template_root.clone(), bundled_files),
-        allowed,
-    );
+    let store =
+        RecordingTemplateStore::with_allowed(BundleTemplateStore::new(bundled_files), allowed);
     let ctx = TemplateContext::for_input_scan(inputs.clone());
     render_source(source, &ctx, Arc::new(store), TemplateRenderMode::Lenient).with_context(
         || {

@@ -1,0 +1,214 @@
+import type {
+  SystemCpuResources,
+  SystemDiskResources,
+  SystemMemoryResources,
+  SystemResourcesResponse,
+} from "@qltysh/fabro-api-client";
+import { formatBytesAsMemory, formatDurationMs } from "../lib/format";
+import { useSystemResources } from "../lib/queries";
+import {
+  Badge,
+  Mono,
+  Muted,
+  Panel,
+  PanelSkeleton,
+  Row,
+  SettingsPageIntro,
+} from "../components/settings-panel";
+
+export function meta() {
+  return [{ title: "Resources — Fabro" }];
+}
+
+const DESCRIPTION =
+  "Server-visible CPU, memory, and storage filesystem usage for this Fabro process.";
+
+export default function SettingsResources() {
+  const resourcesQuery = useSystemResources();
+  const resources = resourcesQuery.data;
+
+  return (
+    <div className="space-y-6">
+      <SettingsPageIntro description={DESCRIPTION} />
+      {resources ? (
+        <>
+          <CpuPanel cpu={resources.cpu} />
+          <MemoryPanel memory={resources.memory} />
+          <DiskPanel disk={resources.disk} />
+          <NotesPanel resources={resources} />
+        </>
+      ) : (
+        <>
+          <PanelSkeleton />
+          <PanelSkeleton />
+          <PanelSkeleton />
+        </>
+      )}
+    </div>
+  );
+}
+
+function CpuPanel({ cpu }: { cpu: SystemCpuResources }) {
+  if (!cpu.supported) {
+    return (
+      <Panel title="CPU">
+        <UnsupportedRows reason={cpu.unavailable_reason} />
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel title="CPU">
+      <Row title="Usage" help="Delta-based usage for the visible CPU set.">
+        {cpu.usage_percent == null ? (
+          <Muted>Collecting sample</Muted>
+        ) : (
+          <UsageMeter percent={cpu.usage_percent} />
+        )}
+      </Row>
+      <Row title="Sample window" help="Elapsed time since the previous CPU sample.">
+        {cpu.sample_window_ms != null ? (
+          formatDurationMs(cpu.sample_window_ms)
+        ) : (
+          <Muted>Unknown</Muted>
+        )}
+      </Row>
+    </Panel>
+  );
+}
+
+function MemoryPanel({ memory }: { memory: SystemMemoryResources }) {
+  if (!memory.supported) {
+    return (
+      <Panel title="Memory">
+        <UnsupportedRows reason={memory.unavailable_reason} />
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel title="Memory">
+      <Row title="Usage" help="Memory used within the reported scope.">
+        <UsageMeter
+          percent={memory.used_percent}
+          label={
+            memory.used_bytes != null && memory.total_bytes != null
+              ? `${formatBytesAsMemory(memory.used_bytes)} / ${formatBytesAsMemory(memory.total_bytes)}`
+              : undefined
+          }
+        />
+      </Row>
+    </Panel>
+  );
+}
+
+function DiskPanel({ disk }: { disk: SystemDiskResources }) {
+  if (!disk.supported) {
+    return (
+      <Panel title="Disk">
+        <UnsupportedRows reason={disk.unavailable_reason} />
+        <Row title="Storage path" help="Configured Fabro storage directory.">
+          <Mono>{disk.storage_path}</Mono>
+        </Row>
+        <FabroStorageRows disk={disk} />
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel title="Disk">
+      <Row title="Usage" help="Storage filesystem capacity used.">
+        <UsageMeter
+          percent={disk.used_percent}
+          label={
+            disk.used_bytes != null && disk.total_bytes != null
+              ? `${formatBytesAsMemory(disk.used_bytes)} / ${formatBytesAsMemory(disk.total_bytes)}`
+              : undefined
+          }
+        />
+      </Row>
+      <Row title="Mount point" help="Filesystem containing the storage path.">
+        {disk.mount_point ? <Mono>{disk.mount_point}</Mono> : <Muted>Unknown</Muted>}
+      </Row>
+      <FabroStorageRows disk={disk} />
+    </Panel>
+  );
+}
+
+function FabroStorageRows({ disk }: { disk: SystemDiskResources }) {
+  return (
+    <>
+      <Row title="Fabro managed" help="Bytes currently tracked under Fabro storage.">
+        {formatBytesAsMemory(disk.fabro_managed_bytes)}
+      </Row>
+      <Row title="Reclaimable" help="Bytes Fabro can reclaim by pruning inactive data.">
+        {formatBytesAsMemory(disk.fabro_reclaimable_bytes)}
+      </Row>
+    </>
+  );
+}
+
+function NotesPanel({ resources }: { resources: SystemResourcesResponse }) {
+  const notes = Array.from(new Set(resources.notes));
+  if (notes.length === 0) return null;
+
+  return (
+    <Panel title="Notes">
+      {notes.map((note) => (
+        <Row key={note} title="Note">
+          <span className="text-fg-2">{note}</span>
+        </Row>
+      ))}
+    </Panel>
+  );
+}
+
+function UnsupportedRows({ reason }: { reason: string | null }) {
+  return (
+    <>
+      <Row title="Status">
+        <Badge>Unsupported</Badge>
+      </Row>
+      <Row title="Reason">
+        <span className="text-fg-2">{reason ?? "Metric unavailable"}</span>
+      </Row>
+    </>
+  );
+}
+
+function UsageMeter({
+  percent,
+  label,
+}: {
+  percent: number | null | undefined;
+  label?: string;
+}) {
+  const safePercent = percent == null ? null : Math.min(100, Math.max(0, percent));
+  const value = safePercent == null ? "Not available" : formatPercent(safePercent);
+  return (
+    <div className="min-w-0 space-y-1.5">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="truncate text-sm text-fg">{label ?? value}</span>
+        {label ? (
+          <span className="font-mono text-xs tabular-nums text-fg-muted">{value}</span>
+        ) : null}
+      </div>
+      <div
+        role="meter"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={safePercent ?? undefined}
+        className="h-2 overflow-hidden rounded-sm bg-overlay-strong"
+      >
+        <div
+          className="h-full rounded-sm bg-teal-500 transition-[width]"
+          style={{ width: `${safePercent ?? 0}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function formatPercent(value: number) {
+  return `${Number.isInteger(value) ? value : value.toFixed(1)}%`;
+}

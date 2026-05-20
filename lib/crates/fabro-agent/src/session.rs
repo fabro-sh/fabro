@@ -15,7 +15,7 @@ use fabro_llm::{Error as LlmError, retry};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_mcp::connection_manager::McpConnectionManager;
 use fabro_model::{AgentProfileKind, Catalog, ModelRef, Speed};
-use fabro_types::{Principal, SessionRecord, SessionStatus};
+use fabro_types::{Principal, SessionRecord, SessionStatus, SteeringMessage};
 use futures::StreamExt;
 use tokio::sync::{Mutex as AsyncMutex, Notify, broadcast};
 use tokio::time;
@@ -70,6 +70,15 @@ impl SteeringItem {
         match self {
             Self::Steering { actor, .. } | Self::PairUserMessage { actor, .. } => actor.as_ref(),
             Self::PairSystemMessage { .. } => None,
+        }
+    }
+}
+
+impl From<SteeringMessage> for SteeringItem {
+    fn from(message: SteeringMessage) -> Self {
+        Self::Steering {
+            text:  message.text,
+            actor: message.actor,
         }
     }
 }

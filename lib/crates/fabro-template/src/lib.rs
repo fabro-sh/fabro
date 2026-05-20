@@ -18,7 +18,7 @@ pub use dependency::{
 };
 pub use store::{
     BundleTemplateStore, CachedTemplateStore, FilesystemTemplateStore, RecordingTemplateStore,
-    TemplateLoadError, TemplateSource, TemplateStore,
+    TemplateIncludeResolver, TemplateLoadError, TemplateSource, TemplateStore,
 };
 
 pub type TemplateLoader = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -530,23 +530,28 @@ fn render_rooted_source(
     env.set_undefined_behavior(undefined);
     env.set_auto_escape_callback(|_| AutoEscape::None);
     env.set_debug(true);
-    env.set_path_join_callback(|name, parent| joined_template_path(name, parent).into());
+    let root = source.root.clone();
+    env.set_path_join_callback(move |name, parent| {
+        joined_template_path(&root, name, parent).into()
+    });
 
     let load_error = Arc::new(Mutex::new(None));
     let loader_error = Arc::clone(&load_error);
-    env.set_loader(move |name| {
-        let parent = ManifestPath::from_wire(".").expect("root manifest path should parse");
-        match store.load(&parent, name) {
-            Ok(source) => Ok(source.map(|source| source.content)),
-            Err(error) => {
-                *loader_error
-                    .lock()
-                    .expect("template load error mutex should not be poisoned") = Some(error);
-                Err(minijinja::Error::new(
-                    ErrorKind::InvalidOperation,
-                    "template load failed",
-                ))
-            }
+    let loader_parent = TemplateSource::new(
+        ManifestPath::from_wire(".").expect("root manifest path should parse"),
+        source.root.clone(),
+        String::new(),
+    );
+    env.set_loader(move |name| match store.load(&loader_parent, name) {
+        Ok(source) => Ok(source.map(|source| source.content)),
+        Err(error) => {
+            *loader_error
+                .lock()
+                .expect("template load error mutex should not be poisoned") = Some(error);
+            Err(minijinja::Error::new(
+                ErrorKind::InvalidOperation,
+                "template load failed",
+            ))
         }
     });
 
@@ -571,12 +576,13 @@ fn render_rooted_source(
     })
 }
 
-fn joined_template_path(name: &str, parent: &str) -> String {
+fn joined_template_path(root: &ManifestPath, name: &str, parent: &str) -> String {
     let Some(parent) = ManifestPath::from_wire(parent) else {
         return name.to_owned();
     };
-    ManifestPath::from_reference(parent.parent_or_dot(), name)
-        .map_or_else(|| name.to_owned(), |path| path.to_string())
+    TemplateIncludeResolver::new(root.clone())
+        .resolve(&parent, name)
+        .map_or_else(|_| name.to_owned(), |path| path.to_string())
 }
 
 fn reject_loader_dependent_string(name: Option<&str>, template: &str) -> Result<(), TemplateError> {
@@ -605,7 +611,6 @@ mod tests {
 
     fn bundle_store(files: &[(&str, &str)]) -> Arc<dyn TemplateStore> {
         Arc::new(BundleTemplateStore::new(
-            manifest_path("."),
             files
                 .iter()
                 .map(|(path, content)| (manifest_path(path), (*content).to_string()))
@@ -742,10 +747,11 @@ mod tests {
     #[test]
     fn render_source_supports_rooted_include() {
         let ctx = TemplateContext::new();
-        let source = TemplateSource {
-            path:    manifest_path("prompts/main.md"),
-            content: r#"{% include "partial.md" %}"#.to_string(),
-        };
+        let source = TemplateSource::new(
+            manifest_path("prompts/main.md"),
+            manifest_path("prompts"),
+            r#"{% include "partial.md" %}"#,
+        );
 
         let rendered = render_source(
             &source,
@@ -761,10 +767,11 @@ mod tests {
     #[test]
     fn render_source_supports_nested_include() {
         let ctx = TemplateContext::new();
-        let source = TemplateSource {
-            path:    manifest_path("prompts/main.md"),
-            content: r#"{% include "partial.md" %}"#.to_string(),
-        };
+        let source = TemplateSource::new(
+            manifest_path("prompts/main.md"),
+            manifest_path("prompts"),
+            r#"{% include "partial.md" %}"#,
+        );
 
         let rendered = render_source(
             &source,
@@ -783,10 +790,11 @@ mod tests {
     #[test]
     fn render_source_supports_extends() {
         let ctx = TemplateContext::new();
-        let source = TemplateSource {
-            path:    manifest_path("pages/main.md"),
-            content: r#"{% extends "layout.md" %}{% block body %}Body{% endblock %}"#.to_string(),
-        };
+        let source = TemplateSource::new(
+            manifest_path("pages/main.md"),
+            manifest_path("pages"),
+            r#"{% extends "layout.md" %}{% block body %}Body{% endblock %}"#,
+        );
 
         let rendered = render_source(
             &source,
@@ -805,10 +813,11 @@ mod tests {
     #[test]
     fn render_source_supports_import() {
         let ctx = TemplateContext::new();
-        let source = TemplateSource {
-            path:    manifest_path("prompts/main.md"),
-            content: r#"{% import "macros.md" as macros %}{{ macros.greet("Ada") }}"#.to_string(),
-        };
+        let source = TemplateSource::new(
+            manifest_path("prompts/main.md"),
+            manifest_path("prompts"),
+            r#"{% import "macros.md" as macros %}{{ macros.greet("Ada") }}"#,
+        );
 
         let rendered = render_source(
             &source,
@@ -827,10 +836,11 @@ mod tests {
     #[test]
     fn render_source_supports_from_import() {
         let ctx = TemplateContext::new();
-        let source = TemplateSource {
-            path:    manifest_path("prompts/main.md"),
-            content: r#"{% from "macros.md" import greet %}{{ greet("Ada") }}"#.to_string(),
-        };
+        let source = TemplateSource::new(
+            manifest_path("prompts/main.md"),
+            manifest_path("prompts"),
+            r#"{% from "macros.md" import greet %}{{ greet("Ada") }}"#,
+        );
 
         let rendered = render_source(
             &source,
@@ -849,14 +859,12 @@ mod tests {
     #[test]
     fn render_source_rejects_unsafe_include() {
         let ctx = TemplateContext::new();
-        let source = TemplateSource {
-            path:    manifest_path("prompts/main.md"),
-            content: r#"{% include "../outside.md" %}"#.to_string(),
-        };
-        let store: Arc<dyn TemplateStore> = Arc::new(BundleTemplateStore::new(
+        let source = TemplateSource::new(
+            manifest_path("prompts/main.md"),
             manifest_path("prompts"),
-            HashMap::new(),
-        ));
+            r#"{% include "../outside.md" %}"#,
+        );
+        let store: Arc<dyn TemplateStore> = Arc::new(BundleTemplateStore::new(HashMap::new()));
 
         let err = render_source(&source, &ctx, store, TemplateRenderMode::Strict).unwrap_err();
 
@@ -867,6 +875,29 @@ mod tests {
                 ..
             } if matches!(*source, TemplateLoadError::EscapesRoot { .. })
         ));
+    }
+
+    #[test]
+    fn render_source_uses_source_root_for_sibling_include() {
+        let ctx = TemplateContext::new();
+        let source = TemplateSource::new(
+            manifest_path("prompts/audits/audit.prompt.md"),
+            manifest_path("prompts"),
+            r#"{% include "../partials/audit.partial.tpl" %}"#,
+        );
+
+        let rendered = render_source(
+            &source,
+            &ctx,
+            Arc::new(BundleTemplateStore::new(HashMap::from([(
+                manifest_path("prompts/partials/audit.partial.tpl"),
+                "shared partial".to_string(),
+            )]))),
+            TemplateRenderMode::Strict,
+        )
+        .unwrap();
+
+        assert_eq!(rendered, "shared partial");
     }
 
     #[test]
@@ -897,11 +928,11 @@ mod tests {
 
     #[test]
     fn static_dependency_closure_collects_both_branches() {
-        let source = TemplateSource {
-            path:    manifest_path("main.md"),
-            content: r#"{% if inputs.use_a %}{% include "a.md" %}{% else %}{% include "b.md" %}{% endif %}"#
-                .to_string(),
-        };
+        let source = TemplateSource::new(
+            manifest_path("main.md"),
+            manifest_path("."),
+            r#"{% if inputs.use_a %}{% include "a.md" %}{% else %}{% include "b.md" %}{% endif %}"#,
+        );
 
         let closure = discover_static_dependency_closure(
             [source],
@@ -915,10 +946,11 @@ mod tests {
 
     #[test]
     fn static_dependency_closure_collects_unused_macro_body_dependencies() {
-        let source = TemplateSource {
-            path:    manifest_path("main.md"),
-            content: r#"{% from "helpers.md" import render_advanced_prompt %}"#.to_string(),
-        };
+        let source = TemplateSource::new(
+            manifest_path("main.md"),
+            manifest_path("."),
+            r#"{% from "helpers.md" import render_advanced_prompt %}"#,
+        );
 
         let closure = discover_static_dependency_closure(
             [source],
@@ -939,10 +971,11 @@ mod tests {
 
     #[test]
     fn static_dependency_closure_rejects_dynamic_include() {
-        let source = TemplateSource {
-            path:    manifest_path("main.md"),
-            content: r"{% include inputs.partial %}".to_string(),
-        };
+        let source = TemplateSource::new(
+            manifest_path("main.md"),
+            manifest_path("."),
+            r"{% include inputs.partial %}",
+        );
 
         let err =
             discover_static_dependency_closure([source], bundle_store(&[]).as_ref()).unwrap_err();

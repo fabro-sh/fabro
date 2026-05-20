@@ -144,6 +144,97 @@ async fn get_system_info_returns_runtime_fields() {
     );
 }
 
+#[tokio::test]
+async fn get_system_resources_returns_server_visible_metrics() {
+    let (_temp, settings, expected_storage_dir) = temp_storage_settings();
+    let app =
+        fabro_server::test_support::build_test_router(test_app_state_with_options(settings, 5));
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(api("/system/resources"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+
+    let body = response_json(response, StatusCode::OK, "GET /api/v1/system/resources").await;
+    let sampled_at = body["sampled_at"]
+        .as_str()
+        .expect("sampled_at should be an RFC3339 timestamp");
+    chrono::DateTime::parse_from_rfc3339(sampled_at).expect("sampled_at should parse as RFC3339");
+
+    assert_eq!(body["cpu"]["supported"], true);
+    assert_eq!(body["cpu"]["scope"], "server_environment");
+    assert!(
+        body["cpu"]["sample_window_ms"].is_null()
+            || body["cpu"]["sample_window_ms"]
+                .as_i64()
+                .is_some_and(|value| value >= 0),
+        "sample window should be null until a delta sample is available or nonnegative: {body}"
+    );
+    assert!(
+        body["cpu"]["logical_cpus"].as_i64().unwrap_or_default() > 0,
+        "logical CPU count should be positive"
+    );
+    assert_percent_if_present(&body["cpu"]["usage_percent"]);
+
+    assert_eq!(body["memory"]["supported"], true);
+    assert!(matches!(
+        body["memory"]["scope"].as_str(),
+        Some("host" | "cgroup")
+    ));
+    assert_nonnegative_i64(&body["memory"]["total_bytes"], "memory.total_bytes");
+    assert_nonnegative_i64(&body["memory"]["used_bytes"], "memory.used_bytes");
+    assert_nonnegative_i64(&body["memory"]["available_bytes"], "memory.available_bytes");
+    assert_percent_if_present(&body["memory"]["used_percent"]);
+
+    assert_eq!(body["disk"]["supported"], true);
+    assert_eq!(body["disk"]["scope"], "storage_filesystem");
+    assert_eq!(
+        body["disk"]["storage_path"],
+        expected_storage_dir.display().to_string()
+    );
+    assert!(body["disk"]["mount_point"].as_str().is_some());
+    assert_nonnegative_i64(&body["disk"]["total_bytes"], "disk.total_bytes");
+    assert_nonnegative_i64(&body["disk"]["used_bytes"], "disk.used_bytes");
+    assert_nonnegative_i64(&body["disk"]["available_bytes"], "disk.available_bytes");
+    assert_percent_if_present(&body["disk"]["used_percent"]);
+    assert_nonnegative_i64(
+        &body["disk"]["fabro_managed_bytes"],
+        "disk.fabro_managed_bytes",
+    );
+    assert_nonnegative_i64(
+        &body["disk"]["fabro_reclaimable_bytes"],
+        "disk.fabro_reclaimable_bytes",
+    );
+    assert!(
+        body["notes"]
+            .as_array()
+            .is_some_and(std::vec::Vec::is_empty),
+        "initial test app resources should not need notes: {body}"
+    );
+}
+
+fn assert_nonnegative_i64(value: &serde_json::Value, name: &str) {
+    assert!(
+        value.as_i64().is_some_and(|value| value >= 0),
+        "{name} should be a nonnegative integer: {value:?}"
+    );
+}
+
+fn assert_percent_if_present(value: &serde_json::Value) {
+    if value.is_null() {
+        return;
+    }
+    let percent = value
+        .as_f64()
+        .expect("percent should be numeric when present");
+    assert!(
+        (0.0..=100.0).contains(&percent),
+        "percent should be between 0 and 100: {percent}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_app_state_with_options_respects_max_concurrent_runs() {
     let app = test_app_with_scheduler(test_app_state_with_options(test_settings(), 1));

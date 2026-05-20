@@ -43,7 +43,7 @@ fn rm_deletes_completed_run() {
     let run = setup_seeded_completed_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
-        r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
+        r"\b[0-9A-HJKMNP-TV-Z]{26}\b".to_string(),
         "[ULID]".to_string(),
     ));
 
@@ -96,7 +96,7 @@ fn rm_force_deletes_submitted_run() {
     let run = setup_seeded_created_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
-        r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
+        r"\b[0-9A-HJKMNP-TV-Z]{26}\b".to_string(),
         "[ULID]".to_string(),
     ));
 
@@ -129,7 +129,7 @@ fn rm_force_deletes_run_without_sandbox_json_when_store_has_sandbox() {
 
     let mut filters = context.filters();
     filters.push((
-        r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
+        r"\b[0-9A-HJKMNP-TV-Z]{26}\b".to_string(),
         "[ULID]".to_string(),
     ));
 
@@ -163,7 +163,7 @@ fn rm_force_removes_active_run() {
 
     let mut filters = context.filters();
     filters.push((
-        r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
+        r"\b[0-9A-HJKMNP-TV-Z]{26}\b".to_string(),
         "[ULID]".to_string(),
     ));
     let mut cmd = context.command();
@@ -248,7 +248,7 @@ fn rm_partial_failure_reports_which_identifiers_failed() {
     let run = setup_seeded_completed_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
-        r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
+        r"\b[0-9A-HJKMNP-TV-Z]{26}\b".to_string(),
         "[ULID]".to_string(),
     ));
     let mut cmd = context.command();

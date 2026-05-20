@@ -8,6 +8,8 @@ pub struct UserPrincipal {
     pub identity:    IdpIdentity,
     pub login:       String,
     pub auth_method: AuthMethod,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url:  Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,10 +62,21 @@ pub enum SystemActorKind {
 impl Principal {
     #[must_use]
     pub fn user(identity: IdpIdentity, login: String, auth_method: AuthMethod) -> Self {
+        Self::user_with_avatar(identity, login, auth_method, None)
+    }
+
+    #[must_use]
+    pub fn user_with_avatar(
+        identity: IdpIdentity,
+        login: String,
+        auth_method: AuthMethod,
+        avatar_url: Option<String>,
+    ) -> Self {
         Self::User(UserPrincipal {
             identity,
             login,
             auth_method,
+            avatar_url,
         })
     }
 
@@ -129,8 +142,19 @@ mod tests {
     use super::{AuthMethod, Principal, SystemActorKind, UserPrincipal};
     use crate::{IdpIdentity, fixtures};
 
+    const AVATAR_URL: &str = "https://example.com/octocat.png";
+
     fn identity() -> IdpIdentity {
         IdpIdentity::new("https://github.com", "12345").unwrap()
+    }
+
+    fn user_with_avatar() -> Principal {
+        Principal::user_with_avatar(
+            identity(),
+            "octocat".to_string(),
+            AuthMethod::Github,
+            Some(AVATAR_URL.to_string()),
+        )
     }
 
     #[test]
@@ -147,6 +171,47 @@ mod tests {
                 },
                 "login": "octocat",
                 "auth_method": "github"
+            })
+        );
+    }
+
+    #[test]
+    fn user_principal_serializes_avatar_when_present() {
+        assert_eq!(
+            serde_json::to_value(user_with_avatar()).unwrap(),
+            json!({
+                "kind": "user",
+                "identity": {
+                    "issuer": "https://github.com",
+                    "subject": "12345"
+                },
+                "login": "octocat",
+                "auth_method": "github",
+                "avatar_url": AVATAR_URL
+            })
+        );
+    }
+
+    #[test]
+    fn user_principal_legacy_json_without_avatar_deserializes() {
+        let parsed: Principal = serde_json::from_value(json!({
+            "kind": "user",
+            "identity": {
+                "issuer": "https://github.com",
+                "subject": "12345"
+            },
+            "login": "octocat",
+            "auth_method": "github"
+        }))
+        .unwrap();
+
+        assert_eq!(
+            parsed,
+            Principal::User(UserPrincipal {
+                identity:    identity(),
+                login:       "octocat".to_string(),
+                auth_method: AuthMethod::Github,
+                avatar_url:  None,
             })
         );
     }
@@ -180,6 +245,11 @@ mod tests {
             "octocat".to_string(),
             AuthMethod::Github,
         ));
+    }
+
+    #[test]
+    fn round_trips_user_variant_with_avatar() {
+        assert_round_trip(&user_with_avatar());
     }
 
     #[test]
@@ -245,6 +315,7 @@ mod tests {
             identity:    identity(),
             login:       "octocat".to_string(),
             auth_method: AuthMethod::Github,
+            avatar_url:  None,
         });
         assert_eq!(principal.kind(), "user");
     }

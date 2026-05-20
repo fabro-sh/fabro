@@ -882,6 +882,52 @@ pub(crate) async fn get_system_info(
         .into_response()
 }
 
+pub(crate) async fn get_system_resources(
+    _auth: RequiredUser,
+    State(_state): State<Arc<AppState>>,
+) -> Response {
+    (
+        StatusCode::OK,
+        Json(json!({
+            "sampled_at": "2026-05-20T15:42:10Z",
+            "cpu": {
+                "supported": true,
+                "scope": "server_environment",
+                "unavailable_reason": null,
+                "logical_cpus": 8,
+                "usage_percent": 18.4,
+                "sample_window_ms": 5000
+            },
+            "memory": {
+                "supported": true,
+                "scope": "host",
+                "unavailable_reason": null,
+                "total_bytes": 17179869184_i64,
+                "used_bytes": 6442450944_i64,
+                "available_bytes": 10737418240_i64,
+                "used_percent": 37.5,
+                "host_total_bytes": 17179869184_i64
+            },
+            "disk": {
+                "supported": true,
+                "scope": "storage_filesystem",
+                "unavailable_reason": null,
+                "storage_path": "/demo/fabro/storage",
+                "mount_point": "/",
+                "filesystem": "demo-fs",
+                "total_bytes": 536870912000_i64,
+                "used_bytes": 214748364800_i64,
+                "available_bytes": 322122547200_i64,
+                "used_percent": 40.0,
+                "fabro_managed_bytes": 1280,
+                "fabro_reclaimable_bytes": 1280
+            },
+            "notes": []
+        })),
+    )
+        .into_response()
+}
+
 pub(crate) async fn get_system_disk_usage(
     _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,

@@ -34,8 +34,8 @@ export function Row({
   help,
   children,
 }: {
-  title: string;
-  help?: string;
+  title: ReactNode;
+  help?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -47,6 +47,25 @@ export function Row({
         ) : null}
       </div>
       <div className="min-w-0 self-center text-sm text-fg">{children}</div>
+    </div>
+  );
+}
+
+export function SettingsPageIntro({
+  description,
+  view,
+  setView,
+}: {
+  description: ReactNode;
+  view?: SettingsView;
+  setView?: (v: SettingsView) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-6">
+      <p className="max-w-[64ch] text-sm/6 text-fg-3 text-pretty">{description}</p>
+      {view !== undefined && setView ? (
+        <ViewToggle view={view} setView={setView} />
+      ) : null}
     </div>
   );
 }
@@ -143,6 +162,59 @@ export function UrlValue({ url }: { url: string }) {
     >
       {url}
     </a>
+  );
+}
+
+export function ObjectStoreRows({
+  store,
+  prefix,
+}: {
+  store: ObjectStoreSettings;
+  prefix: string;
+}) {
+  const prefixRow = (
+    <Row title="Prefix" help="Key prefix appended to every object path.">
+      {prefix ? <Mono>{prefix}</Mono> : <Muted>None</Muted>}
+    </Row>
+  );
+
+  if (store.type === "s3") {
+    return (
+      <>
+        <Row title="Type" help="Backend driver for this store.">
+          <Badge>s3</Badge>
+        </Row>
+        <Row title="Bucket" help="S3 bucket holding the objects.">
+          <Mono>{store.bucket}</Mono>
+        </Row>
+        <Row title="Region" help="AWS region the bucket lives in.">
+          <Mono>{store.region}</Mono>
+        </Row>
+        {store.endpoint ? (
+          <Row title="Endpoint" help="Custom S3-compatible endpoint URL.">
+            <Mono>{store.endpoint}</Mono>
+          </Row>
+        ) : null}
+        {store.path_style ? (
+          <Row title="Path style" help="Use path-style addressing instead of virtual-hosted.">
+            <Toggle on={true} />
+          </Row>
+        ) : null}
+        {prefixRow}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <Row title="Type" help="Backend driver for this store.">
+        <Badge>local</Badge>
+      </Row>
+      <Row title="Root" help="Filesystem directory holding the objects.">
+        <Mono>{store.root}</Mono>
+      </Row>
+      {prefixRow}
+    </>
   );
 }
 

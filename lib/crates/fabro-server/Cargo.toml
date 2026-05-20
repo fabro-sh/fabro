@@ -93,6 +93,7 @@ percent-encoding.workspace = true
 url = "2"
 zeroize.workspace = true
 strum.workspace = true
+sysinfo = { version = "0.35.2", default-features = false, features = ["system", "disk"] }
 
 [build-dependencies]
 fabro-build-support = { path = "../build-support" }

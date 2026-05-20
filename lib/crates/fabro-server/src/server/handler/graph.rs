@@ -125,7 +125,7 @@ fn render_subprocess_failure(
 }
 
 pub(in crate::server) async fn render_dot_subprocess(
-    styled_source: &str,
+    dot_source: &str,
     exe_override: Option<&std::path::Path>,
 ) -> Result<Vec<u8>, RenderSubprocessError> {
     let _permit = GRAPHVIZ_RENDER_SEMAPHORE
@@ -147,7 +147,7 @@ pub(in crate::server) async fn render_dot_subprocess(
     let mut stdin = child.stdin.take().ok_or_else(|| {
         RenderSubprocessError::SpawnFailed("render subprocess stdin was not piped".to_string())
     })?;
-    if let Err(err) = stdin.write_all(styled_source.as_bytes()).await {
+    if let Err(err) = stdin.write_all(dot_source.as_bytes()).await {
         drop(stdin);
         let output = child
             .wait_with_output()
@@ -192,10 +192,9 @@ async fn render_graph_response(
     dot_source: &str,
     exe_override: Option<&std::path::Path>,
 ) -> Response {
-    use fabro_graphviz::render::{inject_dot_style_defaults, postprocess_svg};
+    use fabro_graphviz::render::postprocess_svg;
 
-    let styled_source = inject_dot_style_defaults(dot_source);
-    match render_dot_subprocess(&styled_source, exe_override).await {
+    match render_dot_subprocess(dot_source, exe_override).await {
         Ok(raw) => {
             let bytes = postprocess_svg(raw);
             (StatusCode::OK, [("content-type", "image/svg+xml")], bytes).into_response()

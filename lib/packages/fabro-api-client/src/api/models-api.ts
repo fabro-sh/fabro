@@ -29,6 +29,8 @@ import type { ModelTestMode } from '../models';
 import type { ModelTestResult } from '../models';
 // @ts-ignore
 import type { PaginatedModelList } from '../models';
+// @ts-ignore
+import type { ProviderList } from '../models';
 /**
  * ModelsApi - axios parameter creator
  */
@@ -78,6 +80,42 @@ export const ModelsApiAxiosParamCreator = function (configuration?: Configuratio
             if (pageOffset !== undefined) {
                 localVarQueryParameter['page[offset]'] = pageOffset;
             }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns LLM providers from the catalog with effective config and configured status.
+         * @summary List Providers
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listProviders: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/v1/providers`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
 
             localVarHeaderParameter['Accept'] = 'application/json';
 
@@ -161,6 +199,18 @@ export const ModelsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Returns LLM providers from the catalog with effective config and configured status.
+         * @summary List Providers
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listProviders(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ProviderList>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listProviders(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelsApi.listProviders']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Tests a model by sending a simple prompt and reporting pass/fail.
          * @summary Test Model
          * @param {string} id The model identifier.
@@ -197,6 +247,15 @@ export const ModelsApiFactory = function (configuration?: Configuration, basePat
             return localVarFp.listModels(provider, query, pageLimit, pageOffset, options).then((request) => request(axios, basePath));
         },
         /**
+         * Returns LLM providers from the catalog with effective config and configured status.
+         * @summary List Providers
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listProviders(options?: RawAxiosRequestConfig): AxiosPromise<ProviderList> {
+            return localVarFp.listProviders(options).then((request) => request(axios, basePath));
+        },
+        /**
          * Tests a model by sending a simple prompt and reporting pass/fail.
          * @summary Test Model
          * @param {string} id The model identifier.
@@ -226,6 +285,16 @@ export class ModelsApi extends BaseAPI {
      */
     public listModels(provider?: string, query?: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig) {
         return ModelsApiFp(this.configuration).listModels(provider, query, pageLimit, pageOffset, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns LLM providers from the catalog with effective config and configured status.
+     * @summary List Providers
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listProviders(options?: RawAxiosRequestConfig) {
+        return ModelsApiFp(this.configuration).listProviders(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

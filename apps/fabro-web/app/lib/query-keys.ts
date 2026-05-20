@@ -35,6 +35,7 @@ export const queryKeys = {
   },
   system: {
     info: () => ["system", "info"] as const,
+    resources: () => ["system", "resources"] as const,
     attachUrl: () => "/api/v1/attach",
   },
   boards: {
@@ -91,5 +92,8 @@ export const queryKeys = {
   },
   settings: {
     server: () => ["settings", "server"] as const,
+  },
+  providers: {
+    list: () => ["providers", "list"] as const,
   },
 };

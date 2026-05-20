@@ -21,7 +21,7 @@ use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{Catalog, ModelRef, ProviderId, Speed};
 use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{
-    AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
+    AgentBackend, AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
     InterviewQuestionRecord, Node, Outcome, QuestionType, RunBlobId, RunId, RunSpec,
     SandboxProvider, SessionMessage, SuccessReason, SystemActorKind, WorkflowSettings, fixtures,
 };
@@ -1877,6 +1877,124 @@ methods = ["dev-token"]
     assert!(err.to_string().contains(
         "Fabro server refuses to start: auth is configured but SESSION_SECRET is not set."
     ));
+}
+
+#[test]
+fn build_app_state_migrates_legacy_vault_file_on_boot() {
+    let vault_path = test_secret_store_path();
+    let timestamp = "2026-05-18T12:00:00Z";
+    let legacy_api_key = json!({
+        "provider": "anthropic",
+        "type": "api_key",
+        "key": "sk-ant-legacy",
+    });
+    let legacy_oauth = json!({
+        "provider": "openai",
+        "type": "codex_oauth",
+        "tokens": {
+            "access_token": "codex-access",
+            "refresh_token": "codex-refresh",
+            "expires_at": "2026-05-18T13:00:00Z",
+        },
+        "config": {
+            "auth_url": "https://auth.openai.com",
+            "token_url": "https://auth.openai.com/oauth/token",
+            "client_id": "client",
+            "scopes": ["openid", "offline_access"],
+            "redirect_uri": "https://auth.openai.com/deviceauth/callback",
+            "use_pkce": false,
+        },
+        "account_id": "acct_legacy",
+    });
+    let legacy_vault = json!({
+        "anthropic": {
+            "value": legacy_api_key.to_string(),
+            "type": "credential",
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        },
+        "openai_codex": {
+            "value": legacy_oauth.to_string(),
+            "type": "credential",
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        },
+        "GITHUB_TOKEN": {
+            "value": "ghp_legacy",
+            "type": "environment",
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        },
+        "/tmp/github.pem": {
+            "value": "/tmp/github.pem",
+            "type": "file",
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        },
+    });
+    std::fs::write(
+        &vault_path,
+        serde_json::to_vec_pretty(&legacy_vault).unwrap(),
+    )
+    .expect("legacy vault should be writable");
+
+    let state = build_test_app_state_with_vault_path(&vault_path)
+        .expect("legacy vault should not prevent server boot");
+
+    let vault = state
+        .vault
+        .try_read()
+        .expect("test vault should not be locked");
+    let api_key_entry = vault
+        .get_entry("ANTHROPIC_API_KEY")
+        .expect("legacy provider credential should be migrated to token name");
+    assert_eq!(api_key_entry.secret_type, SecretType::Token);
+    assert_eq!(api_key_entry.value, "sk-ant-legacy");
+    assert!(vault.get_entry("anthropic").is_none());
+
+    let oauth_entry = vault
+        .get_entry("OPENAI_CODEX")
+        .expect("legacy Codex credential should be migrated to canonical OAuth name");
+    assert_eq!(oauth_entry.secret_type, SecretType::Oauth);
+    let oauth: fabro_auth::OAuthCredential =
+        serde_json::from_str(&oauth_entry.value).expect("migrated OAuth JSON should parse");
+    assert_eq!(oauth.tokens.access_token, "codex-access");
+    assert_eq!(oauth.account_id.as_deref(), Some("acct_legacy"));
+    assert!(vault.get_entry("openai_codex").is_none());
+
+    assert_eq!(
+        vault.get_entry("GITHUB_TOKEN").unwrap().secret_type,
+        SecretType::Token
+    );
+    assert_eq!(
+        vault.get_entry("/tmp/github.pem").unwrap().secret_type,
+        SecretType::File
+    );
+}
+
+fn build_test_app_state_with_vault_path(vault_path: &Path) -> anyhow::Result<Arc<AppState>> {
+    let (store, artifact_store) = test_store_bundle();
+    build_app_state(AppStateConfig {
+        resolved_settings: resolved_runtime_settings_for_tests(
+            default_test_server_settings(),
+            RunLayer::default(),
+            LlmCatalogSettings::default(),
+        ),
+        registry_factory_override: None,
+        max_concurrent_runs: 5,
+        store,
+        artifact_store,
+        vault_path: vault_path.to_path_buf(),
+        server_secrets: load_test_server_secrets(
+            vault_path.with_file_name("server.env"),
+            HashMap::new(),
+        ),
+        env_lookup: default_env_lookup(),
+        github_api_base_url: None,
+        active_config_path: tempfile::tempdir().unwrap().path().join("settings.toml"),
+        http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+        shutdown: tokio_util::sync::CancellationToken::new(),
+    })
 }
 
 fn worker_command_test_state(
@@ -5027,6 +5145,116 @@ reasoning = false
     assert_eq!(models.len(), 1);
     assert_eq!(models[0]["id"], "acme-large");
     assert_eq!(models[0]["provider"], "acme");
+}
+
+#[tokio::test]
+async fn list_providers_marks_configured_per_provider_and_omits_secrets() {
+    // Only `ANTHROPIC_API_KEY` is supplied, so anthropic resolves as configured
+    // while every other catalog provider does not.
+    let state = test_app_state_with_env_lookup(
+        default_test_server_settings(),
+        RunLayer::default(),
+        5,
+        |name| (name == EnvVars::ANTHROPIC_API_KEY).then(|| "test-key".to_string()),
+    );
+    let app = crate::test_support::build_test_router(state);
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/providers"))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let providers = body["data"].as_array().unwrap();
+
+    assert!(
+        providers.len() >= 2,
+        "builtin catalog should expose multiple providers"
+    );
+
+    let anthropic = providers
+        .iter()
+        .find(|provider| provider["id"] == "anthropic")
+        .expect("anthropic provider should be present");
+    assert_eq!(anthropic["configured"].as_bool(), Some(true));
+
+    // `model_count` and `default_model` must reflect the catalog truth for
+    // this exact provider, not merely be populated.
+    let catalog = Catalog::builtin();
+    let expected_model_count = catalog.list(Some(&ProviderId::anthropic())).len();
+    assert_eq!(
+        anthropic["model_count"].as_u64(),
+        Some(expected_model_count as u64),
+        "anthropic model_count should match the catalog"
+    );
+    let expected_default = catalog
+        .default_for_provider(&ProviderId::anthropic())
+        .expect("anthropic should have a catalog default model");
+    assert_eq!(
+        anthropic["default_model"].as_str(),
+        Some(expected_default.id.as_str()),
+        "anthropic default_model should match the catalog"
+    );
+
+    assert!(
+        providers
+            .iter()
+            .filter(|provider| provider["id"] != "anthropic")
+            .all(|provider| provider["configured"].as_bool() == Some(false)),
+        "providers without supplied credentials should be unconfigured"
+    );
+
+    // Internal-only catalog fields and the injected credential value must
+    // never reach the wire.
+    let serialized = body["data"].to_string();
+    assert!(!serialized.contains("\"auth\""), "leaked `auth`");
+    assert!(
+        !serialized.contains("\"extra_headers\""),
+        "leaked `extra_headers`"
+    );
+    assert!(
+        !serialized.contains("\"billing_policy\""),
+        "leaked `billing_policy`"
+    );
+    assert!(
+        !serialized.contains("\"agent_profile\""),
+        "leaked `agent_profile`"
+    );
+    assert!(
+        !serialized.contains("test-key"),
+        "leaked the injected credential value"
+    );
+}
+
+#[tokio::test]
+async fn list_providers_marks_all_unconfigured_without_credentials() {
+    let state = test_app_state_with_env_lookup(
+        default_test_server_settings(),
+        RunLayer::default(),
+        5,
+        |_| None,
+    );
+    let app = crate::test_support::build_test_router(state);
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/providers"))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let providers = body["data"].as_array().unwrap();
+
+    assert!(!providers.is_empty());
+    assert!(
+        providers
+            .iter()
+            .all(|provider| provider["configured"].as_bool() == Some(false)),
+        "no provider should be configured when no credentials are supplied"
+    );
 }
 
 #[tokio::test]
@@ -8365,7 +8593,7 @@ fn insert_running_control_run(
 }
 
 #[tokio::test]
-async fn steer_without_active_api_session_forwards_plain_steer_for_buffering() {
+async fn steer_without_active_steerable_session_forwards_plain_steer_for_buffering() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
@@ -8393,7 +8621,40 @@ async fn steer_without_active_api_session_forwards_plain_steer_for_buffering() {
 }
 
 #[tokio::test]
-async fn steer_interrupt_without_active_api_session_returns_conflict() {
+async fn steer_with_active_non_steerable_session_returns_conflict() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = fixtures::RUN_1;
+    let stage_id = StageId::new("agent", 1);
+    let (control_tx, _control_rx) = tokio::sync::mpsc::channel(1);
+    let _temp_dir = insert_running_control_run(
+        &state,
+        run_id,
+        Some(RunAnswerTransport::Subprocess { control_tx }),
+    );
+    {
+        let mut runs = state.runs.lock().expect("runs lock poisoned");
+        runs.get_mut(&run_id)
+            .unwrap()
+            .active_non_steerable_stages
+            .insert(stage_id, "session-a".to_string());
+    }
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api(&format!("/runs/{run_id}/steer")))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"text":"try again"}"#))
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = body_json(response.into_body()).await;
+    assert_eq!(body["errors"][0]["code"], "agent_not_steerable");
+}
+
+#[tokio::test]
+async fn steer_interrupt_without_active_steerable_session_returns_conflict() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
@@ -8414,11 +8675,11 @@ async fn steer_interrupt_without_active_api_session_returns_conflict() {
     let response = app.oneshot(req).await.unwrap();
     assert_eq!(response.status(), StatusCode::CONFLICT);
     let body = body_json(response.into_body()).await;
-    assert_eq!(body["errors"][0]["code"], "no_active_api_session");
+    assert_eq!(body["errors"][0]["code"], "no_active_steerable_session");
 }
 
 #[tokio::test]
-async fn interrupt_with_active_api_session_forwards_interrupt() {
+async fn interrupt_with_active_steerable_session_forwards_interrupt() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
@@ -8433,7 +8694,7 @@ async fn interrupt_with_active_api_session_forwards_interrupt() {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         runs.get_mut(&run_id)
             .unwrap()
-            .active_api_stages
+            .active_steerable_stages
             .insert(stage_id, "session-a".to_string());
     }
 
@@ -8455,7 +8716,7 @@ async fn interrupt_with_active_api_session_forwards_interrupt() {
 }
 
 #[tokio::test]
-async fn steer_interrupt_with_active_api_session_forwards_combined_control_message() {
+async fn steer_interrupt_with_active_steerable_session_forwards_combined_control_message() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
@@ -8470,7 +8731,7 @@ async fn steer_interrupt_with_active_api_session_forwards_combined_control_messa
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         runs.get_mut(&run_id)
             .unwrap()
-            .active_api_stages
+            .active_steerable_stages
             .insert(stage_id, "session-a".to_string());
     }
 
@@ -8525,7 +8786,7 @@ async fn interrupt_terminal_run_returns_run_not_interruptible() {
 }
 
 #[test]
-fn active_api_stage_projection_ignores_stale_deactivation() {
+fn active_steerable_stage_projection_ignores_stale_deactivation() {
     let state = test_app_state();
     let run_id = fixtures::RUN_1;
     let temp_dir = tempfile::tempdir().unwrap();
@@ -8580,7 +8841,9 @@ fn active_api_stage_projection_ignores_stale_deactivation() {
     let runs = state.runs.lock().expect("runs lock poisoned");
     let run = runs.get(&run_id).unwrap();
     assert_eq!(
-        run.active_api_stages.get(&stage_id).map(String::as_str),
+        run.active_steerable_stages
+            .get(&stage_id)
+            .map(String::as_str),
         Some("session-b")
     );
 }
@@ -8600,11 +8863,11 @@ fn acp_event_for_stage(run_id: &RunId, event: &workflow_event::Event) -> fabro_t
 }
 
 #[tokio::test]
-async fn steer_with_active_acp_stage_returns_non_steerable_conflict() {
+async fn steer_with_active_acp_session_forwards_to_worker() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
-    let (control_tx, _control_rx) = tokio::sync::mpsc::channel(1);
+    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
     let _temp_dir = insert_running_control_run(
         &state,
         run_id,
@@ -8618,6 +8881,17 @@ async fn steer_with_active_acp_stage_returns_non_steerable_conflict() {
         config_name: None,
     });
     update_live_run_from_event(&state, run_id, &started);
+    let activated =
+        workflow_event::to_run_event(&run_id, &workflow_event::Event::AgentSessionActivated {
+            node_id:      "agent".to_string(),
+            visit:        1,
+            session_id:   "acp-session".to_string(),
+            thread_id:    None,
+            provider:     Some(AgentBackend::Acp.to_string()),
+            model:        None,
+            capabilities: vec![SessionCapability::Steer],
+        });
+    update_live_run_from_event(&state, run_id, &activated);
 
     let req = Request::builder()
         .method("POST")
@@ -8627,13 +8901,16 @@ async fn steer_with_active_acp_stage_returns_non_steerable_conflict() {
         .unwrap();
 
     let response = app.oneshot(req).await.unwrap();
-    assert_eq!(response.status(), StatusCode::CONFLICT);
-    let body = body_json(response.into_body()).await;
-    assert_eq!(body["errors"][0]["code"], "agent_not_steerable");
+    assert_status!(response, StatusCode::ACCEPTED).await;
+    let envelope = control_rx.recv().await.unwrap();
+    assert!(matches!(
+        envelope.message,
+        WorkerControlMessage::Steer { ref text, .. } if text == "try again"
+    ));
 }
 
 #[tokio::test]
-async fn active_acp_stage_marker_clears_on_terminal_paths() {
+async fn active_acp_steerable_marker_clears_on_terminal_paths() {
     let terminal_events: Vec<workflow_event::Event> = vec![
         workflow_event::Event::AgentAcpCompleted {
             node_id:     "agent".to_string(),
@@ -8692,7 +8969,7 @@ async fn active_acp_stage_marker_clears_on_terminal_paths() {
         let state = test_app_state();
         let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id = fixtures::RUN_1;
-        let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
+        let (control_tx, _control_rx) = tokio::sync::mpsc::channel(1);
         let _temp_dir = insert_running_control_run(
             &state,
             run_id,
@@ -8705,23 +8982,30 @@ async fn active_acp_stage_marker_clears_on_terminal_paths() {
             config_name: None,
         });
         update_live_run_from_event(&state, run_id, &started);
+        let activated =
+            workflow_event::to_run_event(&run_id, &workflow_event::Event::AgentSessionActivated {
+                node_id:      "agent".to_string(),
+                visit:        1,
+                session_id:   "acp-session".to_string(),
+                thread_id:    None,
+                provider:     Some(AgentBackend::Acp.to_string()),
+                model:        None,
+                capabilities: vec![SessionCapability::Steer],
+            });
+        update_live_run_from_event(&state, run_id, &activated);
         let terminal = acp_event_for_stage(&run_id, &terminal_event);
         update_live_run_from_event(&state, run_id, &terminal);
 
         let req = Request::builder()
             .method("POST")
-            .uri(api(&format!("/runs/{run_id}/steer")))
-            .header("content-type", "application/json")
-            .body(Body::from(r#"{"text":"try again"}"#))
+            .uri(api(&format!("/runs/{run_id}/interrupt")))
+            .body(Body::empty())
             .unwrap();
 
         let response = app.oneshot(req).await.unwrap();
-        assert_status!(response, StatusCode::ACCEPTED).await;
-        let envelope = control_rx.recv().await.unwrap();
-        assert!(matches!(
-            envelope.message,
-            WorkerControlMessage::Steer { ref text, .. } if text == "try again"
-        ));
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["errors"][0]["code"], "no_active_steerable_session");
     }
 }
 
@@ -8889,6 +9173,56 @@ async fn render_graph_from_manifest_returns_svg() {
         svg.contains("<?xml") || svg.contains("<svg"),
         "expected SVG content, got: {}",
         &svg[..svg.len().min(200)]
+    );
+}
+
+#[tokio::test]
+async fn render_graph_from_manifest_accepts_fabro_dotted_attributes() {
+    let app = test_app_with();
+    let dot_source = r#"digraph X {
+  start [shape=Mdiamond]
+  exit [shape=Msquare]
+  a [label="A", acp.command="codex"]
+  start -> a -> exit
+}"#;
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api("/graph/render"))
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_string(&serde_json::json!({
+                "manifest": {
+                    "version": 1,
+                    "cwd": "/tmp",
+                    "target": {
+                        "identifier": "workflow.fabro",
+                        "path": "workflow.fabro",
+                    },
+                    "workflows": {
+                        "workflow.fabro": {
+                            "source": dot_source,
+                            "files": {},
+                        },
+                    },
+                },
+                "format": "svg",
+            }))
+            .unwrap(),
+        ))
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+
+    let response = checked_response!(response, StatusCode::OK).await;
+    assert_eq!(
+        response
+            .headers()
+            .get("content-type")
+            .expect("content-type header should be present")
+            .to_str()
+            .unwrap(),
+        "image/svg+xml"
     );
 }
 
