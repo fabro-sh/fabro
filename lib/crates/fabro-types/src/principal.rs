@@ -62,12 +62,7 @@ pub enum SystemActorKind {
 impl Principal {
     #[must_use]
     pub fn user(identity: IdpIdentity, login: String, auth_method: AuthMethod) -> Self {
-        Self::User(UserPrincipal {
-            identity,
-            login,
-            auth_method,
-            avatar_url: None,
-        })
+        Self::user_with_avatar(identity, login, auth_method, None)
     }
 
     #[must_use]
@@ -147,8 +142,19 @@ mod tests {
     use super::{AuthMethod, Principal, SystemActorKind, UserPrincipal};
     use crate::{IdpIdentity, fixtures};
 
+    const AVATAR_URL: &str = "https://example.com/octocat.png";
+
     fn identity() -> IdpIdentity {
         IdpIdentity::new("https://github.com", "12345").unwrap()
+    }
+
+    fn user_with_avatar() -> Principal {
+        Principal::user_with_avatar(
+            identity(),
+            "octocat".to_string(),
+            AuthMethod::Github,
+            Some(AVATAR_URL.to_string()),
+        )
     }
 
     #[test]
@@ -171,15 +177,8 @@ mod tests {
 
     #[test]
     fn user_principal_serializes_avatar_when_present() {
-        let principal = Principal::user_with_avatar(
-            identity(),
-            "octocat".to_string(),
-            AuthMethod::Github,
-            Some("https://example.com/octocat.png".to_string()),
-        );
-
         assert_eq!(
-            serde_json::to_value(&principal).unwrap(),
+            serde_json::to_value(user_with_avatar()).unwrap(),
             json!({
                 "kind": "user",
                 "identity": {
@@ -188,7 +187,7 @@ mod tests {
                 },
                 "login": "octocat",
                 "auth_method": "github",
-                "avatar_url": "https://example.com/octocat.png"
+                "avatar_url": AVATAR_URL
             })
         );
     }
@@ -250,12 +249,7 @@ mod tests {
 
     #[test]
     fn round_trips_user_variant_with_avatar() {
-        assert_round_trip(&Principal::user_with_avatar(
-            identity(),
-            "octocat".to_string(),
-            AuthMethod::Github,
-            Some("https://example.com/octocat.png".to_string()),
-        ));
+        assert_round_trip(&user_with_avatar());
     }
 
     #[test]

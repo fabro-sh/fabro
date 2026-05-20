@@ -23,7 +23,8 @@ use crate::auth::{GithubEndpoints, browser_shell};
 use crate::error::ApiError;
 use crate::jwt_auth::{AuthMode, auth_method_name, dev_token_matches};
 use crate::principal_middleware::{
-    RequestAuth, RequestAuthContext, RequiredUser, UserProfile, require_authenticated_user,
+    RequestAuth, RequestAuthContext, RequiredUser, UserProfile, non_empty_avatar_url,
+    require_authenticated_user,
 };
 use crate::server::AppState;
 
@@ -194,7 +195,7 @@ pub(crate) fn session_cookie_present(headers: &HeaderMap) -> bool {
 
 pub(crate) fn auth_context_from_session(session: &SessionCookie) -> RequestAuthContext {
     let identity = session.identity.clone();
-    let principal_avatar = Some(session.avatar_url.clone()).filter(|s| !s.is_empty());
+    let principal_avatar = non_empty_avatar_url(&session.avatar_url);
     let principal = Principal::user_with_avatar(
         identity,
         session.login.clone(),

@@ -61,27 +61,24 @@ function principalGlyph(icon: ReactNode) {
 function createdByDisplay(actor: Principal): CreatedByDisplay {
   switch (actor.kind) {
     case "user": {
+      let glyph: ReactNode;
       if (actor.avatar_url) {
-        return {
-          glyph: (
-            <img
-              alt=""
-              src={actor.avatar_url}
-              className="size-5 rounded-full outline -outline-offset-1 outline-line-strong"
-            />
-          ),
-          label: actor.login,
-        };
-      }
-      const initial = actor.login.charAt(0).toUpperCase() || "?";
-      return {
-        glyph: (
+        glyph = (
+          <img
+            alt=""
+            src={actor.avatar_url}
+            className="size-5 rounded-full outline -outline-offset-1 outline-line-strong"
+          />
+        );
+      } else {
+        const initial = actor.login.charAt(0).toUpperCase() || "?";
+        glyph = (
           <span className="grid size-5 place-items-center rounded-full bg-teal-500/20 font-mono text-[10px] font-medium text-teal-500">
             {initial}
           </span>
-        ),
-        label: actor.login,
-      };
+        );
+      }
+      return { glyph, label: actor.login };
     }
     case "agent":
       return { glyph: principalGlyph(<CpuChipIcon className="size-3" />), label: "agent" };

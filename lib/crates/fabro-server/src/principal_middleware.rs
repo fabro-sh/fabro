@@ -32,6 +32,10 @@ pub(crate) struct UserProfile {
     pub user_url:   String,
 }
 
+pub(crate) fn non_empty_avatar_url(avatar_url: &str) -> Option<String> {
+    (!avatar_url.is_empty()).then(|| avatar_url.to_string())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
 pub(crate) enum AuthStatus {
@@ -132,10 +136,22 @@ impl AuthContextSlot {
     pub(crate) fn log_snapshot(&self) -> RequestAuthLogContext {
         let context = self.0.lock().expect("auth context lock poisoned");
         RequestAuthLogContext {
-            principal:       context.principal.clone(),
+            principal:       principal_without_log_unused_fields(&context.principal),
             auth_status:     context.auth_status,
             auth_error_code: context.auth_error_code,
         }
+    }
+}
+
+fn principal_without_log_unused_fields(principal: &Principal) -> Principal {
+    match principal {
+        Principal::User(user) => Principal::User(UserPrincipal {
+            identity:    user.identity.clone(),
+            login:       user.login.clone(),
+            auth_method: user.auth_method,
+            avatar_url:  None,
+        }),
+        principal => principal.clone(),
     }
 }
 
@@ -396,7 +412,7 @@ fn classify_user_token(token: &str, config: &ConfiguredAuth) -> RequestAuthConte
             );
         }
     };
-    let principal_avatar = Some(auth.avatar_url.clone()).filter(|s| !s.is_empty());
+    let principal_avatar = non_empty_avatar_url(&auth.avatar_url);
     let principal = Principal::user_with_avatar(
         auth.identity,
         auth.login,
