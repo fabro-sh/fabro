@@ -28,8 +28,9 @@ use fabro_config::daemon::ServerDaemon;
 use fabro_config::user::{SETTINGS_CONFIG_FILENAME, default_storage_dir};
 use fabro_config::{Storage, UserSettingsBuilder, envfile};
 use fabro_install::{
-    InstallListenConfig, InstallPersistencePlan, PendingSettingsWrite, VaultSecretWrite,
-    merge_server_settings as merge_server_settings_impl, write_github_app_settings,
+    InstallListenConfig, InstallPersistencePlan, PendingDevTokenWrite, PendingSettingsWrite,
+    VaultSecretWrite, merge_server_settings as merge_server_settings_impl,
+    prepare_dev_token_write_for_install, rollback_dev_token_write, write_github_app_settings,
     write_token_settings,
 };
 use fabro_model::catalog::CatalogProvider;
@@ -1262,6 +1263,7 @@ async fn persist_install_outputs(
     server_env_secrets: &[(String, String)],
     vault_secrets: &[CreateSecretRequest],
     settings_write: Option<PendingSettingsWrite<'_>>,
+    dev_token_write: Option<PendingDevTokenWrite>,
     server_was_running: bool,
     bootstrap_dev_token: Option<&str>,
 ) -> Result<()> {
@@ -1272,6 +1274,7 @@ async fn persist_install_outputs(
         Vec::new(),
         vault_secrets,
         settings_write,
+        dev_token_write,
         server_was_running,
         move |path| {
             let bootstrap_dev_token = bootstrap_dev_token.clone();
@@ -1328,6 +1331,7 @@ fn persist_github_install_changes(
         settings_write: Some(writes.settings_write),
         server_env_writes: server_env_updates(&writes.server_env_set),
         server_env_removals: server_env_removals(&writes.server_env_remove),
+        dev_token_write: None,
         vault_writes: writes
             .vault_set
             .iter()
@@ -1364,17 +1368,20 @@ async fn persist_cli_install_outputs_with(
     server_env_removals: Vec<envfile::EnvFileRemoval>,
     vault_secrets: &[CreateSecretRequest],
     settings_write: Option<PendingSettingsWrite<'_>>,
+    dev_token_write: Option<PendingDevTokenWrite>,
     server_was_running: bool,
     connect_server: impl for<'a> Fn(&'a Path) -> BoxFuture<'a, Result<server_client::Client>>,
     stop_server: impl for<'a> Fn(&'a Path, Duration) -> BoxFuture<'a, bool>,
 ) -> Result<()> {
     let server_env_path = Storage::new(storage_dir).runtime_directory().env_path();
     let previous_server_env = std::fs::read_to_string(&server_env_path).ok();
+    let dev_token_write_for_rollback = dev_token_write.clone();
     InstallPersistencePlan {
         storage_dir,
         settings_write,
         server_env_writes,
         server_env_removals,
+        dev_token_write,
         vault_writes: Vec::new(),
         vault_removals: Vec::new(),
     }
@@ -1393,6 +1400,9 @@ async fn persist_cli_install_outputs_with(
         restore_optional_file(&server_env_path, previous_server_env.as_deref())?;
         if let Some(write) = settings_write {
             restore_optional_file(write.path, write.previous_contents)?;
+        }
+        if let Some(write) = dev_token_write_for_rollback.as_ref() {
+            rollback_dev_token_write(write)?;
         }
         return Err(err);
     }
@@ -1857,6 +1867,7 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
 
     // Secrets and auth material
     let mut dev_token_for_auth_store = None;
+    let mut dev_token_write = None;
     {
         let session_secret = session_secret::generate_session_secret();
         fabro_util::printerr!(
@@ -1874,7 +1885,9 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
             let dev_token_path = Storage::new(&storage_dir)
                 .runtime_directory()
                 .dev_token_path();
-            let token = dev_token::read_or_mint_dev_token_for_install(&dev_token_path)?;
+            let prepared = prepare_dev_token_write_for_install(&dev_token_path)?;
+            let token = prepared.token;
+            dev_token_write = prepared.write;
             dev_token_for_auth_store = Some(token.clone());
             fabro_util::printerr!(
                 printer,
@@ -1902,6 +1915,7 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
             contents:          settings_toml.as_str(),
             previous_contents: existing_config_contents.as_deref(),
         }),
+        dev_token_write,
         server_was_running,
         dev_token_for_auth_store.as_deref(),
     )
@@ -2847,6 +2861,7 @@ client_id = "client-id"
                 contents:          "_version = 1\n",
                 previous_contents: None,
             }),
+            None,
             false,
             |_| Box::pin(async move { Err(anyhow::anyhow!("boom")) }),
             {
@@ -2874,6 +2889,98 @@ client_id = "client-id"
     }
 
     #[tokio::test]
+    async fn persist_cli_install_outputs_rolls_back_staged_dev_token_on_secret_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path());
+        let dev_token_path = storage.runtime_directory().dev_token_path();
+        let prepared = fabro_install::prepare_dev_token_write_for_install(&dev_token_path).unwrap();
+        let server_env_pairs = [
+            ("SESSION_SECRET".to_string(), "session".to_string()),
+            ("FABRO_DEV_TOKEN".to_string(), prepared.token.clone()),
+        ];
+        let vault_secrets = [CreateSecretRequest {
+            name:        "GITHUB_CLI_TOKEN".to_string(),
+            value:       "gh-token".to_string(),
+            type_:       ApiSecretType::Token,
+            description: None,
+        }];
+        let settings_path = dir.path().join(SETTINGS_CONFIG_FILENAME);
+
+        let result = persist_cli_install_outputs_with(
+            dir.path(),
+            server_env_updates(&server_env_pairs),
+            Vec::new(),
+            &vault_secrets,
+            Some(PendingSettingsWrite {
+                path:              &settings_path,
+                contents:          "_version = 1\n",
+                previous_contents: None,
+            }),
+            prepared.write,
+            false,
+            |_| Box::pin(async move { Err(anyhow::anyhow!("boom")) }),
+            |_, _| Box::pin(async move { true }),
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(!settings_path.exists());
+        assert!(!storage.runtime_directory().env_path().exists());
+        assert!(
+            !dev_token_path.exists(),
+            "failed install should not leave a staged dev token"
+        );
+    }
+
+    #[tokio::test]
+    async fn persist_cli_install_outputs_preserves_existing_dev_token_on_secret_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path());
+        let dev_token_path = storage.runtime_directory().dev_token_path();
+        let token = fabro_util::dev_token::generate_dev_token();
+        fabro_util::dev_token::write_dev_token(&dev_token_path, &token).unwrap();
+        let prepared = fabro_install::prepare_dev_token_write_for_install(&dev_token_path).unwrap();
+        assert_eq!(prepared.token, token);
+        assert!(prepared.write.is_none());
+        let server_env_pairs = [
+            ("SESSION_SECRET".to_string(), "session".to_string()),
+            ("FABRO_DEV_TOKEN".to_string(), token.clone()),
+        ];
+        let vault_secrets = [CreateSecretRequest {
+            name:        "GITHUB_CLI_TOKEN".to_string(),
+            value:       "gh-token".to_string(),
+            type_:       ApiSecretType::Token,
+            description: None,
+        }];
+        let settings_path = dir.path().join(SETTINGS_CONFIG_FILENAME);
+
+        let result = persist_cli_install_outputs_with(
+            dir.path(),
+            server_env_updates(&server_env_pairs),
+            Vec::new(),
+            &vault_secrets,
+            Some(PendingSettingsWrite {
+                path:              &settings_path,
+                contents:          "_version = 1\n",
+                previous_contents: None,
+            }),
+            prepared.write,
+            false,
+            |_| Box::pin(async move { Err(anyhow::anyhow!("boom")) }),
+            |_, _| Box::pin(async move { true }),
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(
+            fabro_util::dev_token::read_dev_token_file(&dev_token_path).as_deref(),
+            Some(token.as_str())
+        );
+        assert!(!settings_path.exists());
+        assert!(!storage.runtime_directory().env_path().exists());
+    }
+
+    #[tokio::test]
     async fn persist_cli_install_outputs_restores_previous_contents_on_secret_failure() {
         let dir = tempfile::tempdir().unwrap();
         let server_env_pairs = [("SESSION_SECRET".to_string(), "session".to_string())];
@@ -2896,6 +3003,7 @@ client_id = "client-id"
                 contents:          "_version = 1\n[server]\nfoo = \"bar\"\n",
                 previous_contents: Some("_version = 1\n[server]\n"),
             }),
+            None,
             false,
             |_| Box::pin(async move { Err(anyhow::anyhow!("boom")) }),
             |_, _| Box::pin(async move { true }),

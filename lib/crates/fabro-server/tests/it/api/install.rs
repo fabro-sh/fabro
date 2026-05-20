@@ -17,7 +17,7 @@ use fabro_model::ProviderId;
 use fabro_server::install::{
     InstallAppState, InstallFinishHook, InstallFinishInfo, build_install_router,
 };
-use fabro_util::{Home, dev_token};
+use fabro_util::Home;
 use fabro_vault::Vault;
 use httpmock::Method::GET;
 use httpmock::MockServer;
@@ -929,18 +929,22 @@ async fn token_install_finish_persists_settings_env_and_vault() {
         "127.0.0.1:32276"
     );
 
-    let server_env = std::fs::read_to_string(
-        fabro_config::Storage::new(temp_dir.path())
-            .runtime_directory()
-            .env_path(),
-    )
-    .unwrap();
+    let storage = fabro_config::Storage::new(temp_dir.path());
+    let server_env = std::fs::read_to_string(storage.runtime_directory().env_path()).unwrap();
     assert!(server_env.contains("SESSION_SECRET="));
     assert!(server_env.contains("FABRO_DEV_TOKEN="));
     assert!(!server_env.contains("AWS_ACCESS_KEY_ID="));
     assert!(!server_env.contains("AWS_SECRET_ACCESS_KEY="));
+    let finish_dev_token = finish_body["dev_token"]
+        .as_str()
+        .expect("token install should return a dev token");
+    let storage_dev_token =
+        fabro_util::dev_token::read_dev_token_file(&storage.runtime_directory().dev_token_path())
+            .expect("token install should write the storage dev token");
+    assert_eq!(storage_dev_token, finish_dev_token);
+    assert!(server_env.contains(&format!("FABRO_DEV_TOKEN={finish_dev_token}")));
 
-    let vault = Vault::load(fabro_config::Storage::new(temp_dir.path()).secrets_path()).unwrap();
+    let vault = Vault::load(storage.secrets_path()).unwrap();
     assert!(vault.get("ANTHROPIC_API_KEY").is_some());
     assert_eq!(vault.get("GITHUB_TOKEN"), Some("ghp_test_token"));
 }
@@ -2278,7 +2282,7 @@ async fn install_finish_failure_reports_only_env_keys_actually_removed() {
 }
 
 #[tokio::test]
-async fn install_finish_failure_does_not_create_home_dev_token() {
+async fn install_finish_failure_does_not_create_dev_token_files() {
     let temp_dir = tempfile::tempdir().unwrap();
     let home_root = tempfile::tempdir().unwrap();
     let home = Home::new(home_root.path().join(".fabro"));
@@ -2319,12 +2323,13 @@ async fn install_finish_failure_does_not_create_home_dev_token() {
         !home.root().join("dev-token").exists(),
         "home dev token file should not be created"
     );
-    let storage_dev_token =
-        dev_token::read_dev_token_file(&storage.runtime_directory().dev_token_path())
-            .expect("storage dev token should exist");
+    assert!(
+        !storage.runtime_directory().dev_token_path().exists(),
+        "storage dev token file should not be created when persistence fails"
+    );
 
     let server_env = std::fs::read_to_string(storage.runtime_directory().env_path()).unwrap();
-    assert!(server_env.contains(&format!("FABRO_DEV_TOKEN={storage_dev_token}")));
+    assert!(server_env.contains("FABRO_DEV_TOKEN="));
 }
 
 #[tokio::test]

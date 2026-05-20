@@ -2002,6 +2002,7 @@ dependencies = [
  "fabro-config",
  "fabro-static",
  "fabro-types",
+ "fabro-util",
  "fabro-vault",
  "ring",
  "tempfile",

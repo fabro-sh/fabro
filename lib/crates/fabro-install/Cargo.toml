@@ -17,6 +17,7 @@ toml.workspace = true
 fabro-config = { path = "../fabro-config" }
 fabro-static.workspace = true
 fabro-types = { path = "../fabro-types" }
+fabro-util = { path = "../fabro-util" }
 fabro-vault = { path = "../fabro-vault" }
 
 [dev-dependencies]
