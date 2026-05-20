@@ -27,24 +27,55 @@ export default function SettingsIntegrations() {
   return (
     <div className="space-y-6">
       <SettingsPageIntro description={DESCRIPTION} />
-      {settings ? <IntegrationsPanel settings={settings} /> : <PanelSkeleton />}
+      {settings ? (
+        <>
+          <GithubPanel settings={settings} />
+          <SlackPanel settings={settings} />
+        </>
+      ) : (
+        <>
+          <PanelSkeleton />
+          <PanelSkeleton />
+        </>
+      )}
     </div>
   );
 }
 
-function IntegrationsPanel({ settings }: { settings: ServerSettings }) {
-  const { integrations } = settings.server;
+function GithubPanel({ settings }: { settings: ServerSettings }) {
+  const { github } = settings.server.integrations;
   return (
-    <Panel title="Integrations">
+    <Panel title="Version Control">
       <Row title="GitHub" help="App for repo access, checks, and PR automation.">
         <IntegrationValue
-          enabled={integrations.github.enabled}
+          enabled={github.enabled}
           detail={
-            integrations.github.slug
-              ? `app: ${integrations.github.slug}`
-              : integrations.github.app_id
-                ? `app id: ${integrations.github.app_id}`
+            github.slug
+              ? `app: ${github.slug}`
+              : github.app_id
+                ? `app id: ${github.app_id}`
                 : undefined
+          }
+        />
+      </Row>
+    </Panel>
+  );
+}
+
+function SlackPanel({ settings }: { settings: ServerSettings }) {
+  const { slack } = settings.server.integrations;
+  return (
+    <Panel title="Communication">
+      <Row
+        title="Slack"
+        help="Workspace app for run notifications and approvals."
+      >
+        <IntegrationValue
+          enabled={slack.enabled}
+          detail={
+            slack.default_channel
+              ? `channel: ${slack.default_channel}`
+              : undefined
           }
         />
       </Row>
