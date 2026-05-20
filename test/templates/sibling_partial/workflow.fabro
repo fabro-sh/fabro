@@ -1,0 +1,7 @@
+digraph SiblingPartialTemplateInclude {
+    start [shape=Mdiamond, label="Start"]
+    audit [label="Audit", prompt="@prompts/audits/audit.prompt.md"]
+    exit  [shape=Msquare,  label="Exit"]
+
+    start -> audit -> exit
+}
