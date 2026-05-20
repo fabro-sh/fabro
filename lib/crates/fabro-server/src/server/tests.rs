@@ -8949,6 +8949,56 @@ async fn render_graph_from_manifest_returns_svg() {
     );
 }
 
+#[tokio::test]
+async fn render_graph_from_manifest_accepts_fabro_dotted_attributes() {
+    let app = test_app_with();
+    let dot_source = r#"digraph X {
+  start [shape=Mdiamond]
+  exit [shape=Msquare]
+  a [label="A", acp.command="codex"]
+  start -> a -> exit
+}"#;
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api("/graph/render"))
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_string(&serde_json::json!({
+                "manifest": {
+                    "version": 1,
+                    "cwd": "/tmp",
+                    "target": {
+                        "identifier": "workflow.fabro",
+                        "path": "workflow.fabro",
+                    },
+                    "workflows": {
+                        "workflow.fabro": {
+                            "source": dot_source,
+                            "files": {},
+                        },
+                    },
+                },
+                "format": "svg",
+            }))
+            .unwrap(),
+        ))
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+
+    let response = checked_response!(response, StatusCode::OK).await;
+    assert_eq!(
+        response
+            .headers()
+            .get("content-type")
+            .expect("content-type header should be present")
+            .to_str()
+            .unwrap(),
+        "image/svg+xml"
+    );
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn render_graph_bytes_returns_bad_request_for_render_error_protocol() {
