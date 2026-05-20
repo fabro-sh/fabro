@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::LazyLock;
 
 use anyhow::Context as _;
@@ -82,9 +83,9 @@ pub fn postprocess_svg(raw: Vec<u8>) -> Vec<u8> {
 #[must_use]
 pub fn normalize_dot_for_graphviz(source: &str) -> std::borrow::Cow<'_, str> {
     let Ok(dot) = parser::parse_ast(source) else {
-        return std::borrow::Cow::Borrowed(source);
+        return Cow::Borrowed(source);
     };
-    std::borrow::Cow::Owned(emit_dot_graph(&dot))
+    Cow::Owned(emit_dot_graph(&dot))
 }
 
 fn emit_dot_graph(dot: &DotGraph) -> String {
@@ -248,14 +249,49 @@ fn push_indent(out: &mut String, indent: usize) {
     }
 }
 
-/// Render styled DOT source into SVG via the vendored Graphviz library.
-pub fn render_dot(source: &str) -> anyhow::Result<Vec<u8>> {
-    let styled_source = inject_dot_style_defaults(source);
-    let render_source = normalize_dot_for_graphviz(&styled_source);
-    let raw = graphviz_sys::render_dot_to_svg(&render_source)
+/// DOT source prepared for Graphviz rendering.
+pub struct RenderableDot<'a> {
+    source: Cow<'a, str>,
+}
+
+impl<'a> RenderableDot<'a> {
+    /// Prepare Fabro DOT for Graphviz by applying render styling and
+    /// normalizing Fabro-specific syntax such as dotted attribute keys.
+    #[must_use]
+    pub fn from_fabro_source(source: &'a str) -> Self {
+        let styled_source = inject_dot_style_defaults(source);
+        let render_source = normalize_dot_for_graphviz(&styled_source).into_owned();
+        Self {
+            source: Cow::Owned(render_source),
+        }
+    }
+
+    /// Return the DOT source that can be handed to Graphviz.
+    #[must_use]
+    pub fn as_graphviz_source(&self) -> &str {
+        &self.source
+    }
+}
+
+/// Render prepared DOT source into raw SVG via the vendored Graphviz library.
+///
+/// This is the only `graphviz_sys` boundary in the workspace.
+pub fn render_raw_svg(dot: &RenderableDot<'_>) -> anyhow::Result<Vec<u8>> {
+    graphviz_sys::render_dot_to_svg(dot.as_graphviz_source())
         .map_err(anyhow::Error::msg)
-        .context("Graphviz rendering failed")?;
+        .context("Graphviz rendering failed")
+}
+
+/// Render prepared DOT source into post-processed SVG.
+pub fn render_svg(dot: &RenderableDot<'_>) -> anyhow::Result<Vec<u8>> {
+    let raw = render_raw_svg(dot)?;
     Ok(postprocess_svg(raw))
+}
+
+/// Render Fabro DOT source into post-processed SVG.
+pub fn render_dot(source: &str) -> anyhow::Result<Vec<u8>> {
+    let dot = RenderableDot::from_fabro_source(source);
+    render_svg(&dot)
 }
 
 #[cfg(test)]
@@ -379,5 +415,73 @@ mod tests {
         .unwrap();
 
         assert!(String::from_utf8(svg).unwrap().contains("<svg"));
+    }
+
+    #[test]
+    fn renderable_dot_normalizes_fabro_source_for_graphviz() {
+        let dot = RenderableDot::from_fabro_source(
+            r#"digraph X {
+                a [label="A", acp.command="codex"]
+            }"#,
+        );
+
+        assert!(
+            dot.as_graphviz_source()
+                .contains(r#""acp.command"="codex""#)
+        );
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "unit test reads checked-in DOT compatibility fixtures synchronously"
+    )]
+    #[test]
+    fn render_dot_compatibility_corpus_produces_svg() {
+        let fixtures = dot_compatibility_fixtures();
+
+        assert_eq!(
+            fixtures.len(),
+            3,
+            "dot compatibility corpus should stay intentionally small"
+        );
+
+        for fixture in fixtures {
+            let source = std::fs::read_to_string(&fixture)
+                .unwrap_or_else(|err| panic!("failed to read {}: {err}", fixture.display()));
+            let dot = RenderableDot::from_fabro_source(&source);
+            let svg = render_svg(&dot)
+                .unwrap_or_else(|err| panic!("failed to render {}: {err:#}", fixture.display()));
+            let svg = String::from_utf8(svg)
+                .unwrap_or_else(|err| panic!("SVG was not UTF-8 for {}: {err}", fixture.display()));
+
+            assert!(
+                svg.contains("<svg"),
+                "expected SVG output for {}, got: {}",
+                fixture.display(),
+                &svg[..svg.len().min(200)]
+            );
+        }
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "unit test helper enumerates checked-in DOT compatibility fixtures synchronously"
+    )]
+    fn dot_compatibility_fixtures() -> Vec<std::path::PathBuf> {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../test/dot-compatibility");
+        let mut fixtures = std::fs::read_dir(&dir)
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", dir.display()))
+            .map(|entry| {
+                entry
+                    .unwrap_or_else(|err| {
+                        panic!("failed to read entry in {}: {err}", dir.display())
+                    })
+                    .path()
+            })
+            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("fabro"))
+            .collect::<Vec<_>>();
+        fixtures.sort();
+        fixtures
     }
 }

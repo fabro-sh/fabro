@@ -1761,7 +1761,6 @@ dependencies = [
  "fs2",
  "futures",
  "git2",
- "graphviz-sys",
  "hkdf",
  "httpmock",
  "indicatif",

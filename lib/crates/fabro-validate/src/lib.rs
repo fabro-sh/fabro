@@ -152,6 +152,7 @@ pub fn validate_with_catalog_or_raise(
 #[cfg(test)]
 mod tests {
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
+    use fabro_graphviz::parser;
     use fabro_model::catalog::LlmCatalogSettings;
     use fabro_model::{Catalog, ProviderId};
 
@@ -367,5 +368,52 @@ reasoning = false
         assert_eq!(Severity::Error, Severity::Error);
         assert_ne!(Severity::Error, Severity::Warning);
         assert_ne!(Severity::Warning, Severity::Info);
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "unit test reads checked-in DOT compatibility fixtures synchronously"
+    )]
+    #[test]
+    fn dot_compatibility_corpus_validates() {
+        let fixtures = dot_compatibility_fixtures();
+
+        assert_eq!(
+            fixtures.len(),
+            3,
+            "dot compatibility corpus should stay intentionally small"
+        );
+
+        for fixture in fixtures {
+            let source = std::fs::read_to_string(&fixture)
+                .unwrap_or_else(|err| panic!("failed to read {}: {err}", fixture.display()));
+            let graph = parser::parse(&source)
+                .unwrap_or_else(|err| panic!("failed to parse {}: {err}", fixture.display()));
+
+            validate_or_raise(&graph, &[])
+                .unwrap_or_else(|err| panic!("failed to validate {}: {err}", fixture.display()));
+        }
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "unit test helper enumerates checked-in DOT compatibility fixtures synchronously"
+    )]
+    fn dot_compatibility_fixtures() -> Vec<std::path::PathBuf> {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../test/dot-compatibility");
+        let mut fixtures = std::fs::read_dir(&dir)
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", dir.display()))
+            .map(|entry| {
+                entry
+                    .unwrap_or_else(|err| {
+                        panic!("failed to read entry in {}: {err}", dir.display())
+                    })
+                    .path()
+            })
+            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("fabro"))
+            .collect::<Vec<_>>();
+        fixtures.sort();
+        fixtures
     }
 }

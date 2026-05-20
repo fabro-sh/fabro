@@ -1,0 +1,23 @@
+digraph AcpAgentChain {
+    graph [goal="Run two ACP agent stages in sequence"]
+    rankdir=LR
+
+    node [shape=box, timeout="900s"]
+    edge [color="#666666"]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    plan [
+        label="Plan"
+        backend="acp"
+        acp.command="python3 tools/fake_acp_agent.py plan"
+    ]
+    implement [
+        label="Implement"
+        backend="acp"
+        acp.command="python3 tools/fake_acp_agent.py implement"
+    ]
+
+    start -> plan -> implement -> exit
+}

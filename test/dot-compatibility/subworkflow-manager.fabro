@@ -1,0 +1,25 @@
+digraph SubworkflowManager {
+    graph [goal="Delegate implementation to a child workflow and review the result"]
+    rankdir=LR
+
+    node [shape=box, timeout="900s"]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    subgraph cluster_delivery {
+        label="Delivery"
+
+        plan [label="Plan", prompt="Plan the child workflow handoff"]
+        impl [
+            label="Implement & Test"
+            shape=house
+            stack.child_workflow="implement-and-test.fabro"
+            manager.max_cycles=50
+        ]
+    }
+
+    review [label="Review", prompt="Review the child workflow result"]
+
+    start -> plan -> impl -> review -> exit
+}

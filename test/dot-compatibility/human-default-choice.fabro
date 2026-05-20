@@ -1,0 +1,17 @@
+digraph HumanDefaultChoice {
+    graph [goal="Ask for approval and use a default deployment choice on timeout"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    approve [shape=hexagon, label="Approve deploy?", human.default_choice="deploy"]
+    deploy  [shape=parallelogram, label="Deploy", script="echo deploy"]
+    revise  [label="Revise", prompt="Revise the change for another approval pass"]
+
+    start -> approve
+    approve -> deploy [label="[D] Deploy"]
+    approve -> revise [label="[R] Revise"]
+    revise -> approve
+    deploy -> exit
+}

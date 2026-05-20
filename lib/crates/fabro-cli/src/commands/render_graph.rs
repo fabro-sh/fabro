@@ -20,8 +20,8 @@ pub(crate) fn execute() -> i32 {
         return 1;
     }
 
-    let render_source = render::normalize_dot_for_graphviz(&dot_source);
-    match graphviz_sys::render_dot_to_svg(&render_source) {
+    let dot = render::RenderableDot::from_fabro_source(&dot_source);
+    match render::render_raw_svg(&dot) {
         Ok(svg) => {
             if std::io::stdout().write_all(&svg).is_err() {
                 return 1;
