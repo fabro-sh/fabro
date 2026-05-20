@@ -2,8 +2,10 @@ import { useState } from "react";
 import type {
   ServerListenSettings,
   ServerSettings,
+  SystemInfoResponse,
 } from "@qltysh/fabro-api-client";
-import { useServerSettings } from "../lib/queries";
+import { formatDurationSecs } from "../lib/format";
+import { useServerSettings, useSystemInfo } from "../lib/queries";
 import { CollapsibleFile } from "../components/collapsible-file";
 import {
   Badge,
@@ -48,7 +50,10 @@ export default function SettingsGeneral() {
     <div className="space-y-6">
       <SettingsPageIntro description={DESCRIPTION} view={view} setView={setView} />
       {view === "settings" ? (
-        <ServerPanel settings={settings} />
+        <>
+          <ServerPanel settings={settings} />
+          <SystemPanel />
+        </>
       ) : (
         <CollapsibleFile
           file={{
@@ -79,6 +84,43 @@ function ServerPanel({ settings }: { settings: ServerSettings }) {
         <NumberValue value={scheduler.max_concurrent_runs} />
       </Row>
     </Panel>
+  );
+}
+
+function SystemPanel() {
+  const infoQuery = useSystemInfo();
+  const info = infoQuery.data;
+  if (!info) {
+    return <PanelSkeleton />;
+  }
+  return (
+    <Panel title="System">
+      <Row title="Fabro version" help="Version of the running Fabro server.">
+        {info.version ? info.version : <Muted>Unknown</Muted>}
+      </Row>
+      <Row
+        title="Operating system"
+        help="Operating system and CPU architecture reported by the server binary."
+      >
+        <OperatingSystemValue info={info} />
+      </Row>
+      <Row title="Uptime" help="Elapsed time since this server process started.">
+        {info.uptime_secs != null ? (
+          formatDurationSecs(info.uptime_secs)
+        ) : (
+          <Muted>Unknown</Muted>
+        )}
+      </Row>
+    </Panel>
+  );
+}
+
+function OperatingSystemValue({ info }: { info: SystemInfoResponse }) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <Badge>{info.os ?? "unknown"}</Badge>
+      <Badge>{info.arch ?? "unknown"}</Badge>
+    </span>
   );
 }
 

@@ -1,11 +1,9 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import TestRenderer, { act } from "react-test-renderer";
 
-let systemInfo: any;
 let systemResources: any;
 
 mock.module("../lib/queries", () => ({
-  useSystemInfo: () => ({ data: systemInfo }),
   useSystemResources: () => ({ data: systemResources }),
 }));
 
@@ -28,16 +26,6 @@ function textContent(node: ReturnType<TestRenderer.ReactTestRenderer["toJSON"]>)
   if (typeof node === "string" || typeof node === "number") return String(node);
   if (Array.isArray(node)) return node.map(textContent).join("");
   return node.children?.map(textContent).join("") ?? "";
-}
-
-function sampleSystemInfo() {
-  return {
-    os:               "macos",
-    arch:             "aarch64",
-    uptime_secs:      3661,
-    sandbox_provider: "docker",
-    storage_dir:      "/var/lib/fabro",
-  };
 }
 
 function sampleResources(overrides: Record<string, unknown> = {}) {
@@ -87,35 +75,25 @@ describe("SettingsResources route", () => {
         renderer.unmount();
       }
     });
-    systemInfo = undefined;
     systemResources = undefined;
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  test("renders loaded runtime and resource data", () => {
-    systemInfo = sampleSystemInfo();
+  test("renders loaded resource data", () => {
     systemResources = sampleResources();
 
     const renderer = renderSettingsResources();
     const text = textContent(renderer.toJSON());
 
-    expect(text).toContain("macos");
-    expect(text).toContain("aarch64");
-    expect(text).toContain("docker");
-    expect(text).toContain("/var/lib/fabro");
     expect(text).toContain("18.4%");
-    expect(text).toContain("10");
     expect(text).toContain("5s");
     expect(text).toContain("3 GiB");
     expect(text).toContain("8 GiB");
-    expect(text).toContain("Container limit");
-    expect(text).toContain("apfs");
     expect(text).toContain("2 GiB");
     expect(text).toContain("512 MiB");
   });
 
   test("shows CPU warmup state while usage is null", () => {
-    systemInfo = sampleSystemInfo();
     systemResources = sampleResources({
       cpu: {
         supported:          true,
@@ -133,7 +111,6 @@ describe("SettingsResources route", () => {
   });
 
   test("renders unsupported resource sections", () => {
-    systemInfo = sampleSystemInfo();
     systemResources = sampleResources({
       cpu:  {
         supported:          false,
@@ -168,7 +145,6 @@ describe("SettingsResources route", () => {
   });
 
   test("renders notes only when present", () => {
-    systemInfo = sampleSystemInfo();
     systemResources = sampleResources({
       notes: ["Memory is scoped to the current container."],
     });
