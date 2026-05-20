@@ -46,6 +46,9 @@ pub trait ActiveControlHandle: Send + Sync {
         cap: usize,
     ) -> Option<SteeringItem>;
     fn park_for_steer(&self) {}
+    fn pair_handle(&self) -> Option<SessionControlHandle> {
+        None
+    }
     fn has_pending_control_work(&self) -> bool;
 }
 
@@ -68,6 +71,10 @@ impl ActiveControlHandle for SessionControlHandle {
 
     fn park_for_steer(&self) {
         Self::park_for_steer(self);
+    }
+
+    fn pair_handle(&self) -> Option<SessionControlHandle> {
+        Some(self.clone())
     }
 
     fn has_pending_control_work(&self) -> bool {
@@ -411,9 +418,7 @@ impl SteeringHub {
 
         let text = human_joined_text();
         if !pair_handle.try_enqueue_bounded(
-            SteeringItem::PairSystemMessage {
-                pair_id,
-                kind: PairSystemMessageKind::HumanJoined,
+            SteeringItem::System {
                 text: text.to_string(),
             },
             PER_SESSION_QUEUE_CAP,
@@ -483,13 +488,7 @@ impl SteeringHub {
         };
 
         if !pair_handle.try_enqueue_bounded(
-            SteeringItem::PairUserMessage {
-                pair_id,
-                message_id,
-                client_message_id: client_message_id.clone(),
-                text: text.clone(),
-                actor: actor.clone(),
-            },
+            SteeringItem::User { text: text.clone() },
             PER_SESSION_QUEUE_CAP,
         ) {
             return Err(PairControlError::MessageNotAccepted);
@@ -544,9 +543,7 @@ impl SteeringHub {
                 return Err(PairControlError::TargetNotActive);
             };
             if !pair_handle.try_enqueue_bounded(
-                SteeringItem::PairSystemMessage {
-                    pair_id,
-                    kind: PairSystemMessageKind::HumanLeft,
+                SteeringItem::System {
                     text: text.to_string(),
                 },
                 PER_SESSION_QUEUE_CAP,

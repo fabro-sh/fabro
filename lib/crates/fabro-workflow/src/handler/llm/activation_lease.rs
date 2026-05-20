@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use fabro_agent::SessionControlHandle;
 use fabro_types::{SessionCapability, StageId};
 
 use crate::error::Error;
@@ -25,7 +24,6 @@ pub struct ActivationLeaseOptions {
     pub capabilities: Vec<SessionCapability>,
     pub hub:          Arc<SteeringHub>,
     pub emitter:      Arc<Emitter>,
-    pub pair_handle:  Option<SessionControlHandle>,
 }
 
 impl ActivationLease {
@@ -33,7 +31,7 @@ impl ActivationLease {
         options: ActivationLeaseOptions,
         handle: &Arc<dyn ActiveControlHandle>,
     ) -> Result<Arc<Self>, Error> {
-        let attached = if let Some(pair_handle) = options.pair_handle.clone() {
+        let attached = if let Some(pair_handle) = handle.pair_handle() {
             options
                 .hub
                 .attach_pairable_handle(&options.stage_id, &options.session_id, pair_handle)
@@ -158,7 +156,6 @@ mod tests {
             capabilities: vec![SessionCapability::Steer],
             hub,
             emitter,
-            pair_handle: None,
         }
     }
 

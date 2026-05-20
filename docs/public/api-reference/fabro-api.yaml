@@ -5375,6 +5375,12 @@ components:
           properties:
             kind:
               type: string
+              enum:
+                - text
+                - tool_output
+                - tool_arguments
+                - error
+                - details
             value:
               type: string
         truncated:

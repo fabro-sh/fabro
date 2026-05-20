@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use fabro_types::{RunEventDetailContent, RunEventDetailEnvelope, RunEventDetailResponse};
+use fabro_types::{
+    RunEventDetailContent, RunEventDetailContentKind, RunEventDetailEnvelope,
+    RunEventDetailResponse,
+};
 use fabro_workflow::event::build_redacted_event_payload;
 
 use super::super::{
@@ -293,7 +296,13 @@ fn detail_response(envelope: EventEnvelope, max_content_length: usize) -> RunEve
     let mut content = None;
     let mut truncated = false;
 
-    for key in ["text", "output", "arguments", "error", "details"] {
+    for (key, kind) in [
+        ("text", RunEventDetailContentKind::Text),
+        ("output", RunEventDetailContentKind::ToolOutput),
+        ("arguments", RunEventDetailContentKind::ToolArguments),
+        ("error", RunEventDetailContentKind::Error),
+        ("details", RunEventDetailContentKind::Details),
+    ] {
         if let Some(value) = properties.remove(key) {
             let raw = match value {
                 serde_json::Value::String(value) => value,
@@ -301,10 +310,7 @@ fn detail_response(envelope: EventEnvelope, max_content_length: usize) -> RunEve
             };
             let (value, was_truncated) = truncate_content(raw, max_content_length);
             truncated = truncated || was_truncated;
-            content = Some(RunEventDetailContent {
-                kind: key.to_string(),
-                value,
-            });
+            content = Some(RunEventDetailContent { kind, value });
             break;
         }
     }
@@ -356,10 +362,7 @@ fn truncate_content(value: String, max_content_length: usize) -> (String, bool) 
     if value.len() <= max_content_length {
         return (value, false);
     }
-    let mut end = max_content_length;
-    while !value.is_char_boundary(end) {
-        end -= 1;
-    }
+    let end = value.floor_char_boundary(max_content_length);
     (value[..end].to_string(), true)
 }
 

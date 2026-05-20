@@ -80,8 +80,6 @@ pub fn event_name(event: &Event) -> &'static str {
             AgentEvent::TurnLimitReached { .. } => "agent.turn.limit",
             AgentEvent::SkillExpanded { .. } => "agent.skill.expanded",
             AgentEvent::SteeringInjected { .. } => "agent.steering.injected",
-            AgentEvent::PairUserMessage { .. } => "agent.pair.user_message",
-            AgentEvent::PairSystemMessage { .. } => "agent.pair.system_message",
             AgentEvent::CompactionStarted { .. } => "agent.compaction.started",
             AgentEvent::CompactionCompleted { .. } => "agent.compaction.completed",
             AgentEvent::LlmRetry { .. } => "agent.llm.retry",

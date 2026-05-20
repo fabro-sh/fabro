@@ -246,6 +246,19 @@ pub struct RunEventDetailResponse {
     pub max_content_length: usize,
 }
 
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString, IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum RunEventDetailContentKind {
+    Text,
+    ToolOutput,
+    ToolArguments,
+    Error,
+    Details,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunEventDetailEnvelope {
     pub seq:          u32,
@@ -269,6 +282,6 @@ pub struct RunEventDetailEnvelope {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunEventDetailContent {
-    pub kind:  String,
+    pub kind:  RunEventDetailContentKind,
     pub value: String,
 }

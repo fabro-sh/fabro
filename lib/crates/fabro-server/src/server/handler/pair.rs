@@ -17,7 +17,8 @@ use fabro_types::{
     PairTranscriptWarning, Principal, RunId,
 };
 use fabro_workflow::run_status::RunStatus;
-use tokio::time::{Instant, sleep};
+use tokio::time::timeout;
+use tokio_stream::StreamExt;
 
 use super::super::{
     AppState, PairTransportError, durable_run_status, parse_run_id_path, reject_if_archived,
@@ -27,7 +28,6 @@ use crate::error::ApiError;
 use crate::principal_middleware::RequiredUser;
 
 const PAIR_CONFIRM_TIMEOUT: Duration = Duration::from_secs(1);
-const PAIR_CONFIRM_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 pub(super) fn routes() -> axum::Router<Arc<AppState>> {
     axum::Router::new()
@@ -107,7 +107,8 @@ async fn start_pair(
     let actor = Principal::User(auth.0);
     match transport.start_pair(id, pair_id, target, actor).await {
         Ok(()) => {
-            match wait_for_pair_record(state.as_ref(), &id, pair_id, PairStatus::Active).await {
+            match wait_for_pair_record(state.as_ref(), &id, pair_id, PairStatus::Active, None).await
+            {
                 Ok(record) => Json(record).into_response(),
                 Err(response) => response,
             }
@@ -151,11 +152,11 @@ async fn end_pair(
         Ok(pair_id) => pair_id,
         Err(response) => return response,
     };
-    let existing = match pair_by_id(state.as_ref(), &id, pair_id).await {
+    let existing = match pair_window_by_id(state.as_ref(), &id, pair_id).await {
         Ok(pair) => pair,
         Err(response) => return response,
     };
-    if existing.status != PairStatus::Active {
+    if existing.record.status != PairStatus::Active {
         return pair_conflict("Pair is not active.", "pair_not_active");
     }
     let transport = match live_transport_for_pair_command(state.as_ref(), &id) {
@@ -168,7 +169,15 @@ async fn end_pair(
 
     match transport.end_pair(pair_id, Principal::User(auth.0)).await {
         Ok(()) => {
-            match wait_for_pair_record(state.as_ref(), &id, pair_id, PairStatus::Ended).await {
+            match wait_for_pair_record(
+                state.as_ref(),
+                &id,
+                pair_id,
+                PairStatus::Ended,
+                Some(&existing.record),
+            )
+            .await
+            {
                 Ok(record) => Json(record).into_response(),
                 Err(response) => response,
             }
@@ -408,19 +417,27 @@ fn compact_summary(tool_name: &str, value: &serde_json::Value, is_error: bool) -
 }
 
 fn compact_value(value: &serde_json::Value, max_len: usize) -> String {
-    let mut rendered = match value {
-        serde_json::Value::String(value) => value.clone(),
-        other => serde_json::to_string(other).unwrap_or_default(),
-    };
-    rendered = rendered.replace('\n', " ");
-    if rendered.len() <= max_len {
-        return rendered;
+    match value {
+        serde_json::Value::String(value) => compact_text(value, max_len),
+        other => compact_text(&serde_json::to_string(other).unwrap_or_default(), max_len),
     }
-    let mut end = max_len;
-    while !rendered.is_char_boundary(end) {
-        end -= 1;
+}
+
+fn compact_text(value: &str, max_len: usize) -> String {
+    let mut rendered = String::with_capacity(max_len.min(value.len()).saturating_add(3));
+    let mut truncated = false;
+    for ch in value.chars() {
+        let ch = if ch == '\n' || ch == '\r' { ' ' } else { ch };
+        if rendered.len().saturating_add(ch.len_utf8()) > max_len {
+            truncated = true;
+            break;
+        }
+        rendered.push(ch);
     }
-    format!("{}...", &rendered[..end])
+    if truncated {
+        rendered.push_str("...");
+    }
+    rendered
 }
 
 fn live_pair_targets(state: &AppState, id: &RunId) -> Vec<PairTarget> {
@@ -525,22 +542,68 @@ async fn wait_for_pair_record(
     id: &RunId,
     pair_id: PairId,
     status: PairStatus,
+    existing: Option<&PairRecord>,
 ) -> Result<PairRecord, Response> {
-    let deadline = Instant::now() + PAIR_CONFIRM_TIMEOUT;
-    loop {
-        let pairs = reconstruct_pair_windows(state, id).await?;
-        if let Some(pair) = pairs.get(&pair_id) {
-            if pair.record.status == status {
-                return Ok(pair.record.clone());
+    let run_store = open_pair_run_reader(state, id).await?;
+    let mut events = run_store.watch_events_from(1).map_err(|err| {
+        ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+    })?;
+
+    match timeout(PAIR_CONFIRM_TIMEOUT, async {
+        while let Some(envelope) = events.next().await {
+            let envelope = envelope.map_err(|err| {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            })?;
+            match &envelope.event.body {
+                EventBody::RunPairStarted(props)
+                    if status == PairStatus::Active && props.pair_id == pair_id =>
+                {
+                    return Ok(PairRecord {
+                        pair_id:        props.pair_id,
+                        run_id:         *id,
+                        status:         PairStatus::Active,
+                        started_at:     envelope.event.ts,
+                        ended_at:       None,
+                        failure_reason: None,
+                        target:         props.target.clone(),
+                    });
+                }
+                EventBody::RunPairEnded(props)
+                    if status == PairStatus::Ended && props.pair_id == pair_id =>
+                {
+                    let Some(existing) = existing else {
+                        continue;
+                    };
+                    let mut record = existing.clone();
+                    record.status = PairStatus::Ended;
+                    record.ended_at = Some(envelope.event.ts);
+                    return Ok(record);
+                }
+                EventBody::RunPairFailed(props)
+                    if status == PairStatus::Failed && props.pair_id == pair_id =>
+                {
+                    let Some(existing) = existing else {
+                        continue;
+                    };
+                    let mut record = existing.clone();
+                    record.status = PairStatus::Failed;
+                    record.ended_at = Some(envelope.event.ts);
+                    record.failure_reason = Some(props.message.clone());
+                    return Ok(record);
+                }
+                _ => {}
             }
         }
-
-        if Instant::now() >= deadline {
-            return Err(worker_unavailable(
-                "Worker control channel cannot confirm pair command.",
-            ));
-        }
-        sleep(PAIR_CONFIRM_POLL_INTERVAL).await;
+        Err(worker_unavailable(
+            "Worker control channel cannot confirm pair command.",
+        ))
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(worker_unavailable(
+            "Worker control channel cannot confirm pair command.",
+        )),
     }
 }
 
@@ -550,10 +613,16 @@ async fn wait_for_pair_message_record(
     pair: &PairWindow,
     message_id: PairMessageId,
 ) -> Result<PairMessageRecord, Response> {
-    let deadline = Instant::now() + PAIR_CONFIRM_TIMEOUT;
-    loop {
-        let events = list_events(state, id, pair.start_seq, 10_000).await?;
-        for envelope in events {
+    let run_store = open_pair_run_reader(state, id).await?;
+    let mut events = run_store.watch_events_from(pair.start_seq).map_err(|err| {
+        ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+    })?;
+
+    match timeout(PAIR_CONFIRM_TIMEOUT, async {
+        while let Some(envelope) = events.next().await {
+            let envelope = envelope.map_err(|err| {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            })?;
             if let EventBody::AgentPairUserMessage(props) = &envelope.event.body {
                 if props.pair_id == pair.record.pair_id && props.message_id == message_id {
                     return Ok(PairMessageRecord {
@@ -568,13 +637,16 @@ async fn wait_for_pair_message_record(
                 }
             }
         }
-
-        if Instant::now() >= deadline {
-            return Err(worker_unavailable(
-                "Worker control channel cannot confirm pair message.",
-            ));
-        }
-        sleep(PAIR_CONFIRM_POLL_INTERVAL).await;
+        Err(worker_unavailable(
+            "Worker control channel cannot confirm pair message.",
+        ))
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(worker_unavailable(
+            "Worker control channel cannot confirm pair message.",
+        )),
     }
 }
 
@@ -656,6 +728,24 @@ async fn reconstruct_pair_windows(
         }
     }
     Ok(pairs)
+}
+
+async fn open_pair_run_reader(
+    state: &AppState,
+    id: &RunId,
+) -> Result<fabro_store::RunDatabase, Response> {
+    match state.store.open_run_reader(id).await {
+        Ok(run_store) => Ok(run_store),
+        Err(_) => match durable_run_status(state, *id).await {
+            Ok(Some(_)) => Err(worker_unavailable(
+                "Worker control channel cannot confirm pair command.",
+            )),
+            Ok(None) => Err(ApiError::not_found("Run not found.").into_response()),
+            Err(err) => Err(
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+            ),
+        },
+    }
 }
 
 async fn list_all_events(state: &AppState, id: &RunId) -> Result<Vec<EventEnvelope>, Response> {
@@ -740,29 +830,6 @@ async fn transcript_page(
                 next_since_seq: since_seq,
                 has_more:       false,
             }),
-            Ok(None) => Err(ApiError::not_found("Run not found.").into_response()),
-            Err(err) => Err(
-                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
-            ),
-        },
-    }
-}
-
-async fn list_events(
-    state: &AppState,
-    id: &RunId,
-    since_seq: u32,
-    limit: usize,
-) -> Result<Vec<EventEnvelope>, Response> {
-    match state.store.open_run_reader(id).await {
-        Ok(run_store) => run_store
-            .list_events_from_with_limit(since_seq, limit)
-            .await
-            .map_err(|err| {
-                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
-            }),
-        Err(_) => match durable_run_status(state, *id).await {
-            Ok(Some(_)) => Ok(Vec::new()),
             Ok(None) => Err(ApiError::not_found("Run not found.").into_response()),
             Err(err) => Err(
                 ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),

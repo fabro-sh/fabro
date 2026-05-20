@@ -276,7 +276,6 @@ impl AgentAcpBackend {
                 capabilities: vec![SessionCapability::Steer],
                 hub:          Arc::clone(steering_hub),
                 emitter:      Arc::clone(emitter),
-                pair_handle:  None,
             },
             &(Arc::new(handle.clone()) as Arc<dyn ActiveControlHandle>),
         )
@@ -286,9 +285,9 @@ impl AgentAcpBackend {
 
 impl ActiveControlHandle for AcpControlHandle {
     fn enqueue_bounded(&self, item: SteeringItem, cap: usize) -> Option<SteeringItem> {
-        let item = match steering_message_from_item(item) {
-            Ok(item) => item,
-            Err(item) => return Some(item),
+        let item = match item {
+            SteeringItem::Steering { text, actor } => SteeringMessage::new(text, actor),
+            item => return Some(item),
         };
         Self::enqueue_bounded(self, item, cap).map(SteeringItem::from)
     }
@@ -302,22 +301,15 @@ impl ActiveControlHandle for AcpControlHandle {
         item: SteeringItem,
         cap: usize,
     ) -> Option<SteeringItem> {
-        let item = match steering_message_from_item(item) {
-            Ok(item) => item,
-            Err(item) => return Some(item),
+        let item = match item {
+            SteeringItem::Steering { text, actor } => SteeringMessage::new(text, actor),
+            item => return Some(item),
         };
         Self::interrupt_then_enqueue_bounded(self, item, cap).map(SteeringItem::from)
     }
 
     fn has_pending_control_work(&self) -> bool {
         Self::has_pending_control_work(self)
-    }
-}
-
-fn steering_message_from_item(item: SteeringItem) -> Result<SteeringMessage, SteeringItem> {
-    match item {
-        SteeringItem::Steering { text, actor } => Ok(SteeringMessage::new(text, actor)),
-        item => Err(item),
     }
 }
 

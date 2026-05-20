@@ -40,14 +40,15 @@ pub mod types {
         PendingInterviewRecord, PermissionLevel, PreRunPushOutcome, Principal, PullRequest,
         PullRequestDetails, PullRequestDetailsStatus, PullRequestDetailsUnavailableReason,
         PullRequestLink, PullRequestMeta, PullRequestResponse, QuestionType, RepositoryRef, Run,
-        RunClientProvenance, RunEvent, RunEventDetailResponse, RunFailure, RunPairStatusResponse,
-        RunProjection, RunProvenance, RunSandbox, RunSandboxRuntime, RunServerProvenance,
-        SandboxDetails, SandboxNetwork, SandboxNetworkPolicy, SandboxNetworkPolicyMode,
-        SandboxProvider, SandboxResources, SandboxService, SandboxServiceListResponse,
-        SandboxState, SandboxTimestamps, SecretMetadata, SecretType, ServerSettings,
-        SessionEventEnvelope, SessionId, SessionMessage, SessionRecord, SessionStatus,
-        SessionSummary, StageCompletion, StageHandler, StageOutcome, StageProjection, StageState,
-        SystemActorKind, TurnId, TurnRecord, TurnStatus, UserPrincipal, WorkflowSettings,
+        RunClientProvenance, RunEvent, RunEventDetailContentKind, RunEventDetailResponse,
+        RunFailure, RunPairStatusResponse, RunProjection, RunProvenance, RunSandbox,
+        RunSandboxRuntime, RunServerProvenance, SandboxDetails, SandboxNetwork,
+        SandboxNetworkPolicy, SandboxNetworkPolicyMode, SandboxProvider, SandboxResources,
+        SandboxService, SandboxServiceListResponse, SandboxState, SandboxTimestamps,
+        SecretMetadata, SecretType, ServerSettings, SessionEventEnvelope, SessionId,
+        SessionMessage, SessionRecord, SessionStatus, SessionSummary, StageCompletion,
+        StageHandler, StageOutcome, StageProjection, StageState, SystemActorKind, TurnId,
+        TurnRecord, TurnStatus, UserPrincipal, WorkflowSettings,
     };
 
     pub use crate::generated::types::*;

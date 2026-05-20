@@ -573,8 +573,7 @@ impl AgentApiBackend {
         thread_id: Option<&str>,
         emitter: &Arc<Emitter>,
     ) -> Result<Arc<ActivationLease>, Error> {
-        let control_handle = session.control_handle();
-        let handle = Arc::new(control_handle.clone()) as Arc<dyn ActiveControlHandle>;
+        let handle = Arc::new(session.control_handle()) as Arc<dyn ActiveControlHandle>;
         let lease = ActivationLease::activate(
             ActivationLeaseOptions {
                 stage_id:     stage_id.clone(),
@@ -585,7 +584,6 @@ impl AgentApiBackend {
                 capabilities: vec![SessionCapability::Steer],
                 hub:          Arc::clone(&self.steering_hub),
                 emitter:      Arc::clone(emitter),
-                pair_handle:  Some(control_handle),
             },
             &handle,
         )?;

@@ -1051,8 +1051,6 @@ fn agent_event_name(event: &AgentEvent) -> &'static str {
         AgentEvent::TurnLimitReached { .. } => "turn.limit_reached",
         AgentEvent::SkillExpanded { .. } => "turn.skill_expanded",
         AgentEvent::SteeringInjected { .. } => "turn.steering_injected",
-        AgentEvent::PairUserMessage { .. } => "turn.pair_user_message",
-        AgentEvent::PairSystemMessage { .. } => "turn.pair_system_message",
         AgentEvent::CompactionStarted { .. } => "turn.compaction_started",
         AgentEvent::CompactionCompleted { .. } => "turn.compaction_completed",
         AgentEvent::LlmRetry { .. } => "turn.llm_retry",
@@ -1114,24 +1112,6 @@ fn agent_event_properties(event: SessionEvent) -> serde_json::Value {
         AgentEvent::TurnLimitReached { max_turns } => json!({ "max_turns": max_turns }),
         AgentEvent::SkillExpanded { skill_name } => json!({ "skill_name": skill_name }),
         AgentEvent::SteeringInjected { text, actor } => json!({ "text": text, "actor": actor }),
-        AgentEvent::PairUserMessage {
-            pair_id,
-            message_id,
-            client_message_id,
-            text,
-            actor,
-        } => json!({
-            "pair_id": pair_id,
-            "message_id": message_id,
-            "client_message_id": client_message_id,
-            "text": text,
-            "actor": actor
-        }),
-        AgentEvent::PairSystemMessage {
-            pair_id,
-            kind,
-            text,
-        } => json!({ "pair_id": pair_id, "kind": kind, "text": text }),
         AgentEvent::CompactionStarted {
             estimated_tokens,
             context_window_size,

@@ -319,9 +319,7 @@ fn agent_actor_for_event(
             parent_session_id: parent_session_id.map(str::to_string),
             model:             None,
         }),
-        AgentEvent::SteeringInjected { actor, .. } | AgentEvent::PairUserMessage { actor, .. } => {
-            actor.clone()
-        }
+        AgentEvent::SteeringInjected { actor, .. } => actor.clone(),
         _ => None,
     }
 }

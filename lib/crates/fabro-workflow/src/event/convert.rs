@@ -646,30 +646,6 @@ fn event_body_from_event(event: &Event) -> EventBody {
                     visit: *visit,
                 })
             }
-            AgentEvent::PairUserMessage {
-                pair_id,
-                message_id,
-                client_message_id,
-                text,
-                ..
-            } => EventBody::AgentPairUserMessage(fabro_types::AgentPairUserMessageProps {
-                pair_id:           *pair_id,
-                message_id:        *message_id,
-                client_message_id: client_message_id.clone(),
-                text:              text.clone(),
-                visit:             *visit,
-            }),
-            AgentEvent::PairSystemMessage {
-                pair_id,
-                kind,
-                text,
-                ..
-            } => EventBody::AgentPairSystemMessage(fabro_types::AgentPairSystemMessageProps {
-                pair_id: *pair_id,
-                kind:    *kind,
-                text:    text.clone(),
-                visit:   *visit,
-            }),
             AgentEvent::CompactionStarted {
                 estimated_tokens,
                 context_window_size,

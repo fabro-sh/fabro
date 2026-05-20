@@ -76,7 +76,8 @@ pub use pair::{
     PairTranscriptError, PairTranscriptMeta, PairTranscriptModel, PairTranscriptResponse,
     PairTranscriptSystemMessage, PairTranscriptToolCall, PairTranscriptToolStatus,
     PairTranscriptUserMessage, PairTranscriptWarning, RunEventDetailContent,
-    RunEventDetailEnvelope, RunEventDetailResponse, RunPairStatusResponse,
+    RunEventDetailContentKind, RunEventDetailEnvelope, RunEventDetailResponse,
+    RunPairStatusResponse,
 };
 pub use principal::{AuthMethod, Principal, SystemActorKind, UserPrincipal};
 pub use pull_request::{

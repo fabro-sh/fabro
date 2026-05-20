@@ -50,17 +50,11 @@ pub enum SteeringItem {
         text:  String,
         actor: Option<Principal>,
     },
-    PairUserMessage {
-        pair_id:           fabro_types::PairId,
-        message_id:        fabro_types::PairMessageId,
-        client_message_id: Option<String>,
-        text:              String,
-        actor:             Option<Principal>,
+    User {
+        text: String,
     },
-    PairSystemMessage {
-        pair_id: fabro_types::PairId,
-        kind:    fabro_types::PairSystemMessageKind,
-        text:    String,
+    System {
+        text: String,
     },
 }
 
@@ -68,8 +62,8 @@ impl SteeringItem {
     #[must_use]
     pub fn actor(&self) -> Option<&Principal> {
         match self {
-            Self::Steering { actor, .. } | Self::PairUserMessage { actor, .. } => actor.as_ref(),
-            Self::PairSystemMessage { .. } => None,
+            Self::Steering { actor, .. } => actor.as_ref(),
+            Self::User { .. } | Self::System { .. } => None,
         }
     }
 }
@@ -179,19 +173,7 @@ impl SessionControlHandle {
     /// single lock acquisition.
     #[must_use]
     pub fn enqueue_bounded(&self, item: SteeringItem, cap: usize) -> Option<SteeringItem> {
-        let evicted = {
-            let mut control = self.control.lock().expect("control state lock poisoned");
-            let evicted = if control.queue.len() >= cap {
-                control.queue.pop_front()
-            } else {
-                None
-            };
-            control.queue.push_back(item);
-            control.waiting_for_steer = false;
-            evicted
-        };
-        self.notify.notify_waiters();
-        evicted
+        self.push_bounded(item, cap)
     }
 
     /// Push `item` only when the queue is below `cap`. Unlike
@@ -218,6 +200,12 @@ impl SessionControlHandle {
         item: SteeringItem,
         cap: usize,
     ) -> Option<SteeringItem> {
+        let evicted = self.push_bounded(item, cap);
+        self.cancel_round();
+        evicted
+    }
+
+    fn push_bounded(&self, item: SteeringItem, cap: usize) -> Option<SteeringItem> {
         let evicted = {
             let mut control = self.control.lock().expect("control state lock poisoned");
             let evicted = if control.queue.len() >= cap {
@@ -225,12 +213,10 @@ impl SessionControlHandle {
             } else {
                 None
             };
-            control.waiting_for_steer = true;
-            control.queue.push_back(item);
             control.waiting_for_steer = false;
+            control.queue.push_back(item);
             evicted
         };
-        self.cancel_round();
         self.notify.notify_waiters();
         evicted
     }
@@ -1594,13 +1580,13 @@ impl Session {
                             actor,
                         });
                 }
-                SteeringItem::PairUserMessage { text, .. } => {
+                SteeringItem::User { text } => {
                     self.history.push(Message::User {
                         content:   text.clone(),
                         timestamp: SystemTime::now(),
                     });
                 }
-                SteeringItem::PairSystemMessage { text, .. } => {
+                SteeringItem::System { text } => {
                     self.history.push(Message::System {
                         content:   text.clone(),
                         timestamp: SystemTime::now(),
