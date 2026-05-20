@@ -169,7 +169,8 @@ async fn build_registry(
             .with_tool_env_provider(tool_env_provider.clone())
             .with_mcp_servers(mcp_servers.clone());
             let acp = AgentAcpBackend::new()
-                .with_tool_env_provider(tool_env_provider.clone(), github_token_refresh_managed);
+                .with_tool_env_provider(tool_env_provider.clone(), github_token_refresh_managed)
+                .with_steering_hub(Arc::clone(&steering_hub));
             Some(Box::new(BackendRouter::new(Box::new(api), acp)))
         }))
     };

@@ -8,12 +8,13 @@ use fabro_types::run_event::{
 };
 use fabro_types::settings::run::RunSandboxSettings;
 use fabro_types::{
-    BilledModelUsage, Checkpoint, CheckpointRecord, CommandTermination, Conclusion, EventBody,
-    FailureSignature, InterviewQuestionRecord, Outcome, PendingInterviewRecord, PullRequestLink,
-    RepositoryRef, Run, RunBillingSummary, RunControlAction, RunDiff, RunEvent, RunId,
-    RunLifecycle, RunLinks, RunModel, RunOrigin, RunProjection, RunSandbox, RunSandboxRuntime,
-    RunSpec, RunStatus, RunTimestamps, SandboxProvider, StageCompletion, StageHandler, StageId,
-    StageOutcome, StageProjection, StageState, StartRecord, WorkflowRef, first_event_seq,
+    AgentBackend, BilledModelUsage, Checkpoint, CheckpointRecord, CommandTermination, Conclusion,
+    EventBody, FailureSignature, InterviewQuestionRecord, Outcome, PendingInterviewRecord,
+    PullRequestLink, RepositoryRef, Run, RunBillingSummary, RunControlAction, RunDiff, RunEvent,
+    RunId, RunLifecycle, RunLinks, RunModel, RunOrigin, RunProjection, RunSandbox,
+    RunSandboxRuntime, RunSpec, RunStatus, RunTimestamps, SandboxProvider, StageCompletion,
+    StageHandler, StageId, StageOutcome, StageProjection, StageState, StartRecord, WorkflowRef,
+    first_event_seq,
 };
 use fabro_util::error::render_compact_with_causes;
 use serde_json::Value;
@@ -373,7 +374,9 @@ impl RunProjectionReducer for RunProjection {
                 else {
                     return Ok(());
                 };
-                stage.provider_used = Some(provider_used_from_agent_session_activated(props));
+                if !is_acp_session_activation(props) {
+                    stage.provider_used = Some(provider_used_from_agent_session_activated(props));
+                }
             }
             EventBody::AgentAcpStarted(props) => {
                 let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
@@ -849,9 +852,17 @@ fn provider_used_from_agent_session_activated(props: &AgentSessionActivatedProps
     Value::Object(provider_used)
 }
 
+fn is_acp_session_activation(props: &AgentSessionActivatedProps) -> bool {
+    let acp: &'static str = AgentBackend::Acp.into();
+    props.provider.as_deref() == Some(acp)
+}
+
 fn provider_used_from_agent_acp_started(props: &AgentAcpStartedProps) -> Value {
     let mut provider_used = serde_json::Map::new();
-    provider_used.insert("mode".to_string(), Value::String("acp".to_string()));
+    provider_used.insert(
+        "mode".to_string(),
+        Value::String(AgentBackend::Acp.to_string()),
+    );
     provider_used.insert("command".to_string(), Value::String(props.command.clone()));
     if let Some(config_name) = props.config_name.clone() {
         provider_used.insert("config_name".to_string(), Value::String(config_name));
@@ -899,11 +910,11 @@ mod tests {
         StageStartedProps,
     };
     use fabro_types::{
-        BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint, CheckpointRecord,
-        CommandTermination, EventBody, FailureCategory, FailureDetail, FailureReason, Graph,
-        Outcome, PullRequestLink, QuestionType, RunBlobId, RunControlAction, RunDiff, RunEvent,
-        RunSpec, RunStatus, StageOutcome, StageState, SuccessReason, WorkflowSettings,
-        first_event_seq, fixtures,
+        AgentBackend, BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint,
+        CheckpointRecord, CommandTermination, EventBody, FailureCategory, FailureDetail,
+        FailureReason, Graph, Outcome, PullRequestLink, QuestionType, RunBlobId, RunControlAction,
+        RunDiff, RunEvent, RunSpec, RunStatus, StageOutcome, StageState, SuccessReason,
+        WorkflowSettings, first_event_seq, fixtures,
     };
     use serde_json::json;
 
@@ -1313,6 +1324,48 @@ mod tests {
                     visit:       1,
                     command:     "python fake_agent.py".to_string(),
                     config_name: Some("fake".to_string()),
+                }),
+                stage_id.clone(),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(
+            stage.provider_used.as_ref().unwrap(),
+            &json!({
+                "mode": "acp",
+                "command": "python fake_agent.py",
+                "config_name": "fake"
+            })
+        );
+    }
+
+    #[test]
+    fn acp_session_activation_preserves_agent_acp_started_provider_used() {
+        let mut state = initialized_projection();
+        let stage_id = StageId::new("code", 1);
+        start_stage(&mut state, &stage_id);
+
+        state
+            .apply_event(&test_stage_event(
+                4,
+                EventBody::AgentAcpStarted(AgentAcpStartedProps {
+                    visit:       1,
+                    command:     "python fake_agent.py".to_string(),
+                    config_name: Some("fake".to_string()),
+                }),
+                stage_id.clone(),
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_stage_event(
+                5,
+                EventBody::AgentSessionActivated(AgentSessionActivatedProps {
+                    thread_id:    None,
+                    provider:     Some(AgentBackend::Acp.to_string()),
+                    model:        Some("fake".to_string()),
+                    capabilities: vec![fabro_types::SessionCapability::Steer],
+                    visit:        1,
                 }),
                 stage_id.clone(),
             ))

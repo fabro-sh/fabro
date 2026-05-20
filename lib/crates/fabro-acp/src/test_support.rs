@@ -30,6 +30,7 @@ import time
 
 methods = []
 session_id = "sess-1"
+prompt_count = 0
 
 if os.environ.get("ACP_PID_RECORD"):
     with open(os.environ["ACP_PID_RECORD"], "w", encoding="utf-8") as record:
@@ -67,6 +68,15 @@ def record_methods():
         with open(os.environ["ACP_RECORD"], "w", encoding="utf-8") as record:
             record.write("\n".join(methods) + "\n")
 
+def first_prompt_text(message):
+    prompt = message.get("params", {}).get("prompt", [])
+    if not prompt:
+        return ""
+    first = prompt[0]
+    if isinstance(first, str):
+        return first
+    return first.get("text", "")
+
 for line in sys.stdin:
     message = json.loads(line)
     method = message.get("method")
@@ -82,6 +92,7 @@ for line in sys.stdin:
                 record.write(json.dumps(message.get("params", {}), separators=(",", ":")))
         respond(message, {"sessionId": session_id})
     elif method == "session/prompt":
+        prompt_count += 1
         if os.environ.get("ACP_PROMPT_RECORD"):
             with open(os.environ["ACP_PROMPT_RECORD"], "w", encoding="utf-8") as record:
                 record.write(json.dumps(message.get("params", {})))
@@ -117,6 +128,27 @@ for line in sys.stdin:
                         record.write("session/cancel\n")
                     respond(message, {"stopReason": "cancelled"})
                     sys.exit(0)
+        if mode == "ignore_cancel":
+            send({
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": "waiting for ignored cancellation"}
+                    }
+                }
+            })
+            for control_line in sys.stdin:
+                control_message = json.loads(control_line)
+                methods.append(control_message.get("method"))
+                if control_message.get("method") == "session/cancel":
+                    if os.environ.get("ACP_CANCEL_RECORD"):
+                        with open(os.environ["ACP_CANCEL_RECORD"], "w", encoding="utf-8") as record:
+                            record.write("session/cancel\n")
+                    record_methods()
+                    time.sleep(60)
         if mode == "permission":
             send({
                 "jsonrpc": "2.0",
@@ -135,6 +167,78 @@ for line in sys.stdin:
             permission_response = json.loads(sys.stdin.readline())
             with open(os.environ["ACP_PERMISSION"], "w", encoding="utf-8") as permission:
                 permission.write(json.dumps(permission_response.get("result", {}), separators=(",", ":")))
+        if mode == "interrupt_steer":
+            if prompt_count == 1:
+                send({
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": session_id,
+                        "update": {
+                            "sessionUpdate": "agent_message_chunk",
+                            "content": {"type": "text", "text": "interrupted "}
+                        }
+                    }
+                })
+                for control_line in sys.stdin:
+                    control_message = json.loads(control_line)
+                    methods.append(control_message.get("method"))
+                    if control_message.get("method") == "session/cancel":
+                        if os.environ.get("ACP_CANCEL_RECORD"):
+                            with open(os.environ["ACP_CANCEL_RECORD"], "w", encoding="utf-8") as record:
+                                record.write("session/cancel\n")
+                        respond(message, {"stopReason": "cancelled"})
+                        break
+                continue
+            if os.environ.get("ACP_STEER_PROMPT_RECORD"):
+                with open(os.environ["ACP_STEER_PROMPT_RECORD"], "w", encoding="utf-8") as record:
+                    record.write(json.dumps(message.get("params", {}), separators=(",", ":")))
+            send({
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": "steered:" + first_prompt_text(message)}
+                    }
+                }
+            })
+            record_methods()
+            respond(message, {"stopReason": "end_turn"})
+            break
+        if mode == "steer":
+            if prompt_count == 1:
+                send({
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": session_id,
+                        "update": {
+                            "sessionUpdate": "agent_message_chunk",
+                            "content": {"type": "text", "text": "initial "}
+                        }
+                    }
+                })
+                respond(message, {"stopReason": "end_turn"})
+                continue
+            if os.environ.get("ACP_STEER_PROMPT_RECORD"):
+                with open(os.environ["ACP_STEER_PROMPT_RECORD"], "w", encoding="utf-8") as record:
+                    record.write(json.dumps(message.get("params", {}), separators=(",", ":")))
+            send({
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": "steered:" + first_prompt_text(message)}
+                    }
+                }
+            })
+            record_methods()
+            respond(message, {"stopReason": "end_turn"})
+            break
         for text in ["hello ", "from acp"]:
             send({
                 "jsonrpc": "2.0",

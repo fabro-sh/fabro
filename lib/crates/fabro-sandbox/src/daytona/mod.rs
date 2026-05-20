@@ -29,7 +29,8 @@ use crate::redact::redact_auth_url;
 use crate::sandbox::{optional_timeout, resolve_path};
 use crate::{
     CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GrepOptions, Sandbox,
-    SandboxEvent, SandboxEventCallback, StdioProcess, format_lines_numbered, shell_quote,
+    SandboxEvent, SandboxEventCallback, StdioProcess, format_lines_numbered, managed_labels,
+    shell_quote,
 };
 
 pub(crate) const WORKING_DIRECTORY: &str = "/home/daytona/workspace";
@@ -459,7 +460,10 @@ impl DaytonaSandbox {
         daytona_sdk::SandboxBaseParams {
             name: Some(name),
             auto_stop_interval: self.config.auto_stop_interval,
-            labels: self.config.labels.clone(),
+            labels: Some(managed_labels::merge_for_run(
+                self.config.labels.as_ref(),
+                self.run_id.as_ref(),
+            )),
             auto_delete_interval: Some(-1),
             ephemeral: Some(false),
             network_block_all,
@@ -2269,6 +2273,56 @@ subpath = "agents"
 
         assert_eq!(params.ephemeral, Some(false));
         assert_eq!(params.auto_delete_interval, Some(-1));
+        assert_eq!(
+            params.labels,
+            Some(HashMap::from([(
+                managed_labels::MANAGED_LABEL.to_string(),
+                "true".to_string(),
+            )]))
+        );
+    }
+
+    #[tokio::test]
+    async fn base_params_merges_managed_daytona_labels() {
+        let run_id: RunId = "01HY0000000000000000000000".parse().unwrap();
+        let sandbox = DaytonaSandbox::new(
+            DaytonaConfig {
+                labels: Some(HashMap::from([
+                    ("team".to_string(), "platform".to_string()),
+                    (
+                        managed_labels::MANAGED_LABEL.to_string(),
+                        "false".to_string(),
+                    ),
+                    (
+                        managed_labels::RUN_ID_LABEL.to_string(),
+                        "wrong".to_string(),
+                    ),
+                ])),
+                ..Default::default()
+            },
+            None,
+            Some(run_id),
+            None,
+            None,
+            Some("dtn_test".to_string()),
+        )
+        .await
+        .expect("sandbox config should be valid");
+
+        assert_eq!(
+            sandbox.base_params().labels,
+            Some(HashMap::from([
+                ("team".to_string(), "platform".to_string()),
+                (
+                    managed_labels::MANAGED_LABEL.to_string(),
+                    "true".to_string()
+                ),
+                (
+                    managed_labels::RUN_ID_LABEL.to_string(),
+                    "01HY0000000000000000000000".to_string(),
+                ),
+            ]))
+        );
     }
 
     #[test]

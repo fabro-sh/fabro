@@ -17,7 +17,7 @@ pub(crate) enum RunInteractAction {
     Get,
     Start,
     Message,
-    /// Cancel the active API-mode agent's current LLM round and park it
+    /// Cancel the active steerable agent's current round and park it
     /// waiting for a later `message`. The run sits idle until you follow up
     /// with `message` or `cancel`. To redirect the agent, prefer `message`
     /// (optionally with `interrupt: true`).

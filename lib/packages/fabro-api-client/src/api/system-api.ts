@@ -33,6 +33,8 @@ import type { PruneRunsResponse } from '../models';
 import type { SystemInfoResponse } from '../models';
 // @ts-ignore
 import type { SystemRepairRunsResponse } from '../models';
+// @ts-ignore
+import type { SystemResourcesResponse } from '../models';
 /**
  * SystemApi - axios parameter creator
  */
@@ -193,6 +195,42 @@ export const SystemApiAxiosParamCreator = function (configuration?: Configuratio
             };
         },
         /**
+         * Returns server-visible CPU, memory, and storage filesystem resource usage.
+         * @summary Retrieve System Resources
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getSystemResources: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/v1/system/resources`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Deletes completed runs matching the provided filters, or previews the deletion set when dry-run is enabled.
          * @summary Prune Runs
          * @param {PruneRunsRequest} pruneRunsRequest 
@@ -293,6 +331,18 @@ export const SystemApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Returns server-visible CPU, memory, and storage filesystem resource usage.
+         * @summary Retrieve System Resources
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getSystemResources(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SystemResourcesResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getSystemResources(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['SystemApi.getSystemResources']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Deletes completed runs matching the provided filters, or previews the deletion set when dry-run is enabled.
          * @summary Prune Runs
          * @param {PruneRunsRequest} pruneRunsRequest 
@@ -353,6 +403,15 @@ export const SystemApiFactory = function (configuration?: Configuration, basePat
             return localVarFp.getSystemRepairRuns(options).then((request) => request(axios, basePath));
         },
         /**
+         * Returns server-visible CPU, memory, and storage filesystem resource usage.
+         * @summary Retrieve System Resources
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getSystemResources(options?: RawAxiosRequestConfig): AxiosPromise<SystemResourcesResponse> {
+            return localVarFp.getSystemResources(options).then((request) => request(axios, basePath));
+        },
+        /**
          * Deletes completed runs matching the provided filters, or previews the deletion set when dry-run is enabled.
          * @summary Prune Runs
          * @param {PruneRunsRequest} pruneRunsRequest 
@@ -409,6 +468,16 @@ export class SystemApi extends BaseAPI {
      */
     public getSystemRepairRuns(options?: RawAxiosRequestConfig) {
         return SystemApiFp(this.configuration).getSystemRepairRuns(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns server-visible CPU, memory, and storage filesystem resource usage.
+     * @summary Retrieve System Resources
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getSystemResources(options?: RawAxiosRequestConfig) {
+        return SystemApiFp(this.configuration).getSystemResources(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

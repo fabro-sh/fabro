@@ -378,10 +378,17 @@ models/submit-answer-yes-request.ts
 models/submit-turn-request.ts
 models/success-reason.ts
 models/system-actor-kind.ts
+models/system-cpu-resource-scope.ts
+models/system-cpu-resources.ts
+models/system-disk-resource-scope.ts
+models/system-disk-resources.ts
 models/system-features.ts
 models/system-info-response.ts
+models/system-memory-resource-scope.ts
+models/system-memory-resources.ts
 models/system-repair-run-issue.ts
 models/system-repair-runs-response.ts
+models/system-resources-response.ts
 models/system-run-counts.ts
 models/timeline-entry-response.ts
 models/tls-mode.ts

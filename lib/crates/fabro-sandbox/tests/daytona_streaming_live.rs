@@ -54,6 +54,60 @@ mod daytona_streaming_live {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "requires live Daytona credentials and provisions a sandbox"]
+    async fn daytona_managed_labels_live_smoke() -> Result<()> {
+        ensure!(
+            daytona_api_key_present(),
+            "DAYTONA_API_KEY must be set to run this live smoke test"
+        );
+
+        let run_id: fabro_types::RunId = "01HY0000000000000000000000".parse().unwrap();
+        let sandbox = DaytonaSandbox::new(
+            DaytonaConfig {
+                skip_clone: true,
+                labels: Some(std::collections::HashMap::from([(
+                    "team".to_string(),
+                    "platform".to_string(),
+                )])),
+                ..Default::default()
+            },
+            None,
+            Some(run_id),
+            None,
+            None,
+            None,
+        )
+        .await?;
+
+        sandbox.initialize().await?;
+        let labels = sandbox
+            .sandbox_handle()
+            .context("sandbox handle should be initialized")?
+            .labels
+            .clone();
+        let cleanup_result = sandbox.cleanup().await.context("clean up Daytona sandbox");
+
+        ensure_eq(
+            &labels.get("sh.fabro.managed").map(String::as_str),
+            &Some("true"),
+            "Daytona should accept and return the managed label",
+        )?;
+        ensure_eq(
+            &labels.get("sh.fabro.run_id").map(String::as_str),
+            &Some("01HY0000000000000000000000"),
+            "Daytona should accept and return the run id label",
+        )?;
+        ensure_eq(
+            &labels.get("team").map(String::as_str),
+            &Some("platform"),
+            "Daytona should preserve user labels",
+        )?;
+        cleanup_result?;
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires live Daytona credentials and provisions a sandbox"]
     async fn daytona_clone_layout_live_smoke() -> Result<()> {
         ensure!(
             daytona_api_key_present(),

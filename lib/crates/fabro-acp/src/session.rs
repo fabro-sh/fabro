@@ -1,5 +1,5 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use agent_client_protocol::schema::{
@@ -10,13 +10,153 @@ use agent_client_protocol::schema::{
 use agent_client_protocol::util::MatchDispatch;
 use agent_client_protocol::{ActiveSession, Agent, Client, Error as ProtocolError, SessionMessage};
 use fabro_sandbox::Sandbox;
+use fabro_types::{Principal, SteeringMessage};
 use fabro_util::time::elapsed_ms;
+use tokio::sync::Notify;
+use tokio::sync::futures::Notified;
 use tokio::time::{sleep, timeout};
 use tokio_util::sync::CancellationToken;
 
 use crate::command::AcpProcessSpec;
 use crate::error::AcpError;
 use crate::transport::{SandboxAcpTransport, TransportState};
+
+pub type AcpNaturalCompletionCallback = Arc<dyn Fn() -> bool + Send + Sync>;
+pub type AcpSteerPromptCallback = Arc<dyn Fn(String, Option<Principal>) + Send + Sync>;
+
+const CANCEL_GRACE_PERIOD: Duration = Duration::from_millis(500);
+
+#[derive(Default)]
+struct AcpControlState {
+    queue:               VecDeque<SteeringMessage>,
+    waiting_for_steer:   bool,
+    interrupt_requested: bool,
+}
+
+#[derive(Clone, Default)]
+pub struct AcpControlHandle {
+    state:  Arc<Mutex<AcpControlState>>,
+    notify: Arc<Notify>,
+}
+
+impl AcpControlHandle {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn enqueue_bounded(&self, item: SteeringMessage, cap: usize) -> Option<SteeringMessage> {
+        self.push_bounded(item, cap, false)
+    }
+
+    pub fn interrupt(&self, _actor: Option<Principal>) {
+        {
+            let mut state = self.state.lock().expect("ACP control lock poisoned");
+            if state.queue.is_empty() {
+                state.waiting_for_steer = true;
+            }
+            state.interrupt_requested = true;
+        }
+        self.notify.notify_one();
+    }
+
+    pub fn interrupt_then_enqueue_bounded(
+        &self,
+        item: SteeringMessage,
+        cap: usize,
+    ) -> Option<SteeringMessage> {
+        self.push_bounded(item, cap, true)
+    }
+
+    fn push_bounded(
+        &self,
+        item: SteeringMessage,
+        cap: usize,
+        request_interrupt: bool,
+    ) -> Option<SteeringMessage> {
+        let evicted = {
+            let mut state = self.state.lock().expect("ACP control lock poisoned");
+            let evicted = if state.queue.len() >= cap {
+                state.queue.pop_front()
+            } else {
+                None
+            };
+            state.waiting_for_steer = false;
+            if request_interrupt {
+                state.interrupt_requested = true;
+            }
+            state.queue.push_back(item);
+            evicted
+        };
+        self.notify.notify_one();
+        evicted
+    }
+
+    #[must_use]
+    pub fn has_pending_control_work(&self) -> bool {
+        let state = self.state.lock().expect("ACP control lock poisoned");
+        !state.queue.is_empty() || state.waiting_for_steer || state.interrupt_requested
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub fn queue_len(&self) -> usize {
+        self.state
+            .lock()
+            .expect("ACP control lock poisoned")
+            .queue
+            .len()
+    }
+
+    fn pop_steer(&self) -> Option<SteeringMessage> {
+        let item = {
+            let mut state = self.state.lock().expect("ACP control lock poisoned");
+            let item = state.queue.pop_front();
+            if item.is_some() {
+                state.waiting_for_steer = false;
+            }
+            item
+        };
+        if item.is_some() {
+            self.notify.notify_one();
+        }
+        item
+    }
+
+    fn take_interrupt_requested(&self) -> bool {
+        let mut state = self.state.lock().expect("ACP control lock poisoned");
+        let requested = state.interrupt_requested;
+        state.interrupt_requested = false;
+        requested
+    }
+
+    fn should_wait_for_steer(&self) -> bool {
+        let state = self.state.lock().expect("ACP control lock poisoned");
+        state.waiting_for_steer && state.queue.is_empty()
+    }
+
+    fn notified(&self) -> Notified<'_> {
+        self.notify.notified()
+    }
+}
+
+#[derive(Default)]
+pub struct AcpLiveControl {
+    pub handle:                AcpControlHandle,
+    pub on_natural_completion: Option<AcpNaturalCompletionCallback>,
+    pub on_steer_prompt:       Option<AcpSteerPromptCallback>,
+}
+
+impl AcpLiveControl {
+    #[must_use]
+    pub fn new(handle: AcpControlHandle) -> Self {
+        Self {
+            handle,
+            on_natural_completion: None,
+            on_steer_prompt: None,
+        }
+    }
+}
 
 pub struct AcpRunRequest {
     pub command:      AcpProcessSpec,
@@ -27,6 +167,7 @@ pub struct AcpRunRequest {
     pub sandbox:      Arc<dyn Sandbox>,
     pub cancel_token: CancellationToken,
     pub on_activity:  Option<Arc<dyn Fn() + Send + Sync>>,
+    pub live_control: Option<AcpLiveControl>,
 }
 
 #[derive(Debug)]
@@ -47,13 +188,14 @@ pub async fn run_acp_turn(request: AcpRunRequest) -> Result<AcpRunResult, AcpErr
         sandbox,
         cancel_token,
         on_activity,
+        live_control,
     } = request;
+    let live_control = live_control.unwrap_or_default();
     let start = std::time::Instant::now();
     let state = TransportState::new();
     let read_cancel_token = cancel_token.clone();
     let run_cancel_token = cancel_token.clone();
     let permission_cancel_token = cancel_token.clone();
-    let state_for_run = state.clone();
     let transport = SandboxAcpTransport::new(command, cwd.clone(), env, sandbox, state.clone());
 
     let run = Client
@@ -79,11 +221,13 @@ pub async fn run_acp_turn(request: AcpRunRequest) -> Result<AcpRunResult, AcpErr
                 .block_task()
                 .run_until(async |mut session| {
                     session.send_prompt(prompt)?;
-                    read_turn(
+                    read_live_session(
                         &mut session,
                         &read_cancel_token,
+                        &live_control.handle,
+                        live_control.on_natural_completion.as_ref(),
+                        live_control.on_steer_prompt.as_ref(),
                         on_activity.as_ref(),
-                        &state_for_run,
                     )
                     .await
                 })
@@ -191,16 +335,70 @@ fn select_permission_outcome(request: &RequestPermissionRequest) -> RequestPermi
     })
 }
 
-async fn read_turn(
+async fn read_live_session(
     session: &mut ActiveSession<'_, Agent>,
     cancel_token: &CancellationToken,
+    control_handle: &AcpControlHandle,
+    on_natural_completion: Option<&AcpNaturalCompletionCallback>,
+    on_steer_prompt: Option<&AcpSteerPromptCallback>,
     on_activity: Option<&Arc<dyn Fn() + Send + Sync>>,
-    state: &TransportState,
 ) -> Result<(String, StopReason), ProtocolError> {
     let mut text = String::new();
+    let mut prompt_active = true;
     let mut cancel_sent = false;
+    let mut last_stop_reason: Option<StopReason> = None;
 
     loop {
+        if !prompt_active {
+            if let Some(message) = control_handle.pop_steer() {
+                if let Some(on_steer_prompt) = on_steer_prompt {
+                    on_steer_prompt(message.text.clone(), message.actor.clone());
+                }
+                session.send_prompt(message.text)?;
+                prompt_active = true;
+                cancel_sent = false;
+                continue;
+            }
+
+            if control_handle.take_interrupt_requested() {
+                continue;
+            }
+
+            if control_handle.should_wait_for_steer() {
+                let notified = control_handle.notified();
+                tokio::select! {
+                    () = cancel_token.cancelled() => {
+                        return Ok((text, StopReason::Cancelled));
+                    }
+                    () = notified => {}
+                }
+                continue;
+            }
+
+            let stop_reason = last_stop_reason.unwrap_or(StopReason::EndTurn);
+            if matches!(stop_reason, StopReason::EndTurn | StopReason::Refusal)
+                && on_natural_completion.is_some_and(|callback| !callback())
+            {
+                // The lease reports pending control work but our flags didn't
+                // observe it yet. Wait on a notify so we don't spin.
+                let notified = control_handle.notified();
+                tokio::select! {
+                    () = cancel_token.cancelled() => {
+                        return Ok((text, StopReason::Cancelled));
+                    }
+                    () = notified => {}
+                }
+                continue;
+            }
+            return Ok((text, stop_reason));
+        }
+
+        if control_handle.take_interrupt_requested() && !cancel_sent {
+            cancel_sent = true;
+            send_cancel_notification(session)?;
+        }
+
+        let control_notified = control_handle.notified();
         tokio::select! {
             update = session.read_update() => {
                 if let Some(on_activity) = on_activity {
@@ -222,24 +420,34 @@ async fn read_turn(
                             .otherwise_ignore()?;
                     }
                     SessionMessage::StopReason(stop_reason) => {
-                        return Ok((text, stop_reason));
+                        prompt_active = false;
+                        cancel_sent = false;
+                        last_stop_reason = Some(stop_reason);
                     }
                     _ => {}
                 }
             }
+            () = control_notified => {
+                if control_handle.take_interrupt_requested() && !cancel_sent {
+                    cancel_sent = true;
+                    send_cancel_notification(session)?;
+                }
+            }
             () = cancel_token.cancelled(), if !cancel_sent => {
                 cancel_sent = true;
-                session.connection().send_notification_to(
-                    Agent,
-                    CancelNotification::new(session.session_id().clone()),
-                )?;
+                send_cancel_notification(session)?;
             }
-            () = sleep(Duration::from_millis(500)), if cancel_sent => {
-                state.terminate().await.map_err(ProtocolError::into_internal_error)?;
+            () = sleep(CANCEL_GRACE_PERIOD), if cancel_sent => {
                 return Ok((text, StopReason::Cancelled));
             }
         }
     }
+}
+
+fn send_cancel_notification(session: &ActiveSession<'_, Agent>) -> Result<(), ProtocolError> {
+    session
+        .connection()
+        .send_notification_to(Agent, CancelNotification::new(session.session_id().clone()))
 }
 
 #[must_use]

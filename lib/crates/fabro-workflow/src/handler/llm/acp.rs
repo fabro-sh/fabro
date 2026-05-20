@@ -1,24 +1,31 @@
 //! Workflow adapter for ACP-backed LLM stages.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use fabro_acp::{AcpCommandError, AcpError, AcpProcessSpec, AcpRunRequest, render_stop_reason};
-use fabro_agent::{Sandbox, StaticEnvProvider, ToolEnvProvider};
+use fabro_acp::{
+    AcpCommandError, AcpControlHandle, AcpError, AcpLiveControl, AcpProcessSpec, AcpRunRequest,
+    render_stop_reason,
+};
+use fabro_agent::{AgentEvent, Sandbox, StaticEnvProvider, ToolEnvProvider};
 use fabro_graphviz::graph::Node;
+use fabro_types::{AgentBackend, Principal, SessionCapability, StageId, SteeringMessage};
 use fabro_util::time::elapsed_ms;
 use tokio_util::sync::CancellationToken;
 
 use super::super::agent::{CodergenBackend, CodergenResult, CodergenRunRequest, OneShotRequest};
+use super::activation_lease::{ActivationLease, ActivationLeaseOptions};
 use super::changed_files;
 use crate::error::Error;
 use crate::event::{Emitter, Event, RunNoticeCode, RunNoticeLevel, StageScope};
 use crate::handler::NodeTimeoutPolicy;
+use crate::steering_hub::{ActiveControlHandle, SteeringHub};
 
 pub struct AgentAcpBackend {
     tool_env:                     Option<Arc<dyn ToolEnvProvider>>,
     github_token_refresh_managed: bool,
+    steering_hub:                 Option<Arc<SteeringHub>>,
 }
 
 impl AgentAcpBackend {
@@ -27,6 +34,7 @@ impl AgentAcpBackend {
         Self {
             tool_env:                     None,
             github_token_refresh_managed: false,
+            steering_hub:                 None,
         }
     }
 
@@ -47,6 +55,12 @@ impl AgentAcpBackend {
         self
     }
 
+    #[must_use]
+    pub fn with_steering_hub(mut self, steering_hub: Arc<SteeringHub>) -> Self {
+        self.steering_hub = Some(steering_hub);
+        self
+    }
+
     async fn run_turn(
         &self,
         node: &Node,
@@ -63,17 +77,62 @@ impl AgentAcpBackend {
             let emitter = Arc::clone(emitter);
             Arc::new(move || emitter.touch()) as Arc<dyn Fn() + Send + Sync>
         };
-
         let command_display = process_spec.to_string();
         emitter.emit_scoped(
             &Event::AgentAcpStarted {
-                node_id: node.id.clone(),
-                visit: stage_scope.visit,
-                command: command_display,
-                config_name,
+                node_id:     node.id.clone(),
+                visit:       stage_scope.visit,
+                command:     command_display,
+                config_name: config_name.clone(),
             },
             stage_scope,
         );
+
+        let control_handle = AcpControlHandle::new();
+        let activation_session_id = format!("acp-{}", uuid::Uuid::new_v4());
+        let activation_lease = self.activate_control_session(
+            &control_handle,
+            &activation_session_id,
+            node,
+            stage_scope,
+            emitter,
+            config_name.as_deref(),
+        )?;
+        let lease_for_completion = Arc::new(Mutex::new(activation_lease));
+        let on_natural_completion = self.steering_hub.as_ref().map(|_| {
+            let lease = Arc::clone(&lease_for_completion);
+            let control_handle = control_handle.clone();
+            Arc::new(move || {
+                let mut lease = lease.lock().expect("ACP activation lease lock poisoned");
+                let Some(active_lease) = lease.as_ref() else {
+                    return true;
+                };
+                if active_lease.release_if_no_pending_control_work(&control_handle) {
+                    lease.take();
+                    true
+                } else {
+                    false
+                }
+            }) as Arc<dyn Fn() -> bool + Send + Sync>
+        });
+        let on_steer_prompt = self.steering_hub.as_ref().map(|_| {
+            let emitter = Arc::clone(emitter);
+            let stage_scope = stage_scope.clone();
+            let node_id = node.id.clone();
+            let session_id = activation_session_id.clone();
+            Arc::new(move |text: String, actor: Option<Principal>| {
+                emitter.emit_scoped(
+                    &Event::Agent {
+                        stage:             node_id.clone(),
+                        visit:             stage_scope.visit,
+                        event:             AgentEvent::SteeringInjected { text, actor },
+                        session_id:        Some(session_id.clone()),
+                        parent_session_id: None,
+                    },
+                    &stage_scope,
+                );
+            }) as Arc<dyn Fn(String, Option<Principal>) + Send + Sync>
+        });
 
         let files_before = changed_files::detect_changed_files(sandbox).await;
         let launch_start = std::time::Instant::now();
@@ -86,6 +145,11 @@ impl AgentAcpBackend {
             sandbox: Arc::clone(sandbox),
             cancel_token: cancel_token.child_token(),
             on_activity: Some(on_activity),
+            live_control: Some(AcpLiveControl {
+                handle: control_handle.clone(),
+                on_natural_completion,
+                on_steer_prompt,
+            }),
         })
         .await
         {
@@ -150,6 +214,13 @@ impl AgentAcpBackend {
             }
             Err(error) => return Err(acp_error_to_workflow(error)),
         };
+        if let Some(lease) = lease_for_completion
+            .lock()
+            .expect("ACP activation lease lock poisoned")
+            .take()
+        {
+            lease.release();
+        }
 
         let (files_touched, last_file_touched) =
             changed_files::files_touched_since(sandbox, &files_before).await;
@@ -181,6 +252,56 @@ impl AgentAcpBackend {
             .resolve()
             .await
             .map_err(|err| Error::handler_with_anyhow("Failed to resolve ACP agent env", err))
+    }
+
+    fn activate_control_session(
+        &self,
+        handle: &AcpControlHandle,
+        session_id: &str,
+        node: &Node,
+        stage_scope: &StageScope,
+        emitter: &Arc<Emitter>,
+        config_name: Option<&str>,
+    ) -> Result<Option<Arc<ActivationLease>>, Error> {
+        let Some(steering_hub) = &self.steering_hub else {
+            return Ok(None);
+        };
+        ActivationLease::activate(
+            ActivationLeaseOptions {
+                stage_id:     StageId::new(node.id.clone(), stage_scope.visit),
+                session_id:   session_id.to_string(),
+                thread_id:    None,
+                provider:     Some(AgentBackend::Acp.to_string()),
+                model:        config_name.map(str::to_string),
+                capabilities: vec![SessionCapability::Steer],
+                hub:          Arc::clone(steering_hub),
+                emitter:      Arc::clone(emitter),
+            },
+            &(Arc::new(handle.clone()) as Arc<dyn ActiveControlHandle>),
+        )
+        .map(Some)
+    }
+}
+
+impl ActiveControlHandle for AcpControlHandle {
+    fn enqueue_bounded(&self, item: SteeringMessage, cap: usize) -> Option<SteeringMessage> {
+        Self::enqueue_bounded(self, item, cap)
+    }
+
+    fn interrupt(&self, actor: Option<Principal>) {
+        Self::interrupt(self, actor);
+    }
+
+    fn interrupt_then_enqueue_bounded(
+        &self,
+        item: SteeringMessage,
+        cap: usize,
+    ) -> Option<SteeringMessage> {
+        Self::interrupt_then_enqueue_bounded(self, item, cap)
+    }
+
+    fn has_pending_control_work(&self) -> bool {
+        Self::has_pending_control_work(self)
     }
 }
 
@@ -273,6 +394,7 @@ fn acp_error_to_workflow(error: AcpError) -> Error {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
 
     use fabro_acp::test_support::fake_acp_agent_script;
@@ -287,6 +409,7 @@ mod tests {
     use crate::context::Context;
     use crate::event::Emitter;
     use crate::handler::agent::{CodergenBackend, CodergenResult, CodergenRunRequest};
+    use crate::steering_hub::SteeringHub;
 
     #[tokio::test]
     async fn acp_backend_run_sends_prompt_and_returns_text() {
@@ -339,6 +462,67 @@ mod tests {
         };
         assert_eq!(text, "hello from acp");
         assert_eq!(files_touched, vec!["hello.txt"]);
+    }
+
+    #[tokio::test]
+    async fn acp_backend_accepts_steer_and_incorporates_followup_result() {
+        let tempdir = tempfile::tempdir().unwrap();
+        init_git(tempdir.path());
+        let script_path = tempdir.path().join("fake_acp_agent.py");
+        tokio::fs::write(&script_path, fake_acp_agent_script())
+            .await
+            .unwrap();
+
+        let mut node = Node::new("work");
+        node.attrs
+            .insert("backend".to_string(), AttrValue::String("acp".to_string()));
+        node.attrs.insert(
+            "acp.command".to_string(),
+            AttrValue::String(format!(
+                "python3 {}",
+                shell_quote(&script_path.to_string_lossy())
+            )),
+        );
+
+        let emitter = Arc::new(Emitter::default());
+        let steering_hub = Arc::new(SteeringHub::new(Arc::clone(&emitter)));
+        let sent = Arc::new(AtomicBool::new(false));
+        let sent_for_listener = Arc::clone(&sent);
+        let hub_for_listener = Arc::clone(&steering_hub);
+        emitter.on_event(move |event| {
+            if event.event_name() == "agent.session.activated"
+                && !sent_for_listener.swap(true, Ordering::AcqRel)
+            {
+                hub_for_listener.deliver_steer("please revise".to_string(), None);
+            }
+        });
+
+        let backend = AgentAcpBackend::new()
+            .with_env(HashMap::from([(
+                "ACP_MODE".to_string(),
+                "steer".to_string(),
+            )]))
+            .with_steering_hub(steering_hub);
+        let sandbox: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(tempdir.path().to_path_buf()));
+        let context = Context::new();
+        let result = backend
+            .run(CodergenRunRequest {
+                node:         &node,
+                prompt:       "write hello",
+                context:      &context,
+                thread_id:    None,
+                emitter:      &emitter,
+                sandbox:      &sandbox,
+                tool_hooks:   None,
+                cancel_token: CancellationToken::new(),
+            })
+            .await
+            .unwrap();
+
+        let CodergenResult::Text { text, .. } = result else {
+            panic!("expected text result");
+        };
+        assert_eq!(text, "initial steered:please revise");
     }
 
     #[tokio::test]

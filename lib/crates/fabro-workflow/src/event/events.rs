@@ -546,7 +546,7 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         model:             Option<String>,
     },
-    /// A stage has a currently steerable API-mode session binding.
+    /// A stage has a currently steerable live session binding.
     AgentSessionActivated {
         node_id:      String,
         visit:        u32,
@@ -559,7 +559,7 @@ pub enum Event {
         model:        Option<String>,
         capabilities: Vec<fabro_types::SessionCapability>,
     },
-    /// A stage's steerable API-mode session binding ended.
+    /// A stage's steerable live session binding ended.
     AgentSessionDeactivated {
         node_id:    String,
         visit:      u32,
@@ -571,7 +571,7 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_session_id: Option<String>,
     },
-    /// A run-level interrupt was delivered to a concrete API-mode agent
+    /// A run-level interrupt was delivered to a concrete steerable agent
     /// session/stage.
     AgentInterruptInjected {
         node_id:    String,

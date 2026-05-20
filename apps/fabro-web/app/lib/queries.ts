@@ -23,6 +23,7 @@ import type {
   SandboxServiceListResponse,
   ServerSettings,
   SystemInfoResponse,
+  SystemResourcesResponse,
   VncPreviewResponse,
   WorkflowDetailResponse,
   WorkflowSettings,
@@ -92,6 +93,14 @@ export function useSystemInfo() {
     queryKeys.system.info(),
     () => apiData(() => systemApi.getSystemInfo()),
     immutableOptions,
+  );
+}
+
+export function useSystemResources() {
+  return useSWR<SystemResourcesResponse>(
+    queryKeys.system.resources(),
+    () => apiData(() => systemApi.getSystemResources()),
+    { refreshInterval: 5_000 },
   );
 }
 

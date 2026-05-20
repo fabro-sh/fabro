@@ -15,7 +15,7 @@ use fabro_llm::{Error as LlmError, retry};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_mcp::connection_manager::McpConnectionManager;
 use fabro_model::{AgentProfileKind, Catalog, ModelRef, Speed};
-use fabro_types::{Principal, SessionRecord, SessionStatus};
+use fabro_types::{Principal, SessionRecord, SessionStatus, SteeringMessage};
 use futures::StreamExt;
 use tokio::sync::{Mutex as AsyncMutex, Notify, broadcast};
 use tokio::time;
@@ -41,13 +41,9 @@ use crate::subagent::{SubAgentCallbackEvent, SubAgentEventCallback, SubAgentMana
 use crate::tool_execution::execute_tool_calls;
 use crate::types::{AgentEvent, Message, SessionEvent, SessionState};
 
-/// One queued steering message: text + the principal that authored it (None
-/// for direct internal callers like loop-detection).
-pub type SteeringItem = (String, Option<Principal>);
-
 #[derive(Default)]
 struct ControlState {
-    queue:             VecDeque<SteeringItem>,
+    queue:             VecDeque<SteeringMessage>,
     waiting_for_steer: bool,
 }
 
@@ -97,7 +93,7 @@ impl SessionControlHandle {
     /// Push a steering message onto the queue and wake a session waiting
     /// after a pure interrupt.
     pub fn steer(&self, text: String, actor: Option<Principal>) {
-        self.enqueue((text, actor));
+        self.enqueue(SteeringMessage::new(text, actor));
     }
 
     /// Cancel the current round and, if no steering text is queued, park the
@@ -115,12 +111,12 @@ impl SessionControlHandle {
 
     /// Atomically apply interrupt semantics, then enqueue steering text.
     pub fn interrupt_then_steer(&self, text: String, actor: Option<Principal>) {
-        self.interrupt_then_enqueue((text, actor));
+        self.interrupt_then_enqueue(SteeringMessage::new(text, actor));
     }
 
     /// Direct enqueue used by callers such as the hub flushing buffered
     /// steers.
-    pub fn enqueue(&self, item: SteeringItem) {
+    pub fn enqueue(&self, item: SteeringMessage) {
         {
             let mut control = self.control.lock().expect("control state lock poisoned");
             control.waiting_for_steer = false;
@@ -133,7 +129,7 @@ impl SessionControlHandle {
     /// `cap`, the oldest entry is evicted and returned. Atomic under a
     /// single lock acquisition.
     #[must_use]
-    pub fn enqueue_bounded(&self, item: SteeringItem, cap: usize) -> Option<SteeringItem> {
+    pub fn enqueue_bounded(&self, item: SteeringMessage, cap: usize) -> Option<SteeringMessage> {
         let evicted = {
             let mut control = self.control.lock().expect("control state lock poisoned");
             let evicted = if control.queue.len() >= cap {
@@ -153,9 +149,9 @@ impl SessionControlHandle {
     #[must_use]
     pub fn interrupt_then_enqueue_bounded(
         &self,
-        item: SteeringItem,
+        item: SteeringMessage,
         cap: usize,
-    ) -> Option<SteeringItem> {
+    ) -> Option<SteeringMessage> {
         let evicted = {
             let mut control = self.control.lock().expect("control state lock poisoned");
             let evicted = if control.queue.len() >= cap {
@@ -173,7 +169,7 @@ impl SessionControlHandle {
         evicted
     }
 
-    fn interrupt_then_enqueue(&self, item: SteeringItem) {
+    fn interrupt_then_enqueue(&self, item: SteeringMessage) {
         {
             let mut control = self.control.lock().expect("control state lock poisoned");
             control.waiting_for_steer = true;
@@ -1512,22 +1508,22 @@ impl Session {
     }
 
     fn drain_steering(&mut self) {
-        let messages: Vec<SteeringItem> = {
+        let messages: Vec<SteeringMessage> = {
             let mut control = self
                 .control_state
                 .lock()
                 .expect("control state lock poisoned");
             control.queue.drain(..).collect()
         };
-        for (text, actor) in messages {
+        for message in messages {
             self.history.push(Message::Steering {
-                content:   text.clone(),
+                content:   message.text.clone(),
                 timestamp: SystemTime::now(),
             });
             self.event_emitter
                 .emit(self.id.clone(), AgentEvent::SteeringInjected {
-                    text,
-                    actor,
+                    text:  message.text,
+                    actor: message.actor,
                 });
         }
     }
