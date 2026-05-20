@@ -128,6 +128,27 @@ for line in sys.stdin:
                         record.write("session/cancel\n")
                     respond(message, {"stopReason": "cancelled"})
                     sys.exit(0)
+        if mode == "ignore_cancel":
+            send({
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": "waiting for ignored cancellation"}
+                    }
+                }
+            })
+            for control_line in sys.stdin:
+                control_message = json.loads(control_line)
+                methods.append(control_message.get("method"))
+                if control_message.get("method") == "session/cancel":
+                    if os.environ.get("ACP_CANCEL_RECORD"):
+                        with open(os.environ["ACP_CANCEL_RECORD"], "w", encoding="utf-8") as record:
+                            record.write("session/cancel\n")
+                    record_methods()
+                    time.sleep(60)
         if mode == "permission":
             send({
                 "jsonrpc": "2.0",

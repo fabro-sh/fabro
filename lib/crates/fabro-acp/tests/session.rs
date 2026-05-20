@@ -277,6 +277,70 @@ async fn interrupt_then_steer_sends_cancel_then_followup_session_prompt_over_acp
 }
 
 #[tokio::test]
+async fn inline_interrupt_terminates_agent_that_ignores_cancel() {
+    let tempdir = tempfile::tempdir().expect("create tempdir");
+    let script_path = tempdir.path().join("fake_acp_agent.py");
+    let record_path = tempdir.path().join("methods.txt");
+    let cancel_path = tempdir.path().join("cancel.txt");
+    write(&script_path, fake_acp_agent_script())
+        .await
+        .expect("write fake ACP agent");
+
+    let raw_command = format!("python3 {}", shell_quote(&script_path.to_string_lossy()));
+    let command = AcpProcessSpec::from_command_attr(&raw_command).expect("parse ACP command");
+    let sandbox: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(tempdir.path().to_path_buf()));
+    let control_handle = AcpControlHandle::new();
+    let handle_for_activity = control_handle.clone();
+    let interrupted = Arc::new(AtomicBool::new(false));
+    let interrupted_for_activity = Arc::clone(&interrupted);
+
+    let err = run_acp_turn(AcpRunRequest {
+        command,
+        prompt: "hello".to_string(),
+        cwd: tempdir.path().to_string_lossy().into_owned(),
+        timeout_ms: Some(ACP_TEST_TIMEOUT_MS),
+        env: HashMap::from([
+            ("ACP_MODE".to_string(), "ignore_cancel".to_string()),
+            ("LC_ALL".to_string(), "C".to_string()),
+            (
+                "ACP_RECORD".to_string(),
+                record_path.to_string_lossy().into_owned(),
+            ),
+            (
+                "ACP_CANCEL_RECORD".to_string(),
+                cancel_path.to_string_lossy().into_owned(),
+            ),
+        ]),
+        sandbox,
+        cancel_token: CancellationToken::new(),
+        on_activity: Some(Arc::new(move || {
+            if !interrupted_for_activity.swap(true, Ordering::AcqRel) {
+                handle_for_activity.interrupt(None);
+            }
+        })),
+        control_handle: Some(control_handle),
+        on_natural_completion: None,
+        on_steer_prompt: None,
+    })
+    .await
+    .expect_err("ignored inline interrupt should terminate as cancelled");
+
+    assert!(matches!(err, AcpError::Cancelled), "{err:?}");
+    assert_eq!(
+        read_to_string(record_path)
+            .await
+            .expect("read method record"),
+        "initialize\nsession/new\nsession/prompt\nsession/cancel\n"
+    );
+    assert_eq!(
+        read_to_string(cancel_path)
+            .await
+            .expect("read cancel record"),
+        "session/cancel\n"
+    );
+}
+
+#[tokio::test]
 async fn permission_request_selects_allow_always() {
     let tempdir = tempfile::tempdir().expect("create tempdir");
     let permission_path = tempdir.path().join("permission.json");

@@ -113,12 +113,12 @@ impl AgentAcpBackend {
                 }
             }) as Arc<dyn Fn() -> bool + Send + Sync>
         });
-        let on_steer_prompt = {
+        let on_steer_prompt = self.steering_hub.as_ref().map(|_| {
             let emitter = Arc::clone(emitter);
             let stage_scope = stage_scope.clone();
             let node_id = node.id.clone();
             let session_id = activation_session_id.clone();
-            Some(Arc::new(move |text: String, actor: Option<Principal>| {
+            Arc::new(move |text: String, actor: Option<Principal>| {
                 emitter.emit_scoped(
                     &Event::Agent {
                         stage:             node_id.clone(),
@@ -129,9 +129,8 @@ impl AgentAcpBackend {
                     },
                     &stage_scope,
                 );
-            })
-                as Arc<dyn Fn(String, Option<Principal>) + Send + Sync>)
-        };
+            }) as Arc<dyn Fn(String, Option<Principal>) + Send + Sync>
+        });
 
         let files_before = changed_files::detect_changed_files(sandbox).await;
         let launch_start = std::time::Instant::now();

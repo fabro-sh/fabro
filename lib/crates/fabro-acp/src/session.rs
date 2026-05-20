@@ -25,6 +25,8 @@ pub type AcpControlItem = (String, Option<Principal>);
 pub type AcpNaturalCompletionCallback = Arc<dyn Fn() -> bool + Send + Sync>;
 pub type AcpSteerPromptCallback = Arc<dyn Fn(String, Option<Principal>) + Send + Sync>;
 
+const CANCEL_GRACE_PERIOD: Duration = Duration::from_millis(500);
+
 #[derive(Default)]
 struct AcpControlState {
     queue:               VecDeque<AcpControlItem>,
@@ -182,7 +184,6 @@ pub async fn run_acp_turn(request: AcpRunRequest) -> Result<AcpRunResult, AcpErr
     let read_cancel_token = cancel_token.clone();
     let run_cancel_token = cancel_token.clone();
     let permission_cancel_token = cancel_token.clone();
-    let state_for_run = state.clone();
     let transport = SandboxAcpTransport::new(command, cwd.clone(), env, sandbox, state.clone());
 
     let run = Client
@@ -215,7 +216,6 @@ pub async fn run_acp_turn(request: AcpRunRequest) -> Result<AcpRunResult, AcpErr
                         on_natural_completion.as_ref(),
                         on_steer_prompt.as_ref(),
                         on_activity.as_ref(),
-                        &state_for_run,
                     )
                     .await
                 })
@@ -330,7 +330,6 @@ async fn read_live_session(
     on_natural_completion: Option<&AcpNaturalCompletionCallback>,
     on_steer_prompt: Option<&AcpSteerPromptCallback>,
     on_activity: Option<&Arc<dyn Fn() + Send + Sync>>,
-    state: &TransportState,
 ) -> Result<(String, StopReason), ProtocolError> {
     let mut text = String::new();
     let mut prompt_active = true;
@@ -417,11 +416,8 @@ async fn read_live_session(
                 cancel_sent = true;
                 send_cancel_notification(session)?;
             }
-            () = sleep(Duration::from_millis(500)), if cancel_sent => {
-                if cancel_token.is_cancelled() {
-                    state.terminate().await.map_err(ProtocolError::into_internal_error)?;
-                    return Ok((text, StopReason::Cancelled));
-                }
+            () = sleep(CANCEL_GRACE_PERIOD), if cancel_sent => {
+                return Ok((text, StopReason::Cancelled));
             }
         }
     }

@@ -1483,8 +1483,7 @@ paths:
         "409":
           description: |
             Run is not currently steerable. Returned when the run is in a
-            terminal state, blocked (use the answer endpoint instead), or
-            all currently running agent stages are CLI-mode.
+            terminal state or blocked (use the answer endpoint instead).
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -1529,8 +1528,7 @@ paths:
           description: |
             Run is not currently interruptible. Returned when the run is in a
             terminal state, blocked (use the answer endpoint instead), has no
-            active steerable agent session, or all currently running agent
-            stages are CLI-mode.
+            active steerable agent session.
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"

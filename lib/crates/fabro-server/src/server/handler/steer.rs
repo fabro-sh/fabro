@@ -114,19 +114,8 @@ async fn control_run(
                 }
                 // Steerability predicate. Best-effort, target-oriented:
                 //   - If at least one steerable session is active → forward.
-                //   - Else if no agent stages are active at all → forward (worker hub buffers
-                //     for the next session).
-                //   - Else (active agents exist but all are non-steerable) → 409.
-                if managed_run.active_steerable_stages.is_empty()
-                    && !managed_run.active_non_steerable_agent_stages.is_empty()
-                {
-                    return ApiError::with_code(
-                        StatusCode::CONFLICT,
-                        "All currently running agent stages use a non-steerable backend.",
-                        "agent_not_steerable",
-                    )
-                    .into_response();
-                }
+                //   - Else plain steers forward to the worker hub for buffering.
+                //   - Else controls that require a live session return 409.
                 if managed_run.active_steerable_stages.is_empty()
                     && control.requires_active_steerable_session()
                 {
