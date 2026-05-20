@@ -22,6 +22,9 @@ export const SECONDARY_BUTTON_CLASS =
 export const DANGER_BUTTON_CLASS =
   "inline-flex items-center justify-center gap-2 rounded-lg bg-coral px-4 py-2 text-sm font-medium text-on-primary transition-colors hover:bg-coral/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-coral disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-coral";
 
+export const COMPACT_SECONDARY_BUTTON_CLASS =
+  "rounded-md border border-line bg-overlay px-2.5 py-1 text-xs text-fg-2 transition-colors hover:bg-overlay-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-50";
+
 export function ErrorMessage({ message }: { message: string }) {
   return (
     <p
@@ -30,6 +33,28 @@ export function ErrorMessage({ message }: { message: string }) {
     >
       {message}
     </p>
+  );
+}
+
+export function FormField({
+  label,
+  htmlFor,
+  help,
+  children,
+}: {
+  label: string;
+  htmlFor: string;
+  help?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div>
+      <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium text-fg-2">
+        {label}
+      </label>
+      {children}
+      {help ? <p className="mt-1.5 text-xs/5 text-fg-3 text-pretty">{help}</p> : null}
+    </div>
   );
 }
 

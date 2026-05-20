@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronDownIcon } from "@heroicons/react/16/solid";
 import type { Provider } from "@qltysh/fabro-api-client";
 import { useProviders } from "../lib/queries";
@@ -31,11 +31,20 @@ export default function SettingsModels() {
 }
 
 function ProvidersPanel({ providers }: { providers: Provider[] }) {
-  const configured = providers.filter((p) => p.configured);
-  const unconfigured = providers.filter((p) => !p.configured);
-  const [showUnconfigured, setShowUnconfigured] = useState(
-    configured.length === 0,
-  );
+  const { configured, unconfigured } = useMemo(() => {
+    const configured: Provider[] = [];
+    const unconfigured: Provider[] = [];
+    for (const provider of providers) {
+      if (provider.configured) {
+        configured.push(provider);
+      } else {
+        unconfigured.push(provider);
+      }
+    }
+    return { configured, unconfigured };
+  }, [providers]);
+  const [showUnconfigured, setShowUnconfigured] = useState(false);
+  const showUnconfiguredRows = configured.length === 0 || showUnconfigured;
 
   if (providers.length === 0) {
     return (
@@ -52,12 +61,12 @@ function ProvidersPanel({ providers }: { providers: Provider[] }) {
       {configured.map((provider) => (
         <ProviderRow key={provider.id} provider={provider} />
       ))}
-      {showUnconfigured
+      {showUnconfiguredRows
         ? unconfigured.map((provider) => (
             <ProviderRow key={provider.id} provider={provider} />
           ))
         : null}
-      {unconfigured.length > 0 ? (
+      {configured.length > 0 && unconfigured.length > 0 ? (
         <button
           type="button"
           onClick={() => setShowUnconfigured((v) => !v)}

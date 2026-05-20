@@ -53,19 +53,25 @@ export function Row({
 
 export function SettingsPageIntro({
   description,
+  action,
   view,
   setView,
 }: {
   description: ReactNode;
+  action?: ReactNode;
   view?: SettingsView;
   setView?: (v: SettingsView) => void;
 }) {
+  const trailing =
+    action ??
+    (view !== undefined && setView ? (
+      <ViewToggle view={view} setView={setView} />
+    ) : null);
+
   return (
     <div className="flex items-start justify-between gap-6">
       <p className="max-w-[64ch] text-sm/6 text-fg-3 text-pretty">{description}</p>
-      {view !== undefined && setView ? (
-        <ViewToggle view={view} setView={setView} />
-      ) : null}
+      {trailing ? <div className="shrink-0">{trailing}</div> : null}
     </div>
   );
 }

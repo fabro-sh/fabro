@@ -591,16 +591,16 @@ pub(crate) async fn list_secrets(
         Json(json!({
             "data": [
                 {
-                    "name": "OPENAI_API_KEY",
-                    "type": "token",
-                    "created_at": "2026-04-05T12:00:00Z",
-                    "updated_at": "2026-04-05T12:00:00Z"
-                },
-                {
                     "name": "GITHUB_APP_PRIVATE_KEY",
                     "type": "token",
                     "created_at": "2026-04-05T12:05:00Z",
                     "updated_at": "2026-04-05T12:05:00Z"
+                },
+                {
+                    "name": "OPENAI_API_KEY",
+                    "type": "token",
+                    "created_at": "2026-04-05T12:00:00Z",
+                    "updated_at": "2026-04-05T12:00:00Z"
                 }
             ]
         })),

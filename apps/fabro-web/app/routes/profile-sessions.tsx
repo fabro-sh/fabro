@@ -11,6 +11,7 @@ import {
   PanelSkeleton,
   Row,
 } from "../components/settings-panel";
+import { COMPACT_SECONDARY_BUTTON_CLASS } from "../components/ui";
 import { formatAbsoluteTs, formatRelativeTime } from "../lib/format";
 
 export default function ProfileSessions() {
@@ -141,7 +142,7 @@ function CliRow({
         onClick={() => onRevoke(session.id)}
         disabled={disabled}
         aria-label="Revoke CLI session"
-        className="rounded-md border border-line bg-overlay px-2.5 py-1 text-xs text-fg-2 transition-colors hover:bg-overlay-strong hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
+        className={COMPACT_SECONDARY_BUTTON_CLASS}
       >
         {pending ? "Revoking…" : "Revoke"}
       </button>

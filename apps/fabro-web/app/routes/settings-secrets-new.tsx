@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useSWRConfig } from "swr";
 import { ArrowLeftIcon } from "@heroicons/react/16/solid";
@@ -9,6 +9,7 @@ import { queryKeys } from "../lib/query-keys";
 import { Panel, SettingsPageIntro } from "../components/settings-panel";
 import {
   ErrorMessage,
+  FormField,
   INPUT_CLASS,
   PRIMARY_BUTTON_CLASS,
   SECONDARY_BUTTON_CLASS,
@@ -21,7 +22,9 @@ export function meta() {
 
 // The create form only offers Token and File. OAuth secrets are written by
 // provider sign-in flows, never typed by hand.
-function isFormType(value: string): value is typeof SecretType.TOKEN | typeof SecretType.FILE {
+function isFormType(
+  value: string,
+): value is typeof SecretType.TOKEN | typeof SecretType.FILE {
   return value === SecretType.TOKEN || value === SecretType.FILE;
 }
 
@@ -94,7 +97,7 @@ function CreateSecretForm() {
     <Panel title="New secret">
       <form onSubmit={onSubmit} className="space-y-4 px-4 py-4">
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Type" htmlFor="secret-type">
+          <FormField label="Type" htmlFor="secret-type">
             <select
               id="secret-type"
               value={type}
@@ -106,8 +109,8 @@ function CreateSecretForm() {
               <option value={SecretType.TOKEN}>Token (environment variable)</option>
               <option value={SecretType.FILE}>File</option>
             </select>
-          </Field>
-          <Field label={nameLabel} htmlFor="secret-name" help={nameHelp}>
+          </FormField>
+          <FormField label={nameLabel} htmlFor="secret-name" help={nameHelp}>
             <input
               id="secret-name"
               type="text"
@@ -118,9 +121,9 @@ function CreateSecretForm() {
               spellCheck={false}
               className={`${INPUT_CLASS} font-mono`}
             />
-          </Field>
+          </FormField>
         </div>
-        <Field
+        <FormField
           label="Value"
           htmlFor="secret-value"
           help={
@@ -138,8 +141,8 @@ function CreateSecretForm() {
             spellCheck={false}
             className={`${INPUT_CLASS} resize-y font-mono`}
           />
-        </Field>
-        <Field
+        </FormField>
+        <FormField
           label="Description"
           htmlFor="secret-description"
           help="Optional. Helps operators recognize what this secret is for."
@@ -152,7 +155,7 @@ function CreateSecretForm() {
             placeholder="Optional"
             className={INPUT_CLASS}
           />
-        </Field>
+        </FormField>
         {error ? <ErrorMessage message={error} /> : null}
         <div className="flex justify-end gap-2">
           <button
@@ -169,27 +172,5 @@ function CreateSecretForm() {
         </div>
       </form>
     </Panel>
-  );
-}
-
-function Field({
-  label,
-  htmlFor,
-  help,
-  children,
-}: {
-  label: string;
-  htmlFor: string;
-  help?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div>
-      <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium text-fg-2">
-        {label}
-      </label>
-      {children}
-      {help ? <p className="mt-1.5 text-xs/5 text-fg-3 text-pretty">{help}</p> : null}
-    </div>
   );
 }
