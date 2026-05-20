@@ -1024,6 +1024,7 @@ mod tests {
             emitter,
             sandbox,
             None,
+            None,
             tokio_util::sync::CancellationToken::new(),
             fabro_model::ProviderId::anthropic(),
             "claude-sonnet-4-6".to_string(),
@@ -1051,6 +1052,7 @@ mod tests {
             Arc::new(fabro_agent::LocalSandbox::new(
                 std::env::current_dir().unwrap(),
             )),
+            None,
             None,
             tokio_util::sync::CancellationToken::new(),
             fabro_model::ProviderId::anthropic(),

@@ -279,7 +279,7 @@ impl Handler for AgentHandler {
                     sandbox: Arc::clone(&services.run.sandbox),
                     run_id,
                     workflow_name: graph.name.clone(),
-                    work_dir: None,
+                    host_work_dir: services.run.host_hook_work_dir.clone(),
                     node_id: node.id.clone(),
                 }) as Arc<dyn fabro_agent::ToolHookCallback>
             });

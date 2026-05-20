@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -8,7 +8,7 @@ use fabro_auth::{
     CredentialSource, EnvCredentialSource, VaultCredentialSource, auth_issue_message,
 };
 use fabro_graphviz::graph;
-use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
+use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner, HookWorkDirs};
 use fabro_model::Catalog;
 use fabro_sandbox::{
     GitSetupIntent, ReadBeforeWriteSandbox, SandboxEventCallback, SandboxSpec,
@@ -42,12 +42,12 @@ async fn run_hooks(
     hook_runner: Option<&HookRunner>,
     hook_context: &HookContext,
     sandbox: Arc<dyn Sandbox>,
-    work_dir: Option<&Path>,
+    work_dirs: HookWorkDirs<'_>,
 ) -> HookDecision {
     let Some(runner) = hook_runner else {
         return HookDecision::Proceed;
     };
-    runner.run(hook_context, sandbox, work_dir).await
+    runner.run(hook_context, sandbox, work_dirs).await
 }
 
 fn git_setup_intent(run_options: &RunOptions) -> GitSetupIntent {
@@ -325,7 +325,8 @@ pub async fn initialize(
     persisted: Persisted,
     mut options: InitOptions,
 ) -> Result<Initialized, Error> {
-    let (graph, source, _diagnostics, run_dir, _run_spec) = persisted.into_parts();
+    let (graph, source, _diagnostics, run_dir, run_spec) = persisted.into_parts();
+    let host_hook_work_dir = run_spec.source_directory.as_deref().map(PathBuf::from);
     options.run_options.run_dir = run_dir.clone();
     options.run_options.git = options.git.clone();
 
@@ -444,7 +445,10 @@ pub async fn initialize(
         hook_runner.as_deref(),
         &hook_ctx,
         Arc::clone(&sandbox),
-        None,
+        HookWorkDirs {
+            host:    host_hook_work_dir.as_deref(),
+            sandbox: Some(Path::new(sandbox.working_directory())),
+        },
     )
     .await;
     if let HookDecision::Block { reason } = decision {
@@ -650,6 +654,7 @@ pub async fn initialize(
         Arc::clone(&options.emitter),
         Arc::clone(&sandbox),
         hook_runner.clone(),
+        host_hook_work_dir,
         options.run_options.cancel_token.clone(),
         options.llm.provider_id.clone(),
         options.llm.model.clone(),

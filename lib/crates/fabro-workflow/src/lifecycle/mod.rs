@@ -88,6 +88,7 @@ impl WorkflowLifecycle {
         run_dir: &Path,
         run_store: &RunStoreHandle,
         artifact_sink: Option<ArtifactSink>,
+        host_hook_work_dir: Option<PathBuf>,
         run_options: &Arc<RunOptions>,
         sandbox_git: Arc<SandboxGitRuntime>,
         metadata_runtime: Arc<RunMetadataRuntime>,
@@ -109,7 +110,7 @@ impl WorkflowLifecycle {
             .as_ref()
             .and_then(|g| g.run_branch.as_ref())
             .is_some();
-        let working_directory = if has_run_branch {
+        let sandbox_working_directory = if has_run_branch {
             Some(sandbox.working_directory().to_string())
         } else {
             None
@@ -124,7 +125,7 @@ impl WorkflowLifecycle {
             base_branch:           run_options.base_branch.clone(),
             base_sha:              run_options.git.as_ref().and_then(|g| g.base_sha.clone()),
             run_branch:            run_options.git.as_ref().and_then(|g| g.run_branch.clone()),
-            worktree_dir:          working_directory.clone(),
+            worktree_dir:          sandbox_working_directory.clone(),
             goal:                  (!graph.goal().is_empty()).then(|| graph.goal().to_string()),
             checkpoint_git_result: Arc::clone(&checkpoint_git_result),
             circuit_breaker:       Arc::clone(&circuit_breaker),
@@ -133,7 +134,8 @@ impl WorkflowLifecycle {
         let hook = HookLifecycle {
             hook_runner,
             sandbox: Arc::clone(sandbox),
-            hook_work_dir: working_directory.clone().map(PathBuf::from),
+            sandbox_hook_work_dir: sandbox_working_directory.clone().map(PathBuf::from),
+            host_hook_work_dir,
             run_id: run_options.run_id,
             graph_name: graph.name.clone(),
         };
@@ -186,7 +188,7 @@ impl WorkflowLifecycle {
             is_initial_resume: AtomicBool::new(is_resume),
             graph,
             run_id: run_options.run_id,
-            working_directory,
+            working_directory: sandbox_working_directory,
         }
     }
 

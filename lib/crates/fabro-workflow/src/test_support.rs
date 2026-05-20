@@ -161,6 +161,7 @@ async fn initialized(
                     emitter,
                     sandbox,
                     options.hook_runner,
+                    None,
                     run_options.cancel_token.clone(),
                     fabro_model::ProviderId::anthropic(),
                     "claude-sonnet-4-6".to_string(),

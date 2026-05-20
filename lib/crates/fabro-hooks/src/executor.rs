@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
-use std::path::Path;
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
@@ -21,7 +20,7 @@ use tokio::time::timeout as tokio_timeout;
 use tokio_util::sync::CancellationToken;
 
 use crate::config::{HookDefinition, HookType, TlsMode};
-use crate::types::{HookContext, HookDecision, HookResult, PromptHookResponse};
+use crate::types::{HookContext, HookDecision, HookResult, HookWorkDirs, PromptHookResponse};
 
 const HOOK_EVALUATOR_SYSTEM_PROMPT: &str = "You are a hook evaluator for a workflow engine. Given context about a workflow event, evaluate the condition.";
 
@@ -49,7 +48,7 @@ pub trait HookExecutor: Send + Sync {
         definition: &HookDefinition,
         context: &HookContext,
         sandbox: Arc<dyn Sandbox>,
-        work_dir: Option<&Path>,
+        work_dirs: HookWorkDirs<'_>,
         llm_source: &dyn CredentialSource,
         catalog: Arc<Catalog>,
     ) -> HookResult;
@@ -142,7 +141,7 @@ impl HookExecutorImpl {
         command: &str,
         context: &HookContext,
         sandbox: &Arc<dyn Sandbox>,
-        work_dir: Option<&Path>,
+        work_dirs: HookWorkDirs<'_>,
         env: &E,
     ) -> HookDecision
     where
@@ -178,8 +177,17 @@ impl HookExecutorImpl {
             if sandbox.write_file(&ctx_path, &context_json).await.is_ok() {
                 env_vars.insert("FABRO_HOOK_CONTEXT".to_string(), ctx_path.clone());
             }
+            let sandbox_work_dir = work_dirs
+                .sandbox
+                .map(|path| path.to_string_lossy().to_string());
             match sandbox
-                .exec_command(&command, timeout_ms, None, Some(&env_vars), None)
+                .exec_command(
+                    &command,
+                    timeout_ms,
+                    sandbox_work_dir.as_deref(),
+                    Some(&env_vars),
+                    None,
+                )
                 .await
             {
                 Ok(result) => Self::parse_decision(result.exit_code.unwrap_or(-1), &result.stdout),
@@ -190,7 +198,7 @@ impl HookExecutorImpl {
         } else {
             let mut cmd = TokioCommand::new("sh");
             cmd.arg("-c").arg(&command);
-            if let Some(wd) = work_dir {
+            if let Some(wd) = work_dirs.host {
                 cmd.current_dir(wd);
             }
             for (k, v) in &env_vars {
@@ -619,7 +627,7 @@ impl HookExecutor for HookExecutorImpl {
         definition: &HookDefinition,
         context: &HookContext,
         sandbox: Arc<dyn Sandbox>,
-        work_dir: Option<&Path>,
+        work_dirs: HookWorkDirs<'_>,
         llm_source: &dyn CredentialSource,
         catalog: Arc<Catalog>,
     ) -> HookResult {
@@ -634,7 +642,7 @@ impl HookExecutor for HookExecutorImpl {
                 Cow::Borrowed(HookType::Command { ref command })
                 | Cow::Owned(HookType::Command { ref command }),
             ) => {
-                Self::execute_command(definition, command, context, &sandbox, work_dir, &env).await
+                Self::execute_command(definition, command, context, &sandbox, work_dirs, &env).await
             }
             Some(
                 Cow::Borrowed(HookType::Http {
@@ -833,7 +841,14 @@ mod tests {
         let sandbox = make_sandbox();
         let source = test_llm_source();
         let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref(), test_catalog())
+            .execute(
+                &def,
+                &ctx,
+                sandbox,
+                HookWorkDirs::default(),
+                source.as_ref(),
+                test_catalog(),
+            )
             .await;
         assert_eq!(result.decision, HookDecision::Proceed);
         assert_eq!(result.hook_name.as_deref(), Some("test-hook"));
@@ -847,7 +862,14 @@ mod tests {
         let sandbox = make_sandbox();
         let source = test_llm_source();
         let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref(), test_catalog())
+            .execute(
+                &def,
+                &ctx,
+                sandbox,
+                HookWorkDirs::default(),
+                source.as_ref(),
+                test_catalog(),
+            )
             .await;
         assert!(matches!(result.decision, HookDecision::Block { .. }));
     }
@@ -860,7 +882,14 @@ mod tests {
         let sandbox = make_sandbox();
         let source = test_llm_source();
         let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref(), test_catalog())
+            .execute(
+                &def,
+                &ctx,
+                sandbox,
+                HookWorkDirs::default(),
+                source.as_ref(),
+                test_catalog(),
+            )
             .await;
         assert!(matches!(result.decision, HookDecision::Block { .. }));
     }
@@ -873,7 +902,14 @@ mod tests {
         let sandbox = make_sandbox();
         let source = test_llm_source();
         let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref(), test_catalog())
+            .execute(
+                &def,
+                &ctx,
+                sandbox,
+                HookWorkDirs::default(),
+                source.as_ref(),
+                test_catalog(),
+            )
             .await;
         assert_eq!(result.decision, HookDecision::Skip {
             reason: Some("test skip".into()),
@@ -890,7 +926,14 @@ mod tests {
         let sandbox = make_sandbox();
         let source = test_llm_source();
         let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref(), test_catalog())
+            .execute(
+                &def,
+                &ctx,
+                sandbox,
+                HookWorkDirs::default(),
+                source.as_ref(),
+                test_catalog(),
+            )
             .await;
         assert_eq!(result.decision, HookDecision::Proceed);
     }
@@ -912,7 +955,14 @@ mod tests {
         let sandbox = make_sandbox();
         let source = test_llm_source();
         let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref(), test_catalog())
+            .execute(
+                &def,
+                &ctx,
+                sandbox,
+                HookWorkDirs::default(),
+                source.as_ref(),
+                test_catalog(),
+            )
             .await;
         assert!(matches!(result.decision, HookDecision::Block { .. }));
     }
@@ -1307,7 +1357,14 @@ mod tests {
         let sandbox = make_sandbox();
         let source = test_llm_source();
         let result = executor
-            .execute(&def, &ctx, sandbox, None, source.as_ref(), test_catalog())
+            .execute(
+                &def,
+                &ctx,
+                sandbox,
+                HookWorkDirs::default(),
+                source.as_ref(),
+                test_catalog(),
+            )
             .await;
 
         mock.assert_async().await;
@@ -1323,7 +1380,7 @@ mod tests {
             "echo {{ env.MISSING_HOOK_VALUE }}",
             &make_context(),
             &sandbox,
-            None,
+            HookWorkDirs::default(),
             &test_env(&[]),
         )
         .await;

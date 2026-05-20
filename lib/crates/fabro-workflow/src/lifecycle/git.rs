@@ -1201,6 +1201,7 @@ mod tests {
                 repo_dir.path().to_path_buf(),
             )),
             None,
+            None,
             tokio_util::sync::CancellationToken::new(),
             fabro_model::ProviderId::anthropic(),
             "claude-sonnet-4-6".to_string(),

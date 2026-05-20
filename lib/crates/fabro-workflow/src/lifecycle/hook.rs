@@ -8,7 +8,7 @@ use fabro_core::lifecycle::{
 };
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
-use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
+use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner, HookWorkDirs};
 use fabro_sandbox::Sandbox;
 use fabro_types::RunId;
 
@@ -22,11 +22,12 @@ type WfNodeDecision = NodeDecision<Option<BilledModelUsage>>;
 
 /// Sub-lifecycle responsible for running workflow hooks.
 pub(crate) struct HookLifecycle {
-    pub hook_runner:   Option<Arc<HookRunner>>,
-    pub sandbox:       Arc<dyn Sandbox>,
-    pub hook_work_dir: Option<PathBuf>,
-    pub run_id:        RunId,
-    pub graph_name:    String,
+    pub hook_runner:           Option<Arc<HookRunner>>,
+    pub sandbox:               Arc<dyn Sandbox>,
+    pub sandbox_hook_work_dir: Option<PathBuf>,
+    pub host_hook_work_dir:    Option<PathBuf>,
+    pub run_id:                RunId,
+    pub graph_name:            String,
 }
 
 impl HookLifecycle {
@@ -35,11 +36,10 @@ impl HookLifecycle {
             return HookDecision::Proceed;
         };
         runner
-            .run(
-                hook_ctx,
-                self.sandbox.clone(),
-                self.hook_work_dir.as_deref(),
-            )
+            .run(hook_ctx, self.sandbox.clone(), HookWorkDirs {
+                host:    self.host_hook_work_dir.as_deref(),
+                sandbox: self.sandbox_hook_work_dir.as_deref(),
+            })
             .await
     }
 }
@@ -65,7 +65,7 @@ impl RunLifecycle<WorkflowGraph> for HookLifecycle {
         let mut hook_ctx =
             HookContext::new(HookEvent::StageStart, self.run_id, self.graph_name.clone());
         hook_ctx.cwd = self
-            .hook_work_dir
+            .sandbox_hook_work_dir
             .as_ref()
             .map(|path| path.display().to_string());
         set_hook_node(&mut hook_ctx, gv);

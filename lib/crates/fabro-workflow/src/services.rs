@@ -1,6 +1,5 @@
 use std::collections::HashMap;
-#[cfg(test)]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 #[cfg(test)]
 use std::time::Duration;
@@ -9,7 +8,7 @@ use fabro_agent::{Sandbox, ToolEnvProvider};
 use fabro_auth::CredentialSource;
 #[cfg(test)]
 use fabro_auth::ResolvedCredentials;
-use fabro_hooks::{HookContext, HookDecision, HookRunner};
+use fabro_hooks::{HookContext, HookDecision, HookRunner, HookWorkDirs};
 use fabro_model::{Catalog, ProviderId};
 use fabro_types::ManifestPath;
 use tokio_util::sync::CancellationToken;
@@ -37,6 +36,7 @@ pub struct RunServices {
     pub emitter:                 Arc<Emitter>,
     pub sandbox:                 Arc<dyn Sandbox>,
     pub hook_runner:             Option<Arc<HookRunner>>,
+    pub host_hook_work_dir:      Option<PathBuf>,
     pub(crate) cancel_token:     CancellationToken,
     pub provider_id:             ProviderId,
     pub model:                   String,
@@ -54,6 +54,7 @@ impl RunServices {
         emitter: Arc<Emitter>,
         sandbox: Arc<dyn Sandbox>,
         hook_runner: Option<Arc<HookRunner>>,
+        host_hook_work_dir: Option<PathBuf>,
         cancel_token: CancellationToken,
         provider_id: ProviderId,
         model: String,
@@ -68,6 +69,7 @@ impl RunServices {
             emitter,
             sandbox,
             hook_runner,
+            host_hook_work_dir,
             cancel_token,
             provider_id,
             model,
@@ -92,8 +94,12 @@ impl RunServices {
         let Some(ref runner) = self.hook_runner else {
             return HookDecision::Proceed;
         };
+        let sandbox_work_dir = Path::new(self.sandbox.working_directory());
         runner
-            .run(hook_context, Arc::clone(&self.sandbox), None)
+            .run(hook_context, Arc::clone(&self.sandbox), HookWorkDirs {
+                host:    self.host_hook_work_dir.as_deref(),
+                sandbox: Some(sandbox_work_dir),
+            })
             .await
     }
 
@@ -247,6 +253,7 @@ impl EngineServices {
                 Arc::new(fabro_agent::LocalSandbox::new(
                     std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
                 )),
+                None,
                 None,
                 CancellationToken::new(),
                 ProviderId::anthropic(),

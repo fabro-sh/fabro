@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use fabro_types::RunId;
 use serde::{Deserialize, Serialize};
 
@@ -114,6 +116,15 @@ impl HookDecision {
     pub fn is_proceed(&self) -> bool {
         matches!(self, Self::Proceed)
     }
+}
+
+/// Working directories available to hook execution.
+///
+/// Host hooks must only use `host`; sandbox hooks may use `sandbox`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HookWorkDirs<'a> {
+    pub host:    Option<&'a Path>,
+    pub sandbox: Option<&'a Path>,
 }
 
 /// Result from executing a single hook.

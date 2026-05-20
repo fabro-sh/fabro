@@ -5,7 +5,7 @@ use fabro_agent::{Sandbox, ToolHookCallback, ToolHookDecision};
 use fabro_types::RunId;
 
 use crate::runner::HookRunner;
-use crate::types::{HookContext, HookDecision, HookEvent};
+use crate::types::{HookContext, HookDecision, HookEvent, HookWorkDirs};
 
 /// Bridge between the workflow hook system and the agent tool-hook callback.
 ///
@@ -16,7 +16,7 @@ pub struct WorkflowToolHookCallback {
     pub sandbox:       Arc<dyn Sandbox>,
     pub run_id:        RunId,
     pub workflow_name: String,
-    pub work_dir:      Option<PathBuf>,
+    pub host_work_dir: Option<PathBuf>,
     pub node_id:       String,
 }
 
@@ -29,8 +29,12 @@ impl WorkflowToolHookCallback {
     }
 
     async fn run_hook(&self, ctx: &HookContext) -> HookDecision {
+        let sandbox_work_dir = std::path::Path::new(self.sandbox.working_directory());
         self.hook_runner
-            .run(ctx, self.sandbox.clone(), self.work_dir.as_deref())
+            .run(ctx, self.sandbox.clone(), HookWorkDirs {
+                host:    self.host_work_dir.as_deref(),
+                sandbox: Some(sandbox_work_dir),
+            })
             .await
     }
 }
@@ -72,7 +76,6 @@ impl ToolHookCallback for WorkflowToolHookCallback {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
     use std::sync::Mutex;
 
     use fabro_model::Catalog;
@@ -95,7 +98,7 @@ mod tests {
             _definition: &HookDefinition,
             context: &HookContext,
             _sandbox: Arc<dyn Sandbox>,
-            _work_dir: Option<&Path>,
+            _work_dirs: HookWorkDirs<'_>,
             _llm_source: &dyn fabro_auth::CredentialSource,
             _catalog: Arc<Catalog>,
         ) -> HookResult {
@@ -136,7 +139,7 @@ mod tests {
             sandbox,
             run_id: fixtures::RUN_1,
             workflow_name: "test-wf".into(),
-            work_dir: None,
+            host_work_dir: None,
             node_id: "plan".into(),
         }
     }
