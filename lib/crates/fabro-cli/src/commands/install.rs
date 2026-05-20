@@ -28,8 +28,9 @@ use fabro_config::daemon::ServerDaemon;
 use fabro_config::user::{SETTINGS_CONFIG_FILENAME, default_storage_dir};
 use fabro_config::{Storage, UserSettingsBuilder, envfile};
 use fabro_install::{
-    InstallListenConfig, PendingSettingsWrite, merge_server_settings as merge_server_settings_impl,
-    persist_install_outputs_direct, write_github_app_settings, write_token_settings,
+    InstallListenConfig, InstallPersistencePlan, PendingSettingsWrite, VaultSecretWrite,
+    merge_server_settings as merge_server_settings_impl, write_github_app_settings,
+    write_token_settings,
 };
 use fabro_model::catalog::CatalogProvider;
 use fabro_model::{Catalog, CredentialRef, ProviderId};
@@ -42,7 +43,7 @@ use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_util::version::FABRO_VERSION;
 use fabro_util::{browser, dev_token, path, session_secret};
-use fabro_vault::{SecretType as VaultSecretType, Vault};
+use fabro_vault::SecretType as VaultSecretType;
 use futures::future::BoxFuture;
 use rand::Rng;
 use tokio::net::TcpListener;
@@ -1265,9 +1266,10 @@ async fn persist_install_outputs(
     bootstrap_dev_token: Option<&str>,
 ) -> Result<()> {
     let bootstrap_dev_token = bootstrap_dev_token.map(str::to_string);
-    persist_install_outputs_with_settings(
+    persist_cli_install_outputs_with(
         storage_dir,
-        server_env_secrets,
+        server_env_updates(server_env_secrets),
+        Vec::new(),
         vault_secrets,
         settings_write,
         server_was_running,
@@ -1321,50 +1323,29 @@ fn persist_github_install_changes(
     storage_dir: &Path,
     writes: &PendingGitHubInstallWrite<'_>,
 ) -> Result<()> {
-    let storage = Storage::new(storage_dir);
-    let server_env_path = storage.runtime_directory().env_path();
-    let vault_path = storage.secrets_path();
-    let previous_server_env = std::fs::read_to_string(&server_env_path).ok();
-    let previous_vault = std::fs::read_to_string(&vault_path).ok();
-
-    let result = (|| -> Result<()> {
-        let server_env_writes = server_env_updates(&writes.server_env_set);
-        let server_env_removals = server_env_removals(&writes.server_env_remove);
-        persist_install_outputs_direct(
-            storage_dir,
-            &server_env_writes,
-            &server_env_removals,
-            &[],
-            Some(&writes.settings_write),
-        )?;
-
-        let mut vault = Vault::load(vault_path.clone()).map_err(anyhow::Error::from)?;
-        for key in &writes.vault_remove {
-            match vault.remove(key) {
-                Ok(()) | Err(fabro_vault::Error::NotFound(_)) => {}
-                Err(err) => return Err(err.into()),
-            }
-        }
-        for (key, value) in &writes.vault_set {
-            vault
-                .set(key, value, VaultSecretType::Token, None)
-                .map_err(anyhow::Error::from)?;
-        }
-
-        Ok(())
-    })();
-
-    if let Err(err) = result {
-        restore_optional_file(
-            writes.settings_write.path,
-            writes.settings_write.previous_contents,
-        )?;
-        restore_optional_file(&server_env_path, previous_server_env.as_deref())?;
-        restore_optional_file(&vault_path, previous_vault.as_deref())?;
-        return Err(err);
+    InstallPersistencePlan {
+        storage_dir,
+        settings_write: Some(writes.settings_write),
+        server_env_writes: server_env_updates(&writes.server_env_set),
+        server_env_removals: server_env_removals(&writes.server_env_remove),
+        vault_writes: writes
+            .vault_set
+            .iter()
+            .map(|(key, value)| VaultSecretWrite {
+                name:        key.clone(),
+                value:       value.clone(),
+                secret_type: VaultSecretType::Token,
+                description: None,
+            })
+            .collect(),
+        vault_removals: writes
+            .vault_remove
+            .iter()
+            .map(|key| (*key).to_string())
+            .collect(),
     }
-
-    Ok(())
+    .persist_direct()
+    .map_err(anyhow::Error::from)
 }
 
 async fn write_artifact_store_metadata(
@@ -1377,9 +1358,10 @@ async fn write_artifact_store_metadata(
     Ok(())
 }
 
-async fn persist_install_outputs_with_settings(
+async fn persist_cli_install_outputs_with(
     storage_dir: &Path,
-    server_env_secrets: &[(String, String)],
+    server_env_writes: Vec<envfile::EnvFileUpdate>,
+    server_env_removals: Vec<envfile::EnvFileRemoval>,
     vault_secrets: &[CreateSecretRequest],
     settings_write: Option<PendingSettingsWrite<'_>>,
     server_was_running: bool,
@@ -1388,14 +1370,15 @@ async fn persist_install_outputs_with_settings(
 ) -> Result<()> {
     let server_env_path = Storage::new(storage_dir).runtime_directory().env_path();
     let previous_server_env = std::fs::read_to_string(&server_env_path).ok();
-    let settings_write_ref = settings_write.as_ref();
-    persist_install_outputs_direct(
+    InstallPersistencePlan {
         storage_dir,
-        &server_env_updates(server_env_secrets),
-        &[],
-        &[],
-        settings_write_ref,
-    )?;
+        settings_write,
+        server_env_writes,
+        server_env_removals,
+        vault_writes: Vec::new(),
+        vault_removals: Vec::new(),
+    }
+    .persist_direct()?;
 
     let persist_result = persist_vault_secrets_with(
         storage_dir,
@@ -1409,13 +1392,7 @@ async fn persist_install_outputs_with_settings(
     if let Err(err) = persist_result {
         restore_optional_file(&server_env_path, previous_server_env.as_deref())?;
         if let Some(write) = settings_write {
-            match write.previous_contents {
-                Some(previous) => std::fs::write(write.path, previous)
-                    .with_context(|| format!("restoring settings file {}", write.path.display()))?,
-                None if write.path.exists() => std::fs::remove_file(write.path)
-                    .with_context(|| format!("removing settings file {}", write.path.display()))?,
-                None => {}
-            }
+            restore_optional_file(write.path, write.previous_contents)?;
         }
         return Err(err);
     }
@@ -2066,6 +2043,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
+    use fabro_vault::Vault;
     use httpmock::Method::POST;
     use httpmock::MockServer;
 
@@ -2847,7 +2825,7 @@ client_id = "client-id"
     }
 
     #[tokio::test]
-    async fn persist_install_outputs_with_settings_rolls_back_new_files_on_secret_failure() {
+    async fn persist_cli_install_outputs_rolls_back_new_files_on_secret_failure() {
         let dir = tempfile::tempdir().unwrap();
         let server_env_pairs = [("SESSION_SECRET".to_string(), "session".to_string())];
         let vault_secrets = [CreateSecretRequest {
@@ -2859,9 +2837,10 @@ client_id = "client-id"
         let settings_path = dir.path().join(SETTINGS_CONFIG_FILENAME);
         let stop_called = Arc::new(AtomicBool::new(false));
 
-        let result = persist_install_outputs_with_settings(
+        let result = persist_cli_install_outputs_with(
             dir.path(),
-            &server_env_pairs,
+            server_env_updates(&server_env_pairs),
+            Vec::new(),
             &vault_secrets,
             Some(PendingSettingsWrite {
                 path:              &settings_path,
@@ -2895,7 +2874,7 @@ client_id = "client-id"
     }
 
     #[tokio::test]
-    async fn persist_install_outputs_with_settings_restores_previous_contents_on_secret_failure() {
+    async fn persist_cli_install_outputs_restores_previous_contents_on_secret_failure() {
         let dir = tempfile::tempdir().unwrap();
         let server_env_pairs = [("SESSION_SECRET".to_string(), "session".to_string())];
         let vault_secrets = [CreateSecretRequest {
@@ -2907,9 +2886,10 @@ client_id = "client-id"
         let settings_path = dir.path().join(SETTINGS_CONFIG_FILENAME);
         std::fs::write(&settings_path, "_version = 1\n[server]\n").unwrap();
 
-        let result = persist_install_outputs_with_settings(
+        let result = persist_cli_install_outputs_with(
             dir.path(),
-            &server_env_pairs,
+            server_env_updates(&server_env_pairs),
+            Vec::new(),
             &vault_secrets,
             Some(PendingSettingsWrite {
                 path:              &settings_path,

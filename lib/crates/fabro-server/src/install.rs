@@ -17,9 +17,9 @@ use fabro_config::Storage;
 use fabro_config::bind::{Bind, BindRequest};
 use fabro_config::envfile::EnvFileUpdate;
 use fabro_install::{
-    InstallListenConfig, InstallSandboxSelection, OBJECT_STORE_ACCESS_KEY_ID_ENV,
-    OBJECT_STORE_SECRET_ACCESS_KEY_ENV, PendingSettingsWrite, VaultSecretWrite,
-    merge_server_settings, persist_install_outputs_direct, write_github_app_settings,
+    InstallListenConfig, InstallPersistencePlan, InstallSandboxSelection,
+    OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV, PendingSettingsWrite,
+    VaultSecretWrite, merge_server_settings, write_github_app_settings,
     write_object_store_settings, write_sandbox_settings, write_token_settings,
 };
 use fabro_llm::client::Client as LlmClient;
@@ -1631,26 +1631,29 @@ async fn post_install_finish(
     )]
     let previous_settings = std::fs::read_to_string(state.config_path.as_ref()).ok();
 
-    if let Err(err) = persist_install_outputs_direct(
-        state.storage_dir.as_ref(),
-        &server_env_writes,
-        &server_env_removals,
-        &vault_secrets,
-        Some(&PendingSettingsWrite {
+    let leftover_env_keys_on_failure: Vec<String> = server_env_writes
+        .iter()
+        .map(|write| write.key.clone())
+        .collect();
+    let persistence_plan = InstallPersistencePlan {
+        storage_dir: state.storage_dir.as_ref(),
+        settings_write: Some(PendingSettingsWrite {
             path:              state.config_path.as_ref(),
             contents:          &settings_toml,
             previous_contents: previous_settings.as_deref(),
         }),
-    ) {
+        server_env_writes,
+        server_env_removals,
+        vault_writes: vault_secrets,
+        vault_removals: Vec::new(),
+    };
+    if let Err(err) = persistence_plan.persist_direct() {
         error!(error = %err, "install persistence failed");
         let status = StatusCode::INTERNAL_SERVER_ERROR;
         let detail = err.to_string();
         let title = status.canonical_reason().unwrap_or("Unknown").to_string();
         let leftover_env_keys: Vec<String> = if err.server_env_applied {
-            server_env_writes
-                .iter()
-                .map(|write| write.key.clone())
-                .collect()
+            leftover_env_keys_on_failure
         } else {
             Vec::new()
         };
