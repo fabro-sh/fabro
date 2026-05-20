@@ -34,8 +34,8 @@ export function Row({
   help,
   children,
 }: {
-  title: string;
-  help?: string;
+  title: ReactNode;
+  help?: ReactNode;
   children: ReactNode;
 }) {
   return (

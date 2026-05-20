@@ -18,6 +18,7 @@ use super::activation_lease::{ActivationLease, ActivationLeaseOptions};
 use super::changed_files;
 use crate::error::Error;
 use crate::event::{Emitter, Event, RunNoticeCode, RunNoticeLevel, StageScope};
+use crate::handler::NodeTimeoutPolicy;
 use crate::steering_hub::{ActiveControlHandle, ControlItem, SteeringHub};
 
 pub struct AgentAcpBackend {
@@ -322,6 +323,10 @@ impl CodergenBackend for AgentAcpBackend {
         Err(Error::Validation(
             "backend=\"acp\" is only valid on agent nodes; prompt nodes are API-only".to_string(),
         ))
+    }
+
+    fn node_timeout_policy(&self, _node: &Node) -> NodeTimeoutPolicy {
+        NodeTimeoutPolicy::HandlerManaged
     }
 }
 

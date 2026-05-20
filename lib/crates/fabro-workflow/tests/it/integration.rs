@@ -841,6 +841,149 @@ async fn human_gate_interrupted_input_fails_closed_without_fail_route() {
     );
 }
 
+struct NeverAnswerInterviewer;
+
+#[async_trait::async_trait]
+impl Interviewer for NeverAnswerInterviewer {
+    async fn ask(&self, _question: fabro_interview::Question) -> fabro_interview::AnswerSubmission {
+        tokio::time::sleep(Duration::from_mins(1)).await;
+        fabro_interview::AnswerSubmission::system(
+            Answer::interrupted(),
+            fabro_types::SystemActorKind::Engine,
+        )
+    }
+}
+
+#[tokio::test]
+async fn human_gate_timeout_routes_to_default_choice_when_unanswered() {
+    let mut graph = Graph::new("HumanGateTimeoutDefaultChoice");
+
+    let mut start = Node::new("start");
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
+    graph.nodes.insert("start".to_string(), start);
+
+    let mut exit = Node::new("exit");
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
+    graph.nodes.insert("exit".to_string(), exit);
+
+    let mut gate = Node::new("gate");
+    gate.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("hexagon".to_string()),
+    );
+    gate.attrs
+        .insert("type".to_string(), AttrValue::String("human".to_string()));
+    gate.attrs.insert(
+        "label".to_string(),
+        AttrValue::String("Approve release?".to_string()),
+    );
+    gate.attrs.insert(
+        "question_type".to_string(),
+        AttrValue::String("multiple_choice".to_string()),
+    );
+    gate.attrs.insert(
+        "human.default_choice".to_string(),
+        AttrValue::String("approve".to_string()),
+    );
+    gate.attrs.insert(
+        "timeout".to_string(),
+        AttrValue::Duration(Duration::from_millis(20)),
+    );
+    graph.nodes.insert("gate".to_string(), gate);
+
+    graph
+        .nodes
+        .insert("approve".to_string(), Node::new("approve"));
+    graph
+        .nodes
+        .insert("revise".to_string(), Node::new("revise"));
+
+    graph.edges.push(Edge::new("start", "gate"));
+
+    let mut approve_edge = Edge::new("gate", "approve");
+    approve_edge.attrs.insert(
+        "label".to_string(),
+        AttrValue::String("[A] Approve".to_string()),
+    );
+    graph.edges.push(approve_edge);
+
+    let mut revise_edge = Edge::new("gate", "revise");
+    revise_edge.attrs.insert(
+        "label".to_string(),
+        AttrValue::String("[R] Revise".to_string()),
+    );
+    graph.edges.push(revise_edge);
+
+    graph.edges.push(Edge::new("approve", "exit"));
+    graph.edges.push(Edge::new("revise", "exit"));
+
+    let interviewer = Arc::new(NeverAnswerInterviewer);
+    let emitter = Emitter::default();
+    let events = collect_events(&emitter);
+
+    let dir = tempfile::tempdir().expect("temporary run dir should be created");
+    let mut registry = HandlerRegistry::new(Box::new(StartHandler));
+    registry.register("start", Box::new(StartHandler));
+    registry.register("exit", Box::new(ExitHandler));
+    registry.register("human", Box::new(HumanHandler::new(interviewer)));
+
+    let engine = WorkflowRunner::new(registry, Arc::new(emitter), local_env());
+    let run_options = RunOptions {
+        settings:         WorkflowSettings::default(),
+        run_dir:          dir.path().to_path_buf(),
+        cancel_token:     CancellationToken::new(),
+        run_id:           test_run_id("test-run"),
+        labels:           std::collections::HashMap::new(),
+        workflow_slug:    None,
+        github_app:       None,
+        base_branch:      None,
+        display_base_sha: None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
+        git:              None,
+    };
+    let (outcome, state) = engine
+        .run_with_state(&graph, &run_options)
+        .await
+        .expect("human timeout should route through default choice");
+
+    if outcome.status != StageOutcome::Succeeded {
+        let gate_outcome = state
+            .current_checkpoint()
+            .and_then(|checkpoint| checkpoint.node_outcomes.get("gate"));
+        panic!(
+            "human timeout should have selected default choice; outcome: {outcome:?}; gate outcome: {gate_outcome:?}"
+        );
+    }
+
+    let checkpoint = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
+    assert!(
+        checkpoint.completed_nodes.contains(&"approve".to_string()),
+        "default choice target should have completed"
+    );
+    assert!(
+        !checkpoint.completed_nodes.contains(&"revise".to_string()),
+        "non-default choice target should not have completed"
+    );
+
+    let captured_events = events.lock().expect("event log lock poisoned");
+    assert!(
+        captured_events
+            .iter()
+            .any(|event| event.event_name() == "interview.timeout"),
+        "interview.timeout should be emitted on human gate timeout"
+    );
+}
+
 #[tokio::test]
 async fn human_gate_interrupted_input_routes_via_outcome_fail_condition() {
     let mut graph = Graph::new("HumanGateInterruptedFailRoute");

@@ -8,13 +8,25 @@ use thiserror::Error;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TemplateSource {
     pub path:    ManifestPath,
+    pub root:    ManifestPath,
     pub content: String,
+}
+
+impl TemplateSource {
+    #[must_use]
+    pub fn new(path: ManifestPath, root: ManifestPath, content: impl Into<String>) -> Self {
+        Self {
+            path,
+            root,
+            content: content.into(),
+        }
+    }
 }
 
 pub trait TemplateStore: Send + Sync {
     fn load(
         &self,
-        parent: &ManifestPath,
+        parent: &TemplateSource,
         reference: &str,
     ) -> Result<Option<TemplateSource>, TemplateLoadError>;
 }
@@ -43,17 +55,13 @@ pub enum TemplateLoadError {
 
 #[derive(Clone, Debug)]
 pub struct FilesystemTemplateStore {
-    cwd:  PathBuf,
-    root: ManifestPath,
+    cwd: PathBuf,
 }
 
 impl FilesystemTemplateStore {
     #[must_use]
-    pub fn new(cwd: impl Into<PathBuf>, root: ManifestPath) -> Self {
-        Self {
-            cwd: cwd.into(),
-            root,
-        }
+    pub fn new(cwd: impl Into<PathBuf>) -> Self {
+        Self { cwd: cwd.into() }
     }
 }
 
@@ -64,12 +72,13 @@ impl TemplateStore for FilesystemTemplateStore {
     )]
     fn load(
         &self,
-        parent: &ManifestPath,
+        parent: &TemplateSource,
         reference: &str,
     ) -> Result<Option<TemplateSource>, TemplateLoadError> {
-        let logical = resolve_logical_reference(parent, reference, &self.root)?;
+        let logical =
+            TemplateIncludeResolver::new(parent.root.clone()).resolve(&parent.path, reference)?;
         let absolute = self.cwd.join(logical.as_path());
-        let root = self.cwd.join(self.root.as_path());
+        let root = self.cwd.join(parent.root.as_path());
 
         let canonical = match absolute.canonicalize() {
             Ok(path) if path.is_file() => path,
@@ -90,9 +99,9 @@ impl TemplateStore for FilesystemTemplateStore {
             })?;
         if !canonical.starts_with(&canonical_root) {
             return Err(TemplateLoadError::EscapesRoot {
-                parent:    parent.clone(),
+                parent:    parent.path.clone(),
                 reference: reference.to_owned(),
-                root:      self.root.clone(),
+                root:      parent.root.clone(),
             });
         }
 
@@ -101,44 +110,45 @@ impl TemplateStore for FilesystemTemplateStore {
                 path: canonical.clone(),
                 source,
             })?;
-        Ok(Some(TemplateSource {
-            path: logical,
+        Ok(Some(TemplateSource::new(
+            logical,
+            parent.root.clone(),
             content,
-        }))
+        )))
     }
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct BundleTemplateStore {
-    root:  ManifestPath,
     files: HashMap<ManifestPath, String>,
 }
 
 impl BundleTemplateStore {
     #[must_use]
-    pub fn new(root: ManifestPath, files: HashMap<ManifestPath, String>) -> Self {
-        Self { root, files }
+    pub fn new(files: HashMap<ManifestPath, String>) -> Self {
+        Self { files }
     }
 }
 
 impl TemplateStore for BundleTemplateStore {
     fn load(
         &self,
-        parent: &ManifestPath,
+        parent: &TemplateSource,
         reference: &str,
     ) -> Result<Option<TemplateSource>, TemplateLoadError> {
-        let path = resolve_logical_reference(parent, reference, &self.root)?;
-        Ok(self.files.get(&path).map(|content| TemplateSource {
-            path,
-            content: content.clone(),
-        }))
+        let path =
+            TemplateIncludeResolver::new(parent.root.clone()).resolve(&parent.path, reference)?;
+        Ok(self
+            .files
+            .get(&path)
+            .map(|content| TemplateSource::new(path, parent.root.clone(), content.clone())))
     }
 }
 
 #[derive(Debug)]
 pub struct CachedTemplateStore<T> {
     inner: T,
-    cache: Mutex<HashMap<(ManifestPath, String), Option<TemplateSource>>>,
+    cache: Mutex<HashMap<(ManifestPath, ManifestPath, String), Option<TemplateSource>>>,
 }
 
 impl<T> CachedTemplateStore<T> {
@@ -157,10 +167,14 @@ where
 {
     fn load(
         &self,
-        parent: &ManifestPath,
+        parent: &TemplateSource,
         reference: &str,
     ) -> Result<Option<TemplateSource>, TemplateLoadError> {
-        let key = (parent.clone(), reference.to_owned());
+        let key = (
+            parent.path.clone(),
+            parent.root.clone(),
+            reference.to_owned(),
+        );
         if let Some(source) = lock(&self.cache).get(&key).cloned() {
             return Ok(source);
         }
@@ -208,7 +222,7 @@ where
 {
     fn load(
         &self,
-        parent: &ManifestPath,
+        parent: &TemplateSource,
         reference: &str,
     ) -> Result<Option<TemplateSource>, TemplateLoadError> {
         let source = self.inner.load(parent, reference)?;
@@ -226,32 +240,44 @@ where
     }
 }
 
-pub(crate) fn resolve_logical_reference(
-    parent: &ManifestPath,
-    reference: &str,
-    root: &ManifestPath,
-) -> Result<ManifestPath, TemplateLoadError> {
-    if !is_safe_template_reference(reference) {
-        return Err(TemplateLoadError::UnsafeReference {
-            parent:    parent.clone(),
-            reference: reference.to_owned(),
-        });
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TemplateIncludeResolver {
+    root: ManifestPath,
+}
+
+impl TemplateIncludeResolver {
+    #[must_use]
+    pub fn new(root: ManifestPath) -> Self {
+        Self { root }
     }
-    let path =
-        ManifestPath::from_reference(parent.parent_or_dot(), reference).ok_or_else(|| {
-            TemplateLoadError::UnsafeReference {
+
+    pub fn resolve(
+        &self,
+        parent: &ManifestPath,
+        reference: &str,
+    ) -> Result<ManifestPath, TemplateLoadError> {
+        if !is_safe_template_reference(reference) {
+            return Err(TemplateLoadError::UnsafeReference {
                 parent:    parent.clone(),
                 reference: reference.to_owned(),
-            }
-        })?;
-    if !is_within_root(&path, root) {
-        return Err(TemplateLoadError::EscapesRoot {
-            parent:    parent.clone(),
-            reference: reference.to_owned(),
-            root:      root.clone(),
-        });
+            });
+        }
+        let path =
+            ManifestPath::from_reference(parent.parent_or_dot(), reference).ok_or_else(|| {
+                TemplateLoadError::UnsafeReference {
+                    parent:    parent.clone(),
+                    reference: reference.to_owned(),
+                }
+            })?;
+        if !is_within_root(&path, &self.root) {
+            return Err(TemplateLoadError::EscapesRoot {
+                parent:    parent.clone(),
+                reference: reference.to_owned(),
+                root:      self.root.clone(),
+            });
+        }
+        Ok(path)
     }
-    Ok(path)
 }
 
 pub(crate) fn is_safe_template_reference(reference: &str) -> bool {
@@ -284,4 +310,73 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
         .expect("template store mutex should not be poisoned")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn manifest_path(value: &str) -> ManifestPath {
+        ManifestPath::from_wire(value).expect("path should parse")
+    }
+
+    #[test]
+    fn include_resolver_allows_sibling_reference_within_root() {
+        let resolver = TemplateIncludeResolver::new(manifest_path("prompts"));
+
+        let resolved = resolver
+            .resolve(
+                &manifest_path("prompts/audits/audit.prompt.md"),
+                "../partials/audit.partial.tpl",
+            )
+            .unwrap();
+
+        assert_eq!(
+            resolved,
+            manifest_path("prompts/partials/audit.partial.tpl")
+        );
+    }
+
+    #[test]
+    fn include_resolver_rejects_reference_that_escapes_root() {
+        let resolver = TemplateIncludeResolver::new(manifest_path("prompts"));
+
+        let err = resolver
+            .resolve(
+                &manifest_path("prompts/audits/audit.prompt.md"),
+                "../../secret.md",
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            TemplateLoadError::EscapesRoot {
+                parent,
+                reference,
+                root,
+            } if parent == manifest_path("prompts/audits/audit.prompt.md")
+                && reference == "../../secret.md"
+                && root == manifest_path("prompts")
+        ));
+    }
+
+    #[test]
+    fn include_resolver_rejects_unsafe_references() {
+        let resolver = TemplateIncludeResolver::new(manifest_path("prompts"));
+        let parent = manifest_path("prompts/main.md");
+
+        for reference in [
+            "",
+            "~/secret.md",
+            "/tmp/secret.md",
+            r"partials\secret.md",
+            "C:/secret.md",
+        ] {
+            let err = resolver.resolve(&parent, reference).unwrap_err();
+            assert!(
+                matches!(err, TemplateLoadError::UnsafeReference { .. }),
+                "{reference} should be unsafe, got {err:?}"
+            );
+        }
+    }
 }

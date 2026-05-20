@@ -23,7 +23,7 @@ use crate::records::Checkpoint;
 use crate::run_metadata::RunMetadataRuntime;
 use crate::run_options::RunOptions;
 use crate::sandbox_git_runtime::SandboxGitRuntime;
-use crate::services::{EngineServices, RunServices};
+use crate::services::{EngineServices, RunLocations, RunServices};
 
 /// These helpers stop at EXECUTE, so they emit the terminal event here to
 /// keep test consumers seeing the same end-of-run signal as production
@@ -145,6 +145,7 @@ async fn initialized(
         ),
         "artifacts",
     );
+    let locations = RunLocations::for_sandbox(None, sandbox.as_ref(), run_options.run_dir.clone());
     InitializedState {
         initialized: Initialized {
             graph:         graph.clone(),
@@ -161,6 +162,7 @@ async fn initialized(
                     emitter,
                     sandbox,
                     options.hook_runner,
+                    locations,
                     run_options.cancel_token.clone(),
                     fabro_model::ProviderId::anthropic(),
                     "claude-sonnet-4-6".to_string(),

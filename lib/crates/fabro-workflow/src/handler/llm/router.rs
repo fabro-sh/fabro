@@ -9,6 +9,7 @@ use super::acp::AgentAcpBackend;
 use super::routing;
 use crate::error::Error;
 use crate::event::Emitter;
+use crate::handler::NodeTimeoutPolicy;
 
 /// Routes codergen invocations to API or ACP backends based on node attributes.
 pub struct BackendRouter {
@@ -54,6 +55,14 @@ impl CodergenBackend for BackendRouter {
 
     async fn shutdown(&self, emitter: &Arc<Emitter>) {
         self.api.shutdown(emitter).await;
+    }
+
+    fn node_timeout_policy(&self, node: &Node) -> NodeTimeoutPolicy {
+        match Self::select_backend(node) {
+            Ok(AgentBackend::Api) => self.api.node_timeout_policy(node),
+            Ok(AgentBackend::Acp) => self.acp.node_timeout_policy(node),
+            Err(_) => NodeTimeoutPolicy::ExecutorEnforced,
+        }
     }
 }
 

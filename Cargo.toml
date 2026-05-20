@@ -5,7 +5,7 @@ resolver = "2"
 
 [workspace.package]
 edition = "2021"
-version = "0.238.0-nightly.0"
+version = "0.239.0-nightly.0"
 license = "MIT"
 
 [workspace.dependencies]

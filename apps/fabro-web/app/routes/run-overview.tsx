@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { graphTheme } from "../lib/graph-theme";
+import { ApiError } from "../lib/api-client";
 import { useRun, useRunGraph, useRunStages } from "../lib/queries";
 import { RunSummaryPanel } from "../components/run-summary-panel";
 import { StageSidebar } from "../components/stage-sidebar";
@@ -9,7 +10,7 @@ import {
   GRAPH_ZOOM_STEPS,
   GraphToolbar,
 } from "../components/graph-toolbar";
-import { EmptyState } from "../components/state";
+import { EmptyState, ErrorState } from "../components/state";
 import {
   ACTIVE_STAGE_STATES,
   SUCCEEDED_STAGE_STATES,
@@ -32,6 +33,12 @@ export default function RunOverview() {
     [stagesQuery.data],
   );
   const graphSvg = graphQuery.data;
+  const graphErrorDescription =
+    graphQuery.error instanceof ApiError
+      ? graphQuery.error.message
+      : graphQuery.error
+        ? "The graph render request failed."
+        : undefined;
   const apiStatus = runQuery.data?.lifecycle.status;
   const terminalOutcome: "succeeded" | "failed" | "dead" | null =
     apiStatus?.kind === "succeeded" ||
@@ -223,6 +230,12 @@ export default function RunOverview() {
               />
             </div>
           </div>
+        ) : graphQuery.error ? (
+          <ErrorState
+            title="Couldn't render workflow graph"
+            description={graphErrorDescription}
+            onRetry={() => void graphQuery.mutate()}
+          />
         ) : (
           <EmptyState
             title="No workflow graph"

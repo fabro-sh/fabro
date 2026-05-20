@@ -5,7 +5,9 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use fabro_template::{TemplateIncludeResolver, TemplateLoadError, TemplateSource, TemplateStore};
 use fabro_types::ManifestPath;
 
 pub trait FileResolver: Send + Sync {
@@ -16,6 +18,34 @@ pub trait FileResolver: Send + Sync {
 pub struct ResolvedFile {
     pub path:    PathBuf,
     pub content: String,
+}
+
+#[derive(Clone)]
+pub struct FileResolverTemplateStore {
+    base_dir: PathBuf,
+    resolver: Arc<dyn FileResolver>,
+}
+
+impl FileResolverTemplateStore {
+    #[must_use]
+    pub fn new(base_dir: PathBuf, resolver: Arc<dyn FileResolver>) -> Self {
+        Self { base_dir, resolver }
+    }
+}
+
+impl TemplateStore for FileResolverTemplateStore {
+    fn load(
+        &self,
+        parent: &TemplateSource,
+        reference: &str,
+    ) -> Result<Option<TemplateSource>, TemplateLoadError> {
+        let path =
+            TemplateIncludeResolver::new(parent.root.clone()).resolve(&parent.path, reference)?;
+        Ok(self
+            .resolver
+            .resolve(&self.base_dir, &path.to_string())
+            .map(|resolved| TemplateSource::new(path, parent.root.clone(), resolved.content)))
+    }
 }
 
 #[derive(Clone, Debug, Default)]

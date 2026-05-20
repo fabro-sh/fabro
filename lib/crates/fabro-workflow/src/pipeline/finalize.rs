@@ -1019,11 +1019,17 @@ mod tests {
         metadata_runtime: Arc<RunMetadataRuntime>,
         metadata_writer: Option<RunMetadataWriterHandle>,
     ) -> Arc<RunServices> {
+        let locations = crate::services::RunLocations::for_sandbox(
+            None,
+            sandbox.as_ref(),
+            Path::new(".").to_path_buf(),
+        );
         RunServices::new(
             run_store,
             emitter,
             sandbox,
             None,
+            locations,
             tokio_util::sync::CancellationToken::new(),
             fabro_model::ProviderId::anthropic(),
             "claude-sonnet-4-6".to_string(),
@@ -1045,13 +1051,17 @@ mod tests {
         let emitter = Arc::new(Emitter::new(test_run_id()));
         let store_logger = StoreProgressLogger::new(run_store.clone());
         store_logger.register(&emitter);
+        let sandbox: Arc<dyn fabro_agent::Sandbox> = Arc::new(fabro_agent::LocalSandbox::new(
+            std::env::current_dir().unwrap(),
+        ));
+        let locations =
+            crate::services::RunLocations::for_sandbox(None, sandbox.as_ref(), run_dir.clone());
         let services = RunServices::new(
             run_store.clone().into(),
             Arc::clone(&emitter),
-            Arc::new(fabro_agent::LocalSandbox::new(
-                std::env::current_dir().unwrap(),
-            )),
+            sandbox,
             None,
+            locations,
             tokio_util::sync::CancellationToken::new(),
             fabro_model::ProviderId::anthropic(),
             "claude-sonnet-4-6".to_string(),

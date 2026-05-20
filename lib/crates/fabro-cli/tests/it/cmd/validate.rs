@@ -223,6 +223,22 @@ fn validate_accepts_static_template_dependencies() {
 }
 
 #[test]
+fn validate_accepts_template_partial_sibling_under_workflow_root() {
+    let context = test_context!();
+    let mut cmd = context.validate();
+    cmd.arg(fixture("templates/sibling_partial/workflow.fabro"));
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    Workflow: SiblingPartialTemplateInclude (3 nodes, 2 edges)
+    Graph: [FIXTURES]/templates/sibling_partial/workflow.fabro
+    Validation: OK
+    ");
+}
+
+#[test]
 fn validate_reports_missing_template_dependency() {
     let context = test_context!();
     let mut cmd = context.validate();

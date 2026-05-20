@@ -1194,13 +1194,20 @@ mod tests {
             .on_checkpoint(&node, &result, Some("exit"), &checkpoint_state)
             .await
             .unwrap();
+        let finalize_sandbox: Arc<dyn fabro_agent::Sandbox> = Arc::new(
+            fabro_agent::LocalSandbox::new(repo_dir.path().to_path_buf()),
+        );
+        let finalize_locations = crate::services::RunLocations::for_sandbox(
+            None,
+            finalize_sandbox.as_ref(),
+            repo_dir.path().join(".fabro/run"),
+        );
         let finalize_services = RunServices::new(
             RunStoreHandle::new(Arc::new(FailingStateStore)),
             Arc::clone(&lifecycle.emitter),
-            Arc::new(fabro_agent::LocalSandbox::new(
-                repo_dir.path().to_path_buf(),
-            )),
+            finalize_sandbox,
             None,
+            finalize_locations,
             tokio_util::sync::CancellationToken::new(),
             fabro_model::ProviderId::anthropic(),
             "claude-sonnet-4-6".to_string(),

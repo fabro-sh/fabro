@@ -100,12 +100,12 @@ pub fn discover_static_dependency_closure(
             });
         }
         for dependency in dependencies.static_references {
-            let loaded = store
-                .load(&source.path, &dependency.reference)?
-                .ok_or_else(|| TemplateDiscoveryError::Missing {
+            let loaded = store.load(&source, &dependency.reference)?.ok_or_else(|| {
+                TemplateDiscoveryError::Missing {
                     parent:    source.path.clone(),
                     reference: dependency.reference.clone(),
-                })?;
+                }
+            })?;
             if sources
                 .insert(loaded.path.clone(), loaded.clone())
                 .is_none()

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-#[cfg(test)]
 use std::path::PathBuf;
 use std::sync::Arc;
 #[cfg(test)]
@@ -9,7 +8,7 @@ use fabro_agent::{Sandbox, ToolEnvProvider};
 use fabro_auth::CredentialSource;
 #[cfg(test)]
 use fabro_auth::ResolvedCredentials;
-use fabro_hooks::{HookContext, HookDecision, HookRunner};
+use fabro_hooks::{HookContext, HookDecision, HookExecutionContext, HookRunner};
 use fabro_model::{Catalog, ProviderId};
 use fabro_types::ManifestPath;
 use tokio_util::sync::CancellationToken;
@@ -22,6 +21,57 @@ use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git::GitState;
 use crate::sandbox_git_runtime::SandboxGitRuntime;
 use crate::workflow_bundle::WorkflowBundle;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RunLocations {
+    pub host_source_dir:  Option<PathBuf>,
+    pub sandbox_work_dir: Option<PathBuf>,
+    pub run_scratch_dir:  PathBuf,
+}
+
+impl RunLocations {
+    #[must_use]
+    pub fn new(
+        host_source_dir: Option<PathBuf>,
+        sandbox_work_dir: Option<PathBuf>,
+        run_scratch_dir: PathBuf,
+    ) -> Self {
+        Self {
+            host_source_dir,
+            sandbox_work_dir,
+            run_scratch_dir,
+        }
+    }
+
+    #[must_use]
+    pub fn for_sandbox(
+        host_source_dir: Option<PathBuf>,
+        sandbox: &dyn Sandbox,
+        run_scratch_dir: PathBuf,
+    ) -> Self {
+        Self::new(
+            host_source_dir,
+            Some(PathBuf::from(sandbox.working_directory())),
+            run_scratch_dir,
+        )
+    }
+
+    #[must_use]
+    pub fn hook_execution_context(&self) -> HookExecutionContext {
+        HookExecutionContext {
+            host_source_dir:  self.host_source_dir.clone(),
+            sandbox_work_dir: self.sandbox_work_dir.clone(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_sandbox_work_dir(&self, sandbox_work_dir: Option<PathBuf>) -> Self {
+        Self {
+            sandbox_work_dir,
+            ..self.clone()
+        }
+    }
+}
 
 /// Services shared across workflow phases.
 ///
@@ -37,6 +87,7 @@ pub struct RunServices {
     pub emitter:                 Arc<Emitter>,
     pub sandbox:                 Arc<dyn Sandbox>,
     pub hook_runner:             Option<Arc<HookRunner>>,
+    pub locations:               RunLocations,
     pub(crate) cancel_token:     CancellationToken,
     pub provider_id:             ProviderId,
     pub model:                   String,
@@ -54,6 +105,7 @@ impl RunServices {
         emitter: Arc<Emitter>,
         sandbox: Arc<dyn Sandbox>,
         hook_runner: Option<Arc<HookRunner>>,
+        locations: RunLocations,
         cancel_token: CancellationToken,
         provider_id: ProviderId,
         model: String,
@@ -68,6 +120,7 @@ impl RunServices {
             emitter,
             sandbox,
             hook_runner,
+            locations,
             cancel_token,
             provider_id,
             model,
@@ -93,7 +146,11 @@ impl RunServices {
             return HookDecision::Proceed;
         };
         runner
-            .run(hook_context, Arc::clone(&self.sandbox), None)
+            .run(
+                hook_context,
+                Arc::clone(&self.sandbox),
+                self.locations.hook_execution_context(),
+            )
             .await
     }
 
@@ -115,8 +172,12 @@ impl RunServices {
 
     #[must_use]
     pub fn with_sandbox(self: &Arc<Self>, sandbox: Arc<dyn Sandbox>) -> Arc<Self> {
+        let locations = self
+            .locations
+            .with_sandbox_work_dir(Some(PathBuf::from(sandbox.working_directory())));
         Arc::new(Self {
             sandbox,
+            locations,
             ..self.as_ref().clone()
         })
     }
@@ -239,15 +300,18 @@ impl EngineServices {
         })
         .join()
         .expect("test run store thread should join");
+        let sandbox: Arc<dyn Sandbox> = Arc::new(fabro_agent::LocalSandbox::new(
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        ));
+        let locations = RunLocations::for_sandbox(None, sandbox.as_ref(), PathBuf::from("."));
 
         Self {
             run:             RunServices::new(
                 run_store.into(),
                 Arc::new(Emitter::default()),
-                Arc::new(fabro_agent::LocalSandbox::new(
-                    std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-                )),
+                sandbox,
                 None,
+                locations,
                 CancellationToken::new(),
                 ProviderId::anthropic(),
                 "claude-sonnet-4-6".to_string(),

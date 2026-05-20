@@ -27,6 +27,16 @@ use crate::outcome::{Outcome, OutcomeExt};
 pub use crate::services::{EngineServices, RunServices};
 
 /// The handler interface for node execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeTimeoutPolicy {
+    /// The workflow executor wraps the whole handler future in the node
+    /// timeout.
+    ExecutorEnforced,
+    /// The handler consumes the node timeout and is responsible for surfacing
+    /// timeout-specific outcome and events.
+    HandlerManaged,
+}
+
 #[async_trait]
 pub trait Handler: Send + Sync {
     async fn execute(
@@ -55,6 +65,10 @@ pub trait Handler: Send + Sync {
     /// Default implementation retries transient errors only.
     fn should_retry(&self, err: &Error) -> bool {
         err.is_retryable()
+    }
+
+    fn node_timeout_policy(&self, _node: &Node) -> NodeTimeoutPolicy {
+        NodeTimeoutPolicy::ExecutorEnforced
     }
 
     async fn shutdown(&self, _emitter: &Arc<Emitter>) {}
@@ -179,8 +193,10 @@ pub fn default_registry(
 #[cfg(test)]
 mod tests {
     use fabro_graphviz::graph::AttrValue;
+    use fabro_interview::AutoApproveInterviewer;
 
     use super::*;
+    use crate::handler::agent::CodergenBackend;
 
     struct TestHandler {
         _name: String,
@@ -259,6 +275,50 @@ mod tests {
         };
         assert!(handler.should_retry(&Error::handler("timeout".to_string())));
         assert!(!handler.should_retry(&Error::Parse("bad".to_string())));
+    }
+
+    #[test]
+    fn timeout_policy_defaults_to_executor_enforced() {
+        let handler = TestHandler {
+            _name: "test".to_string(),
+        };
+        let node = Node::new("work");
+
+        assert_eq!(
+            handler.node_timeout_policy(&node),
+            NodeTimeoutPolicy::ExecutorEnforced
+        );
+    }
+
+    #[test]
+    fn built_in_handlers_that_consume_node_timeout_manage_it_themselves() {
+        let node = Node::new("work");
+        let human = human::HumanHandler::new(Arc::new(AutoApproveInterviewer::engine()));
+        let acp = llm::AgentAcpBackend::new();
+
+        assert_eq!(
+            human.node_timeout_policy(&node),
+            NodeTimeoutPolicy::HandlerManaged
+        );
+        assert_eq!(
+            command::CommandHandler.node_timeout_policy(&node),
+            NodeTimeoutPolicy::HandlerManaged
+        );
+        assert_eq!(
+            acp.node_timeout_policy(&node),
+            NodeTimeoutPolicy::HandlerManaged
+        );
+    }
+
+    #[test]
+    fn agent_handler_delegates_timeout_policy_to_backend() {
+        let node = Node::new("work");
+        let handler = agent::AgentHandler::new(Some(Box::new(llm::AgentAcpBackend::new())));
+
+        assert_eq!(
+            handler.node_timeout_policy(&node),
+            NodeTimeoutPolicy::HandlerManaged
+        );
     }
 
     struct NeverRetryHandler;

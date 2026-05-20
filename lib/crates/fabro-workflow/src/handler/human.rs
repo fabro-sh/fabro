@@ -6,11 +6,11 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
-use fabro_interview::{Answer, AnswerValue, Interviewer, Question};
+use fabro_interview::{Answer, AnswerValue, Interviewer, Question, ask_with_timeout};
 use fabro_types::{BlockedReason, InterviewOption, Principal, QuestionType, SystemActorKind};
 use ulid::Ulid;
 
-use super::{EngineServices, Handler};
+use super::{EngineServices, Handler, NodeTimeoutPolicy};
 use crate::context::{Context, keys};
 use crate::error::Error;
 use crate::event::{Emitter, Event, StageScope};
@@ -28,6 +28,12 @@ struct ChoiceMatch<'a> {
     route:          &'a Choice,
     selected_key:   String,
     selected_label: String,
+}
+
+struct HumanGateQuestion {
+    choices:         Vec<Choice>,
+    freeform_target: Option<String>,
+    question:        Question,
 }
 
 /// Parse an accelerator key from a label.
@@ -71,6 +77,65 @@ fn parse_accelerator_key(label: &str) -> String {
         .next()
         .map(|c| c.to_string())
         .unwrap_or_default()
+}
+
+fn build_human_gate_question(
+    node: &Node,
+    context: &Context,
+    graph: &Graph,
+) -> Result<HumanGateQuestion, String> {
+    let edges = graph.outgoing_edges(&node.id);
+    let mut freeform_target: Option<String> = None;
+    let mut choices: Vec<Choice> = Vec::new();
+
+    for edge in &edges {
+        if edge.freeform() {
+            freeform_target = Some(edge.to.clone());
+            continue;
+        }
+        let label = edge.label().filter(|l| !l.is_empty()).unwrap_or(&edge.to);
+        let key = parse_accelerator_key(label);
+        choices.push(Choice {
+            key,
+            label: label.to_string(),
+            to: edge.to.clone(),
+        });
+    }
+
+    if choices.is_empty() && freeform_target.is_none() {
+        return Err("No outgoing edges for human gate".to_string());
+    }
+
+    let question_type = question_type_for_node(node, choices.is_empty())?;
+    let mut question = Question::new(node.label(), question_type);
+    question.id = Ulid::new().to_string();
+    question.options = choices
+        .iter()
+        .map(|choice| InterviewOption {
+            key:   choice.key.clone(),
+            label: choice.label.clone(),
+        })
+        .collect();
+    question.allow_freeform = freeform_target.is_some();
+    question.stage.clone_from(&node.id);
+    question.timeout_seconds = node.timeout().map(|duration| duration.as_secs_f64());
+
+    if let Some(serde_json::Value::String(last_node)) = context.get(keys::LAST_STAGE) {
+        if let Some(serde_json::Value::String(response)) =
+            context.get(&keys::response_key(&last_node))
+        {
+            let text = response.trim();
+            if !text.is_empty() {
+                question.context_display = Some(text.to_owned());
+            }
+        }
+    }
+
+    Ok(HumanGateQuestion {
+        choices,
+        freeform_target,
+        question,
+    })
 }
 
 /// Refcount of open interviews for this handler's run. Emits `run.blocked`
@@ -206,64 +271,17 @@ impl Handler for HumanHandler {
         _run_dir: &Path,
         services: &EngineServices,
     ) -> Result<Outcome, Error> {
-        // 1. Derive choices from outgoing edges
-        let edges = graph.outgoing_edges(&node.id);
-        let mut freeform_target: Option<String> = None;
-        let mut choices: Vec<Choice> = Vec::new();
-
-        for edge in &edges {
-            if edge.freeform() {
-                freeform_target = Some(edge.to.clone());
-                continue;
-            }
-            let label = edge.label().filter(|l| !l.is_empty()).unwrap_or(&edge.to);
-            let key = parse_accelerator_key(label);
-            choices.push(Choice {
-                key,
-                label: label.to_string(),
-                to: edge.to.clone(),
-            });
-        }
-
-        if choices.is_empty() && freeform_target.is_none() {
-            return Ok(Outcome::fail_deterministic(
-                "No outgoing edges for human gate",
-            ));
-        }
-
-        // 2. Build question
-        let options: Vec<InterviewOption> = choices
-            .iter()
-            .map(|c| InterviewOption {
-                key:   c.key.clone(),
-                label: c.label.clone(),
-            })
-            .collect();
-
-        let question_type = match question_type_for_node(node, choices.is_empty()) {
-            Ok(question_type) => question_type,
+        let HumanGateQuestion {
+            choices,
+            freeform_target,
+            question,
+        } = match build_human_gate_question(node, context, graph) {
+            Ok(question) => question,
             Err(reason) => return Ok(Outcome::fail_deterministic(reason)),
         };
-        let mut question = Question::new(node.label(), question_type);
-        question.id = Ulid::new().to_string();
-        question.options = options;
-        question.allow_freeform = freeform_target.is_some();
-        question.stage.clone_from(&node.id);
 
-        // Look up the prior node's full response
-        if let Some(serde_json::Value::String(last_node)) = context.get(keys::LAST_STAGE) {
-            if let Some(serde_json::Value::String(response)) =
-                context.get(&keys::response_key(&last_node))
-            {
-                let text = response.trim();
-                if !text.is_empty() {
-                    question.context_display = Some(text.to_owned());
-                }
-            }
-        }
-
-        // 3. Present to interviewer
-        let question_text = node.label().to_string();
+        // Present to interviewer
+        let question_text = question.text.clone();
         let question_id = question.id.clone();
         let stage_scope = StageScope::for_handler(context, &node.id);
         self.emit(
@@ -290,11 +308,11 @@ impl Handler for HumanHandler {
         self.tracker
             .interview_started(services.run.emitter.as_ref());
         let interview_start = Instant::now();
-        let answer_submission = self.interviewer.ask(question).await;
+        let answer_submission = ask_with_timeout(self.interviewer.as_ref(), question).await;
         let answer_actor = answer_submission.actor.clone();
         let answer = answer_submission.answer;
 
-        // 4. Handle timeout
+        // Handle timeout
         if answer.value == AnswerValue::Timeout {
             self.emit(
                 &services.run.emitter,
@@ -334,7 +352,7 @@ impl Handler for HumanHandler {
             return Err(Error::Cancelled);
         }
 
-        // 5. Handle unanswered / interrupted interview sessions.
+        // Handle unanswered / interrupted interview sessions.
         if answer.value == AnswerValue::Interrupted {
             if services.run.cancel_token().is_cancelled() {
                 return Err(Error::Cancelled);
@@ -391,7 +409,7 @@ impl Handler for HumanHandler {
         self.tracker
             .interview_resolved(services.run.emitter.as_ref());
 
-        // 6. Try fixed-choice match
+        // Try fixed-choice match
         if let Some(selected) = find_choice_match(&answer, &choices) {
             let mut outcome = make_choice_outcome(
                 &selected.selected_key,
@@ -408,7 +426,7 @@ impl Handler for HumanHandler {
             return Ok(outcome);
         }
 
-        // 7. Freeform fallback
+        // Freeform fallback
         if let Some(freeform_to) = &freeform_target {
             let text = answer_text(&answer);
             let mut outcome = Outcome::success();
@@ -433,7 +451,7 @@ impl Handler for HumanHandler {
             return Ok(outcome);
         }
 
-        // 8. Fallback to first choice
+        // Fallback to first choice
         if let Some(first) = choices.first() {
             let mut outcome = make_choice_outcome(&first.key, &first.label, &first.to);
             add_answer_context(
@@ -447,6 +465,10 @@ impl Handler for HumanHandler {
         }
 
         Ok(Outcome::fail_deterministic("No matching choice"))
+    }
+
+    fn node_timeout_policy(&self, _node: &Node) -> NodeTimeoutPolicy {
+        NodeTimeoutPolicy::HandlerManaged
     }
 }
 
@@ -600,6 +622,7 @@ fn answer_text(answer: &Answer) -> String {
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
+    use std::time::Duration;
 
     use fabro_graphviz::graph::{AttrValue, Edge};
     use fabro_interview::{AutoApproveInterviewer, CallbackInterviewer, RecordingInterviewer};
@@ -1006,6 +1029,51 @@ mod tests {
             outcome.context_updates.get("human.gate.gate.answer"),
             Some(&serde_json::json!("yes"))
         );
+    }
+
+    #[tokio::test]
+    async fn wait_human_copies_node_timeout_to_question_and_started_event() {
+        let inner = Box::new(AutoApproveInterviewer::engine());
+        let recorder = Arc::new(RecordingInterviewer::new(inner));
+        let handler = HumanHandler::new(recorder.clone());
+        let mut graph = build_graph_with_human_gate();
+        let timeout = Duration::from_millis(125);
+        let timeout_seconds = timeout.as_secs_f64();
+        graph
+            .nodes
+            .get_mut("gate")
+            .unwrap()
+            .attrs
+            .insert("timeout".to_string(), AttrValue::Duration(timeout));
+        let node = graph.nodes.get("gate").unwrap();
+        let context = Context::new();
+        let run_dir = Path::new("/tmp/test");
+        let events = Arc::new(Mutex::new(Vec::new()));
+
+        handler
+            .execute(
+                node,
+                &context,
+                &graph,
+                run_dir,
+                &make_services_with_events(Arc::clone(&events)),
+            )
+            .await
+            .unwrap();
+
+        let recordings = recorder.recordings();
+        assert_eq!(recordings.len(), 1);
+        assert_eq!(recordings[0].0.timeout_seconds, Some(timeout_seconds));
+
+        let started_timeout = events
+            .lock()
+            .expect("event log lock poisoned")
+            .iter()
+            .find_map(|event| match &event.body {
+                EventBody::InterviewStarted(props) => props.timeout_seconds,
+                _ => None,
+            });
+        assert_eq!(started_timeout, Some(timeout_seconds));
     }
 
     #[tokio::test]

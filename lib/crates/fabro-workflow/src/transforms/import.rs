@@ -7,7 +7,7 @@ use fabro_graphviz::parser;
 use fabro_template::TemplateContext;
 use fabro_validate::Diagnostic;
 
-use super::file_inlining::template_include_loader;
+use super::file_inlining::template_render_store;
 use super::{FileInliningTransform, Transform};
 use crate::error::Error;
 use crate::file_resolver::{FileResolver, ResolvedFile};
@@ -676,10 +676,12 @@ impl ImportTransform {
         let mut ignored_goal_diagnostics = Vec::new();
         let goal_target = TemplateRenderTarget::graph_attr(self.source_name.clone(), "goal")
             .with_source_text(self.source_text.as_deref(), graph.goal())
-            .with_include_loader(Some(template_include_loader(
-                self.current_dir.clone(),
+            .with_template_store(template_render_store(
+                &self.current_dir,
                 Arc::clone(&self.resolver),
-            )));
+                self.source_name.as_deref(),
+                graph.goal(),
+            )?);
         let parent_goal = render_template_for_target(
             graph.goal(),
             &path_ctx,

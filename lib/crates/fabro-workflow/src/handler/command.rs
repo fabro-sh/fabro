@@ -5,7 +5,7 @@ use fabro_agent::CommandOutputCallback;
 use fabro_graphviz::graph::{Graph, Node};
 use fabro_types::CommandTermination;
 
-use super::{EngineServices, Handler};
+use super::{EngineServices, Handler, NodeTimeoutPolicy};
 use crate::command_log::CommandLogRecorder;
 use crate::context::{Context, keys};
 use crate::error::Error;
@@ -192,6 +192,10 @@ impl Handler for CommandHandler {
             );
             Ok(outcome)
         }
+    }
+
+    fn node_timeout_policy(&self, _node: &Node) -> NodeTimeoutPolicy {
+        NodeTimeoutPolicy::HandlerManaged
     }
 }
 

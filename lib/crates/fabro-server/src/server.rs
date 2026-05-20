@@ -30,13 +30,13 @@ pub use fabro_api::types::{
     DeleteSecretRequest, DiskUsageResponse, DiskUsageRunRow, DiskUsageSummaryRow, ForkRequest,
     ForkResponse, LinkRunPullRequestRequest, MergeRunPullRequestRequest,
     MergeRunPullRequestResponse, ModelReference, PaginatedEventList, PaginatedRunList,
-    PaginationMeta, PreflightResponse, PreviewUrlRequest, PreviewUrlResponse, PruneRunEntry,
-    PruneRunsRequest, PruneRunsResponse, RenderWorkflowGraphDirection, RenderWorkflowGraphRequest,
-    RewindRequest, RewindResponse, RunArtifactEntry, RunArtifactListResponse, RunBilling,
-    RunBillingStage, RunBillingTotals, RunError, RunManifest, RunStage, SandboxDetails,
-    SandboxFileEntry, SandboxFileListResponse, SandboxService, SandboxServiceListResponse,
-    SshAccessRequest, SshAccessResponse, StageHandler, StageState, StartRunRequest,
-    SubmitAnswerRequest, SystemFeatures, SystemInfoResponse, SystemRepairRunIssue,
+    PaginationMeta, PreflightResponse, PreviewUrlRequest, PreviewUrlResponse, Provider,
+    ProviderList, PruneRunEntry, PruneRunsRequest, PruneRunsResponse, RenderWorkflowGraphDirection,
+    RenderWorkflowGraphRequest, RewindRequest, RewindResponse, RunArtifactEntry,
+    RunArtifactListResponse, RunBilling, RunBillingStage, RunBillingTotals, RunError, RunManifest,
+    RunStage, SandboxDetails, SandboxFileEntry, SandboxFileListResponse, SandboxService,
+    SandboxServiceListResponse, SshAccessRequest, SshAccessResponse, StageHandler, StageState,
+    StartRunRequest, SubmitAnswerRequest, SystemFeatures, SystemInfoResponse, SystemRepairRunIssue,
     SystemRepairRunsResponse, SystemRunCounts, TimelineEntryResponse, VncPreviewResponse,
     WriteBlobResponse,
 };
@@ -708,6 +708,11 @@ impl AppState {
 
     pub(crate) async fn resolve_llm_client(&self) -> anyhow::Result<LlmClientResult> {
         resolve_llm_client_from_source(self.llm_source.as_ref(), self.catalog()).await
+    }
+
+    pub(crate) async fn configured_llm_provider_ids(&self) -> Vec<ProviderId> {
+        let catalog = self.catalog();
+        self.llm_source.configured_providers(catalog.as_ref()).await
     }
 
     pub(crate) async fn ready_llm_provider_ids(&self) -> Vec<ProviderId> {
