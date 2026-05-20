@@ -74,7 +74,7 @@
 - Modify event files: `lib/crates/fabro-workflow/src/event/events.rs`, `names.rs`, `convert.rs`, and `stored_fields.rs` for `agent.acp.*`.
 - Modify fork replay: `lib/crates/fabro-workflow/src/operations/fork.rs` so ACP provider metadata and terminal status survive fork projection rebuilds.
 - Modify run event/projection files: `lib/crates/fabro-types/src/run_event/mod.rs`, `lib/crates/fabro-types/src/run_event/misc.rs`, and `lib/crates/fabro-store/src/run_state.rs`.
-- Modify server steerability tracking: `lib/crates/fabro-server/src/server.rs`, `lib/crates/fabro-server/src/server/handler/steer.rs`, and `lib/crates/fabro-server/src/server/tests.rs` so currently running ACP stages are treated as non-steerable like CLI-backed stages instead of allowing buffered API steering.
+- Modify server steerability tracking: `lib/crates/fabro-server/src/server.rs`, `lib/crates/fabro-server/src/server/handler/steer.rs`, and `lib/crates/fabro-server/src/server/tests.rs` so currently running ACP stages register a live steerable session through `agent.session.activated`, while CLI-backed stages remain non-steerable until a real control channel exists.
 - Modify docs: `docs/public/reference/dot-language.mdx`, `docs/public/core-concepts/agents.mdx`, and any CLI/backend reference that currently says only `api`/`cli`.
 - Add/update tests in `lib/crates/fabro-acp/tests/`, `lib/crates/fabro-sandbox` unit tests, `lib/crates/fabro-workflow/tests/it/integration.rs`, `lib/crates/fabro-store/src/run_state.rs`, `lib/crates/fabro-server/src/server/tests.rs`, and `lib/crates/fabro-cli/tests/it/workflow/`.
 
@@ -928,10 +928,15 @@ Add a fork replay test proving ACP provider metadata survives replay:
 - `agent.acp.started` is included by `replay_event_for_fork_projection`
 - `agent.acp.cancelled` and `agent.acp.timed_out` are included for terminal metadata, matching the existing CLI terminal-event behavior
 
-Add server tests proving an active ACP stage is non-steerable:
+Historical note: this plan originally treated ACP stages as non-steerable. That
+classification was superseded by the ACP steering follow-up work; ACP now uses
+the same live steering control path as API-backed sessions.
 
-- after `agent.acp.started`, `/runs/{id}/steer` returns a conflict when no API-mode session is active
-- after `agent.acp.completed`, `agent.acp.cancelled`, `agent.acp.timed_out`, `stage.completed`, or `stage.failed`, the non-steerable active-stage marker is cleared
+Add server tests proving an active ACP stage is steerable once a live ACP
+control session emits `agent.session.activated` with `steer` capability:
+
+- after ACP activation, `/runs/{id}/steer` returns `202 ACCEPTED`
+- after `agent.acp.completed`, `agent.acp.cancelled`, `agent.acp.timed_out`, `stage.completed`, or `stage.failed`, the active steerable-stage marker is cleared
 
 - [ ] **Step 4: Run tests to verify they fail**
 
@@ -980,11 +985,12 @@ Update `operations/fork.rs` to replay `AgentAcpStarted`, `AgentAcpCancelled`, an
 
 - [ ] **Step 7: Implement server steerability tracking**
 
-Treat ACP-backed stages as active non-steerable agent stages while they are running:
+Treat ACP-backed stages as active steerable agent stages while a live ACP
+control session is registered:
 
-- add `EventBody::AgentAcpStarted(_)` to the same active-stage set currently used for CLI-backed stages, or rename the set to a neutral `active_non_steerable_agent_stages` if the surrounding code becomes clearer
+- add `EventBody::AgentSessionActivated(_)` with `SessionCapability::Steer` to the active steerable-stage set for ACP just like API-backed sessions
 - remove the stage on `AgentAcpCompleted`, `AgentAcpCancelled`, `AgentAcpTimedOut`, `StageCompleted`, and `StageFailed`
-- update the conflict message/code only if needed to avoid saying "CLI-mode" for an ACP-only active stage; tests should assert the API returns a clear non-steerable-agent conflict
+- keep CLI/non-control backends in the non-steerable set until they have a real control channel
 
 - [ ] **Step 8: Run tests to verify they pass**
 
@@ -1283,5 +1289,5 @@ Expected: clean worktree.
 - **Model drift:** stable ACP does not standardize model selection. Do not pretend node `model` was sent to the ACP agent unless the implementation actually supports it through an explicit command/config mechanism.
 - **Event projection drift:** ACP events must set `mode="acp"` independently from CLI projection helpers.
 - **Missing stored fields or fork replay:** ACP events must populate stage-scoped stored fields and fork replay rules. Otherwise provider metadata may be emitted correctly but fail to attach to the stage projection or disappear after a fork.
-- **Incorrect steerability while ACP is running:** ACP-backed stages are not API-mode steerable in this cutover. The server must treat active ACP stages as non-steerable agent stages so steer requests do not get buffered as if an API session might appear.
+- **Steering regression while ACP is running:** ACP-backed stages are steerable only while their live ACP control session is registered. The server must treat those `agent.session.activated` leases as steerable and still clear them on ACP terminal events.
 - **Credential regression:** ACP must use the same credential resolver path as CLI mode so vault-backed installs do not fall back to missing host env vars.

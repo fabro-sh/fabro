@@ -28,7 +28,7 @@ enum RunControlRequest {
 }
 
 impl RunControlRequest {
-    const fn requires_active_api_session(&self) -> bool {
+    const fn requires_active_steerable_session(&self) -> bool {
         matches!(self, Self::Interrupt | Self::InterruptThenSteer { .. })
     }
 }
@@ -113,11 +113,11 @@ async fn control_run(
                     RunStatus::Running => {}
                 }
                 // Steerability predicate. Best-effort, target-oriented:
-                //   - If at least one API-mode session is active → forward.
+                //   - If at least one steerable session is active → forward.
                 //   - Else if no agent stages are active at all → forward (worker hub buffers
                 //     for the next session).
                 //   - Else (active agents exist but all are non-steerable) → 409.
-                if managed_run.active_api_stages.is_empty()
+                if managed_run.active_steerable_stages.is_empty()
                     && !managed_run.active_non_steerable_agent_stages.is_empty()
                 {
                     return ApiError::with_code(
@@ -127,12 +127,13 @@ async fn control_run(
                     )
                     .into_response();
                 }
-                if managed_run.active_api_stages.is_empty() && control.requires_active_api_session()
+                if managed_run.active_steerable_stages.is_empty()
+                    && control.requires_active_steerable_session()
                 {
                     return ApiError::with_code(
                         StatusCode::CONFLICT,
-                        "Run has no active API-mode agent session.",
-                        "no_active_api_session",
+                        "Run has no active steerable agent session.",
+                        "no_active_steerable_session",
                     )
                     .into_response();
                 }

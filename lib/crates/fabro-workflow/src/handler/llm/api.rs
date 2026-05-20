@@ -5,8 +5,8 @@ use async_trait::async_trait;
 use fabro_agent::subagent::{SessionFactory, SubAgentManager};
 use fabro_agent::{
     AgentEvent, AgentProfile, AnthropicProfile, CompletionCoordinator, GeminiProfile,
-    Message as AgentMessage, OpenAiProfile, Sandbox, Session, SessionControlHandle, SessionOptions,
-    StaticEnvProvider, ToolEnvProvider,
+    Message as AgentMessage, OpenAiProfile, Sandbox, Session, SessionOptions, StaticEnvProvider,
+    ToolEnvProvider,
 };
 use fabro_auth::{CredentialSource, EnvCredentialSource};
 use fabro_graphviz::graph::{AttrValue, Node};
@@ -31,7 +31,7 @@ use crate::context::keys::Fidelity;
 use crate::error::Error;
 use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::billed_model_usage_from_llm;
-use crate::steering_hub::SteeringHub;
+use crate::steering_hub::{ActiveControlHandle, SteeringHub};
 
 /// Spawn a task that, when the run-level token cancels, sets the agent
 /// `Session`'s interrupt reason to `Cancelled` and cancels the session token.
@@ -573,7 +573,7 @@ impl AgentApiBackend {
         thread_id: Option<&str>,
         emitter: &Arc<Emitter>,
     ) -> Result<Arc<ActivationLease>, Error> {
-        let handle = session.control_handle();
+        let handle = Arc::new(session.control_handle()) as Arc<dyn ActiveControlHandle>;
         let lease = ActivationLease::activate(
             ActivationLeaseOptions {
                 stage_id:     stage_id.clone(),
@@ -1125,7 +1125,7 @@ impl CodergenBackend for AgentApiBackend {
 /// "close-the-door" pattern: detach only if the queue is empty, otherwise
 /// report `true` so the loop drains.
 struct SteeringCompletionCoordinator {
-    handle: SessionControlHandle,
+    handle: Arc<dyn ActiveControlHandle>,
     lease:  Mutex<Option<Arc<ActivationLease>>>,
 }
 
@@ -1135,7 +1135,7 @@ impl CompletionCoordinator for SteeringCompletionCoordinator {
         let Some(active_lease) = lease.as_ref() else {
             return false;
         };
-        if active_lease.release_if_no_pending_control_work(&self.handle) {
+        if active_lease.release_if_no_pending_control_work(self.handle.as_ref()) {
             lease.take();
             false
         } else {

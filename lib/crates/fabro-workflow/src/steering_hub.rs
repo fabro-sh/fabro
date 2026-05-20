@@ -1,8 +1,8 @@
 //! Bridge between the worker's HTTP control plane and live agent
 //! `Session`s. The hub owns:
 //!
-//! - A map of currently steerable API-mode sessions, keyed by `StageId` →
-//!   active `(session_id, SessionControlHandle)` entries.
+//! - A map of currently steerable live sessions, keyed by `StageId` → active
+//!   `(session_id, ActiveControlHandle)` entries.
 //! - A bounded run-wide pending buffer for steers that arrive when no session
 //!   is registered (between stages, before the first agent stage, or after a
 //!   session ends but before the next registers).
@@ -19,7 +19,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
 
-use fabro_agent::{SessionControlHandle, SteeringItem};
+use fabro_agent::SessionControlHandle;
 use fabro_types::run_event::AgentSteerDroppedReason;
 use fabro_types::{Principal, StageId};
 
@@ -33,6 +33,33 @@ pub const PER_SESSION_QUEUE_CAP: usize = 32;
 /// Overflow evicts the oldest entry (FIFO) and emits `agent.steer.dropped`.
 pub const PER_RUN_PENDING_CAP: usize = 32;
 
+pub type ControlItem = (String, Option<Principal>);
+
+pub trait ActiveControlHandle: Send + Sync {
+    fn enqueue_bounded(&self, item: ControlItem, cap: usize) -> Option<ControlItem>;
+    fn interrupt(&self, actor: Option<Principal>);
+    fn interrupt_then_enqueue_bounded(&self, item: ControlItem, cap: usize) -> Option<ControlItem>;
+    fn has_pending_control_work(&self) -> bool;
+}
+
+impl ActiveControlHandle for SessionControlHandle {
+    fn enqueue_bounded(&self, item: ControlItem, cap: usize) -> Option<ControlItem> {
+        Self::enqueue_bounded(self, item, cap)
+    }
+
+    fn interrupt(&self, actor: Option<Principal>) {
+        Self::interrupt(self, actor);
+    }
+
+    fn interrupt_then_enqueue_bounded(&self, item: ControlItem, cap: usize) -> Option<ControlItem> {
+        Self::interrupt_then_enqueue_bounded(self, item, cap)
+    }
+
+    fn has_pending_control_work(&self) -> bool {
+        Self::has_pending_control_work(self)
+    }
+}
+
 #[derive(Debug, Clone)]
 struct PendingSteer {
     text:  String,
@@ -41,7 +68,7 @@ struct PendingSteer {
 
 #[derive(Clone)]
 struct ActiveEntry {
-    handle:     SessionControlHandle,
+    handle:     Arc<dyn ActiveControlHandle>,
     session_id: String,
 }
 
@@ -87,24 +114,24 @@ impl SteeringHub {
         self.active.read().expect("active lock poisoned").len()
     }
 
-    /// Attach an API-mode session as steerable for this stage. Returns
+    /// Attach a live backend session as steerable for this stage. Returns
     /// `false` when a different session is already active for the stage.
     pub fn attach_handle(
         &self,
         stage_id: &StageId,
         session_id: &str,
-        handle: &SessionControlHandle,
+        handle: Arc<dyn ActiveControlHandle>,
     ) -> bool {
         let mut active = self.active.write().expect("active lock poisoned");
         match active.get_mut(stage_id) {
             Some(entry) if entry.session_id != session_id => false,
             Some(entry) => {
-                entry.handle = handle.clone();
+                entry.handle = handle;
                 true
             }
             None => {
                 active.insert(stage_id.clone(), ActiveEntry {
-                    handle:     handle.clone(),
+                    handle,
                     session_id: session_id.to_string(),
                 });
                 true
@@ -113,7 +140,7 @@ impl SteeringHub {
     }
 
     /// Drain pending run-wide steers into `handle`.
-    pub fn drain_pending_into(&self, stage_id: &StageId, handle: &SessionControlHandle) {
+    pub fn drain_pending_into(&self, stage_id: &StageId, handle: &dyn ActiveControlHandle) {
         let pending: Vec<PendingSteer> = {
             let mut pending = self.pending.lock().expect("pending lock poisoned");
             pending.drain(..).collect()
@@ -150,7 +177,7 @@ impl SteeringHub {
         &self,
         stage_id: &StageId,
         session_id: &str,
-        handle: &SessionControlHandle,
+        handle: &dyn ActiveControlHandle,
     ) -> bool {
         let mut active = self.active.write().expect("active lock poisoned");
         let Some(entry) = active.get(stage_id) else {
@@ -207,7 +234,7 @@ impl SteeringHub {
         // Broadcast to every active session.
         for (stage_id, entry) in active.iter() {
             Self::enqueue_into_session_queue(
-                &entry.handle,
+                entry.handle.as_ref(),
                 (text.clone(), actor.clone()),
                 &self.emitter,
                 Some(stage_id),
@@ -215,7 +242,7 @@ impl SteeringHub {
         }
     }
 
-    /// Interrupt every active API-mode session. Does not buffer when no
+    /// Interrupt every active steerable session. Does not buffer when no
     /// active session exists.
     pub fn interrupt(&self, actor: Option<&Principal>) {
         let active = self.active.read().expect("active lock poisoned");
@@ -238,7 +265,7 @@ impl SteeringHub {
     }
 
     /// Atomically apply interrupt semantics, then deliver steering text to
-    /// every active API-mode session. Emits persisted run events in the same
+    /// every active steerable session. Emits persisted run events in the same
     /// order.
     pub fn interrupt_then_steer(&self, text: &str, actor: Option<&Principal>) {
         let active = self.active.read().expect("active lock poisoned");
@@ -302,8 +329,8 @@ impl SteeringHub {
     /// emitting `agent.steer.dropped { queue_full }` if the cap is hit.
     /// The push + eviction are atomic under the per-session queue lock.
     fn enqueue_into_session_queue(
-        handle: &SessionControlHandle,
-        item: SteeringItem,
+        handle: &dyn ActiveControlHandle,
+        item: ControlItem,
         emitter: &Emitter,
         stage_id: Option<&StageId>,
     ) {
@@ -326,7 +353,7 @@ mod tests {
     use fabro_agent::SessionControlHandle;
     use fabro_types::{Principal, RunEvent, RunId, StageId, SystemActorKind};
 
-    use super::SteeringHub;
+    use super::{ActiveControlHandle, ControlItem, SteeringHub};
     use crate::event::Emitter;
 
     fn hub_with_event_names() -> (Arc<SteeringHub>, Arc<Mutex<Vec<String>>>) {
@@ -350,6 +377,50 @@ mod tests {
             events_for_listener.lock().unwrap().push(event.clone());
         });
         (Arc::new(SteeringHub::new(emitter)), events)
+    }
+
+    fn control_handle(handle: &SessionControlHandle) -> Arc<dyn ActiveControlHandle> {
+        Arc::new(handle.clone())
+    }
+
+    #[derive(Default)]
+    struct FakeAcpControlHandle {
+        queue:       Mutex<Vec<ControlItem>>,
+        interrupted: Mutex<usize>,
+    }
+
+    impl FakeAcpControlHandle {
+        fn queue_len(&self) -> usize {
+            self.queue.lock().unwrap().len()
+        }
+
+        fn interrupt_count(&self) -> usize {
+            *self.interrupted.lock().unwrap()
+        }
+    }
+
+    impl ActiveControlHandle for FakeAcpControlHandle {
+        fn enqueue_bounded(&self, item: ControlItem, _cap: usize) -> Option<ControlItem> {
+            self.queue.lock().unwrap().push(item);
+            None
+        }
+
+        fn interrupt(&self, _actor: Option<Principal>) {
+            *self.interrupted.lock().unwrap() += 1;
+        }
+
+        fn interrupt_then_enqueue_bounded(
+            &self,
+            item: ControlItem,
+            cap: usize,
+        ) -> Option<ControlItem> {
+            self.interrupt(None);
+            self.enqueue_bounded(item, cap)
+        }
+
+        fn has_pending_control_work(&self) -> bool {
+            !self.queue.lock().unwrap().is_empty()
+        }
     }
 
     #[test]
@@ -404,7 +475,7 @@ mod tests {
 
         let stage = StageId::new("agent-node", 1);
         let handle = SessionControlHandle::new();
-        assert!(hub.attach_handle(&stage, "session-a", &handle));
+        assert!(hub.attach_handle(&stage, "session-a", control_handle(&handle)));
         hub.drain_pending_into(&stage, &handle);
 
         assert_eq!(handle.queue_len(), 2);
@@ -419,8 +490,8 @@ mod tests {
         let stage_b = StageId::new("b", 1);
         let handle_a = SessionControlHandle::new();
         let handle_b = SessionControlHandle::new();
-        assert!(hub.attach_handle(&stage_a, "session-a", &handle_a));
-        assert!(hub.attach_handle(&stage_b, "session-b", &handle_b));
+        assert!(hub.attach_handle(&stage_a, "session-a", control_handle(&handle_a)));
+        assert!(hub.attach_handle(&stage_b, "session-b", control_handle(&handle_b)));
 
         hub.deliver_steer("hello".into(), None);
 
@@ -430,16 +501,38 @@ mod tests {
     }
 
     #[test]
+    fn deliver_broadcasts_to_api_and_acp_control_handles() {
+        let hub = SteeringHub::for_tests();
+        let api_stage = StageId::new("api", 1);
+        let acp_stage = StageId::new("acp", 1);
+        let api_handle = SessionControlHandle::new();
+        let acp_handle = Arc::new(FakeAcpControlHandle::default());
+        assert!(hub.attach_handle(&api_stage, "session-api", control_handle(&api_handle)));
+        assert!(hub.attach_handle(
+            &acp_stage,
+            "session-acp",
+            Arc::clone(&acp_handle) as Arc<dyn ActiveControlHandle>,
+        ));
+
+        hub.deliver_steer("hello".into(), None);
+        hub.interrupt(None);
+
+        assert_eq!(api_handle.queue_len(), 1);
+        assert_eq!(acp_handle.queue_len(), 1);
+        assert_eq!(acp_handle.interrupt_count(), 1);
+    }
+
+    #[test]
     fn attach_rejects_different_session_for_same_stage() {
         let hub = SteeringHub::for_tests();
         let stage = StageId::new("a", 1);
         let handle1 = SessionControlHandle::new();
-        assert!(hub.attach_handle(&stage, "session-a", &handle1));
+        assert!(hub.attach_handle(&stage, "session-a", control_handle(&handle1)));
         hub.deliver_steer("x".into(), None);
         assert_eq!(handle1.queue_len(), 1);
 
         let handle2 = SessionControlHandle::new();
-        assert!(!hub.attach_handle(&stage, "session-b", &handle2));
+        assert!(!hub.attach_handle(&stage, "session-b", control_handle(&handle2)));
         assert_eq!(handle2.queue_len(), 0);
     }
 
@@ -448,7 +541,7 @@ mod tests {
         let hub = SteeringHub::for_tests();
         let stage = StageId::new("a", 1);
         let handle = SessionControlHandle::new();
-        assert!(hub.attach_handle(&stage, "session-a", &handle));
+        assert!(hub.attach_handle(&stage, "session-a", control_handle(&handle)));
 
         assert!(!hub.detach(&stage, "session-b"));
         hub.deliver_steer("still-active".into(), None);
@@ -462,7 +555,7 @@ mod tests {
         let hub = SteeringHub::for_tests();
         let stage = StageId::new("a", 1);
         let handle = SessionControlHandle::new();
-        assert!(hub.attach_handle(&stage, "session-a", &handle));
+        assert!(hub.attach_handle(&stage, "session-a", control_handle(&handle)));
 
         assert!(!hub.detach_if_no_pending_control_work(&stage, "session-b", &handle));
         hub.deliver_steer("queued".into(), None);
@@ -475,7 +568,7 @@ mod tests {
         let hub = SteeringHub::for_tests();
         let stage = StageId::new("a", 1);
         let handle = SessionControlHandle::new();
-        assert!(hub.attach_handle(&stage, "session-a", &handle));
+        assert!(hub.attach_handle(&stage, "session-a", control_handle(&handle)));
 
         assert!(hub.detach_if_no_pending_control_work(&stage, "session-a", &handle));
         assert_eq!(hub.active_count(), 0);
@@ -486,7 +579,7 @@ mod tests {
         let (hub, events) = hub_with_events();
         let stage = StageId::new("a", 1);
         let handle = SessionControlHandle::new();
-        assert!(hub.attach_handle(&stage, "session-a", &handle));
+        assert!(hub.attach_handle(&stage, "session-a", control_handle(&handle)));
 
         hub.interrupt(None);
         hub.interrupt(None);
@@ -513,7 +606,7 @@ mod tests {
         let (hub, events) = hub_with_events();
         let stage = StageId::new("a", 1);
         let handle = SessionControlHandle::new();
-        assert!(hub.attach_handle(&stage, "session-a", &handle));
+        assert!(hub.attach_handle(&stage, "session-a", control_handle(&handle)));
 
         hub.interrupt_then_steer("stop", None);
 
@@ -536,7 +629,7 @@ mod tests {
         let hub = SteeringHub::for_tests();
         let stage = StageId::new("a", 1);
         let handle = SessionControlHandle::new();
-        assert!(hub.attach_handle(&stage, "session-a", &handle));
+        assert!(hub.attach_handle(&stage, "session-a", control_handle(&handle)));
 
         for i in 0..(super::PER_SESSION_QUEUE_CAP + 5) {
             hub.deliver_steer(format!("m{i}"), None);

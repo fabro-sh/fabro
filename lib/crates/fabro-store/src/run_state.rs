@@ -373,7 +373,9 @@ impl RunProjectionReducer for RunProjection {
                 else {
                     return Ok(());
                 };
-                stage.provider_used = Some(provider_used_from_agent_session_activated(props));
+                if !is_acp_session_activation(props) {
+                    stage.provider_used = Some(provider_used_from_agent_session_activated(props));
+                }
             }
             EventBody::AgentAcpStarted(props) => {
                 let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
@@ -849,6 +851,10 @@ fn provider_used_from_agent_session_activated(props: &AgentSessionActivatedProps
     Value::Object(provider_used)
 }
 
+fn is_acp_session_activation(props: &AgentSessionActivatedProps) -> bool {
+    props.provider.as_deref() == Some("acp")
+}
+
 fn provider_used_from_agent_acp_started(props: &AgentAcpStartedProps) -> Value {
     let mut provider_used = serde_json::Map::new();
     provider_used.insert("mode".to_string(), Value::String("acp".to_string()));
@@ -1313,6 +1319,48 @@ mod tests {
                     visit:       1,
                     command:     "python fake_agent.py".to_string(),
                     config_name: Some("fake".to_string()),
+                }),
+                stage_id.clone(),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(
+            stage.provider_used.as_ref().unwrap(),
+            &json!({
+                "mode": "acp",
+                "command": "python fake_agent.py",
+                "config_name": "fake"
+            })
+        );
+    }
+
+    #[test]
+    fn acp_session_activation_preserves_agent_acp_started_provider_used() {
+        let mut state = initialized_projection();
+        let stage_id = StageId::new("code", 1);
+        start_stage(&mut state, &stage_id);
+
+        state
+            .apply_event(&test_stage_event(
+                4,
+                EventBody::AgentAcpStarted(AgentAcpStartedProps {
+                    visit:       1,
+                    command:     "python fake_agent.py".to_string(),
+                    config_name: Some("fake".to_string()),
+                }),
+                stage_id.clone(),
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_stage_event(
+                5,
+                EventBody::AgentSessionActivated(AgentSessionActivatedProps {
+                    thread_id:    None,
+                    provider:     Some("acp".to_string()),
+                    model:        Some("fake".to_string()),
+                    capabilities: vec![fabro_types::SessionCapability::Steer],
+                    visit:        1,
                 }),
                 stage_id.clone(),
             ))

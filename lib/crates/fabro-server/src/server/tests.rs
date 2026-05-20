@@ -8422,7 +8422,7 @@ fn insert_running_control_run(
 }
 
 #[tokio::test]
-async fn steer_without_active_api_session_forwards_plain_steer_for_buffering() {
+async fn steer_without_active_steerable_session_forwards_plain_steer_for_buffering() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
@@ -8450,7 +8450,7 @@ async fn steer_without_active_api_session_forwards_plain_steer_for_buffering() {
 }
 
 #[tokio::test]
-async fn steer_interrupt_without_active_api_session_returns_conflict() {
+async fn steer_interrupt_without_active_steerable_session_returns_conflict() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
@@ -8471,11 +8471,11 @@ async fn steer_interrupt_without_active_api_session_returns_conflict() {
     let response = app.oneshot(req).await.unwrap();
     assert_eq!(response.status(), StatusCode::CONFLICT);
     let body = body_json(response.into_body()).await;
-    assert_eq!(body["errors"][0]["code"], "no_active_api_session");
+    assert_eq!(body["errors"][0]["code"], "no_active_steerable_session");
 }
 
 #[tokio::test]
-async fn interrupt_with_active_api_session_forwards_interrupt() {
+async fn interrupt_with_active_steerable_session_forwards_interrupt() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
@@ -8490,7 +8490,7 @@ async fn interrupt_with_active_api_session_forwards_interrupt() {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         runs.get_mut(&run_id)
             .unwrap()
-            .active_api_stages
+            .active_steerable_stages
             .insert(stage_id, "session-a".to_string());
     }
 
@@ -8512,7 +8512,7 @@ async fn interrupt_with_active_api_session_forwards_interrupt() {
 }
 
 #[tokio::test]
-async fn steer_interrupt_with_active_api_session_forwards_combined_control_message() {
+async fn steer_interrupt_with_active_steerable_session_forwards_combined_control_message() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
@@ -8527,7 +8527,7 @@ async fn steer_interrupt_with_active_api_session_forwards_combined_control_messa
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         runs.get_mut(&run_id)
             .unwrap()
-            .active_api_stages
+            .active_steerable_stages
             .insert(stage_id, "session-a".to_string());
     }
 
@@ -8582,7 +8582,7 @@ async fn interrupt_terminal_run_returns_run_not_interruptible() {
 }
 
 #[test]
-fn active_api_stage_projection_ignores_stale_deactivation() {
+fn active_steerable_stage_projection_ignores_stale_deactivation() {
     let state = test_app_state();
     let run_id = fixtures::RUN_1;
     let temp_dir = tempfile::tempdir().unwrap();
@@ -8637,7 +8637,9 @@ fn active_api_stage_projection_ignores_stale_deactivation() {
     let runs = state.runs.lock().expect("runs lock poisoned");
     let run = runs.get(&run_id).unwrap();
     assert_eq!(
-        run.active_api_stages.get(&stage_id).map(String::as_str),
+        run.active_steerable_stages
+            .get(&stage_id)
+            .map(String::as_str),
         Some("session-b")
     );
 }
@@ -8657,11 +8659,11 @@ fn acp_event_for_stage(run_id: &RunId, event: &workflow_event::Event) -> fabro_t
 }
 
 #[tokio::test]
-async fn steer_with_active_acp_stage_returns_non_steerable_conflict() {
+async fn steer_with_active_acp_session_forwards_to_worker() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
-    let (control_tx, _control_rx) = tokio::sync::mpsc::channel(1);
+    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
     let _temp_dir = insert_running_control_run(
         &state,
         run_id,
@@ -8675,6 +8677,52 @@ async fn steer_with_active_acp_stage_returns_non_steerable_conflict() {
         config_name: None,
     });
     update_live_run_from_event(&state, run_id, &started);
+    let activated =
+        workflow_event::to_run_event(&run_id, &workflow_event::Event::AgentSessionActivated {
+            node_id:      "agent".to_string(),
+            visit:        1,
+            session_id:   "acp-session".to_string(),
+            thread_id:    None,
+            provider:     Some("acp".to_string()),
+            model:        None,
+            capabilities: vec![SessionCapability::Steer],
+        });
+    update_live_run_from_event(&state, run_id, &activated);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api(&format!("/runs/{run_id}/steer")))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"text":"try again"}"#))
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    assert_status!(response, StatusCode::ACCEPTED).await;
+    let envelope = control_rx.recv().await.unwrap();
+    assert!(matches!(
+        envelope.message,
+        WorkerControlMessage::Steer { ref text, .. } if text == "try again"
+    ));
+}
+
+#[tokio::test]
+async fn steer_with_active_non_steerable_agent_stage_returns_conflict() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = fixtures::RUN_1;
+    let (control_tx, _control_rx) = tokio::sync::mpsc::channel(1);
+    let _temp_dir = insert_running_control_run(
+        &state,
+        run_id,
+        Some(RunAnswerTransport::Subprocess { control_tx }),
+    );
+    {
+        let mut runs = state.runs.lock().expect("runs lock poisoned");
+        runs.get_mut(&run_id)
+            .unwrap()
+            .active_non_steerable_agent_stages
+            .insert(StageId::new("agent", 1));
+    }
 
     let req = Request::builder()
         .method("POST")
@@ -8690,7 +8738,7 @@ async fn steer_with_active_acp_stage_returns_non_steerable_conflict() {
 }
 
 #[tokio::test]
-async fn active_acp_stage_marker_clears_on_terminal_paths() {
+async fn active_acp_steerable_marker_clears_on_terminal_paths() {
     let terminal_events: Vec<workflow_event::Event> = vec![
         workflow_event::Event::AgentAcpCompleted {
             node_id:     "agent".to_string(),
@@ -8749,7 +8797,7 @@ async fn active_acp_stage_marker_clears_on_terminal_paths() {
         let state = test_app_state();
         let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id = fixtures::RUN_1;
-        let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
+        let (control_tx, _control_rx) = tokio::sync::mpsc::channel(1);
         let _temp_dir = insert_running_control_run(
             &state,
             run_id,
@@ -8762,23 +8810,30 @@ async fn active_acp_stage_marker_clears_on_terminal_paths() {
             config_name: None,
         });
         update_live_run_from_event(&state, run_id, &started);
+        let activated =
+            workflow_event::to_run_event(&run_id, &workflow_event::Event::AgentSessionActivated {
+                node_id:      "agent".to_string(),
+                visit:        1,
+                session_id:   "acp-session".to_string(),
+                thread_id:    None,
+                provider:     Some("acp".to_string()),
+                model:        None,
+                capabilities: vec![SessionCapability::Steer],
+            });
+        update_live_run_from_event(&state, run_id, &activated);
         let terminal = acp_event_for_stage(&run_id, &terminal_event);
         update_live_run_from_event(&state, run_id, &terminal);
 
         let req = Request::builder()
             .method("POST")
-            .uri(api(&format!("/runs/{run_id}/steer")))
-            .header("content-type", "application/json")
-            .body(Body::from(r#"{"text":"try again"}"#))
+            .uri(api(&format!("/runs/{run_id}/interrupt")))
+            .body(Body::empty())
             .unwrap();
 
         let response = app.oneshot(req).await.unwrap();
-        assert_status!(response, StatusCode::ACCEPTED).await;
-        let envelope = control_rx.recv().await.unwrap();
-        assert!(matches!(
-            envelope.message,
-            WorkerControlMessage::Steer { ref text, .. } if text == "try again"
-        ));
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["errors"][0]["code"], "no_active_steerable_session");
     }
 }
 

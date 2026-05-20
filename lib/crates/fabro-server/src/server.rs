@@ -202,10 +202,10 @@ struct ManagedRun {
     // Populated when running:
     answer_transport: Option<RunAnswerTransport>,
     accepted_questions: HashSet<String>,
-    /// Stage IDs of currently steerable API-mode (SDK) agent sessions,
+    /// Stage IDs of currently steerable live agent sessions,
     /// keyed to the session id that owns the active lease. Used by the
     /// steerability predicate.
-    active_api_stages: HashMap<StageId, String>,
+    active_steerable_stages: HashMap<StageId, String>,
     /// Stage IDs of currently running non-steerable agent sessions, observed
     /// from CLI/ACP start/completion events plus `stage.completed`/
     /// `stage.failed` backstops.
@@ -2045,7 +2045,7 @@ fn octet_stream_response(bytes: Bytes) -> Response {
 fn clear_live_run_state(run: &mut ManagedRun) {
     run.answer_transport = None;
     run.accepted_questions.clear();
-    run.active_api_stages.clear();
+    run.active_steerable_stages.clear();
     run.active_non_steerable_agent_stages.clear();
     run.event_tx = None;
     run.cancel_tx = None;
@@ -2360,7 +2360,7 @@ fn managed_run(
         enqueued_at: Instant::now(),
         answer_transport: None,
         accepted_questions: HashSet::new(),
-        active_api_stages: HashMap::new(),
+        active_steerable_stages: HashMap::new(),
         active_non_steerable_agent_stages: HashSet::new(),
         event_tx: None,
         checkpoint: None,
@@ -2466,7 +2466,7 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
                 reason: props.reason,
             };
             managed_run.error = None;
-            managed_run.active_api_stages.clear();
+            managed_run.active_steerable_stages.clear();
             managed_run.active_non_steerable_agent_stages.clear();
         }
         EventBody::RunFailed(props) => {
@@ -2477,10 +2477,10 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
                 &props.failure.detail.message,
                 &props.failure.detail.causes,
             ));
-            managed_run.active_api_stages.clear();
+            managed_run.active_steerable_stages.clear();
             managed_run.active_non_steerable_agent_stages.clear();
         }
-        // Track API-mode steerable sessions. Activated/deactivated are
+        // Track steerable sessions. Activated/deactivated are
         // leased by session id so stale deactivations cannot clear a newer
         // binding for the same stage.
         EventBody::AgentSessionActivated(props)
@@ -2490,7 +2490,7 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
                 (event.stage_id.as_ref(), event.session_id.as_ref())
             {
                 managed_run
-                    .active_api_stages
+                    .active_steerable_stages
                     .insert(stage_id.clone(), session_id.clone());
             }
         }
@@ -2499,38 +2499,23 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
                 (event.stage_id.as_ref(), event.session_id.as_ref())
             {
                 if managed_run
-                    .active_api_stages
+                    .active_steerable_stages
                     .get(stage_id)
                     .is_some_and(|current| current == session_id)
                 {
-                    managed_run.active_api_stages.remove(stage_id);
+                    managed_run.active_steerable_stages.remove(stage_id);
                 }
             }
         }
-        // Track non-steerable agent stages. ACP started/completed are
-        // coarser and sometimes fail to emit terminal events on error paths;
-        // stage.completed/stage.failed below are the backstops.
-        EventBody::AgentAcpStarted(_) => {
-            if let Some(stage_id) = event.stage_id.as_ref() {
-                managed_run
-                    .active_non_steerable_agent_stages
-                    .insert(stage_id.clone());
-            }
-        }
+        // ACP sessions are steerable via `agent.session.activated`; terminal
+        // ACP events and stage lifecycle events are still backstops for cleanup.
         EventBody::AgentAcpCompleted(_)
         | EventBody::AgentAcpCancelled(_)
-        | EventBody::AgentAcpTimedOut(_) => {
+        | EventBody::AgentAcpTimedOut(_)
+        | EventBody::StageCompleted(_)
+        | EventBody::StageFailed(_) => {
             if let Some(stage_id) = &event.stage_id {
-                managed_run
-                    .active_non_steerable_agent_stages
-                    .remove(stage_id);
-            }
-        }
-        // Stage lifecycle backstop: cover both completion and failure
-        // paths so a failing ACP stage doesn't strand its entry.
-        EventBody::StageCompleted(_) | EventBody::StageFailed(_) => {
-            if let Some(stage_id) = &event.stage_id {
-                managed_run.active_api_stages.remove(stage_id);
+                managed_run.active_steerable_stages.remove(stage_id);
                 managed_run
                     .active_non_steerable_agent_stages
                     .remove(stage_id);

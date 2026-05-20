@@ -1448,9 +1448,9 @@ paths:
       description: |
         Send a mid-run steering message to the live agent session(s) of a
         running run. Set `interrupt=true` to atomically interrupt the active
-        API-mode agent round first, then deliver this message as the next
+        steerable agent round first, then deliver this message as the next
         user turn. Without `interrupt=true`, the message is appended to the
-        steering queue and may buffer until the next API-mode agent session.
+        steering queue and may buffer until the next steerable agent session.
       parameters:
         - $ref: "#/components/parameters/RunId"
       requestBody:
@@ -1508,7 +1508,7 @@ paths:
       tags: [Human-in-the-Loop]
       summary: Interrupt Run
       description: |
-        Interrupt the active API-mode agent round without sending steering
+        Interrupt the active steerable agent round without sending steering
         text. The agent keeps its steering lease and waits for a later steer
         message before starting another LLM round.
       parameters:
@@ -1529,7 +1529,7 @@ paths:
           description: |
             Run is not currently interruptible. Returned when the run is in a
             terminal state, blocked (use the answer endpoint instead), has no
-            active API-mode agent session, or all currently running agent
+            active steerable agent session, or all currently running agent
             stages are CLI-mode.
           headers:
             x-request-id:

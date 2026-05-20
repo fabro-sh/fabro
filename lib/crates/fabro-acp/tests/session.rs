@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use agent_client_protocol::schema::StopReason;
-use fabro_acp::{AcpError, AcpProcessSpec, AcpRunRequest, AcpRunResult, run_acp_turn};
+use fabro_acp::{
+    AcpControlHandle, AcpError, AcpProcessSpec, AcpRunRequest, AcpRunResult, run_acp_turn,
+};
 use fabro_sandbox::test_support::{MockSandbox, MockStdioProcess};
 use fabro_sandbox::{LocalSandbox, Sandbox, shell_quote};
 use fabro_util::error::collect_chain;
@@ -45,6 +48,9 @@ async fn stdio_spawn_failure_returns_sandbox_error() {
         sandbox,
         cancel_token: CancellationToken::new(),
         on_activity: None,
+        control_handle: None,
+        on_natural_completion: None,
+        on_steer_prompt: None,
     })
     .await;
     let Err(error) = result else {
@@ -78,6 +84,9 @@ async fn clean_stdio_exit_after_final_response_completes_turn() {
         sandbox,
         cancel_token: CancellationToken::new(),
         on_activity: None,
+        control_handle: None,
+        on_natural_completion: None,
+        on_steer_prompt: None,
     })
     .await
     .expect("clean ACP process exit should not preempt final protocol response");
@@ -111,6 +120,9 @@ async fn session_lifecycle_initializes_sends_prompt_and_aggregates_text() {
         sandbox,
         cancel_token: CancellationToken::new(),
         on_activity: None,
+        control_handle: None,
+        on_natural_completion: None,
+        on_steer_prompt: None,
     })
     .await
     .expect("run ACP turn");
@@ -122,6 +134,145 @@ async fn session_lifecycle_initializes_sends_prompt_and_aggregates_text() {
             .await
             .expect("read method record"),
         "initialize\nsession/new\nsession/prompt\n"
+    );
+}
+
+#[tokio::test]
+async fn steering_sends_followup_session_prompt_over_acp() {
+    let tempdir = tempfile::tempdir().expect("create tempdir");
+    let script_path = tempdir.path().join("fake_acp_agent.py");
+    let record_path = tempdir.path().join("methods.txt");
+    let steer_prompt_path = tempdir.path().join("steer_prompt.json");
+    write(&script_path, fake_acp_agent_script())
+        .await
+        .expect("write fake ACP agent");
+
+    let raw_command = format!("python3 {}", shell_quote(&script_path.to_string_lossy()));
+    let command = AcpProcessSpec::from_command_attr(&raw_command).expect("parse ACP command");
+    let sandbox: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(tempdir.path().to_path_buf()));
+    let control_handle = AcpControlHandle::new();
+    let handle_for_activity = control_handle.clone();
+    let queued = Arc::new(AtomicBool::new(false));
+    let queued_for_activity = Arc::clone(&queued);
+
+    let result = run_acp_turn(AcpRunRequest {
+        command,
+        prompt: "hello".to_string(),
+        cwd: tempdir.path().to_string_lossy().into_owned(),
+        timeout_ms: Some(ACP_TEST_TIMEOUT_MS),
+        env: HashMap::from([
+            ("ACP_MODE".to_string(), "steer".to_string()),
+            (
+                "ACP_RECORD".to_string(),
+                record_path.to_string_lossy().into_owned(),
+            ),
+            (
+                "ACP_STEER_PROMPT_RECORD".to_string(),
+                steer_prompt_path.to_string_lossy().into_owned(),
+            ),
+        ]),
+        sandbox,
+        cancel_token: CancellationToken::new(),
+        on_activity: Some(Arc::new(move || {
+            if !queued_for_activity.swap(true, Ordering::AcqRel) {
+                handle_for_activity.enqueue_bounded(("please revise".to_string(), None), 32);
+            }
+        })),
+        control_handle: Some(control_handle),
+        on_natural_completion: None,
+        on_steer_prompt: None,
+    })
+    .await
+    .expect("run ACP turn with steering");
+
+    assert_eq!(result.text, "initial steered:please revise");
+    assert_eq!(
+        read_to_string(record_path)
+            .await
+            .expect("read method record"),
+        "initialize\nsession/new\nsession/prompt\nsession/prompt\n"
+    );
+    assert!(
+        read_to_string(steer_prompt_path)
+            .await
+            .expect("read steer prompt")
+            .contains("please revise")
+    );
+}
+
+#[tokio::test]
+async fn interrupt_then_steer_sends_cancel_then_followup_session_prompt_over_acp() {
+    let tempdir = tempfile::tempdir().expect("create tempdir");
+    let script_path = tempdir.path().join("fake_acp_agent.py");
+    let record_path = tempdir.path().join("methods.txt");
+    let cancel_path = tempdir.path().join("cancel.txt");
+    let steer_prompt_path = tempdir.path().join("steer_prompt.json");
+    write(&script_path, fake_acp_agent_script())
+        .await
+        .expect("write fake ACP agent");
+
+    let raw_command = format!("python3 {}", shell_quote(&script_path.to_string_lossy()));
+    let command = AcpProcessSpec::from_command_attr(&raw_command).expect("parse ACP command");
+    let sandbox: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(tempdir.path().to_path_buf()));
+    let control_handle = AcpControlHandle::new();
+    let handle_for_activity = control_handle.clone();
+    let queued = Arc::new(AtomicBool::new(false));
+    let queued_for_activity = Arc::clone(&queued);
+
+    let result = run_acp_turn(AcpRunRequest {
+        command,
+        prompt: "hello".to_string(),
+        cwd: tempdir.path().to_string_lossy().into_owned(),
+        timeout_ms: Some(ACP_TEST_TIMEOUT_MS),
+        env: HashMap::from([
+            ("ACP_MODE".to_string(), "interrupt_steer".to_string()),
+            ("LC_ALL".to_string(), "C".to_string()),
+            (
+                "ACP_RECORD".to_string(),
+                record_path.to_string_lossy().into_owned(),
+            ),
+            (
+                "ACP_CANCEL_RECORD".to_string(),
+                cancel_path.to_string_lossy().into_owned(),
+            ),
+            (
+                "ACP_STEER_PROMPT_RECORD".to_string(),
+                steer_prompt_path.to_string_lossy().into_owned(),
+            ),
+        ]),
+        sandbox,
+        cancel_token: CancellationToken::new(),
+        on_activity: Some(Arc::new(move || {
+            if !queued_for_activity.swap(true, Ordering::AcqRel) {
+                handle_for_activity
+                    .interrupt_then_enqueue_bounded(("please revise".to_string(), None), 32);
+            }
+        })),
+        control_handle: Some(control_handle),
+        on_natural_completion: None,
+        on_steer_prompt: None,
+    })
+    .await
+    .expect("run ACP turn with interrupt and steering");
+
+    assert_eq!(result.text, "interrupted steered:please revise");
+    assert_eq!(
+        read_to_string(record_path)
+            .await
+            .expect("read method record"),
+        "initialize\nsession/new\nsession/prompt\nsession/cancel\nsession/prompt\n"
+    );
+    assert_eq!(
+        read_to_string(cancel_path)
+            .await
+            .expect("read cancel record"),
+        "session/cancel\n"
+    );
+    assert!(
+        read_to_string(steer_prompt_path)
+            .await
+            .expect("read steer prompt")
+            .contains("please revise")
     );
 }
 
@@ -451,7 +602,7 @@ async fn run_fake_agent(
 
 async fn run_fake_agent_with_activity(
     tempdir: &Path,
-    env: HashMap<String, String>,
+    mut env: HashMap<String, String>,
     timeout_ms: Option<u64>,
     cancel_token: CancellationToken,
     on_activity: Option<Arc<dyn Fn() + Send + Sync>>,
@@ -463,6 +614,8 @@ async fn run_fake_agent_with_activity(
     let raw_command = format!("python3 {}", shell_quote(&script_path.to_string_lossy()));
     let command = AcpProcessSpec::from_command_attr(&raw_command).expect("parse ACP command");
     let sandbox: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(tempdir.to_path_buf()));
+    env.entry("LC_ALL".to_string())
+        .or_insert_with(|| "C".to_string());
 
     run_acp_turn(AcpRunRequest {
         command,
@@ -473,6 +626,9 @@ async fn run_fake_agent_with_activity(
         sandbox,
         cancel_token,
         on_activity,
+        control_handle: None,
+        on_natural_completion: None,
+        on_steer_prompt: None,
     })
     .await
 }

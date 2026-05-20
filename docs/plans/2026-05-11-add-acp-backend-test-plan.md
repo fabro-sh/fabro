@@ -228,21 +228,22 @@ The accepted testing strategy still holds, with scoped additions from the implem
     - Expected outcome: `AgentAcpStarted`, `AgentAcpCancelled`, and `AgentAcpTimedOut` are replayed into the fork projection; `AgentAcpCompleted` follows the existing CLI completed replay policy. Source of truth: implementation plan fork replay requirement.
     - Interactions: historical event filtering, forked run projection.
 
-23. **ACP running stages are not steerable through the server API**
+23. **ACP running stages are steerable through the server API**
     - Type: scenario
-    - Disposition: new
+    - Disposition: supersedes the original non-steerable ACP expectation
     - Harness: server event-state harness extension.
-    - Preconditions: a running managed run with worker control channel; no active API-mode agent session; active stage marker has been set by `agent.acp.started`.
+    - Preconditions: a running managed run with worker control channel; active ACP stage has emitted `agent.session.activated` with `steer` capability.
     - Actions: call `POST /runs/{id}/steer` with a plain steer request and with interrupt+steer.
-    - Expected outcome: response is `409 CONFLICT` with a clear non-steerable-agent error code/message; no worker control message is enqueued as if an API session might appear. Source of truth: implementation plan server steerability tracking.
+    - Expected outcome: response is `202 ACCEPTED` and the worker control message is enqueued for the live ACP session. Source of truth: ACP steering follow-up architecture.
     - Interactions: run manager event reducer, HTTP handler, worker control queue.
 
-24. **ACP non-steerable marker clears on all terminal paths**
+24. **ACP steerable marker clears on all terminal paths**
     - Type: invariant
     - Disposition: new
     - Harness: server event-state harness extension.
-    - Preconditions: a running managed run with active ACP stage and no active API-mode stage.
-    - Actions: apply each clearing event independently: `agent.acp.completed`, `agent.acp.cancelled`, `agent.acp.timed_out`, `stage.completed`, and `stage.failed`; then call `POST /runs/{id}/steer` with a plain steer request.
+    - Preconditions: a running managed run with active ACP steerable session.
+    - Actions: apply each clearing event independently: `agent.acp.completed`, `agent.acp.cancelled`, `agent.acp.timed_out`, `stage.completed`, and `stage.failed`; then call `POST /runs/{id}/interrupt`.
+    - Expected outcome: response is `409 CONFLICT` because the live steerable session was cleared; plain future steers may still buffer for the next steerable stage.
     - Expected outcome: plain steer is accepted/buffered after each terminal event because no non-steerable active agent remains. Source of truth: implementation plan server steerability clearing rules.
     - Interactions: event reducer backstops, HTTP handler, stage lifecycle.
 
@@ -270,7 +271,7 @@ The accepted testing strategy still holds, with scoped additions from the implem
     - Harness: workflow ACP runner harness.
     - Preconditions: temp workflow has a prompt/one_shot node with `backend="acp"` and fake ACP command.
     - Actions: run the workflow through the CLI test command and inspect stage response/events.
-    - Expected outcome: prompt node succeeds through ACP, response is fake ACP text, and `agent.acp.*` provider metadata appears; no API-mode `agent.session.activated` event is needed for the prompt. Source of truth: implementation plan User-Visible Behavior for `backend="acp"` on prompt/one_shot nodes.
+    - Expected outcome: prompt node succeeds through ACP, response is fake ACP text, and `agent.acp.*` provider metadata appears; any `agent.session.activated` event is ACP-backed and must not indicate fallback to the API backend. Source of truth: implementation plan User-Visible Behavior for `backend="acp"` on prompt/one_shot nodes.
     - Interactions: prompt handler, one-shot routing, pipeline initialization, run projection.
 
 28. **Documentation examples and backend references include ACP without stale CLI prompt claims**
