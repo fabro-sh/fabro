@@ -396,7 +396,13 @@ fn classify_user_token(token: &str, config: &ConfiguredAuth) -> RequestAuthConte
             );
         }
     };
-    let principal = Principal::user(auth.identity, auth.login, auth.auth_method);
+    let principal_avatar = Some(auth.avatar_url.clone()).filter(|s| !s.is_empty());
+    let principal = Principal::user_with_avatar(
+        auth.identity,
+        auth.login,
+        auth.auth_method,
+        principal_avatar,
+    );
     let profile = UserProfile {
         name:       auth.name,
         email:      auth.email,

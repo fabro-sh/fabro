@@ -6506,6 +6506,8 @@ components:
           type: string
         auth_method:
           $ref: "#/components/schemas/AuthMethod"
+        avatar_url:
+          type: ["string", "null"]
 
     PrincipalWorker:
       type: object

@@ -194,7 +194,13 @@ pub(crate) fn session_cookie_present(headers: &HeaderMap) -> bool {
 
 pub(crate) fn auth_context_from_session(session: &SessionCookie) -> RequestAuthContext {
     let identity = session.identity.clone();
-    let principal = Principal::user(identity, session.login.clone(), session.auth_method);
+    let principal_avatar = Some(session.avatar_url.clone()).filter(|s| !s.is_empty());
+    let principal = Principal::user_with_avatar(
+        identity,
+        session.login.clone(),
+        session.auth_method,
+        principal_avatar,
+    );
     RequestAuthContext::authenticated(
         principal,
         Some(UserProfile {

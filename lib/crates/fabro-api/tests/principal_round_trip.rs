@@ -42,6 +42,59 @@ fn principal_round_trips_representative_json() {
 }
 
 #[test]
+fn principal_user_with_avatar_round_trips_through_api_type() {
+    let value = json!({
+        "kind": "user",
+        "identity": {
+            "issuer": "https://github.com",
+            "subject": "12345"
+        },
+        "login": "octocat",
+        "auth_method": "github",
+        "avatar_url": "https://example.com/octocat.png"
+    });
+
+    let principal: Principal = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(
+        principal,
+        Principal::user_with_avatar(
+            IdpIdentity::new("https://github.com", "12345").unwrap(),
+            "octocat".to_string(),
+            AuthMethod::Github,
+            Some("https://example.com/octocat.png".to_string()),
+        )
+    );
+
+    let api_principal: ApiPrincipal = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(api_principal, principal);
+    assert_eq!(serde_json::to_value(api_principal).unwrap(), value);
+}
+
+#[test]
+fn principal_user_legacy_json_without_avatar_round_trips_through_api_type() {
+    let value = json!({
+        "kind": "user",
+        "identity": {
+            "issuer": "https://github.com",
+            "subject": "12345"
+        },
+        "login": "octocat",
+        "auth_method": "github"
+    });
+
+    let api_principal: ApiPrincipal = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(
+        api_principal,
+        Principal::user(
+            IdpIdentity::new("https://github.com", "12345").unwrap(),
+            "octocat".to_string(),
+            AuthMethod::Github,
+        )
+    );
+    assert_eq!(serde_json::to_value(api_principal).unwrap(), value);
+}
+
+#[test]
 fn principal_system_uses_system_kind_field() {
     let principal = Principal::System {
         system_kind: SystemActorKind::Watchdog,

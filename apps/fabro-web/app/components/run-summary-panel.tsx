@@ -61,6 +61,18 @@ function principalGlyph(icon: ReactNode) {
 function createdByDisplay(actor: Principal): CreatedByDisplay {
   switch (actor.kind) {
     case "user": {
+      if (actor.avatar_url) {
+        return {
+          glyph: (
+            <img
+              alt=""
+              src={actor.avatar_url}
+              className="size-5 rounded-full outline -outline-offset-1 outline-line-strong"
+            />
+          ),
+          label: actor.login,
+        };
+      }
       const initial = actor.login.charAt(0).toUpperCase() || "?";
       return {
         glyph: (
