@@ -47,19 +47,7 @@ impl AcpControlHandle {
     }
 
     pub fn enqueue_bounded(&self, item: AcpControlItem, cap: usize) -> Option<AcpControlItem> {
-        let evicted = {
-            let mut state = self.state.lock().expect("ACP control lock poisoned");
-            let evicted = if state.queue.len() >= cap {
-                state.queue.pop_front()
-            } else {
-                None
-            };
-            state.waiting_for_steer = false;
-            state.queue.push_back(item);
-            evicted
-        };
-        self.notify.notify_waiters();
-        evicted
+        self.push_bounded(item, cap, false)
     }
 
     pub fn interrupt(&self, _actor: Option<Principal>) {
@@ -70,13 +58,22 @@ impl AcpControlHandle {
             }
             state.interrupt_requested = true;
         }
-        self.notify.notify_waiters();
+        self.notify.notify_one();
     }
 
     pub fn interrupt_then_enqueue_bounded(
         &self,
         item: AcpControlItem,
         cap: usize,
+    ) -> Option<AcpControlItem> {
+        self.push_bounded(item, cap, true)
+    }
+
+    fn push_bounded(
+        &self,
+        item: AcpControlItem,
+        cap: usize,
+        request_interrupt: bool,
     ) -> Option<AcpControlItem> {
         let evicted = {
             let mut state = self.state.lock().expect("ACP control lock poisoned");
@@ -86,11 +83,13 @@ impl AcpControlHandle {
                 None
             };
             state.waiting_for_steer = false;
-            state.interrupt_requested = true;
+            if request_interrupt {
+                state.interrupt_requested = true;
+            }
             state.queue.push_back(item);
             evicted
         };
-        self.notify.notify_waiters();
+        self.notify.notify_one();
         evicted
     }
 
@@ -120,7 +119,7 @@ impl AcpControlHandle {
             item
         };
         if item.is_some() {
-            self.notify.notify_waiters();
+            self.notify.notify_one();
         }
         item
     }
@@ -367,6 +366,15 @@ async fn read_live_session(
             if matches!(stop_reason, StopReason::EndTurn | StopReason::Refusal)
                 && on_natural_completion.is_some_and(|callback| !callback())
             {
+                // The lease reports pending control work but our flags didn't
+                // observe it yet. Wait on a notify so we don't spin.
+                let notified = control_handle.notified();
+                tokio::select! {
+                    () = cancel_token.cancelled() => {
+                        return Ok((text, StopReason::Cancelled));
+                    }
+                    () = notified => {}
+                }
                 continue;
             }
             return Ok((text, stop_reason));

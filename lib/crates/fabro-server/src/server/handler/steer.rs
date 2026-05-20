@@ -112,10 +112,8 @@ async fn control_run(
                     }
                     RunStatus::Running => {}
                 }
-                // Steerability predicate. Best-effort, target-oriented:
-                //   - If at least one steerable session is active → forward.
-                //   - Else plain steers forward to the worker hub for buffering.
-                //   - Else controls that require a live session return 409.
+                // Plain steers buffer in the worker hub; interrupts need a
+                // live session because there's nothing to cancel otherwise.
                 if managed_run.active_steerable_stages.is_empty()
                     && control.requires_active_steerable_session()
                 {
