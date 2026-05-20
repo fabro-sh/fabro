@@ -31,7 +31,9 @@ use crate::auth::{
     self, AuthCode, AuthErrorCode, ConsumeOutcome, JwtSubject, REFRESH_TOKEN_PREFIX, RefreshToken,
 };
 use crate::jwt_auth::{AuthMode, ConfiguredAuth, bearer_token_from_headers};
-use crate::principal_middleware::{AuthContextSlot, AuthStatus, RequestAuth, RequestAuthContext};
+use crate::principal_middleware::{
+    AuthContextSlot, AuthStatus, RequestAuth, RequestAuthContext, UserProfile, non_empty_avatar_url,
+};
 use crate::server::AppState;
 use crate::web_auth::{
     SessionCookie, auth_context_from_session, read_private_session, session_cookie_present,
@@ -471,6 +473,7 @@ async fn token(
         login:        entry.login.clone(),
         name:         entry.name.clone(),
         email:        entry.email.clone(),
+        avatar_url:   entry.avatar_url.clone(),
         issued_at:    now,
         expires_at:   refresh_expires_at,
         last_used_at: now,
@@ -505,7 +508,7 @@ async fn token(
             login:       entry.login.clone(),
             name:        entry.name.clone(),
             email:       entry.email.clone(),
-            avatar_url:  String::new(),
+            avatar_url:  entry.avatar_url.clone().unwrap_or_default(),
             user_url:    String::new(),
             auth_method: AuthMethod::Github,
         },
@@ -662,7 +665,7 @@ async fn refresh(
             login:       old.login.clone(),
             name:        old.name.clone(),
             email:       old.email.clone(),
-            avatar_url:  String::new(),
+            avatar_url:  old.avatar_url.clone().unwrap_or_default(),
             user_url:    String::new(),
             auth_method: AuthMethod::Github,
         },
@@ -956,13 +959,20 @@ fn refresh_credential_from_headers(headers: &HeaderMap) -> RefreshCredential {
 }
 
 fn refresh_user_context(refresh_token: &RefreshToken) -> RequestAuthContext {
+    let avatar_url = refresh_token.avatar_url.clone();
     RequestAuthContext::authenticated(
-        Principal::user(
+        Principal::user_with_avatar(
             refresh_token.identity.clone(),
             refresh_token.login.clone(),
             AuthMethod::Github,
+            avatar_url.clone(),
         ),
-        None,
+        Some(UserProfile {
+            name:       refresh_token.name.clone(),
+            email:      refresh_token.email.clone(),
+            avatar_url: avatar_url.unwrap_or_default(),
+            user_url:   String::new(),
+        }),
     )
 }
 
@@ -986,6 +996,7 @@ fn next_refresh_row(
         login:        existing.map_or_else(String::new, |token| token.login.clone()),
         name:         existing.map_or_else(String::new, |token| token.name.clone()),
         email:        existing.map_or_else(String::new, |token| token.email.clone()),
+        avatar_url:   existing.and_then(|token| token.avatar_url.clone()),
         issued_at:    now,
         expires_at:   now + chrono::Duration::days(REFRESH_TOKEN_TTL_DAYS),
         last_used_at: now,
@@ -1179,6 +1190,7 @@ async fn issue_auth_code_response(
         login: session.login.clone(),
         name: session.name.clone(),
         email: session.email.clone(),
+        avatar_url: non_empty_avatar_url(&session.avatar_url),
         code_challenge: code_challenge.to_string(),
         redirect_uri: redirect_uri.clone(),
         expires_at: chrono::Utc::now() + chrono::Duration::seconds(60),
@@ -1222,8 +1234,8 @@ mod tests {
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use fabro_config::{RunLayer, ServerSettingsBuilder};
-    use fabro_types::AuthMethod;
     use fabro_types::settings::server::ServerAuthMethod;
+    use fabro_types::{AuthMethod, Principal};
     use serde_json::json;
     use sha2::{Digest, Sha256};
     use tokio::sync::Barrier;
@@ -1250,12 +1262,14 @@ mod tests {
             .expect("test key should derive")
     }
 
+    fn test_jwt_key() -> auth::JwtSigningKey {
+        auth::derive_jwt_key(b"cli-flow-test-key-material-0123456789")
+            .expect("test key should derive")
+    }
+
     fn github_auth_mode() -> AuthMode {
         let mut config = ConfiguredAuth::new(vec![ServerAuthMethod::Github], None);
-        config.jwt_key = Some(
-            auth::derive_jwt_key(b"cli-flow-test-key-material-0123456789")
-                .expect("test key should derive"),
-        );
+        config.jwt_key = Some(test_jwt_key());
         config.jwt_issuer = Some("https://fabro.example".to_string());
         AuthMode::Enabled(config)
     }
@@ -1390,6 +1404,7 @@ client_id = "github-client-id"
                 login:          "octocat".to_string(),
                 name:           "The Octocat".to_string(),
                 email:          "octocat@example.com".to_string(),
+                avatar_url:     Some("https://example.com/octocat.png".to_string()),
                 code_challenge: pkce_challenge(verifier),
                 redirect_uri:   "http://127.0.0.1:4444/callback".to_string(),
                 expires_at:     chrono::Utc::now() + chrono::Duration::seconds(60),
@@ -1412,6 +1427,7 @@ client_id = "github-client-id"
             login:        "octocat".to_string(),
             name:         "The Octocat".to_string(),
             email:        "octocat@example.com".to_string(),
+            avatar_url:   Some("https://example.com/octocat.png".to_string()),
             issued_at:    now,
             expires_at:   now + chrono::Duration::days(30),
             last_used_at: now,
@@ -1989,6 +2005,13 @@ client_id = "github-client-id"
         assert_eq!(body["subject"]["idp_issuer"], "https://github.com");
         assert_eq!(body["subject"]["idp_subject"], "12345");
         assert_eq!(body["subject"]["login"], "octocat");
+        let claims = auth::verify(
+            &test_jwt_key(),
+            "https://fabro.example",
+            body["access_token"].as_str().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(claims.avatar_url, "https://example.com/octocat.png");
 
         let refresh_secret = body["refresh_token"]
             .as_str()
@@ -2002,6 +2025,10 @@ client_id = "github-client-id"
             .unwrap()
             .expect("refresh token should be stored");
         assert_eq!(refresh.login, "octocat");
+        assert_eq!(
+            refresh.avatar_url.as_deref(),
+            Some("https://example.com/octocat.png")
+        );
         assert_eq!(refresh.user_agent, "fabro-cli/0.1");
     }
 
@@ -2169,6 +2196,13 @@ client_id = "github-client-id"
         let first_body: serde_json::Value =
             serde_json::from_slice(&to_bytes(first.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
+        let claims = auth::verify(
+            &test_jwt_key(),
+            "https://fabro.example",
+            first_body["access_token"].as_str().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(claims.avatar_url, "https://example.com/octocat.png");
         let rotated = first_body["refresh_token"].as_str().unwrap().to_string();
         assert_ne!(rotated, format!("fabro_refresh_{initial_secret}"));
 
@@ -2245,6 +2279,13 @@ client_id = "github-client-id"
         let contexts = captured.lock().expect("captured auth contexts").clone();
         assert_eq!(contexts[0].auth_status, AuthStatus::Authenticated);
         assert_eq!(contexts[0].principal.display(), "octocat");
+        let Principal::User(user) = &contexts[0].principal else {
+            panic!("expected user principal");
+        };
+        assert_eq!(
+            user.avatar_url.as_deref(),
+            Some("https://example.com/octocat.png")
+        );
         assert_eq!(contexts[1].auth_status, AuthStatus::Invalid);
         assert_eq!(
             contexts[1].auth_error_code,
