@@ -353,17 +353,16 @@ impl SteeringHub {
         }
 
         let text = human_joined_text();
-        entry
-            .handle
-            .try_enqueue_bounded(
-                SteeringItem::PairSystemMessage {
-                    pair_id,
-                    kind: PairSystemMessageKind::HumanJoined,
-                    text: text.to_string(),
-                },
-                PER_SESSION_QUEUE_CAP,
-            )
-            .map_err(|_| PairControlError::MessageNotAccepted)?;
+        if !entry.handle.try_enqueue_bounded(
+            SteeringItem::PairSystemMessage {
+                pair_id,
+                kind: PairSystemMessageKind::HumanJoined,
+                text: text.to_string(),
+            },
+            PER_SESSION_QUEUE_CAP,
+        ) {
+            return Err(PairControlError::MessageNotAccepted);
+        }
 
         let record = PairRecord {
             pair_id,
@@ -423,19 +422,18 @@ impl SteeringHub {
             return Err(PairControlError::TargetNotActive);
         }
 
-        entry
-            .handle
-            .try_enqueue_bounded(
-                SteeringItem::PairUserMessage {
-                    pair_id,
-                    message_id,
-                    client_message_id: client_message_id.clone(),
-                    text: text.clone(),
-                    actor: actor.clone(),
-                },
-                PER_SESSION_QUEUE_CAP,
-            )
-            .map_err(|_| PairControlError::MessageNotAccepted)?;
+        if !entry.handle.try_enqueue_bounded(
+            SteeringItem::PairUserMessage {
+                pair_id,
+                message_id,
+                client_message_id: client_message_id.clone(),
+                text: text.clone(),
+                actor: actor.clone(),
+            },
+            PER_SESSION_QUEUE_CAP,
+        ) {
+            return Err(PairControlError::MessageNotAccepted);
+        }
         self.emitter.emit(&Event::AgentPairUserMessage {
             node_id: target.node_id.clone(),
             visit: target.visit,
@@ -482,17 +480,16 @@ impl SteeringHub {
             .get(&target.stage_id)
             .filter(|entry| entry.session_id == target.agent_session_id)
         {
-            entry
-                .handle
-                .try_enqueue_bounded(
-                    SteeringItem::PairSystemMessage {
-                        pair_id,
-                        kind: PairSystemMessageKind::HumanLeft,
-                        text: text.to_string(),
-                    },
-                    PER_SESSION_QUEUE_CAP,
-                )
-                .map_err(|_| PairControlError::MessageNotAccepted)?;
+            if !entry.handle.try_enqueue_bounded(
+                SteeringItem::PairSystemMessage {
+                    pair_id,
+                    kind: PairSystemMessageKind::HumanLeft,
+                    text: text.to_string(),
+                },
+                PER_SESSION_QUEUE_CAP,
+            ) {
+                return Err(PairControlError::MessageNotAccepted);
+            }
             self.emitter.emit(&Event::AgentPairSystemMessage {
                 node_id: target.node_id.clone(),
                 visit: target.visit,

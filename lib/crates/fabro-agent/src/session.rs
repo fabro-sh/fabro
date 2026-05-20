@@ -187,18 +187,19 @@ impl SessionControlHandle {
 
     /// Push `item` only when the queue is below `cap`. Unlike
     /// `enqueue_bounded`, this preserves all existing queued work and returns
-    /// the rejected item when the queue is already full.
-    pub fn try_enqueue_bounded(&self, item: SteeringItem, cap: usize) -> Result<(), SteeringItem> {
+    /// whether the item was accepted.
+    #[must_use]
+    pub fn try_enqueue_bounded(&self, item: SteeringItem, cap: usize) -> bool {
         {
             let mut control = self.control.lock().expect("control state lock poisoned");
             if control.queue.len() >= cap {
-                return Err(item);
+                return false;
             }
             control.queue.push_back(item);
             control.waiting_for_steer = false;
         }
         self.notify.notify_waiters();
-        Ok(())
+        true
     }
 
     /// Interrupt the current round and push `item` while enforcing a FIFO cap.
