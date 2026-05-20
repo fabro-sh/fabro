@@ -200,7 +200,7 @@ impl FileInliningTransform {
                 node_id.clone(),
                 "prompt",
             )
-            .with_source_text(self.source_text.as_deref(), prompt)
+            .with_source_origin(self.source_text.as_deref(), prompt)
             .with_template_store(template_render_store(
                 &self.current_dir,
                 Arc::clone(&self.resolver),
@@ -234,7 +234,7 @@ impl FileInliningTransform {
         };
         let ctx = TemplateContext::for_input_scan(self.inputs.clone());
         let target = TemplateRenderTarget::graph_attr(self.source_name.clone(), "goal")
-            .with_source_text(self.source_text.as_deref(), goal)
+            .with_source_origin(self.source_text.as_deref(), goal)
             .with_template_store(template_render_store(
                 &self.current_dir,
                 Arc::clone(&self.resolver),
@@ -270,7 +270,7 @@ impl FileInliningTransform {
         let (source, store) = self.template_source_for_resolved_file(&resolved)?;
         let target = owner_target
             .with_source_name(resolved.path.display().to_string())
-            .with_source_text(Some(&resolved.content), &resolved.content)
+            .with_source_origin(Some(&resolved.content), &resolved.content)
             .with_template_store(TemplateRenderStore::new(source, store));
         Ok(Some(render_file_contents(
             &resolved,

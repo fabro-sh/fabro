@@ -675,7 +675,7 @@ impl ImportTransform {
         let path_ctx = TemplateContext::for_input_scan(self.inputs.clone());
         let mut ignored_goal_diagnostics = Vec::new();
         let goal_target = TemplateRenderTarget::graph_attr(self.source_name.clone(), "goal")
-            .with_source_text(self.source_text.as_deref(), graph.goal())
+            .with_source_origin(self.source_text.as_deref(), graph.goal())
             .with_template_store(template_render_store(
                 &self.current_dir,
                 Arc::clone(&self.resolver),
@@ -700,7 +700,7 @@ impl ImportTransform {
                 placeholder_id.clone(),
                 "import",
             )
-            .with_source_text(self.source_text.as_deref(), &import_path);
+            .with_source_origin(self.source_text.as_deref(), &import_path);
             let rendered_import_path = render_template_for_target(
                 &import_path,
                 &path_ctx,

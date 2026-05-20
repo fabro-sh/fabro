@@ -206,7 +206,7 @@ fn bare_fabro_with_unbound_inputs_in_template_partial_validates_structurally_wit
     ----- stderr -----
     Workflow: TemplatedUnboundPartial (3 nodes, 2 edges)
     Graph: [FIXTURES]/templated_unbound_partial/workflow.fabro
-    warning: [FIXTURES]/templated_unbound_partial/test-include.partial.md:1:1: undefined template variable `inputs.hello` in node `test_imported_include` attribute `prompt` [node: test_imported_include] (template_undefined_variable)
+    warning: [FIXTURES]/templated_unbound_partial/test-include.partial.md:1:4: undefined template variable `inputs.hello` in node `test_imported_include` attribute `prompt` [node: test_imported_include] (template_undefined_variable)
     Validation: OK
     ");
 }

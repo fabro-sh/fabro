@@ -6,10 +6,34 @@ use fabro_types::ManifestPath;
 use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TemplateSourceOrigin {
+    pub source_text:    String,
+    pub fragment_start: usize,
+}
+
+impl TemplateSourceOrigin {
+    #[must_use]
+    pub fn new(source_text: impl Into<String>, fragment_start: usize) -> Self {
+        Self {
+            source_text: source_text.into(),
+            fragment_start,
+        }
+    }
+
+    #[must_use]
+    pub fn from_fragment(source_text: &str, fragment: &str) -> Option<Self> {
+        source_text
+            .find(fragment)
+            .map(|fragment_start| Self::new(source_text, fragment_start))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TemplateSource {
     pub path:    ManifestPath,
     pub root:    ManifestPath,
     pub content: String,
+    pub origin:  Option<TemplateSourceOrigin>,
 }
 
 impl TemplateSource {
@@ -19,7 +43,14 @@ impl TemplateSource {
             path,
             root,
             content: content.into(),
+            origin: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_origin(mut self, origin: TemplateSourceOrigin) -> Self {
+        self.origin = Some(origin);
+        self
     }
 }
 
