@@ -714,6 +714,11 @@ impl AppState {
         resolve_llm_client_from_source(self.llm_source.as_ref(), self.catalog()).await
     }
 
+    pub(crate) async fn configured_llm_provider_ids(&self) -> Vec<ProviderId> {
+        let catalog = self.catalog();
+        self.llm_source.configured_providers(catalog.as_ref()).await
+    }
+
     pub(crate) async fn ready_llm_provider_ids(&self) -> Vec<ProviderId> {
         match self.resolve_llm_client().await {
             Ok(result) => result.provider_ids(),

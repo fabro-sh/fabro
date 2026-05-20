@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::super::{
     ApiError, AppState, FromStr, HashSet, IntoResponse, Json, MAX_PAGE_OFFSET, ModelTestMode, Path,
-    Provider, ProviderId, ProviderList, Query, RequiredUser, Response, Router, State, StatusCode,
+    ProviderId, ProviderList, Query, RequiredUser, Response, Router, State, StatusCode,
     auth_issue_message, default_page_limit, error, get, post, run_model_test,
 };
 
@@ -83,23 +83,12 @@ async fn list_models(
 
 async fn list_providers(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
     let catalog = state.catalog();
-    let configured: HashSet<ProviderId> =
-        state.ready_llm_provider_ids().await.into_iter().collect();
-
-    let data = catalog
-        .providers()
-        .iter()
-        .map(|provider| {
-            let mut public = Provider::from(provider);
-            public.model_count =
-                u32::try_from(catalog.list(Some(&provider.id)).len()).unwrap_or(u32::MAX);
-            public.default_model = catalog
-                .default_for_provider(&provider.id)
-                .map(|model| model.id.clone());
-            public.configured = configured.contains(&provider.id);
-            public
-        })
-        .collect::<Vec<_>>();
+    let configured: HashSet<ProviderId> = state
+        .configured_llm_provider_ids()
+        .await
+        .into_iter()
+        .collect();
+    let data = catalog.provider_summaries(&configured);
 
     (StatusCode::OK, Json(ProviderList { data })).into_response()
 }

@@ -12,6 +12,7 @@ use tracing::warn;
 use crate::Speed;
 use crate::adapter::{AdapterKind, AgentProfileKind};
 use crate::ids::ProviderId;
+use crate::provider::Provider;
 use crate::reasoning::ReasoningEffort;
 use crate::types::{Model, ModelCosts, ModelFeatures, ModelLimits, ReasoningEffortFeature};
 
@@ -775,6 +776,37 @@ impl Catalog {
     #[must_use]
     pub fn providers(&self) -> &[CatalogProvider] {
         &self.providers
+    }
+
+    #[must_use]
+    pub fn provider_summaries(&self, configured: &HashSet<ProviderId>) -> Vec<Provider> {
+        #[derive(Default)]
+        struct Stats {
+            model_count:   u32,
+            default_model: Option<String>,
+        }
+
+        let mut stats_by_provider = HashMap::<ProviderId, Stats>::new();
+        for model in &self.models {
+            let stats = stats_by_provider.entry(model.provider.clone()).or_default();
+            stats.model_count = stats.model_count.saturating_add(1);
+            if model.default {
+                stats.default_model = Some(model.id.clone());
+            }
+        }
+
+        self.providers
+            .iter()
+            .map(|provider| {
+                let stats = stats_by_provider.remove(&provider.id).unwrap_or_default();
+                Provider::from_catalog(
+                    provider,
+                    stats.model_count,
+                    stats.default_model,
+                    configured.contains(&provider.id),
+                )
+            })
+            .collect()
     }
 
     #[must_use]
