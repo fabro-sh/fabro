@@ -1086,7 +1086,7 @@ fn container_config(config: &DockerSandboxOptions, run_id: Option<&RunId>) -> Co
         } else {
             Some(config.env_vars.clone())
         },
-        labels: Some(managed_labels::managed_labels(run_id)),
+        labels: Some(managed_labels::for_run(run_id)),
         host_config: Some(host_config(config)),
         ..Default::default()
     }
@@ -2070,7 +2070,7 @@ mod tests {
             container_name(&run_id),
             "fabro-run-01HY0000000000000000000000"
         );
-        let labels = managed_labels::managed_labels(Some(&run_id));
+        let labels = managed_labels::for_run(Some(&run_id));
         assert_eq!(labels.get(MANAGED_LABEL).map(String::as_str), Some("true"));
         assert_eq!(
             labels.get(RUN_ID_LABEL).map(String::as_str),

@@ -460,7 +460,7 @@ impl DaytonaSandbox {
         daytona_sdk::SandboxBaseParams {
             name: Some(name),
             auto_stop_interval: self.config.auto_stop_interval,
-            labels: Some(managed_labels::merge_managed_labels(
+            labels: Some(managed_labels::merge_for_run(
                 self.config.labels.as_ref(),
                 self.run_id.as_ref(),
             )),
@@ -2273,46 +2273,30 @@ subpath = "agents"
 
         assert_eq!(params.ephemeral, Some(false));
         assert_eq!(params.auto_delete_interval, Some(-1));
-    }
-
-    #[tokio::test]
-    async fn base_params_adds_managed_daytona_labels() {
-        let run_id: RunId = "01HY0000000000000000000000".parse().unwrap();
-        let sandbox = DaytonaSandbox::new(
-            DaytonaConfig::default(),
-            None,
-            Some(run_id),
-            None,
-            None,
-            Some("dtn_test".to_string()),
-        )
-        .await
-        .expect("sandbox config should be valid");
-
-        let labels = sandbox
-            .base_params()
-            .labels
-            .expect("managed labels should be present");
-
         assert_eq!(
-            labels.get("sh.fabro.managed").map(String::as_str),
-            Some("true")
-        );
-        assert_eq!(
-            labels.get("sh.fabro.run_id").map(String::as_str),
-            Some("01HY0000000000000000000000")
+            params.labels,
+            Some(HashMap::from([(
+                managed_labels::MANAGED_LABEL.to_string(),
+                "true".to_string(),
+            )]))
         );
     }
 
     #[tokio::test]
-    async fn base_params_preserves_user_labels_and_overwrites_reserved_daytona_labels() {
+    async fn base_params_merges_managed_daytona_labels() {
         let run_id: RunId = "01HY0000000000000000000000".parse().unwrap();
         let sandbox = DaytonaSandbox::new(
             DaytonaConfig {
                 labels: Some(HashMap::from([
                     ("team".to_string(), "platform".to_string()),
-                    ("sh.fabro.managed".to_string(), "false".to_string()),
-                    ("sh.fabro.run_id".to_string(), "wrong".to_string()),
+                    (
+                        managed_labels::MANAGED_LABEL.to_string(),
+                        "false".to_string(),
+                    ),
+                    (
+                        managed_labels::RUN_ID_LABEL.to_string(),
+                        "wrong".to_string(),
+                    ),
                 ])),
                 ..Default::default()
             },
@@ -2325,19 +2309,19 @@ subpath = "agents"
         .await
         .expect("sandbox config should be valid");
 
-        let labels = sandbox
-            .base_params()
-            .labels
-            .expect("merged labels should be present");
-
-        assert_eq!(labels.get("team").map(String::as_str), Some("platform"));
         assert_eq!(
-            labels.get("sh.fabro.managed").map(String::as_str),
-            Some("true")
-        );
-        assert_eq!(
-            labels.get("sh.fabro.run_id").map(String::as_str),
-            Some("01HY0000000000000000000000")
+            sandbox.base_params().labels,
+            Some(HashMap::from([
+                ("team".to_string(), "platform".to_string()),
+                (
+                    managed_labels::MANAGED_LABEL.to_string(),
+                    "true".to_string()
+                ),
+                (
+                    managed_labels::RUN_ID_LABEL.to_string(),
+                    "01HY0000000000000000000000".to_string(),
+                ),
+            ]))
         );
     }
 

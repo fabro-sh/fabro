@@ -5,22 +5,28 @@ use fabro_types::RunId;
 pub(crate) const MANAGED_LABEL: &str = "sh.fabro.managed";
 pub(crate) const RUN_ID_LABEL: &str = "sh.fabro.run_id";
 
-pub(crate) fn managed_labels(run_id: Option<&RunId>) -> HashMap<String, String> {
-    let mut labels = HashMap::from([(MANAGED_LABEL.to_string(), "true".to_string())]);
-    if let Some(run_id) = run_id {
-        labels.insert(RUN_ID_LABEL.to_string(), run_id.to_string());
-    }
+#[cfg(any(feature = "docker", test))]
+pub(crate) fn for_run(run_id: Option<&RunId>) -> HashMap<String, String> {
+    let mut labels = HashMap::new();
+    insert_for_run(&mut labels, run_id);
     labels
 }
 
 #[cfg(any(feature = "daytona", test))]
-pub(crate) fn merge_managed_labels(
+pub(crate) fn merge_for_run(
     user_labels: Option<&HashMap<String, String>>,
     run_id: Option<&RunId>,
 ) -> HashMap<String, String> {
     let mut labels = user_labels.cloned().unwrap_or_default();
-    labels.extend(managed_labels(run_id));
+    insert_for_run(&mut labels, run_id);
     labels
+}
+
+fn insert_for_run(labels: &mut HashMap<String, String>, run_id: Option<&RunId>) {
+    labels.insert(MANAGED_LABEL.to_string(), "true".to_string());
+    if let Some(run_id) = run_id {
+        labels.insert(RUN_ID_LABEL.to_string(), run_id.to_string());
+    }
 }
 
 #[cfg(test)]
@@ -47,7 +53,7 @@ mod tests {
     #[test]
     fn managed_labels_include_run_id_when_present() {
         let run_id: RunId = "01HY0000000000000000000000".parse().unwrap();
-        let labels = managed_labels(Some(&run_id));
+        let labels = for_run(Some(&run_id));
 
         assert_eq!(labels.get(MANAGED_LABEL).map(String::as_str), Some("true"));
         assert_eq!(
@@ -65,7 +71,7 @@ mod tests {
             (RUN_ID_LABEL.to_string(), "wrong".to_string()),
         ]);
 
-        let labels = merge_managed_labels(Some(&user_labels), Some(&run_id));
+        let labels = merge_for_run(Some(&user_labels), Some(&run_id));
 
         assert_eq!(labels.get("team").map(String::as_str), Some("platform"));
         assert_eq!(labels.get(MANAGED_LABEL).map(String::as_str), Some("true"));
