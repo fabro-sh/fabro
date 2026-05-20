@@ -13,6 +13,9 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { SystemMemoryResourceScope } from './system-memory-resource-scope';
 
 /**
  * Memory resources visible to the Fabro server process.
@@ -22,10 +25,7 @@ export interface SystemMemoryResources {
      * Whether memory metrics are available on this platform.
      */
     'supported': boolean;
-    /**
-     * `cgroup` when Linux cgroup limits are available, otherwise `host`.
-     */
-    'scope': string;
+    'scope': SystemMemoryResourceScope;
     /**
      * Reason metrics are unavailable when unsupported.
      */

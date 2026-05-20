@@ -10296,8 +10296,7 @@ components:
           type: boolean
           description: Whether CPU metrics are available on this platform.
         scope:
-          type: string
-          description: Metric scope. Currently `server_environment`.
+          $ref: "#/components/schemas/SystemCpuResourceScope"
         unavailable_reason:
           type: ["string", "null"]
           description: Reason metrics are unavailable when unsupported.
@@ -10312,7 +10311,12 @@ components:
         sample_window_ms:
           type: ["integer", "null"]
           format: int64
-          description: Expected polling interval used for delta-based CPU sampling.
+          description: Elapsed milliseconds since the previous CPU sample, null until a delta sample is available.
+
+    SystemCpuResourceScope:
+      description: Scope for CPU resource metrics.
+      type: string
+      enum: [server_environment]
 
     SystemMemoryResources:
       description: Memory resources visible to the Fabro server process.
@@ -10331,8 +10335,7 @@ components:
           type: boolean
           description: Whether memory metrics are available on this platform.
         scope:
-          type: string
-          description: "`cgroup` when Linux cgroup limits are available, otherwise `host`."
+          $ref: "#/components/schemas/SystemMemoryResourceScope"
         unavailable_reason:
           type: ["string", "null"]
           description: Reason metrics are unavailable when unsupported.
@@ -10357,6 +10360,11 @@ components:
           format: int64
           description: Host total memory, included even when reporting a cgroup scope.
 
+    SystemMemoryResourceScope:
+      description: "`cgroup` when Linux cgroup limits are available, otherwise `host`."
+      type: string
+      enum: [host, cgroup]
+
     SystemDiskResources:
       description: Filesystem resources for the configured Fabro storage root.
       type: object
@@ -10378,8 +10386,7 @@ components:
           type: boolean
           description: Whether storage filesystem metrics are available.
         scope:
-          type: string
-          description: Metric scope. Currently `storage_filesystem`.
+          $ref: "#/components/schemas/SystemDiskResourceScope"
         unavailable_reason:
           type: ["string", "null"]
           description: Reason metrics are unavailable when unsupported.
@@ -10416,6 +10423,11 @@ components:
           type: integer
           format: int64
           description: Bytes reclaimable through Fabro pruning.
+
+    SystemDiskResourceScope:
+      description: Scope for disk resource metrics.
+      type: string
+      enum: [storage_filesystem]
 
     SystemRepairRunsResponse:
       description: Runs that need manual repair or deletion because they cannot be loaded.

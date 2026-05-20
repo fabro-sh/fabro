@@ -1,9 +1,7 @@
-import type { ServerSettings, SystemDiskResources } from "@qltysh/fabro-api-client";
-import { formatBytesAsMemory } from "../lib/format";
-import { useServerSettings, useSystemResources } from "../lib/queries";
+import type { ServerSettings } from "@qltysh/fabro-api-client";
+import { useServerSettings } from "../lib/queries";
 import {
   Mono,
-  Muted,
   ObjectStoreRows,
   Panel,
   PanelSkeleton,
@@ -50,32 +48,13 @@ export default function SettingsStorage() {
 
 function StorageRootPanel({ settings }: { settings: ServerSettings }) {
   const { storage } = settings.server;
-  const resourcesQuery = useSystemResources();
-  const disk = resourcesQuery.data?.disk;
   return (
     <Panel title="Storage root">
       <Row title="Path" help="Filesystem path for run state and logs.">
         <Mono>{storage.root}</Mono>
       </Row>
-      <Row title="Fabro managed" help="Bytes currently tracked under Fabro storage.">
-        <DiskBytes disk={disk} field="fabro_managed_bytes" />
-      </Row>
-      <Row title="Reclaimable" help="Bytes Fabro can reclaim by pruning inactive data.">
-        <DiskBytes disk={disk} field="fabro_reclaimable_bytes" />
-      </Row>
     </Panel>
   );
-}
-
-function DiskBytes({
-  disk,
-  field,
-}: {
-  disk: SystemDiskResources | undefined;
-  field: "fabro_managed_bytes" | "fabro_reclaimable_bytes";
-}) {
-  if (!disk) return <Muted>Loading…</Muted>;
-  return <>{formatBytesAsMemory(disk[field])}</>;
 }
 
 function SlateDbPanel({ settings }: { settings: ServerSettings }) {

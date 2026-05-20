@@ -13,6 +13,9 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { SystemCpuResourceScope } from './system-cpu-resource-scope';
 
 /**
  * CPU resources visible to the Fabro server process.
@@ -22,10 +25,7 @@ export interface SystemCpuResources {
      * Whether CPU metrics are available on this platform.
      */
     'supported': boolean;
-    /**
-     * Metric scope. Currently `server_environment`.
-     */
-    'scope': string;
+    'scope': SystemCpuResourceScope;
     /**
      * Reason metrics are unavailable when unsupported.
      */
@@ -39,7 +39,7 @@ export interface SystemCpuResources {
      */
     'usage_percent': number | null;
     /**
-     * Expected polling interval used for delta-based CPU sampling.
+     * Elapsed milliseconds since the previous CPU sample, null until a delta sample is available.
      */
     'sample_window_ms': number | null;
 }

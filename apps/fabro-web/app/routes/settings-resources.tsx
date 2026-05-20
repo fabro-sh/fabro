@@ -4,7 +4,7 @@ import type {
   SystemMemoryResources,
   SystemResourcesResponse,
 } from "@qltysh/fabro-api-client";
-import { formatBytesAsMemory, formatDurationSecs } from "../lib/format";
+import { formatBytesAsMemory, formatDurationMs } from "../lib/format";
 import { useSystemResources } from "../lib/queries";
 import {
   Badge,
@@ -66,9 +66,9 @@ function CpuPanel({ cpu }: { cpu: SystemCpuResources }) {
           <UsageMeter percent={cpu.usage_percent} />
         )}
       </Row>
-      <Row title="Sample window" help="Expected polling interval for CPU deltas.">
+      <Row title="Sample window" help="Elapsed time since the previous CPU sample.">
         {cpu.sample_window_ms != null ? (
-          formatDurationSecs(Math.round(cpu.sample_window_ms / 1000))
+          formatDurationMs(cpu.sample_window_ms)
         ) : (
           <Muted>Unknown</Muted>
         )}
@@ -110,9 +110,7 @@ function DiskPanel({ disk }: { disk: SystemDiskResources }) {
         <Row title="Storage path" help="Configured Fabro storage directory.">
           <Mono>{disk.storage_path}</Mono>
         </Row>
-        <Row title="Fabro managed" help="Bytes currently tracked under Fabro storage.">
-          {formatBytesAsMemory(disk.fabro_managed_bytes)}
-        </Row>
+        <FabroStorageRows disk={disk} />
       </Panel>
     );
   }
@@ -132,18 +130,26 @@ function DiskPanel({ disk }: { disk: SystemDiskResources }) {
       <Row title="Mount point" help="Filesystem containing the storage path.">
         {disk.mount_point ? <Mono>{disk.mount_point}</Mono> : <Muted>Unknown</Muted>}
       </Row>
+      <FabroStorageRows disk={disk} />
+    </Panel>
+  );
+}
+
+function FabroStorageRows({ disk }: { disk: SystemDiskResources }) {
+  return (
+    <>
       <Row title="Fabro managed" help="Bytes currently tracked under Fabro storage.">
         {formatBytesAsMemory(disk.fabro_managed_bytes)}
       </Row>
       <Row title="Reclaimable" help="Bytes Fabro can reclaim by pruning inactive data.">
         {formatBytesAsMemory(disk.fabro_reclaimable_bytes)}
       </Row>
-    </Panel>
+    </>
   );
 }
 
 function NotesPanel({ resources }: { resources: SystemResourcesResponse }) {
-  const notes = resourceNotes(resources);
+  const notes = Array.from(new Set(resources.notes));
   if (notes.length === 0) return null;
 
   return (
@@ -201,16 +207,6 @@ function UsageMeter({
       </div>
     </div>
   );
-}
-
-function resourceNotes(resources: SystemResourcesResponse): string[] {
-  const notes = [...resources.notes];
-  for (const resource of [resources.cpu, resources.memory, resources.disk]) {
-    if (!resource.supported && resource.unavailable_reason) {
-      notes.push(resource.unavailable_reason);
-    }
-  }
-  return Array.from(new Set(notes));
 }
 
 function formatPercent(value: number) {

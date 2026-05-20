@@ -165,7 +165,13 @@ async fn get_system_resources_returns_server_visible_metrics() {
 
     assert_eq!(body["cpu"]["supported"], true);
     assert_eq!(body["cpu"]["scope"], "server_environment");
-    assert_eq!(body["cpu"]["sample_window_ms"], 5000);
+    assert!(
+        body["cpu"]["sample_window_ms"].is_null()
+            || body["cpu"]["sample_window_ms"]
+                .as_i64()
+                .is_some_and(|value| value >= 0),
+        "sample window should be null until a delta sample is available or nonnegative: {body}"
+    );
     assert!(
         body["cpu"]["logical_cpus"].as_i64().unwrap_or_default() > 0,
         "logical CPU count should be positive"

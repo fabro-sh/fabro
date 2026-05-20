@@ -36,10 +36,11 @@ pub use fabro_api::types::{
     RunArtifactListResponse, RunBilling, RunBillingStage, RunBillingTotals, RunError, RunManifest,
     RunStage, SandboxDetails, SandboxFileEntry, SandboxFileListResponse, SandboxService,
     SandboxServiceListResponse, SshAccessRequest, SshAccessResponse, StageHandler, StageState,
-    StartRunRequest, SubmitAnswerRequest, SystemCpuResources, SystemDiskResources, SystemFeatures,
-    SystemInfoResponse, SystemMemoryResources, SystemRepairRunIssue, SystemRepairRunsResponse,
-    SystemResourcesResponse, SystemRunCounts, TimelineEntryResponse, VncPreviewResponse,
-    WriteBlobResponse,
+    StartRunRequest, SubmitAnswerRequest, SystemCpuResourceScope, SystemCpuResources,
+    SystemDiskResourceScope, SystemDiskResources, SystemFeatures, SystemInfoResponse,
+    SystemMemoryResourceScope, SystemMemoryResources, SystemRepairRunIssue,
+    SystemRepairRunsResponse, SystemResourcesResponse, SystemRunCounts, TimelineEntryResponse,
+    VncPreviewResponse, WriteBlobResponse,
 };
 use fabro_auth::{CredentialSource, VaultCredentialSource, auth_issue_message};
 #[cfg(test)]

@@ -1,7 +1,15 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import type {
+  SystemCpuResources,
+  SystemDiskResources,
+  SystemMemoryResources,
+  SystemResourcesResponse,
+} from "@qltysh/fabro-api-client";
 import TestRenderer, { act } from "react-test-renderer";
+import { setupReactTestEnv } from "../lib/test-utils";
 
-let systemResources: any;
+let systemResources: SystemResourcesResponse | undefined;
+let teardownReactTestEnv: (() => void) | undefined;
 
 mock.module("../lib/queries", () => ({
   useSystemResources: () => ({ data: systemResources }),
@@ -12,7 +20,6 @@ const { default: SettingsResources } = await import("./settings-resources");
 const mountedRenderers: TestRenderer.ReactTestRenderer[] = [];
 
 function renderSettingsResources() {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   let renderer: TestRenderer.ReactTestRenderer | undefined;
   act(() => {
     renderer = TestRenderer.create(<SettingsResources />);
@@ -28,8 +35,16 @@ function textContent(node: ReturnType<TestRenderer.ReactTestRenderer["toJSON"]>)
   return node.children?.map(textContent).join("") ?? "";
 }
 
-function sampleResources(overrides: Record<string, unknown> = {}) {
-  return {
+type ResourceOverrides = Partial<
+  Omit<SystemResourcesResponse, "cpu" | "memory" | "disk">
+> & {
+  cpu?: Partial<SystemCpuResources>;
+  memory?: Partial<SystemMemoryResources>;
+  disk?: Partial<SystemDiskResources>;
+};
+
+function sampleResources(overrides: ResourceOverrides = {}): SystemResourcesResponse {
+  const resources: SystemResourcesResponse = {
     sampled_at: "2026-05-20T15:42:10Z",
     cpu:        {
       supported:          true,
@@ -64,11 +79,21 @@ function sampleResources(overrides: Record<string, unknown> = {}) {
       fabro_reclaimable_bytes: 512 * 1024 * 1024,
     },
     notes:      [],
-    ...overrides,
+  };
+  return {
+    sampled_at: overrides.sampled_at ?? resources.sampled_at,
+    cpu:        { ...resources.cpu, ...overrides.cpu },
+    memory:     { ...resources.memory, ...overrides.memory },
+    disk:       { ...resources.disk, ...overrides.disk },
+    notes:      overrides.notes ?? resources.notes,
   };
 }
 
 describe("SettingsResources route", () => {
+  beforeEach(() => {
+    teardownReactTestEnv = setupReactTestEnv();
+  });
+
   afterEach(() => {
     act(() => {
       for (const renderer of mountedRenderers.splice(0)) {
@@ -76,7 +101,8 @@ describe("SettingsResources route", () => {
       }
     });
     systemResources = undefined;
-    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+    teardownReactTestEnv?.();
+    teardownReactTestEnv = undefined;
   });
 
   test("renders loaded resource data", () => {
@@ -101,7 +127,7 @@ describe("SettingsResources route", () => {
         unavailable_reason: null,
         logical_cpus:       10,
         usage_percent:      null,
-        sample_window_ms:   5000,
+        sample_window_ms:   null,
       },
     });
 

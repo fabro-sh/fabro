@@ -13,6 +13,9 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { SystemDiskResourceScope } from './system-disk-resource-scope';
 
 /**
  * Filesystem resources for the configured Fabro storage root.
@@ -22,10 +25,7 @@ export interface SystemDiskResources {
      * Whether storage filesystem metrics are available.
      */
     'supported': boolean;
-    /**
-     * Metric scope. Currently `storage_filesystem`.
-     */
-    'scope': string;
+    'scope': SystemDiskResourceScope;
     /**
      * Reason metrics are unavailable when unsupported.
      */
