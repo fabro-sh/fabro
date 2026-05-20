@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use fabro_graphviz::graph::{AttrValue, Graph};
@@ -36,10 +36,13 @@ pub fn resolve_file_ref(
 
 pub(crate) fn template_include_loader(
     current_dir: PathBuf,
+    template_root: PathBuf,
     resolver: Arc<dyn FileResolver>,
 ) -> TemplateLoader {
     Arc::new(move |name| {
-        if !is_safe_include_name(name) {
+        if !is_safe_include_name(name)
+            || !include_stays_within_root(&current_dir, &template_root, name)
+        {
             return None;
         }
         resolver
@@ -49,11 +52,52 @@ pub(crate) fn template_include_loader(
 }
 
 fn is_safe_include_name(name: &str) -> bool {
-    if name.is_empty() || name.starts_with('~') || Path::new(name).is_absolute() {
+    !name.is_empty()
+        && !name.starts_with('~')
+        && !name.contains('\\')
+        && !has_windows_drive_prefix(name)
+        && !Path::new(name).is_absolute()
+}
+
+fn has_windows_drive_prefix(path: &str) -> bool {
+    let mut chars = path.chars();
+    matches!(
+        (chars.next(), chars.next()),
+        (Some(first), Some(':')) if first.is_ascii_alphabetic()
+    )
+}
+
+fn include_stays_within_root(current_dir: &Path, template_root: &Path, name: &str) -> bool {
+    let Some(path) = normalize_template_path(current_dir.join(name)) else {
         return false;
+    };
+    let Some(root) = normalize_template_path(template_root) else {
+        return false;
+    };
+    if root.as_os_str().is_empty() {
+        return !path.has_root() && !matches!(path.components().next(), Some(Component::ParentDir));
     }
-    name.split('/')
-        .all(|segment| !segment.starts_with('.') && !segment.contains('\\'))
+    path.starts_with(root)
+}
+
+fn normalize_template_path(path: impl AsRef<Path>) -> Option<PathBuf> {
+    let mut normalized = PathBuf::new();
+    for component in path.as_ref().components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => normalized.push(part),
+            Component::ParentDir => {
+                if normalized.file_name().is_some() {
+                    normalized.pop();
+                } else if !normalized.has_root() {
+                    normalized.push("..");
+                }
+            }
+            Component::RootDir => normalized.push(Path::new("/")),
+            Component::Prefix(_) => return None,
+        }
+    }
+    Some(normalized)
 }
 
 fn parent_dir_or_dot(path: &Path) -> PathBuf {
@@ -142,6 +186,7 @@ impl FileInliningTransform {
             .with_source_text(self.source_text.as_deref(), prompt)
             .with_include_loader(Some(template_include_loader(
                 self.current_dir.clone(),
+                self.current_dir.clone(),
                 Arc::clone(&self.resolver),
             )));
             let rendered = render_template_for_target(
@@ -173,6 +218,7 @@ impl FileInliningTransform {
         let target = TemplateRenderTarget::graph_attr(self.source_name.clone(), "goal")
             .with_source_text(self.source_text.as_deref(), goal)
             .with_include_loader(Some(template_include_loader(
+                self.current_dir.clone(),
                 self.current_dir.clone(),
                 Arc::clone(&self.resolver),
             )));
@@ -207,6 +253,7 @@ impl FileInliningTransform {
             .with_source_text(Some(&resolved.content), &resolved.content)
             .with_include_loader(Some(template_include_loader(
                 parent_dir_or_dot(&resolved.path),
+                self.template_root_for_resolved_file(&resolved.path),
                 Arc::clone(&self.resolver),
             )));
         Ok(Some(render_file_contents(
@@ -217,6 +264,28 @@ impl FileInliningTransform {
             diagnostics,
         )?))
     }
+
+    fn template_root_for_resolved_file(&self, path: &Path) -> PathBuf {
+        let parent = parent_dir_or_dot(path);
+        if path_is_within_root(&parent, &self.current_dir) {
+            self.current_dir.clone()
+        } else {
+            parent
+        }
+    }
+}
+
+fn path_is_within_root(path: &Path, root: &Path) -> bool {
+    let Some(path) = normalize_template_path(path) else {
+        return false;
+    };
+    let Some(root) = normalize_template_path(root) else {
+        return false;
+    };
+    if root.as_os_str().is_empty() {
+        return !path.has_root() && !matches!(path.components().next(), Some(Component::ParentDir));
+    }
+    path.starts_with(root)
 }
 
 impl Transform for FileInliningTransform {

@@ -352,6 +352,8 @@ fn collect_workflow_files(
             )?;
             let source = std::fs::read_to_string(&bundled.absolute_path)
                 .with_context(|| format!("Failed to read {}", bundled.absolute_path.display()))?;
+            let template_root =
+                template_root_for_bundled_file(&bundled.path, &workflow_template_root)?;
             collect_template_include_files(
                 files,
                 context.cwd,
@@ -359,7 +361,7 @@ fn collect_workflow_files(
                     path:    bundled.path.clone(),
                     content: source,
                 },
-                &manifest_parent_or_dot(&bundled.path)?,
+                &template_root,
                 Some(&bundled.path),
                 &context.inputs,
             )?;
@@ -394,6 +396,8 @@ fn collect_workflow_files(
                     std::fs::read_to_string(&bundled.absolute_path).with_context(|| {
                         format!("Failed to read {}", bundled.absolute_path.display())
                     })?;
+                let template_root =
+                    template_root_for_bundled_file(&bundled.path, &workflow_template_root)?;
                 collect_template_include_files(
                     files,
                     context.cwd,
@@ -401,7 +405,7 @@ fn collect_workflow_files(
                         path:    bundled.path.clone(),
                         content: source,
                     },
-                    &manifest_parent_or_dot(&bundled.path)?,
+                    &template_root,
                     Some(&bundled.path),
                     &context.inputs,
                 )?;
@@ -498,6 +502,27 @@ fn collect_template_include_files(
             });
     }
     Ok(())
+}
+
+fn template_root_for_bundled_file(
+    path: &ManifestPath,
+    workflow_template_root: &ManifestPath,
+) -> Result<ManifestPath> {
+    if manifest_path_is_within_root(path, workflow_template_root) {
+        Ok(workflow_template_root.clone())
+    } else {
+        manifest_parent_or_dot(path)
+    }
+}
+
+fn manifest_path_is_within_root(path: &ManifestPath, root: &ManifestPath) -> bool {
+    if root.as_path().as_os_str().is_empty() {
+        return !matches!(
+            path.as_path().components().next(),
+            Some(Component::ParentDir)
+        );
+    }
+    path.starts_with(root)
 }
 
 fn verify_recorded_template_dependencies(
