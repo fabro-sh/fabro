@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { ChevronDownIcon } from "@heroicons/react/16/solid";
 import type { Provider } from "@qltysh/fabro-api-client";
 import { useProviders } from "../lib/queries";
 import {
@@ -29,17 +31,48 @@ export default function SettingsModels() {
 }
 
 function ProvidersPanel({ providers }: { providers: Provider[] }) {
-  return (
-    <Panel title="Providers">
-      {providers.length === 0 ? (
+  const configured = providers.filter((p) => p.configured);
+  const unconfigured = providers.filter((p) => !p.configured);
+  const [showUnconfigured, setShowUnconfigured] = useState(
+    configured.length === 0,
+  );
+
+  if (providers.length === 0) {
+    return (
+      <Panel title="Providers">
         <div className="px-4 py-6 text-sm text-fg-muted">
           No LLM providers in the catalog.
         </div>
-      ) : (
-        providers.map((provider) => (
-          <ProviderRow key={provider.id} provider={provider} />
-        ))
-      )}
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel title="Providers">
+      {configured.map((provider) => (
+        <ProviderRow key={provider.id} provider={provider} />
+      ))}
+      {showUnconfigured
+        ? unconfigured.map((provider) => (
+            <ProviderRow key={provider.id} provider={provider} />
+          ))
+        : null}
+      {unconfigured.length > 0 ? (
+        <button
+          type="button"
+          onClick={() => setShowUnconfigured((v) => !v)}
+          aria-expanded={showUnconfigured}
+          className="flex w-full items-center gap-1.5 px-4 py-3 text-left text-xs font-medium text-fg-muted hover:text-fg-3"
+        >
+          <ChevronDownIcon
+            className={`size-4 h-lh shrink-0 transition-transform ${
+              showUnconfigured ? "rotate-180" : ""
+            }`}
+          />
+          {showUnconfigured ? "Hide" : "Show"} {unconfigured.length}{" "}
+          unconfigured {plural(unconfigured.length, "provider", "providers")}
+        </button>
+      ) : null}
     </Panel>
   );
 }
