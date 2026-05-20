@@ -5,11 +5,12 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use fabro_acp::{
-    AcpCommandError, AcpControlHandle, AcpError, AcpProcessSpec, AcpRunRequest, render_stop_reason,
+    AcpCommandError, AcpControlHandle, AcpError, AcpLiveControl, AcpProcessSpec, AcpRunRequest,
+    render_stop_reason,
 };
 use fabro_agent::{AgentEvent, Sandbox, StaticEnvProvider, ToolEnvProvider};
 use fabro_graphviz::graph::Node;
-use fabro_types::{Principal, SessionCapability, StageId};
+use fabro_types::{AgentBackend, Principal, SessionCapability, StageId, SteeringMessage};
 use fabro_util::time::elapsed_ms;
 use tokio_util::sync::CancellationToken;
 
@@ -19,7 +20,7 @@ use super::changed_files;
 use crate::error::Error;
 use crate::event::{Emitter, Event, RunNoticeCode, RunNoticeLevel, StageScope};
 use crate::handler::NodeTimeoutPolicy;
-use crate::steering_hub::{ActiveControlHandle, ControlItem, SteeringHub};
+use crate::steering_hub::{ActiveControlHandle, SteeringHub};
 
 pub struct AgentAcpBackend {
     tool_env:                     Option<Arc<dyn ToolEnvProvider>>,
@@ -144,9 +145,11 @@ impl AgentAcpBackend {
             sandbox: Arc::clone(sandbox),
             cancel_token: cancel_token.child_token(),
             on_activity: Some(on_activity),
-            control_handle: Some(control_handle.clone()),
-            on_natural_completion,
-            on_steer_prompt,
+            live_control: Some(AcpLiveControl {
+                handle: control_handle.clone(),
+                on_natural_completion,
+                on_steer_prompt,
+            }),
         })
         .await
         {
@@ -268,7 +271,7 @@ impl AgentAcpBackend {
                 stage_id:     StageId::new(node.id.clone(), stage_scope.visit),
                 session_id:   session_id.to_string(),
                 thread_id:    None,
-                provider:     Some("acp".to_string()),
+                provider:     Some(AgentBackend::Acp.to_string()),
                 model:        config_name.map(str::to_string),
                 capabilities: vec![SessionCapability::Steer],
                 hub:          Arc::clone(steering_hub),
@@ -281,7 +284,7 @@ impl AgentAcpBackend {
 }
 
 impl ActiveControlHandle for AcpControlHandle {
-    fn enqueue_bounded(&self, item: ControlItem, cap: usize) -> Option<ControlItem> {
+    fn enqueue_bounded(&self, item: SteeringMessage, cap: usize) -> Option<SteeringMessage> {
         Self::enqueue_bounded(self, item, cap)
     }
 
@@ -289,7 +292,11 @@ impl ActiveControlHandle for AcpControlHandle {
         Self::interrupt(self, actor);
     }
 
-    fn interrupt_then_enqueue_bounded(&self, item: ControlItem, cap: usize) -> Option<ControlItem> {
+    fn interrupt_then_enqueue_bounded(
+        &self,
+        item: SteeringMessage,
+        cap: usize,
+    ) -> Option<SteeringMessage> {
         Self::interrupt_then_enqueue_bounded(self, item, cap)
     }
 

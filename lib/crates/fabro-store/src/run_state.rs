@@ -8,12 +8,13 @@ use fabro_types::run_event::{
 };
 use fabro_types::settings::run::RunSandboxSettings;
 use fabro_types::{
-    BilledModelUsage, Checkpoint, CheckpointRecord, CommandTermination, Conclusion, EventBody,
-    FailureSignature, InterviewQuestionRecord, Outcome, PendingInterviewRecord, PullRequestLink,
-    RepositoryRef, Run, RunBillingSummary, RunControlAction, RunDiff, RunEvent, RunId,
-    RunLifecycle, RunLinks, RunModel, RunOrigin, RunProjection, RunSandbox, RunSandboxRuntime,
-    RunSpec, RunStatus, RunTimestamps, SandboxProvider, StageCompletion, StageHandler, StageId,
-    StageOutcome, StageProjection, StageState, StartRecord, WorkflowRef, first_event_seq,
+    AgentBackend, BilledModelUsage, Checkpoint, CheckpointRecord, CommandTermination, Conclusion,
+    EventBody, FailureSignature, InterviewQuestionRecord, Outcome, PendingInterviewRecord,
+    PullRequestLink, RepositoryRef, Run, RunBillingSummary, RunControlAction, RunDiff, RunEvent,
+    RunId, RunLifecycle, RunLinks, RunModel, RunOrigin, RunProjection, RunSandbox,
+    RunSandboxRuntime, RunSpec, RunStatus, RunTimestamps, SandboxProvider, StageCompletion,
+    StageHandler, StageId, StageOutcome, StageProjection, StageState, StartRecord, WorkflowRef,
+    first_event_seq,
 };
 use fabro_util::error::render_compact_with_causes;
 use serde_json::Value;
@@ -852,12 +853,16 @@ fn provider_used_from_agent_session_activated(props: &AgentSessionActivatedProps
 }
 
 fn is_acp_session_activation(props: &AgentSessionActivatedProps) -> bool {
-    props.provider.as_deref() == Some("acp")
+    let acp: &'static str = AgentBackend::Acp.into();
+    props.provider.as_deref() == Some(acp)
 }
 
 fn provider_used_from_agent_acp_started(props: &AgentAcpStartedProps) -> Value {
     let mut provider_used = serde_json::Map::new();
-    provider_used.insert("mode".to_string(), Value::String("acp".to_string()));
+    provider_used.insert(
+        "mode".to_string(),
+        Value::String(AgentBackend::Acp.to_string()),
+    );
     provider_used.insert("command".to_string(), Value::String(props.command.clone()));
     if let Some(config_name) = props.config_name.clone() {
         provider_used.insert("config_name".to_string(), Value::String(config_name));
@@ -905,11 +910,11 @@ mod tests {
         StageStartedProps,
     };
     use fabro_types::{
-        BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint, CheckpointRecord,
-        CommandTermination, EventBody, FailureCategory, FailureDetail, FailureReason, Graph,
-        Outcome, PullRequestLink, QuestionType, RunBlobId, RunControlAction, RunDiff, RunEvent,
-        RunSpec, RunStatus, StageOutcome, StageState, SuccessReason, WorkflowSettings,
-        first_event_seq, fixtures,
+        AgentBackend, BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint,
+        CheckpointRecord, CommandTermination, EventBody, FailureCategory, FailureDetail,
+        FailureReason, Graph, Outcome, PullRequestLink, QuestionType, RunBlobId, RunControlAction,
+        RunDiff, RunEvent, RunSpec, RunStatus, StageOutcome, StageState, SuccessReason,
+        WorkflowSettings, first_event_seq, fixtures,
     };
     use serde_json::json;
 
@@ -1357,7 +1362,7 @@ mod tests {
                 5,
                 EventBody::AgentSessionActivated(AgentSessionActivatedProps {
                     thread_id:    None,
-                    provider:     Some("acp".to_string()),
+                    provider:     Some(AgentBackend::Acp.to_string()),
                     model:        Some("fake".to_string()),
                     capabilities: vec![fabro_types::SessionCapability::Steer],
                     visit:        1,

@@ -21,7 +21,7 @@ use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{Catalog, ModelRef, ProviderId, Speed};
 use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{
-    AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
+    AgentBackend, AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
     InterviewQuestionRecord, Node, Outcome, QuestionType, RunBlobId, RunId, RunSpec,
     SandboxProvider, SessionMessage, SuccessReason, SystemActorKind, WorkflowSettings, fixtures,
 };
@@ -8560,6 +8560,39 @@ async fn steer_without_active_steerable_session_forwards_plain_steer_for_bufferi
 }
 
 #[tokio::test]
+async fn steer_with_active_non_steerable_session_returns_conflict() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = fixtures::RUN_1;
+    let stage_id = StageId::new("agent", 1);
+    let (control_tx, _control_rx) = tokio::sync::mpsc::channel(1);
+    let _temp_dir = insert_running_control_run(
+        &state,
+        run_id,
+        Some(RunAnswerTransport::Subprocess { control_tx }),
+    );
+    {
+        let mut runs = state.runs.lock().expect("runs lock poisoned");
+        runs.get_mut(&run_id)
+            .unwrap()
+            .active_non_steerable_stages
+            .insert(stage_id, "session-a".to_string());
+    }
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api(&format!("/runs/{run_id}/steer")))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"text":"try again"}"#))
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = body_json(response.into_body()).await;
+    assert_eq!(body["errors"][0]["code"], "agent_not_steerable");
+}
+
+#[tokio::test]
 async fn steer_interrupt_without_active_steerable_session_returns_conflict() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
@@ -8793,7 +8826,7 @@ async fn steer_with_active_acp_session_forwards_to_worker() {
             visit:        1,
             session_id:   "acp-session".to_string(),
             thread_id:    None,
-            provider:     Some("acp".to_string()),
+            provider:     Some(AgentBackend::Acp.to_string()),
             model:        None,
             capabilities: vec![SessionCapability::Steer],
         });
@@ -8894,7 +8927,7 @@ async fn active_acp_steerable_marker_clears_on_terminal_paths() {
                 visit:        1,
                 session_id:   "acp-session".to_string(),
                 thread_id:    None,
-                provider:     Some("acp".to_string()),
+                provider:     Some(AgentBackend::Acp.to_string()),
                 model:        None,
                 capabilities: vec![SessionCapability::Steer],
             });

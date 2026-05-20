@@ -10,7 +10,7 @@ use agent_client_protocol::schema::{
 use agent_client_protocol::util::MatchDispatch;
 use agent_client_protocol::{ActiveSession, Agent, Client, Error as ProtocolError, SessionMessage};
 use fabro_sandbox::Sandbox;
-use fabro_types::Principal;
+use fabro_types::{Principal, SteeringMessage};
 use fabro_util::time::elapsed_ms;
 use tokio::sync::Notify;
 use tokio::sync::futures::Notified;
@@ -21,7 +21,6 @@ use crate::command::AcpProcessSpec;
 use crate::error::AcpError;
 use crate::transport::{SandboxAcpTransport, TransportState};
 
-pub type AcpControlItem = (String, Option<Principal>);
 pub type AcpNaturalCompletionCallback = Arc<dyn Fn() -> bool + Send + Sync>;
 pub type AcpSteerPromptCallback = Arc<dyn Fn(String, Option<Principal>) + Send + Sync>;
 
@@ -29,7 +28,7 @@ const CANCEL_GRACE_PERIOD: Duration = Duration::from_millis(500);
 
 #[derive(Default)]
 struct AcpControlState {
-    queue:               VecDeque<AcpControlItem>,
+    queue:               VecDeque<SteeringMessage>,
     waiting_for_steer:   bool,
     interrupt_requested: bool,
 }
@@ -46,7 +45,7 @@ impl AcpControlHandle {
         Self::default()
     }
 
-    pub fn enqueue_bounded(&self, item: AcpControlItem, cap: usize) -> Option<AcpControlItem> {
+    pub fn enqueue_bounded(&self, item: SteeringMessage, cap: usize) -> Option<SteeringMessage> {
         self.push_bounded(item, cap, false)
     }
 
@@ -63,18 +62,18 @@ impl AcpControlHandle {
 
     pub fn interrupt_then_enqueue_bounded(
         &self,
-        item: AcpControlItem,
+        item: SteeringMessage,
         cap: usize,
-    ) -> Option<AcpControlItem> {
+    ) -> Option<SteeringMessage> {
         self.push_bounded(item, cap, true)
     }
 
     fn push_bounded(
         &self,
-        item: AcpControlItem,
+        item: SteeringMessage,
         cap: usize,
         request_interrupt: bool,
-    ) -> Option<AcpControlItem> {
+    ) -> Option<SteeringMessage> {
         let evicted = {
             let mut state = self.state.lock().expect("ACP control lock poisoned");
             let evicted = if state.queue.len() >= cap {
@@ -109,7 +108,7 @@ impl AcpControlHandle {
             .len()
     }
 
-    fn pop_steer(&self) -> Option<AcpControlItem> {
+    fn pop_steer(&self) -> Option<SteeringMessage> {
         let item = {
             let mut state = self.state.lock().expect("ACP control lock poisoned");
             let item = state.queue.pop_front();
@@ -141,18 +140,34 @@ impl AcpControlHandle {
     }
 }
 
-pub struct AcpRunRequest {
-    pub command:               AcpProcessSpec,
-    pub prompt:                String,
-    pub cwd:                   String,
-    pub timeout_ms:            Option<u64>,
-    pub env:                   HashMap<String, String>,
-    pub sandbox:               Arc<dyn Sandbox>,
-    pub cancel_token:          CancellationToken,
-    pub on_activity:           Option<Arc<dyn Fn() + Send + Sync>>,
-    pub control_handle:        Option<AcpControlHandle>,
+#[derive(Default)]
+pub struct AcpLiveControl {
+    pub handle:                AcpControlHandle,
     pub on_natural_completion: Option<AcpNaturalCompletionCallback>,
     pub on_steer_prompt:       Option<AcpSteerPromptCallback>,
+}
+
+impl AcpLiveControl {
+    #[must_use]
+    pub fn new(handle: AcpControlHandle) -> Self {
+        Self {
+            handle,
+            on_natural_completion: None,
+            on_steer_prompt: None,
+        }
+    }
+}
+
+pub struct AcpRunRequest {
+    pub command:      AcpProcessSpec,
+    pub prompt:       String,
+    pub cwd:          String,
+    pub timeout_ms:   Option<u64>,
+    pub env:          HashMap<String, String>,
+    pub sandbox:      Arc<dyn Sandbox>,
+    pub cancel_token: CancellationToken,
+    pub on_activity:  Option<Arc<dyn Fn() + Send + Sync>>,
+    pub live_control: Option<AcpLiveControl>,
 }
 
 #[derive(Debug)]
@@ -173,11 +188,9 @@ pub async fn run_acp_turn(request: AcpRunRequest) -> Result<AcpRunResult, AcpErr
         sandbox,
         cancel_token,
         on_activity,
-        control_handle,
-        on_natural_completion,
-        on_steer_prompt,
+        live_control,
     } = request;
-    let control_handle = control_handle.unwrap_or_default();
+    let live_control = live_control.unwrap_or_default();
     let start = std::time::Instant::now();
     let state = TransportState::new();
     let read_cancel_token = cancel_token.clone();
@@ -211,9 +224,9 @@ pub async fn run_acp_turn(request: AcpRunRequest) -> Result<AcpRunResult, AcpErr
                     read_live_session(
                         &mut session,
                         &read_cancel_token,
-                        &control_handle,
-                        on_natural_completion.as_ref(),
-                        on_steer_prompt.as_ref(),
+                        &live_control.handle,
+                        live_control.on_natural_completion.as_ref(),
+                        live_control.on_steer_prompt.as_ref(),
                         on_activity.as_ref(),
                     )
                     .await
@@ -337,11 +350,11 @@ async fn read_live_session(
 
     loop {
         if !prompt_active {
-            if let Some((steer_text, actor)) = control_handle.pop_steer() {
+            if let Some(message) = control_handle.pop_steer() {
                 if let Some(on_steer_prompt) = on_steer_prompt {
-                    on_steer_prompt(steer_text.clone(), actor.clone());
+                    on_steer_prompt(message.text.clone(), message.actor.clone());
                 }
-                session.send_prompt(steer_text)?;
+                session.send_prompt(message.text)?;
                 prompt_active = true;
                 cancel_sent = false;
                 continue;

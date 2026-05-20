@@ -6,10 +6,12 @@ use std::time::Duration;
 
 use agent_client_protocol::schema::StopReason;
 use fabro_acp::{
-    AcpControlHandle, AcpError, AcpProcessSpec, AcpRunRequest, AcpRunResult, run_acp_turn,
+    AcpControlHandle, AcpError, AcpLiveControl, AcpProcessSpec, AcpRunRequest, AcpRunResult,
+    run_acp_turn,
 };
 use fabro_sandbox::test_support::{MockSandbox, MockStdioProcess};
 use fabro_sandbox::{LocalSandbox, Sandbox, shell_quote};
+use fabro_types::SteeringMessage;
 use fabro_util::error::collect_chain;
 use tokio::fs::{read_to_string, write};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream};
@@ -48,9 +50,7 @@ async fn stdio_spawn_failure_returns_sandbox_error() {
         sandbox,
         cancel_token: CancellationToken::new(),
         on_activity: None,
-        control_handle: None,
-        on_natural_completion: None,
-        on_steer_prompt: None,
+        live_control: None,
     })
     .await;
     let Err(error) = result else {
@@ -84,9 +84,7 @@ async fn clean_stdio_exit_after_final_response_completes_turn() {
         sandbox,
         cancel_token: CancellationToken::new(),
         on_activity: None,
-        control_handle: None,
-        on_natural_completion: None,
-        on_steer_prompt: None,
+        live_control: None,
     })
     .await
     .expect("clean ACP process exit should not preempt final protocol response");
@@ -120,9 +118,7 @@ async fn session_lifecycle_initializes_sends_prompt_and_aggregates_text() {
         sandbox,
         cancel_token: CancellationToken::new(),
         on_activity: None,
-        control_handle: None,
-        on_natural_completion: None,
-        on_steer_prompt: None,
+        live_control: None,
     })
     .await
     .expect("run ACP turn");
@@ -175,12 +171,11 @@ async fn steering_sends_followup_session_prompt_over_acp() {
         cancel_token: CancellationToken::new(),
         on_activity: Some(Arc::new(move || {
             if !queued_for_activity.swap(true, Ordering::AcqRel) {
-                handle_for_activity.enqueue_bounded(("please revise".to_string(), None), 32);
+                handle_for_activity
+                    .enqueue_bounded(SteeringMessage::new("please revise", None), 32);
             }
         })),
-        control_handle: Some(control_handle),
-        on_natural_completion: None,
-        on_steer_prompt: None,
+        live_control: Some(AcpLiveControl::new(control_handle)),
     })
     .await
     .expect("run ACP turn with steering");
@@ -244,13 +239,13 @@ async fn interrupt_then_steer_sends_cancel_then_followup_session_prompt_over_acp
         cancel_token: CancellationToken::new(),
         on_activity: Some(Arc::new(move || {
             if !queued_for_activity.swap(true, Ordering::AcqRel) {
-                handle_for_activity
-                    .interrupt_then_enqueue_bounded(("please revise".to_string(), None), 32);
+                handle_for_activity.interrupt_then_enqueue_bounded(
+                    SteeringMessage::new("please revise", None),
+                    32,
+                );
             }
         })),
-        control_handle: Some(control_handle),
-        on_natural_completion: None,
-        on_steer_prompt: None,
+        live_control: Some(AcpLiveControl::new(control_handle)),
     })
     .await
     .expect("run ACP turn with interrupt and steering");
@@ -318,9 +313,7 @@ async fn inline_interrupt_terminates_agent_that_ignores_cancel() {
                 handle_for_activity.interrupt(None);
             }
         })),
-        control_handle: Some(control_handle),
-        on_natural_completion: None,
-        on_steer_prompt: None,
+        live_control: Some(AcpLiveControl::new(control_handle)),
     })
     .await
     .expect_err("ignored inline interrupt should terminate as cancelled");
@@ -690,9 +683,7 @@ async fn run_fake_agent_with_activity(
         sandbox,
         cancel_token,
         on_activity,
-        control_handle: None,
-        on_natural_completion: None,
-        on_steer_prompt: None,
+        live_control: None,
     })
     .await
 }

@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use fabro_agent::SessionControlHandle;
 use fabro_types::run_event::AgentSteerDroppedReason;
-use fabro_types::{Principal, StageId};
+use fabro_types::{Principal, StageId, SteeringMessage};
 
 use crate::event::{Emitter, Event};
 
@@ -33,17 +33,19 @@ pub const PER_SESSION_QUEUE_CAP: usize = 32;
 /// Overflow evicts the oldest entry (FIFO) and emits `agent.steer.dropped`.
 pub const PER_RUN_PENDING_CAP: usize = 32;
 
-pub type ControlItem = (String, Option<Principal>);
-
 pub trait ActiveControlHandle: Send + Sync {
-    fn enqueue_bounded(&self, item: ControlItem, cap: usize) -> Option<ControlItem>;
+    fn enqueue_bounded(&self, item: SteeringMessage, cap: usize) -> Option<SteeringMessage>;
     fn interrupt(&self, actor: Option<Principal>);
-    fn interrupt_then_enqueue_bounded(&self, item: ControlItem, cap: usize) -> Option<ControlItem>;
+    fn interrupt_then_enqueue_bounded(
+        &self,
+        item: SteeringMessage,
+        cap: usize,
+    ) -> Option<SteeringMessage>;
     fn has_pending_control_work(&self) -> bool;
 }
 
 impl ActiveControlHandle for SessionControlHandle {
-    fn enqueue_bounded(&self, item: ControlItem, cap: usize) -> Option<ControlItem> {
+    fn enqueue_bounded(&self, item: SteeringMessage, cap: usize) -> Option<SteeringMessage> {
         Self::enqueue_bounded(self, item, cap)
     }
 
@@ -51,19 +53,17 @@ impl ActiveControlHandle for SessionControlHandle {
         Self::interrupt(self, actor);
     }
 
-    fn interrupt_then_enqueue_bounded(&self, item: ControlItem, cap: usize) -> Option<ControlItem> {
+    fn interrupt_then_enqueue_bounded(
+        &self,
+        item: SteeringMessage,
+        cap: usize,
+    ) -> Option<SteeringMessage> {
         Self::interrupt_then_enqueue_bounded(self, item, cap)
     }
 
     fn has_pending_control_work(&self) -> bool {
         Self::has_pending_control_work(self)
     }
-}
-
-#[derive(Debug, Clone)]
-struct PendingSteer {
-    text:  String,
-    actor: Option<Principal>,
 }
 
 #[derive(Clone)]
@@ -78,7 +78,7 @@ struct ActiveEntry {
 )]
 pub struct SteeringHub {
     active:  RwLock<HashMap<StageId, ActiveEntry>>,
-    pending: Mutex<VecDeque<PendingSteer>>,
+    pending: Mutex<VecDeque<SteeringMessage>>,
     emitter: Arc<Emitter>,
 }
 
@@ -141,17 +141,12 @@ impl SteeringHub {
 
     /// Drain pending run-wide steers into `handle`.
     pub fn drain_pending_into(&self, stage_id: &StageId, handle: &dyn ActiveControlHandle) {
-        let pending: Vec<PendingSteer> = {
+        let pending: Vec<SteeringMessage> = {
             let mut pending = self.pending.lock().expect("pending lock poisoned");
             pending.drain(..).collect()
         };
         for item in pending {
-            Self::enqueue_into_session_queue(
-                handle,
-                (item.text, item.actor),
-                &self.emitter,
-                Some(stage_id),
-            );
+            Self::enqueue_into_session_queue(handle, item, &self.emitter, Some(stage_id));
         }
     }
 
@@ -206,14 +201,11 @@ impl SteeringHub {
             let dropped_actor = {
                 let mut pending = self.pending.lock().expect("pending lock poisoned");
                 let dropped_actor = if pending.len() >= PER_RUN_PENDING_CAP {
-                    Some(pending.pop_front().and_then(|d| d.actor))
+                    pending.pop_front().and_then(|d| d.actor)
                 } else {
                     None
                 };
-                pending.push_back(PendingSteer {
-                    text,
-                    actor: actor.clone(),
-                });
+                pending.push_back(SteeringMessage::new(text, actor.clone()));
                 dropped_actor
             };
 
@@ -221,7 +213,7 @@ impl SteeringHub {
                 self.emitter.emit(&Event::AgentSteerDropped {
                     reason:  AgentSteerDroppedReason::QueueFull,
                     count:   1,
-                    actor:   dropped_actor,
+                    actor:   Some(dropped_actor),
                     node_id: None,
                     visit:   None,
                 });
@@ -235,7 +227,7 @@ impl SteeringHub {
         for (stage_id, entry) in active.iter() {
             Self::enqueue_into_session_queue(
                 entry.handle.as_ref(),
-                (text.clone(), actor.clone()),
+                SteeringMessage::new(text.clone(), actor.clone()),
                 &self.emitter,
                 Some(stage_id),
             );
@@ -282,14 +274,14 @@ impl SteeringHub {
         });
 
         for (stage_id, entry) in active.iter() {
-            if let Some((_, evicted_actor)) = entry.handle.interrupt_then_enqueue_bounded(
-                (text.to_string(), actor.cloned()),
+            if let Some(evicted) = entry.handle.interrupt_then_enqueue_bounded(
+                SteeringMessage::new(text, actor.cloned()),
                 PER_SESSION_QUEUE_CAP,
             ) {
                 self.emitter.emit(&Event::AgentSteerDropped {
                     reason:  AgentSteerDroppedReason::QueueFull,
                     count:   1,
-                    actor:   evicted_actor,
+                    actor:   evicted.actor,
                     node_id: Some(stage_id.node_id().to_string()),
                     visit:   Some(stage_id.visit()),
                 });
@@ -330,15 +322,15 @@ impl SteeringHub {
     /// The push + eviction are atomic under the per-session queue lock.
     fn enqueue_into_session_queue(
         handle: &dyn ActiveControlHandle,
-        item: ControlItem,
+        item: SteeringMessage,
         emitter: &Emitter,
         stage_id: Option<&StageId>,
     ) {
-        if let Some((_, evicted_actor)) = handle.enqueue_bounded(item, PER_SESSION_QUEUE_CAP) {
+        if let Some(evicted) = handle.enqueue_bounded(item, PER_SESSION_QUEUE_CAP) {
             emitter.emit(&Event::AgentSteerDropped {
                 reason:  AgentSteerDroppedReason::QueueFull,
                 count:   1,
-                actor:   evicted_actor,
+                actor:   evicted.actor,
                 node_id: stage_id.map(|s| s.node_id().to_string()),
                 visit:   stage_id.map(StageId::visit),
             });
@@ -353,7 +345,7 @@ mod tests {
     use fabro_agent::SessionControlHandle;
     use fabro_types::{Principal, RunEvent, RunId, StageId, SystemActorKind};
 
-    use super::{ActiveControlHandle, ControlItem, SteeringHub};
+    use super::{ActiveControlHandle, SteeringHub, SteeringMessage};
     use crate::event::Emitter;
 
     fn hub_with_event_names() -> (Arc<SteeringHub>, Arc<Mutex<Vec<String>>>) {
@@ -385,7 +377,7 @@ mod tests {
 
     #[derive(Default)]
     struct FakeAcpControlHandle {
-        queue:       Mutex<Vec<ControlItem>>,
+        queue:       Mutex<Vec<SteeringMessage>>,
         interrupted: Mutex<usize>,
     }
 
@@ -400,7 +392,7 @@ mod tests {
     }
 
     impl ActiveControlHandle for FakeAcpControlHandle {
-        fn enqueue_bounded(&self, item: ControlItem, _cap: usize) -> Option<ControlItem> {
+        fn enqueue_bounded(&self, item: SteeringMessage, _cap: usize) -> Option<SteeringMessage> {
             self.queue.lock().unwrap().push(item);
             None
         }
@@ -411,9 +403,9 @@ mod tests {
 
         fn interrupt_then_enqueue_bounded(
             &self,
-            item: ControlItem,
+            item: SteeringMessage,
             cap: usize,
-        ) -> Option<ControlItem> {
+        ) -> Option<SteeringMessage> {
             self.interrupt(None);
             self.enqueue_bounded(item, cap)
         }
