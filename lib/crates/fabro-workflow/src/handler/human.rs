@@ -6,11 +6,11 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
-use fabro_interview::{Answer, AnswerValue, Interviewer, Question};
+use fabro_interview::{Answer, AnswerValue, Interviewer, Question, ask_with_timeout};
 use fabro_types::{BlockedReason, InterviewOption, Principal, QuestionType, SystemActorKind};
 use ulid::Ulid;
 
-use super::{EngineServices, Handler};
+use super::{EngineServices, Handler, NodeTimeoutPolicy};
 use crate::context::{Context, keys};
 use crate::error::Error;
 use crate::event::{Emitter, Event, StageScope};
@@ -249,6 +249,7 @@ impl Handler for HumanHandler {
         question.options = options;
         question.allow_freeform = freeform_target.is_some();
         question.stage.clone_from(&node.id);
+        question.timeout_seconds = node.timeout().map(|duration| duration.as_secs_f64());
 
         // Look up the prior node's full response
         if let Some(serde_json::Value::String(last_node)) = context.get(keys::LAST_STAGE) {
@@ -290,7 +291,7 @@ impl Handler for HumanHandler {
         self.tracker
             .interview_started(services.run.emitter.as_ref());
         let interview_start = Instant::now();
-        let answer_submission = self.interviewer.ask(question).await;
+        let answer_submission = ask_with_timeout(self.interviewer.as_ref(), question).await;
         let answer_actor = answer_submission.actor.clone();
         let answer = answer_submission.answer;
 
@@ -448,6 +449,10 @@ impl Handler for HumanHandler {
 
         Ok(Outcome::fail_deterministic("No matching choice"))
     }
+
+    fn node_timeout_policy(&self, _node: &Node) -> NodeTimeoutPolicy {
+        NodeTimeoutPolicy::HandlerManaged
+    }
 }
 
 fn make_choice_outcome(key: &str, label: &str, to: &str) -> Outcome {
@@ -600,6 +605,7 @@ fn answer_text(answer: &Answer) -> String {
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
+    use std::time::Duration;
 
     use fabro_graphviz::graph::{AttrValue, Edge};
     use fabro_interview::{AutoApproveInterviewer, CallbackInterviewer, RecordingInterviewer};
@@ -1006,6 +1012,51 @@ mod tests {
             outcome.context_updates.get("human.gate.gate.answer"),
             Some(&serde_json::json!("yes"))
         );
+    }
+
+    #[tokio::test]
+    async fn wait_human_copies_node_timeout_to_question_and_started_event() {
+        let inner = Box::new(AutoApproveInterviewer::engine());
+        let recorder = Arc::new(RecordingInterviewer::new(inner));
+        let handler = HumanHandler::new(recorder.clone());
+        let mut graph = build_graph_with_human_gate();
+        let timeout = Duration::from_millis(125);
+        let timeout_seconds = timeout.as_secs_f64();
+        graph
+            .nodes
+            .get_mut("gate")
+            .unwrap()
+            .attrs
+            .insert("timeout".to_string(), AttrValue::Duration(timeout));
+        let node = graph.nodes.get("gate").unwrap();
+        let context = Context::new();
+        let run_dir = Path::new("/tmp/test");
+        let events = Arc::new(Mutex::new(Vec::new()));
+
+        handler
+            .execute(
+                node,
+                &context,
+                &graph,
+                run_dir,
+                &make_services_with_events(Arc::clone(&events)),
+            )
+            .await
+            .unwrap();
+
+        let recordings = recorder.recordings();
+        assert_eq!(recordings.len(), 1);
+        assert_eq!(recordings[0].0.timeout_seconds, Some(timeout_seconds));
+
+        let started_timeout = events
+            .lock()
+            .expect("event log lock poisoned")
+            .iter()
+            .find_map(|event| match &event.body {
+                EventBody::InterviewStarted(props) => props.timeout_seconds,
+                _ => None,
+            });
+        assert_eq!(started_timeout, Some(timeout_seconds));
     }
 
     #[tokio::test]

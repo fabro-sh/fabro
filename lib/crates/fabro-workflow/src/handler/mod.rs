@@ -27,6 +27,12 @@ use crate::outcome::{Outcome, OutcomeExt};
 pub use crate::services::{EngineServices, RunServices};
 
 /// The handler interface for node execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeTimeoutPolicy {
+    ExecutorEnforced,
+    HandlerManaged,
+}
+
 #[async_trait]
 pub trait Handler: Send + Sync {
     async fn execute(
@@ -55,6 +61,10 @@ pub trait Handler: Send + Sync {
     /// Default implementation retries transient errors only.
     fn should_retry(&self, err: &Error) -> bool {
         err.is_retryable()
+    }
+
+    fn node_timeout_policy(&self, _node: &Node) -> NodeTimeoutPolicy {
+        NodeTimeoutPolicy::ExecutorEnforced
     }
 
     async fn shutdown(&self, _emitter: &Arc<Emitter>) {}

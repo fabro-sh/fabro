@@ -16,7 +16,7 @@ use crate::artifact;
 use crate::context::Context;
 use crate::error::Error;
 use crate::graph::{WorkflowGraph, WorkflowNode};
-use crate::handler::{EngineServices, dispatch_handler, format_panic_message};
+use crate::handler::{EngineServices, NodeTimeoutPolicy, dispatch_handler, format_panic_message};
 use crate::outcome::{FailureDetail, Outcome, StageOutcome};
 use crate::retry::build_retry_policy;
 
@@ -58,7 +58,10 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
         let execution_snapshot = wf_context.snapshot();
 
         // Timeout from the node
-        let node_timeout = gv_node.timeout();
+        let node_timeout = match handler.node_timeout_policy(gv_node) {
+            NodeTimeoutPolicy::ExecutorEnforced => gv_node.timeout(),
+            NodeTimeoutPolicy::HandlerManaged => None,
+        };
 
         // Wrap with panic catch + timeout
         let run_dir = self.run_dir.clone();

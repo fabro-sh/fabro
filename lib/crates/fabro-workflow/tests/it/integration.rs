@@ -846,7 +846,7 @@ struct NeverAnswerInterviewer;
 #[async_trait::async_trait]
 impl Interviewer for NeverAnswerInterviewer {
     async fn ask(&self, _question: fabro_interview::Question) -> fabro_interview::AnswerSubmission {
-        tokio::time::sleep(Duration::from_secs(60)).await;
+        tokio::time::sleep(Duration::from_mins(1)).await;
         fabro_interview::AnswerSubmission::system(
             Answer::interrupted(),
             fabro_types::SystemActorKind::Engine,
