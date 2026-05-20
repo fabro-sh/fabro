@@ -169,26 +169,26 @@ pub enum TemplateError {
     Syntax {
         line:        Option<u32>,
         source_name: Option<String>,
-        source_text: Option<String>,
+        source_text: Option<Arc<str>>,
         span:        Option<SourceSpan>,
-        source_code: Option<Box<NamedSource<String>>>,
+        source_code: Option<Box<NamedSource<Arc<str>>>>,
         source:      Box<minijinja::Error>,
     },
     UndefinedVariable {
         expression:  Option<String>,
         line:        Option<u32>,
         source_name: Option<String>,
-        source_text: Option<String>,
+        source_text: Option<Arc<str>>,
         span:        Option<SourceSpan>,
-        source_code: Option<Box<NamedSource<String>>>,
+        source_code: Option<Box<NamedSource<Arc<str>>>>,
         source:      Box<minijinja::Error>,
     },
     Render {
         line:        Option<u32>,
         source_name: Option<String>,
-        source_text: Option<String>,
+        source_text: Option<Arc<str>>,
         span:        Option<SourceSpan>,
-        source_code: Option<Box<NamedSource<String>>>,
+        source_code: Option<Box<NamedSource<Arc<str>>>>,
         source:      Box<minijinja::Error>,
     },
 }
@@ -250,18 +250,18 @@ fn extract_expression(error: &minijinja::Error) -> Option<String> {
 }
 
 struct MiniJinjaErrorDetails {
-    location:    TemplateErrorLocation,
-    source_text: Option<String>,
+    line:        Option<u32>,
+    source_name: Option<String>,
+    source_text: Option<Arc<str>>,
     span:        Option<SourceSpan>,
-    source_code: Option<Box<NamedSource<String>>>,
+    source_code: Option<Box<NamedSource<Arc<str>>>>,
 }
 
 impl MiniJinjaErrorDetails {
     fn from_error(error: &minijinja::Error, origin: Option<&TemplateSourceOrigin>) -> Self {
         let source_name = error.name().map(str::to_owned);
-        let mut source_text = error.template_source().map(str::to_owned);
+        let mut source_text = error.template_source().map(Arc::<str>::from);
         let mut line = error.line().and_then(|n| u32::try_from(n).ok());
-        let mut column = None;
         let mut span_start = None;
         let mut span_len = None;
 
@@ -271,20 +271,14 @@ impl MiniJinjaErrorDetails {
             if let Some(len) = len {
                 span_start = Some(start);
                 span_len = Some(len);
-                column = source_text
-                    .as_deref()
-                    .and_then(|source| source_position(source, start).map(|(_, column)| column));
             }
         }
 
         if let (Some(origin), Some(fragment_start), Some(len)) = (origin, span_start, span_len) {
-            if let Some(start) = origin.fragment_start.checked_add(fragment_start) {
-                if let Some((origin_line, origin_column)) =
-                    source_position(&origin.source_text, start)
-                {
-                    source_text = Some(origin.source_text.clone());
+            if let Some(start) = origin.fragment_start().checked_add(fragment_start) {
+                if let Some((origin_line, _)) = source_position(origin.source_text(), start) {
+                    source_text = Some(origin.clone_source_text());
                     line = Some(origin_line);
-                    column = Some(origin_column);
                     span_start = Some(start);
                     span_len = Some(len);
                 }
@@ -297,15 +291,10 @@ impl MiniJinjaErrorDetails {
         let source_code = source_name
             .as_ref()
             .zip(source_text.as_ref())
-            .map(|(name, source)| Box::new(NamedSource::new(name.clone(), source.clone())));
+            .map(|(name, source)| Box::new(NamedSource::new(name.clone(), Arc::clone(source))));
         Self {
-            location: TemplateErrorLocation {
-                source_name,
-                line,
-                column,
-                span_start,
-                span_len,
-            },
+            line,
+            source_name,
             source_text,
             span,
             source_code,
@@ -376,8 +365,8 @@ impl TemplateError {
         let details = MiniJinjaErrorDetails::from_error(primary, primary_origin);
         match primary.kind() {
             ErrorKind::SyntaxError => Self::Syntax {
-                line:        details.location.line,
-                source_name: details.location.source_name,
+                line:        details.line,
+                source_name: details.source_name,
                 source_text: details.source_text,
                 span:        details.span,
                 source_code: details.source_code,
@@ -387,8 +376,8 @@ impl TemplateError {
                 let expression = extract_expression(primary);
                 Self::UndefinedVariable {
                     expression,
-                    line: details.location.line,
-                    source_name: details.location.source_name,
+                    line: details.line,
+                    source_name: details.source_name,
                     source_text: details.source_text,
                     span: details.span,
                     source_code: details.source_code,
@@ -401,8 +390,8 @@ impl TemplateError {
                 });
                 let details = MiniJinjaErrorDetails::from_error(&error, render_origin);
                 Self::Render {
-                    line:        details.location.line,
-                    source_name: details.location.source_name,
+                    line:        details.line,
+                    source_name: details.source_name,
                     source_text: details.source_text,
                     span:        details.span,
                     source_code: details.source_code,
@@ -481,16 +470,10 @@ impl TemplateError {
     pub fn column(&self) -> Option<u32> {
         let source_text = self.source_text()?;
         let offset = self.span()?.offset();
-        if offset > source_text.len() || !source_text.is_char_boundary(offset) {
-            return None;
-        }
-        let line_start = source_text[..offset]
-            .rfind('\n')
-            .map_or(0, |index| index + 1);
-        u32::try_from(source_text[line_start..offset].chars().count() + 1).ok()
+        source_position(source_text, offset).map(|(_, column)| column)
     }
 
-    fn source_code_ref(&self) -> Option<&NamedSource<String>> {
+    fn source_code_ref(&self) -> Option<&NamedSource<Arc<str>>> {
         match self {
             Self::LoaderDependentString { .. } | Self::Load { .. } => None,
             Self::Syntax { source_code, .. }
@@ -556,15 +539,7 @@ pub fn render_named(
     template: &str,
     ctx: &TemplateContext,
 ) -> Result<String, TemplateError> {
-    let name = name.into();
-    render_with(
-        Some(&name),
-        template,
-        ctx,
-        UndefinedBehavior::Strict,
-        None,
-        None,
-    )
+    render_named_with_origin(name, template, ctx, TemplateRenderMode::Strict, None)
 }
 
 pub fn render_named_fragment(
@@ -573,14 +548,30 @@ pub fn render_named_fragment(
     origin: &TemplateSourceOrigin,
     ctx: &TemplateContext,
 ) -> Result<String, TemplateError> {
+    render_named_with_origin(
+        name,
+        template,
+        ctx,
+        TemplateRenderMode::Strict,
+        Some(origin),
+    )
+}
+
+pub fn render_named_with_origin(
+    name: impl Into<String>,
+    template: &str,
+    ctx: &TemplateContext,
+    mode: TemplateRenderMode,
+    origin: Option<&TemplateSourceOrigin>,
+) -> Result<String, TemplateError> {
     let name = name.into();
     render_with(
         Some(&name),
         template,
         ctx,
-        UndefinedBehavior::Strict,
+        mode.undefined_behavior(),
         None,
-        Some(origin),
+        origin,
     )
 }
 
@@ -621,15 +612,7 @@ pub fn render_lenient_named(
     template: &str,
     ctx: &TemplateContext,
 ) -> Result<String, TemplateError> {
-    let name = name.into();
-    render_with(
-        Some(&name),
-        template,
-        ctx,
-        UndefinedBehavior::Chainable,
-        None,
-        None,
-    )
+    render_named_with_origin(name, template, ctx, TemplateRenderMode::Lenient, None)
 }
 
 pub fn render_lenient_named_fragment(
@@ -638,13 +621,11 @@ pub fn render_lenient_named_fragment(
     origin: &TemplateSourceOrigin,
     ctx: &TemplateContext,
 ) -> Result<String, TemplateError> {
-    let name = name.into();
-    render_with(
-        Some(&name),
+    render_named_with_origin(
+        name,
         template,
         ctx,
-        UndefinedBehavior::Chainable,
-        None,
+        TemplateRenderMode::Lenient,
         Some(origin),
     )
 }
@@ -1093,7 +1074,7 @@ mod tests {
         let ctx = TemplateContext::new();
         let source_text = "digraph {\n  plan [prompt=\"Hello {{ inputs.name }}\"]\n}\n";
         let fragment = "Hello {{ inputs.name }}";
-        let origin = TemplateSourceOrigin::from_fragment(source_text, fragment)
+        let origin = TemplateSourceOrigin::from_first_fragment_match(source_text, fragment)
             .expect("fragment should be present in source");
 
         let err = render_named_fragment("workflow.fabro", fragment, &origin, &ctx).unwrap_err();

@@ -5,8 +5,7 @@ use std::sync::Arc;
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_template::{
     TemplateContext, TemplateError, TemplateRenderMode, TemplateSource, TemplateSourceOrigin,
-    TemplateStore, render_lenient_named, render_lenient_named_fragment, render_named,
-    render_named_fragment, render_source,
+    TemplateStore, render_named_with_origin, render_source,
 };
 use fabro_util::error::collect_chain;
 use fabro_validate::{Diagnostic, Severity};
@@ -61,13 +60,13 @@ impl TemplateRenderStore {
         text: &str,
         ctx: &TemplateContext,
         mode: TemplateRenderMode,
-        origin: Option<TemplateSourceOrigin>,
+        origin: Option<&TemplateSourceOrigin>,
     ) -> Result<String, TemplateError> {
-        let mut source = self.source.clone();
+        let mut source = match origin {
+            Some(origin) => self.source.clone().with_origin(origin.clone()),
+            None => self.source.clone(),
+        };
         text.clone_into(&mut source.content);
-        if let Some(origin) = origin {
-            source.origin = Some(origin);
-        }
         render_source(&source, ctx, Arc::clone(&self.store), mode)
     }
 }
@@ -132,8 +131,9 @@ impl TemplateRenderTarget {
 
     #[must_use]
     pub(crate) fn with_source_origin(mut self, source_text: Option<&str>, value: &str) -> Self {
-        self.source_origin = source_text
-            .and_then(|source_text| TemplateSourceOrigin::from_fragment(source_text, value));
+        self.source_origin = source_text.and_then(|source_text| {
+            TemplateSourceOrigin::from_first_fragment_match(source_text, value)
+        });
         self
     }
 
@@ -161,16 +161,15 @@ pub(crate) fn render_template_for_target(
     let source_name = target.template_source_name();
     let render_with_mode = |mode| match target.template_store.as_ref() {
         Some(template_store) => {
-            template_store.render(text, ctx, mode, target.source_origin.clone())
+            template_store.render(text, ctx, mode, target.source_origin.as_ref())
         }
-        None if matches!(mode, TemplateRenderMode::Strict) => match target.source_origin.clone() {
-            Some(origin) => render_named_fragment(source_name.clone(), text, &origin, ctx),
-            None => render_named(source_name.clone(), text, ctx),
-        },
-        None => match target.source_origin.clone() {
-            Some(origin) => render_lenient_named_fragment(source_name.clone(), text, &origin, ctx),
-            None => render_lenient_named(source_name.clone(), text, ctx),
-        },
+        None => render_named_with_origin(
+            source_name.clone(),
+            text,
+            ctx,
+            mode,
+            target.source_origin.as_ref(),
+        ),
     };
     match render_mode {
         RenderMode::Strict => render_with_mode(TemplateRenderMode::Strict)
