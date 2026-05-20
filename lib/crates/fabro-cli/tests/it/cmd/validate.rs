@@ -190,6 +190,27 @@ fn bare_fabro_with_unbound_inputs_in_imported_prompt_validates_structurally_with
     ");
 }
 
+/// Regression: https://github.com/fabro-sh/fabro/issues/330
+///
+/// Undefined template variables in partials included by an imported prompt must
+/// surface as structural validation warnings, matching direct `@file` prompts.
+#[test]
+fn bare_fabro_with_unbound_inputs_in_template_partial_validates_structurally_with_warning() {
+    let context = test_context!();
+    let mut cmd = context.validate();
+    cmd.arg(fixture("templated_unbound_partial/workflow.fabro"));
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    Workflow: TemplatedUnboundPartial (3 nodes, 2 edges)
+    Graph: [FIXTURES]/templated_unbound_partial/workflow.fabro
+    warning: [FIXTURES]/templated_unbound_partial/test-include.partial.md:1:1: undefined template variable `inputs.hello` in node `test_imported_include` attribute `prompt` [node: test_imported_include] (template_undefined_variable)
+    Validation: OK
+    ");
+}
+
 #[test]
 fn bare_fabro_picks_up_sibling_workflow_toml_inputs() {
     let context = test_context!();

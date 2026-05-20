@@ -1,0 +1,7 @@
+digraph TemplatedUnboundPartial {
+    start [shape=Mdiamond, label="Start"]
+    test_imported_include [label="Test", prompt="@test-include.prompt.md"]
+    exit  [shape=Msquare,  label="Exit"]
+
+    start -> test_imported_include -> exit
+}
