@@ -7,7 +7,7 @@ use fabro_graphviz::graph::{Graph, Node};
 use fabro_types::RunId;
 use tokio_util::sync::CancellationToken;
 
-use super::{EngineServices, Handler};
+use super::{EngineServices, Handler, NodeTimeoutPolicy};
 use crate::context::{Context, WorkflowContext, keys};
 use crate::error::Error;
 use crate::event::{Emitter, Event, StageScope};
@@ -61,6 +61,10 @@ pub trait CodergenBackend: Send + Sync {
     }
 
     async fn shutdown(&self, _emitter: &Arc<Emitter>) {}
+
+    fn node_timeout_policy(&self, _node: &Node) -> NodeTimeoutPolicy {
+        NodeTimeoutPolicy::ExecutorEnforced
+    }
 }
 
 /// The default handler for LLM task nodes.
@@ -395,6 +399,14 @@ impl Handler for AgentHandler {
         outcome.files_touched = backend_files_touched;
 
         Ok(outcome)
+    }
+
+    fn node_timeout_policy(&self, node: &Node) -> NodeTimeoutPolicy {
+        self.backend
+            .as_ref()
+            .map_or(NodeTimeoutPolicy::ExecutorEnforced, |backend| {
+                backend.node_timeout_policy(node)
+            })
     }
 }
 

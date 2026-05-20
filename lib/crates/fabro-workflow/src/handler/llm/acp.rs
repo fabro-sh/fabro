@@ -14,6 +14,7 @@ use super::super::agent::{CodergenBackend, CodergenResult, CodergenRunRequest, O
 use super::changed_files;
 use crate::error::Error;
 use crate::event::{Emitter, Event, RunNoticeCode, RunNoticeLevel, StageScope};
+use crate::handler::NodeTimeoutPolicy;
 
 pub struct AgentAcpBackend {
     tool_env:                     Option<Arc<dyn ToolEnvProvider>>,
@@ -208,6 +209,10 @@ impl CodergenBackend for AgentAcpBackend {
         Err(Error::Validation(
             "backend=\"acp\" is only valid on agent nodes; prompt nodes are API-only".to_string(),
         ))
+    }
+
+    fn node_timeout_policy(&self, _node: &Node) -> NodeTimeoutPolicy {
+        NodeTimeoutPolicy::HandlerManaged
     }
 }
 
