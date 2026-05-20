@@ -10,6 +10,8 @@
 
 use std::io::{Read, Write};
 
+use fabro_graphviz::render;
+
 const RENDER_ERROR_PREFIX: &str = "RENDER_ERROR:";
 
 pub(crate) fn execute() -> i32 {
@@ -18,7 +20,8 @@ pub(crate) fn execute() -> i32 {
         return 1;
     }
 
-    match graphviz_sys::render_dot_to_svg(&dot_source) {
+    let render_source = render::normalize_dot_for_graphviz(&dot_source);
+    match graphviz_sys::render_dot_to_svg(&render_source) {
         Ok(svg) => {
             if std::io::stdout().write_all(&svg).is_err() {
                 return 1;

@@ -192,10 +192,13 @@ async fn render_graph_response(
     dot_source: &str,
     exe_override: Option<&std::path::Path>,
 ) -> Response {
-    use fabro_graphviz::render::{inject_dot_style_defaults, postprocess_svg};
+    use fabro_graphviz::render::{
+        inject_dot_style_defaults, normalize_dot_for_graphviz, postprocess_svg,
+    };
 
     let styled_source = inject_dot_style_defaults(dot_source);
-    match render_dot_subprocess(&styled_source, exe_override).await {
+    let render_source = normalize_dot_for_graphviz(&styled_source);
+    match render_dot_subprocess(&render_source, exe_override).await {
         Ok(raw) => {
             let bytes = postprocess_svg(raw);
             (StatusCode::OK, [("content-type", "image/svg+xml")], bytes).into_response()
