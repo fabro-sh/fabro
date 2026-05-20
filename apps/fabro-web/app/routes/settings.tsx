@@ -3,6 +3,8 @@ import {
   CircleStackIcon,
   Cog6ToothIcon,
   CpuChipIcon,
+  KeyIcon,
+  PlusIcon,
   PuzzlePieceIcon,
   ShieldCheckIcon,
 } from "@heroicons/react/24/outline";
@@ -46,6 +48,12 @@ const navItems: NavEntry[] = [
     match: (p) => p.startsWith("/settings/models"),
   },
   {
+    name: "Secrets",
+    href: "/settings/secrets",
+    icon: KeyIcon,
+    match: (p) => p.startsWith("/settings/secrets"),
+  },
+  {
     name: "Security",
     href: "/settings/security",
     icon: ShieldCheckIcon,
@@ -70,6 +78,32 @@ function isLink(entry: NavEntry): entry is NavItem {
   return entry.type !== "divider";
 }
 
+// A settings page can declare a header action and description by exporting
+// `handle = { headerAction: { to, label }, description }`. When a description
+// is present the layout renders the full header — title, description, and
+// action — as one row, with the action centered against both lines.
+type HeaderAction = { to: string; label: string };
+
+function readHeaderAction(handle: unknown): HeaderAction | null {
+  if (!handle || typeof handle !== "object" || !("headerAction" in handle)) {
+    return null;
+  }
+  const action = handle.headerAction;
+  if (!action || typeof action !== "object") return null;
+  if (!("to" in action) || !("label" in action)) return null;
+  const { to, label } = action;
+  if (typeof to !== "string" || typeof label !== "string") return null;
+  return { to, label };
+}
+
+function readDescription(handle: unknown): string | null {
+  if (!handle || typeof handle !== "object" || !("description" in handle)) {
+    return null;
+  }
+  const description = handle.description;
+  return typeof description === "string" ? description : null;
+}
+
 function classNames(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
@@ -82,6 +116,10 @@ export default function SettingsLayout() {
   const fullHeight = matches.some(
     (m) => (m.handle as { fullHeight?: boolean } | undefined)?.fullHeight,
   );
+  const headerAction =
+    matches.map((m) => readHeaderAction(m.handle)).find((a) => a !== null) ?? null;
+  const description =
+    matches.map((m) => readDescription(m.handle)).find((d) => d !== null) ?? null;
 
   return (
     <div
@@ -133,9 +171,32 @@ export default function SettingsLayout() {
           fullHeight && "flex min-h-0 flex-col",
         )}
       >
-        <h1 className="mb-2 text-xl font-semibold tracking-tight text-fg">
-          {currentName}
-        </h1>
+        <div
+          className={classNames(
+            "flex items-center justify-between gap-6",
+            description ? "mb-6" : "mb-2",
+          )}
+        >
+          <div className="min-w-0">
+            <h1 className="text-xl font-semibold tracking-tight text-fg">
+              {currentName}
+            </h1>
+            {description ? (
+              <p className="mt-1 max-w-[64ch] text-sm/6 text-fg-3 text-pretty">
+                {description}
+              </p>
+            ) : null}
+          </div>
+          {headerAction ? (
+            <Link
+              to={headerAction.to}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-line bg-panel/80 px-2.5 py-1 text-sm font-medium text-fg-3 transition-colors hover:border-line-strong hover:bg-panel hover:text-fg"
+            >
+              <PlusIcon className="size-3.5" aria-hidden="true" />
+              {headerAction.label}
+            </Link>
+          ) : null}
+        </div>
         <Outlet />
       </div>
     </div>

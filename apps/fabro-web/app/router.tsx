@@ -35,6 +35,8 @@ import * as Settings from "./routes/settings";
 import * as SettingsGeneral from "./routes/settings-general";
 import * as SettingsIntegrations from "./routes/settings-integrations";
 import * as SettingsModels from "./routes/settings-models";
+import * as SettingsSecrets from "./routes/settings-secrets";
+import * as SettingsSecretsNew from "./routes/settings-secrets-new";
 import * as SettingsSecurity from "./routes/settings-security";
 import * as SettingsStorage from "./routes/settings-storage";
 import * as SettingsLiveEvents from "./routes/settings-live-events";
@@ -137,6 +139,8 @@ export const routes: RouteObject[] = [
               indexRoute(SettingsGeneral),
               route("integrations", SettingsIntegrations),
               route("models", SettingsModels),
+              route("secrets", SettingsSecrets),
+              route("secrets/new", SettingsSecretsNew),
               route("security", SettingsSecurity),
               route("storage", SettingsStorage),
               route("live-events", SettingsLiveEvents),

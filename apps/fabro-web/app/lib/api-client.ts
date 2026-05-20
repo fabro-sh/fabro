@@ -15,6 +15,7 @@ import {
   RunInternalsApiAxiosParamCreator,
   RunOutputsApi,
   RunsApi,
+  SecretsApi,
   SettingsApi,
   SystemApi,
   WorkflowsApi,
@@ -104,6 +105,11 @@ export const runOutputsApi = new RunOutputsApi(
   generatedAxios,
 );
 export const runsApi = new RunsApi(
+  generatedApiConfiguration,
+  "",
+  generatedAxios,
+);
+export const secretsApi = new SecretsApi(
   generatedApiConfiguration,
   "",
   generatedAxios,
