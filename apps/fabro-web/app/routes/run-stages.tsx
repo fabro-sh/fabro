@@ -24,13 +24,17 @@ import type {
   ThreadDnaItem,
   ThreadDnaSelection,
 } from "../components/event-debug";
+import { StageContext } from "../components/stage-context";
 import { StageSidebar } from "../components/stage-sidebar";
 import type { Stage } from "../components/stage-sidebar";
 import { EmptyState } from "../components/state";
 import { Tooltip } from "../components/ui";
 import { ConditionalDecision } from "../components/stage-renderers/conditional-decision";
 import { FanInResults } from "../components/stage-renderers/fan-in-results";
-import { extractStageNotes } from "../components/stage-renderers/helpers";
+import {
+  extractStageContext,
+  extractStageNotes,
+} from "../components/stage-renderers/helpers";
 import { HumanQA } from "../components/stage-renderers/human-qa";
 import { ParallelChildren } from "../components/stage-renderers/parallel-children";
 import {
@@ -105,7 +109,7 @@ const EVENT_KIND_LABEL: Record<EventKind, string> = {
   command: "Command",
 };
 
-const EVENTS_TABS = ["primary", "debug"] as const;
+const EVENTS_TABS = ["primary", "context", "debug"] as const;
 type EventsTab = (typeof EVENTS_TABS)[number];
 
 const PRIMARY_TAB_LABEL: Record<StageRenderer, string> = {
@@ -121,6 +125,7 @@ const PRIMARY_TAB_LABEL: Record<StageRenderer, string> = {
 
 export function eventsTabLabel(tab: EventsTab, renderer: StageRenderer): string {
   if (tab === "debug") return "Debug";
+  if (tab === "context") return "Context";
   return PRIMARY_TAB_LABEL[renderer];
 }
 
@@ -1107,10 +1112,12 @@ function ToolGroupDetailsPanel({
 function EventsTabToggle({
   tab,
   renderer,
+  availableTabs,
   onTabChange,
 }: {
   tab: EventsTab;
   renderer: StageRenderer;
+  availableTabs: readonly EventsTab[];
   onTabChange: (tab: EventsTab) => void;
 }) {
   return (
@@ -1119,7 +1126,7 @@ function EventsTabToggle({
       aria-label="View"
       className="inline-flex rounded-md bg-panel p-0.5 outline-1 -outline-offset-1 outline-line-strong"
     >
-      {EVENTS_TABS.map((value) => {
+      {availableTabs.map((value) => {
         const active = tab === value;
         return (
           <button
@@ -1144,6 +1151,7 @@ function EventsTabToggle({
 function EventsToolbar({
   tab,
   renderer,
+  availableTabs,
   commandTurn,
   onTabChange,
   selectedKinds,
@@ -1159,6 +1167,7 @@ function EventsToolbar({
 }: {
   tab: EventsTab;
   renderer: StageRenderer;
+  availableTabs: readonly EventsTab[];
   commandTurn: CommandTurn | null;
   onTabChange: (tab: EventsTab) => void;
   selectedKinds: EventKind[];
@@ -1194,7 +1203,12 @@ function EventsToolbar({
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-3">
-      <EventsTabToggle tab={tab} renderer={renderer} onTabChange={onTabChange} />
+      <EventsTabToggle
+        tab={tab}
+        renderer={renderer}
+        availableTabs={availableTabs}
+        onTabChange={onTabChange}
+      />
       {showFilters && (
         <div className="flex flex-1 flex-wrap items-center gap-2">
           {tab === "primary" ? (
@@ -1297,7 +1311,6 @@ export default function RunStages() {
   }, [selectedStageId]);
 
   const [tab, setTab] = useState<EventsTab>("primary");
-  const effectiveTab: EventsTab = tab;
   const [selectedKinds, setSelectedKinds] = useState<EventKind[]>([
     ...EVENT_KINDS,
   ]);
@@ -1380,6 +1393,18 @@ export default function RunStages() {
     });
   }, [debugEvents, selectedDebugCategories, search]);
 
+  // The Context tab surfaces the workflow's deliberate per-visit outputs. It
+  // only exists when the stage completed and actually wrote something.
+  const contextData = useMemo(
+    () => extractStageContext(debugEvents),
+    [debugEvents],
+  );
+  const availableTabs = useMemo<EventsTab[]>(
+    () => (contextData ? [...EVENTS_TABS] : ["primary", "debug"]),
+    [contextData],
+  );
+  const effectiveTab: EventsTab = availableTabs.includes(tab) ? tab : "primary";
+
   if (!id || !stages.length) {
     return (
       <div className="py-12">
@@ -1410,6 +1435,7 @@ export default function RunStages() {
             <EventsToolbar
               tab={effectiveTab}
               renderer={renderer}
+              availableTabs={availableTabs}
               commandTurn={commandTurn}
               onTabChange={setTab}
               selectedKinds={selectedKinds}
@@ -1520,6 +1546,8 @@ export default function RunStages() {
             ) : (
               <StageSummary stage={selectedStage} events={debugEvents} />
             )
+          ) : effectiveTab === "context" ? (
+            contextData ? <StageContext data={contextData} /> : null
           ) : debugEvents.length > 0 && filteredDebugEvents.length === 0 ? (
             <div className="px-2 py-6 text-sm text-fg-muted">
               No events match these filters.

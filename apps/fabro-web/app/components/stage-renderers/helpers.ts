@@ -248,6 +248,63 @@ export function extractStageNotes(events: EventEnvelope[]): string | null {
   return null;
 }
 
+export interface StageContextData {
+  routing: { preferredLabel: string | null; suggestedNextIds: string[] };
+  /** `context_updates` keys the workflow deliberately set (engine keys removed). */
+  updates: Record<string, unknown>;
+}
+
+// Engine/auto-populated context keys. These are bookkeeping or already shown in
+// a stage's primary tab (command output, human answers, fan-in results), so the
+// Context tab hides them and surfaces only what the workflow deliberately wrote.
+const ENGINE_CONTEXT_KEYS = new Set(["last_stage", "last_response", "command.output"]);
+const ENGINE_CONTEXT_PREFIXES = [
+  "response.",
+  "internal.",
+  "current.",
+  "human.gate.",
+  "parallel.",
+];
+
+function isEngineContextKey(key: string): boolean {
+  if (ENGINE_CONTEXT_KEYS.has(key)) return true;
+  return ENGINE_CONTEXT_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
+
+/**
+ * Extract the workflow's deliberate outputs from the `stage.completed` event:
+ * author-set `context_updates` (minus engine keys) plus the routing hints
+ * (`preferred_label`, `suggested_next_ids`). Returns null when the stage hasn't
+ * finished or produced nothing worth showing — which hides the Context tab.
+ */
+export function extractStageContext(events: EventEnvelope[]): StageContextData | null {
+  for (const event of events) {
+    if (event.event !== "stage.completed") continue;
+    const props: UnknownRecord = event.properties ?? {};
+
+    const rawUpdates = getObject(props, "context_updates") ?? {};
+    const updates: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(rawUpdates)) {
+      if (!isEngineContextKey(key)) updates[key] = value;
+    }
+
+    const preferredLabel = getString(props, "preferred_label") ?? null;
+    const suggestedNextIds = (getArray(props, "suggested_next_ids") ?? []).filter(
+      (v): v is string => typeof v === "string",
+    );
+
+    if (
+      Object.keys(updates).length === 0 &&
+      !preferredLabel &&
+      suggestedNextIds.length === 0
+    ) {
+      return null;
+    }
+    return { routing: { preferredLabel, suggestedNextIds }, updates };
+  }
+  return null;
+}
+
 export interface EdgeSelection {
   fromNode: string;
   toNode: string;
