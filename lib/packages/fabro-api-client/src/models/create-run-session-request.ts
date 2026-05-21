@@ -16,5 +16,8 @@
 
 export interface CreateRunSessionRequest {
     'title'?: string;
+    /**
+     * Catalog model ID or alias, or provider-qualified provider/model reference. Stored as the canonical catalog model ID.
+     */
     'model'?: string;
 }

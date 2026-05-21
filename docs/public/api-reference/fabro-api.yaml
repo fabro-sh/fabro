@@ -5397,6 +5397,7 @@ components:
           type: string
         model:
           type: string
+          description: Catalog model ID or alias, or provider-qualified provider/model reference. Stored as the canonical catalog model ID.
 
     SubmitTurnRequest:
       type: object

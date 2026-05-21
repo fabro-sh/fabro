@@ -30,6 +30,7 @@ use super::super::session_runtime::{InterruptTurnError, SessionTurnLease, StartT
 use super::super::{AppState, ListResponse};
 use crate::error::ApiError;
 use crate::principal_middleware::RequiredUser;
+use crate::server_secrets::LlmClientResult;
 
 const SESSION_SSE_BUFFER_CAPACITY: usize = 1024;
 
@@ -103,6 +104,10 @@ async fn create_run_session(
         Ok(store) => store,
         Err(response) => return response,
     };
+    let model = match canonical_session_model(state.catalog().as_ref(), request.model.as_deref()) {
+        Ok(model) => model,
+        Err(err) => return err.into_response(),
+    };
 
     let session_id = SessionId::new();
     let now = Utc::now();
@@ -113,7 +118,7 @@ async fn create_run_session(
         "run.session.created",
         json!({
             "title": request.title,
-            "model": request.model,
+            "model": model,
         }),
         now,
     )
@@ -405,23 +410,6 @@ async fn build_agent_session(
     session: &ProjectedRunSession,
 ) -> anyhow::Result<Session> {
     let catalog = state.catalog();
-    let requested_provider_id = ProviderId::anthropic();
-    let (provider_id, profile_kind) = {
-        let provider = catalog.provider(&requested_provider_id).ok_or_else(|| {
-            anyhow::anyhow!("provider '{requested_provider_id}' is not configured")
-        })?;
-        (provider.id.clone(), provider.agent_profile)
-    };
-    let model = session
-        .record
-        .model
-        .clone()
-        .or_else(|| {
-            catalog
-                .default_for_provider(&provider_id)
-                .map(|model| model.id.clone())
-        })
-        .ok_or_else(|| anyhow::anyhow!("provider '{provider_id}' has no default model"))?;
     let llm_result = state.resolve_llm_client().await?;
     for (provider, issue) in &llm_result.auth_issues {
         warn!(provider = %provider, error = %issue, "LLM provider unavailable due to auth issue");
@@ -429,6 +417,8 @@ async fn build_agent_session(
     for issue in &llm_result.registration_issues {
         warn!(provider = %issue.provider, error = %issue.error, "LLM provider unavailable due to registration issue");
     }
+    let (provider_id, model, profile_kind) =
+        selected_session_model(&catalog, &llm_result, session)?;
     if !llm_result.client.has_provider(provider_id.as_str()) {
         anyhow::bail!("LLM credentials not configured for provider '{provider_id}'");
     }
@@ -470,6 +460,89 @@ async fn build_agent_session(
         None,
     )
     .map_err(Into::into)
+}
+
+fn selected_session_model(
+    catalog: &Catalog,
+    llm_result: &LlmClientResult,
+    session: &ProjectedRunSession,
+) -> anyhow::Result<(ProviderId, String, AgentProfileKind)> {
+    let configured_provider_ids = llm_result.provider_ids();
+    let selected = match session.record.model.as_deref() {
+        Some(model_id) => catalog
+            .get(model_id)
+            .ok_or_else(|| anyhow::anyhow!("session model '{model_id}' is not in the catalog"))?,
+        None => catalog.default_for_configured_ids(&configured_provider_ids),
+    };
+    let provider_id = selected.provider.clone();
+    let model = selected.id.clone();
+    let profile_kind = catalog
+        .effective_agent_profile(&provider_id, Some(&model))
+        .ok_or_else(|| anyhow::anyhow!("provider '{provider_id}' is not configured"))?;
+    Ok((provider_id, model, profile_kind))
+}
+
+fn canonical_session_model(
+    catalog: &Catalog,
+    requested: Option<&str>,
+) -> Result<Option<String>, ApiError> {
+    let Some(requested) = requested else {
+        return Ok(None);
+    };
+    let requested = requested.trim();
+    if requested.is_empty() {
+        return Err(ApiError::bad_request("Session model must not be empty."));
+    }
+    if requested.contains('/') {
+        return resolve_provider_qualified_session_model(catalog, requested).map(Some);
+    }
+
+    let model = catalog.get(requested);
+    let provider = catalog.provider(&ProviderId::new(requested));
+    match (model, provider) {
+        (Some(_), Some(_)) => Err(ApiError::bad_request(format!(
+            "Session model reference '{requested}' is ambiguous; use a catalog model ID or provider/model reference."
+        ))),
+        (Some(model), None) => Ok(Some(model.id.clone())),
+        (None, Some(_)) => Err(ApiError::bad_request(format!(
+            "Session model reference '{requested}' names a provider; include a model ID."
+        ))),
+        (None, None) => Err(ApiError::bad_request(format!(
+            "Unknown session model '{requested}'."
+        ))),
+    }
+}
+
+fn resolve_provider_qualified_session_model(
+    catalog: &Catalog,
+    requested: &str,
+) -> Result<String, ApiError> {
+    let Some((provider_ref, model_ref)) = requested.split_once('/') else {
+        return Err(ApiError::bad_request(format!(
+            "Invalid session model reference '{requested}'."
+        )));
+    };
+    let provider_ref = provider_ref.trim();
+    let model_ref = model_ref.trim();
+    if provider_ref.is_empty() || model_ref.is_empty() || model_ref.contains('/') {
+        return Err(ApiError::bad_request(format!(
+            "Session model reference '{requested}' must use provider/model."
+        )));
+    }
+    let provider_id = ProviderId::new(provider_ref);
+    let provider = catalog.provider(&provider_id).ok_or_else(|| {
+        ApiError::bad_request(format!("Unknown session model provider '{provider_ref}'."))
+    })?;
+    let model = catalog
+        .get(model_ref)
+        .ok_or_else(|| ApiError::bad_request(format!("Unknown session model '{model_ref}'.")))?;
+    if model.provider != provider.id {
+        return Err(ApiError::bad_request(format!(
+            "Session model '{model_ref}' belongs to provider '{}', not '{}'.",
+            model.provider, provider.id
+        )));
+    }
+    Ok(model.id.clone())
 }
 
 fn build_profile(
