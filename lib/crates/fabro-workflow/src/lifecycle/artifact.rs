@@ -11,11 +11,12 @@ use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
 use fabro_store::{ArtifactKey, ArtifactStore};
 use fabro_types::{ArtifactUpload, EventBody, RunId, StageId};
+use fabro_util::error::collect_chain;
 use tokio::fs;
 use tokio::time::sleep;
 
 use crate::artifact::{normalize_durable_updates, offload_large_values, sync_artifacts_to_env};
-use crate::artifact_snapshot::collect_artifacts;
+use crate::artifact_snapshot::{ArtifactCollectionSummary, collect_artifacts};
 use crate::artifact_upload::ArtifactSink;
 use crate::event::{Emitter, Event, RunNoticeCode, RunNoticeLevel};
 use crate::graph::{WorkflowGraph, WorkflowNode};
@@ -77,7 +78,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
             .rebuild_captured_artifact_ledger()
             .await
             .map_err(|err| {
-                let rendered = fabro_util::error::collect_chain(err.as_ref()).join(": ");
+                let rendered = collect_chain(err.as_ref()).join(": ");
                 CoreError::Other(format!(
                     "failed to rebuild captured artifact ledger: {rendered}"
                 ))
@@ -232,11 +233,7 @@ impl ArtifactLifecycle {
             .collect())
     }
 
-    fn emit_collection_problem_notice(
-        &self,
-        node_id: &str,
-        summary: &crate::artifact_snapshot::ArtifactCollectionSummary,
-    ) {
+    fn emit_collection_problem_notice(&self, node_id: &str, summary: &ArtifactCollectionSummary) {
         if summary.download_errors == 0 && summary.hash_errors == 0 {
             return;
         }
