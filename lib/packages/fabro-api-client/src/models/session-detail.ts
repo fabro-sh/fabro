@@ -15,24 +15,19 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { SessionMessage } from './session-message';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { SessionRecord } from './session-record';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { SessionStatus } from './session-status';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { SessionTurn } from './session-turn';
 
 /**
- * List projection of an Ask Fabro session.
+ * @type SessionDetail
+ * Session metadata plus durable transcript projection.
  */
-export interface SessionSummary {
-    /**
-     * Durable session identifier.
-     */
-    'id': string;
-    'run_id': string;
-    'title'?: string | null;
-    'status': SessionStatus;
-    'model'?: string | null;
-    'active_turn': SessionTurn | null;
-    'created_at': string;
-    'updated_at': string;
-}
+export type SessionDetail = SessionRecord;

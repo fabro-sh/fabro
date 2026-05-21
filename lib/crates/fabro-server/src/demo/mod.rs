@@ -1151,6 +1151,7 @@ mod runs {
             billing: total_usd_micros.map(|total_usd_micros| RunBillingSummary {
                 total_usd_micros: Some(total_usd_micros),
             }),
+            ask_fabro: Default::default(),
             diff: None,
             pull_request: None,
             current_question: None,

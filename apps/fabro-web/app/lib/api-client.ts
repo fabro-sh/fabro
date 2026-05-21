@@ -16,6 +16,7 @@ import {
   RunOutputsApi,
   RunsApi,
   SecretsApi,
+  SessionsApi,
   SettingsApi,
   SystemApi,
   WorkflowsApi,
@@ -110,6 +111,11 @@ export const runsApi = new RunsApi(
   generatedAxios,
 );
 export const secretsApi = new SecretsApi(
+  generatedApiConfiguration,
+  "",
+  generatedAxios,
+);
+export const sessionsApi = new SessionsApi(
   generatedApiConfiguration,
   "",
   generatedAxios,

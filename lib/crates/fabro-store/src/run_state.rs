@@ -8,13 +8,13 @@ use fabro_types::run_event::{
 };
 use fabro_types::settings::run::RunSandboxSettings;
 use fabro_types::{
-    AgentBackend, BilledModelUsage, Checkpoint, CheckpointRecord, CommandTermination, Conclusion,
-    EventBody, FailureSignature, InterviewQuestionRecord, Outcome, PendingInterviewRecord,
-    PullRequestLink, RepositoryRef, Run, RunBillingSummary, RunControlAction, RunDiff, RunEvent,
-    RunId, RunLifecycle, RunLinks, RunModel, RunOrigin, RunProjection, RunSandbox,
-    RunSandboxRuntime, RunSpec, RunStatus, RunTimestamps, SandboxProvider, StageCompletion,
-    StageHandler, StageId, StageOutcome, StageProjection, StageState, StartRecord, WorkflowRef,
-    first_event_seq,
+    AgentBackend, AskFabro, BilledModelUsage, Checkpoint, CheckpointRecord, CommandTermination,
+    Conclusion, EventBody, FailureSignature, InterviewQuestionRecord, Outcome,
+    PendingInterviewRecord, PullRequestLink, RepositoryRef, Run, RunBillingSummary,
+    RunControlAction, RunDiff, RunEvent, RunId, RunLifecycle, RunLinks, RunModel, RunOrigin,
+    RunProjection, RunSandbox, RunSandboxRuntime, RunSpec, RunStatus, RunTimestamps,
+    SandboxProvider, StageCompletion, StageHandler, StageId, StageOutcome, StageProjection,
+    StageState, StartRecord, WorkflowRef, first_event_seq,
 };
 use fabro_util::error::render_compact_with_causes;
 use serde_json::Value;
@@ -675,6 +675,7 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> Run {
         billing: total_usd_micros.map(|total_usd_micros| RunBillingSummary {
             total_usd_micros: Some(total_usd_micros),
         }),
+        ask_fabro: AskFabro::default(),
         diff: diff_summary,
         pull_request: state.pull_request.clone(),
         current_question,

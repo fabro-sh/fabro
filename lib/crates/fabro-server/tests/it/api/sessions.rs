@@ -104,6 +104,8 @@ async fn run_bound_session_is_created_as_run_event_and_resolves_by_flat_id() {
     assert_eq!(fetched["id"], session_id);
     assert_eq!(fetched["run_id"], run_id);
     assert_session_metadata_only(&fetched);
+    assert_eq!(fetched["messages"].as_array().unwrap().len(), 0);
+    assert!(fetched["active_turn"].is_null());
 
     let events_request = Request::builder()
         .method("GET")
@@ -123,6 +125,7 @@ async fn run_bound_session_is_created_as_run_event_and_resolves_by_flat_id() {
         .filter(|event| event["session_id"] == session_id)
         .collect();
     assert_eq!(session_events.len(), 1);
+    assert_eq!(fetched["last_seq"], session_events[0]["seq"]);
     assert_eq!(session_events[0]["event"], "run.session.created");
     assert!(
         session_events[0]["properties"].get("permissions").is_none(),
@@ -273,6 +276,10 @@ async fn session_turn_fails_when_selected_model_provider_is_unconfigured() {
         .expect("submit-turn request should build");
     let response = app.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response.headers().contains_key("x-fabro-turn-id"),
+        "submit turn should return the generated turn id"
+    );
     let events = session_sse_events(response).await;
 
     let failed = events
@@ -286,6 +293,8 @@ async fn session_turn_fails_when_selected_model_provider_is_unconfigured() {
             .contains("provider 'openai'"),
         "failure should be for the selected model provider: {failed:?}"
     );
+    assert_eq!(failed["properties"]["code"], "model_unavailable");
+    assert_eq!(failed["properties"]["retryable"], false);
 }
 
 #[tokio::test]
@@ -312,7 +321,7 @@ async fn session_metadata_patch_route_is_removed() {
 }
 
 #[tokio::test]
-async fn derived_session_read_routes_are_removed() {
+async fn unsupported_derived_turn_read_routes_are_removed() {
     let app = fabro_server::test_support::build_test_router(test_app_state());
     let run_id = create_run(&app).await;
     let created = create_session(&app, &run_id, "Ask Fabro").await;
@@ -321,11 +330,7 @@ async fn derived_session_read_routes_are_removed() {
         .expect("session response should include an id");
     let turn_id = fabro_types::TurnId::new();
 
-    for path in [
-        format!("/sessions/{session_id}/turns"),
-        format!("/sessions/{session_id}/turns/{turn_id}"),
-        format!("/sessions/{session_id}/events"),
-    ] {
+    for path in [format!("/sessions/{session_id}/turns/{turn_id}")] {
         let request = Request::builder()
             .method("GET")
             .uri(api(&path))
@@ -338,6 +343,68 @@ async fn derived_session_read_routes_are_removed() {
         )
         .await;
     }
+}
+
+#[tokio::test]
+async fn session_events_are_filtered_by_session_and_paginated_by_run_sequence() {
+    let app = test_app_with_no_providers();
+    let run_id = create_run(&app).await;
+    let first = create_session(&app, &run_id, "First").await;
+    let second = create_session(&app, &run_id, "Second").await;
+    let first_id = first["id"].as_str().unwrap();
+    let second_id = second["id"].as_str().unwrap();
+    let get_first = Request::builder()
+        .method("GET")
+        .uri(api(&format!("/sessions/{first_id}")))
+        .body(Body::empty())
+        .expect("get-session request should build");
+    let first_detail = response_json(
+        app.clone().oneshot(get_first).await.unwrap(),
+        StatusCode::OK,
+        format!("GET /api/v1/sessions/{first_id}"),
+    )
+    .await;
+    let after_first_created_seq = first_detail["last_seq"].as_u64().unwrap() + 1;
+
+    let turn_id = fabro_types::TurnId::new();
+    let submit = Request::builder()
+        .method("POST")
+        .uri(api(&format!("/sessions/{first_id}/turns")))
+        .header("content-type", "application/json")
+        .body(Body::from(format!(
+            r#"{{"turn_id":"{turn_id}","input":"Which provider?"}}"#
+        )))
+        .expect("submit-turn request should build");
+    let response = app.clone().oneshot(submit).await.unwrap();
+    assert_eq!(
+        response.headers().get("x-fabro-turn-id").unwrap(),
+        turn_id.to_string().as_str()
+    );
+    let _ = session_sse_events(response).await;
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(api(&format!(
+            "/sessions/{first_id}/events?since_seq={after_first_created_seq}&limit=1"
+        )))
+        .body(Body::empty())
+        .expect("session events request should build");
+    let page = response_json(
+        app.clone().oneshot(request).await.unwrap(),
+        StatusCode::OK,
+        format!("GET /api/v1/sessions/{first_id}/events"),
+    )
+    .await;
+
+    assert_eq!(page["data"].as_array().unwrap().len(), 1);
+    assert_eq!(page["data"][0]["session_id"], first_id);
+    assert_ne!(page["data"][0]["session_id"], second_id);
+    assert_eq!(page["data"][0]["event"], "run.session.turn.started");
+    assert_eq!(
+        page["data"][0]["properties"]["turn_id"],
+        turn_id.to_string()
+    );
+    assert_eq!(page["meta"]["has_more"], true);
 }
 
 #[tokio::test]

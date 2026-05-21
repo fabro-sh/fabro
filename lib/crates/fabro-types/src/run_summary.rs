@@ -8,6 +8,37 @@ use crate::{
     RunControlAction, RunId, RunSandbox, RunStatus,
 };
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AskFabro {
+    pub available:          bool,
+    #[serde(default)]
+    pub unavailable_reason: Option<AskFabroUnavailableReason>,
+    #[serde(default)]
+    pub default_model:      Option<String>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum AskFabroUnavailableReason {
+    FeatureDisabled,
+    NoSandbox,
+    SandboxNotReady,
+    LlmUnconfigured,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Run {
     pub id:               RunId,
@@ -35,6 +66,8 @@ pub struct Run {
     pub timestamps:       RunTimestamps,
     #[serde(default)]
     pub billing:          Option<RunBillingSummary>,
+    #[serde(default)]
+    pub ask_fabro:        AskFabro,
     #[serde(default)]
     pub diff:             Option<DiffSummary>,
     #[serde(default)]

@@ -650,7 +650,8 @@ impl Client {
             .map_err(|()| anyhow!("server base URL cannot accept path segments"))?
             .extend(["api", "v1", "sessions", &session_id.to_string(), "turns"]);
         let body = types::SubmitTurnRequest {
-            input: input.into(),
+            input:   input.into(),
+            turn_id: None,
         };
         let response = self
             .send_http(|http_client| {

@@ -63,12 +63,42 @@ pub struct RunSessionTurnSucceededProps {
     pub output:  Option<String>,
 }
 
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Default,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum RunSessionTurnFailedCode {
+    NoSandbox,
+    SandboxUnavailable,
+    LlmUnconfigured,
+    ModelUnavailable,
+    ToolDenied,
+    #[default]
+    AgentError,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSessionTurnFailedProps {
-    pub turn_id: TurnId,
-    pub error:   String,
+    pub turn_id:   TurnId,
+    pub error:     String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output:  Option<String>,
+    pub output:    Option<String>,
+    #[serde(default)]
+    pub code:      RunSessionTurnFailedCode,
+    #[serde(default)]
+    pub retryable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

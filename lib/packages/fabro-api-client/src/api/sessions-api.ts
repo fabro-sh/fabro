@@ -28,7 +28,11 @@ import type { ErrorResponse } from '../models';
 // @ts-ignore
 import type { EventEnvelope } from '../models';
 // @ts-ignore
+import type { PaginatedEventList } from '../models';
+// @ts-ignore
 import type { PaginatedSessionList } from '../models';
+// @ts-ignore
+import type { SessionDetail } from '../models';
 // @ts-ignore
 import type { SessionRecord } from '../models';
 // @ts-ignore
@@ -38,6 +42,51 @@ import type { SubmitTurnRequest } from '../models';
  */
 export const SessionsApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
+        /**
+         * Replays and streams this session\'s durable `run.session.*` events from the owning run event log. The stream remains open until the client disconnects or the server shuts down.
+         * @summary Attach to session events
+         * @param {string} id
+         * @param {number} [sinceSeq]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        attachSessionEvents: async (id: string, sinceSeq?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('attachSessionEvents', 'id', id)
+            const localVarPath = `/api/v1/sessions/{id}/attach`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (sinceSeq !== undefined) {
+                localVarQueryParameter['since_seq'] = sinceSeq;
+            }
+
+            localVarHeaderParameter['Accept'] = 'text/event-stream,application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
         /**
          * Creates a read-only Ask Fabro session bound to the run.
          * @summary Create run session
@@ -171,10 +220,13 @@ export const SessionsApiAxiosParamCreator = function (configuration?: Configurat
          *
          * @summary List run sessions
          * @param {string} id Unique run identifier (ULID).
+         * @param {number} [pageLimit]
+         * @param {number} [pageOffset]
+         * @param {ListRunSessionsOrderEnum} [order]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listRunSessions: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        listRunSessions: async (id: string, pageLimit?: number, pageOffset?: number, order?: ListRunSessionsOrderEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('listRunSessions', 'id', id)
             const localVarPath = `/api/v1/runs/{id}/sessions`
@@ -195,6 +247,68 @@ export const SessionsApiAxiosParamCreator = function (configuration?: Configurat
             // authentication BearerAuth required
             // http bearer authentication required
             await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (pageLimit !== undefined) {
+                localVarQueryParameter['page[limit]'] = pageLimit;
+            }
+
+            if (pageOffset !== undefined) {
+                localVarQueryParameter['page[offset]'] = pageOffset;
+            }
+
+            if (order !== undefined) {
+                localVarQueryParameter['order'] = order;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns run event envelopes filtered to this session\'s durable `run.session.*` events. `since_seq` uses the owning run event sequence.
+         * @summary List session events
+         * @param {string} id
+         * @param {number} [sinceSeq]
+         * @param {number} [limit]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listSessionEvents: async (id: string, sinceSeq?: number, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('listSessionEvents', 'id', id)
+            const localVarPath = `/api/v1/sessions/{id}/events`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (sinceSeq !== undefined) {
+                localVarQueryParameter['since_seq'] = sinceSeq;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
 
             localVarHeaderParameter['Accept'] = 'application/json';
 
@@ -262,6 +376,20 @@ export const SessionsApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = SessionsApiAxiosParamCreator(configuration)
     return {
         /**
+         * Replays and streams this session\'s durable `run.session.*` events from the owning run event log. The stream remains open until the client disconnects or the server shuts down.
+         * @summary Attach to session events
+         * @param {string} id
+         * @param {number} [sinceSeq]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async attachSessionEvents(id: string, sinceSeq?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<string>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.attachSessionEvents(id, sinceSeq, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['SessionsApi.attachSessionEvents']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Creates a read-only Ask Fabro session bound to the run.
          * @summary Create run session
          * @param {string} id Unique run identifier (ULID).
@@ -282,7 +410,7 @@ export const SessionsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async getSession(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SessionRecord>> {
+        async getSession(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SessionDetail>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.getSession(id, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['SessionsApi.getSession']?.[localVarOperationServerIndex]?.url;
@@ -306,13 +434,31 @@ export const SessionsApiFp = function(configuration?: Configuration) {
          *
          * @summary List run sessions
          * @param {string} id Unique run identifier (ULID).
+         * @param {number} [pageLimit]
+         * @param {number} [pageOffset]
+         * @param {ListRunSessionsOrderEnum} [order]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async listRunSessions(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedSessionList>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.listRunSessions(id, options);
+        async listRunSessions(id: string, pageLimit?: number, pageOffset?: number, order?: ListRunSessionsOrderEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedSessionList>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listRunSessions(id, pageLimit, pageOffset, order, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['SessionsApi.listRunSessions']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Returns run event envelopes filtered to this session\'s durable `run.session.*` events. `since_seq` uses the owning run event sequence.
+         * @summary List session events
+         * @param {string} id
+         * @param {number} [sinceSeq]
+         * @param {number} [limit]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listSessionEvents(id: string, sinceSeq?: number, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedEventList>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listSessionEvents(id, sinceSeq, limit, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['SessionsApi.listSessionEvents']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -339,6 +485,17 @@ export const SessionsApiFactory = function (configuration?: Configuration, baseP
     const localVarFp = SessionsApiFp(configuration)
     return {
         /**
+         * Replays and streams this session\'s durable `run.session.*` events from the owning run event log. The stream remains open until the client disconnects or the server shuts down.
+         * @summary Attach to session events
+         * @param {string} id
+         * @param {number} [sinceSeq]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        attachSessionEvents(id: string, sinceSeq?: number, options?: RawAxiosRequestConfig): AxiosPromise<string> {
+            return localVarFp.attachSessionEvents(id, sinceSeq, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Creates a read-only Ask Fabro session bound to the run.
          * @summary Create run session
          * @param {string} id Unique run identifier (ULID).
@@ -356,7 +513,7 @@ export const SessionsApiFactory = function (configuration?: Configuration, baseP
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getSession(id: string, options?: RawAxiosRequestConfig): AxiosPromise<SessionRecord> {
+        getSession(id: string, options?: RawAxiosRequestConfig): AxiosPromise<SessionDetail> {
             return localVarFp.getSession(id, options).then((request) => request(axios, basePath));
         },
         /**
@@ -374,11 +531,26 @@ export const SessionsApiFactory = function (configuration?: Configuration, baseP
          *
          * @summary List run sessions
          * @param {string} id Unique run identifier (ULID).
+         * @param {number} [pageLimit]
+         * @param {number} [pageOffset]
+         * @param {ListRunSessionsOrderEnum} [order]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listRunSessions(id: string, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedSessionList> {
-            return localVarFp.listRunSessions(id, options).then((request) => request(axios, basePath));
+        listRunSessions(id: string, pageLimit?: number, pageOffset?: number, order?: ListRunSessionsOrderEnum, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedSessionList> {
+            return localVarFp.listRunSessions(id, pageLimit, pageOffset, order, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Returns run event envelopes filtered to this session\'s durable `run.session.*` events. `since_seq` uses the owning run event sequence.
+         * @summary List session events
+         * @param {string} id
+         * @param {number} [sinceSeq]
+         * @param {number} [limit]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listSessionEvents(id: string, sinceSeq?: number, limit?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedEventList> {
+            return localVarFp.listSessionEvents(id, sinceSeq, limit, options).then((request) => request(axios, basePath));
         },
         /**
          * Starts a streamed turn immediately. Background turns are not supported in this API version.
@@ -398,6 +570,18 @@ export const SessionsApiFactory = function (configuration?: Configuration, baseP
  * SessionsApi - object-oriented interface
  */
 export class SessionsApi extends BaseAPI {
+    /**
+     * Replays and streams this session\'s durable `run.session.*` events from the owning run event log. The stream remains open until the client disconnects or the server shuts down.
+     * @summary Attach to session events
+     * @param {string} id
+     * @param {number} [sinceSeq]
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public attachSessionEvents(id: string, sinceSeq?: number, options?: RawAxiosRequestConfig) {
+        return SessionsApiFp(this.configuration).attachSessionEvents(id, sinceSeq, options).then((request) => request(this.axios, this.basePath));
+    }
+
     /**
      * Creates a read-only Ask Fabro session bound to the run.
      * @summary Create run session
@@ -437,11 +621,27 @@ export class SessionsApi extends BaseAPI {
      *
      * @summary List run sessions
      * @param {string} id Unique run identifier (ULID).
+     * @param {number} [pageLimit]
+     * @param {number} [pageOffset]
+     * @param {ListRunSessionsOrderEnum} [order]
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public listRunSessions(id: string, options?: RawAxiosRequestConfig) {
-        return SessionsApiFp(this.configuration).listRunSessions(id, options).then((request) => request(this.axios, this.basePath));
+    public listRunSessions(id: string, pageLimit?: number, pageOffset?: number, order?: ListRunSessionsOrderEnum, options?: RawAxiosRequestConfig) {
+        return SessionsApiFp(this.configuration).listRunSessions(id, pageLimit, pageOffset, order, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns run event envelopes filtered to this session\'s durable `run.session.*` events. `since_seq` uses the owning run event sequence.
+     * @summary List session events
+     * @param {string} id
+     * @param {number} [sinceSeq]
+     * @param {number} [limit]
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listSessionEvents(id: string, sinceSeq?: number, limit?: number, options?: RawAxiosRequestConfig) {
+        return SessionsApiFp(this.configuration).listSessionEvents(id, sinceSeq, limit, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -456,3 +656,9 @@ export class SessionsApi extends BaseAPI {
         return SessionsApiFp(this.configuration).submitSessionTurn(id, submitTurnRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }
+
+export const ListRunSessionsOrderEnum = {
+    UPDATED_DESC: 'updated_desc',
+    CREATED_DESC: 'created_desc'
+} as const;
+export type ListRunSessionsOrderEnum = typeof ListRunSessionsOrderEnum[keyof typeof ListRunSessionsOrderEnum];

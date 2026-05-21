@@ -14,10 +14,14 @@
 
 
 
-export interface SubmitTurnRequest {
-    'input': string;
+/**
+ * Currently active durable session turn.
+ */
+export interface SessionTurn {
     /**
      * Durable session turn identifier.
      */
-    'turn_id'?: string;
+    'id': string;
+    'started_at': string;
+    'input': string;
 }

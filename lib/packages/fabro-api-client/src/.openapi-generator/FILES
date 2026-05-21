@@ -33,6 +33,7 @@ models/artifact-batch-upload-manifest.ts
 models/artifact-entry.ts
 models/artifact-list-response.ts
 models/artifacts-settings.ts
+models/ask-fabro.ts
 models/auth-config-response.ts
 models/auth-me-response.ts
 models/auth-method.ts
@@ -371,10 +372,12 @@ models/server-settings.ts
 models/server-slate-db-settings.ts
 models/server-storage-settings.ts
 models/server-web-settings.ts
+models/session-detail.ts
 models/session-message.ts
 models/session-record.ts
 models/session-status.ts
 models/session-summary.ts
+models/session-turn.ts
 models/slack-integration-settings.ts
 models/ssh-access-request.ts
 models/ssh-access-response.ts

@@ -25,7 +25,9 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
 
 async fn run_response(state: &AppState, id: RunId, status: StatusCode) -> Response {
     match state.store.get_cached_summary(&id).await {
-        Ok(Some(summary)) => (status, Json(summary)).into_response(),
+        Ok(Some(summary)) => {
+            (status, Json(state.decorate_run_summary(summary).await)).into_response()
+        }
         Ok(None) => ApiError::not_found("Run not found.").into_response(),
         Err(err) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()

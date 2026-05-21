@@ -5,8 +5,9 @@ use chrono::{TimeZone, Utc};
 use fabro_api::types::{RepositoryRef as ApiRepositoryRef, Run as ApiRun};
 use fabro_types::status::{RunStatus, SuccessReason};
 use fabro_types::{
-    DiffSummary, PullRequestLink, RepositoryProvider, RepositoryRef, Run, RunBillingSummary, RunId,
-    RunLifecycle, RunLinks, RunOrigin, RunTimestamps, WorkflowRef,
+    AskFabro, AskFabroUnavailableReason, DiffSummary, PullRequestLink, RepositoryProvider,
+    RepositoryRef, Run, RunBillingSummary, RunId, RunLifecycle, RunLinks, RunOrigin, RunTimestamps,
+    WorkflowRef,
 };
 use serde_json::json;
 
@@ -68,6 +69,11 @@ fn run_summary_json_matches_openapi_shape() {
         billing:          Some(RunBillingSummary {
             total_usd_micros: Some(123),
         }),
+        ask_fabro:        AskFabro {
+            available:          false,
+            unavailable_reason: Some(AskFabroUnavailableReason::SandboxNotReady),
+            default_model:      Some("gpt-5.4".to_string()),
+        },
         diff:             Some(DiffSummary {
             files_changed: 3,
             additions:     12,
@@ -134,6 +140,11 @@ fn run_summary_json_matches_openapi_shape() {
             },
             "billing": {
                 "total_usd_micros": 123
+            },
+            "ask_fabro": {
+                "available": false,
+                "unavailable_reason": "sandbox_not_ready",
+                "default_model": "gpt-5.4"
             },
             "diff": {
                 "files_changed": 3,
@@ -223,6 +234,7 @@ fn run_summary_deserializes_when_optional_fields_are_absent() {
     assert_eq!(summary.timestamps.duration_ms, None);
     assert_eq!(summary.timestamps.elapsed_secs, None);
     assert_eq!(summary.billing, None);
+    assert_eq!(summary.ask_fabro, AskFabro::default());
     assert_eq!(summary.superseded_by, None);
     assert_eq!(summary.diff, None);
     assert_eq!(summary.pull_request, None);

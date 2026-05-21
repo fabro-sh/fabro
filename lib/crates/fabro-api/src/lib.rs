@@ -32,8 +32,8 @@ pub mod types {
         BlockedReason, FailureReason, RunControlAction, RunStatus, SuccessReason,
     };
     pub use fabro_types::{
-        AuthMethod, BilledTokenCounts, CommandTermination, Conclusion, DiffStats, DiffSummary,
-        DirtyStatus, EventEnvelope, ExecOutputTail, FailureCategory, FailureDetail,
+        AskFabro, AuthMethod, BilledTokenCounts, CommandTermination, Conclusion, DiffStats,
+        DiffSummary, DirtyStatus, EventEnvelope, ExecOutputTail, FailureCategory, FailureDetail,
         FailureSignature, GitContext, IdpIdentity, InterviewOption, InterviewQuestionRecord,
         PairId, PairMessageId, PairMessageRecord, PairMessageRequest, PairRecord, PairStartRequest,
         PairStatus, PairTarget, PairTargetSelector, PairTranscriptEntry, PairTranscriptResponse,
@@ -45,9 +45,10 @@ pub mod types {
         RunSandboxRuntime, RunServerProvenance, SandboxDetails, SandboxNetwork,
         SandboxNetworkPolicy, SandboxNetworkPolicyMode, SandboxProvider, SandboxResources,
         SandboxService, SandboxServiceListResponse, SandboxState, SandboxTimestamps,
-        SecretMetadata, SecretType, ServerSettings, SessionId, SessionMessage, SessionRecord,
-        SessionStatus, SessionSummary, StageCompletion, StageHandler, StageOutcome,
-        StageProjection, StageState, SystemActorKind, TurnId, UserPrincipal, WorkflowSettings,
+        SecretMetadata, SecretType, ServerSettings, SessionDetail, SessionId, SessionMessage,
+        SessionRecord, SessionStatus, SessionSummary, SessionTurn, StageCompletion, StageHandler,
+        StageOutcome, StageProjection, StageState, SystemActorKind, TurnId, UserPrincipal,
+        WorkflowSettings,
     };
 
     pub use crate::generated::types::*;

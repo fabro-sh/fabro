@@ -103,8 +103,8 @@ pub use run_projection::{
 };
 pub use run_sandbox::{RunSandbox, RunSandboxRuntime};
 pub use run_summary::{
-    AutomationRef, Run, RunBillingSummary, RunError, RunLifecycle, RunLinks, RunModel, RunOrigin,
-    RunOriginKind, RunTimestamps, WorkflowRef,
+    AskFabro, AskFabroUnavailableReason, AutomationRef, Run, RunBillingSummary, RunError,
+    RunLifecycle, RunLinks, RunModel, RunOrigin, RunOriginKind, RunTimestamps, WorkflowRef,
 };
 pub use run_title::{RunTitleError, infer_run_title, normalize_explicit_run_title};
 pub use sandbox_details::{
@@ -118,8 +118,8 @@ pub use sandbox_services::{
 };
 pub use secret::{SecretMetadata, SecretType};
 pub use session::{
-    PermissionLevel, SessionId, SessionMessage, SessionRecord, SessionStatus, SessionSummary,
-    TurnId,
+    PermissionLevel, SessionDetail, SessionId, SessionMessage, SessionRecord, SessionStatus,
+    SessionSummary, SessionTurn, TurnId,
 };
 pub use stage_completion::StageCompletion;
 pub use stage_handler::StageHandler;

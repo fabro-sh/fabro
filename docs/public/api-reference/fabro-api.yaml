@@ -822,6 +822,26 @@ paths:
       operationId: listRunSessions
       tags: [Sessions]
       summary: List run sessions
+      parameters:
+        - name: page[limit]
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: page[offset]
+          in: query
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [updated_desc, created_desc]
+            default: updated_desc
       responses:
         "200":
           description: Ask Fabro sessions for the run
@@ -870,11 +890,11 @@ paths:
       summary: Get session
       responses:
         "200":
-          description: Session record
+          description: Session detail
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SessionRecord"
+                $ref: "#/components/schemas/SessionDetail"
         "404":
           description: Session not found
           headers:
@@ -884,6 +904,84 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/sessions/{id}/events:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/SessionId"
+    get:
+      operationId: listSessionEvents
+      tags: [Sessions]
+      summary: List session events
+      description: Returns run event envelopes filtered to this session's durable `run.session.*` events. `since_seq` uses the owning run event sequence.
+      parameters:
+        - name: since_seq
+          in: query
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Session-scoped run events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedEventList"
+        "404":
+          description: Session not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/sessions/{id}/attach:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/SessionId"
+    get:
+      operationId: attachSessionEvents
+      tags: [Sessions]
+      summary: Attach to session events
+      description: Replays and streams this session's durable `run.session.*` events from the owning run event log. The stream remains open until the client disconnects or the server shuts down.
+      parameters:
+        - name: since_seq
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Streamed session-scoped run events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "404":
+          description: Session not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/sessions/{id}/turns:
     parameters:
       - name: id
@@ -905,6 +1003,11 @@ paths:
       responses:
         "200":
           description: Streamed session events
+          headers:
+            x-fabro-turn-id:
+              description: Durable turn id accepted for this streamed turn.
+              schema:
+                $ref: "#/components/schemas/TurnId"
           content:
             text/event-stream:
               schema:
@@ -932,6 +1035,10 @@ paths:
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
+            x-fabro-active-turn-id:
+              description: Durable id of the currently active turn.
+              schema:
+                $ref: "#/components/schemas/TurnId"
           content:
             application/json:
               schema:
@@ -5338,6 +5445,22 @@ components:
       type: string
       enum: [idle, running, failed]
 
+    SessionTurn:
+      description: Currently active durable session turn.
+      type: object
+      required:
+        - id
+        - started_at
+        - input
+      properties:
+        id:
+          $ref: "#/components/schemas/TurnId"
+        started_at:
+          type: string
+          format: date-time
+        input:
+          type: string
+
     SessionMessage:
       description: Persisted full-fidelity session transcript message.
       type: object
@@ -5373,6 +5496,7 @@ components:
         - id
         - run_id
         - status
+        - active_turn
         - created_at
         - updated_at
       properties:
@@ -5386,6 +5510,10 @@ components:
           $ref: "#/components/schemas/SessionStatus"
         model:
           type: ["string", "null"]
+        active_turn:
+          oneOf:
+            - $ref: "#/components/schemas/SessionTurn"
+            - type: "null"
         created_at:
           type: string
           format: date-time
@@ -5400,6 +5528,7 @@ components:
         - id
         - run_id
         - status
+        - active_turn
         - created_at
         - updated_at
       properties:
@@ -5413,12 +5542,33 @@ components:
           $ref: "#/components/schemas/SessionStatus"
         model:
           type: ["string", "null"]
+        active_turn:
+          oneOf:
+            - $ref: "#/components/schemas/SessionTurn"
+            - type: "null"
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+
+    SessionDetail:
+      description: Session metadata plus durable transcript projection.
+      allOf:
+        - $ref: "#/components/schemas/SessionRecord"
+        - type: object
+          required:
+            - messages
+            - last_seq
+          properties:
+            messages:
+              type: array
+              items:
+                $ref: "#/components/schemas/SessionMessage"
+            last_seq:
+              type: integer
+              minimum: 0
 
     CreateRunSessionRequest:
       type: object
@@ -5436,6 +5586,8 @@ components:
       properties:
         input:
           type: string
+        turn_id:
+          $ref: "#/components/schemas/TurnId"
 
     PaginatedSessionList:
       description: Paginated list of sessions.
@@ -7909,6 +8061,7 @@ components:
         - source_directory
         - timestamps
         - billing
+        - ask_fabro
         - diff
         - pull_request
         - current_question
@@ -7968,6 +8121,8 @@ components:
           oneOf:
             - $ref: "#/components/schemas/RunBillingSummary"
             - type: "null"
+        ask_fabro:
+          $ref: "#/components/schemas/AskFabro"
         diff:
           oneOf:
             - $ref: "#/components/schemas/DiffSummary"
@@ -7984,6 +8139,27 @@ components:
           type: ["string", "null"]
         links:
           $ref: "#/components/schemas/RunLinks"
+
+    AskFabro:
+      description: Readiness and defaults for starting an Ask Fabro session on this run.
+      type: object
+      required:
+        - available
+        - unavailable_reason
+        - default_model
+      properties:
+        available:
+          type: boolean
+        unavailable_reason:
+          type: ["string", "null"]
+          enum:
+            - feature_disabled
+            - no_sandbox
+            - sandbox_not_ready
+            - llm_unconfigured
+            - null
+        default_model:
+          type: ["string", "null"]
 
     WorkflowRef:
       type: object

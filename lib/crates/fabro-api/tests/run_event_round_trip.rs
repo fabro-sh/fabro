@@ -170,6 +170,26 @@ fn run_event_round_trips_agent_interrupt_injected() {
 }
 
 #[test]
+fn run_event_turn_failed_defaults_code_for_legacy_payloads() {
+    let value = json!({
+        "id": "evt_session_failed",
+        "ts": "2026-05-20T12:00:00Z",
+        "run_id": fixtures::RUN_1,
+        "event": "run.session.turn.failed",
+        "session_id": "01HZX6M0P7SE4VJ9Y3X2B8E9QF",
+        "properties": {
+            "turn_id": "01HZX6M29F1CD5YYMHT1F5D7WQ",
+            "error": "provider unavailable"
+        }
+    });
+
+    let event: ApiRunEvent = serde_json::from_value(value).unwrap();
+    let round_trip = serde_json::to_value(event).unwrap();
+    assert_eq!(round_trip["properties"]["code"], "agent_error");
+    assert_eq!(round_trip["properties"]["retryable"], false);
+}
+
+#[test]
 fn run_event_round_trips_stage_started() {
     let value = json!({
         "id": "evt_stage_started",

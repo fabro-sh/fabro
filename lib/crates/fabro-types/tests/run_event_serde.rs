@@ -3,9 +3,10 @@ use std::collections::BTreeMap;
 use fabro_types::graph::Graph;
 use fabro_types::run::{DirtyStatus, ForkSourceRef, GitContext, PreRunPushOutcome};
 use fabro_types::run_event::run::{RunCreatedProps, RunParentLinkedProps, RunParentUnlinkedProps};
+use fabro_types::run_event::{RunSessionTurnFailedCode, RunSessionTurnFailedProps};
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::RunGoal;
-use fabro_types::{EventBody, WorkflowSettings, fixtures};
+use fabro_types::{EventBody, TurnId, WorkflowSettings, fixtures};
 
 fn templated_settings() -> WorkflowSettings {
     let mut settings = WorkflowSettings::default();
@@ -141,4 +142,21 @@ fn run_parent_events_round_trip_parent_ids() {
     let unlinked_round_trip: EventBody =
         serde_json::from_value(unlinked_json).expect("unlinked event should deserialize");
     assert_eq!(unlinked_round_trip.event_name(), "run.parent.unlinked");
+}
+
+#[test]
+fn run_session_turn_failed_defaults_code_for_old_events() {
+    let turn_id = TurnId::new();
+    let props: RunSessionTurnFailedProps = serde_json::from_value(serde_json::json!({
+        "turn_id": turn_id,
+        "error": "legacy failure"
+    }))
+    .expect("legacy failed props should deserialize");
+
+    assert_eq!(props.code, RunSessionTurnFailedCode::AgentError);
+    assert!(!props.retryable);
+
+    let json = serde_json::to_value(props).expect("props should serialize");
+    assert_eq!(json["code"], "agent_error");
+    assert_eq!(json["retryable"], false);
 }

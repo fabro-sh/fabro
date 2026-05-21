@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use fabro_types::run_event::{RunSessionToolCallCompletedProps, RunSessionToolCallStartedProps};
 use fabro_types::{
     EventBody, EventEnvelope, RunId, SessionId, SessionMessage, SessionRecord, SessionStatus,
-    SessionSummary,
+    SessionSummary, SessionTurn,
 };
 use serde_json::json;
 
@@ -11,6 +11,7 @@ use serde_json::json;
 pub struct ProjectedRunSession {
     pub record:          SessionRecord,
     pub runtime_context: Vec<SessionMessage>,
+    pub last_seq:        u32,
 }
 
 pub fn project_run_sessions(run_id: RunId, events: &[EventEnvelope]) -> Vec<SessionSummary> {
@@ -79,18 +80,26 @@ impl RunSessionProjection {
                     let projected = ProjectedRunSession {
                         record,
                         runtime_context: Vec::new(),
+                        last_seq: envelope.seq,
                     };
                     self.sessions.insert(session_id, projected);
                 }
-                EventBody::RunSessionTurnStarted(_) => {
+                EventBody::RunSessionTurnStarted(props) => {
                     if let Some(session) = self.sessions.get_mut(&session_id) {
+                        session.last_seq = envelope.seq;
                         session.record.status = SessionStatus::Running;
+                        session.record.active_turn = Some(SessionTurn {
+                            id:         props.turn_id,
+                            started_at: envelope.event.ts,
+                            input:      props.input.clone(),
+                        });
                         session.record.updated_at = envelope.event.ts;
                     }
                 }
                 EventBody::RunSessionUserMessage(props) => {
                     let project_context = self.should_project_context(session_id);
                     if let Some(session) = self.sessions.get_mut(&session_id) {
+                        session.last_seq = envelope.seq;
                         if project_context {
                             session
                                 .runtime_context
@@ -102,6 +111,7 @@ impl RunSessionProjection {
                 EventBody::RunSessionAssistantMessage(props) => {
                     let project_context = self.should_project_context(session_id);
                     if let Some(session) = self.sessions.get_mut(&session_id) {
+                        session.last_seq = envelope.seq;
                         if project_context {
                             session.runtime_context.push(SessionMessage::Assistant {
                                 content:        props.text.clone(),
@@ -115,9 +125,16 @@ impl RunSessionProjection {
                         session.record.updated_at = envelope.event.ts;
                     }
                 }
+                EventBody::RunSessionAssistantDelta(_) => {
+                    if let Some(session) = self.sessions.get_mut(&session_id) {
+                        session.last_seq = envelope.seq;
+                        session.record.updated_at = envelope.event.ts;
+                    }
+                }
                 EventBody::RunSessionToolCallStarted(props) => {
                     let project_context = self.should_project_context(session_id);
                     if let Some(session) = self.sessions.get_mut(&session_id) {
+                        session.last_seq = envelope.seq;
                         if project_context {
                             append_tool_call(session, props);
                         }
@@ -127,6 +144,7 @@ impl RunSessionProjection {
                 EventBody::RunSessionToolCallCompleted(props) => {
                     let project_context = self.should_project_context(session_id);
                     if let Some(session) = self.sessions.get_mut(&session_id) {
+                        session.last_seq = envelope.seq;
                         if project_context {
                             append_tool_result(session, props, envelope.event.ts);
                         }
@@ -134,10 +152,10 @@ impl RunSessionProjection {
                     }
                 }
                 EventBody::RunSessionTurnFailed(_) => {
-                    self.finish_turn(session_id, true, envelope.event.ts);
+                    self.finish_turn(session_id, true, envelope.event.ts, envelope.seq);
                 }
                 EventBody::RunSessionTurnSucceeded(_) | EventBody::RunSessionTurnInterrupted(_) => {
-                    self.finish_turn(session_id, false, envelope.event.ts);
+                    self.finish_turn(session_id, false, envelope.event.ts, envelope.seq);
                 }
                 _ => {}
             }
@@ -149,13 +167,16 @@ impl RunSessionProjection {
         session_id: SessionId,
         failed: bool,
         timestamp: chrono::DateTime<chrono::Utc>,
+        seq: u32,
     ) {
         if let Some(session) = self.sessions.get_mut(&session_id) {
+            session.last_seq = seq;
             session.record.status = if failed {
                 SessionStatus::Failed
             } else {
                 SessionStatus::Idle
             };
+            session.record.active_turn = None;
             session.record.updated_at = timestamp;
         }
     }
@@ -216,8 +237,8 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use fabro_types::run_event::{
         RunSessionAssistantMessageProps, RunSessionCreatedProps, RunSessionToolCallCompletedProps,
-        RunSessionToolCallStartedProps, RunSessionTurnStartedProps, RunSessionTurnSucceededProps,
-        RunSessionUserMessageProps,
+        RunSessionToolCallStartedProps, RunSessionTurnFailedCode, RunSessionTurnFailedProps,
+        RunSessionTurnStartedProps, RunSessionTurnSucceededProps, RunSessionUserMessageProps,
     };
     use fabro_types::{EventBody, EventEnvelope, RunEvent, SessionMessage, TurnId, fixtures};
     use serde_json::json;
@@ -390,6 +411,94 @@ mod tests {
         assert!(value.get("provider").is_none());
         assert!(value.get("permissions").is_none());
         assert!(value.get("deleted_at").is_none());
+    }
+
+    #[test]
+    fn projection_tracks_active_turn_and_last_matching_sequence() {
+        let session_id = fabro_types::SessionId::new();
+        let other_session_id = fabro_types::SessionId::new();
+        let turn_id = TurnId::new();
+        let events = vec![
+            event(
+                1,
+                session_id,
+                EventBody::RunSessionCreated(RunSessionCreatedProps {
+                    title: None,
+                    model: None,
+                }),
+            ),
+            event(
+                2,
+                session_id,
+                EventBody::RunSessionTurnStarted(RunSessionTurnStartedProps {
+                    turn_id,
+                    input: "Summarize".to_string(),
+                }),
+            ),
+            event(
+                3,
+                other_session_id,
+                EventBody::RunSessionCreated(RunSessionCreatedProps {
+                    title: Some("Other".to_string()),
+                    model: None,
+                }),
+            ),
+        ];
+
+        let session = project_run_session_with_context(fixtures::RUN_1, session_id, &events)
+            .expect("session should project from run events");
+
+        assert_eq!(session.last_seq, 2);
+        let active = session.record.active_turn.expect("turn should be active");
+        assert_eq!(active.id, turn_id);
+        assert_eq!(active.started_at, events[1].event.ts);
+        assert_eq!(active.input, "Summarize");
+    }
+
+    #[test]
+    fn projection_clears_active_turn_when_turn_finishes() {
+        let session_id = fabro_types::SessionId::new();
+        let turn_id = TurnId::new();
+
+        for body in [
+            EventBody::RunSessionTurnSucceeded(RunSessionTurnSucceededProps {
+                turn_id,
+                output: None,
+            }),
+            EventBody::RunSessionTurnFailed(RunSessionTurnFailedProps {
+                turn_id,
+                error: "no sandbox".to_string(),
+                output: None,
+                code: RunSessionTurnFailedCode::default(),
+                retryable: false,
+            }),
+        ] {
+            let events = vec![
+                event(
+                    1,
+                    session_id,
+                    EventBody::RunSessionCreated(RunSessionCreatedProps {
+                        title: None,
+                        model: None,
+                    }),
+                ),
+                event(
+                    2,
+                    session_id,
+                    EventBody::RunSessionTurnStarted(RunSessionTurnStartedProps {
+                        turn_id,
+                        input: "Summarize".to_string(),
+                    }),
+                ),
+                event(3, session_id, body),
+            ];
+
+            let session = project_run_session_with_context(fixtures::RUN_1, session_id, &events)
+                .expect("session should project from run events");
+
+            assert_eq!(session.last_seq, 3);
+            assert_eq!(session.record.active_turn, None);
+        }
     }
 
     fn event(seq: u32, session_id: fabro_types::SessionId, body: EventBody) -> EventEnvelope {
