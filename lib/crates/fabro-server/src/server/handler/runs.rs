@@ -18,8 +18,7 @@ use fabro_api::types::{
 use fabro_config::Storage;
 use fabro_interview::AnswerSubmission;
 use fabro_types::{
-    Principal, RunClientProvenance, RunId, RunProvenance, RunServerProvenance, UserPrincipal,
-    parse_blob_ref,
+    Principal, RunClientProvenance, RunId, RunProvenance, RunServerProvenance, parse_blob_ref,
 };
 use fabro_util::version::FABRO_VERSION;
 use fabro_workflow::command_log::{command_log_path, read_json_string_blob, read_log_slice};
@@ -36,7 +35,8 @@ use super::super::{
 };
 use crate::error::ApiError;
 use crate::principal_middleware::{
-    RequestAuth, RequireCommandLog, RequireRunScoped, RequiredUser, require_user,
+    RequireCommandLog, RequireRunScoped, RequireRunScopedOrRunTools, RequiredRunToolActor,
+    RequiredUser,
 };
 use crate::run_files::{list_run_commits, list_run_files};
 use crate::run_manifest;
@@ -206,15 +206,10 @@ async fn list_board_runs(
 }
 
 async fn link_run_parent(
-    subject: RequiredUser,
+    RequireRunScopedOrRunTools(child_id, actor): RequireRunScopedOrRunTools,
     State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
     Json(req): Json<UpdateRunParentRequest>,
 ) -> Response {
-    let child_id = match parse_run_id_path(&id) {
-        Ok(id) => id,
-        Err(err) => return err.into_response(),
-    };
     let parent_id = match req.parent_id.parse::<RunId>() {
         Ok(parent_id) => parent_id,
         Err(err) => {
@@ -249,7 +244,7 @@ async fn link_run_parent(
         &workflow_event::Event::RunParentLinked {
             previous_parent_id: child.parent_id,
             parent_id,
-            actor: Some(Principal::User(subject.0)),
+            actor: Some(actor),
         },
     )
     .await
@@ -260,14 +255,9 @@ async fn link_run_parent(
 }
 
 async fn unlink_run_parent(
-    subject: RequiredUser,
+    RequireRunScopedOrRunTools(child_id, actor): RequireRunScopedOrRunTools,
     State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
 ) -> Response {
-    let child_id = match parse_run_id_path(&id) {
-        Ok(id) => id,
-        Err(err) => return err.into_response(),
-    };
     let _parent_link_guard = state.parent_link_lock.lock().await;
     let child = match state.store.get_cached_summary(&child_id).await {
         Ok(Some(summary)) => summary,
@@ -289,7 +279,7 @@ async fn unlink_run_parent(
         &child_id,
         &workflow_event::Event::RunParentUnlinked {
             previous_parent_id,
-            actor: Some(Principal::User(subject.0)),
+            actor: Some(actor),
         },
     )
     .await
@@ -340,7 +330,7 @@ async fn updated_run_response(state: &AppState, run_id: &RunId) -> Response {
 }
 
 async fn list_runs(
-    _auth: RequiredUser,
+    _auth: RequiredRunToolActor,
     State(state): State<Arc<AppState>>,
     Query(params): Query<ListRunsParams>,
 ) -> Response {
@@ -410,7 +400,7 @@ struct CommandLogResponseBody {
 }
 
 async fn resolve_run(
-    _auth: RequiredUser,
+    _auth: RequiredRunToolActor,
     State(state): State<Arc<AppState>>,
     Query(query): Query<ResolveRunQuery>,
 ) -> Response {
@@ -527,15 +517,11 @@ async fn update_run(
 }
 
 async fn create_run(
-    RequestAuth(auth_slot): RequestAuth,
+    RequiredRunToolActor(actor): RequiredRunToolActor,
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let subject = match require_user(&auth_slot) {
-        Ok(subject) => subject,
-        Err(err) => return err.into_response(),
-    };
     let req = match serde_json::from_slice::<RunManifest>(&body) {
         Ok(req) => req,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
@@ -562,7 +548,7 @@ async fn create_run(
     let mut create_input =
         run_manifest::create_run_input(prepared.clone(), configured_providers, web_url.clone());
     create_input.run_id = Some(run_id);
-    create_input.provenance = Some(run_provenance(&headers, &subject));
+    create_input.provenance = Some(run_provenance(&headers, &actor));
     create_input.submitted_manifest_bytes = Some(body.to_vec());
 
     let storage_root = match resolve_interp_string(&state.server_settings().server.storage.root) {
@@ -622,13 +608,13 @@ async fn create_run(
     (StatusCode::CREATED, Json(summary)).into_response()
 }
 
-fn run_provenance(headers: &HeaderMap, subject: &UserPrincipal) -> RunProvenance {
+fn run_provenance(headers: &HeaderMap, subject: &Principal) -> RunProvenance {
     RunProvenance {
         server:  Some(RunServerProvenance {
             version: FABRO_VERSION.to_string(),
         }),
         client:  run_client_provenance(headers),
-        subject: Some(Principal::User(subject.clone())),
+        subject: Some(subject.clone()),
     }
 }
 
@@ -713,14 +699,9 @@ async fn validate_run_manifest(
 }
 
 async fn get_run_status(
-    _auth: RequiredUser,
+    RequireRunScopedOrRunTools(id, _actor): RequireRunScopedOrRunTools,
     State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
 ) -> Response {
-    let id = match parse_run_id_path(&id) {
-        Ok(id) => id,
-        Err(response) => return response,
-    };
     match state.store.get_cached_summary(&id).await {
         Ok(Some(run)) => (StatusCode::OK, Json(run)).into_response(),
         Ok(None) => ApiError::not_found("Run not found.").into_response(),
@@ -755,14 +736,9 @@ async fn get_run_settings(
 }
 
 async fn get_questions(
-    _auth: RequiredUser,
+    RequireRunScopedOrRunTools(id, _actor): RequireRunScopedOrRunTools,
     State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
 ) -> Response {
-    let id = match parse_run_id_path(&id) {
-        Ok(id) => id,
-        Err(response) => return response,
-    };
     match state.store.get_cached_run(&id).await {
         Ok(Some(cached)) => {
             let questions = cached
@@ -781,15 +757,11 @@ async fn get_questions(
 }
 
 async fn submit_answer(
-    auth: RequiredUser,
+    RequireRunScopedOrRunTools(id, actor): RequireRunScopedOrRunTools,
     State(state): State<Arc<AppState>>,
-    Path((id, qid)): Path<(String, String)>,
+    Path((_id, qid)): Path<(String, String)>,
     Json(req): Json<SubmitAnswerRequest>,
 ) -> Response {
-    let id = match parse_run_id_path(&id) {
-        Ok(id) => id,
-        Err(response) => return response,
-    };
     if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
         return response;
     }
@@ -801,7 +773,7 @@ async fn submit_answer(
         Ok(answer) => answer,
         Err(response) => return response,
     };
-    let submission = AnswerSubmission::new(answer, Principal::User(auth.0));
+    let submission = AnswerSubmission::new(answer, actor);
     match submit_pending_interview_answer(state.as_ref(), &pending, submission).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(response) => response,
@@ -809,7 +781,7 @@ async fn submit_answer(
 }
 
 async fn get_run_state(
-    RequireRunScoped(id): RequireRunScoped,
+    RequireRunScopedOrRunTools(id, _actor): RequireRunScopedOrRunTools,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     match state.store.get_cached_run(&id).await {

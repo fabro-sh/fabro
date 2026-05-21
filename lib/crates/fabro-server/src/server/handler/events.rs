@@ -9,10 +9,10 @@ use fabro_workflow::event::build_redacted_event_payload;
 use super::super::{
     ApiError, AppState, AppendEventResponse, BroadcastStream, Event, EventBody, EventEnvelope,
     EventPayload, HashSet, IntoResponse, Json, KeepAlive, PaginatedEventList, PaginationMeta, Path,
-    Query, RequireRunScoped, RequireRunStageScoped, RequiredUser, Response, Router, RunEvent,
-    RunId, Sse, State, StatusCode, StreamExt, UnboundedReceiverStream, broadcast, get, mpsc,
-    parse_run_id_path, parse_stage_id_path, redact_jsonl_line, reject_if_archived,
-    update_live_run_from_event,
+    Query, RequireRunScoped, RequireRunScopedOrRunTools, RequireRunStageScoped, RequiredUser,
+    Response, Router, RunEvent, RunId, Sse, State, StatusCode, StreamExt, UnboundedReceiverStream,
+    broadcast, get, mpsc, parse_run_id_path, parse_stage_id_path, redact_jsonl_line,
+    reject_if_archived, update_live_run_from_event,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -198,7 +198,7 @@ async fn append_run_event(
 }
 
 async fn list_run_events(
-    RequireRunScoped(id): RequireRunScoped,
+    RequireRunScopedOrRunTools(id, _actor): RequireRunScopedOrRunTools,
     State(state): State<Arc<AppState>>,
     Query(params): Query<EventListParams>,
 ) -> Response {

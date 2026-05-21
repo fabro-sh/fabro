@@ -33,7 +33,6 @@ pub(crate) async fn dispatch(
     cmd: RunCommands,
     base_ctx: &CommandContext,
     worker_token: Option<String>,
-    run_agent_token: Option<String>,
 ) -> Result<()> {
     let printer = base_ctx.printer();
 
@@ -95,16 +94,8 @@ pub(crate) async fn dispatch(
                 })?;
             let run_span = tracing::info_span!("run", id = %run_id);
             Box::pin(
-                runner::execute(
-                    run_id,
-                    server,
-                    storage_dir,
-                    run_dir,
-                    mode,
-                    &worker_token,
-                    run_agent_token.as_deref(),
-                )
-                .instrument(run_span),
+                runner::execute(run_id, server, storage_dir, run_dir, mode, &worker_token)
+                    .instrument(run_span),
             )
             .await
         }

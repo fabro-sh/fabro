@@ -36,7 +36,6 @@ impl EnvVars {
     pub const FABRO_TEST_MODE: &'static str = "FABRO_TEST_MODE";
     pub const FABRO_VERBOSE: &'static str = "FABRO_VERBOSE";
     pub const FABRO_WEB_URL: &'static str = "FABRO_WEB_URL";
-    pub const FABRO_RUN_AGENT_TOKEN: &'static str = "FABRO_RUN_AGENT_TOKEN";
     pub const FABRO_WORKER_TOKEN: &'static str = "FABRO_WORKER_TOKEN";
 
     // LLM providers and tool integrations
@@ -176,7 +175,6 @@ mod tests {
             EnvVars::FABRO_TEST_MODE,
             EnvVars::FABRO_VERBOSE,
             EnvVars::FABRO_WEB_URL,
-            EnvVars::FABRO_RUN_AGENT_TOKEN,
             EnvVars::FABRO_WORKER_TOKEN,
             EnvVars::ANTHROPIC_API_KEY,
             EnvVars::ANTHROPIC_BASE_URL,

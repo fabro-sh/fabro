@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
@@ -9,11 +9,9 @@ use fabro_api::types::SteerRunRequest;
 use fabro_types::Principal;
 use fabro_workflow::run_status::RunStatus;
 
-use super::super::{
-    AnswerTransportError, AppState, durable_run_status, parse_run_id_path, reject_if_archived,
-};
+use super::super::{AnswerTransportError, AppState, durable_run_status, reject_if_archived};
 use crate::error::ApiError;
-use crate::principal_middleware::RequiredUser;
+use crate::principal_middleware::RequireRunScopedOrRunTools;
 
 pub(super) fn routes() -> axum::Router<Arc<AppState>> {
     axum::Router::new()
@@ -34,9 +32,8 @@ impl RunControlRequest {
 }
 
 async fn steer_run(
-    auth: RequiredUser,
+    RequireRunScopedOrRunTools(id, actor): RequireRunScopedOrRunTools,
     State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
     Json(req): Json<SteerRunRequest>,
 ) -> Response {
     // OpenAPI enforces minLength=1/maxLength=8192 already; only whitespace-only
@@ -52,27 +49,22 @@ async fn steer_run(
         RunControlRequest::Steer { text }
     };
 
-    control_run(auth, state, id, control).await
+    control_run(actor, state, id, control).await
 }
 
 async fn interrupt_run(
-    auth: RequiredUser,
+    RequireRunScopedOrRunTools(id, actor): RequireRunScopedOrRunTools,
     State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
 ) -> Response {
-    control_run(auth, state, id, RunControlRequest::Interrupt).await
+    control_run(actor, state, id, RunControlRequest::Interrupt).await
 }
 
 async fn control_run(
-    auth: RequiredUser,
+    actor: Principal,
     state: Arc<AppState>,
-    id: String,
+    id: fabro_types::RunId,
     control: RunControlRequest,
 ) -> Response {
-    let id = match parse_run_id_path(&id) {
-        Ok(id) => id,
-        Err(response) => return response,
-    };
     if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
         return response;
     }
@@ -155,7 +147,6 @@ async fn control_run(
         .into_response();
     };
 
-    let actor = Principal::User(auth.0);
     let result = match control {
         RunControlRequest::Steer { text } => answer_transport.steer(text, actor).await,
         RunControlRequest::Interrupt => answer_transport.interrupt(actor).await,

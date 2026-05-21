@@ -71,7 +71,6 @@ pub(crate) async fn execute(
     run_dir: PathBuf,
     mode: RunWorkerMode,
     worker_token: &str,
-    run_agent_token: Option<&str>,
 ) -> Result<()> {
     let _ = fabro_proc::title_init();
     set_worker_title(&run_id, initial_worker_title_phase(mode));
@@ -90,7 +89,7 @@ pub(crate) async fn execute(
         worker_token.to_owned(),
     )));
     let fabro_run_tools = build_fabro_run_tool_services(
-        run_agent_token,
+        worker_token,
         &target,
         run_id,
         run_spec.source_directory.as_deref(),
@@ -168,16 +167,16 @@ pub(crate) async fn execute(
 }
 
 async fn build_fabro_run_tool_services(
-    run_agent_token: Option<&str>,
+    worker_token: &str,
     target: &fabro_client::ServerTarget,
     current_run_id: RunId,
     source_directory: Option<&str>,
     run_dir: &Path,
 ) -> Result<Option<FabroRunToolServices>> {
-    let Some(run_agent_token) = run_agent_token.filter(|token| !token.trim().is_empty()) else {
+    let Some(worker_token) = (!worker_token.trim().is_empty()).then_some(worker_token) else {
         return Ok(None);
     };
-    let client = server_client::connect_server_target_with_bearer(target, run_agent_token).await?;
+    let client = server_client::connect_server_target_with_bearer(target, worker_token).await?;
     let backend = ClientBackend::new(Arc::new(client))
         .with_manifest_builder(Arc::new(WorkerRunManifestBuilder));
     Ok(Some(FabroRunToolServices {
