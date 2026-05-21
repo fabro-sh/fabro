@@ -79,7 +79,8 @@ async fn get_run_billing(
     };
     let projection = cached.projection;
 
-    let rollup = fabro_workflow::billing_rollup_from_projection(&projection);
+    let catalog = state.catalog();
+    let rollup = fabro_workflow::billing_rollup_from_projection(&projection, Some(&catalog));
     let by_model = rollup
         .by_model
         .iter()
