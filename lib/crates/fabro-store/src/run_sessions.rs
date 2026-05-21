@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 
+use fabro_types::run_event::{RunSessionToolCallCompletedProps, RunSessionToolCallStartedProps};
 use fabro_types::{
-    EventBody, EventEnvelope, RunId, SessionId, SessionMessage, SessionRecord, SessionSummary,
+    EventBody, EventEnvelope, RunId, SessionId, SessionMessage, SessionRecord, SessionStatus,
+    SessionSummary,
 };
 use serde_json::json;
 
@@ -82,7 +84,7 @@ impl RunSessionProjection {
                 }
                 EventBody::RunSessionTurnStarted(_) => {
                     if let Some(session) = self.sessions.get_mut(&session_id) {
-                        session.record.status = fabro_types::SessionStatus::Running;
+                        session.record.status = SessionStatus::Running;
                         session.record.updated_at = envelope.event.ts;
                     }
                 }
@@ -150,9 +152,9 @@ impl RunSessionProjection {
     ) {
         if let Some(session) = self.sessions.get_mut(&session_id) {
             session.record.status = if failed {
-                fabro_types::SessionStatus::Failed
+                SessionStatus::Failed
             } else {
-                fabro_types::SessionStatus::Idle
+                SessionStatus::Idle
             };
             session.record.updated_at = timestamp;
         }
@@ -174,10 +176,7 @@ fn event_session_id(envelope: &EventEnvelope) -> Option<SessionId> {
         .and_then(|id| id.parse().ok())
 }
 
-fn append_tool_call(
-    session: &mut ProjectedRunSession,
-    props: &fabro_types::run_event::RunSessionToolCallStartedProps,
-) {
+fn append_tool_call(session: &mut ProjectedRunSession, props: &RunSessionToolCallStartedProps) {
     if let Some(SessionMessage::Assistant { tool_calls, .. }) = session
         .runtime_context
         .iter_mut()
@@ -194,7 +193,7 @@ fn append_tool_call(
 
 fn append_tool_result(
     session: &mut ProjectedRunSession,
-    props: &fabro_types::run_event::RunSessionToolCallCompletedProps,
+    props: &RunSessionToolCallCompletedProps,
     timestamp: chrono::DateTime<chrono::Utc>,
 ) {
     let result = json!({

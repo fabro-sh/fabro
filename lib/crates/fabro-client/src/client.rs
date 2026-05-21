@@ -613,10 +613,6 @@ impl Client {
             .context("server returned invalid JSON for server settings")
     }
 
-    #[expect(
-        clippy::disallowed_types,
-        reason = "Client builds raw server API request URLs for wire transit; logging redaction is handled at log boundaries."
-    )]
     pub async fn create_run_session(
         &self,
         run_id: RunId,

@@ -9,6 +9,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use fabro_agent::config::ToolApprovalFn;
+use fabro_agent::tool_permissions::is_tool_auto_approved;
 use fabro_agent::{
     AgentEvent, AgentProfile, AnthropicProfile, Error as AgentError, GeminiProfile, OpenAiProfile,
     Session, SessionEvent, SessionOptions, ToolApprovalAdapter, WebFetchSummarizer,
@@ -328,7 +329,7 @@ async fn run_streaming_turn(
         turn_lease.attach_cancel_token(&cancel_token);
         let initialize = !runtime_entry.is_initialized();
         let mut output = None;
-        let result = drive_agent_session(
+        let result = Box::pin(drive_agent_session(
             &run_store,
             session,
             run_id,
@@ -338,7 +339,7 @@ async fn run_streaming_turn(
             initialize,
             &sender,
             &mut output,
-        )
+        ))
         .await;
         if initialize && matches!(result, Ok(Ok(()))) {
             runtime_entry.mark_initialized();
@@ -613,10 +614,7 @@ fn summarizer_model_id(
 
 fn build_ask_fabro_tool_approval() -> ToolApprovalFn {
     Arc::new(move |tool_name: &str, _args: &Value| {
-        if fabro_agent::tool_permissions::is_tool_auto_approved(
-            PermissionLevel::ReadOnly,
-            tool_name,
-        ) {
+        if is_tool_auto_approved(PermissionLevel::ReadOnly, tool_name) {
             Ok(())
         } else {
             Err(format!(
