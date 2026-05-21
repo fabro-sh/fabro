@@ -482,11 +482,6 @@ fn main() {
         ("SessionRecord", "fabro_types::SessionRecord", &[]),
         ("SessionSummary", "fabro_types::SessionSummary", &[]),
         ("TurnRecord", "fabro_types::TurnRecord", &[]),
-        (
-            "SessionEventEnvelope",
-            "fabro_types::SessionEventEnvelope",
-            &[],
-        ),
     ];
     for (name, path, impls) in replacements {
         settings.with_replacement(*name, *path, impls.iter().copied());

@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString, IntoStaticStr};
 
+use crate::RunId;
 use crate::id::ulid_id;
 
 ulid_id!(SessionId);
@@ -70,6 +71,7 @@ impl TurnStatus {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub id:              SessionId,
+    pub run_id:          RunId,
     pub title:           Option<String>,
     pub status:          SessionStatus,
     pub working_dir:     Option<String>,
@@ -84,15 +86,16 @@ pub struct SessionRecord {
 }
 
 impl SessionRecord {
-    pub fn new(id: SessionId, now: DateTime<Utc>) -> Self {
+    pub fn new(id: SessionId, run_id: RunId, now: DateTime<Utc>) -> Self {
         Self {
             id,
+            run_id,
             title: None,
             status: SessionStatus::Idle,
             working_dir: None,
             provider: None,
             model: None,
-            permissions: PermissionLevel::ReadWrite,
+            permissions: PermissionLevel::ReadOnly,
             created_at: now,
             updated_at: now,
             deleted_at: None,
@@ -104,6 +107,7 @@ impl SessionRecord {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionSummary {
     pub id:          SessionId,
+    pub run_id:      RunId,
     pub title:       Option<String>,
     pub status:      SessionStatus,
     pub working_dir: Option<String>,
@@ -117,6 +121,7 @@ impl From<&SessionRecord> for SessionSummary {
     fn from(record: &SessionRecord) -> Self {
         Self {
             id:          record.id,
+            run_id:      record.run_id,
             title:       record.title.clone(),
             status:      record.status,
             working_dir: record.working_dir.clone(),
@@ -132,6 +137,7 @@ impl From<&SessionRecord> for SessionSummary {
 pub struct TurnRecord {
     pub id:           TurnId,
     pub session_id:   SessionId,
+    pub run_id:       RunId,
     pub input:        String,
     pub status:       TurnStatus,
     pub output:       Option<String>,
@@ -139,42 +145,6 @@ pub struct TurnRecord {
     pub created_at:   DateTime<Utc>,
     pub updated_at:   DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SessionEventEnvelope {
-    pub seq:        u32,
-    pub session_id: SessionId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn_id:    Option<TurnId>,
-    pub event:      String,
-    pub properties: serde_json::Value,
-    pub ts:         DateTime<Utc>,
-}
-
-impl SessionEventEnvelope {
-    pub fn new(
-        session_id: SessionId,
-        turn_id: Option<TurnId>,
-        event: impl Into<String>,
-        properties: serde_json::Value,
-        ts: DateTime<Utc>,
-    ) -> Self {
-        Self {
-            seq: 0,
-            session_id,
-            turn_id,
-            event: event.into(),
-            properties,
-            ts,
-        }
-    }
-
-    #[must_use]
-    pub fn with_seq(mut self, seq: u32) -> Self {
-        self.seq = seq;
-        self
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

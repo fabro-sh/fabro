@@ -15,22 +15,18 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { SessionStatus } from './session-status';
+import type { Principal } from './principal';
 
-/**
- * List projection of an Ask Fabro session.
- */
-export interface SessionSummary {
-    /**
-     * Durable session identifier.
-     */
+export interface RunEventDetailResponseEvent {
+    'seq': number;
     'id': string;
+    'ts': string;
     'run_id': string;
-    'title'?: string | null;
-    'status': SessionStatus;
-    'working_dir'?: string | null;
-    'provider'?: string | null;
-    'model'?: string | null;
-    'created_at': string;
-    'updated_at': string;
+    'event': string;
+    'actor'?: Principal;
+    'session_id'?: string;
+    'node_id'?: string;
+    'node_label'?: string;
+    'stage_id'?: string;
+    'tool_call_id'?: string;
 }

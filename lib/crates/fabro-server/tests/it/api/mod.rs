@@ -7,6 +7,7 @@ mod routing;
 mod run_files;
 mod runs;
 mod sandbox_vnc;
+mod sessions;
 mod settings;
 mod system;
 mod tcp;

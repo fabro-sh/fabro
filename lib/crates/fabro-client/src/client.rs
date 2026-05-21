@@ -15,8 +15,8 @@ use fabro_types::settings::run::MergeStrategy;
 use fabro_types::{
     ArtifactUpload, EventEnvelope, PairId, PairMessageRecord, PairMessageRequest, PairRecord,
     PairStartRequest, PairTargetSelector, PairTranscriptResponse, Run, RunBlobId, RunEvent,
-    RunEventDetailResponse, RunId, RunPairStatusResponse, RunProjection, SessionEventEnvelope,
-    SessionId, SessionRecord, StageId,
+    RunEventDetailResponse, RunId, RunPairStatusResponse, RunProjection, SessionId, SessionRecord,
+    StageId,
 };
 use fabro_util::exit::{ErrorExt, ExitClass};
 use futures::future::BoxFuture;
@@ -53,7 +53,7 @@ type HttpByteStream = Pin<Box<dyn Stream<Item = Result<Bytes>> + Send>>;
 pub struct SessionEventStream {
     stream:          HttpByteStream,
     pending_bytes:   Vec<u8>,
-    buffered_events: VecDeque<SessionEventEnvelope>,
+    buffered_events: VecDeque<EventEnvelope>,
 }
 
 pub struct RewindRunResult {
@@ -186,7 +186,7 @@ impl SessionEventStream {
         }
     }
 
-    pub async fn next_event(&mut self) -> Result<Option<SessionEventEnvelope>> {
+    pub async fn next_event(&mut self) -> Result<Option<EventEnvelope>> {
         loop {
             if let Some(event) = self.buffered_events.pop_front() {
                 return Ok(Some(event));
@@ -613,13 +613,32 @@ impl Client {
             .context("server returned invalid JSON for server settings")
     }
 
-    pub async fn create_session(&self, body: types::CreateSessionRequest) -> Result<SessionRecord> {
+    #[expect(
+        clippy::disallowed_types,
+        reason = "Client builds raw server API request URLs for wire transit; logging redaction is handled at log boundaries."
+    )]
+    pub async fn create_run_session(
+        &self,
+        run_id: RunId,
+        body: types::CreateRunSessionRequest,
+    ) -> Result<SessionRecord> {
+        let base_url = self.base_url();
+        let mut url = fabro_http::Url::parse(&base_url)
+            .with_context(|| format!("invalid server base URL {base_url}"))?;
+        url.path_segments_mut()
+            .map_err(|()| anyhow!("server base URL cannot accept path segments"))?
+            .extend(["api", "v1", "runs", &run_id.to_string(), "sessions"]);
         let response = self
-            .send_api(
-                |client| async move { client.create_session().body(body.clone()).send().await },
-            )
+            .send_http(|http_client| {
+                let url = url.clone();
+                let body = body.clone();
+                async move { http_client.post(url).json(&body).send().await }
+            })
             .await?;
-        Ok(response.into_inner())
+        response
+            .json::<SessionRecord>()
+            .await
+            .context("server returned invalid JSON for run session")
     }
 
     #[expect(

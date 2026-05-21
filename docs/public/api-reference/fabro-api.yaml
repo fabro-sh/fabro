@@ -16,7 +16,7 @@ tags:
   - name: Runs
     description: Run management operations
   - name: Sessions
-    description: Persistent Fabro agent sessions
+    description: Ask Fabro sessions bound to runs
   - name: Human-in-the-Loop
     description: Questions, answers, and steering for runs
   - name: Run Outputs
@@ -815,28 +815,31 @@ paths:
 
   # ── Sessions ──────────────────────────────────────────────────────────
 
-  /api/v1/sessions:
+  /api/v1/runs/{id}/sessions:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
     get:
-      operationId: listSessions
+      operationId: listRunSessions
       tags: [Sessions]
-      summary: List sessions
+      summary: List run sessions
       responses:
         "200":
-          description: Durable session summaries
+          description: Ask Fabro sessions for the run
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/PaginatedSessionList"
     post:
-      operationId: createSession
+      operationId: createRunSession
       tags: [Sessions]
-      summary: Create session
+      summary: Create run session
+      description: Creates a read-only Ask Fabro session bound to the run.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateSessionRequest"
+              $ref: "#/components/schemas/CreateRunSessionRequest"
       responses:
         "201":
           description: Session created
@@ -884,7 +887,7 @@ paths:
     patch:
       operationId: updateSession
       tags: [Sessions]
-      summary: Update session
+      summary: Update session metadata
       requestBody:
         required: true
         content:
@@ -898,13 +901,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SessionRecord"
-    delete:
-      operationId: deleteSession
-      tags: [Sessions]
-      summary: Delete session
-      responses:
-        "204":
-          description: Session deleted
 
   /api/v1/sessions/{id}/turns:
     parameters:
@@ -1025,7 +1021,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SessionEventEnvelope"
+                $ref: "#/components/schemas/EventEnvelope"
         "404":
           description: Session turn not found
           headers:
@@ -1070,7 +1066,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PaginatedSessionEventList"
+                $ref: "#/components/schemas/PaginatedEventList"
             text/event-stream:
               schema:
                 type: string
@@ -5437,10 +5433,11 @@ components:
           items: {}
 
     SessionRecord:
-      description: Durable session metadata and compactable runtime context.
+      description: Ask Fabro session metadata derived from the owning run event stream.
       type: object
       required:
         - id
+        - run_id
         - status
         - permissions
         - created_at
@@ -5449,6 +5446,8 @@ components:
       properties:
         id:
           $ref: "#/components/schemas/SessionId"
+        run_id:
+          type: string
         title:
           type: ["string", "null"]
         status:
@@ -5484,16 +5483,19 @@ components:
         - full
 
     SessionSummary:
-      description: List projection of a durable session.
+      description: List projection of an Ask Fabro session.
       type: object
       required:
         - id
+        - run_id
         - status
         - created_at
         - updated_at
       properties:
         id:
           $ref: "#/components/schemas/SessionId"
+        run_id:
+          type: string
         title:
           type: ["string", "null"]
         status:
@@ -5517,6 +5519,7 @@ components:
       required:
         - id
         - session_id
+        - run_id
         - input
         - status
         - created_at
@@ -5526,6 +5529,8 @@ components:
           $ref: "#/components/schemas/TurnId"
         session_id:
           $ref: "#/components/schemas/SessionId"
+        run_id:
+          type: string
         input:
           type: string
         status:
@@ -5544,48 +5549,13 @@ components:
           type: ["string", "null"]
           format: date-time
 
-    SessionEventEnvelope:
-      description: Append-only durable session event envelope.
+    CreateRunSessionRequest:
       type: object
-      required:
-        - seq
-        - session_id
-        - event
-        - properties
-        - ts
-      properties:
-        seq:
-          type: integer
-          minimum: 0
-        session_id:
-          $ref: "#/components/schemas/SessionId"
-        turn_id:
-          oneOf:
-            - $ref: "#/components/schemas/TurnId"
-            - type: "null"
-        event:
-          type: string
-          example: turn.running
-        properties: {}
-        ts:
-          type: string
-          format: date-time
-
-    CreateSessionRequest:
-      type: object
-      required:
-        - permissions
       properties:
         title:
           type: string
-        working_dir:
-          type: string
-        provider:
-          type: string
         model:
           type: string
-        permissions:
-          $ref: "#/components/schemas/PermissionLevel"
 
     UpdateSessionRequest:
       type: object
@@ -5626,20 +5596,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/TurnRecord"
-        meta:
-          $ref: "#/components/schemas/PaginationMeta"
-
-    PaginatedSessionEventList:
-      description: Paginated list of session events.
-      type: object
-      required:
-        - data
-        - meta
-      properties:
-        data:
-          type: array
-          items:
-            $ref: "#/components/schemas/SessionEventEnvelope"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
 

@@ -15,22 +15,13 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { SessionStatus } from './session-status';
+import type { PairRecord } from './pair-record';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { PairTarget } from './pair-target';
 
-/**
- * List projection of an Ask Fabro session.
- */
-export interface SessionSummary {
-    /**
-     * Durable session identifier.
-     */
-    'id': string;
+export interface RunPairStatusResponse {
     'run_id': string;
-    'title'?: string | null;
-    'status': SessionStatus;
-    'working_dir'?: string | null;
-    'provider'?: string | null;
-    'model'?: string | null;
-    'created_at': string;
-    'updated_at': string;
+    'current_pair'?: PairRecord | null;
+    'targets': Array<PairTarget>;
 }
