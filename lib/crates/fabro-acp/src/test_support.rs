@@ -107,8 +107,15 @@ for line in sys.stdin:
             print("early boom", file=sys.stderr, flush=True)
             sys.exit(2)
         if mode == "write_file":
-            with open("hello.txt", "w", encoding="utf-8") as file:
-                file.write("hello from sandbox\n")
+            path = os.environ.get("ACP_WRITE_PATH", "hello.txt")
+            parent = os.path.dirname(path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(os.environ.get("ACP_WRITE_CONTENT", "hello from sandbox\n"))
+            if os.environ.get("ACP_WRITE_MTIME_EPOCH"):
+                mtime = float(os.environ["ACP_WRITE_MTIME_EPOCH"])
+                os.utime(path, (mtime, mtime))
         if mode == "cancel":
             send({
                 "jsonrpc": "2.0",
