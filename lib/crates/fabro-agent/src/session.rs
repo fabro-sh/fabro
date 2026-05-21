@@ -15,7 +15,7 @@ use fabro_llm::{Error as LlmError, retry};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_mcp::connection_manager::McpConnectionManager;
 use fabro_model::{AgentProfileKind, Catalog, ModelRef, Speed};
-use fabro_types::{Principal, SessionMessage, SessionRecord, SessionStatus, SteeringMessage};
+use fabro_types::{Principal, SessionMessage, SessionRecord, SteeringMessage};
 use futures::StreamExt;
 use tokio::sync::{Mutex as AsyncMutex, Notify, broadcast};
 use tokio::time;
@@ -399,12 +399,7 @@ impl Session {
         session.history = History::from_session_messages(runtime_context).map_err(|err| {
             Error::InvalidState(format!("invalid persisted session context: {err}"))
         })?;
-        session.state = match record.status {
-            SessionStatus::Closed | SessionStatus::Deleted => SessionState::Closed,
-            SessionStatus::Running | SessionStatus::Failed | SessionStatus::Idle => {
-                SessionState::Idle
-            }
-        };
+        session.state = SessionState::Idle;
         Ok(session)
     }
 

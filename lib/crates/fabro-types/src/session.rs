@@ -40,8 +40,6 @@ pub enum SessionStatus {
     Idle,
     Running,
     Failed,
-    Closed,
-    Deleted,
 }
 
 impl SessionStatus {
@@ -178,5 +176,18 @@ impl SessionMessage {
             content: content.into(),
             timestamp,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::SessionStatus;
+
+    #[test]
+    fn session_status_rejects_removed_terminal_states() {
+        assert!(serde_json::from_value::<SessionStatus>(json!("closed")).is_err());
+        assert!(serde_json::from_value::<SessionStatus>(json!("deleted")).is_err());
     }
 }

@@ -5380,7 +5380,7 @@ components:
 
     SessionStatus:
       type: string
-      enum: [idle, running, failed, closed, deleted]
+      enum: [idle, running, failed]
 
     TurnStatus:
       type: string
