@@ -201,7 +201,7 @@ pub(crate) fn register_fabro_run_tools(
 }
 
 fn fabro_run_tool(
-    definition: fabro_tool::ToolDefinition,
+    definition: &fabro_tool::ToolDefinition,
     services: FabroRunToolServices,
 ) -> RegisteredTool {
     let name = definition.name.to_string();
@@ -209,7 +209,7 @@ fn fabro_run_tool(
         definition: LlmToolDefinition {
             name:        name.clone(),
             description: definition.description.to_string(),
-            parameters:  definition.parameters,
+            parameters:  definition.parameters.clone(),
         },
         executor:   Arc::new(move |args, _context: ToolContext| {
             let name = name.clone();
@@ -229,21 +229,24 @@ async fn execute_fabro_run_tool(
     services: FabroRunToolServices,
 ) -> fabro_tool::ToolResult<String> {
     match name {
-        "fabro_run_create" => {
+        fabro_tool::FABRO_RUN_CREATE_TOOL_NAME => {
             let params = parse_fabro_tool_args::<fabro_tool::FabroRunCreateParams>(name, args)?;
-            let params = inject_current_run_parent(params, services.current_run_id)?;
+            ensure_current_run_parent(&params, services.current_run_id)?;
             let validated = fabro_tool::ValidatedCreateRuns::try_from(params)?;
-            let result = fabro_tool::create_runs(
+            let result = fabro_tool::create_runs_with_options(
                 Arc::clone(&services.backend),
                 &services.base_cwd,
                 &services.user_settings_path,
                 validated,
+                fabro_tool::CreateRunOptions {
+                    forced_parent_id: Some(services.current_run_id),
+                },
             )
             .await?;
             let summary = fabro_tool::create_runs_text(&result);
             render_fabro_tool_result(&summary, &result)
         }
-        "fabro_run_search" => {
+        fabro_tool::FABRO_RUN_SEARCH_TOOL_NAME => {
             let params = parse_fabro_tool_args::<fabro_tool::FabroRunSearchParams>(name, args)?;
             let result = fabro_tool::search_runs(
                 Arc::clone(&services.backend),
@@ -253,7 +256,7 @@ async fn execute_fabro_run_tool(
             let summary = fabro_tool::search_runs_text(&result);
             render_fabro_tool_result(&summary, &result)
         }
-        "fabro_run_interact" => {
+        fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME => {
             let params = parse_fabro_tool_args::<fabro_tool::FabroRunInteractParams>(name, args)?;
             let result = fabro_tool::interact_run(
                 Arc::clone(&services.backend),
@@ -263,7 +266,7 @@ async fn execute_fabro_run_tool(
             let summary = fabro_tool::interact_run_text(&result);
             render_fabro_tool_result(&summary, &result)
         }
-        "fabro_run_gather" => {
+        fabro_tool::FABRO_RUN_GATHER_TOOL_NAME => {
             let params = parse_fabro_tool_args::<fabro_tool::FabroRunGatherParams>(name, args)?;
             let result = fabro_tool::gather_runs(
                 Arc::clone(&services.backend),
@@ -273,7 +276,7 @@ async fn execute_fabro_run_tool(
             let summary = fabro_tool::gather_runs_text(&result);
             render_fabro_tool_result(&summary, &result)
         }
-        "fabro_run_events" => {
+        fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME => {
             let params = parse_fabro_tool_args::<fabro_tool::FabroRunEventsParams>(name, args)?;
             let result = fabro_tool::run_events(
                 Arc::clone(&services.backend),
@@ -297,22 +300,20 @@ where
         .map_err(|err| fabro_tool::ToolError::message(format!("invalid {name} arguments: {err}")))
 }
 
-fn inject_current_run_parent(
-    mut params: fabro_tool::FabroRunCreateParams,
+fn ensure_current_run_parent(
+    params: &fabro_tool::FabroRunCreateParams,
     current_run_id: RunId,
-) -> fabro_tool::ToolResult<fabro_tool::FabroRunCreateParams> {
+) -> fabro_tool::ToolResult<()> {
     let current_parent = current_run_id.to_string();
-    for run in &mut params.runs {
+    for run in &params.runs {
         match run.parent_id.as_deref().map(str::trim) {
-            None => run.parent_id = Some(current_parent.clone()),
+            None => {}
             Some("") => {
                 return Err(fabro_tool::ToolError::message(
                     "parent_id must be omitted or match the current run; blank parent_id is invalid",
                 ));
             }
-            Some(parent_id) if parent_id == current_parent => {
-                run.parent_id = Some(current_parent.clone());
-            }
+            Some(parent_id) if parent_id == current_parent => {}
             Some(parent_id) => {
                 return Err(fabro_tool::ToolError::message(format!(
                     "parent_id must be omitted or match the current run {current_parent}; got {parent_id}"
@@ -320,7 +321,7 @@ fn inject_current_run_parent(
             }
         }
     }
-    Ok(params)
+    Ok(())
 }
 
 fn render_fabro_tool_result<T>(summary: &str, result: &T) -> fabro_tool::ToolResult<String>
@@ -1439,11 +1440,11 @@ mod tests {
             .collect::<Vec<_>>();
         registered.sort();
         assert_eq!(registered, vec![
-            "fabro_run_create",
-            "fabro_run_events",
-            "fabro_run_gather",
-            "fabro_run_interact",
-            "fabro_run_search",
+            fabro_tool::FABRO_RUN_CREATE_TOOL_NAME,
+            fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
+            fabro_tool::FABRO_RUN_GATHER_TOOL_NAME,
+            fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
+            fabro_tool::FABRO_RUN_SEARCH_TOOL_NAME,
         ]);
 
         for definition in fabro_tool::tool_definitions() {
@@ -1461,7 +1462,7 @@ mod tests {
         let mut registry = ToolRegistry::new();
         register_fabro_run_tools(&mut registry, &services);
         let tool = registry
-            .get("fabro_run_create")
+            .get(fabro_tool::FABRO_RUN_CREATE_TOOL_NAME)
             .expect("create tool should be registered");
 
         let output = (tool.executor)(
@@ -1488,7 +1489,7 @@ mod tests {
         let (services, _backend) = fabro_run_tool_services();
         register_fabro_run_tools(&mut registry, &services);
         let tool = registry
-            .get("fabro_run_create")
+            .get(fabro_tool::FABRO_RUN_CREATE_TOOL_NAME)
             .expect("create tool should be registered");
 
         let err = (tool.executor)(
@@ -1514,7 +1515,9 @@ mod tests {
         let mut registry = ToolRegistry::new();
         register_fabro_run_tools(&mut registry, &services);
 
-        let create = registry.get("fabro_run_create").unwrap();
+        let create = registry
+            .get(fabro_tool::FABRO_RUN_CREATE_TOOL_NAME)
+            .unwrap();
         (create.executor)(
             serde_json::json!({
                 "runs": [{
@@ -1527,7 +1530,9 @@ mod tests {
         .await
         .expect("create should succeed");
 
-        let gather = registry.get("fabro_run_gather").unwrap();
+        let gather = registry
+            .get(fabro_tool::FABRO_RUN_GATHER_TOOL_NAME)
+            .unwrap();
         let gathered = (gather.executor)(
             serde_json::json!({
                 "run_ids": [child_run_id().to_string()],
@@ -1538,7 +1543,9 @@ mod tests {
         .await
         .expect("gather should succeed");
 
-        let events = registry.get("fabro_run_events").unwrap();
+        let events = registry
+            .get(fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME)
+            .unwrap();
         let listed = (events.executor)(
             serde_json::json!({
                 "action": "list",

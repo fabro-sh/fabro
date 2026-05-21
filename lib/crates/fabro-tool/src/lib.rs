@@ -14,12 +14,14 @@ mod manifest;
 mod search;
 
 pub use common::{
-    FabroToolBackend, RunManifestBuilder, RunSummaryResult, ToolDefinition, ToolError, ToolResult,
-    tool_definitions,
+    FABRO_RUN_CREATE_TOOL_NAME, FABRO_RUN_EVENTS_TOOL_NAME, FABRO_RUN_GATHER_TOOL_NAME,
+    FABRO_RUN_INTERACT_TOOL_NAME, FABRO_RUN_SEARCH_TOOL_NAME, FabroToolBackend, RunManifestBuilder,
+    RunSummaryResult, ToolDefinition, ToolError, ToolResult, tool_definitions,
 };
 pub use create::{
-    CreateRunSpec, CreateRunsResult, CreatedRunResult, FabroRunCreateParams, RunInputValue,
-    ValidatedCreateRunSpec, ValidatedCreateRuns, create_runs, create_runs_text,
+    CreateRunOptions, CreateRunSpec, CreateRunsResult, CreatedRunResult, FabroRunCreateParams,
+    RunInputValue, ValidatedCreateRunSpec, ValidatedCreateRuns, create_runs, create_runs_text,
+    create_runs_with_options,
 };
 pub use events::{
     FabroRunEventsParams, RunEventResult, RunEventsAction, RunEventsResult, ValidatedRunEvents,

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::LazyLock;
 
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
@@ -121,30 +122,40 @@ pub struct ToolDefinition {
     pub parameters:  Value,
 }
 
-#[must_use]
-pub fn tool_definitions() -> Vec<ToolDefinition> {
+pub const FABRO_RUN_CREATE_TOOL_NAME: &str = "fabro_run_create";
+pub const FABRO_RUN_SEARCH_TOOL_NAME: &str = "fabro_run_search";
+pub const FABRO_RUN_INTERACT_TOOL_NAME: &str = "fabro_run_interact";
+pub const FABRO_RUN_GATHER_TOOL_NAME: &str = "fabro_run_gather";
+pub const FABRO_RUN_EVENTS_TOOL_NAME: &str = "fabro_run_events";
+
+static TOOL_DEFINITIONS: LazyLock<Vec<ToolDefinition>> = LazyLock::new(|| {
     vec![
         tool_definition::<crate::FabroRunCreateParams>(
-            "fabro_run_create",
+            FABRO_RUN_CREATE_TOOL_NAME,
             "Create one or more Fabro workflow runs, optionally under a parent run, starting them by default.",
         ),
         tool_definition::<crate::FabroRunSearchParams>(
-            "fabro_run_search",
+            FABRO_RUN_SEARCH_TOOL_NAME,
             "Search Fabro workflow runs by id, parent, workflow, labels, status, archival state, and creation time.",
         ),
         tool_definition::<crate::FabroRunInteractParams>(
-            "fabro_run_interact",
+            FABRO_RUN_INTERACT_TOOL_NAME,
             "Get, start, message, interrupt, cancel, archive, unarchive, link or unlink a parent, inspect questions, or answer a Fabro run.",
         ),
         tool_definition::<crate::FabroRunGatherParams>(
-            "fabro_run_gather",
+            FABRO_RUN_GATHER_TOOL_NAME,
             "Wait for Fabro runs to reach terminal states, returning current state on timeout.",
         ),
         tool_definition::<crate::FabroRunEventsParams>(
-            "fabro_run_events",
+            FABRO_RUN_EVENTS_TOOL_NAME,
             "List, inspect, or search stored events for a Fabro workflow run.",
         ),
     ]
+});
+
+#[must_use]
+pub fn tool_definitions() -> &'static [ToolDefinition] {
+    TOOL_DEFINITIONS.as_slice()
 }
 
 fn tool_definition<T>(name: &'static str, description: &'static str) -> ToolDefinition

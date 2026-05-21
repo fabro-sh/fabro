@@ -2280,6 +2280,7 @@ dependencies = [
  "fabro-static",
  "fabro-store",
  "fabro-test",
+ "fabro-tool",
  "fabro-types",
  "fabro-util",
  "fabro-validate",

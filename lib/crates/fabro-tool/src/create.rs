@@ -174,22 +174,44 @@ pub struct CreatedRunResult {
     pub status:         String,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CreateRunOptions {
+    pub forced_parent_id: Option<RunId>,
+}
+
 pub async fn create_runs(
     backend: Arc<dyn FabroToolBackend>,
     base_cwd: &Path,
     user_settings_path: &Path,
     params: ValidatedCreateRuns,
 ) -> ToolResult<CreateRunsResult> {
+    create_runs_with_options(
+        backend,
+        base_cwd,
+        user_settings_path,
+        params,
+        CreateRunOptions::default(),
+    )
+    .await
+}
+
+pub async fn create_runs_with_options(
+    backend: Arc<dyn FabroToolBackend>,
+    base_cwd: &Path,
+    user_settings_path: &Path,
+    params: ValidatedCreateRuns,
+    options: CreateRunOptions,
+) -> ToolResult<CreateRunsResult> {
     let mut created = Vec::with_capacity(params.runs.len());
+    let mut parent_id_cache = HashMap::<String, RunId>::new();
     for spec in params.runs {
         let cwd = spec.cwd.clone().unwrap_or_else(|| base_cwd.to_path_buf());
-        let parent_id = if let Some(parent_selector) = spec.parent_id.as_deref() {
+        let parent_id = if let Some(forced_parent_id) = options.forced_parent_id {
+            Some(forced_parent_id)
+        } else if let Some(parent_selector) = spec.parent_id.as_deref() {
             Some(
-                backend
-                    .resolve_run(parent_selector)
-                    .await
-                    .map_err(|err| ToolError::from_anyhow(&err))?
-                    .id,
+                resolve_parent_run_id(backend.as_ref(), &mut parent_id_cache, parent_selector)
+                    .await?,
             )
         } else {
             None
@@ -220,6 +242,27 @@ pub async fn create_runs(
         });
     }
     Ok(CreateRunsResult { runs: created })
+}
+
+async fn resolve_parent_run_id(
+    backend: &dyn FabroToolBackend,
+    parent_id_cache: &mut HashMap<String, RunId>,
+    parent_selector: &str,
+) -> ToolResult<RunId> {
+    if let Ok(parent_id) = parent_selector.parse::<RunId>() {
+        return Ok(parent_id);
+    }
+    if let Some(parent_id) = parent_id_cache.get(parent_selector) {
+        return Ok(*parent_id);
+    }
+
+    let parent_id = backend
+        .resolve_run(parent_selector)
+        .await
+        .map_err(|err| ToolError::from_anyhow(&err))?
+        .id;
+    parent_id_cache.insert(parent_selector.to_string(), parent_id);
+    Ok(parent_id)
 }
 
 pub fn create_runs_text(result: &CreateRunsResult) -> String {
@@ -296,6 +339,7 @@ mod tests {
             child_id,
             parent_id,
             created_parent_ids: Mutex::new(Vec::new()),
+            resolved_selectors: Mutex::new(Vec::new()),
         });
         let params = ValidatedCreateRuns::try_from(FabroRunCreateParams {
             runs: vec![CreateRunSpec {
@@ -326,6 +370,105 @@ mod tests {
         assert_eq!(backend.created_parent_ids.lock().unwrap().as_slice(), &[
             Some(parent_id)
         ]);
+        assert_eq!(backend.resolved_selectors.lock().unwrap().as_slice(), &[
+            "nightly-parent".to_string()
+        ]);
+    }
+
+    #[tokio::test]
+    async fn create_runs_reuses_parent_selector_resolution_within_batch() {
+        let temp = tempfile::tempdir().expect("tempdir should be created");
+        let settings = temp.path().join("settings.toml");
+        let child_id = run_id("01KRBZW5C00000000000000001");
+        let parent_id = run_id("01KRBZW4DW0000000000000002");
+        let backend = Arc::new(MockCreateBackend {
+            child_id,
+            parent_id,
+            created_parent_ids: Mutex::new(Vec::new()),
+            resolved_selectors: Mutex::new(Vec::new()),
+        });
+        let runs = (0..2)
+            .map(|_| CreateRunSpec {
+                workflow:         "simple.fabro".to_string(),
+                cwd:              None,
+                run_id:           None,
+                parent_id:        Some("nightly-parent".to_string()),
+                goal:             None,
+                inputs:           HashMap::new(),
+                labels:           HashMap::new(),
+                dry_run:          Some(true),
+                auto_approve:     Some(true),
+                model:            None,
+                provider:         None,
+                sandbox:          None,
+                preserve_sandbox: None,
+                start:            Some(false),
+            })
+            .collect();
+        let params = ValidatedCreateRuns::try_from(FabroRunCreateParams { runs })
+            .expect("create params should validate");
+
+        create_runs(backend.clone(), temp.path(), &settings, params)
+            .await
+            .expect("runs should be created");
+
+        assert_eq!(backend.created_parent_ids.lock().unwrap().as_slice(), &[
+            Some(parent_id),
+            Some(parent_id),
+        ]);
+        assert_eq!(backend.resolved_selectors.lock().unwrap().as_slice(), &[
+            "nightly-parent".to_string()
+        ]);
+    }
+
+    #[tokio::test]
+    async fn create_runs_forced_parent_id_skips_selector_resolution() {
+        let temp = tempfile::tempdir().expect("tempdir should be created");
+        let settings = temp.path().join("settings.toml");
+        let child_id = run_id("01KRBZW5C00000000000000001");
+        let parent_id = run_id("01KRBZW4DW0000000000000002");
+        let backend = Arc::new(MockCreateBackend {
+            child_id,
+            parent_id,
+            created_parent_ids: Mutex::new(Vec::new()),
+            resolved_selectors: Mutex::new(Vec::new()),
+        });
+        let params = ValidatedCreateRuns::try_from(FabroRunCreateParams {
+            runs: vec![CreateRunSpec {
+                workflow:         "simple.fabro".to_string(),
+                cwd:              None,
+                run_id:           None,
+                parent_id:        Some(parent_id.to_string()),
+                goal:             None,
+                inputs:           HashMap::new(),
+                labels:           HashMap::new(),
+                dry_run:          Some(true),
+                auto_approve:     Some(true),
+                model:            None,
+                provider:         None,
+                sandbox:          None,
+                preserve_sandbox: None,
+                start:            Some(false),
+            }],
+        })
+        .expect("create params should validate");
+
+        create_runs_with_options(
+            backend.clone(),
+            temp.path(),
+            &settings,
+            params,
+            CreateRunOptions {
+                forced_parent_id: Some(parent_id),
+            },
+        )
+        .await
+        .expect("run should be created");
+
+        assert_eq!(backend.created_parent_ids.lock().unwrap().as_slice(), &[
+            Some(parent_id)
+        ]);
+        assert!(backend.resolved_selectors.lock().unwrap().is_empty());
     }
 
     fn run_id(raw: &str) -> RunId {
@@ -381,6 +524,7 @@ mod tests {
         child_id:           RunId,
         parent_id:          RunId,
         created_parent_ids: Mutex<Vec<Option<RunId>>>,
+        resolved_selectors: Mutex<Vec<String>>,
     }
 
     #[async_trait]
@@ -398,6 +542,10 @@ mod tests {
 
         async fn resolve_run(&self, selector: &str) -> anyhow::Result<Run> {
             assert_eq!(selector, "nightly-parent");
+            self.resolved_selectors
+                .lock()
+                .unwrap()
+                .push(selector.to_string());
             Ok(run(self.parent_id, None, 1))
         }
 

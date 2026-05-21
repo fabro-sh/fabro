@@ -39,7 +39,11 @@ impl FabroToolBackend for ClientBackend {
         parent_id: Option<RunId>,
     ) -> anyhow::Result<RunId> {
         let Some(builder) = self.manifest_builder.as_ref() else {
-            return Err(ToolError::message("fabro_run_create is not available").into());
+            return Err(ToolError::message(format!(
+                "{} is not available",
+                crate::FABRO_RUN_CREATE_TOOL_NAME
+            ))
+            .into());
         };
         let mut manifest = builder
             .build_run_manifest(spec, cwd, user_settings_path)

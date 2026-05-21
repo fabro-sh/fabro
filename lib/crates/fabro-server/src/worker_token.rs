@@ -86,11 +86,11 @@ impl WorkerScopeSet {
         self.agent_run_tools
     }
 
-    fn claim(self) -> &'static str {
+    fn claim(self) -> String {
         if self.agent_run_tools {
-            "run:worker agent:run_tools"
+            [WORKER_TOKEN_SCOPE, WORKER_RUN_TOOLS_SCOPE].join(" ")
         } else {
-            WORKER_TOKEN_SCOPE
+            WORKER_TOKEN_SCOPE.to_string()
         }
     }
 }
@@ -122,7 +122,7 @@ pub(crate) fn issue_worker_token_with_scopes(
         iat:    now,
         exp:    now + WORKER_TOKEN_TTL_SECS,
         run_id: run_id.to_string(),
-        scope:  scopes.claim().to_string(),
+        scope:  scopes.claim(),
         jti:    Uuid::new_v4().simple().to_string(),
     };
     jsonwebtoken::encode(&worker_token_header(), &claims, &keys.encoding).map_err(|err| {
