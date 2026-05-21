@@ -27,7 +27,7 @@ export interface CheckRun {
     'name': string;
     'status': CheckRunStatus;
     /**
-     * Duration of the check run in seconds.
+     * Wall-clock duration of the check run in milliseconds.
      */
-    'duration_secs'?: number;
+    'wall_time_ms'?: number;
 }

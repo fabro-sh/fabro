@@ -3,7 +3,7 @@ import { Fragment, useMemo } from "react";
 import { EmptyState } from "../components/state";
 import { Tooltip } from "../components/ui";
 import {
-  formatDurationSecs,
+  formatDurationMs,
   formatTokenCount,
   formatUsdMicros,
 } from "../lib/format";
@@ -53,24 +53,24 @@ interface MappedStageRow {
   outputTokens:     number | null;
   cacheReadTokens:  number | null;
   cacheWriteTokens: number | null;
-  runtimeSecs:      number;
+  wallTimeMs:       number;
   totalUsdMicros:   number | null | undefined;
   inFlight:         boolean;
 }
 
-function liveRuntimeSecs(stage: RunBillingStage, now: number): number {
+function liveWallTimeMs(stage: RunBillingStage, now: number): number {
   if (stage.started_at) {
     const startedMs = new Date(stage.started_at).getTime();
     if (Number.isFinite(startedMs)) {
-      return Math.max(0, (now - startedMs) / 1000);
+      return Math.max(0, now - startedMs);
     }
   }
-  return stage.runtime_secs;
+  return stage.timing.wall_time_ms;
 }
 
 export const handle = { wide: true };
 
-function mapStageRow(stage: RunBillingStage, runtimeSecs: number): MappedStageRow {
+function mapStageRow(stage: RunBillingStage, wallTimeMs: number): MappedStageRow {
   const hasModel = stage.model != null;
   return {
     stage:            stage.stage.name,
@@ -81,7 +81,7 @@ function mapStageRow(stage: RunBillingStage, runtimeSecs: number): MappedStageRo
       : null,
     cacheReadTokens:  hasModel ? stage.billing.cache_read_tokens : null,
     cacheWriteTokens: hasModel ? stage.billing.cache_write_tokens : null,
-    runtimeSecs,
+    wallTimeMs,
     totalUsdMicros:   stage.billing.total_usd_micros,
     inFlight:         isInFlight(stage),
   };
@@ -181,7 +181,7 @@ export default function RunBilling({ params }: { params: { id: string } }) {
   // don't reallocate them every tick.
   const completedRows = useMemo<MappedStageRow[]>(() => {
     if (!billing) return [];
-    return billing.stages.map((stage) => mapStageRow(stage, stage.runtime_secs));
+    return billing.stages.map((stage) => mapStageRow(stage, stage.timing.wall_time_ms));
   }, [billing]);
 
   // The model breakdown is server-derived and stable across ticks too.
@@ -206,16 +206,16 @@ export default function RunBilling({ params }: { params: { id: string } }) {
     if (!hasInFlight) return completedRows;
     return billing.stages.map((stage, idx) =>
       isInFlight(stage)
-        ? mapStageRow(stage, liveRuntimeSecs(stage, now))
+        ? mapStageRow(stage, liveWallTimeMs(stage, now))
         : completedRows[idx],
     );
   }, [billing, completedRows, hasInFlight, now]);
 
   // While ticking, sum the displayed row runtimes so the footer updates in
   // lock-step. Otherwise trust the server's authoritative total.
-  const totalRuntimeSecs = hasInFlight
-    ? rows.reduce((sum, row) => sum + row.runtimeSecs, 0)
-    : (billing?.totals.runtime_secs ?? 0);
+  const totalWallTimeMs = hasInFlight
+    ? rows.reduce((sum, row) => sum + row.wallTimeMs, 0)
+    : (billing?.totals.timing.wall_time_ms ?? 0);
 
   const hasLlmStages = (billing?.by_model.length ?? 0) > 0;
   const totalInput = hasLlmStages ? (billing?.totals.input_tokens ?? null) : null;
@@ -276,7 +276,7 @@ export default function RunBilling({ params }: { params: { id: string } }) {
                   />
                 </td>
                 <td className="px-4 py-3 text-right font-mono text-xs text-fg-3">
-                  {formatDurationSecs(row.runtimeSecs)}
+                  {formatDurationMs(row.wallTimeMs)}
                 </td>
                 <td className="px-4 py-3 text-right font-mono text-xs text-fg-3">
                   {formatUsdMicrosOrDash(row.totalUsdMicros)}
@@ -297,7 +297,7 @@ export default function RunBilling({ params }: { params: { id: string } }) {
                 />
               </td>
               <td className="px-4 py-3 text-right font-mono text-xs font-medium text-fg">
-                {formatDurationSecs(totalRuntimeSecs)}
+                {formatDurationMs(totalWallTimeMs)}
               </td>
               <td className="px-4 py-3 text-right font-mono text-xs font-medium text-fg">
                 {formatUsdMicrosOrDash(totalUsdMicros)}

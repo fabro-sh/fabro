@@ -19,6 +19,4 @@ export interface RunTimestamps {
     'started_at': string | null;
     'last_event_at': string | null;
     'completed_at': string | null;
-    'duration_ms'?: number | null;
-    'elapsed_secs'?: number | null;
 }

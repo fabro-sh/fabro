@@ -251,9 +251,9 @@ struct ModelBillingTotals {
 /// In-memory aggregate billing counters, reset on server restart.
 #[derive(Default)]
 struct BillingAccumulator {
-    total_runs:         i64,
-    total_runtime_secs: f64,
-    by_model:           HashMap<ModelRef, ModelBillingTotals>,
+    total_runs:   i64,
+    total_timing: fabro_types::StageTiming,
+    by_model:     HashMap<ModelRef, ModelBillingTotals>,
 }
 
 pub(crate) type RegistryFactoryOverride =
@@ -702,7 +702,7 @@ fn accumulate_billing_rollup(
     rollup: &fabro_workflow::ProjectionBillingRollup,
 ) {
     accumulator.total_runs += 1;
-    accumulator.total_runtime_secs += rollup.runtime_ms as f64 / 1000.0;
+    accumulator.total_timing = accumulator.total_timing.saturating_add(&rollup.timing);
     for model in &rollup.by_model {
         let entry = accumulator.by_model.entry(model.model.clone()).or_default();
         entry.stages += model.stages;
@@ -714,7 +714,7 @@ pub(crate) fn run_stage_from_stage_id(
     stage_id: &StageId,
     name: impl Into<String>,
     status: StageState,
-    duration_secs: Option<f64>,
+    wall_time_ms: Option<u64>,
     started_at: Option<chrono::DateTime<chrono::Utc>>,
     handler: StageHandler,
 ) -> RunStage {
@@ -723,7 +723,7 @@ pub(crate) fn run_stage_from_stage_id(
         name: name.into(),
         handler,
         status,
-        duration_secs,
+        wall_time_ms,
         node_id: stage_id.node_id().to_string(),
         visit: std::num::NonZeroU32::new(stage_id.visit())
             .expect("StageId stores a non-zero visit"),
@@ -2236,7 +2236,13 @@ pub(crate) async fn reconcile_incomplete_runs_on_startup(
             "Fabro server restarted before the run reached a terminal state.".to_string(),
         );
         let failure_event = workflow_event::Event::workflow_run_failed_from_error(
-            &error, 0, reason, None, None, None, None,
+            &error,
+            fabro_types::RunTiming::default(),
+            reason,
+            None,
+            None,
+            None,
+            None,
         );
         workflow_event::append_event(&run_store, &summary.id, &failure_event).await?;
         reconciled += 1;
@@ -2281,7 +2287,13 @@ async fn persist_shutdown_run_failures(
             "Fabro server shut down before the run reached a terminal state.".to_string(),
         );
         let failure_event = workflow_event::Event::workflow_run_failed_from_error(
-            &error, 0, reason, None, None, None, None,
+            &error,
+            fabro_types::RunTiming::default(),
+            reason,
+            None,
+            None,
+            None,
+            None,
         );
         workflow_event::append_event(&run_store, &run_id, &failure_event).await?;
     }
@@ -2353,7 +2365,7 @@ async fn persist_cancelled_run_status(state: &AppState, run_id: RunId) -> anyhow
 
     let failure_event = workflow_event::Event::workflow_run_failed_from_error(
         &WorkflowError::Cancelled,
-        0,
+        fabro_types::RunTiming::default(),
         FailureReason::Cancelled,
         None,
         None,
@@ -2389,7 +2401,7 @@ async fn fail_run_before_execution(
         Ok(run_store) => {
             let failure_event = workflow_event::Event::workflow_run_failed_from_error(
                 &WorkflowError::engine(message.clone()),
-                0,
+                fabro_types::RunTiming::default(),
                 reason,
                 None,
                 None,
@@ -2703,7 +2715,13 @@ async fn append_worker_exit_failure(
         format!("Worker exited before emitting a terminal run event: {wait_status}"),
     );
     let failure_event = workflow_event::Event::workflow_run_failed_from_error(
-        &error, 0, reason, None, None, None, None,
+        &error,
+        fabro_types::RunTiming::default(),
+        reason,
+        None,
+        None,
+        None,
+        None,
     );
 
     if let Err(err) = workflow_event::append_event(run_store, &run_id, &failure_event).await {
@@ -3359,7 +3377,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             let message = format!("Failed to spawn worker: {err}");
             let failure_event = workflow_event::Event::workflow_run_failed_from_error(
                 &WorkflowError::engine_with_anyhow("Failed to spawn worker", err),
-                0,
+                fabro_types::RunTiming::default(),
                 FailureReason::LaunchFailed,
                 None,
                 None,
@@ -3379,7 +3397,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         let _ = child.start_kill();
         let failure_event = workflow_event::Event::workflow_run_failed_from_error(
             &WorkflowError::engine(message.clone()),
-            0,
+            fabro_types::RunTiming::default(),
             FailureReason::LaunchFailed,
             None,
             None,
@@ -3407,7 +3425,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         let _ = child.start_kill();
         let failure_event = workflow_event::Event::workflow_run_failed_from_error(
             &WorkflowError::engine(message.clone()),
-            0,
+            fabro_types::RunTiming::default(),
             FailureReason::LaunchFailed,
             None,
             None,
@@ -3426,7 +3444,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         let _ = child.start_kill();
         let failure_event = workflow_event::Event::workflow_run_failed_from_error(
             &WorkflowError::engine(message.clone()),
-            0,
+            fabro_types::RunTiming::default(),
             FailureReason::LaunchFailed,
             None,
             None,
@@ -3458,7 +3476,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             let _ = child.start_kill();
             let failure_event = workflow_event::Event::workflow_run_failed_from_error(
                 &WorkflowError::engine_with_source("Worker wait failed", err),
-                0,
+                fabro_types::RunTiming::default(),
                 FailureReason::Terminated,
                 None,
                 None,

@@ -298,7 +298,8 @@ pub struct Executed {
     pub graph:         Graph,
     pub outcome:       Result<Outcome, Error>,
     pub run_options:   RunOptions,
-    pub duration_ms:   u64,
+    /// Run wall-clock time in milliseconds from EXECUTE start to outcome.
+    pub wall_time_ms:  u64,
     pub final_context: Context,
     pub engine:        Arc<EngineServices>,
     pub model:         String,

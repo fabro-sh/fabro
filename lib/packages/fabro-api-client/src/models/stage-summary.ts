@@ -13,6 +13,9 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { StageTiming } from './stage-timing';
 
 /**
  * Terminal summary for one stage in a run conclusion.
@@ -20,7 +23,7 @@
 export interface StageSummary {
     'stage_id': string;
     'stage_label': string;
-    'duration_ms': number;
+    'timing': StageTiming;
     'billing_usd_micros'?: number | null;
     'retries': number;
 }

@@ -392,7 +392,7 @@ mod tests {
             node_id: "work".to_string(),
             name: "Work".to_string(),
             index: 1,
-            duration_ms: 10,
+            timing: fabro_types::StageTiming::wall_only(10),
             status: "succeeded".to_string(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),

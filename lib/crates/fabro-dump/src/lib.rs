@@ -548,7 +548,7 @@ mod tests {
                 .single()
                 .unwrap(),
             status:               StageOutcome::Succeeded,
-            duration_ms:          5,
+            timing:               fabro_types::RunTiming::new(5, 0, 0),
             failure:              None,
             final_git_commit_sha: Some("abc123".to_string()),
             stages:               Vec::new(),

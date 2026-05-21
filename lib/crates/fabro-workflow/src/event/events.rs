@@ -4,8 +4,8 @@ use ::fabro_types::{
     BilledTokenCounts, BlockedReason, CommandTermination, DiffSummary, FailureReason,
     ForkSourceRef, GitContext, PairId, PairMessageId, PairSystemMessageKind, PairTarget,
     ParallelBranchId, Principal, PullRequestLink, RunBlobId, RunFailure, RunId, RunNoticeLevel,
-    RunPairEndedReason, RunPairFailedReason, RunProvenance, SandboxProvider, StageId,
-    SuccessReason, run_event as fabro_types,
+    RunPairEndedReason, RunPairFailedReason, RunProvenance, RunTiming, SandboxProvider, StageId,
+    StageTiming, SuccessReason, run_event as fabro_types,
 };
 use fabro_agent::{AgentEvent, SandboxEvent};
 use serde::{Deserialize, Serialize};
@@ -150,7 +150,7 @@ pub enum Event {
         actor:              Option<Principal>,
     },
     WorkflowRunCompleted {
-        duration_ms:          u64,
+        timing:               RunTiming,
         artifact_count:       usize,
         #[serde(default)]
         status:               String,
@@ -168,7 +168,7 @@ pub enum Event {
     },
     WorkflowRunFailed {
         failure:              RunFailure,
-        duration_ms:          u64,
+        timing:               RunTiming,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         final_git_commit_sha: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -226,7 +226,7 @@ pub enum Event {
         node_id: String,
         name: String,
         index: usize,
-        duration_ms: u64,
+        timing: StageTiming,
         status: String,
         preferred_label: Option<String>,
         suggested_next_ids: Vec<String>,
@@ -253,15 +253,15 @@ pub enum Event {
         max_attempts: usize,
     },
     StageFailed {
-        node_id:     String,
-        name:        String,
-        index:       usize,
-        failure:     FailureDetail,
-        will_retry:  bool,
-        duration_ms: u64,
-        billing:     Option<BilledModelUsage>,
+        node_id:    String,
+        name:       String,
+        index:      usize,
+        failure:    FailureDetail,
+        will_retry: bool,
+        timing:     StageTiming,
+        billing:    Option<BilledModelUsage>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        actor:       Option<Principal>,
+        actor:      Option<Principal>,
     },
     StageRetrying {
         node_id:      String,
@@ -724,7 +724,7 @@ impl Event {
     #[must_use]
     pub fn workflow_run_failed_from_error(
         error: &Error,
-        duration_ms: u64,
+        timing: RunTiming,
         reason: FailureReason,
         final_git_commit_sha: Option<String>,
         final_patch: Option<String>,
@@ -733,7 +733,7 @@ impl Event {
     ) -> Self {
         Self::WorkflowRunFailed {
             failure: run_failure_from_error(error, reason),
-            duration_ms,
+            timing,
             final_git_commit_sha,
             final_patch,
             diff_summary,
@@ -868,20 +868,23 @@ impl Event {
                 info!(%previous_parent_id, ?actor, "Run parent unlinked");
             }
             Self::WorkflowRunCompleted {
-                duration_ms,
+                timing,
                 artifact_count,
                 status,
                 ..
             } => {
                 info!(
-                    duration_ms,
-                    artifact_count, status, "Workflow run completed"
+                    wall_time_ms = timing.wall_time_ms,
+                    active_time_ms = timing.active_time_ms,
+                    inference_time_ms = timing.inference_time_ms,
+                    tool_time_ms = timing.tool_time_ms,
+                    artifact_count,
+                    status,
+                    "Workflow run completed"
                 );
             }
             Self::WorkflowRunFailed {
-                failure,
-                duration_ms,
-                ..
+                failure, timing, ..
             } => {
                 let detail = &failure.detail;
                 let tail =
@@ -898,7 +901,8 @@ impl Event {
                     exec_stderr_tail_bytes = tail.stderr_bytes,
                     exec_stdout_truncated = tail.stdout_truncated,
                     exec_stderr_truncated = tail.stderr_truncated,
-                    duration_ms,
+                    wall_time_ms = timing.wall_time_ms,
+                    active_time_ms = timing.active_time_ms,
                     "Workflow run failed"
                 );
             }
@@ -1009,7 +1013,7 @@ impl Event {
                 node_id,
                 name,
                 index,
-                duration_ms,
+                timing,
                 status,
                 attempt,
                 max_attempts,
@@ -1019,7 +1023,10 @@ impl Event {
                     node_id,
                     stage = name.as_str(),
                     index,
-                    duration_ms,
+                    wall_time_ms = timing.wall_time_ms,
+                    active_time_ms = timing.active_time_ms,
+                    inference_time_ms = timing.inference_time_ms,
+                    tool_time_ms = timing.tool_time_ms,
                     status,
                     attempt,
                     max_attempts,

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     DiffSummary, InterviewQuestionRecord, Principal, PullRequestLink, RepositoryRef,
-    RunControlAction, RunId, RunSandbox, RunStatus,
+    RunControlAction, RunId, RunSandbox, RunStatus, RunTiming,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -33,6 +33,10 @@ pub struct Run {
     #[serde(default)]
     pub source_directory: Option<String>,
     pub timestamps:       RunTimestamps,
+    /// Run-level timing rollup. `None` until the run has measurable timing
+    /// data; populated once a terminal event or partial rollup is available.
+    #[serde(default)]
+    pub timing:           Option<RunTiming>,
     #[serde(default)]
     pub billing:          Option<RunBillingSummary>,
     #[serde(default)]
@@ -123,10 +127,6 @@ pub struct RunTimestamps {
     pub last_event_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub completed_at:  Option<DateTime<Utc>>,
-    #[serde(default)]
-    pub duration_ms:   Option<u64>,
-    #[serde(default)]
-    pub elapsed_secs:  Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

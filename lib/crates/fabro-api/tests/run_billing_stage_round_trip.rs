@@ -37,7 +37,7 @@ fn run_billing_stage_model_accepts_required_null() {
             "cache_read_tokens": 0,
             "cache_write_tokens": 0
         },
-        "runtime_secs": 0.0
+        "timing": {"wall_time_ms": 0, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0}
     });
 
     let stage: RunBillingStage =
@@ -69,7 +69,7 @@ fn run_billing_stage_round_trips_terminal_row_with_started_at_and_state() {
             "cache_read_tokens": 0,
             "cache_write_tokens": 0
         },
-        "runtime_secs": 5.5,
+        "timing": {"wall_time_ms": 5500, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
         "started_at": "2026-04-29T12:34:56Z",
         "state": "succeeded"
     });
@@ -122,7 +122,7 @@ fn run_billing_stage_round_trips_in_flight_row() {
             "cache_read_tokens": 0,
             "cache_write_tokens": 0
         },
-        "runtime_secs": 1.25,
+        "timing": {"wall_time_ms": 1250, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
         "started_at": "2026-04-29T12:34:56Z",
         "state": "running"
     });

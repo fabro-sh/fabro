@@ -25,18 +25,21 @@ import type { BillingStageRef } from './billing-stage-ref';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { StageState } from './stage-state';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { StageTiming } from './stage-timing';
 
 /**
- * Token counts and billed totals for one workflow node within a run. Rows are grouped by node; billing and runtime sum every visit of that node.
+ * Token counts and billed totals for one workflow node within a run. Rows are grouped by node; billing and timing sum every visit of that node.
  */
 export interface RunBillingStage {
     'stage': BillingStageRef;
     'model': BillingModelRef | null;
     'billing': BilledTokenCounts;
     /**
-     * Wall-clock runtime in seconds, summed across every visit of this node.
+     * Per-node timing summed across every visit. `wall_time_ms` is the sum of visit wall times; the active breakdown sums work timing.
      */
-    'runtime_secs': number;
+    'timing': StageTiming;
     /**
      * Wall-clock time the latest attempt of this stage started, if known.
      */

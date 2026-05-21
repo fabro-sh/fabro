@@ -332,6 +332,7 @@ models/run-status-succeeded.ts
 models/run-status.ts
 models/run-superseded-by-props.ts
 models/run-timestamps.ts
+models/run-timing.ts
 models/run-timings.ts
 models/run.ts
 models/sandbox-details.ts
@@ -384,6 +385,7 @@ models/stage-outcome.ts
 models/stage-projection.ts
 models/stage-state.ts
 models/stage-summary.ts
+models/stage-timing.ts
 models/start-record.ts
 models/start-run-request.ts
 models/steer-run-request.ts

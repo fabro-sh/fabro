@@ -35,9 +35,9 @@ export interface RunStage {
     'handler': StageHandler;
     'status': StageState;
     /**
-     * Time spent in this stage, in seconds.
+     * Wall-clock time the latest attempt spent in this stage, in milliseconds.
      */
-    'duration_secs'?: number;
+    'wall_time_ms'?: number;
     /**
      * Node id in the workflow graph; multiple stages with different visits share the same node_id.
      */

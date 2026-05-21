@@ -13,6 +13,9 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RunTiming } from './run-timing';
 
 /**
  * Aggregate billing totals across all runs.
@@ -51,7 +54,7 @@ export interface AggregateBillingTotals {
      */
     'total_usd_micros'?: number | null;
     /**
-     * Total runtime in seconds.
+     * Aggregate timing rollup across every completed run. Active timing sums work across stage visits, so `active_time_ms` can exceed `wall_time_ms`.
      */
-    'runtime_secs': number;
+    'timing': RunTiming;
 }

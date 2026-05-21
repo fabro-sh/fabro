@@ -394,10 +394,9 @@ mod tests {
                 "created_at": "2026-04-05T12:00:00Z",
                 "started_at": null,
                 "last_event_at": null,
-                "completed_at": null,
-                "duration_ms": null,
-                "elapsed_secs": null
+                "completed_at": null
             },
+            "timing": null,
             "billing": null,
             "diff": null,
             "pull_request": null,

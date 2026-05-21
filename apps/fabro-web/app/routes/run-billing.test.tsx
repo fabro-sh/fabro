@@ -28,7 +28,7 @@ function billing(overrides: Partial<RunBilling> = {}): RunBilling {
   return {
     stages: [],
     totals: {
-      runtime_secs: 0,
+      timing: { wall_time_ms: 0, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
       ...zeroBilling(),
     },
     by_model: [],
@@ -74,19 +74,19 @@ describe("RunBilling", () => {
             stage: { id: "start", name: "start" },
             model: null,
             billing: zeroBilling(),
-            runtime_secs: 0,
+            timing: { wall_time_ms: 0, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
             state: "succeeded",
           },
           {
             stage: { id: "command", name: "command" },
             model: null,
             billing: zeroBilling(),
-            runtime_secs: 61,
+            timing: { wall_time_ms: 61000, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
             state: "succeeded",
           },
         ],
         totals: {
-          runtime_secs: 61,
+          timing: { wall_time_ms: 61000, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
           ...zeroBilling(),
         },
       }),
@@ -109,7 +109,7 @@ describe("RunBilling", () => {
             stage: { id: "start", name: "start" },
             model: null,
             billing: zeroBilling(),
-            runtime_secs: 0,
+            timing: { wall_time_ms: 0, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
             state: "succeeded",
           },
           {
@@ -124,12 +124,12 @@ describe("RunBilling", () => {
               total_tokens: 1500,
               total_usd_micros: 240000,
             }),
-            runtime_secs: 42,
+            timing: { wall_time_ms: 42000, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
             state: "succeeded",
           },
         ],
         totals: {
-          runtime_secs: 42,
+          timing: { wall_time_ms: 42000, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
           ...zeroBilling({
             input_tokens: 1200,
             output_tokens: 300,
@@ -197,13 +197,13 @@ describe("RunBilling", () => {
                 total_tokens: 1500,
                 total_usd_micros: 240000,
               }),
-              runtime_secs: 0,
+              timing: { wall_time_ms: 0, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
               started_at: startedAt,
               state: "running",
             },
           ],
           totals: {
-            runtime_secs: 0,
+            timing: { wall_time_ms: 0, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
             ...zeroBilling({
               input_tokens: 1200,
               output_tokens: 300,

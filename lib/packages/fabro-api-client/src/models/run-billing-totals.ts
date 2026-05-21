@@ -13,15 +13,18 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RunTiming } from './run-timing';
 
 /**
  * Aggregate billing totals across all stages of a run.
  */
 export interface RunBillingTotals {
     /**
-     * Total wall-clock runtime in seconds.
+     * Run-level timing rollup. `wall_time_ms` is summed across stage visits; active timing sums work across visits.
      */
-    'runtime_secs': number;
+    'timing': RunTiming;
     /**
      * Total input tokens consumed.
      */

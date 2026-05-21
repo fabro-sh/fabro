@@ -14,8 +14,36 @@ use crate::lifecycle::{
     AttemptContext, AttemptResultContext, EdgeContext, EdgeDecision, NodeDecision, NoopLifecycle,
     RunLifecycle,
 };
-use crate::outcome::{NodeResult, NodeResultExt, Outcome};
+use crate::outcome::{NodeResult, NodeResultExt, Outcome, OutcomeMeta};
 use crate::state::ExecutionState;
+
+/// Build a [`NodeResult`] from an attempt outcome, pulling the inference and
+/// tool breakdown from `outcome.timing` when handlers populated it. The wall
+/// time comes from the executor's stopwatch since that is the source of
+/// authoritative per-attempt clock time.
+fn node_result_from_outcome<M: OutcomeMeta>(
+    outcome: Outcome<M>,
+    wall_time: std::time::Duration,
+    attempts: u32,
+    max_attempts: u32,
+) -> NodeResult<M> {
+    let inference_time = outcome
+        .timing
+        .map(|t| std::time::Duration::from_millis(t.inference_time_ms))
+        .unwrap_or_default();
+    let tool_time = outcome
+        .timing
+        .map(|t| std::time::Duration::from_millis(t.tool_time_ms))
+        .unwrap_or_default();
+    NodeResult::new(
+        outcome,
+        wall_time,
+        inference_time,
+        tool_time,
+        attempts,
+        max_attempts,
+    )
+}
 
 #[derive(Default)]
 pub struct ExecutorOptions {
@@ -288,8 +316,12 @@ impl<G: Graph + 'static> Executor<G> {
             match self.handler.execute(node, &state.context, graph).await {
                 Ok(outcome) if outcome.status.retry_requested() && can_retry => {
                     let delay = policy.backoff.delay_for_attempt(attempt);
-                    let result =
-                        NodeResult::new(outcome, start.elapsed(), attempt, policy.max_attempts);
+                    let result = node_result_from_outcome(
+                        outcome,
+                        start.elapsed(),
+                        attempt,
+                        policy.max_attempts,
+                    );
                     let ctx = AttemptResultContext {
                         node,
                         result: &result,
@@ -302,7 +334,7 @@ impl<G: Graph + 'static> Executor<G> {
                 }
                 Ok(outcome) if outcome.status.retry_requested() => {
                     let final_outcome = self.handler.on_retries_exhausted(node, outcome);
-                    let result = NodeResult::new(
+                    let result = node_result_from_outcome(
                         final_outcome,
                         start.elapsed(),
                         attempt,
@@ -319,8 +351,12 @@ impl<G: Graph + 'static> Executor<G> {
                     return Ok(result);
                 }
                 Ok(outcome) => {
-                    let result =
-                        NodeResult::new(outcome, start.elapsed(), attempt, policy.max_attempts);
+                    let result = node_result_from_outcome(
+                        outcome,
+                        start.elapsed(),
+                        attempt,
+                        policy.max_attempts,
+                    );
                     let ctx = AttemptResultContext {
                         node,
                         result: &result,
@@ -348,8 +384,12 @@ impl<G: Graph + 'static> Executor<G> {
                 Err(e @ Error::Handler { .. }) => {
                     // Convert handler failures to fail outcomes so routing continues.
                     let outcome = e.to_fail_outcome();
-                    let result =
-                        NodeResult::new(outcome, start.elapsed(), attempt, policy.max_attempts);
+                    let result = node_result_from_outcome(
+                        outcome,
+                        start.elapsed(),
+                        attempt,
+                        policy.max_attempts,
+                    );
                     let ctx = AttemptResultContext {
                         node,
                         result: &result,

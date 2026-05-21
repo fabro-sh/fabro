@@ -140,10 +140,10 @@ impl RunInfo {
         }
     }
 
-    pub fn duration_ms(&self) -> Option<u64> {
+    pub fn wall_time_ms(&self) -> Option<u64> {
         self.summary
             .as_ref()
-            .and_then(|summary| summary.timestamps.duration_ms)
+            .and_then(|summary| summary.timing.as_ref().map(|t| t.wall_time_ms))
     }
 
     pub fn total_cost(&self) -> Option<f64> {
@@ -284,8 +284,11 @@ fn run_info_from_summary(summary: &Run, scratch_base: &Path) -> Option<RunInfo> 
     let dir_name = path.file_name()?.to_string_lossy().to_string();
     let start_time_dt = summary.id.created_at();
     let end_time = if summary.lifecycle.status.is_terminal() {
-        summary.timestamps.duration_ms.and_then(|duration_ms| {
-            Some(start_time_dt + chrono::Duration::milliseconds(i64::try_from(duration_ms).ok()?))
+        summary.timing.as_ref().and_then(|timing| {
+            Some(
+                start_time_dt
+                    + chrono::Duration::milliseconds(i64::try_from(timing.wall_time_ms).ok()?),
+            )
         })
     } else {
         None

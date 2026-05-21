@@ -21,7 +21,7 @@ fn run_sse_body(run_id: &str) -> String {
         "run_id": run_id,
         "ts": "2026-04-05T12:00:01Z",
         "properties": {
-            "duration_ms": 12,
+            "timing": {"wall_time_ms": 12, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
             "artifact_count": 0,
             "status": "succeeded",
             "reason": "completed"

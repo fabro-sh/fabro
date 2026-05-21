@@ -54,7 +54,7 @@ pub(crate) async fn list_command(
                     "status": run.status(),
                     "start_time": run.start_time(),
                     "labels": run.labels(),
-                    "duration_ms": run.duration_ms(),
+                    "wall_time_ms": run.wall_time_ms(),
                     "total_usd_micros": run.total_usd_micros(),
                     "source_directory": run.source_directory(),
                     "repo_origin_url": run.repo_origin_url(),
@@ -107,7 +107,7 @@ pub(crate) async fn list_command(
     let rows: Vec<Vec<CellStruct>> = display_runs
         .iter()
         .map(|run| {
-            let duration_display = match run.duration_ms() {
+            let duration_display = match run.wall_time_ms() {
                 Some(ms) => format_duration_ms(ms),
                 None => match run.start_time_dt() {
                     Some(start) => {

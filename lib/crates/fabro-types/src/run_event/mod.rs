@@ -940,7 +940,7 @@ mod tests {
             actor:              None,
             body:               EventBody::StageCompleted(StageCompletedProps {
                 index: 1,
-                duration_ms: 1234,
+                timing: crate::StageTiming::wall_only(1234),
                 status: crate::StageOutcome::Succeeded,
                 preferred_label: None,
                 suggested_next_ids: vec!["next".to_string()],
@@ -1135,7 +1135,12 @@ mod tests {
             (
                 "run.completed",
                 json!({
-                    "duration_ms": 42,
+                    "timing": {
+                        "wall_time_ms": 42,
+                        "inference_time_ms": 0,
+                        "tool_time_ms": 0,
+                        "active_time_ms": 0
+                    },
                     "artifact_count": 0,
                     "status": "succeeded",
                     "reason": "completed",
@@ -1156,7 +1161,12 @@ mod tests {
                             "category": "deterministic"
                         }
                     },
-                    "duration_ms": 42,
+                    "timing": {
+                        "wall_time_ms": 42,
+                        "inference_time_ms": 0,
+                        "tool_time_ms": 0,
+                        "active_time_ms": 0
+                    },
                     "diff_summary": {
                         "files_changed": 2,
                         "additions": 10,
@@ -1214,7 +1224,7 @@ mod tests {
     fn event_body_event_name_matches_wire_name() {
         let body = EventBody::StageCompleted(StageCompletedProps {
             index: 1,
-            duration_ms: 1234,
+            timing: crate::StageTiming::wall_only(1234),
             status: crate::StageOutcome::Succeeded,
             preferred_label: None,
             suggested_next_ids: vec!["next".to_string()],

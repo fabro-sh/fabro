@@ -111,7 +111,14 @@ mod tests {
     fn run_state_record_updates_all_fields() {
         let g = linear_graph(&["start", "end"]);
         let mut state = ExecutionState::<()>::new(&g).unwrap();
-        let result = NodeResult::new(Outcome::success(), Duration::from_millis(50), 2, 3);
+        let result = NodeResult::new(
+            Outcome::success(),
+            Duration::from_millis(50),
+            Duration::ZERO,
+            Duration::ZERO,
+            2,
+            3,
+        );
         state.record("start", &result);
 
         assert_eq!(state.completed_nodes, vec!["start"]);
@@ -126,7 +133,14 @@ mod tests {
         let mut state = ExecutionState::<()>::new(&g).unwrap();
         let mut outcome = Outcome::success();
         outcome.context_updates.insert("key".into(), json!("value"));
-        let result = NodeResult::new(outcome, Duration::ZERO, 1, 1);
+        let result = NodeResult::new(
+            outcome,
+            Duration::ZERO,
+            Duration::ZERO,
+            Duration::ZERO,
+            1,
+            1,
+        );
         state.record("start", &result);
         assert_eq!(state.context.get("key"), Some(json!("value")));
     }
@@ -155,7 +169,14 @@ mod tests {
         state.increment_visits("work");
         state.record(
             "start",
-            &NodeResult::new(Outcome::success(), Duration::ZERO, 1, 1),
+            &NodeResult::new(
+                Outcome::success(),
+                Duration::ZERO,
+                Duration::ZERO,
+                Duration::ZERO,
+                1,
+                1,
+            ),
         );
         state.advance("work");
 

@@ -205,7 +205,7 @@ pub(crate) fn print_run_conclusion(
     fabro_util::printerr!(
         printer,
         "Duration:  {}",
-        HumanDuration(Duration::from_millis(conclusion.duration_ms))
+        HumanDuration(Duration::from_millis(conclusion.timing.wall_time_ms))
     );
 
     if let Some(billing) = conclusion.billing.as_ref() {

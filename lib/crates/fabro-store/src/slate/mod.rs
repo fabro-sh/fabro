@@ -619,7 +619,7 @@ mod tests {
             "2026-03-27T12:00:03Z",
             "run.completed",
             &serde_json::json!({
-                "duration_ms": 3210,
+                "timing": {"wall_time_ms": 3210, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
                 "artifact_count": 1,
                 "status": "succeeded",
                 "reason": "completed",
@@ -993,7 +993,7 @@ mod tests {
                         "category": "canceled"
                     }
                 },
-                "duration_ms": 1,
+                "timing": {"wall_time_ms": 1, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
             }),
         ))
         .await
@@ -1038,7 +1038,7 @@ mod tests {
             "2026-03-27T12:00:04Z",
             "run.completed",
             &serde_json::json!({
-                "duration_ms": 3210,
+                "timing": {"wall_time_ms": 3210, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
                 "artifact_count": 1,
                 "status": "succeeded",
                 "reason": "completed",
@@ -1397,7 +1397,7 @@ mod tests {
                         "category": "deterministic"
                     }
                 },
-                "duration_ms": 1,
+                "timing": {"wall_time_ms": 1, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
             }),
         ))
         .await

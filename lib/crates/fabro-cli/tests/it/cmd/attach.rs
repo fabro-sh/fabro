@@ -1147,13 +1147,18 @@ fn attach_json_errors_without_prompting_for_human_input() {
             "internal.run_id": "[ULID]",
             "internal.thread_id": null
           },
-          "duration_ms": "[DURATION_MS]",
           "index": 0,
           "max_attempts": 1,
           "node_visits": {
             "start": 1
           },
-          "status": "succeeded"
+          "status": "succeeded",
+          "timing": {
+            "active_time_ms": 0,
+            "inference_time_ms": 0,
+            "tool_time_ms": 0,
+            "wall_time_ms": 0
+          }
         },
         "run_id": "[ULID]",
         "stage_id": "start@1",
