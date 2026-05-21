@@ -70,19 +70,13 @@ impl TurnStatus {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionRecord {
-    pub id:              SessionId,
-    pub run_id:          RunId,
-    pub title:           Option<String>,
-    pub status:          SessionStatus,
-    pub working_dir:     Option<String>,
-    pub provider:        Option<String>,
-    pub model:           Option<String>,
-    pub permissions:     PermissionLevel,
-    pub created_at:      DateTime<Utc>,
-    pub updated_at:      DateTime<Utc>,
-    pub deleted_at:      Option<DateTime<Utc>>,
-    #[serde(default)]
-    pub runtime_context: Vec<SessionMessage>,
+    pub id:         SessionId,
+    pub run_id:     RunId,
+    pub title:      Option<String>,
+    pub status:     SessionStatus,
+    pub model:      Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 impl SessionRecord {
@@ -92,43 +86,34 @@ impl SessionRecord {
             run_id,
             title: None,
             status: SessionStatus::Idle,
-            working_dir: None,
-            provider: None,
             model: None,
-            permissions: PermissionLevel::ReadOnly,
             created_at: now,
             updated_at: now,
-            deleted_at: None,
-            runtime_context: Vec::new(),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionSummary {
-    pub id:          SessionId,
-    pub run_id:      RunId,
-    pub title:       Option<String>,
-    pub status:      SessionStatus,
-    pub working_dir: Option<String>,
-    pub provider:    Option<String>,
-    pub model:       Option<String>,
-    pub created_at:  DateTime<Utc>,
-    pub updated_at:  DateTime<Utc>,
+    pub id:         SessionId,
+    pub run_id:     RunId,
+    pub title:      Option<String>,
+    pub status:     SessionStatus,
+    pub model:      Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 impl From<&SessionRecord> for SessionSummary {
     fn from(record: &SessionRecord) -> Self {
         Self {
-            id:          record.id,
-            run_id:      record.run_id,
-            title:       record.title.clone(),
-            status:      record.status,
-            working_dir: record.working_dir.clone(),
-            provider:    record.provider.clone(),
-            model:       record.model.clone(),
-            created_at:  record.created_at,
-            updated_at:  record.updated_at,
+            id:         record.id,
+            run_id:     record.run_id,
+            title:      record.title.clone(),
+            status:     record.status,
+            model:      record.model.clone(),
+            created_at: record.created_at,
+            updated_at: record.updated_at,
         }
     }
 }

@@ -18,7 +18,7 @@
 import type { TurnStatus } from './turn-status';
 
 /**
- * One externally submitted input plus terminal output metadata. Full resumable context is stored on SessionRecord.runtime_context.
+ * One externally submitted input plus terminal output metadata. Full resumable context is rebuilt internally from run events.
  */
 export interface TurnRecord {
     /**

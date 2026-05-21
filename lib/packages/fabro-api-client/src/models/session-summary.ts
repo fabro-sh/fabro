@@ -28,8 +28,6 @@ export interface SessionSummary {
     'run_id': string;
     'title'?: string | null;
     'status': SessionStatus;
-    'working_dir'?: string | null;
-    'provider'?: string | null;
     'model'?: string | null;
     'created_at': string;
     'updated_at': string;

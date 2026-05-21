@@ -5439,10 +5439,8 @@ components:
         - id
         - run_id
         - status
-        - permissions
         - created_at
         - updated_at
-        - runtime_context
       properties:
         id:
           $ref: "#/components/schemas/SessionId"
@@ -5452,27 +5450,14 @@ components:
           type: ["string", "null"]
         status:
           $ref: "#/components/schemas/SessionStatus"
-        working_dir:
-          type: ["string", "null"]
-        provider:
-          type: ["string", "null"]
         model:
           type: ["string", "null"]
-        permissions:
-          $ref: "#/components/schemas/PermissionLevel"
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
-        deleted_at:
-          type: ["string", "null"]
-          format: date-time
-        runtime_context:
-          type: array
-          items:
-            $ref: "#/components/schemas/SessionMessage"
 
     PermissionLevel:
       description: Agent tool permission level applied to a session.
@@ -5500,10 +5485,6 @@ components:
           type: ["string", "null"]
         status:
           $ref: "#/components/schemas/SessionStatus"
-        working_dir:
-          type: ["string", "null"]
-        provider:
-          type: ["string", "null"]
         model:
           type: ["string", "null"]
         created_at:
@@ -5514,7 +5495,7 @@ components:
           format: date-time
 
     TurnRecord:
-      description: One externally submitted input plus terminal output metadata. Full resumable context is stored on SessionRecord.runtime_context.
+      description: One externally submitted input plus terminal output metadata. Full resumable context is rebuilt internally from run events.
       type: object
       required:
         - id

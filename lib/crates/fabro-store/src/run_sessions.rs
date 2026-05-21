@@ -1,9 +1,15 @@
 use std::collections::BTreeMap;
 
 use fabro_types::{
-    EventBody, EventEnvelope, PermissionLevel, RunId, SessionId, SessionMessage, SessionRecord,
-    SessionSummary, TurnId, TurnRecord, TurnStatus,
+    EventBody, EventEnvelope, RunId, SessionId, SessionMessage, SessionRecord, SessionSummary,
+    TurnId, TurnRecord, TurnStatus,
 };
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProjectedRunSession {
+    pub record:          SessionRecord,
+    pub runtime_context: Vec<SessionMessage>,
+}
 
 pub fn project_run_sessions(run_id: RunId, events: &[EventEnvelope]) -> Vec<SessionSummary> {
     let mut projection = RunSessionProjection::default();
@@ -11,7 +17,7 @@ pub fn project_run_sessions(run_id: RunId, events: &[EventEnvelope]) -> Vec<Sess
     projection
         .sessions
         .values()
-        .map(SessionSummary::from)
+        .map(|session| SessionSummary::from(&session.record))
         .collect()
 }
 
@@ -20,6 +26,14 @@ pub fn project_run_session(
     session_id: SessionId,
     events: &[EventEnvelope],
 ) -> Option<SessionRecord> {
+    project_run_session_with_context(run_id, session_id, events).map(|session| session.record)
+}
+
+pub fn project_run_session_with_context(
+    run_id: RunId,
+    session_id: SessionId,
+    events: &[EventEnvelope],
+) -> Option<ProjectedRunSession> {
     let mut projection = RunSessionProjection::default();
     projection.apply(run_id, events);
     projection.sessions.remove(&session_id)
@@ -51,7 +65,7 @@ pub fn project_run_session_turn(
 
 #[derive(Default)]
 struct RunSessionProjection {
-    sessions: BTreeMap<SessionId, SessionRecord>,
+    sessions: BTreeMap<SessionId, ProjectedRunSession>,
     turns:    BTreeMap<SessionId, BTreeMap<TurnId, TurnRecord>>,
 }
 
@@ -66,19 +80,22 @@ impl RunSessionProjection {
                     let mut record = SessionRecord::new(session_id, run_id, envelope.event.ts);
                     record.title.clone_from(&props.title);
                     record.model.clone_from(&props.model);
-                    record.permissions = PermissionLevel::ReadOnly;
-                    self.sessions.insert(session_id, record);
+                    let projected = ProjectedRunSession {
+                        record,
+                        runtime_context: Vec::new(),
+                    };
+                    self.sessions.insert(session_id, projected);
                 }
                 EventBody::RunSessionTitleUpdated(props) => {
-                    if let Some(record) = self.sessions.get_mut(&session_id) {
-                        record.title.clone_from(&props.title);
-                        record.updated_at = envelope.event.ts;
+                    if let Some(session) = self.sessions.get_mut(&session_id) {
+                        session.record.title.clone_from(&props.title);
+                        session.record.updated_at = envelope.event.ts;
                     }
                 }
                 EventBody::RunSessionTurnStarted(props) => {
-                    if let Some(record) = self.sessions.get_mut(&session_id) {
-                        record.status = fabro_types::SessionStatus::Running;
-                        record.updated_at = envelope.event.ts;
+                    if let Some(session) = self.sessions.get_mut(&session_id) {
+                        session.record.status = fabro_types::SessionStatus::Running;
+                        session.record.updated_at = envelope.event.ts;
                     }
                     self.turns
                         .entry(session_id)
@@ -97,16 +114,16 @@ impl RunSessionProjection {
                         });
                 }
                 EventBody::RunSessionUserMessage(props) => {
-                    if let Some(record) = self.sessions.get_mut(&session_id) {
-                        record
+                    if let Some(session) = self.sessions.get_mut(&session_id) {
+                        session
                             .runtime_context
                             .push(SessionMessage::user(props.text.clone(), envelope.event.ts));
-                        record.updated_at = envelope.event.ts;
+                        session.record.updated_at = envelope.event.ts;
                     }
                 }
                 EventBody::RunSessionAssistantMessage(props) => {
-                    if let Some(record) = self.sessions.get_mut(&session_id) {
-                        record.runtime_context.push(SessionMessage::Assistant {
+                    if let Some(session) = self.sessions.get_mut(&session_id) {
+                        session.runtime_context.push(SessionMessage::Assistant {
                             content:        props.text.clone(),
                             tool_calls:     Vec::new(),
                             provider_parts: Vec::new(),
@@ -114,7 +131,7 @@ impl RunSessionProjection {
                             response_id:    String::new(),
                             timestamp:      envelope.event.ts,
                         });
-                        record.updated_at = envelope.event.ts;
+                        session.record.updated_at = envelope.event.ts;
                     }
                     if let Some(turn) = self
                         .turns
@@ -169,13 +186,13 @@ impl RunSessionProjection {
         error: Option<String>,
         timestamp: chrono::DateTime<chrono::Utc>,
     ) {
-        if let Some(record) = self.sessions.get_mut(&session_id) {
-            record.status = if status == TurnStatus::Failed {
+        if let Some(session) = self.sessions.get_mut(&session_id) {
+            session.record.status = if status == TurnStatus::Failed {
                 fabro_types::SessionStatus::Failed
             } else {
                 fabro_types::SessionStatus::Idle
             };
-            record.updated_at = timestamp;
+            session.record.updated_at = timestamp;
         }
         if let Some(turn) = self
             .turns
@@ -213,7 +230,7 @@ mod tests {
     };
     use serde_json::json;
 
-    use super::project_run_session;
+    use super::{project_run_session, project_run_session_with_context};
 
     #[test]
     fn projection_rebuilds_runtime_context_from_run_events() {
@@ -265,7 +282,7 @@ mod tests {
             ),
         ];
 
-        let session = project_run_session(fixtures::RUN_1, session_id, &events)
+        let session = project_run_session_with_context(fixtures::RUN_1, session_id, &events)
             .expect("session should project from run events");
 
         assert_eq!(session.runtime_context.len(), 2);
@@ -278,6 +295,41 @@ mod tests {
             SessionMessage::Assistant { content, usage, .. }
                 if content == "The run finished." && usage == &json!({ "output_tokens": 4 })
         ));
+    }
+
+    #[test]
+    fn public_session_record_projection_omits_runtime_context() {
+        let session_id = fabro_types::SessionId::new();
+        let turn_id = TurnId::new();
+        let events = vec![
+            event(
+                1,
+                session_id,
+                EventBody::RunSessionCreated(RunSessionCreatedProps {
+                    title:       Some("Ask".to_string()),
+                    model:       Some("test-model".to_string()),
+                    permissions: PermissionLevel::ReadOnly,
+                }),
+            ),
+            event(
+                2,
+                session_id,
+                EventBody::RunSessionUserMessage(RunSessionUserMessageProps {
+                    turn_id,
+                    text: "What happened?".to_string(),
+                }),
+            ),
+        ];
+
+        let session = project_run_session(fixtures::RUN_1, session_id, &events)
+            .expect("session should project from run events");
+        let value = serde_json::to_value(session).expect("session should serialize");
+
+        assert!(value.get("runtime_context").is_none());
+        assert!(value.get("working_dir").is_none());
+        assert!(value.get("provider").is_none());
+        assert!(value.get("permissions").is_none());
+        assert!(value.get("deleted_at").is_none());
     }
 
     fn event(seq: u32, session_id: fabro_types::SessionId, body: EventBody) -> EventEnvelope {

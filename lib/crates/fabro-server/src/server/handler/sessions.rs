@@ -17,12 +17,10 @@ use fabro_llm::client::Client as LlmClient;
 use fabro_model::{AgentProfileKind, Catalog, ModelHandle, ProviderId};
 use fabro_sandbox::reconnect::reconnect_for_run;
 use fabro_store::{
-    EventPayload, RunDatabase, project_run_session, project_run_session_turn,
+    EventPayload, ProjectedRunSession, RunDatabase, project_run_session, project_run_session_turn,
     project_run_session_turns, project_run_sessions,
 };
-use fabro_types::{
-    EventEnvelope, PermissionLevel, RunId, SessionId, SessionRecord, TurnId, TurnStatus,
-};
+use fabro_types::{EventEnvelope, PermissionLevel, RunId, SessionId, TurnId, TurnStatus};
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 use tokio::sync::broadcast::error::RecvError;
@@ -163,11 +161,11 @@ async fn get_session(
         Ok(id) => id,
         Err(err) => return err.into_response(),
     };
-    let (_, _, record) = match load_session(&state, session_id).await {
+    let (_, _, session) = match load_session(&state, session_id).await {
         Ok(context) => context,
         Err(response) => return response,
     };
-    Json(record).into_response()
+    Json(session.record).into_response()
 }
 
 async fn update_session(
@@ -217,7 +215,7 @@ async fn submit_turn(
         Ok(id) => id,
         Err(err) => return err.into_response(),
     };
-    let (run_id, run_store, session_record) = match load_session(&state, session_id).await {
+    let (run_id, run_store, session) = match load_session(&state, session_id).await {
         Ok(context) => context,
         Err(response) => return response,
     };
@@ -260,7 +258,7 @@ async fn submit_turn(
         state,
         run_id,
         run_store,
-        session_record,
+        session,
         turn_id,
         request.input,
         sender,
@@ -476,18 +474,19 @@ async fn run_streaming_turn(
     state: Arc<AppState>,
     run_id: RunId,
     run_store: RunDatabase,
-    record: SessionRecord,
+    session: ProjectedRunSession,
     turn_id: TurnId,
     input: String,
     sender: SessionSseSender,
     turn_lease: SessionTurnLease,
 ) {
+    let session_id = session.record.id;
     if turn_lease.interrupt_requested() {
         let _ = append_and_send_event(
             &run_store,
             &sender,
             run_id,
-            record.id,
+            session_id,
             "run.session.turn.interrupted",
             json!({ "turn_id": turn_id, "error": "Interrupted." }),
             Utc::now(),
@@ -500,17 +499,17 @@ async fn run_streaming_turn(
         let runtime_entry = turn_lease.entry();
         let mut session_slot = runtime_entry.lock_session().await;
         if session_slot.is_none() {
-            match build_agent_session(&state, run_id, &record).await {
-                Ok(session) => {
-                    *session_slot = Some(session);
+            match build_agent_session(&state, run_id, &session).await {
+                Ok(agent_session) => {
+                    *session_slot = Some(agent_session);
                 }
                 Err(err) => {
-                    error!(error = ?err, session_id = %record.id, turn_id = %turn_id, "Failed to build run-backed session runtime");
+                    error!(error = ?err, session_id = %session_id, turn_id = %turn_id, "Failed to build run-backed session runtime");
                     let _ = append_and_send_event(
                         &run_store,
                         &sender,
                         run_id,
-                        record.id,
+                        session_id,
                         "run.session.turn.failed",
                         json!({ "turn_id": turn_id, "error": err.to_string() }),
                         Utc::now(),
@@ -531,7 +530,7 @@ async fn run_streaming_turn(
             &run_store,
             session,
             run_id,
-            record.id,
+            session_id,
             turn_id,
             &input,
             initialize,
@@ -551,7 +550,7 @@ async fn run_streaming_turn(
                 &run_store,
                 &sender,
                 run_id,
-                record.id,
+                session_id,
                 "run.session.turn.succeeded",
                 json!({ "turn_id": turn_id, "output": outcome.output }),
                 Utc::now(),
@@ -569,7 +568,7 @@ async fn run_streaming_turn(
                 &run_store,
                 &sender,
                 run_id,
-                record.id,
+                session_id,
                 event_name,
                 json!({ "turn_id": turn_id, "error": err.to_string(), "output": outcome.output }),
                 Utc::now(),
@@ -582,7 +581,7 @@ async fn run_streaming_turn(
                 &run_store,
                 &sender,
                 run_id,
-                record.id,
+                session_id,
                 "run.session.turn.failed",
                 json!({ "turn_id": turn_id, "error": err.to_string(), "output": outcome.output }),
                 Utc::now(),
@@ -600,7 +599,7 @@ struct TurnExecutionOutcome {
 async fn build_agent_session(
     state: &AppState,
     run_id: RunId,
-    record: &SessionRecord,
+    session: &ProjectedRunSession,
 ) -> anyhow::Result<Session> {
     let catalog = state.catalog();
     let requested_provider_id = ProviderId::anthropic();
@@ -610,7 +609,8 @@ async fn build_agent_session(
         })?;
         (provider.id.clone(), provider.agent_profile)
     };
-    let model = record
+    let model = session
+        .record
         .model
         .clone()
         .or_else(|| {
@@ -657,8 +657,16 @@ async fn build_agent_session(
         ..SessionOptions::default()
     };
 
-    Session::from_record(record, llm_result.client, profile, sandbox, config, None)
-        .map_err(Into::into)
+    Session::from_record(
+        &session.record,
+        &session.runtime_context,
+        llm_result.client,
+        profile,
+        sandbox,
+        config,
+        None,
+    )
+    .map_err(Into::into)
 }
 
 fn build_profile(
@@ -912,7 +920,7 @@ async fn send_sse_event(sender: &SessionSseSender, event: &EventEnvelope) -> boo
 async fn load_session(
     state: &AppState,
     session_id: SessionId,
-) -> Result<(RunId, RunDatabase, SessionRecord), Response> {
+) -> Result<(RunId, RunDatabase, ProjectedRunSession), Response> {
     let run_id = match state.store_ref().get_session_run_id(&session_id).await {
         Ok(Some(run_id)) => run_id,
         Ok(None) => return Err(ApiError::not_found("Session not found.").into_response()),
@@ -923,8 +931,8 @@ async fn load_session(
         Ok(events) => events,
         Err(err) => return Err(store_error(&err).into_response()),
     };
-    match project_run_session(run_id, session_id, &events) {
-        Some(record) => Ok((run_id, run_store, record)),
+    match fabro_store::project_run_session_with_context(run_id, session_id, &events) {
+        Some(session) => Ok((run_id, run_store, session)),
         None => Err(ApiError::not_found("Session not found.").into_response()),
     }
 }

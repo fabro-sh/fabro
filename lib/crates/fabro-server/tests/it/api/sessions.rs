@@ -55,7 +55,7 @@ async fn run_bound_session_is_created_as_run_event_and_resolves_by_flat_id() {
         .expect("session response should include an id");
     assert_eq!(created["run_id"], run_id);
     assert_eq!(created["title"], "Ask Fabro");
-    assert_eq!(created["permissions"], "read-only");
+    assert_session_metadata_only(&created);
     assert!(session_id.parse::<fabro_types::SessionId>().is_ok());
 
     let get_request = Request::builder()
@@ -71,6 +71,7 @@ async fn run_bound_session_is_created_as_run_event_and_resolves_by_flat_id() {
     .await;
     assert_eq!(fetched["id"], session_id);
     assert_eq!(fetched["run_id"], run_id);
+    assert_session_metadata_only(&fetched);
 
     let events_request = Request::builder()
         .method("GET")
@@ -113,6 +114,7 @@ async fn sessions_are_listed_only_under_their_owning_run() {
     .await;
     assert_eq!(first["data"].as_array().unwrap().len(), 1);
     assert_eq!(first["data"][0]["id"], created["id"]);
+    assert_session_metadata_only(&first["data"][0]);
 
     let second_request = Request::builder()
         .method("GET")
@@ -126,4 +128,22 @@ async fn sessions_are_listed_only_under_their_owning_run() {
     )
     .await;
     assert!(second["data"].as_array().unwrap().is_empty());
+}
+
+fn assert_session_metadata_only(value: &serde_json::Value) {
+    let object = value
+        .as_object()
+        .expect("session response should be a JSON object");
+    for field in [
+        "working_dir",
+        "provider",
+        "permissions",
+        "deleted_at",
+        "runtime_context",
+    ] {
+        assert!(
+            !object.contains_key(field),
+            "session metadata should not expose {field}"
+        );
+    }
 }
