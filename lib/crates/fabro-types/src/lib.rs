@@ -70,13 +70,13 @@ pub use outcome::{
     FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMeta, StageOutcome, StageState,
 };
 pub use pair::{
-    PairId, PairMessageId, PairMessageRecord, PairMessageRequest, PairRecord, PairStartRequest,
-    PairStatus, PairSystemMessageKind, PairTarget, PairTranscriptAssistantMessage,
-    PairTranscriptDetailRef, PairTranscriptEntry, PairTranscriptError, PairTranscriptMeta,
-    PairTranscriptResponse, PairTranscriptSystemMessage, PairTranscriptToolCall,
-    PairTranscriptToolStatus, PairTranscriptUserMessage, PairTranscriptWarning,
-    RunEventDetailContent, RunEventDetailContentKind, RunEventDetailEnvelope,
-    RunEventDetailResponse, RunPairStatusResponse,
+    MAX_PAIR_MESSAGE_BYTES, PairId, PairMessageId, PairMessageRecord, PairMessageRequest,
+    PairRecord, PairStartRequest, PairStatus, PairSystemMessageKind, PairTarget,
+    PairTranscriptAssistantMessage, PairTranscriptDetailRef, PairTranscriptEntry,
+    PairTranscriptError, PairTranscriptMeta, PairTranscriptResponse, PairTranscriptSystemMessage,
+    PairTranscriptToolCall, PairTranscriptToolStatus, PairTranscriptUserMessage,
+    PairTranscriptWarning, RunEventDetailContent, RunEventDetailContentKind,
+    RunEventDetailEnvelope, RunEventDetailResponse, RunPairStatusResponse,
 };
 pub use principal::{AuthMethod, Principal, SystemActorKind, UserPrincipal};
 pub use pull_request::{

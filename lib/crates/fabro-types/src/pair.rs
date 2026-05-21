@@ -9,6 +9,13 @@ use crate::{RunId, StageId};
 ulid_id!(PairId);
 ulid_id!(PairMessageId);
 
+/// Maximum byte length of a pair message text payload.
+///
+/// Mirrored in `docs/public/api-reference/fabro-api.yaml` as the
+/// `PairMessageRequest.text` `maxLength`. Keep the YAML and this constant in
+/// sync.
+pub const MAX_PAIR_MESSAGE_BYTES: usize = 8192;
+
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString, IntoStaticStr,
 )]

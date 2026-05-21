@@ -1,17 +1,17 @@
 use std::sync::Arc;
 
 use fabro_client::Client;
-use fabro_types::{PairId, PairMessageRequest, StageId};
+use fabro_types::{MAX_PAIR_MESSAGE_BYTES, PairId, PairMessageRequest, StageId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use strum::IntoStaticStr;
 
 use super::common::{ToolError, ToolResult};
 
-const MAX_PAIR_MESSAGE_BYTES: usize = 8192;
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, IntoStaticStr)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub(crate) enum RunPairAction {
     Status,
     Start,
@@ -107,11 +107,13 @@ impl TryFrom<FabroRunPairParams> for ValidatedPairRun {
                 ValidatedPairAction::Start { stage_id }
             }
             RunPairAction::Get => {
-                let pair_id = parse_pair_id_for_action(params.pair_id.as_deref(), "get")?;
+                let pair_id =
+                    parse_pair_id_for_action(params.pair_id.as_deref(), RunPairAction::Get)?;
                 ValidatedPairAction::Get { pair_id }
             }
             RunPairAction::Message => {
-                let pair_id = parse_pair_id_for_action(params.pair_id.as_deref(), "message")?;
+                let pair_id =
+                    parse_pair_id_for_action(params.pair_id.as_deref(), RunPairAction::Message)?;
                 let Some(text) = params
                     .text
                     .as_deref()
@@ -137,11 +139,13 @@ impl TryFrom<FabroRunPairParams> for ValidatedPairRun {
                 }
             }
             RunPairAction::End => {
-                let pair_id = parse_pair_id_for_action(params.pair_id.as_deref(), "end")?;
+                let pair_id =
+                    parse_pair_id_for_action(params.pair_id.as_deref(), RunPairAction::End)?;
                 ValidatedPairAction::End { pair_id }
             }
             RunPairAction::Transcript => {
-                let pair_id = parse_pair_id_for_action(params.pair_id.as_deref(), "transcript")?;
+                let pair_id =
+                    parse_pair_id_for_action(params.pair_id.as_deref(), RunPairAction::Transcript)?;
                 ValidatedPairAction::Transcript {
                     pair_id,
                     since_seq: params.since_seq,
@@ -153,14 +157,15 @@ impl TryFrom<FabroRunPairParams> for ValidatedPairRun {
     }
 }
 
-fn parse_pair_id_for_action(raw: Option<&str>, action: &str) -> ToolResult<PairId> {
+fn parse_pair_id_for_action(raw: Option<&str>, action: RunPairAction) -> ToolResult<PairId> {
+    let name: &'static str = action.into();
     let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
         return Err(ToolError::message(format!(
-            "pair_id is required for action {action}"
+            "pair_id is required for action {name}"
         )));
     };
     raw.parse::<PairId>()
-        .map_err(|err| ToolError::message(format!("invalid pair_id for action {action}: {err}")))
+        .map_err(|err| ToolError::message(format!("invalid pair_id for action {name}: {err}")))
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -239,16 +244,10 @@ pub(crate) async fn pair_run(
 }
 
 pub(crate) fn pair_run_text(result: &PairRunResult) -> String {
-    match result.action {
-        RunPairAction::Status => format!("read pair status for Fabro run {}", result.run_id),
-        RunPairAction::Start => format!("started pair for Fabro run {}", result.run_id),
-        RunPairAction::Get => format!("read pair for Fabro run {}", result.run_id),
-        RunPairAction::Message => format!("sent pair message for Fabro run {}", result.run_id),
-        RunPairAction::End => format!("ended pair for Fabro run {}", result.run_id),
-        RunPairAction::Transcript => {
-            format!("read pair transcript for Fabro run {}", result.run_id)
-        }
-    }
+    format!(
+        "completed pair {:?} for Fabro run {}",
+        result.action, result.run_id
+    )
 }
 
 #[cfg(test)]

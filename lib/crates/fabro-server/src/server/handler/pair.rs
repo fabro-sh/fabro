@@ -9,12 +9,12 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use fabro_store::EventEnvelope;
 use fabro_types::{
-    EventBody, PairId, PairMessageId, PairMessageRecord, PairMessageRequest, PairRecord,
-    PairStartRequest, PairStatus, PairTarget, PairTranscriptAssistantMessage,
-    PairTranscriptDetailRef, PairTranscriptEntry, PairTranscriptError, PairTranscriptMeta,
-    PairTranscriptResponse, PairTranscriptSystemMessage, PairTranscriptToolCall,
-    PairTranscriptToolStatus, PairTranscriptUserMessage, PairTranscriptWarning, Principal, RunId,
-    StageId,
+    EventBody, MAX_PAIR_MESSAGE_BYTES, PairId, PairMessageId, PairMessageRecord,
+    PairMessageRequest, PairRecord, PairStartRequest, PairStatus, PairTarget,
+    PairTranscriptAssistantMessage, PairTranscriptDetailRef, PairTranscriptEntry,
+    PairTranscriptError, PairTranscriptMeta, PairTranscriptResponse, PairTranscriptSystemMessage,
+    PairTranscriptToolCall, PairTranscriptToolStatus, PairTranscriptUserMessage,
+    PairTranscriptWarning, Principal, RunId, StageId,
 };
 use fabro_workflow::run_status::RunStatus;
 use tokio::time::timeout;
@@ -208,9 +208,11 @@ async fn send_pair_message(
     if text.is_empty() {
         return ApiError::bad_request("Pair message text must not be empty.").into_response();
     }
-    if text.len() > 8192 {
-        return ApiError::bad_request("Pair message text must be at most 8192 bytes.")
-            .into_response();
+    if text.len() > MAX_PAIR_MESSAGE_BYTES {
+        return ApiError::bad_request(format!(
+            "Pair message text must be at most {MAX_PAIR_MESSAGE_BYTES} bytes."
+        ))
+        .into_response();
     }
     let pair_window = match pair_window_by_id(state.as_ref(), &id, pair_id).await {
         Ok(pair) => pair,

@@ -92,6 +92,10 @@ struct ActiveEntry {
 #[derive(Debug, Clone)]
 struct ActivePair {
     record:     PairRecord,
+    /// Snapshot of the agent session id active at `start_pair` time. Used to
+    /// detect session replacement on subsequent pair commands and on
+    /// `AgentSessionDeactivated` cleanup; intentionally not exposed in the
+    /// public `PairRecord`.
     session_id: String,
 }
 
