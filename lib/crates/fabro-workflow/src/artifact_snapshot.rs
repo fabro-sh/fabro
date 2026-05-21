@@ -175,19 +175,14 @@ fn parse_find_output_darwin(output: &str) -> Vec<DiscoveredFile> {
     files
 }
 
-/// Select which files should be collected based on timing and size budgets.
+/// Select which files should be collected based on size budgets.
 pub fn select_files_to_collect(
     discovered: &[DiscoveredFile],
-    command_start_epoch: f64,
+    _command_start_epoch: f64,
 ) -> Vec<DiscoveredFile> {
     let mut candidates: Vec<DiscoveredFile> = discovered
         .iter()
         .filter(|f| {
-            // Skip files older than command start
-            if f.mtime_epoch_secs < command_start_epoch {
-                return false;
-            }
-
             // Skip oversized files
             if f.size > MAX_FILE_SIZE {
                 return false;
@@ -287,6 +282,19 @@ pub async fn collect_artifacts(
         .exec_command(&cmd, FIND_TIMEOUT_MS, None, None, None)
         .await
         .map_err(|e| e.display_with_causes())?;
+    if !result.is_success() {
+        let stderr = result.stderr.trim();
+        let status = format!(
+            "exit code {}, termination {}",
+            result.display_exit_code(),
+            result.termination.as_str()
+        );
+        return if stderr.is_empty() {
+            Err(format!("find command failed ({status})"))
+        } else {
+            Err(format!("find command failed ({status}): {stderr}"))
+        };
+    }
 
     let discovered = parse_find_output(&result.stdout, platform);
     let discovered = normalize_paths(discovered, root);
@@ -377,6 +385,11 @@ mod tests {
                 working_dir: "/home/test",
                 platform_str: platform,
             }
+        }
+
+        fn with_exec_result(mut self, exec_result: ExecResult) -> Self {
+            self.exec_result = exec_result;
+            self
         }
     }
 
@@ -500,14 +513,15 @@ mod tests {
     }
 
     #[test]
-    fn select_files_skips_old_mtime() {
+    fn select_files_collects_old_mtime() {
         let discovered = vec![DiscoveredFile {
             relative_path:    "test-results/old.xml".to_string(),
             size:             1024,
             mtime_epoch_secs: 500.0,
         }];
         let selected = select_files_to_collect(&discovered, 1000.0);
-        assert_eq!(selected.len(), 0);
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].relative_path, "test-results/old.xml");
     }
 
     #[test]
@@ -674,7 +688,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn collect_assets_skips_old_files() {
+    async fn collect_assets_collects_old_mtime_files() {
         let stage_dir = tempfile::tempdir().unwrap();
 
         let mut files = HashMap::new();
@@ -688,7 +702,29 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(summary.files_copied, 0);
+        assert_eq!(summary.files_copied, 1);
+        assert_eq!(summary.captured_assets[0].path, "test-results/r.xml");
+    }
+
+    #[tokio::test]
+    async fn collect_assets_returns_error_when_find_fails() {
+        let stage_dir = tempfile::tempdir().unwrap();
+        let mock =
+            AssetMockSandbox::new(HashMap::new(), "", "linux").with_exec_result(ExecResult {
+                stdout:      String::new(),
+                stderr:      "find: /workspace: Permission denied\n".to_string(),
+                exit_code:   Some(1),
+                termination: CommandTermination::Exited,
+                duration_ms: 10,
+            });
+
+        let globs = vec!["test-results/**".to_string()];
+        let error = collect_artifacts(&mock, stage_dir.path(), &globs, 1000.0)
+            .await
+            .expect_err("nonzero find exit should fail artifact collection");
+
+        assert!(error.contains("find command failed"), "{error}");
+        assert!(error.contains("Permission denied"), "{error}");
     }
 
     #[tokio::test]
