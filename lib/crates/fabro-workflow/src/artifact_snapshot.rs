@@ -60,7 +60,7 @@ const MAX_TOTAL_SIZE: u64 = 50 * 1024 * 1024;
 /// Globs with `/` are treated as directory patterns: the trailing `/**` (if
 /// any) is stripped and the remainder is matched via `-path '*/{dir}/*'`.
 pub fn build_find_command(root: &str, platform: &str, globs: &[String]) -> String {
-    let mut cmd = format!("find {}", shell_quote(root));
+    let mut cmd = format!("find -H {}", shell_quote(root));
 
     // Prune excluded directories
     let prune_parts: Vec<String> = EXCLUDE_DIRS
@@ -609,7 +609,10 @@ mod tests {
     fn build_find_command_shell_quotes_root_and_globs() {
         let globs = vec!["test result's/**".to_string(), "*.trace zip".to_string()];
         let cmd = build_find_command("/workspace with spaces", "linux", &globs);
-        assert!(cmd.starts_with(&format!("find {}", shell_quote("/workspace with spaces"))));
+        assert!(cmd.starts_with(&format!(
+            "find -H {}",
+            shell_quote("/workspace with spaces")
+        )));
         assert!(cmd.contains(&format!("-path {}", shell_quote("*/test result's/*"))));
         assert!(cmd.contains(&format!("-name {}", shell_quote("*.trace zip"))));
     }
