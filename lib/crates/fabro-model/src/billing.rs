@@ -361,24 +361,13 @@ impl BilledTokenCounts {
     /// Returns the five disjoint per-call token buckets, dropping the derived
     /// `total_tokens` sum and the optional `total_usd_micros` cost.
     #[must_use]
-    pub fn to_token_counts(&self) -> TokenCounts {
+    pub fn token_counts(&self) -> TokenCounts {
         TokenCounts {
             input_tokens:       self.input_tokens,
             output_tokens:      self.output_tokens,
             reasoning_tokens:   self.reasoning_tokens,
             cache_read_tokens:  self.cache_read_tokens,
             cache_write_tokens: self.cache_write_tokens,
-        }
-    }
-
-    /// Fills in `total_usd_micros` from catalog pricing when it is missing.
-    ///
-    /// No-op when the cost is already known. Used by read-side rollups so
-    /// in-flight stages can show an exact cost for the tokens consumed so far
-    /// without mutating the underlying projection.
-    pub fn ensure_priced(&mut self, catalog: &Catalog, model: &ModelRef) {
-        if self.total_usd_micros.is_none() {
-            self.total_usd_micros = catalog.price_tokens(model, &self.to_token_counts());
         }
     }
 

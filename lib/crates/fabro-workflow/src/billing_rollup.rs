@@ -1,14 +1,29 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use fabro_model::Catalog;
 use fabro_types::{BilledTokenCounts, ModelRef, RunProjection, StageProjection};
 
-fn stage_priced_usage(catalog: Option<&Catalog>, stage: &StageProjection) -> BilledTokenCounts {
-    let mut usage = stage.usage.clone();
-    if let (Some(catalog), Some(model)) = (catalog, stage.model.as_ref()) {
-        usage.ensure_priced(catalog, model);
+fn stage_usage_with_cost<'a>(
+    catalog: Option<&Catalog>,
+    stage: &'a StageProjection,
+) -> Cow<'a, BilledTokenCounts> {
+    let Some(catalog) = catalog else {
+        return Cow::Borrowed(&stage.usage);
+    };
+    let Some(model) = stage.model.as_ref() else {
+        return Cow::Borrowed(&stage.usage);
+    };
+    if stage.usage.total_usd_micros.is_some() {
+        return Cow::Borrowed(&stage.usage);
     }
-    usage
+
+    let Some(total_usd_micros) = catalog.price_tokens(model, &stage.usage.token_counts()) else {
+        return Cow::Borrowed(&stage.usage);
+    };
+    let mut usage = stage.usage.clone();
+    usage.total_usd_micros = Some(total_usd_micros);
+    Cow::Owned(usage)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -58,8 +73,9 @@ pub fn billing_rollup_from_projection(
         if is_boundary_stage(projection, stage_id.node_id()) {
             continue;
         }
-        let priced = stage_priced_usage(catalog, stage);
-        if stage.completion.is_none() && stage.duration_ms.is_none() && priced.is_zero() {
+        let usage = stage_usage_with_cost(catalog, stage);
+        let usage = usage.as_ref();
+        if stage.completion.is_none() && stage.duration_ms.is_none() && usage.is_zero() {
             continue;
         }
 
@@ -81,10 +97,10 @@ pub fn billing_rollup_from_projection(
             runtime_ms = runtime_ms.saturating_add(duration_ms);
         }
 
-        if !priced.is_zero() {
+        if !usage.is_zero() {
             billed_visit_count += 1;
-            row.billing.add_counts(&priced);
-            totals.add_counts(&priced);
+            row.billing.add_counts(usage);
+            totals.add_counts(usage);
 
             if let Some(model) = &stage.model {
                 row.model = Some(model.clone());
@@ -97,7 +113,7 @@ pub fn billing_rollup_from_projection(
                             billing: BilledTokenCounts::default(),
                         });
                 model_entry.stages += 1;
-                model_entry.billing.add_counts(&priced);
+                model_entry.billing.add_counts(usage);
             }
         }
     }
