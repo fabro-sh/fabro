@@ -159,6 +159,60 @@ async fn session_metadata_patch_route_is_removed() {
     .await;
 }
 
+#[tokio::test]
+async fn derived_session_read_routes_are_removed() {
+    let app = fabro_server::test_support::build_test_router(test_app_state());
+    let run_id = create_run(&app).await;
+    let created = create_session(&app, &run_id, "Ask Fabro").await;
+    let session_id = created["id"]
+        .as_str()
+        .expect("session response should include an id");
+    let turn_id = fabro_types::TurnId::new();
+
+    for path in [
+        format!("/sessions/{session_id}/turns"),
+        format!("/sessions/{session_id}/turns/{turn_id}"),
+        format!("/sessions/{session_id}/events"),
+    ] {
+        let request = Request::builder()
+            .method("GET")
+            .uri(api(&path))
+            .body(Body::empty())
+            .expect("removed session read request should build");
+        response_status(
+            app.clone().oneshot(request).await.unwrap(),
+            StatusCode::NOT_FOUND,
+            format!("GET /api/v1{path}"),
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn inactive_turn_interrupt_returns_conflict() {
+    let app = fabro_server::test_support::build_test_router(test_app_state());
+    let run_id = create_run(&app).await;
+    let created = create_session(&app, &run_id, "Ask Fabro").await;
+    let session_id = created["id"]
+        .as_str()
+        .expect("session response should include an id");
+    let turn_id = fabro_types::TurnId::new();
+
+    let request = Request::builder()
+        .method("POST")
+        .uri(api(&format!(
+            "/sessions/{session_id}/turns/{turn_id}/interrupt"
+        )))
+        .body(Body::empty())
+        .expect("interrupt request should build");
+    response_status(
+        app.clone().oneshot(request).await.unwrap(),
+        StatusCode::CONFLICT,
+        format!("POST /api/v1/sessions/{session_id}/turns/{turn_id}/interrupt"),
+    )
+    .await;
+}
+
 fn assert_session_metadata_only(value: &serde_json::Value) {
     let object = value
         .as_object()

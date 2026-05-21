@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use fabro_types::{
     EventBody, EventEnvelope, RunId, SessionId, SessionMessage, SessionRecord, SessionSummary,
-    TurnId, TurnRecord, TurnStatus,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -39,34 +38,9 @@ pub fn project_run_session_with_context(
     projection.sessions.remove(&session_id)
 }
 
-pub fn project_run_session_turns(
-    run_id: RunId,
-    session_id: SessionId,
-    events: &[EventEnvelope],
-) -> Vec<TurnRecord> {
-    let mut projection = RunSessionProjection::default();
-    projection.apply(run_id, events);
-    projection
-        .turns
-        .remove(&session_id)
-        .map(|turns| turns.into_values().collect())
-        .unwrap_or_default()
-}
-
-pub fn project_run_session_turn(
-    run_id: RunId,
-    session_id: SessionId,
-    turn_id: TurnId,
-    events: &[EventEnvelope],
-) -> Option<TurnRecord> {
-    let turns = project_run_session_turns(run_id, session_id, events);
-    turns.into_iter().find(|turn| turn.id == turn_id)
-}
-
 #[derive(Default)]
 struct RunSessionProjection {
     sessions: BTreeMap<SessionId, ProjectedRunSession>,
-    turns:    BTreeMap<SessionId, BTreeMap<TurnId, TurnRecord>>,
 }
 
 impl RunSessionProjection {
@@ -86,26 +60,11 @@ impl RunSessionProjection {
                     };
                     self.sessions.insert(session_id, projected);
                 }
-                EventBody::RunSessionTurnStarted(props) => {
+                EventBody::RunSessionTurnStarted(_) => {
                     if let Some(session) = self.sessions.get_mut(&session_id) {
                         session.record.status = fabro_types::SessionStatus::Running;
                         session.record.updated_at = envelope.event.ts;
                     }
-                    self.turns
-                        .entry(session_id)
-                        .or_default()
-                        .insert(props.turn_id, TurnRecord {
-                            id: props.turn_id,
-                            session_id,
-                            run_id,
-                            input: props.input.clone(),
-                            status: TurnStatus::Running,
-                            output: None,
-                            error: None,
-                            created_at: envelope.event.ts,
-                            updated_at: envelope.event.ts,
-                            completed_at: None,
-                        });
                 }
                 EventBody::RunSessionUserMessage(props) => {
                     if let Some(session) = self.sessions.get_mut(&session_id) {
@@ -127,44 +86,12 @@ impl RunSessionProjection {
                         });
                         session.record.updated_at = envelope.event.ts;
                     }
-                    if let Some(turn) = self
-                        .turns
-                        .get_mut(&session_id)
-                        .and_then(|turns| turns.get_mut(&props.turn_id))
-                    {
-                        turn.output = Some(props.text.clone());
-                        turn.updated_at = envelope.event.ts;
-                    }
                 }
-                EventBody::RunSessionTurnSucceeded(props) => {
-                    self.finish_turn(
-                        session_id,
-                        props.turn_id,
-                        TurnStatus::Succeeded,
-                        props.output.clone(),
-                        None,
-                        envelope.event.ts,
-                    );
+                EventBody::RunSessionTurnFailed(_) => {
+                    self.finish_turn(session_id, true, envelope.event.ts);
                 }
-                EventBody::RunSessionTurnFailed(props) => {
-                    self.finish_turn(
-                        session_id,
-                        props.turn_id,
-                        TurnStatus::Failed,
-                        props.output.clone(),
-                        Some(props.error.clone()),
-                        envelope.event.ts,
-                    );
-                }
-                EventBody::RunSessionTurnInterrupted(props) => {
-                    self.finish_turn(
-                        session_id,
-                        props.turn_id,
-                        TurnStatus::Interrupted,
-                        None,
-                        props.error.clone(),
-                        envelope.event.ts,
-                    );
+                EventBody::RunSessionTurnSucceeded(_) | EventBody::RunSessionTurnInterrupted(_) => {
+                    self.finish_turn(session_id, false, envelope.event.ts);
                 }
                 _ => {}
             }
@@ -174,32 +101,16 @@ impl RunSessionProjection {
     fn finish_turn(
         &mut self,
         session_id: SessionId,
-        turn_id: TurnId,
-        status: TurnStatus,
-        output: Option<String>,
-        error: Option<String>,
+        failed: bool,
         timestamp: chrono::DateTime<chrono::Utc>,
     ) {
         if let Some(session) = self.sessions.get_mut(&session_id) {
-            session.record.status = if status == TurnStatus::Failed {
+            session.record.status = if failed {
                 fabro_types::SessionStatus::Failed
             } else {
                 fabro_types::SessionStatus::Idle
             };
             session.record.updated_at = timestamp;
-        }
-        if let Some(turn) = self
-            .turns
-            .get_mut(&session_id)
-            .and_then(|turns| turns.get_mut(&turn_id))
-        {
-            turn.status = status;
-            if output.is_some() {
-                turn.output = output;
-            }
-            turn.error = error;
-            turn.updated_at = timestamp;
-            turn.completed_at = Some(timestamp);
         }
     }
 }

@@ -21,8 +21,8 @@ pub use fabro_types::{
 };
 pub(crate) use keyed_mutex::KeyedMutex;
 pub use run_sessions::{
-    ProjectedRunSession, project_run_session, project_run_session_turn, project_run_session_turns,
-    project_run_session_with_context, project_run_sessions,
+    ProjectedRunSession, project_run_session, project_run_session_with_context,
+    project_run_sessions,
 };
 pub use run_state::RunProjectionReducer;
 pub use serializable_projection::SerializableProjection;

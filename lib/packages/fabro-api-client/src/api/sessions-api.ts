@@ -28,17 +28,11 @@ import type { ErrorResponse } from '../models';
 // @ts-ignore
 import type { EventEnvelope } from '../models';
 // @ts-ignore
-import type { PaginatedEventList } from '../models';
-// @ts-ignore
 import type { PaginatedSessionList } from '../models';
-// @ts-ignore
-import type { PaginatedTurnList } from '../models';
 // @ts-ignore
 import type { SessionRecord } from '../models';
 // @ts-ignore
 import type { SubmitTurnRequest } from '../models';
-// @ts-ignore
-import type { TurnRecord } from '../models';
 /**
  * SessionsApi - axios parameter creator
  */
@@ -101,50 +95,6 @@ export const SessionsApiAxiosParamCreator = function (configuration?: Configurat
             assertParamExists('getSession', 'id', id)
             const localVarPath = `/api/v1/sessions/{id}`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            // authentication SessionCookie required
-
-            // authentication BearerAuth required
-            // http bearer authentication required
-            await setBearerAuthToObject(localVarHeaderParameter, configuration)
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Get session turn
-         * @param {string} id
-         * @param {string} turnId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        getSessionTurn: async (id: string, turnId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'id' is not null or undefined
-            assertParamExists('getSessionTurn', 'id', id)
-            // verify required parameter 'turnId' is not null or undefined
-            assertParamExists('getSessionTurn', 'turnId', turnId)
-            const localVarPath = `/api/v1/sessions/{id}/turns/{turnId}`
-                .replace(`{${"id"}}`, encodeURIComponent(String(id)))
-                .replace(`{${"turnId"}}`, encodeURIComponent(String(turnId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -258,91 +208,6 @@ export const SessionsApiAxiosParamCreator = function (configuration?: Configurat
             };
         },
         /**
-         * Returns JSON replay by default. When the `Accept` header includes `text/event-stream`, replays durable events from `since_seq` or `Last-Event-ID`, then stays attached for live events.
-         * @summary List or stream session events
-         * @param {string} id
-         * @param {number} [sinceSeq]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        listSessionEvents: async (id: string, sinceSeq?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'id' is not null or undefined
-            assertParamExists('listSessionEvents', 'id', id)
-            const localVarPath = `/api/v1/sessions/{id}/events`
-                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            // authentication SessionCookie required
-
-            // authentication BearerAuth required
-            // http bearer authentication required
-            await setBearerAuthToObject(localVarHeaderParameter, configuration)
-
-            if (sinceSeq !== undefined) {
-                localVarQueryParameter['since_seq'] = sinceSeq;
-            }
-
-            localVarHeaderParameter['Accept'] = 'application/json,text/event-stream';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary List session turns
-         * @param {string} id
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        listSessionTurns: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'id' is not null or undefined
-            assertParamExists('listSessionTurns', 'id', id)
-            const localVarPath = `/api/v1/sessions/{id}/turns`
-                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            // authentication SessionCookie required
-
-            // authentication BearerAuth required
-            // http bearer authentication required
-            await setBearerAuthToObject(localVarHeaderParameter, configuration)
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
          * Starts a streamed turn immediately. Background turns are not supported in this API version.
          * @summary Submit a session turn
          * @param {string} id
@@ -425,20 +290,6 @@ export const SessionsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Get session turn
-         * @param {string} id
-         * @param {string} turnId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async getSessionTurn(id: string, turnId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TurnRecord>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.getSessionTurn(id, turnId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['SessionsApi.getSessionTurn']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
          * @summary Interrupt a session turn
          * @param {string} id
          * @param {string} turnId
@@ -462,33 +313,6 @@ export const SessionsApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.listRunSessions(id, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['SessionsApi.listRunSessions']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         * Returns JSON replay by default. When the `Accept` header includes `text/event-stream`, replays durable events from `since_seq` or `Last-Event-ID`, then stays attached for live events.
-         * @summary List or stream session events
-         * @param {string} id
-         * @param {number} [sinceSeq]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async listSessionEvents(id: string, sinceSeq?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedEventList>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.listSessionEvents(id, sinceSeq, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['SessionsApi.listSessionEvents']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary List session turns
-         * @param {string} id
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async listSessionTurns(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedTurnList>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.listSessionTurns(id, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['SessionsApi.listSessionTurns']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -537,17 +361,6 @@ export const SessionsApiFactory = function (configuration?: Configuration, baseP
         },
         /**
          *
-         * @summary Get session turn
-         * @param {string} id
-         * @param {string} turnId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        getSessionTurn(id: string, turnId: string, options?: RawAxiosRequestConfig): AxiosPromise<TurnRecord> {
-            return localVarFp.getSessionTurn(id, turnId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
          * @summary Interrupt a session turn
          * @param {string} id
          * @param {string} turnId
@@ -566,27 +379,6 @@ export const SessionsApiFactory = function (configuration?: Configuration, baseP
          */
         listRunSessions(id: string, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedSessionList> {
             return localVarFp.listRunSessions(id, options).then((request) => request(axios, basePath));
-        },
-        /**
-         * Returns JSON replay by default. When the `Accept` header includes `text/event-stream`, replays durable events from `since_seq` or `Last-Event-ID`, then stays attached for live events.
-         * @summary List or stream session events
-         * @param {string} id
-         * @param {number} [sinceSeq]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        listSessionEvents(id: string, sinceSeq?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedEventList> {
-            return localVarFp.listSessionEvents(id, sinceSeq, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary List session turns
-         * @param {string} id
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        listSessionTurns(id: string, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedTurnList> {
-            return localVarFp.listSessionTurns(id, options).then((request) => request(axios, basePath));
         },
         /**
          * Starts a streamed turn immediately. Background turns are not supported in this API version.
@@ -631,18 +423,6 @@ export class SessionsApi extends BaseAPI {
 
     /**
      *
-     * @summary Get session turn
-     * @param {string} id
-     * @param {string} turnId
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public getSessionTurn(id: string, turnId: string, options?: RawAxiosRequestConfig) {
-        return SessionsApiFp(this.configuration).getSessionTurn(id, turnId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
      * @summary Interrupt a session turn
      * @param {string} id
      * @param {string} turnId
@@ -662,29 +442,6 @@ export class SessionsApi extends BaseAPI {
      */
     public listRunSessions(id: string, options?: RawAxiosRequestConfig) {
         return SessionsApiFp(this.configuration).listRunSessions(id, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * Returns JSON replay by default. When the `Accept` header includes `text/event-stream`, replays durable events from `since_seq` or `Last-Event-ID`, then stays attached for live events.
-     * @summary List or stream session events
-     * @param {string} id
-     * @param {number} [sinceSeq]
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public listSessionEvents(id: string, sinceSeq?: number, options?: RawAxiosRequestConfig) {
-        return SessionsApiFp(this.configuration).listSessionEvents(id, sinceSeq, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary List session turns
-     * @param {string} id
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public listSessionTurns(id: string, options?: RawAxiosRequestConfig) {
-        return SessionsApiFp(this.configuration).listSessionTurns(id, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

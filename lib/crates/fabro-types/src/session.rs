@@ -48,24 +48,6 @@ impl SessionStatus {
     }
 }
 
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString, IntoStaticStr,
-)]
-#[serde(rename_all = "snake_case")]
-#[strum(serialize_all = "snake_case")]
-pub enum TurnStatus {
-    Running,
-    Succeeded,
-    Failed,
-    Interrupted,
-}
-
-impl TurnStatus {
-    pub fn as_str(self) -> &'static str {
-        self.into()
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub id:         SessionId,
@@ -114,20 +96,6 @@ impl From<&SessionRecord> for SessionSummary {
             updated_at: record.updated_at,
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TurnRecord {
-    pub id:           TurnId,
-    pub session_id:   SessionId,
-    pub run_id:       RunId,
-    pub input:        String,
-    pub status:       TurnStatus,
-    pub output:       Option<String>,
-    pub error:        Option<String>,
-    pub created_at:   DateTime<Utc>,
-    pub updated_at:   DateTime<Utc>,
-    pub completed_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

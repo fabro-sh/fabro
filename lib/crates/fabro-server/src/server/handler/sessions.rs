@@ -1,8 +1,8 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -17,11 +17,9 @@ use fabro_llm::client::Client as LlmClient;
 use fabro_model::{AgentProfileKind, Catalog, ModelHandle, ProviderId};
 use fabro_sandbox::reconnect::reconnect_for_run;
 use fabro_store::{
-    EventPayload, ProjectedRunSession, RunDatabase, project_run_session, project_run_session_turn,
-    project_run_session_turns, project_run_sessions,
+    EventPayload, ProjectedRunSession, RunDatabase, project_run_session, project_run_sessions,
 };
-use fabro_types::{EventEnvelope, RunId, SessionId, TurnId, TurnStatus};
-use futures_util::StreamExt;
+use fabro_types::{EventEnvelope, RunId, SessionId, TurnId};
 use serde_json::{Value, json};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
@@ -47,13 +45,14 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             "/sessions/{id}",
             get(get_session).fallback(session_method_not_found),
         )
-        .route("/sessions/{id}/turns", get(list_turns).post(submit_turn))
-        .route("/sessions/{id}/turns/{turnId}", get(get_turn))
+        .route(
+            "/sessions/{id}/turns",
+            post(submit_turn).fallback(session_method_not_found),
+        )
         .route(
             "/sessions/{id}/turns/{turnId}/interrupt",
             post(interrupt_turn),
         )
-        .route("/sessions/{id}/events", get(list_events))
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -67,12 +66,6 @@ struct CreateRunSessionRequest {
 #[derive(Debug, serde::Deserialize)]
 struct SubmitTurnRequest {
     input: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct EventQuery {
-    #[serde(default)]
-    since_seq: Option<u32>,
 }
 
 async fn list_run_sessions(
@@ -232,54 +225,6 @@ async fn submit_turn(
         .into_response()
 }
 
-async fn list_turns(
-    _auth: RequiredUser,
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Response {
-    let session_id = match parse_session_id(&id) {
-        Ok(id) => id,
-        Err(err) => return err.into_response(),
-    };
-    let (run_id, run_store, _) = match load_session(&state, session_id).await {
-        Ok(context) => context,
-        Err(response) => return response,
-    };
-    match run_store.list_events().await {
-        Ok(events) => Json(ListResponse::new(project_run_session_turns(
-            run_id, session_id, &events,
-        )))
-        .into_response(),
-        Err(err) => store_error(&err).into_response(),
-    }
-}
-
-async fn get_turn(
-    _auth: RequiredUser,
-    State(state): State<Arc<AppState>>,
-    Path((id, turn_id)): Path<(String, String)>,
-) -> Response {
-    let session_id = match parse_session_id(&id) {
-        Ok(id) => id,
-        Err(err) => return err.into_response(),
-    };
-    let turn_id = match parse_turn_id(&turn_id) {
-        Ok(id) => id,
-        Err(err) => return err.into_response(),
-    };
-    let (run_id, run_store, _) = match load_session(&state, session_id).await {
-        Ok(context) => context,
-        Err(response) => return response,
-    };
-    match run_store.list_events().await {
-        Ok(events) => match project_run_session_turn(run_id, session_id, turn_id, &events) {
-            Some(turn) => Json(turn).into_response(),
-            None => ApiError::not_found("Turn not found.").into_response(),
-        },
-        Err(err) => store_error(&err).into_response(),
-    }
-}
-
 async fn interrupt_turn(
     _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
@@ -297,19 +242,6 @@ async fn interrupt_turn(
         Ok(context) => context,
         Err(response) => return response,
     };
-    let events = match run_store.list_events().await {
-        Ok(events) => events,
-        Err(err) => return store_error(&err).into_response(),
-    };
-    let Some(turn) = project_run_session_turn(run_id, session_id, turn_id, &events) else {
-        return ApiError::not_found("Turn not found.").into_response();
-    };
-    if matches!(
-        turn.status,
-        TurnStatus::Succeeded | TurnStatus::Failed | TurnStatus::Interrupted
-    ) {
-        return ApiError::new(StatusCode::CONFLICT, "Turn is already terminal.").into_response();
-    }
     let pending_interrupt = match state
         .session_runtimes()
         .request_interrupt(session_id, turn_id)
@@ -339,98 +271,6 @@ async fn interrupt_turn(
             store_error(&err).into_response()
         }
     }
-}
-
-async fn list_events(
-    _auth: RequiredUser,
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-    Query(query): Query<EventQuery>,
-    headers: HeaderMap,
-) -> Response {
-    let session_id = match parse_session_id(&id) {
-        Ok(id) => id,
-        Err(err) => return err.into_response(),
-    };
-    let (run_id, run_store, _) = match load_session(&state, session_id).await {
-        Ok(context) => context,
-        Err(response) => return response,
-    };
-    let since_seq = session_event_since_seq(&query, &headers);
-    if wants_session_event_stream(&headers) {
-        return stream_events(run_store, session_id, since_seq);
-    }
-    match run_store
-        .list_events_from_with_limit(since_seq, usize::MAX / 2)
-        .await
-    {
-        Ok(events) => Json(ListResponse::new(filter_session_events(
-            run_id, session_id, events,
-        )))
-        .into_response(),
-        Err(err) => store_error(&err).into_response(),
-    }
-}
-
-fn session_event_since_seq(query: &EventQuery, headers: &HeaderMap) -> u32 {
-    query
-        .since_seq
-        .or_else(|| {
-            headers
-                .get("last-event-id")
-                .and_then(|value| value.to_str().ok())
-                .and_then(|value| value.parse::<u32>().ok())
-                .map(|seq| seq.saturating_add(1))
-        })
-        .unwrap_or(1)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SessionEventResponse {
-    Json,
-    Stream,
-}
-
-fn wants_session_event_stream(headers: &HeaderMap) -> bool {
-    headers
-        .get(header::ACCEPT)
-        .and_then(|value| value.to_str().ok())
-        .and_then(preferred_session_event_response)
-        == Some(SessionEventResponse::Stream)
-}
-
-fn preferred_session_event_response(accept: &str) -> Option<SessionEventResponse> {
-    accept.split(',').find_map(|part| {
-        let media_type = part.trim().split(';').next().unwrap_or_default().trim();
-        match media_type {
-            "text/event-stream" => Some(SessionEventResponse::Stream),
-            "application/json" | "application/*" | "*/*" => Some(SessionEventResponse::Json),
-            _ => None,
-        }
-    })
-}
-
-fn stream_events(run_store: RunDatabase, session_id: SessionId, since_seq: u32) -> Response {
-    let (sender, receiver) = mpsc::channel(SESSION_SSE_BUFFER_CAPACITY);
-    tokio::spawn(async move {
-        let Ok(mut events) = run_store.watch_events_from(since_seq) else {
-            return;
-        };
-        while let Some(event) = events.next().await {
-            let Ok(event) = event else {
-                break;
-            };
-            if event.event.session_id.as_deref() == Some(&session_id.to_string())
-                && !send_sse_event(&sender, &event).await
-            {
-                break;
-            }
-        }
-    });
-
-    Sse::new(ReceiverStream::new(receiver))
-        .keep_alive(KeepAlive::default())
-        .into_response()
 }
 
 async fn run_streaming_turn(
@@ -903,20 +743,6 @@ async fn open_run(state: &AppState, run_id: RunId) -> Result<RunDatabase, Respon
             store_error(&err).into_response()
         }
     })
-}
-
-fn filter_session_events(
-    run_id: RunId,
-    session_id: SessionId,
-    events: Vec<EventEnvelope>,
-) -> Vec<EventEnvelope> {
-    events
-        .into_iter()
-        .filter(|event| {
-            event.event.run_id == run_id
-                && event.event.session_id.as_deref() == Some(&session_id.to_string())
-        })
-        .collect()
 }
 
 fn store_error(err: &fabro_store::Error) -> ApiError {

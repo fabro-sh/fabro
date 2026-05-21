@@ -119,7 +119,7 @@ pub use sandbox_services::{
 pub use secret::{SecretMetadata, SecretType};
 pub use session::{
     PermissionLevel, SessionId, SessionMessage, SessionRecord, SessionStatus, SessionSummary,
-    TurnId, TurnRecord, TurnStatus,
+    TurnId,
 };
 pub use stage_completion::StageCompletion;
 pub use stage_handler::StageHandler;

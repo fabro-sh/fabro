@@ -191,7 +191,6 @@ models/paginated-run-list.ts
 models/paginated-run-stage-list.ts
 models/paginated-saved-query-list.ts
 models/paginated-session-list.ts
-models/paginated-turn-list.ts
 models/paginated-workflow-list-response.ts
 models/pagination-meta.ts
 models/pair-message-record.ts
@@ -412,8 +411,6 @@ models/system-resources-response.ts
 models/system-run-counts.ts
 models/timeline-entry-response.ts
 models/tls-mode.ts
-models/turn-record.ts
-models/turn-status.ts
 models/update-run-parent-request.ts
 models/update-run-request.ts
 models/user-response.ts

@@ -891,17 +891,6 @@ paths:
         required: true
         schema:
           $ref: "#/components/schemas/SessionId"
-    get:
-      operationId: listSessionTurns
-      tags: [Sessions]
-      summary: List session turns
-      responses:
-        "200":
-          description: Session turns
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PaginatedTurnList"
     post:
       operationId: submitSessionTurn
       tags: [Sessions]
@@ -948,39 +937,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /api/v1/sessions/{id}/turns/{turnId}:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          $ref: "#/components/schemas/SessionId"
-      - name: turnId
-        in: path
-        required: true
-        schema:
-          $ref: "#/components/schemas/TurnId"
-    get:
-      operationId: getSessionTurn
-      tags: [Sessions]
-      summary: Get session turn
-      responses:
-        "200":
-          description: Turn record
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/TurnRecord"
-        "404":
-          description: Turn not found
-          headers:
-            x-request-id:
-              $ref: "#/components/headers/XRequestId"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
   /api/v1/sessions/{id}/turns/{turnId}/interrupt:
     parameters:
       - name: id
@@ -1005,7 +961,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/EventEnvelope"
         "404":
-          description: Session turn not found
+          description: Session not found
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -1014,7 +970,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Turn is already terminal or is not active for this session
+          description: Turn is not active for this session
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -1022,36 +978,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-
-  /api/v1/sessions/{id}/events:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          $ref: "#/components/schemas/SessionId"
-    get:
-      operationId: listSessionEvents
-      tags: [Sessions]
-      summary: List or stream session events
-      description: Returns JSON replay by default. When the `Accept` header includes `text/event-stream`, replays durable events from `since_seq` or `Last-Event-ID`, then stays attached for live events.
-      parameters:
-        - name: since_seq
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-      responses:
-        "200":
-          description: Durable session events or live SSE stream
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PaginatedEventList"
-            text/event-stream:
-              schema:
-                type: string
 
   # ── Runs ──────────────────────────────────────────────────────────────
 
@@ -5382,10 +5308,6 @@ components:
       type: string
       enum: [idle, running, failed]
 
-    TurnStatus:
-      type: string
-      enum: [running, succeeded, failed, interrupted]
-
     SessionMessage:
       description: Persisted full-fidelity session transcript message.
       type: object
@@ -5468,42 +5390,6 @@ components:
           type: string
           format: date-time
 
-    TurnRecord:
-      description: One externally submitted input plus terminal output metadata. Full resumable context is rebuilt internally from run events.
-      type: object
-      required:
-        - id
-        - session_id
-        - run_id
-        - input
-        - status
-        - created_at
-        - updated_at
-      properties:
-        id:
-          $ref: "#/components/schemas/TurnId"
-        session_id:
-          $ref: "#/components/schemas/SessionId"
-        run_id:
-          type: string
-        input:
-          type: string
-        status:
-          $ref: "#/components/schemas/TurnStatus"
-        output:
-          type: ["string", "null"]
-        error:
-          type: ["string", "null"]
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-        completed_at:
-          type: ["string", "null"]
-          format: date-time
-
     CreateRunSessionRequest:
       type: object
       properties:
@@ -5531,20 +5417,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SessionSummary"
-        meta:
-          $ref: "#/components/schemas/PaginationMeta"
-
-    PaginatedTurnList:
-      description: Paginated list of turns.
-      type: object
-      required:
-        - data
-        - meta
-      properties:
-        data:
-          type: array
-          items:
-            $ref: "#/components/schemas/TurnRecord"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
 

@@ -47,8 +47,7 @@ pub mod types {
         SandboxService, SandboxServiceListResponse, SandboxState, SandboxTimestamps,
         SecretMetadata, SecretType, ServerSettings, SessionId, SessionMessage, SessionRecord,
         SessionStatus, SessionSummary, StageCompletion, StageHandler, StageOutcome,
-        StageProjection, StageState, SystemActorKind, TurnId, TurnRecord, TurnStatus,
-        UserPrincipal, WorkflowSettings,
+        StageProjection, StageState, SystemActorKind, TurnId, UserPrincipal, WorkflowSettings,
     };
 
     pub use crate::generated::types::*;
