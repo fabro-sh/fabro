@@ -70,7 +70,7 @@ fn conclusion_json_uses_failure_object() {
             status:               StageOutcome::Failed {
                 retry_requested: false,
             },
-            timing:               fabro_types::RunTiming::new(42, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(42),
             failure:              Some(RunFailure {
                 reason: FailureReason::WorkflowError,
                 detail: FailureDetail::new("boom", FailureCategory::Deterministic),

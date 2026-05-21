@@ -102,7 +102,7 @@ async fn append_completed_run_with_final_patch(
         &run_store,
         run_id,
         &workflow_event::Event::WorkflowRunCompleted {
-            timing:               fabro_types::RunTiming::new(1, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(1),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,

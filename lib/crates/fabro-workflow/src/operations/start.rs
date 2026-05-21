@@ -272,7 +272,7 @@ async fn persist_terminal_engine_failure(
     };
     let failure_event = Event::workflow_run_failed_from_error(
         error,
-        fabro_types::RunTiming::new(crate::millis_u64(duration), 0, 0),
+        fabro_types::RunTiming::wall_only(crate::millis_u64(duration)),
         reason,
         None,
         None,
@@ -1720,7 +1720,7 @@ reasoning = false
         let conclusion = crate::records::Conclusion {
             timestamp:            Utc::now(),
             status:               StageOutcome::Succeeded,
-            timing:               fabro_types::RunTiming::new(1, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(1),
             failure:              None,
             final_git_commit_sha: None,
             stages:               vec![],

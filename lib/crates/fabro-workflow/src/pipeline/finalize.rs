@@ -183,11 +183,7 @@ fn build_conclusion_from_parts(
     Conclusion {
         timestamp: chrono::Utc::now(),
         status,
-        timing: fabro_types::RunTiming::new(
-            run_wall_time_ms,
-            projection_billing.timing.inference_time_ms,
-            projection_billing.timing.tool_time_ms,
-        ),
+        timing: projection_billing.timing.with_wall_time(run_wall_time_ms),
         failure,
         final_git_commit_sha,
         stages,
@@ -1109,7 +1105,7 @@ mod tests {
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),
             status:               StageOutcome::Succeeded,
-            timing:               fabro_types::RunTiming::new(10, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(10),
             failure:              None,
             final_git_commit_sha: None,
             stages:               Vec::new(),
@@ -1172,7 +1168,7 @@ mod tests {
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),
             status:               StageOutcome::Succeeded,
-            timing:               fabro_types::RunTiming::new(10, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(10),
             failure:              None,
             final_git_commit_sha: None,
             stages:               Vec::new(),
@@ -1224,7 +1220,7 @@ mod tests {
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),
             status:               StageOutcome::Succeeded,
-            timing:               fabro_types::RunTiming::new(10, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(10),
             failure:              None,
             final_git_commit_sha: None,
             stages:               Vec::new(),

@@ -153,7 +153,7 @@ mod tests {
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),
             status:               StageOutcome::Succeeded,
-            timing:               fabro_types::RunTiming::new(12345, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(12345),
             failure:              None,
             final_git_commit_sha: None,
             stages:               vec![],
@@ -212,7 +212,7 @@ mod tests {
             status:               StageOutcome::Failed {
                 retry_requested: false,
             },
-            timing:               fabro_types::RunTiming::new(500, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(500),
             failure:              Some(RunFailure {
                 reason: FailureReason::WorkflowError,
                 detail: FailureDetail::new("error", FailureCategory::Deterministic),
@@ -241,7 +241,7 @@ mod tests {
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),
             status:               StageOutcome::Succeeded,
-            timing:               fabro_types::RunTiming::new(8000, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(8000),
             failure:              None,
             final_git_commit_sha: None,
             stages:               vec![],

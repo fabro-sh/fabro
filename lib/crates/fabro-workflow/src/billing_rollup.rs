@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use fabro_types::{BilledTokenCounts, ModelRef, RunProjection, StageTiming};
+use fabro_types::{BilledTokenCounts, ModelRef, RunProjection, RunTiming, StageTiming};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectionBillingStage {
@@ -27,7 +27,7 @@ pub struct ProjectionBillingRollup {
     pub by_model:           Vec<ProjectionBillingByModel>,
     /// Run-level timing summed across every stage visit. `wall_time_ms` is
     /// the sum of stage visit wall times (not the run clock duration).
-    pub timing:             StageTiming,
+    pub timing:             RunTiming,
     pub billed_visit_count: usize,
 }
 
@@ -44,7 +44,7 @@ pub fn billing_rollup_from_projection(projection: &RunProjection) -> ProjectionB
     let mut stages = Vec::<ProjectionBillingStage>::new();
     let mut by_model = HashMap::<ModelRef, ProjectionBillingByModel>::new();
     let mut totals = BilledTokenCounts::default();
-    let mut run_timing = StageTiming::default();
+    let mut run_timing = RunTiming::default();
     let mut billed_visit_count = 0_usize;
 
     for (stage_id, stage) in projection.iter_stages() {
@@ -70,7 +70,7 @@ pub fn billing_rollup_from_projection(projection: &RunProjection) -> ProjectionB
 
         if let Some(timing) = stage.timing {
             row.timing = row.timing.saturating_add(&timing);
-            run_timing = run_timing.saturating_add(&timing);
+            run_timing = run_timing.saturating_add(&RunTiming::from(timing));
         }
 
         if !stage.usage.is_zero() {

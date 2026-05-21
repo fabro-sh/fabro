@@ -541,11 +541,7 @@ async fn get_aggregate_billing(
             output_tokens:      total_billing.output_tokens,
             reasoning_tokens:   total_billing.reasoning_tokens,
             runs:               agg.total_runs,
-            timing:             fabro_types::RunTiming::new(
-                agg.total_timing.wall_time_ms,
-                agg.total_timing.inference_time_ms,
-                agg.total_timing.tool_time_ms,
-            ),
+            timing:             agg.total_timing,
             total_tokens:       total_billing.total_tokens,
             total_usd_micros:   total_billing.total_usd_micros,
         },

@@ -252,7 +252,7 @@ struct ModelBillingTotals {
 #[derive(Default)]
 struct BillingAccumulator {
     total_runs:   i64,
-    total_timing: fabro_types::StageTiming,
+    total_timing: fabro_types::RunTiming,
     by_model:     HashMap<ModelRef, ModelBillingTotals>,
 }
 

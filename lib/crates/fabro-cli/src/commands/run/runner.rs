@@ -795,7 +795,7 @@ mod tests {
         );
         assert_eq!(
             worker_title_phase_for_event(&EventBody::RunCompleted(RunCompletedProps {
-                timing:               fabro_types::RunTiming::new(10, 0, 0),
+                timing:               fabro_types::RunTiming::wall_only(10),
                 artifact_count:       0,
                 status:               "succeeded".to_string(),
                 reason:               SuccessReason::Completed,
@@ -813,7 +813,7 @@ mod tests {
                     reason: FailureReason::Cancelled,
                     detail: FailureDetail::new("cancelled", FailureCategory::Canceled),
                 },
-                timing:               fabro_types::RunTiming::new(10, 0, 0),
+                timing:               fabro_types::RunTiming::wall_only(10),
                 final_git_commit_sha: None,
                 final_patch:          None,
                 diff_summary:         None,
@@ -827,7 +827,7 @@ mod tests {
                     reason: FailureReason::Terminated,
                     detail: FailureDetail::new("boom", FailureCategory::Deterministic),
                 },
-                timing:               fabro_types::RunTiming::new(10, 0, 0),
+                timing:               fabro_types::RunTiming::wall_only(10),
                 final_git_commit_sha: None,
                 final_patch:          None,
                 diff_summary:         None,

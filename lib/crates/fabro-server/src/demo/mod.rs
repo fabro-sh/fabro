@@ -1107,7 +1107,7 @@ mod runs {
         let source_directory = Some(format!("/demo/{repo_name}"));
         let repo_origin_url = Some(format!("https://github.com/demo/{repo_name}.git"));
         let wall_time_ms = elapsed_secs.and_then(duration_ms_from_secs);
-        let timing = wall_time_ms.map(|ms| fabro_types::RunTiming::new(ms, 0, 0));
+        let timing = wall_time_ms.map(fabro_types::RunTiming::wall_only);
         Run {
             id: run_id,
             parent_id: None,
@@ -1603,7 +1603,7 @@ mod runs {
             totals:   RunBillingTotals {
                 cache_read_tokens:  0,
                 cache_write_tokens: 0,
-                timing:             fabro_types::RunTiming::new(389_000, 0, 0),
+                timing:             fabro_types::RunTiming::wall_only(389_000),
                 input_tokens:       71540,
                 output_tokens:      21080,
                 reasoning_tokens:   0,
@@ -1987,7 +1987,7 @@ mod billing {
                 input_tokens:       643_860,
                 output_tokens:      189_720,
                 reasoning_tokens:   0,
-                timing:             fabro_types::RunTiming::new(3_501_000, 0, 0),
+                timing:             fabro_types::RunTiming::wall_only(3_501_000),
                 total_tokens:       833_580,
                 total_usd_micros:   Some(20_340_000),
             },

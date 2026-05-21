@@ -99,15 +99,44 @@ impl RunTiming {
         }
     }
 
-    /// Add one stage visit's active timing into this run rollup. The stage's
-    /// wall time does not feed into the run wall time (which is the clock
-    /// duration of the run itself, not the sum of stage wall times).
-    pub fn add_stage_active(&mut self, stage: &StageTiming) {
-        self.inference_time_ms = self
-            .inference_time_ms
-            .saturating_add(stage.inference_time_ms);
-        self.tool_time_ms = self.tool_time_ms.saturating_add(stage.tool_time_ms);
-        self.active_time_ms = self.inference_time_ms.saturating_add(self.tool_time_ms);
+    /// Run-level rollups for runs with no inference/tool work yet recorded.
+    #[must_use]
+    pub fn wall_only(wall_time_ms: u64) -> Self {
+        Self::new(wall_time_ms, 0, 0)
+    }
+
+    /// Sum two run timings field-by-field. Used to accumulate aggregate
+    /// billing totals across completed runs.
+    #[must_use]
+    pub fn saturating_add(&self, other: &Self) -> Self {
+        Self::new(
+            self.wall_time_ms.saturating_add(other.wall_time_ms),
+            self.inference_time_ms
+                .saturating_add(other.inference_time_ms),
+            self.tool_time_ms.saturating_add(other.tool_time_ms),
+        )
+    }
+
+    /// Return a copy with `wall_time_ms` replaced. Useful at finalize time
+    /// when the active breakdown is summed across stage visits but the run
+    /// wall time is the executor's clock duration.
+    #[must_use]
+    pub fn with_wall_time(self, wall_time_ms: u64) -> Self {
+        Self {
+            wall_time_ms,
+            ..self
+        }
+    }
+}
+
+impl From<StageTiming> for RunTiming {
+    fn from(stage: StageTiming) -> Self {
+        Self {
+            wall_time_ms:      stage.wall_time_ms,
+            inference_time_ms: stage.inference_time_ms,
+            tool_time_ms:      stage.tool_time_ms,
+            active_time_ms:    stage.active_time_ms,
+        }
     }
 }
 
@@ -145,14 +174,43 @@ mod tests {
     }
 
     #[test]
-    fn run_timing_add_stage_accumulates_active_breakdown_only() {
-        let mut run = RunTiming::new(1500, 0, 0);
-        run.add_stage_active(&StageTiming::new(400, 100, 50));
-        run.add_stage_active(&StageTiming::new(800, 200, 150));
-        assert_eq!(run.wall_time_ms, 1500);
-        assert_eq!(run.inference_time_ms, 300);
-        assert_eq!(run.tool_time_ms, 200);
+    fn run_timing_wall_only_zeroes_breakdown_and_active() {
+        let timing = RunTiming::wall_only(1500);
+        assert_eq!(timing.wall_time_ms, 1500);
+        assert_eq!(timing.inference_time_ms, 0);
+        assert_eq!(timing.tool_time_ms, 0);
+        assert_eq!(timing.active_time_ms, 0);
+    }
+
+    #[test]
+    fn run_timing_saturating_add_sums_all_breakdown_fields() {
+        let a = RunTiming::new(1000, 100, 50);
+        let b = RunTiming::new(500, 200, 150);
+        let sum = a.saturating_add(&b);
+        assert_eq!(sum.wall_time_ms, 1500);
+        assert_eq!(sum.inference_time_ms, 300);
+        assert_eq!(sum.tool_time_ms, 200);
+        assert_eq!(sum.active_time_ms, 500);
+    }
+
+    #[test]
+    fn run_timing_from_stage_timing_copies_all_fields() {
+        let stage = StageTiming::new(900, 200, 300);
+        let run: RunTiming = stage.into();
+        assert_eq!(run.wall_time_ms, 900);
+        assert_eq!(run.inference_time_ms, 200);
+        assert_eq!(run.tool_time_ms, 300);
         assert_eq!(run.active_time_ms, 500);
+    }
+
+    #[test]
+    fn run_timing_with_wall_time_replaces_wall_and_preserves_breakdown() {
+        let original = RunTiming::new(1000, 200, 300);
+        let updated = original.with_wall_time(5000);
+        assert_eq!(updated.wall_time_ms, 5000);
+        assert_eq!(updated.inference_time_ms, 200);
+        assert_eq!(updated.tool_time_ms, 300);
+        assert_eq!(updated.active_time_ms, 500);
     }
 
     #[test]

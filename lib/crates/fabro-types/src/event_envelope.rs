@@ -36,7 +36,7 @@ mod tests {
             tool_call_id:       None,
             actor:              None,
             body:               EventBody::RunCompleted(RunCompletedProps {
-                timing:               RunTiming::new(42, 0, 0),
+                timing:               RunTiming::wall_only(42),
                 artifact_count:       0,
                 status:               "success".to_string(),
                 reason:               SuccessReason::Completed,
@@ -80,7 +80,7 @@ mod tests {
                 model:             Some("claude-sonnet".to_string()),
             }),
             body:               EventBody::RunCompleted(RunCompletedProps {
-                timing:               RunTiming::new(100, 0, 0),
+                timing:               RunTiming::wall_only(100),
                 artifact_count:       1,
                 status:               "success".to_string(),
                 reason:               SuccessReason::Completed,

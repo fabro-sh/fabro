@@ -1255,7 +1255,7 @@ mod tests {
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),
             status:               StageOutcome::Succeeded,
-            timing:               fabro_types::RunTiming::new(10, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(10),
             failure:              None,
             final_git_commit_sha: None,
             stages:               Vec::new(),

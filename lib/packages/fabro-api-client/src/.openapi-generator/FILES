@@ -333,7 +333,6 @@ models/run-status.ts
 models/run-superseded-by-props.ts
 models/run-timestamps.ts
 models/run-timing.ts
-models/run-timings.ts
 models/run.ts
 models/sandbox-details.ts
 models/sandbox-file-entry.ts

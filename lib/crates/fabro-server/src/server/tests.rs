@@ -2709,7 +2709,7 @@ async fn persist_cancelled_run_status_ignores_already_terminal_runs() {
     let run_id = fixtures::RUN_1;
     create_durable_run_with_events(&state, run_id, &[
         workflow_event::Event::WorkflowRunCompleted {
-            timing:               fabro_types::RunTiming::new(1000, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(1000),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -2745,7 +2745,7 @@ async fn delete_terminal_managed_run_does_not_send_cancel_signal() {
     let run_id = fixtures::RUN_1;
     create_durable_run_with_events(&state, run_id, &[
         workflow_event::Event::WorkflowRunCompleted {
-            timing:               fabro_types::RunTiming::new(1000, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(1000),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -4057,7 +4057,7 @@ async fn create_completed_run_ready_for_pull_request(
             goal: Some("Ship the server-side PR".to_string()),
         },
         workflow_event::Event::WorkflowRunCompleted {
-            timing:               fabro_types::RunTiming::new(1, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(1),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -7549,7 +7549,7 @@ async fn patch_run_title_updates_active_and_archived_runs() {
         &run_store,
         &run_id,
         &workflow_event::Event::WorkflowRunCompleted {
-            timing:               fabro_types::RunTiming::new(1, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(1),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -7697,7 +7697,7 @@ async fn cancel_terminal_durable_run_returns_conflict() {
     let run_id = fixtures::RUN_1;
     create_durable_run_with_events(&state, run_id, &[
         workflow_event::Event::WorkflowRunCompleted {
-            timing:               fabro_types::RunTiming::new(1000, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(1000),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -7747,7 +7747,7 @@ async fn steer_terminal_durable_run_returns_run_not_steerable() {
     let run_id = fixtures::RUN_1;
     create_durable_run_with_events(&state, run_id, &[
         workflow_event::Event::WorkflowRunCompleted {
-            timing:               fabro_types::RunTiming::new(1000, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(1000),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -8601,7 +8601,7 @@ async fn archive_and_unarchive_updates_listing_visibility() {
         workflow_event::Event::RunStarting,
         workflow_event::Event::RunRunning,
         workflow_event::Event::WorkflowRunCompleted {
-            timing:               fabro_types::RunTiming::new(1000, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(1000),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -8935,7 +8935,7 @@ async fn delete_run_retry_after_missing_provider_resource_removes_metadata() {
             primary_repo_link: None,
         },
         workflow_event::Event::WorkflowRunCompleted {
-            timing:               fabro_types::RunTiming::new(1, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(1),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -9201,7 +9201,7 @@ fn aggregate_billing_counts_projection_rollup_usage_visits() {
                 },
             },
         ],
-        timing:             fabro_types::StageTiming::wall_only(2000),
+        timing:             fabro_types::RunTiming::wall_only(2000),
         billed_visit_count: 2,
     };
 
@@ -10438,7 +10438,7 @@ async fn boards_runs_excludes_archived_by_default() {
         workflow_event::Event::RunStarting,
         workflow_event::Event::RunRunning,
         workflow_event::Event::WorkflowRunCompleted {
-            timing:               fabro_types::RunTiming::new(1000, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(1000),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -10487,7 +10487,7 @@ async fn boards_runs_includes_archived_when_flag_set() {
         workflow_event::Event::RunStarting,
         workflow_event::Event::RunRunning,
         workflow_event::Event::WorkflowRunCompleted {
-            timing:               fabro_types::RunTiming::new(1000, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(1000),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -10507,7 +10507,7 @@ async fn boards_runs_includes_archived_when_flag_set() {
         workflow_event::Event::RunStarting,
         workflow_event::Event::RunRunning,
         workflow_event::Event::WorkflowRunCompleted {
-            timing:               fabro_types::RunTiming::new(1000, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(1000),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -10580,7 +10580,7 @@ async fn get_run_exposes_canonical_operator_statuses() {
         workflow_event::Event::RunStarting,
         workflow_event::Event::RunRunning,
         workflow_event::Event::WorkflowRunCompleted {
-            timing:               fabro_types::RunTiming::new(1000, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(1000),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -10665,7 +10665,7 @@ async fn boards_runs_maps_statuses_to_columns() {
         workflow_event::Event::RunStarting,
         workflow_event::Event::RunRunning,
         workflow_event::Event::WorkflowRunCompleted {
-            timing:               fabro_types::RunTiming::new(1000, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(1000),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,

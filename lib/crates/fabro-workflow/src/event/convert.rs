@@ -1553,7 +1553,7 @@ mod tests {
     fn run_event_workflow_failure_uses_display_error() {
         let event = Event::workflow_run_failed_from_error(
             &Error::handler("boom"),
-            ::fabro_types::RunTiming::new(900, 0, 0),
+            ::fabro_types::RunTiming::wall_only(900),
             FailureReason::WorkflowError,
             Some("abc123".to_string()),
             None,
@@ -1573,7 +1573,7 @@ mod tests {
         let source = EventTestCause;
         let event = Event::workflow_run_failed_from_error(
             &Error::engine_with_source("Failed to initialize sandbox", source),
-            ::fabro_types::RunTiming::new(900, 0, 0),
+            ::fabro_types::RunTiming::wall_only(900),
             FailureReason::WorkflowError,
             None,
             None,
@@ -1598,7 +1598,7 @@ mod tests {
         let source = EventTestCause;
         let event = Event::workflow_run_failed_from_error(
             &Error::engine_with_source("Failed to initialize sandbox", source),
-            ::fabro_types::RunTiming::new(900, 0, 0),
+            ::fabro_types::RunTiming::wall_only(900),
             FailureReason::SandboxInitFailed,
             Some("abc123".to_string()),
             None,

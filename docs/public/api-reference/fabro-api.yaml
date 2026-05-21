@@ -8684,23 +8684,6 @@ components:
           description: Equals `inference_time_ms + tool_time_ms`.
           example: 180000
 
-    RunTimings:
-      description: Timing information for a run.
-      type: object
-      required:
-        - wall_time_ms
-      properties:
-        wall_time_ms:
-          type: integer
-          format: uint64
-          minimum: 0
-          description: Wall-clock time elapsed in milliseconds.
-          example: 420000
-        elapsed_warning:
-          type: boolean
-          description: Whether the elapsed time exceeds the expected threshold.
-          example: false
-
     SandboxProvider:
       description: Sandbox execution provider.
       type: string

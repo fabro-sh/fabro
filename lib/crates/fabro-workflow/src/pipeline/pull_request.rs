@@ -870,7 +870,7 @@ mod tests {
         Conclusion {
             timestamp:            Utc::now(),
             status:               crate::outcome::StageOutcome::Succeeded,
-            timing:               fabro_types::RunTiming::new(150_000, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(150_000),
             failure:              None,
             final_git_commit_sha: None,
             stages:               vec![
@@ -1600,7 +1600,7 @@ mod tests {
             .await
             .unwrap();
         append_event(&run_store, &fixtures::RUN_1, &Event::WorkflowRunCompleted {
-            timing:               fabro_types::RunTiming::new(1, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(1),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -1888,7 +1888,7 @@ mod tests {
             .await
             .unwrap();
         append_event(&run_store, &fixtures::RUN_1, &Event::WorkflowRunCompleted {
-            timing:               fabro_types::RunTiming::new(1, 0, 0),
+            timing:               fabro_types::RunTiming::wall_only(1),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,

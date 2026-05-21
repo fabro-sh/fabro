@@ -1,7 +1,20 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import TestRenderer from "react-test-renderer";
 
-import type { BilledTokenCounts, RunBilling } from "@qltysh/fabro-api-client";
+import type {
+  BilledTokenCounts,
+  RunBilling,
+  StageTiming,
+} from "@qltysh/fabro-api-client";
+
+function stageTiming(wall_time_ms = 0, inference_time_ms = 0, tool_time_ms = 0): StageTiming {
+  return {
+    wall_time_ms,
+    inference_time_ms,
+    tool_time_ms,
+    active_time_ms: inference_time_ms + tool_time_ms,
+  };
+}
 
 let currentBilling: RunBilling | undefined;
 
@@ -28,7 +41,7 @@ function billing(overrides: Partial<RunBilling> = {}): RunBilling {
   return {
     stages: [],
     totals: {
-      timing: { wall_time_ms: 0, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
+      timing: stageTiming(),
       ...zeroBilling(),
     },
     by_model: [],
@@ -74,19 +87,19 @@ describe("RunBilling", () => {
             stage: { id: "start", name: "start" },
             model: null,
             billing: zeroBilling(),
-            timing: { wall_time_ms: 0, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
+            timing: stageTiming(),
             state: "succeeded",
           },
           {
             stage: { id: "command", name: "command" },
             model: null,
             billing: zeroBilling(),
-            timing: { wall_time_ms: 61000, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
+            timing: stageTiming(61000),
             state: "succeeded",
           },
         ],
         totals: {
-          timing: { wall_time_ms: 61000, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
+          timing: stageTiming(61000),
           ...zeroBilling(),
         },
       }),
@@ -109,7 +122,7 @@ describe("RunBilling", () => {
             stage: { id: "start", name: "start" },
             model: null,
             billing: zeroBilling(),
-            timing: { wall_time_ms: 0, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
+            timing: stageTiming(),
             state: "succeeded",
           },
           {
@@ -124,12 +137,12 @@ describe("RunBilling", () => {
               total_tokens: 1500,
               total_usd_micros: 240000,
             }),
-            timing: { wall_time_ms: 42000, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
+            timing: stageTiming(42000),
             state: "succeeded",
           },
         ],
         totals: {
-          timing: { wall_time_ms: 42000, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
+          timing: stageTiming(42000),
           ...zeroBilling({
             input_tokens: 1200,
             output_tokens: 300,
@@ -197,13 +210,13 @@ describe("RunBilling", () => {
                 total_tokens: 1500,
                 total_usd_micros: 240000,
               }),
-              timing: { wall_time_ms: 0, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
+              timing: stageTiming(),
               started_at: startedAt,
               state: "running",
             },
           ],
           totals: {
-            timing: { wall_time_ms: 0, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
+            timing: stageTiming(),
             ...zeroBilling({
               input_tokens: 1200,
               output_tokens: 300,

@@ -2,9 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use fabro_types::{
-    RunProjection, RunTiming, StageHandler, StageProjection, StageState, StageTiming,
-};
+use fabro_types::{RunProjection, StageHandler, StageProjection, StageState, StageTiming};
 
 use super::super::{
     ApiError, AppState, BillingByModel, BillingStageRef, IntoResponse, Json, ListResponse,
@@ -130,11 +128,7 @@ async fn get_run_billing(
             input_tokens:       rollup.totals.input_tokens,
             output_tokens:      rollup.totals.output_tokens,
             reasoning_tokens:   rollup.totals.reasoning_tokens,
-            timing:             RunTiming::new(
-                totals_timing.wall_time_ms,
-                totals_timing.inference_time_ms,
-                totals_timing.tool_time_ms,
-            ),
+            timing:             totals_timing.into(),
             total_tokens:       rollup.totals.total_tokens,
             total_usd_micros:   rollup.totals.total_usd_micros,
         },

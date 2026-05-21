@@ -32,7 +32,7 @@ fn run_failed_serializes_nested_failure_contract() {
                 detail
             },
         },
-        timing:               RunTiming::new(42, 0, 0),
+        timing:               RunTiming::wall_only(42),
         final_git_commit_sha: Some("abc123".to_string()),
         final_patch:          Some("diff --git a/file b/file".to_string()),
         diff_summary:         None,
@@ -86,7 +86,7 @@ fn run_failed_omits_empty_failure_optional_fields() {
             reason: FailureReason::WorkflowError,
             detail: FailureDetail::new("boom", FailureCategory::Deterministic),
         },
-        timing:               RunTiming::new(1, 0, 0),
+        timing:               RunTiming::wall_only(1),
         final_git_commit_sha: None,
         final_patch:          None,
         diff_summary:         None,
@@ -124,7 +124,7 @@ fn conclusion_serializes_rich_failure() {
         status:               StageOutcome::Failed {
             retry_requested: false,
         },
-        timing:               RunTiming::new(42, 0, 0),
+        timing:               RunTiming::wall_only(42),
         failure:              Some(RunFailure {
             reason: FailureReason::WorkflowError,
             detail: {
