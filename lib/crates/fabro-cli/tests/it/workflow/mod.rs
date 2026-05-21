@@ -5,6 +5,7 @@
 
 mod acp;
 mod agent_linear;
+mod artifacts;
 mod command_agent_mixed;
 mod command_pipeline;
 mod conditional_branching;

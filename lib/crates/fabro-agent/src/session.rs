@@ -15,7 +15,7 @@ use fabro_llm::{Error as LlmError, retry};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_mcp::connection_manager::McpConnectionManager;
 use fabro_model::{AgentProfileKind, Catalog, ModelRef, Speed};
-use fabro_types::{Principal, SessionRecord, SessionStatus, SteeringMessage};
+use fabro_types::{Principal, SessionMessage, SessionRecord, SteeringMessage};
 use futures::StreamExt;
 use tokio::sync::{Mutex as AsyncMutex, Notify, broadcast};
 use tokio::time;
@@ -381,6 +381,7 @@ impl Session {
 
     pub fn from_record(
         record: &SessionRecord,
+        runtime_context: &[SessionMessage],
         llm_client: Client,
         provider_profile: Arc<dyn AgentProfile>,
         sandbox: Arc<dyn Sandbox>,
@@ -395,31 +396,11 @@ impl Session {
             subagent_manager,
         );
         session.id = record.id.to_string();
-        session.history =
-            History::from_session_messages(&record.runtime_context).map_err(|err| {
-                Error::InvalidState(format!("invalid persisted session context: {err}"))
-            })?;
-        session.state = match record.status {
-            SessionStatus::Closed | SessionStatus::Deleted => SessionState::Closed,
-            SessionStatus::Running | SessionStatus::Failed | SessionStatus::Idle => {
-                SessionState::Idle
-            }
-        };
+        session.history = History::from_session_messages(runtime_context).map_err(|err| {
+            Error::InvalidState(format!("invalid persisted session context: {err}"))
+        })?;
+        session.state = SessionState::Idle;
         Ok(session)
-    }
-
-    #[must_use]
-    pub fn to_record(&self, mut record: SessionRecord) -> SessionRecord {
-        record.status = match self.state {
-            SessionState::Closed => SessionStatus::Closed,
-            SessionState::Thinking | SessionState::Executing => SessionStatus::Running,
-            SessionState::Idle => SessionStatus::Idle,
-        };
-        record.provider = Some(self.provider_id().to_string());
-        record.model = Some(self.model().to_string());
-        record.runtime_context = self.history.to_session_messages();
-        record.updated_at = chrono::Utc::now();
-        record
     }
 
     pub fn set_tool_env_provider(&mut self, provider: Arc<dyn ToolEnvProvider>) {

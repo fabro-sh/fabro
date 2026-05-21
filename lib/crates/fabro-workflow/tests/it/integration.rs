@@ -12256,6 +12256,113 @@ async fn asset_collection_local_sandbox_success() {
     assert_eq!(asset_properties["attempt"].as_u64().unwrap(), 1);
 }
 
+/// Local sandbox: artifact collection discovers files when the sandbox
+/// working directory itself is a symlink.
+#[tokio::test]
+#[cfg(unix)]
+async fn asset_collection_local_sandbox_symlink_working_directory() {
+    let work_root = tempfile::tempdir().unwrap();
+    let real_work_dir = work_root.path().join("real-workspace");
+    let symlink_work_dir = work_root.path().join("workspace-link");
+    std::fs::create_dir_all(&real_work_dir).expect("real workspace should create");
+    std::os::unix::fs::symlink(&real_work_dir, &symlink_work_dir)
+        .expect("workspace symlink should create");
+    let run_dir = tempfile::tempdir().unwrap();
+
+    let sandbox: Arc<dyn fabro_agent::Sandbox> =
+        Arc::new(fabro_agent::LocalSandbox::new(symlink_work_dir));
+    sandbox.initialize().await.unwrap();
+
+    let mut registry = HandlerRegistry::new(Box::new(AssetCreatorHandler::success()));
+    registry.register("start", Box::new(StartHandler));
+    registry.register("exit", Box::new(ExitHandler));
+
+    let emitter = Emitter::default();
+    let events = collect_events(&emitter);
+
+    let engine = WorkflowRunner::new(registry, Arc::new(emitter), sandbox.clone());
+
+    let mut graph = Graph::new("AssetCollectionSymlinkTest");
+    graph.attrs.insert(
+        "goal".to_string(),
+        AttrValue::String("Test artifact collection from symlinked workdir".to_string()),
+    );
+
+    let mut start = Node::new("start");
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
+    graph.nodes.insert("start".to_string(), start);
+
+    let mut create_assets = Node::new("create_assets");
+    create_assets.attrs.insert(
+        "label".to_string(),
+        AttrValue::String("Create Assets".to_string()),
+    );
+    graph
+        .nodes
+        .insert("create_assets".to_string(), create_assets);
+
+    let mut exit = Node::new("exit");
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
+    graph.nodes.insert("exit".to_string(), exit);
+
+    graph.edges.push(Edge::new("start", "create_assets"));
+    graph.edges.push(Edge::new("create_assets", "exit"));
+
+    let run_options = RunOptions {
+        settings:         WorkflowSettings {
+            run: fabro_types::settings::RunNamespace {
+                artifacts: fabro_types::settings::run::ArtifactsSettings {
+                    include: vec!["test-results/**".to_string()],
+                },
+                ..fabro_types::settings::RunNamespace::default()
+            },
+            ..WorkflowSettings::default()
+        },
+        run_dir:          run_dir.path().to_path_buf(),
+        cancel_token:     CancellationToken::new(),
+        run_id:           test_run_id("artifact-test-symlink-workdir"),
+        labels:           std::collections::HashMap::new(),
+        workflow_slug:    None,
+        github_app:       None,
+        base_branch:      None,
+        display_base_sha: None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
+        git:              None,
+    };
+    let outcome = engine
+        .run(&graph, &run_options)
+        .await
+        .expect("run should succeed");
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
+
+    let artifacts = test_artifact_store(run_dir.path())
+        .list_for_run(&run_options.run_id)
+        .await
+        .unwrap();
+
+    assert!(
+        artifacts
+            .iter()
+            .any(|artifact| artifact.filename == "test-results/report.xml"),
+        "expected artifact created under symlinked working directory: {artifacts:?}"
+    );
+    assert!(
+        events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event.event_name() == "artifact.captured"),
+        "artifact.captured should be emitted for symlinked working directory"
+    );
+}
+
 /// Local sandbox: assets are still collected even when the handler fails.
 #[tokio::test]
 async fn asset_collection_local_sandbox_on_failure() {

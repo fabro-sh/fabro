@@ -8,6 +8,7 @@ use crate::shared::print_json_pretty;
 #[cfg(feature = "sleep_inhibitor")]
 use crate::sleep_inhibitor;
 
+pub(crate) mod ask;
 pub(crate) mod attach;
 pub(crate) mod checkpoints;
 pub(crate) mod command;
@@ -127,5 +128,6 @@ pub(crate) async fn dispatch(
             wait::run(&args, &styles, base_ctx).await
         }
         RunCommands::Steer(args) => steer::run(args, base_ctx).await,
+        RunCommands::Ask(args) => ask::run(args, base_ctx).await,
     }
 }

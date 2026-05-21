@@ -208,6 +208,15 @@ async fn get_system_resources_returns_server_visible_metrics() {
         "disk.fabro_reclaimable_bytes",
     );
     assert!(
+        body["disk"]["fabro_managed_bytes"]
+            .as_i64()
+            .unwrap_or_default()
+            >= body["disk"]["fabro_reclaimable_bytes"]
+                .as_i64()
+                .unwrap_or_default(),
+        "managed bytes must include everything reclaimable: {body}"
+    );
+    assert!(
         body["notes"]
             .as_array()
             .is_some_and(std::vec::Vec::is_empty),
@@ -286,8 +295,22 @@ async fn get_system_disk_usage_returns_summary_and_verbose_rows() {
         "GET /api/v1/system/df?verbose=true",
     )
     .await;
-    assert!(body["summary"].is_array());
-    assert!(body["total_size_bytes"].as_i64().unwrap_or_default() > 0);
+    let summary = body["summary"].as_array().expect("summary array");
+    assert!(summary.iter().any(|row| row["type"] == "other"));
+
+    let row_size = |type_: &str| {
+        summary
+            .iter()
+            .find(|row| row["type"] == type_)
+            .and_then(|row| row["size_bytes"].as_i64())
+            .unwrap_or_default()
+    };
+    let total_size = body["total_size_bytes"].as_i64().unwrap_or_default();
+    assert!(total_size > 0);
+    assert_eq!(
+        row_size("runs") + row_size("logs") + row_size("other"),
+        total_size,
+    );
     assert!(
         body["runs"]
             .as_array()

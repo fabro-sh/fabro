@@ -36,16 +36,16 @@ const navItems: NavEntry[] = [
     match: (p) => p === "/settings",
   },
   {
-    name: "Integrations",
-    href: "/settings/integrations",
-    icon: PuzzlePieceIcon,
-    match: (p) => p.startsWith("/settings/integrations"),
-  },
-  {
     name: "Models",
     href: "/settings/models",
     icon: CpuChipIcon,
     match: (p) => p.startsWith("/settings/models"),
+  },
+  {
+    name: "Integrations",
+    href: "/settings/integrations",
+    icon: PuzzlePieceIcon,
+    match: (p) => p.startsWith("/settings/integrations"),
   },
   {
     name: "Secrets",

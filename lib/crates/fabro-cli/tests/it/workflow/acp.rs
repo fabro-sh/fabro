@@ -9,7 +9,8 @@ use fabro_test::test_context;
 use fabro_types::EventBody;
 use fabro_vault::{SecretType, Vault};
 
-use super::{find_run_dir, has_event, read_conclusion, run_events, run_state};
+use super::{find_run_dir, has_event, read_conclusion, run_events, run_id_for, run_state};
+use crate::cmd::support::output_stdout;
 
 #[test]
 fn acp_backend_workflow() {
@@ -133,6 +134,125 @@ fn acp_backend_does_not_inject_registered_provider_credentials() {
     )
     .expect("fake ACP environment record should be valid JSON");
     assert_eq!(recorded_env, serde_json::json!({}));
+}
+
+#[test]
+fn acp_artifacts_are_listed_when_touched_file_mtime_precedes_attempt_start() {
+    let mut context = test_context!();
+    context.write_home(
+        ".fabro/settings.toml",
+        "[server.auth]\nmethods = [\"dev-token\"]\n",
+    );
+    context.isolated_server();
+    let fake_agent = write_fake_acp_agent(&context);
+    let acp_config = fake_acp_config_attr_with_env(&fake_agent, vec![
+        serde_json::json!({
+            "name": "ACP_WRITE_PATH",
+            "value": "verification-artifacts/report.md",
+        }),
+        serde_json::json!({
+            "name": "ACP_WRITE_CONTENT",
+            "value": "verified\n",
+        }),
+        serde_json::json!({
+            "name": "ACP_WRITE_MTIME_EPOCH",
+            "value": "946684800",
+        }),
+    ]);
+    context.write_temp(
+        "acp_artifact_collection.fabro",
+        format!(
+            r#"digraph ACPArtifacts {{
+  graph [goal="Capture verification artifacts"]
+  start [shape=Mdiamond]
+  verify [type="agent", backend="acp", prompt="write verification artifact", acp.config={acp_config}]
+  exit [shape=Msquare]
+  start -> verify
+  verify -> exit
+}}"#
+        ),
+    );
+    context.write_temp(
+        "run.toml",
+        r#"_version = 1
+
+[workflow]
+graph = "acp_artifact_collection.fabro"
+
+[run]
+goal = "Capture verification artifacts"
+
+[run.checkpoint]
+exclude_globs = ["verification-artifacts/**"]
+
+[run.artifacts]
+include = ["verification-artifacts/**"]
+"#,
+    );
+    init_git_repo(&context.temp_dir);
+
+    context
+        .run_cmd()
+        .args(["--auto-approve", "--sandbox", "local"])
+        .arg(context.temp_dir.join("run.toml"))
+        .assert()
+        .success();
+
+    let run_dir = find_run_dir(&context);
+    let run_id = run_id_for(&run_dir);
+    let events = run_events(&run_dir);
+    let completed = events
+        .iter()
+        .find_map(|event| match &event.event.body {
+            EventBody::StageCompleted(props)
+                if event.event.node_id.as_deref() == Some("verify") =>
+            {
+                Some(props)
+            }
+            _ => None,
+        })
+        .expect("verify stage should complete");
+    assert!(
+        completed
+            .files_touched
+            .iter()
+            .any(|file| file == "verification-artifacts/report.md"),
+        "files_touched should include the artifact path: {:?}",
+        completed.files_touched
+    );
+
+    let output = context
+        .command()
+        .args(["--json", "artifact", "list", &run_id])
+        .output()
+        .expect("artifact list should execute");
+    assert!(
+        output.status.success(),
+        "artifact list failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let artifacts: Vec<serde_json::Value> =
+        serde_json::from_str(&output_stdout(&output)).expect("artifact list JSON should parse");
+    assert!(
+        artifacts.iter().any(|artifact| {
+            artifact["node_slug"] == "verify"
+                && artifact["relative_path"] == "verification-artifacts/report.md"
+        }),
+        "artifact list should include the touched verification artifact: {artifacts:?}"
+    );
+
+    let completed_run = events
+        .iter()
+        .find_map(|event| match &event.event.body {
+            EventBody::RunCompleted(props) => Some(props),
+            _ => None,
+        })
+        .expect("run.completed should be emitted");
+    assert!(
+        completed_run.artifact_count > 0,
+        "run.completed should report captured artifacts"
+    );
 }
 
 fn write_fake_acp_agent(context: &fabro_test::TestContext) -> std::path::PathBuf {

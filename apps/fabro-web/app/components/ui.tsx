@@ -2,7 +2,7 @@
 // exposes the primary button, secondary button, input, error message, and
 // copy button so the auth and in-app surfaces can match.
 
-import { useId, useRef, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Dialog, DialogPanel, DialogTitle } from "@headlessui/react";
 import {
@@ -153,30 +153,36 @@ export function ConfirmDialog({
   );
 }
 
+// Shared hover/focus state for `Tooltip` and `HoverCard`. Returns the trigger
+// props to spread and the trigger rect (only while open) for positioning.
+function useHoverAnchor() {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const rect = open ? (triggerRef.current?.getBoundingClientRect() ?? null) : null;
+  const triggerProps = {
+    ref:          triggerRef,
+    onMouseEnter: () => setOpen(true),
+    onMouseLeave: () => setOpen(false),
+    onFocus:      () => setOpen(true),
+    onBlur:       () => setOpen(false),
+  };
+  return { open, rect, triggerProps };
+}
+
 export function Tooltip({
   label,
   children,
 }: {
-  label: React.ReactNode;
-  children: React.ReactNode;
+  label: ReactNode;
+  children: ReactNode;
 }) {
-  const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLSpanElement>(null);
+  const { open, rect, triggerProps } = useHoverAnchor();
   const id = useId();
-  const rect = open ? triggerRef.current?.getBoundingClientRect() : null;
   const portalTarget = typeof document === "undefined" ? null : document.body;
 
   return (
     <>
-      <span
-        ref={triggerRef}
-        onMouseEnter={() => setOpen(true)}
-        onMouseLeave={() => setOpen(false)}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
-        aria-describedby={open ? id : undefined}
-        className="inline-flex"
-      >
+      <span {...triggerProps} aria-describedby={open ? id : undefined} className="inline-flex">
         {children}
       </span>
       {rect && portalTarget
@@ -191,6 +197,57 @@ export function Tooltip({
               className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md bg-panel px-2 py-1 text-xs text-fg-2 shadow-lg outline-1 -outline-offset-1 outline-line-strong"
             >
               {label}
+            </div>,
+            portalTarget,
+          )
+        : null}
+    </>
+  );
+}
+
+// Anchors the card just below the trigger. Triggers in the left half of the
+// viewport grow rightward from their left edge; triggers in the right half
+// grow leftward from their right edge — keeping the card on-screen without
+// measuring its width.
+function hoverCardStyle(rect: DOMRect): CSSProperties {
+  const margin = 12;
+  const top = rect.bottom + 6;
+  if (rect.left > window.innerWidth / 2) {
+    return { top, right: Math.max(margin, window.innerWidth - rect.right) };
+  }
+  return { top, left: Math.max(margin, rect.left) };
+}
+
+/**
+ * Hover-triggered rich popover. Unlike `Tooltip`, it anchors below the trigger,
+ * stays within the viewport, and allows multi-line wrapping content. The
+ * `content` node is mounted only while open, so consumers may fetch lazily.
+ */
+export function HoverCard({
+  content,
+  children,
+}: {
+  content: ReactNode;
+  children: ReactNode;
+}) {
+  const { open, rect, triggerProps } = useHoverAnchor();
+  const id = useId();
+  const portalTarget = typeof document === "undefined" ? null : document.body;
+
+  return (
+    <>
+      <span {...triggerProps} aria-describedby={open ? id : undefined} className="inline-flex">
+        {children}
+      </span>
+      {rect && portalTarget
+        ? createPortal(
+            <div
+              role="tooltip"
+              id={id}
+              style={hoverCardStyle(rect)}
+              className="pointer-events-none fixed z-50 max-w-[18rem] rounded-lg bg-panel p-3 text-xs text-fg-2 shadow-xl outline-1 -outline-offset-1 outline-line-strong"
+            >
+              {content}
             </div>,
             portalTarget,
           )

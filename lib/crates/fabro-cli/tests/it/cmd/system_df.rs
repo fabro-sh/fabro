@@ -58,6 +58,10 @@ fn system_df_summarizes_runs_and_logs() {
         "system df should summarize logs: {stdout}"
     );
     assert!(
+        stdout.contains("Database & artifacts"),
+        "system df should summarize database and artifact storage: {stdout}"
+    );
+    assert!(
         stdout.contains("Data directory:"),
         "system df should print the storage directory: {stdout}"
     );

@@ -14,7 +14,7 @@ pub use auth_codes::{AuthCode, AuthCodeStore};
 pub use auth_tokens::{ConsumeOutcome, RefreshToken, RefreshTokenStore};
 pub use blob_store::{Blob, BlobStore};
 use chrono::{DateTime, Utc};
-use fabro_types::{Run, RunId};
+use fabro_types::{Run, RunId, SessionId};
 use object_store::ObjectStore;
 pub use projection_cache::CachedRunProjection;
 use projection_cache::RunProjectionCache;
@@ -32,6 +32,11 @@ pub struct UnreadableRun {
     pub run_id:     RunId,
     pub created_at: DateTime<Utc>,
     pub error:      String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+struct SessionRunIndexEntry {
+    run_id: RunId,
 }
 
 #[derive(Clone)]
@@ -292,6 +297,29 @@ impl Database {
         Ok(self.projection_cache.get_summary(run_id).await)
     }
 
+    pub async fn put_session_run_index(
+        &self,
+        session_id: &SessionId,
+        run_id: &RunId,
+    ) -> Result<()> {
+        let db = self.open_db().await?;
+        db.put(
+            keys::session_by_id_key(session_id),
+            serde_json::to_vec(&SessionRunIndexEntry { run_id: *run_id })?,
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_session_run_id(&self, session_id: &SessionId) -> Result<Option<RunId>> {
+        let db = self.open_db().await?;
+        if let Some(bytes) = db.get(keys::session_by_id_key(session_id)).await? {
+            let entry: SessionRunIndexEntry = serde_json::from_slice(&bytes)?;
+            return Ok(Some(entry.run_id));
+        }
+        Ok(None)
+    }
+
     pub(crate) async fn remove_cached_run(&self, run_id: &RunId) {
         self.projection_cache.remove(run_id).await;
     }
@@ -315,8 +343,27 @@ impl Database {
         for key in keys_to_delete {
             db.delete(key).await?;
         }
+        self.delete_session_indexes_for_run(run_id).await?;
         self.catalog_index().await?.remove(run_id).await?;
         self.remove_cached_run(run_id).await;
+        Ok(())
+    }
+
+    async fn delete_session_indexes_for_run(&self, run_id: &RunId) -> Result<()> {
+        let db = self.open_db().await?;
+        let mut keys_to_delete = Vec::new();
+        let mut iter = db.scan_prefix(keys::sessions_by_id_prefix()).await?;
+        while let Some(entry) = iter.next().await? {
+            let index: SessionRunIndexEntry = serde_json::from_slice(&entry.value)?;
+            if index.run_id == *run_id {
+                keys_to_delete.push(String::from_utf8(entry.key.to_vec()).map_err(|err| {
+                    Error::Other(format!("stored key is not valid UTF-8: {err}"))
+                })?);
+            }
+        }
+        for key in keys_to_delete {
+            db.delete(key).await?;
+        }
         Ok(())
     }
 

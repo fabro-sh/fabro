@@ -72,7 +72,7 @@ use fabro_slack::{blocks as slack_blocks, connection as slack_connection};
 use fabro_static::EnvVars;
 use fabro_store::{
     ArtifactKey, ArtifactStore, Database, EventEnvelope, EventPayload, NodeArtifact,
-    PendingInterviewRecord, SessionStore, StageArtifactEntry, StageId,
+    PendingInterviewRecord, StageArtifactEntry, StageId,
 };
 #[cfg(test)]
 use fabro_types::BlockedReason;
@@ -596,7 +596,6 @@ pub struct AppState {
     runs: Mutex<HashMap<RunId, ManagedRun>>,
     aggregate_billing: Mutex<BillingAccumulator>,
     store: Arc<Database>,
-    session_store: SessionStore,
     session_runtimes: SessionRuntimeManager,
     artifact_store: ArtifactStore,
     worker_tokens: WorkerTokenKeys,
@@ -849,10 +848,6 @@ impl AppState {
     /// without cross-module state coupling on the `AppState` field layout.
     pub(crate) fn store_ref(&self) -> &Arc<Database> {
         &self.store
-    }
-
-    pub(crate) fn session_store(&self) -> &SessionStore {
-        &self.session_store
     }
 
     pub(crate) fn session_runtimes(&self) -> &SessionRuntimeManager {
@@ -1474,6 +1469,12 @@ fn build_disk_usage_response(
         }
     }
 
+    // Measure the whole storage tree so the managed total can't drift as new
+    // subdirectories are added. "other" is the residual (database, artifacts,
+    // sessions, vaults) — everything that isn't an enumerated run or log file.
+    let managed_size = dir_size(storage_dir);
+    let other_size = managed_size.saturating_sub(total_run_size + total_log_size);
+
     Ok(DiskUsageResponse {
         summary:                 vec![
             DiskUsageSummaryRow {
@@ -1490,8 +1491,15 @@ fn build_disk_usage_response(
                 size_bytes:        Some(to_i64(total_log_size)),
                 reclaimable_bytes: Some(to_i64(total_log_size)),
             },
+            DiskUsageSummaryRow {
+                type_:             Some("other".to_string()),
+                count:             None,
+                active:            None,
+                size_bytes:        Some(to_i64(other_size)),
+                reclaimable_bytes: Some(0),
+            },
         ],
-        total_size_bytes:        Some(to_i64(total_run_size + total_log_size)),
+        total_size_bytes:        Some(to_i64(managed_size)),
         total_reclaimable_bytes: Some(to_i64(reclaimable_run_size + total_log_size)),
         runs:                    verbose.then_some(run_rows),
     })
@@ -1679,15 +1687,6 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
     ));
     let (global_event_tx, _) = broadcast::channel(4096);
     let current_server_settings = Arc::new(resolved_settings.server_settings);
-    let session_store = SessionStore::new(
-        PathBuf::from(resolve_interp_string(
-            &current_server_settings.server.storage.root,
-        )?)
-        .join("sessions"),
-    );
-    session_store
-        .recover_stale_running_state(chrono::Utc::now())
-        .context("recovering stale session runtime state")?;
     let current_manifest_run_defaults = Arc::new(resolved_settings.manifest_run_defaults);
     let current_manifest_run_settings = resolved_settings.manifest_run_settings;
     let current_catalog = Arc::new(
@@ -1724,7 +1723,6 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         runs: Mutex::new(HashMap::new()),
         aggregate_billing: Mutex::new(BillingAccumulator::default()),
         store,
-        session_store,
         session_runtimes: SessionRuntimeManager::new(),
         artifact_store,
         worker_tokens,

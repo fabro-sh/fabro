@@ -2,6 +2,7 @@ pub mod agent;
 pub mod infra;
 pub mod misc;
 pub mod run;
+pub mod session;
 pub mod stage;
 
 pub use agent::*;
@@ -14,6 +15,7 @@ use serde::de::Error as DeError;
 use serde::ser::Error as SerError;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value, json};
+pub use session::*;
 pub use stage::*;
 
 use crate::{ParallelBranchId, Principal, RunId, StageId};
@@ -96,6 +98,26 @@ pub enum EventBody {
     RunUnarchived(RunUnarchivedProps),
     #[serde(rename = "run.title.updated")]
     RunTitleUpdated(RunTitleUpdatedProps),
+    #[serde(rename = "run.session.created")]
+    RunSessionCreated(RunSessionCreatedProps),
+    #[serde(rename = "run.session.turn.started")]
+    RunSessionTurnStarted(RunSessionTurnStartedProps),
+    #[serde(rename = "run.session.user_message")]
+    RunSessionUserMessage(RunSessionUserMessageProps),
+    #[serde(rename = "run.session.assistant_delta")]
+    RunSessionAssistantDelta(RunSessionAssistantDeltaProps),
+    #[serde(rename = "run.session.assistant_message")]
+    RunSessionAssistantMessage(RunSessionAssistantMessageProps),
+    #[serde(rename = "run.session.tool_call.started")]
+    RunSessionToolCallStarted(RunSessionToolCallStartedProps),
+    #[serde(rename = "run.session.tool_call.completed")]
+    RunSessionToolCallCompleted(RunSessionToolCallCompletedProps),
+    #[serde(rename = "run.session.turn.succeeded")]
+    RunSessionTurnSucceeded(RunSessionTurnSucceededProps),
+    #[serde(rename = "run.session.turn.failed")]
+    RunSessionTurnFailed(RunSessionTurnFailedProps),
+    #[serde(rename = "run.session.turn.interrupted")]
+    RunSessionTurnInterrupted(RunSessionTurnInterruptedProps),
     #[serde(rename = "run.parent.linked")]
     RunParentLinked(RunParentLinkedProps),
     #[serde(rename = "run.parent.unlinked")]
@@ -405,6 +427,16 @@ impl EventBody {
             Self::RunArchived(_) => "run.archived",
             Self::RunUnarchived(_) => "run.unarchived",
             Self::RunTitleUpdated(_) => "run.title.updated",
+            Self::RunSessionCreated(_) => "run.session.created",
+            Self::RunSessionTurnStarted(_) => "run.session.turn.started",
+            Self::RunSessionUserMessage(_) => "run.session.user_message",
+            Self::RunSessionAssistantDelta(_) => "run.session.assistant_delta",
+            Self::RunSessionAssistantMessage(_) => "run.session.assistant_message",
+            Self::RunSessionToolCallStarted(_) => "run.session.tool_call.started",
+            Self::RunSessionToolCallCompleted(_) => "run.session.tool_call.completed",
+            Self::RunSessionTurnSucceeded(_) => "run.session.turn.succeeded",
+            Self::RunSessionTurnFailed(_) => "run.session.turn.failed",
+            Self::RunSessionTurnInterrupted(_) => "run.session.turn.interrupted",
             Self::RunParentLinked(_) => "run.parent.linked",
             Self::RunParentUnlinked(_) => "run.parent.unlinked",
             Self::RunCompleted(_) => "run.completed",
@@ -561,6 +593,17 @@ fn is_known_event_name(event: &str) -> bool {
             | "run.superseded_by"
             | "run.archived"
             | "run.unarchived"
+            | "run.title.updated"
+            | "run.session.created"
+            | "run.session.turn.started"
+            | "run.session.user_message"
+            | "run.session.assistant_delta"
+            | "run.session.assistant_message"
+            | "run.session.tool_call.started"
+            | "run.session.tool_call.completed"
+            | "run.session.turn.succeeded"
+            | "run.session.turn.failed"
+            | "run.session.turn.interrupted"
             | "run.parent.linked"
             | "run.parent.unlinked"
             | "run.completed"

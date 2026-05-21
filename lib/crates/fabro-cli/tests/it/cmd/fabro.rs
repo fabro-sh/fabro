@@ -12,7 +12,6 @@ fn help() {
     Usage: fabro [OPTIONS] [COMMAND]
 
     Commands:
-      session     Run a persistent Fabro agent session
       run         Launch a workflow run
       create      Create a workflow run (allocate run dir, persist spec)
       start       Start a created workflow run on the server
@@ -24,6 +23,7 @@ fn help() {
       fork        Fork a workflow run from an earlier checkpoint into a new run
       wait        Block until a workflow run completes
       steer       Steer a running agent mid-execution
+      ask         Ask Fabro a read-only question about a run
       preflight   Validate run configuration without executing
       validate    Validate a workflow
       graph       Render a workflow graph as SVG

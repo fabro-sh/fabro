@@ -111,12 +111,10 @@ describe("SettingsResources route", () => {
     const renderer = renderSettingsResources();
     const text = textContent(renderer.toJSON());
 
-    expect(text).toContain("18.4%");
+    expect(text).toContain("18%");
     expect(text).toContain("5s");
     expect(text).toContain("3 GiB");
     expect(text).toContain("8 GiB");
-    expect(text).toContain("2 GiB");
-    expect(text).toContain("512 MiB");
   });
 
   test("shows CPU warmup state while usage is null", () => {

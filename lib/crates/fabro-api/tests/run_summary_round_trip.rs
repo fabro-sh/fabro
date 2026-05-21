@@ -32,6 +32,8 @@ fn run_summary_json_matches_openapi_shape() {
             slug:       Some("workflow".to_string()),
             name:       Some("Ship workflow".to_string()),
             graph_name: Some("GraphName".to_string()),
+            node_count: 7,
+            edge_count: 9,
         },
         automation:       None,
         repository:       Some(RepositoryRef {
@@ -91,7 +93,9 @@ fn run_summary_json_matches_openapi_shape() {
             "workflow": {
                 "slug": "workflow",
                 "name": "Ship workflow",
-                "graph_name": "GraphName"
+                "graph_name": "GraphName",
+                "node_count": 7,
+                "edge_count": 9
             },
             "automation": null,
             "repository": {
@@ -197,6 +201,8 @@ fn run_summary_deserializes_when_optional_fields_are_absent() {
     assert_eq!(summary.workflow.name, None);
     assert_eq!(summary.workflow.graph_name.as_deref(), Some("GraphName"));
     assert_eq!(summary.workflow.slug, None);
+    assert_eq!(summary.workflow.node_count, 0);
+    assert_eq!(summary.workflow.edge_count, 0);
     assert_eq!(summary.goal, "ship it");
     assert_eq!(summary.title, "ship it");
     assert_eq!(summary.labels, HashMap::new());

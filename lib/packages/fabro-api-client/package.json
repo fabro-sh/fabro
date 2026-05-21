@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate": "bunx @openapitools/openapi-generator-cli generate -i ../../../docs/public/api-reference/fabro-api.yaml -g typescript-axios --additional-properties=supportsES6=true,typescriptThreePlus=true,withSeparateModelsAndApi=true,apiPackage=api,modelPackage=models,useTags=true,enumPropertyNaming=UPPERCASE -o src",
+    "generate": "bunx @openapitools/openapi-generator-cli generate -i ../../../docs/public/api-reference/fabro-api.yaml -g typescript-axios --additional-properties=supportsES6=true,typescriptThreePlus=true,withSeparateModelsAndApi=true,apiPackage=api,modelPackage=models,useTags=true,enumPropertyNaming=UPPERCASE -o src && bun run scripts/normalize-generated.ts",
     "typecheck": "tsc"
   },
   "devDependencies": {

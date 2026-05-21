@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -9,12 +10,13 @@ use fabro_core::lifecycle::{AttemptContext, AttemptResultContext, NodeDecision, 
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
 use fabro_store::{ArtifactKey, ArtifactStore};
-use fabro_types::{ArtifactUpload, RunId, StageId};
+use fabro_types::{ArtifactUpload, EventBody, RunId, StageId};
+use fabro_util::error::collect_chain;
 use tokio::fs;
 use tokio::time::sleep;
 
 use crate::artifact::{normalize_durable_updates, offload_large_values, sync_artifacts_to_env};
-use crate::artifact_snapshot::collect_artifacts;
+use crate::artifact_snapshot::{ArtifactCollectionSummary, collect_artifacts};
 use crate::artifact_upload::ArtifactSink;
 use crate::event::{Emitter, Event, RunNoticeCode, RunNoticeLevel};
 use crate::graph::{WorkflowGraph, WorkflowNode};
@@ -25,6 +27,7 @@ use crate::runtime_store::RunStoreHandle;
 type WfRunState = ExecutionState<Option<BilledModelUsage>>;
 type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
 type WfNodeDecision = NodeDecision<Option<BilledModelUsage>>;
+type ArtifactIdentity = (String, String);
 
 const ARTIFACT_UPLOAD_RETRY_DELAYS: [Duration; 3] = [
     Duration::from_millis(100),
@@ -42,6 +45,7 @@ pub(crate) struct ArtifactLifecycle {
     pub artifact_sink:   Option<ArtifactSink>,
     /// Per-attempt state: epoch seconds when the attempt started.
     attempt_start_epoch: std::sync::Mutex<Option<f64>>,
+    captured_artifacts:  std::sync::Mutex<HashSet<ArtifactIdentity>>,
 }
 
 impl ArtifactLifecycle {
@@ -61,6 +65,7 @@ impl ArtifactLifecycle {
             artifact_globs,
             artifact_sink,
             attempt_start_epoch: std::sync::Mutex::new(None),
+            captured_artifacts: std::sync::Mutex::new(HashSet::new()),
         }
     }
 }
@@ -69,6 +74,16 @@ impl ArtifactLifecycle {
 impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
     async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
         *self.attempt_start_epoch.lock().unwrap() = None;
+        let ledger = self
+            .rebuild_captured_artifact_ledger()
+            .await
+            .map_err(|err| {
+                let rendered = collect_chain(err.as_ref()).join(": ");
+                CoreError::Other(format!(
+                    "failed to rebuild captured artifact ledger: {rendered}"
+                ))
+            })?;
+        *self.captured_artifacts.lock().unwrap() = ledger;
         Ok(())
     }
 
@@ -112,14 +127,20 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         )
         .await
         {
-            Ok(summary) if summary.files_copied > 0 => {
+            Ok(summary) => {
+                self.emit_collection_problem_notice(node_id, &summary);
+                let new_assets = self.new_captured_assets(&summary.captured_assets);
+                if new_assets.is_empty() {
+                    return Ok(());
+                }
+
                 let stage_id = StageId::new(node_id.to_string(), visit);
                 if let Err(err) = self
                     .persist_artifacts(
                         &stage_id,
                         ctx.attempt,
                         artifact_capture_dir.path(),
-                        &summary.captured_assets,
+                        &new_assets,
                     )
                     .await
                 {
@@ -130,8 +151,9 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
                     );
                     return Ok(());
                 }
+                self.record_captured_assets(&new_assets);
                 let scope = stage_scope_for(state, node_id);
-                for asset in &summary.captured_assets {
+                for asset in &new_assets {
                     self.emitter.emit_scoped(
                         &Event::ArtifactCaptured {
                             node_id:        node_id.to_string(),
@@ -147,7 +169,6 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
                     );
                 }
             }
-            Ok(_) => {} // no files collected
             Err(e) => {
                 self.emitter.notice(
                     RunNoticeLevel::Warn,
@@ -197,6 +218,59 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
 }
 
 impl ArtifactLifecycle {
+    async fn rebuild_captured_artifact_ledger(&self) -> Result<HashSet<ArtifactIdentity>> {
+        let events = self
+            .run_store
+            .list_events()
+            .await
+            .context("failed to list run events")?;
+        Ok(events
+            .into_iter()
+            .filter_map(|envelope| match envelope.event.body {
+                EventBody::ArtifactCaptured(props) => Some((props.path, props.content_sha256)),
+                _ => None,
+            })
+            .collect())
+    }
+
+    fn emit_collection_problem_notice(&self, node_id: &str, summary: &ArtifactCollectionSummary) {
+        if summary.download_errors == 0 && summary.hash_errors == 0 {
+            return;
+        }
+
+        let mut parts = Vec::new();
+        if summary.download_errors > 0 {
+            parts.push(format!("{} download error(s)", summary.download_errors));
+        }
+        if summary.hash_errors > 0 {
+            parts.push(format!("{} hash/read error(s)", summary.hash_errors));
+        }
+        self.emitter.notice(
+            RunNoticeLevel::Warn,
+            RunNoticeCode::ArtifactCollectionFailed,
+            format!(
+                "[node: {node_id}] artifact collection completed with {}",
+                parts.join(", ")
+            ),
+        );
+    }
+
+    fn new_captured_assets(&self, artifacts: &[ArtifactUpload]) -> Vec<ArtifactUpload> {
+        let ledger = self.captured_artifacts.lock().unwrap();
+        artifacts
+            .iter()
+            .filter(|artifact| !ledger.contains(&artifact_identity(artifact)))
+            .cloned()
+            .collect()
+    }
+
+    fn record_captured_assets(&self, artifacts: &[ArtifactUpload]) {
+        let mut ledger = self.captured_artifacts.lock().unwrap();
+        for artifact in artifacts {
+            ledger.insert(artifact_identity(artifact));
+        }
+    }
+
     async fn persist_artifacts(
         &self,
         stage_id: &StageId,
@@ -271,4 +345,8 @@ impl ArtifactLifecycle {
         }
         Ok(())
     }
+}
+
+fn artifact_identity(artifact: &ArtifactUpload) -> ArtifactIdentity {
+    (artifact.path.clone(), artifact.content_sha256.clone())
 }

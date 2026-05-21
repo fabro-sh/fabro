@@ -227,6 +227,13 @@
     min-width: 0;
     overflow-x: hidden;
   }
+  /* Give user message bubbles a lighter, solid surface so they read as raised
+   * cards. The default muted bubble color (panel-alt) is nearly identical to
+   * the translucent `bg-panel/40` sidebar once composited over the page, so
+   * bubbles visually disappeared into the column. */
+  .ask-fabro-sidebar .aui-user-message-content {
+    background-color: var(--color-panel);
+  }
   /* Inset the assistant message content from the column's right edge so the
    * code block (dark pre box) has visible right margin and doesn't appear to
    * bleed against the sidebar edge when its content overflows. */

@@ -19,6 +19,7 @@ function render(props: Partial<RunSummaryPanelViewProps> = {}) {
   const full: RunSummaryPanelViewProps = {
     run:              null,
     runLoading:       false,
+    sandboxState:     null,
     sandboxResources: null,
     sandboxLoading:   false,
     artifactsCount:   null,
@@ -118,9 +119,18 @@ describe("RunSummaryPanelView", () => {
   test("renders sandbox CPU and memory", () => {
     const tree = render({
       run:              makeRun(),
+      sandboxState:     "running",
       sandboxResources: { cpu_cores: 4, memory_bytes: 8 * 1024 * 1024 * 1024 } as any,
     });
     expect(instanceText(cellAfterLabel(tree, "Sandbox"))).toBe("4 CPU · 8 GiB");
+  });
+
+  test("renders sandbox status dot and falls back to state label without resources", () => {
+    const tree = render({ run: makeRun(), sandboxState: "stopped" });
+    const cell = cellAfterLabel(tree, "Sandbox");
+    expect(instanceText(cell)).toBe("Stopped");
+    const dot = cell.find((node) => node.props["aria-label"] === "Sandbox Stopped");
+    expect(dot.props.className).toContain("bg-fg-muted");
   });
 
   test("renders artifacts count when positive", () => {

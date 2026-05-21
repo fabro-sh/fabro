@@ -515,7 +515,7 @@ mod daytona {
                 .filter(|cidr| !cidr.is_empty());
             let cidrs: Vec<_> = cidrs.collect();
             if cidrs.is_empty() {
-                SandboxNetworkPolicy::unknown()
+                SandboxNetworkPolicy::open()
             } else {
                 SandboxNetworkPolicy::allow_cidrs(cidrs)
             }
@@ -523,7 +523,7 @@ mod daytona {
 
         SandboxNetwork {
             egress,
-            ingress: SandboxNetworkPolicy::unknown(),
+            ingress: SandboxNetworkPolicy::blocked(),
         }
     }
 
@@ -634,32 +634,34 @@ mod daytona {
         }
 
         #[test]
-        fn network_block_all_blocks_egress_and_leaves_ingress_unknown() {
+        fn network_block_all_blocks_egress_and_ingress() {
             let network = daytona_network(true, Some("10.0.0.0/8"));
             assert_eq!(network.egress, SandboxNetworkPolicy::blocked());
-            assert_eq!(network.ingress, SandboxNetworkPolicy::unknown());
+            assert_eq!(network.ingress, SandboxNetworkPolicy::blocked());
         }
 
         #[test]
-        fn network_allow_list_maps_to_cidr_allow_list() {
+        fn network_allow_list_maps_to_cidr_allow_list_and_blocks_ingress() {
             let network = daytona_network(false, Some("10.0.0.0/8, 192.168.0.0/16 "));
             assert_eq!(
                 network.egress,
                 SandboxNetworkPolicy::allow_cidrs(["10.0.0.0/8", "192.168.0.0/16"])
             );
-            assert_eq!(network.ingress, SandboxNetworkPolicy::unknown());
+            assert_eq!(network.ingress, SandboxNetworkPolicy::blocked());
         }
 
         #[test]
-        fn empty_network_allow_list_is_unknown() {
+        fn empty_network_allow_list_is_open_egress_and_blocked_ingress() {
             let network = daytona_network(false, Some(" , "));
-            assert_eq!(network, SandboxNetwork::unknown());
+            assert_eq!(network.egress, SandboxNetworkPolicy::open());
+            assert_eq!(network.ingress, SandboxNetworkPolicy::blocked());
         }
 
         #[test]
-        fn default_daytona_network_is_unknown() {
+        fn default_daytona_network_is_open_egress_and_blocked_ingress() {
             let network = daytona_network(false, None);
-            assert_eq!(network, SandboxNetwork::unknown());
+            assert_eq!(network.egress, SandboxNetworkPolicy::open());
+            assert_eq!(network.ingress, SandboxNetworkPolicy::blocked());
         }
     }
 }

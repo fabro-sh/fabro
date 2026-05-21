@@ -43,6 +43,10 @@ fn df_from(
         .summary
         .iter()
         .find(|row| row.type_.as_deref() == Some("logs"));
+    let other_summary = output
+        .summary
+        .iter()
+        .find(|row| row.type_.as_deref() == Some("other"));
 
     let run_count = runs_summary.and_then(|row| row.count).map_or(0, as_u64);
     let active_count = runs_summary.and_then(|row| row.active).map_or(0, as_u64);
@@ -55,6 +59,10 @@ fn df_from(
 
     let log_count = logs_summary.and_then(|row| row.count).map_or(0, as_u64);
     let total_log_size = logs_summary
+        .and_then(|row| row.size_bytes)
+        .map_or(0, as_u64);
+
+    let total_other_size = other_summary
         .and_then(|row| row.size_bytes)
         .map_or(0, as_u64);
 
@@ -108,6 +116,15 @@ fn df_from(
             "-".cell().justify(Justify::Right),
             format_size(total_log_size).cell().justify(Justify::Right),
             format!("{} ({log_reclaim_pct}%)", format_size(total_log_size))
+                .cell()
+                .justify(Justify::Right),
+        ],
+        vec![
+            "Database & artifacts".cell(),
+            "-".cell().justify(Justify::Right),
+            "-".cell().justify(Justify::Right),
+            format_size(total_other_size).cell().justify(Justify::Right),
+            format!("{} (0%)", format_size(0))
                 .cell()
                 .justify(Justify::Right),
         ],

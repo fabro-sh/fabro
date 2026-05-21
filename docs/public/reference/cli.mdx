@@ -65,6 +65,7 @@ fabro [OPTIONS] [COMMAND]
 | --- | --- |
 | `fabro archive` | Mark terminal runs as archived (reviewed, no further action needed). Archived runs are hidden from default listings |
 | `fabro artifact` | Inspect and copy run artifacts (screenshots, reports, traces) |
+| `fabro ask` | Ask Fabro a read-only question about a run |
 | `fabro attach` | Attach to a running or finished workflow run |
 | `fabro auth` | Manage CLI authentication state |
 | `fabro completion` | Generate shell completions |
@@ -93,7 +94,6 @@ fabro [OPTIONS] [COMMAND]
 | `fabro sandbox` | Sandbox operations (cp, ssh, preview) |
 | `fabro secret` | Manage server-owned secrets |
 | `fabro server` | Server operations |
-| `fabro session` | Run a persistent Fabro agent session |
 | `fabro settings` | Inspect effective settings |
 | `fabro start` | Start a created workflow run on the server |
 | `fabro steer` | Steer a running agent mid-execution |
@@ -185,6 +185,28 @@ fabro artifact list [OPTIONS] <RUN_ID>
 | --- | --- |
 | `--node <node>` | Filter to artifacts from a specific node |
 | `--retry <retry>` | Filter to artifacts from a specific retry attempt |
+| `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
+
+### `fabro ask`
+
+Ask Fabro a read-only question about a run
+
+```bash
+fabro ask [OPTIONS] --prompt <PROMPT> <RUN>
+```
+
+#### Arguments
+
+| Name | Description |
+| --- | --- |
+| `RUN` | Run ID prefix or workflow name |
+
+#### Options
+
+| Option | Description |
+| --- | --- |
+| `--model <model>` | Optional model name |
+| `-p, --prompt <prompt>` | Question to ask |
 | `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
 
 ### `fabro attach`
@@ -1266,25 +1288,6 @@ fabro server stop [OPTIONS]
 | --- | --- |
 | `--storage-dir <storage_dir>` | Local storage directory (default: ~/.fabro/storage) |
 | `--timeout <timeout>` | Seconds to wait for graceful shutdown before SIGKILL<br />Default: `10` |
-
-### `fabro session`
-
-Run a persistent Fabro agent session
-
-```bash
-fabro session [OPTIONS] --prompt <PROMPT>
-```
-
-#### Options
-
-| Option | Description |
-| --- | --- |
-| `--model <model>` | Model name (defaults per provider) |
-| `--permissions <level>` | Permission level for tool execution<br />Values: `read-only`, `read-write`, `full` |
-| `-p, --prompt <prompt>` | Task prompt |
-| `--provider <provider>` | LLM provider (anthropic, openai, gemini, kimi, zai, minimax, inception) |
-| `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
-| `--storage-dir <storage_dir>` | Local storage directory (default: ~/.fabro/storage) |
 
 ### `fabro settings`
 

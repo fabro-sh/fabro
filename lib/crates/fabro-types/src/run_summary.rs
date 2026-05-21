@@ -54,6 +54,12 @@ pub struct WorkflowRef {
     pub name:       Option<String>,
     #[serde(default)]
     pub graph_name: Option<String>,
+    /// Number of nodes in the workflow graph.
+    #[serde(default)]
+    pub node_count: i64,
+    /// Number of edges in the workflow graph.
+    #[serde(default)]
+    pub edge_count: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

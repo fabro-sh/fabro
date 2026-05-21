@@ -640,6 +640,10 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> Run {
             slug:       state.spec.workflow_slug.clone(),
             name:       state.spec.workflow_name().map(ToOwned::to_owned),
             graph_name: state.spec.graph_name().map(ToOwned::to_owned),
+            node_count: i64::try_from(state.spec.graph.nodes.len())
+                .expect("graph node count should fit in i64"),
+            edge_count: i64::try_from(state.spec.graph.edges.len())
+                .expect("graph edge count should fit in i64"),
         },
         automation: None,
         repository: Some(RepositoryRef::from_origin_and_source(

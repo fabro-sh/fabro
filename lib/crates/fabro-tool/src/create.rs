@@ -486,6 +486,8 @@ mod tests {
                 slug:       Some("simple".to_string()),
                 name:       Some("Simple".to_string()),
                 graph_name: None,
+                node_count: 0,
+                edge_count: 0,
             },
             automation: None,
             repository: None,

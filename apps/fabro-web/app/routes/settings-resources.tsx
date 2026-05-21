@@ -68,7 +68,7 @@ function CpuPanel({ cpu }: { cpu: SystemCpuResources }) {
       </Row>
       <Row title="Sample window" help="Elapsed time since the previous CPU sample.">
         {cpu.sample_window_ms != null ? (
-          formatDurationMs(cpu.sample_window_ms)
+          formatDurationMs(cpu.sample_window_ms, 0)
         ) : (
           <Muted>Unknown</Muted>
         )}
@@ -93,7 +93,7 @@ function MemoryPanel({ memory }: { memory: SystemMemoryResources }) {
           percent={memory.used_percent}
           label={
             memory.used_bytes != null && memory.total_bytes != null
-              ? `${formatBytesAsMemory(memory.used_bytes)} / ${formatBytesAsMemory(memory.total_bytes)}`
+              ? `${formatBytesAsMemory(memory.used_bytes, 0)} / ${formatBytesAsMemory(memory.total_bytes, 0)}`
               : undefined
           }
         />
@@ -110,7 +110,6 @@ function DiskPanel({ disk }: { disk: SystemDiskResources }) {
         <Row title="Storage path" help="Configured Fabro storage directory.">
           <Mono>{disk.storage_path}</Mono>
         </Row>
-        <FabroStorageRows disk={disk} />
       </Panel>
     );
   }
@@ -122,29 +121,12 @@ function DiskPanel({ disk }: { disk: SystemDiskResources }) {
           percent={disk.used_percent}
           label={
             disk.used_bytes != null && disk.total_bytes != null
-              ? `${formatBytesAsMemory(disk.used_bytes)} / ${formatBytesAsMemory(disk.total_bytes)}`
+              ? `${formatBytesAsMemory(disk.used_bytes, 0)} / ${formatBytesAsMemory(disk.total_bytes, 0)}`
               : undefined
           }
         />
       </Row>
-      <Row title="Mount point" help="Filesystem containing the storage path.">
-        {disk.mount_point ? <Mono>{disk.mount_point}</Mono> : <Muted>Unknown</Muted>}
-      </Row>
-      <FabroStorageRows disk={disk} />
     </Panel>
-  );
-}
-
-function FabroStorageRows({ disk }: { disk: SystemDiskResources }) {
-  return (
-    <>
-      <Row title="Fabro managed" help="Bytes currently tracked under Fabro storage.">
-        {formatBytesAsMemory(disk.fabro_managed_bytes)}
-      </Row>
-      <Row title="Reclaimable" help="Bytes Fabro can reclaim by pruning inactive data.">
-        {formatBytesAsMemory(disk.fabro_reclaimable_bytes)}
-      </Row>
-    </>
   );
 }
 
@@ -210,5 +192,5 @@ function UsageMeter({
 }
 
 function formatPercent(value: number) {
-  return `${Number.isInteger(value) ? value : value.toFixed(1)}%`;
+  return `${Math.round(value)}%`;
 }

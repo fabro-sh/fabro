@@ -80,11 +80,11 @@ export function formatDurationSecs(secs: number): string {
   return remainMin > 0 ? `${hours}h ${remainMin}m` : `${hours}h`;
 }
 
-export function formatDurationMs(ms: number): string {
+export function formatDurationMs(ms: number, fractionDigits = 1): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
   if (ms < 60_000) {
     const seconds = ms / 1000;
-    return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)}s`;
+    return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(fractionDigits)}s`;
   }
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.round((ms % 60_000) / 1000);
@@ -106,19 +106,19 @@ export function formatTokenCount(
 
 const BYTES_PER_GIB = 1024 * 1024 * 1024;
 const BYTES_PER_MIB = 1024 * 1024;
+const BYTES_PER_KIB = 1024;
 
 /**
- * Format a byte count as a memory/disk size (e.g. "8 GiB", "512 MiB", "1024 B").
+ * Format a byte count as a memory/disk size (e.g. "8 GiB", "2,173 GiB", "742 B").
+ * Large values get thousands separators. Pass `fractionDigits: 0` to round to
+ * whole units.
  */
-export function formatBytesAsMemory(bytes: number): string {
-  if (bytes >= BYTES_PER_GIB) {
-    const gib = bytes / BYTES_PER_GIB;
-    return `${Number.isInteger(gib) ? gib : gib.toFixed(1)} GiB`;
-  }
-  if (bytes >= BYTES_PER_MIB) {
-    const mib = bytes / BYTES_PER_MIB;
-    return `${Number.isInteger(mib) ? mib : mib.toFixed(1)} MiB`;
-  }
+export function formatBytesAsMemory(bytes: number, fractionDigits = 1): string {
+  const scaled = (unit: number) =>
+    (bytes / unit).toLocaleString("en-US", { maximumFractionDigits: fractionDigits });
+  if (bytes >= BYTES_PER_GIB) return `${scaled(BYTES_PER_GIB)} GiB`;
+  if (bytes >= BYTES_PER_MIB) return `${scaled(BYTES_PER_MIB)} MiB`;
+  if (bytes >= BYTES_PER_KIB) return `${scaled(BYTES_PER_KIB)} KiB`;
   return `${bytes} B`;
 }
 

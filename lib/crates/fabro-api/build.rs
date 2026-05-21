@@ -476,17 +476,9 @@ fn main() {
         ("SessionId", "fabro_types::SessionId", &[]),
         ("TurnId", "fabro_types::TurnId", &[]),
         ("SessionStatus", "fabro_types::SessionStatus", &[]),
-        ("TurnStatus", "fabro_types::TurnStatus", &[]),
-        ("PermissionLevel", "fabro_types::PermissionLevel", &[]),
         ("SessionMessage", "fabro_types::SessionMessage", &[]),
         ("SessionRecord", "fabro_types::SessionRecord", &[]),
         ("SessionSummary", "fabro_types::SessionSummary", &[]),
-        ("TurnRecord", "fabro_types::TurnRecord", &[]),
-        (
-            "SessionEventEnvelope",
-            "fabro_types::SessionEventEnvelope",
-            &[],
-        ),
     ];
     for (name, path, impls) in replacements {
         settings.with_replacement(*name, *path, impls.iter().copied());

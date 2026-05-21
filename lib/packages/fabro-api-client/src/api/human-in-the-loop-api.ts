@@ -26,9 +26,21 @@ import type { ErrorResponse } from '../models';
 // @ts-ignore
 import type { PaginatedApiQuestionList } from '../models';
 // @ts-ignore
+import type { PairMessageRecord } from '../models';
+// @ts-ignore
+import type { PairMessageRequest } from '../models';
+// @ts-ignore
+import type { PairRecord } from '../models';
+// @ts-ignore
+import type { PairStartRequest } from '../models';
+// @ts-ignore
+import type { PairTranscriptResponse } from '../models';
+// @ts-ignore
 import type { PreviewUrlRequest } from '../models';
 // @ts-ignore
 import type { PreviewUrlResponse } from '../models';
+// @ts-ignore
+import type { RunPairStatusResponse } from '../models';
 // @ts-ignore
 import type { SandboxDetails } from '../models';
 // @ts-ignore
@@ -136,6 +148,50 @@ export const HumanInTheLoopApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
+         *
+         * @summary End Run Pair
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} pairId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        endRunPair: async (id: string, pairId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('endRunPair', 'id', id)
+            // verify required parameter 'pairId' is not null or undefined
+            assertParamExists('endRunPair', 'pairId', pairId)
+            const localVarPath = `/api/v1/runs/{id}/pair/{pair_id}`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)))
+                .replace(`{${"pair_id"}}`, encodeURIComponent(String(pairId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Generates a preview URL for a port exposed by the run\'s sandbox environment.
          * @summary Preview URL
          * @param {string} id Unique run identifier (ULID).
@@ -174,6 +230,144 @@ export const HumanInTheLoopApiAxiosParamCreator = function (configuration?: Conf
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
             localVarRequestOptions.data = serializeDataIfNeeded(previewUrlRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Get Run Pair
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} pairId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getRunPair: async (id: string, pairId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('getRunPair', 'id', id)
+            // verify required parameter 'pairId' is not null or undefined
+            assertParamExists('getRunPair', 'pairId', pairId)
+            const localVarPath = `/api/v1/runs/{id}/pair/{pair_id}`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)))
+                .replace(`{${"pair_id"}}`, encodeURIComponent(String(pairId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Get Run Pair Status
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getRunPairStatus: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('getRunPairStatus', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/pair`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Get Run Pair Transcript
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} pairId
+         * @param {number} [sinceSeq] First event sequence number to include.
+         * @param {number} [limit] Maximum number of events to return.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getRunPairTranscript: async (id: string, pairId: string, sinceSeq?: number, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('getRunPairTranscript', 'id', id)
+            // verify required parameter 'pairId' is not null or undefined
+            assertParamExists('getRunPairTranscript', 'pairId', pairId)
+            const localVarPath = `/api/v1/runs/{id}/pair/{pair_id}/transcript`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)))
+                .replace(`{${"pair_id"}}`, encodeURIComponent(String(pairId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (sinceSeq !== undefined) {
+                localVarQueryParameter['since_seq'] = sinceSeq;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -502,6 +696,100 @@ export const HumanInTheLoopApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
+         *
+         * @summary Send Run Pair Message
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} pairId
+         * @param {PairMessageRequest} pairMessageRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        sendRunPairMessage: async (id: string, pairId: string, pairMessageRequest: PairMessageRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('sendRunPairMessage', 'id', id)
+            // verify required parameter 'pairId' is not null or undefined
+            assertParamExists('sendRunPairMessage', 'pairId', pairId)
+            // verify required parameter 'pairMessageRequest' is not null or undefined
+            assertParamExists('sendRunPairMessage', 'pairMessageRequest', pairMessageRequest)
+            const localVarPath = `/api/v1/runs/{id}/pair/{pair_id}/messages`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)))
+                .replace(`{${"pair_id"}}`, encodeURIComponent(String(pairId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(pairMessageRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Starts pairing with exactly one selected active API-mode agent target.
+         * @summary Start Run Pair
+         * @param {string} id Unique run identifier (ULID).
+         * @param {PairStartRequest} pairStartRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        startRunPair: async (id: string, pairStartRequest: PairStartRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('startRunPair', 'id', id)
+            // verify required parameter 'pairStartRequest' is not null or undefined
+            assertParamExists('startRunPair', 'pairStartRequest', pairStartRequest)
+            const localVarPath = `/api/v1/runs/{id}/pair`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(pairStartRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Send a mid-run steering message to the live agent session(s) of a running run. Set `interrupt=true` to atomically interrupt the active steerable agent round first, then deliver this message as the next user turn. Without `interrupt=true`, the message is appended to the steering queue and may buffer until the next steerable agent session.
          * @summary Steer Run
          * @param {string} id Unique run identifier (ULID).
@@ -632,6 +920,20 @@ export const HumanInTheLoopApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         *
+         * @summary End Run Pair
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} pairId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async endRunPair(id: string, pairId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PairRecord>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.endRunPair(id, pairId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['HumanInTheLoopApi.endRunPair']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Generates a preview URL for a port exposed by the run\'s sandbox environment.
          * @summary Preview URL
          * @param {string} id Unique run identifier (ULID).
@@ -643,6 +945,49 @@ export const HumanInTheLoopApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.generatePreviewUrl(id, previewUrlRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['HumanInTheLoopApi.generatePreviewUrl']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get Run Pair
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} pairId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getRunPair(id: string, pairId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PairRecord>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getRunPair(id, pairId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['HumanInTheLoopApi.getRunPair']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get Run Pair Status
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getRunPairStatus(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunPairStatusResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getRunPairStatus(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['HumanInTheLoopApi.getRunPairStatus']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get Run Pair Transcript
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} pairId
+         * @param {number} [sinceSeq] First event sequence number to include.
+         * @param {number} [limit] Maximum number of events to return.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getRunPairTranscript(id: string, pairId: string, sinceSeq?: number, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PairTranscriptResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getRunPairTranscript(id, pairId, sinceSeq, limit, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['HumanInTheLoopApi.getRunPairTranscript']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -744,6 +1089,35 @@ export const HumanInTheLoopApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         *
+         * @summary Send Run Pair Message
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} pairId
+         * @param {PairMessageRequest} pairMessageRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async sendRunPairMessage(id: string, pairId: string, pairMessageRequest: PairMessageRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PairMessageRecord>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.sendRunPairMessage(id, pairId, pairMessageRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['HumanInTheLoopApi.sendRunPairMessage']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Starts pairing with exactly one selected active API-mode agent target.
+         * @summary Start Run Pair
+         * @param {string} id Unique run identifier (ULID).
+         * @param {PairStartRequest} pairStartRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async startRunPair(id: string, pairStartRequest: PairStartRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PairRecord>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.startRunPair(id, pairStartRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['HumanInTheLoopApi.startRunPair']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Send a mid-run steering message to the live agent session(s) of a running run. Set `interrupt=true` to atomically interrupt the active steerable agent round first, then deliver this message as the next user turn. Without `interrupt=true`, the message is appended to the steering queue and may buffer until the next steerable agent session.
          * @summary Steer Run
          * @param {string} id Unique run identifier (ULID).
@@ -803,6 +1177,17 @@ export const HumanInTheLoopApiFactory = function (configuration?: Configuration,
             return localVarFp.createSandboxVncPreview(id, options).then((request) => request(axios, basePath));
         },
         /**
+         *
+         * @summary End Run Pair
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} pairId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        endRunPair(id: string, pairId: string, options?: RawAxiosRequestConfig): AxiosPromise<PairRecord> {
+            return localVarFp.endRunPair(id, pairId, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Generates a preview URL for a port exposed by the run\'s sandbox environment.
          * @summary Preview URL
          * @param {string} id Unique run identifier (ULID).
@@ -812,6 +1197,40 @@ export const HumanInTheLoopApiFactory = function (configuration?: Configuration,
          */
         generatePreviewUrl(id: string, previewUrlRequest: PreviewUrlRequest, options?: RawAxiosRequestConfig): AxiosPromise<PreviewUrlResponse> {
             return localVarFp.generatePreviewUrl(id, previewUrlRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get Run Pair
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} pairId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getRunPair(id: string, pairId: string, options?: RawAxiosRequestConfig): AxiosPromise<PairRecord> {
+            return localVarFp.getRunPair(id, pairId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get Run Pair Status
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getRunPairStatus(id: string, options?: RawAxiosRequestConfig): AxiosPromise<RunPairStatusResponse> {
+            return localVarFp.getRunPairStatus(id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get Run Pair Transcript
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} pairId
+         * @param {number} [sinceSeq] First event sequence number to include.
+         * @param {number} [limit] Maximum number of events to return.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getRunPairTranscript(id: string, pairId: string, sinceSeq?: number, limit?: number, options?: RawAxiosRequestConfig): AxiosPromise<PairTranscriptResponse> {
+            return localVarFp.getRunPairTranscript(id, pairId, sinceSeq, limit, options).then((request) => request(axios, basePath));
         },
         /**
          * Downloads a file from the run\'s sandbox environment.
@@ -891,6 +1310,29 @@ export const HumanInTheLoopApiFactory = function (configuration?: Configuration,
             return localVarFp.retrieveRunSandbox(id, options).then((request) => request(axios, basePath));
         },
         /**
+         *
+         * @summary Send Run Pair Message
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} pairId
+         * @param {PairMessageRequest} pairMessageRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        sendRunPairMessage(id: string, pairId: string, pairMessageRequest: PairMessageRequest, options?: RawAxiosRequestConfig): AxiosPromise<PairMessageRecord> {
+            return localVarFp.sendRunPairMessage(id, pairId, pairMessageRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Starts pairing with exactly one selected active API-mode agent target.
+         * @summary Start Run Pair
+         * @param {string} id Unique run identifier (ULID).
+         * @param {PairStartRequest} pairStartRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        startRunPair(id: string, pairStartRequest: PairStartRequest, options?: RawAxiosRequestConfig): AxiosPromise<PairRecord> {
+            return localVarFp.startRunPair(id, pairStartRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Send a mid-run steering message to the live agent session(s) of a running run. Set `interrupt=true` to atomically interrupt the active steerable agent round first, then deliver this message as the next user turn. Without `interrupt=true`, the message is appended to the steering queue and may buffer until the next steerable agent session.
          * @summary Steer Run
          * @param {string} id Unique run identifier (ULID).
@@ -944,6 +1386,18 @@ export class HumanInTheLoopApi extends BaseAPI {
     }
 
     /**
+     *
+     * @summary End Run Pair
+     * @param {string} id Unique run identifier (ULID).
+     * @param {string} pairId
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public endRunPair(id: string, pairId: string, options?: RawAxiosRequestConfig) {
+        return HumanInTheLoopApiFp(this.configuration).endRunPair(id, pairId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Generates a preview URL for a port exposed by the run\'s sandbox environment.
      * @summary Preview URL
      * @param {string} id Unique run identifier (ULID).
@@ -953,6 +1407,43 @@ export class HumanInTheLoopApi extends BaseAPI {
      */
     public generatePreviewUrl(id: string, previewUrlRequest: PreviewUrlRequest, options?: RawAxiosRequestConfig) {
         return HumanInTheLoopApiFp(this.configuration).generatePreviewUrl(id, previewUrlRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get Run Pair
+     * @param {string} id Unique run identifier (ULID).
+     * @param {string} pairId
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getRunPair(id: string, pairId: string, options?: RawAxiosRequestConfig) {
+        return HumanInTheLoopApiFp(this.configuration).getRunPair(id, pairId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get Run Pair Status
+     * @param {string} id Unique run identifier (ULID).
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getRunPairStatus(id: string, options?: RawAxiosRequestConfig) {
+        return HumanInTheLoopApiFp(this.configuration).getRunPairStatus(id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get Run Pair Transcript
+     * @param {string} id Unique run identifier (ULID).
+     * @param {string} pairId
+     * @param {number} [sinceSeq] First event sequence number to include.
+     * @param {number} [limit] Maximum number of events to return.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getRunPairTranscript(id: string, pairId: string, sinceSeq?: number, limit?: number, options?: RawAxiosRequestConfig) {
+        return HumanInTheLoopApiFp(this.configuration).getRunPairTranscript(id, pairId, sinceSeq, limit, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -1040,6 +1531,31 @@ export class HumanInTheLoopApi extends BaseAPI {
     }
 
     /**
+     *
+     * @summary Send Run Pair Message
+     * @param {string} id Unique run identifier (ULID).
+     * @param {string} pairId
+     * @param {PairMessageRequest} pairMessageRequest
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public sendRunPairMessage(id: string, pairId: string, pairMessageRequest: PairMessageRequest, options?: RawAxiosRequestConfig) {
+        return HumanInTheLoopApiFp(this.configuration).sendRunPairMessage(id, pairId, pairMessageRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Starts pairing with exactly one selected active API-mode agent target.
+     * @summary Start Run Pair
+     * @param {string} id Unique run identifier (ULID).
+     * @param {PairStartRequest} pairStartRequest
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public startRunPair(id: string, pairStartRequest: PairStartRequest, options?: RawAxiosRequestConfig) {
+        return HumanInTheLoopApiFp(this.configuration).startRunPair(id, pairStartRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Send a mid-run steering message to the live agent session(s) of a running run. Set `interrupt=true` to atomically interrupt the active steerable agent round first, then deliver this message as the next user turn. Without `interrupt=true`, the message is appended to the steering queue and may buffer until the next steerable agent session.
      * @summary Steer Run
      * @param {string} id Unique run identifier (ULID).
@@ -1064,4 +1580,3 @@ export class HumanInTheLoopApi extends BaseAPI {
         return HumanInTheLoopApiFp(this.configuration).submitRunAnswer(id, qid, submitAnswerRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }
-

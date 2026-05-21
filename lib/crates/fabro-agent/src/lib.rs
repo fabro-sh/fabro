@@ -20,6 +20,7 @@ pub mod session;
 pub mod skills;
 pub mod subagent;
 pub mod tool_execution;
+pub mod tool_permissions;
 pub mod tool_registry;
 pub mod tools;
 pub mod truncation;

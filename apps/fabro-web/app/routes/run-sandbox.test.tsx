@@ -182,6 +182,24 @@ describe("formatBytesAsMemory", () => {
   test("falls back to mebibytes when below a gibibyte", () => {
     expect(formatBytesAsMemory(512 * 1024 * 1024)).toBe("512 MiB");
   });
+
+  test("falls back to kibibytes when below a mebibyte", () => {
+    expect(formatBytesAsMemory(4 * 1024)).toBe("4 KiB");
+    expect(formatBytesAsMemory(1536)).toBe("1.5 KiB");
+  });
+
+  test("renders raw bytes when below a kibibyte", () => {
+    expect(formatBytesAsMemory(742)).toBe("742 B");
+  });
+
+  test("rounds to whole units when fractionDigits is 0", () => {
+    expect(formatBytesAsMemory(51.8 * 1024 * 1024 * 1024, 0)).toBe("52 GiB");
+    expect(formatBytesAsMemory(1536, 0)).toBe("2 KiB");
+  });
+
+  test("groups large values with thousands separators", () => {
+    expect(formatBytesAsMemory(2173 * 1024 * 1024 * 1024, 0)).toBe("2,173 GiB");
+  });
 });
 
 describe("RunSandbox route", () => {

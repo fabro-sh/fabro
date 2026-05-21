@@ -9,7 +9,7 @@ import { StopIcon } from "@heroicons/react/24/outline";
  */
 export default function SidebarComposer() {
   return (
-    <ComposerPrimitive.Root className="m-3 flex w-auto items-end gap-2 rounded-2xl bg-panel-alt/80 px-3 py-2 shadow-md shadow-black/30 ring-1 ring-line-strong backdrop-blur-sm focus-within:ring-teal-500/40">
+    <ComposerPrimitive.Root className="my-3 flex w-auto items-end gap-2 rounded-2xl bg-panel-alt/80 px-3 py-2 shadow-md shadow-black/30 ring-1 ring-line-strong backdrop-blur-sm focus-within:ring-teal-500/40">
       <ComposerPrimitive.Input
         rows={1}
         autoFocus

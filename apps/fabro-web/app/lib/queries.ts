@@ -13,6 +13,7 @@ import type {
   PaginatedRunStageList,
   PaginatedWorkflowListResponse,
   ProviderList,
+  PullRequestResponse,
   RunArtifactListResponse,
   RunBilling,
   RunProjection,
@@ -287,6 +288,15 @@ export function useRunQuestions(id: string | undefined, enabled: boolean) {
       const payload = await apiNullableData(() => humanInTheLoopApi.listRunQuestions(id!, 25, 0));
       return payload?.data ?? [];
     },
+  );
+}
+
+// Fetches live pull request details from GitHub. The header popover mounts the
+// consumer of this hook only on hover, so the request stays lazy.
+export function useRunPullRequest(id: string | undefined) {
+  return useSWR<PullRequestResponse | null>(
+    id ? queryKeys.runs.pullRequest(id) : null,
+    () => apiNullableData(() => runsApi.getRunPullRequest(id!)),
   );
 }
 

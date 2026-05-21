@@ -10,11 +10,11 @@ import {
   formatCpuCores,
 } from "../lib/format";
 import { useRunSandboxDetails } from "../lib/queries";
+import { SANDBOX_STATE_DISPLAY } from "../lib/sandbox-state";
 import type {
   SandboxDetails,
   SandboxNetwork,
   SandboxResources,
-  SandboxState,
 } from "@qltysh/fabro-api-client";
 import FilesystemPanel from "./run-sandbox/filesystem-panel";
 import ServicesPanel from "./run-sandbox/services-panel";
@@ -39,22 +39,6 @@ function vncTabAvailable(provider: string | null | undefined): boolean {
 }
 
 const EMPTY_VALUE = "—";
-
-const STATE_DISPLAY: Record<SandboxState, { label: string; dot: string; text: string }> = {
-  unknown: { label: "Unknown", dot: "bg-fg-muted", text: "text-fg-muted" },
-  provisioning: { label: "Provisioning", dot: "bg-amber", text: "text-amber" },
-  starting: { label: "Starting", dot: "bg-amber", text: "text-amber" },
-  running: { label: "Running", dot: "bg-teal-500", text: "text-teal-500" },
-  stopping: { label: "Stopping", dot: "bg-amber", text: "text-amber" },
-  stopped: { label: "Stopped", dot: "bg-fg-muted", text: "text-fg-muted" },
-  paused: { label: "Paused", dot: "bg-amber", text: "text-amber" },
-  deleting: { label: "Deleting", dot: "bg-amber", text: "text-amber" },
-  deleted: { label: "Deleted", dot: "bg-coral", text: "text-coral" },
-  archived: { label: "Archived", dot: "bg-fg-muted", text: "text-fg-muted" },
-  restoring: { label: "Restoring", dot: "bg-amber", text: "text-amber" },
-  resizing: { label: "Resizing", dot: "bg-amber", text: "text-amber" },
-  error: { label: "Error", dot: "bg-coral", text: "text-coral" },
-};
 
 function nullable(value: string | null | undefined): string {
   return value && value.length > 0 ? value : EMPTY_VALUE;
@@ -149,7 +133,7 @@ function Panel({ title, children }: PanelProps) {
 }
 
 function StatusStrip({ details }: { details: SandboxDetails }) {
-  const display = STATE_DISPLAY[details.state] ?? STATE_DISPLAY.unknown;
+  const display = SANDBOX_STATE_DISPLAY[details.state] ?? SANDBOX_STATE_DISPLAY.unknown;
   const provider = details.sandbox.provider;
   const showNative =
     details.native_state &&
