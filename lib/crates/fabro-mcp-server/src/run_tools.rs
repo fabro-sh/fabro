@@ -9,6 +9,7 @@ mod events;
 mod gather;
 mod interact;
 mod manifest;
+mod pair;
 mod search;
 
 pub(crate) use common::{ToolError, error_result, success_result};
@@ -18,4 +19,5 @@ pub(crate) use gather::{FabroRunGatherParams, ValidatedGatherRuns, gather_runs, 
 pub(crate) use interact::{
     FabroRunInteractParams, ValidatedInteractRun, interact_run, interact_run_text,
 };
+pub(crate) use pair::{FabroRunPairParams, ValidatedPairRun, pair_run, pair_run_text};
 pub(crate) use search::{FabroRunSearchParams, ValidatedSearchRuns, search_runs, search_runs_text};

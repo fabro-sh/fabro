@@ -14,9 +14,8 @@ use fabro_model::{Model, ModelTestMode, ProviderId};
 use fabro_types::settings::run::MergeStrategy;
 use fabro_types::{
     ArtifactUpload, EventEnvelope, PairId, PairMessageRecord, PairMessageRequest, PairRecord,
-    PairStartRequest, PairTargetSelector, PairTranscriptResponse, Run, RunBlobId, RunEvent,
-    RunEventDetailResponse, RunId, RunPairStatusResponse, RunProjection, SessionId, SessionRecord,
-    StageId,
+    PairStartRequest, PairTranscriptResponse, Run, RunBlobId, RunEvent, RunEventDetailResponse,
+    RunId, RunPairStatusResponse, RunProjection, SessionId, SessionRecord, StageId,
 };
 use fabro_util::exit::{ErrorExt, ExitClass};
 use futures::future::BoxFuture;
@@ -966,12 +965,8 @@ impl Client {
         convert_type(response.into_inner())
     }
 
-    pub async fn start_run_pair(
-        &self,
-        run_id: &RunId,
-        target: PairTargetSelector,
-    ) -> Result<PairRecord> {
-        let body = PairStartRequest { target };
+    pub async fn start_run_pair(&self, run_id: &RunId, stage_id: StageId) -> Result<PairRecord> {
+        let body = PairStartRequest { stage_id };
         let response = self
             .send_api(|client| {
                 let body = body.clone();

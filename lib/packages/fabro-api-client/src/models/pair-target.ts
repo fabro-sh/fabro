@@ -16,10 +16,5 @@
 
 export interface PairTarget {
     'stage_id': string;
-    'node_id': string;
     'node_label': string;
-    'visit': number;
-    'agent_session_id': string;
-    'provider'?: string;
-    'model'?: string;
 }

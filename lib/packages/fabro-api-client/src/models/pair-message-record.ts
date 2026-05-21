@@ -13,9 +13,6 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { PairTargetSelector } from './pair-target-selector';
 
 export interface PairMessageRecord {
     /**
@@ -28,7 +25,7 @@ export interface PairMessageRecord {
      */
     'pair_id': string;
     'run_id': string;
-    'target': PairTargetSelector;
+    'stage_id': string;
     'text': string;
     'accepted_at': string;
 }

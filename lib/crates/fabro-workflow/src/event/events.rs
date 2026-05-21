@@ -792,7 +792,12 @@ impl Event {
             Self::RunPairStarted {
                 pair_id, target, ..
             } => {
-                info!(%pair_id, stage_id = %target.stage_id, session_id = target.agent_session_id, "Run pairing started");
+                info!(
+                    %pair_id,
+                    stage_id = %target.stage_id,
+                    node_label = %target.node_label,
+                    "Run pairing started",
+                );
             }
             Self::RunPairEnded {
                 pair_id, reason, ..

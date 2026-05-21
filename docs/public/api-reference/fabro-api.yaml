@@ -4912,48 +4912,19 @@ components:
       type: string
       enum: [active, ended, failed]
 
-    PairTargetSelector:
-      type: object
-      required:
-        - stage_id
-        - agent_session_id
-      properties:
-        stage_id:
-          type: string
-          example: code@1
-        agent_session_id:
-          type: string
-          example: ses_01
-
     PairTarget:
       type: object
+      additionalProperties: false
       required:
         - stage_id
-        - node_id
         - node_label
-        - visit
-        - agent_session_id
       properties:
         stage_id:
           type: string
           example: code@1
-        node_id:
-          type: string
-          example: code
         node_label:
           type: string
           example: Code
-        visit:
-          type: integer
-          minimum: 1
-          example: 1
-        agent_session_id:
-          type: string
-          example: ses_01
-        provider:
-          type: string
-        model:
-          type: string
 
     PairRecord:
       type: object
@@ -5000,11 +4971,13 @@ components:
 
     PairStartRequest:
       type: object
+      additionalProperties: false
       required:
-        - target
+        - stage_id
       properties:
-        target:
-          $ref: "#/components/schemas/PairTargetSelector"
+        stage_id:
+          type: string
+          example: code@1
 
     PairMessageRequest:
       type: object
@@ -5024,7 +4997,7 @@ components:
         - message_id
         - pair_id
         - run_id
-        - target
+        - stage_id
         - text
         - accepted_at
       properties:
@@ -5036,8 +5009,9 @@ components:
           $ref: "#/components/schemas/PairId"
         run_id:
           type: string
-        target:
-          $ref: "#/components/schemas/PairTargetSelector"
+        stage_id:
+          type: string
+          example: code@1
         text:
           type: string
         accepted_at:
@@ -5130,14 +5104,23 @@ components:
 
     PairTranscriptAssistantMessage:
       type: object
-      required: [kind, seq, event_id, ts, pair_id, target, text, model, tool_call_count]
+      additionalProperties: false
+      required:
+        - kind
+        - seq
+        - event_id
+        - ts
+        - pair_id
+        - target
+        - text
+        - tool_call_count
       properties:
         kind:
           type: string
           enum: [assistant_message]
         seq:
           type: integer
-          minimum: 1
+          format: uint32
         event_id:
           type: string
         ts:
@@ -5149,16 +5132,6 @@ components:
           $ref: "#/components/schemas/PairTarget"
         text:
           type: string
-        model:
-          type: object
-          required: [provider, model_id]
-          properties:
-            provider:
-              type: string
-            model_id:
-              type: string
-            speed:
-              type: ["string", "null"]
         tool_call_count:
           type: integer
           minimum: 0

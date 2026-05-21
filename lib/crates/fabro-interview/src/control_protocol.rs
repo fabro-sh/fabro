@@ -199,7 +199,7 @@ impl From<WorkerControlAnswer> for Answer {
 
 #[cfg(test)]
 mod tests {
-    use fabro_types::{PairTarget, Principal, StageId, SystemActorKind, fixtures};
+    use fabro_types::{PairTarget, Principal, SystemActorKind, fixtures};
 
     use super::*;
 
@@ -274,18 +274,12 @@ mod tests {
 
     #[test]
     fn pair_start_round_trips_through_json() {
-        let stage_id = StageId::new("code", 1);
         let envelope = WorkerControlEnvelope::start_pair(
             fixtures::RUN_1,
             "01HZX6M29F1CD5YYMHT1F5D7WQ".parse().unwrap(),
             PairTarget {
-                stage_id:         stage_id.clone(),
-                node_id:          "code".to_string(),
-                node_label:       "Code".to_string(),
-                visit:            1,
-                agent_session_id: "ses_01".to_string(),
-                provider:         Some("openai".to_string()),
-                model:            Some("gpt-5.4".to_string()),
+                stage_id:   "code@1".parse().unwrap(),
+                node_label: "Code".to_string(),
             },
             Principal::System {
                 system_kind: SystemActorKind::Engine,
@@ -294,6 +288,18 @@ mod tests {
         let json = serde_json::to_string(&envelope).unwrap();
         let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, envelope);
+
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let target = &value["target"];
+        let target_text = target.to_string();
+        assert!(target_text.contains("stage_id"));
+        assert!(target_text.contains("node_label"));
+        assert!(!target_text.contains("agent_session_id"));
+        assert!(!target_text.contains("session_id"));
+        assert!(!target_text.contains("\"node_id\""));
+        assert!(!target_text.contains("\"visit\""));
+        assert!(!target_text.contains("provider"));
+        assert!(!target_text.contains("model"));
     }
 
     #[test]

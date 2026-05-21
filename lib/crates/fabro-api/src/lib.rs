@@ -36,7 +36,7 @@ pub mod types {
         DirtyStatus, EventEnvelope, ExecOutputTail, FailureCategory, FailureDetail,
         FailureSignature, GitContext, IdpIdentity, InterviewOption, InterviewQuestionRecord,
         PairId, PairMessageId, PairMessageRecord, PairMessageRequest, PairRecord, PairStartRequest,
-        PairStatus, PairTarget, PairTargetSelector, PairTranscriptEntry, PairTranscriptResponse,
+        PairStatus, PairTarget, PairTranscriptEntry, PairTranscriptResponse,
         PendingInterviewRecord, PreRunPushOutcome, Principal, PullRequest, PullRequestDetails,
         PullRequestDetailsStatus, PullRequestDetailsUnavailableReason, PullRequestLink,
         PullRequestMeta, PullRequestResponse, QuestionType, RepositoryRef, Run,

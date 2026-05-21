@@ -424,6 +424,7 @@ async fn stdio_server_initializes_and_lists_run_tools() {
         "fabro_run_events",
         "fabro_run_gather",
         "fabro_run_interact",
+        "fabro_run_pair",
         "fabro_run_search",
     ]);
     for (name, _, schema) in &tools {
@@ -505,7 +506,7 @@ async fn stdio_startup_and_list_tools_is_fast() {
     let start = std::time::Instant::now();
     let client = spawn_mcp_client(&context, &[]).await;
     let tools = client.list_tools().await.unwrap();
-    assert_eq!(tools.len(), 5);
+    assert_eq!(tools.len(), 6);
     assert!(start.elapsed() < std::time::Duration::from_secs(2));
     client
         .shutdown()
@@ -724,7 +725,7 @@ async fn mcp_missing_default_settings_reports_configure_first_error_and_stays_al
         error.contains("Cannot reach Fabro server: no settings.toml configured."),
         "{error}"
     );
-    assert_eq!(client.list_tools().await.unwrap().len(), 5);
+    assert_eq!(client.list_tools().await.unwrap().len(), 6);
     client
         .shutdown()
         .await
@@ -1219,7 +1220,7 @@ async fn mcp_gather_rejects_too_many_runs() {
     .await;
 
     assert!(error.contains("run_ids"), "{error}");
-    assert_eq!(client.list_tools().await.unwrap().len(), 5);
+    assert_eq!(client.list_tools().await.unwrap().len(), 6);
     client
         .shutdown()
         .await
@@ -1259,7 +1260,7 @@ async fn mcp_gather_rejects_invalid_timeout_values_before_auth() {
     );
     assert!(poll_error.contains("poll_interval_seconds"), "{poll_error}");
     assert!(!poll_error.contains("fabro auth login"), "{poll_error}");
-    assert_eq!(client.list_tools().await.unwrap().len(), 5);
+    assert_eq!(client.list_tools().await.unwrap().len(), 6);
     client
         .shutdown()
         .await
@@ -1314,7 +1315,7 @@ async fn mcp_interact_error_does_not_stop_server() {
     .await;
 
     assert!(error.contains("message"), "{error}");
-    assert_eq!(client.list_tools().await.unwrap().len(), 5);
+    assert_eq!(client.list_tools().await.unwrap().len(), 6);
     client
         .shutdown()
         .await
@@ -1486,7 +1487,7 @@ async fn mcp_create_validation_errors_happen_before_auth_or_network() {
     assert!(empty.contains("runs"), "{empty}");
     assert!(many.contains("runs"), "{many}");
     assert!(null.contains("decision"), "{null}");
-    assert_eq!(client.list_tools().await.unwrap().len(), 5);
+    assert_eq!(client.list_tools().await.unwrap().len(), 6);
     client
         .shutdown()
         .await
@@ -1511,7 +1512,7 @@ async fn mcp_interact_answer_validation_happens_before_auth_or_network() {
     .await;
 
     assert!(error.contains("option, options, text"), "{error}");
-    assert_eq!(client.list_tools().await.unwrap().len(), 5);
+    assert_eq!(client.list_tools().await.unwrap().len(), 6);
     client
         .shutdown()
         .await
@@ -1754,7 +1755,7 @@ async fn mcp_events_requires_action_specific_inputs_before_auth() {
     );
     assert!(search_error.contains("query"), "{search_error}");
     assert!(!search_error.contains("fabro auth login"), "{search_error}");
-    assert_eq!(client.list_tools().await.unwrap().len(), 5);
+    assert_eq!(client.list_tools().await.unwrap().len(), 6);
     client
         .shutdown()
         .await
@@ -2039,7 +2040,7 @@ async fn mcp_tool_auth_error_mentions_login() {
         error.contains("Run `fabro auth login` to authenticate."),
         "{error}"
     );
-    assert_eq!(client.list_tools().await.unwrap().len(), 5);
+    assert_eq!(client.list_tools().await.unwrap().len(), 6);
 
     client
         .shutdown()

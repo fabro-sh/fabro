@@ -13,10 +13,7 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { PairTargetSelector } from './pair-target-selector';
 
 export interface PairStartRequest {
-    'target': PairTargetSelector;
+    'stage_id': string;
 }

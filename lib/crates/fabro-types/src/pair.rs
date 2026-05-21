@@ -27,31 +27,9 @@ impl PairStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PairTargetSelector {
-    pub stage_id:         StageId,
-    pub agent_session_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PairTarget {
-    pub stage_id:         StageId,
-    pub node_id:          String,
-    pub node_label:       String,
-    pub visit:            u32,
-    pub agent_session_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider:         Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model:            Option<String>,
-}
-
-impl PairTarget {
-    pub fn selector(&self) -> PairTargetSelector {
-        PairTargetSelector {
-            stage_id:         self.stage_id.clone(),
-            agent_session_id: self.agent_session_id.clone(),
-        }
-    }
+    pub stage_id:   StageId,
+    pub node_label: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -74,7 +52,7 @@ pub struct RunPairStatusResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PairStartRequest {
-    pub target: PairTargetSelector,
+    pub stage_id: StageId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,7 +69,7 @@ pub struct PairMessageRecord {
     pub client_message_id: Option<String>,
     pub pair_id:           PairId,
     pub run_id:            RunId,
-    pub target:            PairTargetSelector,
+    pub stage_id:          StageId,
     pub text:              String,
     pub accepted_at:       DateTime<Utc>,
 }
@@ -157,16 +135,7 @@ pub struct PairTranscriptAssistantMessage {
     pub pair_id:         PairId,
     pub target:          PairTarget,
     pub text:            String,
-    pub model:           PairTranscriptModel,
     pub tool_call_count: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PairTranscriptModel {
-    pub provider: String,
-    pub model_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub speed:    Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

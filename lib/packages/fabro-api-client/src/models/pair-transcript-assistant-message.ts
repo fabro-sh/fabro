@@ -16,9 +16,6 @@
 // May contain unused imports in some cases
 // @ts-ignore
 import type { PairTarget } from './pair-target';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { PairTranscriptAssistantMessageModel } from './pair-transcript-assistant-message-model';
 
 export interface PairTranscriptAssistantMessage {
     'kind': PairTranscriptAssistantMessageKindEnum;
@@ -31,7 +28,6 @@ export interface PairTranscriptAssistantMessage {
     'pair_id': string;
     'target': PairTarget;
     'text': string;
-    'model': PairTranscriptAssistantMessageModel;
     'tool_call_count': number;
 }
 

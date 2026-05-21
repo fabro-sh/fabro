@@ -5,15 +5,15 @@ use fabro_api::types::{
     PairMessageRecord as ApiPairMessageRecord, PairMessageRequest as ApiPairMessageRequest,
     PairRecord as ApiPairRecord, PairStartRequest as ApiPairStartRequest,
     PairStatus as ApiPairStatus, PairTarget as ApiPairTarget,
-    PairTargetSelector as ApiPairTargetSelector, PairTranscriptEntry as ApiPairTranscriptEntry,
+    PairTranscriptEntry as ApiPairTranscriptEntry,
     PairTranscriptResponse as ApiPairTranscriptResponse,
     RunEventDetailResponse as ApiRunEventDetailResponse,
     RunPairStatusResponse as ApiRunPairStatusResponse,
 };
 use fabro_types::{
     PairId, PairMessageId, PairMessageRecord, PairMessageRequest, PairRecord, PairStartRequest,
-    PairStatus, PairTarget, PairTargetSelector, PairTranscriptEntry, PairTranscriptResponse,
-    RunEventDetailResponse, RunPairStatusResponse, fixtures,
+    PairStatus, PairTarget, PairTranscriptEntry, PairTranscriptResponse, RunEventDetailResponse,
+    RunPairStatusResponse, fixtures,
 };
 use serde_json::{Value, json};
 
@@ -22,7 +22,6 @@ fn pair_api_reuses_canonical_types() {
     assert_same_type::<ApiPairId, PairId>();
     assert_same_type::<ApiPairMessageId, PairMessageId>();
     assert_same_type::<ApiPairStatus, PairStatus>();
-    assert_same_type::<ApiPairTargetSelector, PairTargetSelector>();
     assert_same_type::<ApiPairTarget, PairTarget>();
     assert_same_type::<ApiPairRecord, PairRecord>();
     assert_same_type::<ApiRunPairStatusResponse, RunPairStatusResponse>();
@@ -32,6 +31,44 @@ fn pair_api_reuses_canonical_types() {
     assert_same_type::<ApiPairTranscriptEntry, PairTranscriptEntry>();
     assert_same_type::<ApiPairTranscriptResponse, PairTranscriptResponse>();
     assert_same_type::<ApiRunEventDetailResponse, RunEventDetailResponse>();
+}
+
+#[test]
+fn pair_target_omits_internal_fields() {
+    let target = PairTarget {
+        stage_id:   "code@1".parse().unwrap(),
+        node_label: "Code".to_string(),
+    };
+    let serialized = serde_json::to_value(&target).unwrap();
+    assert_eq!(
+        serialized,
+        json!({
+            "stage_id": "code@1",
+            "node_label": "Code"
+        })
+    );
+    assert!(serialized.get("agent_session_id").is_none());
+    assert!(serialized.get("session_id").is_none());
+    assert!(serialized.get("node_id").is_none());
+    assert!(serialized.get("visit").is_none());
+    assert!(serialized.get("provider").is_none());
+    assert!(serialized.get("model").is_none());
+}
+
+#[test]
+fn pair_start_request_only_carries_stage_id() {
+    let request = PairStartRequest {
+        stage_id: "code@1".parse().unwrap(),
+    };
+    let serialized = serde_json::to_value(&request).unwrap();
+    assert_eq!(
+        serialized,
+        json!({
+            "stage_id": "code@1"
+        })
+    );
+    assert!(serialized.get("agent_session_id").is_none());
+    assert!(serialized.get("target").is_none());
 }
 
 #[test]
@@ -54,10 +91,7 @@ fn pair_message_record_round_trips_json() {
         "client_message_id": "client-1",
         "pair_id": "01HZX6M29F1CD5YYMHT1F5D7WQ",
         "run_id": fixtures::RUN_1,
-        "target": {
-            "stage_id": "code@1",
-            "agent_session_id": "ses_01"
-        },
+        "stage_id": "code@1",
         "text": "Can you inspect the failing test?",
         "accepted_at": "2026-05-18T12:01:00Z"
     }));
@@ -139,12 +173,7 @@ fn run_event_detail_response_round_trips_json() {
 fn pair_target_json() -> Value {
     json!({
         "stage_id": "code@1",
-        "node_id": "code",
-        "node_label": "Code",
-        "visit": 1,
-        "agent_session_id": "ses_01",
-        "provider": "openai",
-        "model": "gpt-5.3"
+        "node_label": "Code"
     })
 }
 

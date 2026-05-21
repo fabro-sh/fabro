@@ -12,9 +12,9 @@ use fabro_types::{
     EventBody, PairId, PairMessageId, PairMessageRecord, PairMessageRequest, PairRecord,
     PairStartRequest, PairStatus, PairTarget, PairTranscriptAssistantMessage,
     PairTranscriptDetailRef, PairTranscriptEntry, PairTranscriptError, PairTranscriptMeta,
-    PairTranscriptModel, PairTranscriptResponse, PairTranscriptSystemMessage,
-    PairTranscriptToolCall, PairTranscriptToolStatus, PairTranscriptUserMessage,
-    PairTranscriptWarning, Principal, RunId,
+    PairTranscriptResponse, PairTranscriptSystemMessage, PairTranscriptToolCall,
+    PairTranscriptToolStatus, PairTranscriptUserMessage, PairTranscriptWarning, Principal, RunId,
+    StageId,
 };
 use fabro_workflow::run_status::RunStatus;
 use tokio::time::timeout;
@@ -95,7 +95,7 @@ async fn start_pair(
         }
     }
 
-    let (target, transport) = match pair_target_and_transport(state.as_ref(), &id, &req.target) {
+    let (target, transport) = match pair_target_and_transport(state.as_ref(), &id, &req.stage_id) {
         Ok(value) => value,
         Err(response) => return response,
     };
@@ -325,11 +325,6 @@ fn transcript_entry_from_event(
                 pair_id:         pair.pair_id,
                 target:          pair.target.clone(),
                 text:            props.text.clone(),
-                model:           PairTranscriptModel {
-                    provider: props.model.provider.to_string(),
-                    model_id: props.model.model_id.clone(),
-                    speed:    props.model.speed.map(|speed| speed.to_string()),
-                },
                 tool_call_count: props.tool_call_count,
             }),
         ),
@@ -407,8 +402,7 @@ fn transcript_entry_from_event(
 }
 
 fn event_matches_pair_target(pair: &PairRecord, event: &fabro_types::RunEvent) -> bool {
-    event.session_id.as_deref() == Some(pair.target.agent_session_id.as_str())
-        && event.stage_id.as_ref() == Some(&pair.target.stage_id)
+    event.stage_id.as_ref() == Some(&pair.target.stage_id)
 }
 
 fn compact_summary(tool_name: &str, value: &serde_json::Value, is_error: bool) -> String {
@@ -457,25 +451,19 @@ fn live_pair_targets(state: &AppState, id: &RunId) -> Vec<PairTarget> {
 fn pair_target_and_transport(
     state: &AppState,
     id: &RunId,
-    selector: &fabro_types::PairTargetSelector,
+    stage_id: &StageId,
 ) -> Result<(PairTarget, Option<super::super::RunAnswerTransport>), Response> {
     let runs = state.runs.lock().expect("runs lock poisoned");
     let Some(run) = runs.get(id) else {
         return Err(ApiError::not_found("Run not found.").into_response());
     };
     reject_unpairable_status(run.status)?;
-    let Some(target) = run.active_api_targets.get(&selector.stage_id) else {
+    let Some(target) = run.active_api_targets.get(stage_id) else {
         return Err(pair_conflict(
             "Requested pair target is not active.",
             "pair_target_not_active",
         ));
     };
-    if target.agent_session_id != selector.agent_session_id {
-        return Err(pair_conflict(
-            "Requested pair target is not active.",
-            "pair_target_not_active",
-        ));
-    }
     Ok((target.clone(), run.answer_transport.clone()))
 }
 
@@ -630,7 +618,7 @@ async fn wait_for_pair_message_record(
                         client_message_id: props.client_message_id.clone(),
                         pair_id:           props.pair_id,
                         run_id:            *id,
-                        target:            pair.record.target.selector(),
+                        stage_id:          pair.record.target.stage_id.clone(),
                         text:              props.text.clone(),
                         accepted_at:       envelope.event.ts,
                     });
@@ -904,7 +892,7 @@ mod tests {
     use crate::test_support::{build_test_router, test_app_state};
 
     #[test]
-    fn transcript_projection_includes_matching_assistant_messages() {
+    fn transcript_projection_matches_by_stage_id() {
         let pair = PairRecord {
             pair_id:        "01HZX6M29F1CD5YYMHT1F5D7WQ".parse().unwrap(),
             run_id:         fixtures::RUN_1,
@@ -913,13 +901,8 @@ mod tests {
             ended_at:       None,
             failure_reason: None,
             target:         PairTarget {
-                stage_id:         StageId::new("code", 1),
-                node_id:          "code".to_string(),
-                node_label:       "Code".to_string(),
-                visit:            1,
-                agent_session_id: "ses_01".to_string(),
-                provider:         Some("openai".to_string()),
-                model:            Some("gpt-5.4".to_string()),
+                stage_id:   StageId::new("code", 1),
+                node_label: "Code".to_string(),
             },
         };
 
@@ -945,7 +928,7 @@ mod tests {
         .unwrap();
 
         assert!(matches!(
-            entry,
+            &entry,
             PairTranscriptEntry::AssistantMessage(PairTranscriptAssistantMessage {
                 text,
                 ..
@@ -957,10 +940,10 @@ mod tests {
                 &pair,
                 &envelope(
                     8,
-                    Some("other"),
-                    Some(StageId::new("code", 1)),
+                    Some("ses_01"),
+                    Some(StageId::new("other", 1)),
                     EventBody::AgentMessage(AgentMessageProps {
-                        text:            "wrong session".to_string(),
+                        text:            "wrong stage".to_string(),
                         model:           ModelRef {
                             provider: ProviderId::new("openai"),
                             model_id: "gpt-5.4".to_string(),
@@ -974,6 +957,12 @@ mod tests {
             )
             .is_none()
         );
+
+        let serialized = serde_json::to_value(&entry).unwrap();
+        let serialized_text = serialized.to_string();
+        assert!(!serialized_text.contains("agent_session_id"));
+        assert!(!serialized_text.contains("provider"));
+        assert!(!serialized_text.contains("\"model\""));
     }
 
     #[tokio::test]
@@ -983,13 +972,8 @@ mod tests {
         let run_id = RunId::new();
         let pair_id = PairId::new();
         let target = PairTarget {
-            stage_id:         StageId::new("code", 1),
-            node_id:          "code".to_string(),
-            node_label:       "Code".to_string(),
-            visit:            1,
-            agent_session_id: "ses_01".to_string(),
-            provider:         Some("openai".to_string()),
-            model:            Some("gpt-5.4".to_string()),
+            stage_id:   StageId::new("code", 1),
+            node_label: "Code".to_string(),
         };
         let run_store = state
             .store_ref()
@@ -1013,9 +997,9 @@ mod tests {
                 &run_store,
                 &run_id,
                 &workflow_event::Event::AgentPairUserMessage {
-                    node_id: target.node_id.clone(),
-                    visit: target.visit,
-                    session_id: target.agent_session_id.clone(),
+                    node_id: target.stage_id.node_id().to_string(),
+                    visit: target.stage_id.visit(),
+                    session_id: "ses_01".to_string(),
                     pair_id,
                     message_id: PairMessageId::new(),
                     client_message_id: None,

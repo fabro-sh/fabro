@@ -78,7 +78,7 @@ fn run_event_round_trips_run_steer() {
 
 #[test]
 fn run_event_round_trips_pair_lifecycle_events() {
-    assert_run_event_round_trip(json!({
+    let value = json!({
         "id": "evt_pair_started",
         "ts": "2026-05-18T12:00:00Z",
         "run_id": fixtures::RUN_1,
@@ -88,15 +88,24 @@ fn run_event_round_trips_pair_lifecycle_events() {
             "pair_id": "01HZX6M29F1CD5YYMHT1F5D7WQ",
             "target": {
                 "stage_id": "code@1",
-                "node_id": "code",
-                "node_label": "Code",
-                "visit": 1,
-                "agent_session_id": "ses_01",
-                "provider": "openai",
-                "model": "gpt-5.3"
+                "node_label": "Code"
             }
         }
-    }));
+    });
+
+    let event: RunEvent = serde_json::from_value(value.clone()).unwrap();
+    let serialized = serde_json::to_value(&event).unwrap();
+    assert_eq!(serialized, value);
+
+    let body = &serialized["properties"];
+    let body_text = body.to_string();
+    assert!(body_text.contains("stage_id"));
+    assert!(!body_text.contains("agent_session_id"));
+    assert!(!body_text.contains("session_id"));
+    assert!(!body_text.contains("provider"));
+    assert!(!body_text.contains("model"));
+    assert!(!body_text.contains("\"node_id\""));
+    assert!(!body_text.contains("\"visit\""));
 
     assert_run_event_round_trip(json!({
         "id": "evt_pair_ended",

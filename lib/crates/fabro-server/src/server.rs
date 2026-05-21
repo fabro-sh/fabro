@@ -2588,19 +2588,11 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
                         managed_run
                             .active_api_targets
                             .insert(stage_id.clone(), PairTarget {
-                                stage_id:         stage_id.clone(),
-                                node_id:          event
-                                    .node_id
-                                    .clone()
-                                    .unwrap_or_else(|| stage_id.node_id().to_string()),
-                                node_label:       event
+                                stage_id:   stage_id.clone(),
+                                node_label: event
                                     .node_label
                                     .clone()
                                     .unwrap_or_else(|| stage_id.node_id().to_string()),
-                                visit:            stage_id.visit(),
-                                agent_session_id: session_id.clone(),
-                                provider:         props.provider.clone(),
-                                model:            props.model.clone(),
                             });
                     }
                 } else {
@@ -2622,13 +2614,7 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
                     .is_some_and(|current| current == session_id)
                 {
                     managed_run.active_steerable_stages.remove(stage_id);
-                    if managed_run
-                        .active_api_targets
-                        .get(stage_id)
-                        .is_some_and(|target| target.agent_session_id == *session_id)
-                    {
-                        managed_run.active_api_targets.remove(stage_id);
-                    }
+                    managed_run.active_api_targets.remove(stage_id);
                 }
                 if managed_run
                     .active_non_steerable_stages

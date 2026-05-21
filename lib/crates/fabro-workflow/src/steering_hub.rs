@@ -91,7 +91,8 @@ struct ActiveEntry {
 
 #[derive(Debug, Clone)]
 struct ActivePair {
-    record: PairRecord,
+    record:     PairRecord,
+    session_id: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -404,12 +405,13 @@ impl SteeringHub {
         let Some(entry) = active.get(&target.stage_id) else {
             return Err(PairControlError::TargetNotActive);
         };
-        if entry.session_id != target.agent_session_id {
-            return Err(PairControlError::TargetNotActive);
-        }
         let Some(pair_handle) = entry.pair_handle.as_ref() else {
             return Err(PairControlError::TargetNotActive);
         };
+        let session_id = entry.session_id.clone();
+        let interrupt_handle = Arc::clone(&entry.handle);
+        let pair_handle = pair_handle.clone();
+        drop(active);
 
         let mut active_pair = self.active_pair.lock().expect("active pair lock poisoned");
         if active_pair.is_some() {
@@ -441,17 +443,18 @@ impl SteeringHub {
             actor: actor.clone(),
         });
 
-        entry.handle.interrupt(actor);
+        interrupt_handle.interrupt(actor);
         self.emitter.emit(&Event::AgentPairSystemMessage {
-            node_id: record.target.node_id.clone(),
-            visit: record.target.visit,
-            session_id: record.target.agent_session_id.clone(),
+            node_id: record.target.stage_id.node_id().to_string(),
+            visit: record.target.stage_id.visit(),
+            session_id: session_id.clone(),
             pair_id,
             kind: PairSystemMessageKind::HumanJoined,
             text: text.to_string(),
         });
         *active_pair = Some(ActivePair {
             record: record.clone(),
+            session_id,
         });
         Ok(record)
     }
@@ -475,12 +478,13 @@ impl SteeringHub {
             return Err(PairControlError::PairNotActive);
         }
 
-        let active = self.active.read().expect("active lock poisoned");
         let target = &pair.record.target;
+        let session_id = pair.session_id.clone();
+        let active = self.active.read().expect("active lock poisoned");
         let Some(entry) = active.get(&target.stage_id) else {
             return Err(PairControlError::TargetNotActive);
         };
-        if entry.session_id != target.agent_session_id {
+        if entry.session_id != session_id {
             return Err(PairControlError::TargetNotActive);
         }
         let Some(pair_handle) = entry.pair_handle.as_ref() else {
@@ -494,9 +498,9 @@ impl SteeringHub {
             return Err(PairControlError::MessageNotAccepted);
         }
         self.emitter.emit(&Event::AgentPairUserMessage {
-            node_id: target.node_id.clone(),
-            visit: target.visit,
-            session_id: target.agent_session_id.clone(),
+            node_id: target.stage_id.node_id().to_string(),
+            visit: target.stage_id.visit(),
+            session_id,
             pair_id,
             message_id,
             client_message_id: client_message_id.clone(),
@@ -508,7 +512,7 @@ impl SteeringHub {
             client_message_id,
             pair_id,
             run_id: pair.record.run_id,
-            target: target.selector(),
+            stage_id: target.stage_id.clone(),
             text,
             accepted_at: Utc::now(),
         })
@@ -531,13 +535,14 @@ impl SteeringHub {
         }
 
         let target = pair.record.target.clone();
+        let session_id = pair.session_id.clone();
         let text = human_left_text();
         if let Some(entry) = self
             .active
             .read()
             .expect("active lock poisoned")
             .get(&target.stage_id)
-            .filter(|entry| entry.session_id == target.agent_session_id)
+            .filter(|entry| entry.session_id == session_id)
         {
             let Some(pair_handle) = entry.pair_handle.as_ref() else {
                 return Err(PairControlError::TargetNotActive);
@@ -551,9 +556,9 @@ impl SteeringHub {
                 return Err(PairControlError::MessageNotAccepted);
             }
             self.emitter.emit(&Event::AgentPairSystemMessage {
-                node_id: target.node_id.clone(),
-                visit: target.visit,
-                session_id: target.agent_session_id.clone(),
+                node_id: target.stage_id.node_id().to_string(),
+                visit: target.stage_id.visit(),
+                session_id: session_id.clone(),
                 pair_id,
                 kind: PairSystemMessageKind::HumanLeft,
                 text: text.to_string(),
@@ -581,7 +586,7 @@ impl SteeringHub {
             .is_some_and(|pair| {
                 pair.record.status == PairStatus::Active
                     && pair.record.target.stage_id == *stage_id
-                    && pair.record.target.agent_session_id == session_id
+                    && pair.session_id == session_id
             })
     }
 
@@ -598,7 +603,7 @@ impl SteeringHub {
             };
             if pair.record.status != PairStatus::Active
                 || pair.record.target.stage_id != *stage_id
-                || pair.record.target.agent_session_id != session_id
+                || pair.session_id != session_id
             {
                 return false;
             }
@@ -700,15 +705,10 @@ mod tests {
         (Arc::new(SteeringHub::new(emitter)), events)
     }
 
-    fn pair_target(stage_id: &StageId, session_id: &str) -> PairTarget {
+    fn pair_target(stage_id: &StageId, _session_id: &str) -> PairTarget {
         PairTarget {
-            stage_id:         stage_id.clone(),
-            node_id:          stage_id.node_id().to_string(),
-            node_label:       stage_id.node_id().to_string(),
-            visit:            stage_id.visit(),
-            agent_session_id: session_id.to_string(),
-            provider:         Some("openai".to_string()),
-            model:            Some("gpt-5.4".to_string()),
+            stage_id:   stage_id.clone(),
+            node_label: stage_id.node_id().to_string(),
         }
     }
 
@@ -1010,16 +1010,17 @@ mod tests {
     }
 
     #[test]
-    fn pair_start_rejects_non_selected_or_missing_target() {
+    fn pair_start_rejects_missing_target() {
         let hub = SteeringHub::for_tests();
         let stage_id = StageId::new("code", 1);
         let handle = SessionControlHandle::new();
         assert!(hub.attach_pairable_handle(&stage_id, "ses_01", handle.clone()));
 
+        let missing_stage = StageId::new("other", 1);
         let result = hub.start_pair(
             RunId::new(),
             PairId::new(),
-            pair_target(&stage_id, "ses_02"),
+            pair_target(&missing_stage, "ses_01"),
             None,
         );
         assert_eq!(result.unwrap_err(), PairControlError::TargetNotActive);

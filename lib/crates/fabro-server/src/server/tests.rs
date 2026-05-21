@@ -2153,13 +2153,8 @@ async fn subprocess_answer_transport_pair_commands_enqueue_control_messages() {
         system_kind: SystemActorKind::Engine,
     };
     let target = PairTarget {
-        stage_id:         StageId::new("agent", 1),
-        node_id:          "agent".to_string(),
-        node_label:       "Agent".to_string(),
-        visit:            1,
-        agent_session_id: "ses_01".to_string(),
-        provider:         Some("openai".to_string()),
-        model:            Some("gpt-5.4".to_string()),
+        stage_id:   StageId::new("agent", 1),
+        node_label: "Agent".to_string(),
     };
 
     transport
