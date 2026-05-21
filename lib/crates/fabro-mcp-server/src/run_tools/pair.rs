@@ -244,10 +244,16 @@ pub(crate) async fn pair_run(
 }
 
 pub(crate) fn pair_run_text(result: &PairRunResult) -> String {
-    format!(
-        "completed pair {:?} for Fabro run {}",
-        result.action, result.run_id
-    )
+    match result.action {
+        RunPairAction::Status => format!("read pair status for Fabro run {}", result.run_id),
+        RunPairAction::Start => format!("started pair for Fabro run {}", result.run_id),
+        RunPairAction::Get => format!("read pair for Fabro run {}", result.run_id),
+        RunPairAction::Message => format!("sent pair message for Fabro run {}", result.run_id),
+        RunPairAction::End => format!("ended pair for Fabro run {}", result.run_id),
+        RunPairAction::Transcript => {
+            format!("read pair transcript for Fabro run {}", result.run_id)
+        }
+    }
 }
 
 #[cfg(test)]
