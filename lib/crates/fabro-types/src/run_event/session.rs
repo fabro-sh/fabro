@@ -12,12 +12,6 @@ pub struct RunSessionCreatedProps {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RunSessionTitleUpdatedProps {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSessionTurnStartedProps {
     pub turn_id: TurnId,
     pub input:   String,

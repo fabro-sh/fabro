@@ -43,7 +43,10 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             "/runs/{run_id}/sessions",
             get(list_run_sessions).post(create_run_session),
         )
-        .route("/sessions/{id}", get(get_session).patch(update_session))
+        .route(
+            "/sessions/{id}",
+            get(get_session).fallback(session_method_not_found),
+        )
         .route("/sessions/{id}/turns", get(list_turns).post(submit_turn))
         .route("/sessions/{id}/turns/{turnId}", get(get_turn))
         .route(
@@ -59,12 +62,6 @@ struct CreateRunSessionRequest {
     title: Option<String>,
     #[serde(default)]
     model: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct UpdateSessionRequest {
-    #[serde(default)]
-    title: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -167,41 +164,8 @@ async fn get_session(
     Json(session.record).into_response()
 }
 
-async fn update_session(
-    _auth: RequiredUser,
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-    Json(request): Json<UpdateSessionRequest>,
-) -> Response {
-    let session_id = match parse_session_id(&id) {
-        Ok(id) => id,
-        Err(err) => return err.into_response(),
-    };
-    let (run_id, run_store, _) = match load_session(&state, session_id).await {
-        Ok(context) => context,
-        Err(response) => return response,
-    };
-    let now = Utc::now();
-    if let Err(err) = append_run_session_event(
-        &run_store,
-        run_id,
-        session_id,
-        "run.session.title.updated",
-        json!({ "title": request.title }),
-        now,
-    )
-    .await
-    {
-        return store_error(&err).into_response();
-    }
-    let events = match run_store.list_events().await {
-        Ok(events) => events,
-        Err(err) => return store_error(&err).into_response(),
-    };
-    match project_run_session(run_id, session_id, &events) {
-        Some(record) => Json(record).into_response(),
-        None => ApiError::not_found("Session not found.").into_response(),
-    }
+async fn session_method_not_found() -> Response {
+    StatusCode::NOT_FOUND.into_response()
 }
 
 async fn submit_turn(

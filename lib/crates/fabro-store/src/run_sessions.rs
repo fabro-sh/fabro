@@ -86,12 +86,6 @@ impl RunSessionProjection {
                     };
                     self.sessions.insert(session_id, projected);
                 }
-                EventBody::RunSessionTitleUpdated(props) => {
-                    if let Some(session) = self.sessions.get_mut(&session_id) {
-                        session.record.title.clone_from(&props.title);
-                        session.record.updated_at = envelope.event.ts;
-                    }
-                }
                 EventBody::RunSessionTurnStarted(props) => {
                     if let Some(session) = self.sessions.get_mut(&session_id) {
                         session.record.status = fabro_types::SessionStatus::Running;

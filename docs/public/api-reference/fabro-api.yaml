@@ -884,24 +884,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-    patch:
-      operationId: updateSession
-      tags: [Sessions]
-      summary: Update session metadata
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UpdateSessionRequest"
-      responses:
-        "200":
-          description: Updated session record
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SessionRecord"
-
   /api/v1/sessions/{id}/turns:
     parameters:
       - name: id
@@ -5528,12 +5510,6 @@ components:
         title:
           type: string
         model:
-          type: string
-
-    UpdateSessionRequest:
-      type: object
-      properties:
-        title:
           type: string
 
     SubmitTurnRequest:

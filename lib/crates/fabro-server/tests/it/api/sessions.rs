@@ -2,7 +2,9 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
-use crate::helpers::{MINIMAL_DOT, api, minimal_manifest_json, response_json, test_app_state};
+use crate::helpers::{
+    MINIMAL_DOT, api, minimal_manifest_json, response_json, response_status, test_app_state,
+};
 
 async fn create_run(app: &axum::Router) -> String {
     let request = Request::builder()
@@ -132,6 +134,29 @@ async fn sessions_are_listed_only_under_their_owning_run() {
     )
     .await;
     assert!(second["data"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn session_metadata_patch_route_is_removed() {
+    let app = fabro_server::test_support::build_test_router(test_app_state());
+    let run_id = create_run(&app).await;
+    let created = create_session(&app, &run_id, "Ask Fabro").await;
+    let session_id = created["id"]
+        .as_str()
+        .expect("session response should include an id");
+
+    let request = Request::builder()
+        .method("PATCH")
+        .uri(api(&format!("/sessions/{session_id}")))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"title":"Renamed"}"#))
+        .expect("patch-session request should build");
+    response_status(
+        app.clone().oneshot(request).await.unwrap(),
+        StatusCode::NOT_FOUND,
+        format!("PATCH /api/v1/sessions/{session_id}"),
+    )
+    .await;
 }
 
 fn assert_session_metadata_only(value: &serde_json::Value) {

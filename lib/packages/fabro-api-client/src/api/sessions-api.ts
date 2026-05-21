@@ -39,8 +39,6 @@ import type { SessionRecord } from '../models';
 import type { SubmitTurnRequest } from '../models';
 // @ts-ignore
 import type { TurnRecord } from '../models';
-// @ts-ignore
-import type { UpdateSessionRequest } from '../models';
 /**
  * SessionsApi - axios parameter creator
  */
@@ -389,51 +387,6 @@ export const SessionsApiAxiosParamCreator = function (configuration?: Configurat
                 options: localVarRequestOptions,
             };
         },
-        /**
-         *
-         * @summary Update session metadata
-         * @param {string} id
-         * @param {UpdateSessionRequest} updateSessionRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        updateSession: async (id: string, updateSessionRequest: UpdateSessionRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'id' is not null or undefined
-            assertParamExists('updateSession', 'id', id)
-            // verify required parameter 'updateSessionRequest' is not null or undefined
-            assertParamExists('updateSession', 'updateSessionRequest', updateSessionRequest)
-            const localVarPath = `/api/v1/sessions/{id}`
-                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            // authentication SessionCookie required
-
-            // authentication BearerAuth required
-            // http bearer authentication required
-            await setBearerAuthToObject(localVarHeaderParameter, configuration)
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(updateSessionRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
     }
 };
 
@@ -552,20 +505,6 @@ export const SessionsApiFp = function(configuration?: Configuration) {
             const localVarOperationServerBasePath = operationServerMap['SessionsApi.submitSessionTurn']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
-        /**
-         *
-         * @summary Update session metadata
-         * @param {string} id
-         * @param {UpdateSessionRequest} updateSessionRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async updateSession(id: string, updateSessionRequest: UpdateSessionRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SessionRecord>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.updateSession(id, updateSessionRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['SessionsApi.updateSession']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
     }
 };
 
@@ -659,17 +598,6 @@ export const SessionsApiFactory = function (configuration?: Configuration, baseP
          */
         submitSessionTurn(id: string, submitTurnRequest: SubmitTurnRequest, options?: RawAxiosRequestConfig): AxiosPromise<string> {
             return localVarFp.submitSessionTurn(id, submitTurnRequest, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Update session metadata
-         * @param {string} id
-         * @param {UpdateSessionRequest} updateSessionRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        updateSession(id: string, updateSessionRequest: UpdateSessionRequest, options?: RawAxiosRequestConfig): AxiosPromise<SessionRecord> {
-            return localVarFp.updateSession(id, updateSessionRequest, options).then((request) => request(axios, basePath));
         },
     };
 };
@@ -769,17 +697,5 @@ export class SessionsApi extends BaseAPI {
      */
     public submitSessionTurn(id: string, submitTurnRequest: SubmitTurnRequest, options?: RawAxiosRequestConfig) {
         return SessionsApiFp(this.configuration).submitSessionTurn(id, submitTurnRequest, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Update session metadata
-     * @param {string} id
-     * @param {UpdateSessionRequest} updateSessionRequest
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public updateSession(id: string, updateSessionRequest: UpdateSessionRequest, options?: RawAxiosRequestConfig) {
-        return SessionsApiFp(this.configuration).updateSession(id, updateSessionRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }

@@ -392,7 +392,6 @@ export * from './turn-record';
 export * from './turn-status';
 export * from './update-run-parent-request';
 export * from './update-run-request';
-export * from './update-session-request';
 export * from './user-response';
 export * from './validate-response';
 export * from './vnc-preview-response';

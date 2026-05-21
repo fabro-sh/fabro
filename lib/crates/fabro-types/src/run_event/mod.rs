@@ -100,8 +100,6 @@ pub enum EventBody {
     RunTitleUpdated(RunTitleUpdatedProps),
     #[serde(rename = "run.session.created")]
     RunSessionCreated(RunSessionCreatedProps),
-    #[serde(rename = "run.session.title.updated")]
-    RunSessionTitleUpdated(RunSessionTitleUpdatedProps),
     #[serde(rename = "run.session.turn.started")]
     RunSessionTurnStarted(RunSessionTurnStartedProps),
     #[serde(rename = "run.session.user_message")]
@@ -432,7 +430,6 @@ impl EventBody {
             Self::RunUnarchived(_) => "run.unarchived",
             Self::RunTitleUpdated(_) => "run.title.updated",
             Self::RunSessionCreated(_) => "run.session.created",
-            Self::RunSessionTitleUpdated(_) => "run.session.title.updated",
             Self::RunSessionTurnStarted(_) => "run.session.turn.started",
             Self::RunSessionUserMessage(_) => "run.session.user_message",
             Self::RunSessionAssistantDelta(_) => "run.session.assistant_delta",
@@ -601,7 +598,6 @@ fn is_known_event_name(event: &str) -> bool {
             | "run.unarchived"
             | "run.title.updated"
             | "run.session.created"
-            | "run.session.title.updated"
             | "run.session.turn.started"
             | "run.session.user_message"
             | "run.session.assistant_delta"
