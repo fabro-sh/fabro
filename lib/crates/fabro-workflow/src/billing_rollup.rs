@@ -3,6 +3,14 @@ use std::collections::HashMap;
 use fabro_model::Catalog;
 use fabro_types::{BilledTokenCounts, ModelRef, RunProjection, StageProjection};
 
+fn stage_priced_usage(catalog: Option<&Catalog>, stage: &StageProjection) -> BilledTokenCounts {
+    let mut usage = stage.usage.clone();
+    if let (Some(catalog), Some(model)) = (catalog, stage.model.as_ref()) {
+        usage.ensure_priced(catalog, model);
+    }
+    usage
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectionBillingStage {
     pub node_id:     String,
@@ -50,7 +58,7 @@ pub fn billing_rollup_from_projection(
         if is_boundary_stage(projection, stage_id.node_id()) {
             continue;
         }
-        let priced = stage_usage_with_cost(catalog, stage);
+        let priced = stage_priced_usage(catalog, stage);
         if stage.completion.is_none() && stage.duration_ms.is_none() && priced.is_zero() {
             continue;
         }
@@ -116,16 +124,6 @@ pub fn billing_rollup_from_projection(
         runtime_ms,
         billed_visit_count,
     }
-}
-
-fn stage_usage_with_cost(catalog: Option<&Catalog>, stage: &StageProjection) -> BilledTokenCounts {
-    let mut usage = stage.usage.clone();
-    if usage.total_usd_micros.is_none() {
-        if let (Some(catalog), Some(model)) = (catalog, stage.model.as_ref()) {
-            usage.total_usd_micros = catalog.price_tokens(model, &usage.token_counts());
-        }
-    }
-    usage
 }
 
 fn is_boundary_stage(projection: &RunProjection, node_id: &str) -> bool {
