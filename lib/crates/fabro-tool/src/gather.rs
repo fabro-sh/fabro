@@ -1,27 +1,26 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use fabro_client::Client;
 use futures::future::try_join_all;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tokio::time;
 
 use super::common;
-use super::common::{RunSummaryResult, ToolError, ToolResult};
+use super::common::{FabroToolBackend, RunSummaryResult, ToolError, ToolResult};
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub(crate) struct FabroRunGatherParams {
-    pub(crate) run_ids:               Vec<String>,
-    pub(crate) timeout_seconds:       Option<u64>,
-    pub(crate) poll_interval_seconds: Option<u64>,
+pub struct FabroRunGatherParams {
+    pub run_ids:               Vec<String>,
+    pub timeout_seconds:       Option<u64>,
+    pub poll_interval_seconds: Option<u64>,
 }
 
 #[derive(Debug)]
-pub(crate) struct ValidatedGatherRuns {
-    pub(crate) run_ids:               Vec<String>,
-    pub(crate) timeout_seconds:       u64,
-    pub(crate) poll_interval_seconds: u64,
+pub struct ValidatedGatherRuns {
+    pub run_ids:               Vec<String>,
+    pub timeout_seconds:       u64,
+    pub poll_interval_seconds: u64,
 }
 
 impl TryFrom<FabroRunGatherParams> for ValidatedGatherRuns {
@@ -47,22 +46,22 @@ impl TryFrom<FabroRunGatherParams> for ValidatedGatherRuns {
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
-pub(crate) struct GatherRunsResult {
-    pub(crate) runs:            Vec<RunSummaryResult>,
-    pub(crate) timed_out:       bool,
-    pub(crate) elapsed_seconds: u64,
+pub struct GatherRunsResult {
+    pub runs:            Vec<RunSummaryResult>,
+    pub timed_out:       bool,
+    pub elapsed_seconds: u64,
 }
 
-pub(crate) async fn gather_runs(
-    client: Arc<Client>,
+pub async fn gather_runs(
+    backend: Arc<dyn FabroToolBackend>,
     params: ValidatedGatherRuns,
 ) -> ToolResult<GatherRunsResult> {
     let start = Instant::now();
     let deadline = start + Duration::from_secs(params.timeout_seconds);
     let run_ids = try_join_all(params.run_ids.into_iter().map(|selector| {
-        let client = Arc::clone(&client);
+        let backend = Arc::clone(&backend);
         async move {
-            client
+            backend
                 .resolve_run(&selector)
                 .await
                 .map(|run| run.id)
@@ -73,8 +72,8 @@ pub(crate) async fn gather_runs(
 
     loop {
         let summaries = try_join_all(run_ids.iter().map(|run_id| {
-            let client = Arc::clone(&client);
-            async move { common::retrieve_run(&client, run_id).await }
+            let backend = Arc::clone(&backend);
+            async move { common::retrieve_run(backend.as_ref(), run_id).await }
         }))
         .await?;
         if summaries
@@ -100,7 +99,7 @@ pub(crate) async fn gather_runs(
     }
 }
 
-pub(crate) fn gather_runs_text(result: &GatherRunsResult) -> String {
+pub fn gather_runs_text(result: &GatherRunsResult) -> String {
     format!(
         "gathered {} Fabro run(s), timed_out={}",
         result.runs.len(),

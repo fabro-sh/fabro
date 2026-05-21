@@ -28,6 +28,7 @@ use crate::support::{issue_test_worker_jwt, seed_dev_token_auth, unique_run_id};
 const SHARED_DAEMON_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const LEAKED_WORKER_PARENT_TOKEN: &str = "leak-worker-parent-token";
 const LEAKED_NEW_RELIC_LICENSE: &str = "leak-new-relic-license";
+const LEAKED_RUN_AGENT_TOKEN: &str = "leak-run-agent-token";
 
 fn auth_context() -> fabro_test::TestContext {
     let context = test_context!();
@@ -138,8 +139,10 @@ fn assert_no_worker_env_leak(scope: &str, content: &str) {
         "MY_API_TOKEN=",
         "NEW_RELIC_LICENSE_KEY=",
         "FABRO_WORKER_TOKEN=",
+        "FABRO_RUN_AGENT_TOKEN=",
         LEAKED_WORKER_PARENT_TOKEN,
         LEAKED_NEW_RELIC_LICENSE,
+        LEAKED_RUN_AGENT_TOKEN,
     ] {
         assert!(
             !content.contains(needle),
@@ -438,6 +441,7 @@ methods = ["dev-token"]
         .command()
         .env("MY_API_TOKEN", LEAKED_WORKER_PARENT_TOKEN)
         .env("NEW_RELIC_LICENSE_KEY", LEAKED_NEW_RELIC_LICENSE)
+        .env("FABRO_RUN_AGENT_TOKEN", LEAKED_RUN_AGENT_TOKEN)
         .args(["server", "start"])
         .arg("--storage-dir")
         .arg(&storage_dir)
@@ -461,7 +465,7 @@ methods = ["dev-token"]
   graph [goal="Verify worker subprocess env isolation", default_max_retries=0]
   start [shape=Mdiamond, label="Start"]
   exit  [shape=Msquare, label="Exit"]
-  probe [shape=parallelogram, label="Probe", script="echo probe-ran; for key in $(printf 'MY%s NEW%s FABRO%s' '_API_TOKEN' '_RELIC_LICENSE_KEY' '_WORKER_TOKEN'); do value=$(printenv \"$key\" || true); if [ -n \"$value\" ]; then echo \"$key=$value\"; fi; done"]
+  probe [shape=parallelogram, label="Probe", script="echo probe-ran; for key in $(printf 'MY%s NEW%s FABRO%s FABRO%s' '_API_TOKEN' '_RELIC_LICENSE_KEY' '_WORKER_TOKEN' '_RUN_AGENT_TOKEN'); do value=$(printenv \"$key\" || true); if [ -n \"$value\" ]; then echo \"$key=$value\"; fi; done"]
   start -> probe -> exit
 }
 "#,

@@ -1567,6 +1567,7 @@ fn worker_command_always_sets_worker_token_env() {
         github_run_id,
         RunExecutionMode::Start,
         github_only.path(),
+        None,
     )
     .unwrap();
     assert!(matches!(
@@ -1612,6 +1613,7 @@ fn worker_command_always_sets_worker_token_env() {
         dev_token_run_id,
         RunExecutionMode::Start,
         dev_token.path(),
+        None,
     )
     .unwrap();
     assert!(matches!(
@@ -1639,6 +1641,67 @@ fn worker_command_always_sets_worker_token_env() {
 
 #[cfg(unix)]
 #[test]
+fn worker_command_sets_run_agent_token_only_when_delegated_token_exists() {
+    let storage_dir = tempfile::tempdir().unwrap();
+    let state = worker_command_test_state(storage_dir.path(), &["dev-token"], Some(TEST_DEV_TOKEN));
+    let omitted = worker_command(
+        state.as_ref(),
+        RunId::new(),
+        RunExecutionMode::Start,
+        storage_dir.path(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        command_env_value(&omitted, EnvVars::FABRO_RUN_AGENT_TOKEN),
+        EnvOverride::Unchanged
+    );
+
+    let token = "delegated-run-agent-token".to_string();
+    let included = worker_command(
+        state.as_ref(),
+        RunId::new(),
+        RunExecutionMode::Start,
+        storage_dir.path(),
+        Some(token.clone()),
+    )
+    .unwrap();
+
+    assert_eq!(
+        command_env_value(&included, EnvVars::FABRO_RUN_AGENT_TOKEN),
+        EnvOverride::Set(token)
+    );
+}
+
+#[test]
+fn run_agent_token_authenticates_as_run_creating_user() {
+    let storage_dir = tempfile::tempdir().unwrap();
+    let state = worker_command_test_state(storage_dir.path(), &["dev-token"], Some(TEST_DEV_TOKEN));
+    let user = UserPrincipal {
+        identity:    fabro_types::IdpIdentity::new("fabro:dev", "dev").unwrap(),
+        login:       "dev".to_string(),
+        auth_method: AuthMethod::DevToken,
+        avatar_url:  None,
+    };
+
+    let token = issue_run_agent_token(state.as_ref(), &user)
+        .expect("run-agent token issuance should not fail")
+        .expect("dev-token auth state should support user JWTs");
+    let settings = state.server_settings();
+    let AuthMode::Enabled(config) =
+        jwt_auth::resolve_auth_mode_with_lookup(&settings.server, |name| state.server_secret(name))
+            .expect("test auth mode should resolve");
+    let verified = jwt_auth::authenticate_jwt_bearer(&token, &config)
+        .expect("delegated token should authenticate");
+
+    assert_eq!(verified.login, user.login);
+    assert_eq!(verified.identity, user.identity);
+    assert_eq!(verified.auth_method, user.auth_method);
+    assert_eq!(verified.avatar_url, String::new());
+}
+
+#[cfg(unix)]
+#[test]
 fn worker_command_forwards_github_app_private_key_from_server_secrets() {
     let storage_dir = tempfile::tempdir().unwrap();
     let state = worker_command_test_state_with_extra_config_and_env_lookup(
@@ -1654,6 +1717,7 @@ fn worker_command_forwards_github_app_private_key_from_server_secrets() {
         RunId::new(),
         RunExecutionMode::Start,
         storage_dir.path(),
+        None,
     )
     .unwrap();
 
@@ -1673,6 +1737,7 @@ fn worker_command_omits_github_app_private_key_when_unset() {
         RunId::new(),
         RunExecutionMode::Start,
         storage_dir.path(),
+        None,
     )
     .unwrap();
 
@@ -1702,6 +1767,7 @@ level = "debug"
         run_id,
         RunExecutionMode::Start,
         storage_dir.path(),
+        None,
     )
     .unwrap();
 
@@ -1731,6 +1797,7 @@ destination = "stdout"
         run_id,
         RunExecutionMode::Start,
         storage_dir.path(),
+        None,
     )
     .unwrap();
 
@@ -1759,6 +1826,7 @@ fn worker_command_sets_fabro_config_to_active_absolute_config_path() {
         run_id,
         RunExecutionMode::Start,
         storage_dir.path(),
+        None,
     )
     .unwrap();
 
@@ -1800,6 +1868,7 @@ destination = "file"
         run_id,
         RunExecutionMode::Start,
         storage_dir.path(),
+        None,
     )
     .unwrap();
 
@@ -1831,6 +1900,7 @@ destination = "file"
         run_id,
         RunExecutionMode::Start,
         storage_dir.path(),
+        None,
     ) else {
         panic!("invalid env destination should fail");
     };

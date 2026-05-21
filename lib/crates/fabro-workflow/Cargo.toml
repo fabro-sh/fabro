@@ -32,6 +32,7 @@ fabro-mcp = { path = "../fabro-mcp" }
 fabro-github = { path = "../fabro-github" }
 fabro-interview = { path = "../fabro-interview" }
 fabro-template = { path = "../fabro-template" }
+fabro-tool = { path = "../fabro-tool" }
 fabro-util = { path = "../fabro-util" }
 fabro-redact.workspace = true
 fabro-checkpoint = { path = "../fabro-checkpoint" }
@@ -73,6 +74,7 @@ fabro-vault = { path = "../fabro-vault" }
 [dev-dependencies]
 base64.workspace = true
 fabro-acp = { path = "../fabro-acp", features = ["test-support"] }
+fabro-api = { path = "../fabro-api" }
 fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona", "docker", "test-support"] }
 fabro-mcp = { path = "../fabro-mcp" }
 tokio = { workspace = true, features = ["test-util", "macros"] }

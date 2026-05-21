@@ -49,6 +49,7 @@ use crate::run_metadata::metadata_branch_name;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::run_status::{FailureReason, RunStatus};
 use crate::runtime_store::RunStoreHandle;
+use crate::services::FabroRunToolServices;
 use crate::steering_hub::SteeringHub;
 use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
 
@@ -82,6 +83,7 @@ struct RunSession {
     run_control:       Option<Arc<RunControlState>>,
     vault:             Option<Arc<AsyncRwLock<Vault>>>,
     catalog:           Arc<Catalog>,
+    fabro_run_tools:   Option<FabroRunToolServices>,
 }
 
 struct ResolvedStartLlm {
@@ -108,6 +110,7 @@ pub struct StartServices {
     pub catalog:            Arc<Catalog>,
     pub on_node:            crate::OnNodeCallback,
     pub registry_override:  Option<Arc<HandlerRegistry>>,
+    pub fabro_run_tools:    Option<FabroRunToolServices>,
 }
 
 pub struct Started {
@@ -434,6 +437,7 @@ impl RunSession {
             workflow_bundle,
             vault: services.vault,
             catalog,
+            fabro_run_tools: services.fabro_run_tools,
         })
     }
 }
@@ -887,6 +891,7 @@ impl RunSession {
             run_control: self.run_control,
             checkpoint,
             seed_context: self.seed_context,
+            fabro_run_tools: self.fabro_run_tools,
         };
         let mut initialized = Box::pin(pipeline::initialize(persisted, init_options)).await?;
         initialized.on_node = on_node;
@@ -1402,6 +1407,7 @@ reasoning = false
             catalog: test_catalog(),
             on_node: None,
             registry_override: Some(registry),
+            fabro_run_tools: None,
         }
     }
 

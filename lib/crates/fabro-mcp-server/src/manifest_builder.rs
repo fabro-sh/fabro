@@ -1,16 +1,28 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use fabro_api::types;
 use fabro_config::{CliLayer, RunLayer, load_llm_catalog_settings};
 use fabro_manifest::{self, ManifestBuildInput, RunOverrideInput};
 use fabro_model::Catalog;
 use fabro_server::manifest_validation;
-use serde_json::Value;
+use fabro_tool::{RunManifestBuilder, ToolError, ToolResult, ValidatedCreateRunSpec};
 
-use super::common::{ToolError, ToolResult};
-use super::create::ValidatedCreateRunSpec;
+#[derive(Default)]
+pub(crate) struct McpRunManifestBuilder;
 
-pub(super) fn build_mcp_run_manifest(
+impl RunManifestBuilder for McpRunManifestBuilder {
+    fn build_run_manifest(
+        &self,
+        spec: &ValidatedCreateRunSpec,
+        cwd: &Path,
+        user_settings_path: &Path,
+    ) -> ToolResult<types::RunManifest> {
+        build_mcp_run_manifest(spec, cwd, user_settings_path)
+    }
+}
+
+fn build_mcp_run_manifest(
     spec: &ValidatedCreateRunSpec,
     cwd: &Path,
     user_settings_path: &Path,
@@ -28,7 +40,7 @@ pub(super) fn build_mcp_run_manifest(
     .map_err(|err| ToolError::from_anyhow(&err))?;
     let llm_catalog_settings = load_llm_catalog_settings(Some(user_settings_path))
         .map_err(|err| ToolError::message(err.to_string()))?;
-    let catalog = std::sync::Arc::new(
+    let catalog = Arc::new(
         Catalog::from_builtin_with_overrides(&llm_catalog_settings)
             .map_err(|err| ToolError::message(err.to_string()))?,
     );
@@ -40,33 +52,6 @@ pub(super) fn build_mcp_run_manifest(
         return Err(ToolError::message("workflow manifest validation failed"));
     }
     Ok(built.manifest)
-}
-
-pub(super) fn json_to_toml_value(key: &str, value: &Value) -> ToolResult<toml::Value> {
-    match value {
-        Value::Null => Err(ToolError::message(format!(
-            "input `{key}` cannot be null; use a string, boolean, or number"
-        ))),
-        Value::Bool(value) => Ok(toml::Value::Boolean(*value)),
-        Value::Number(value) => {
-            if let Some(integer) = value.as_i64() {
-                Ok(toml::Value::Integer(integer))
-            } else if let Some(float) = value.as_f64() {
-                Ok(toml::Value::Float(float))
-            } else {
-                Err(ToolError::message(format!(
-                    "input `{key}` contains a number outside TOML's supported range"
-                )))
-            }
-        }
-        Value::String(value) => Ok(toml::Value::String(value.clone())),
-        Value::Array(_) => Err(ToolError::message(format!(
-            "input `{key}` does not support array values; use a string, boolean, or number",
-        ))),
-        Value::Object(_) => Err(ToolError::message(format!(
-            "input `{key}` does not support object values; use a string, boolean, or number",
-        ))),
-    }
 }
 
 fn mcp_manifest_args(spec: &ValidatedCreateRunSpec) -> Option<types::ManifestArgs> {
@@ -115,49 +100,10 @@ fn mcp_run_overrides(spec: &ValidatedCreateRunSpec) -> Option<RunLayer> {
 mod tests {
     use std::collections::HashMap;
 
-    use serde_json::{Value, json};
+    use fabro_tool::{CreateRunSpec, ValidatedCreateRunSpec};
+    use serde_json::json;
 
-    use super::super::create::CreateRunSpec;
     use super::*;
-
-    #[test]
-    fn json_inputs_convert_scalar_values_to_toml_values() {
-        let cases = [
-            (json!("hello"), toml::Value::String("hello".to_string())),
-            (json!(true), toml::Value::Boolean(true)),
-            (json!(42), toml::Value::Integer(42)),
-            (json!(0.5), toml::Value::Float(0.5)),
-        ];
-
-        for (json, expected) in cases {
-            assert_eq!(json_to_toml_value("input", &json).unwrap(), expected);
-        }
-    }
-
-    #[test]
-    fn json_input_arrays_and_objects_are_rejected() {
-        let array_err = json_to_toml_value("matrix", &json!(["a", 1])).unwrap_err();
-        assert_eq!(
-            array_err.as_str(),
-            "input `matrix` does not support array values; use a string, boolean, or number",
-        );
-
-        let object_err = json_to_toml_value("settings", &json!({ "enabled": true })).unwrap_err();
-        assert_eq!(
-            object_err.as_str(),
-            "input `settings` does not support object values; use a string, boolean, or number",
-        );
-    }
-
-    #[test]
-    fn json_input_null_is_rejected_with_key_name() {
-        let err = json_to_toml_value("goal", &Value::Null).unwrap_err();
-
-        assert_eq!(
-            err.as_str(),
-            "input `goal` cannot be null; use a string, boolean, or number",
-        );
-    }
 
     #[test]
     fn mcp_manifest_args_preserve_input_provenance() {

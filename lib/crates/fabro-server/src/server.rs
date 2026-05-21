@@ -72,7 +72,7 @@ use fabro_slack::{blocks as slack_blocks, connection as slack_connection};
 use fabro_static::EnvVars;
 use fabro_store::{
     ArtifactKey, ArtifactStore, Database, EventEnvelope, EventPayload, NodeArtifact,
-    PendingInterviewRecord, SessionStore, StageArtifactEntry, StageId,
+    PendingInterviewRecord, RunDatabase, SessionStore, StageArtifactEntry, StageId,
 };
 #[cfg(test)]
 use fabro_types::BlockedReason;
@@ -84,7 +84,7 @@ use fabro_types::settings::{InterpString, RunNamespace};
 use fabro_types::{
     AgentBackend, EventBody, InterviewQuestionRecord, PairId, PairMessageId, PairTarget, Principal,
     PullRequestLink, QuestionType, RunBlobId, RunControlAction, RunEvent, RunId, ServerSettings,
-    SessionCapability,
+    SessionCapability, UserPrincipal,
 };
 use fabro_util::error::{
     SharedError, collect_causes, render_compact_with_causes, render_with_causes,
@@ -2713,6 +2713,8 @@ async fn append_worker_exit_failure(
     }
 }
 
+const RUN_AGENT_TOKEN_TTL_HOURS: i64 = 72;
+
 #[expect(
     clippy::disallowed_methods,
     reason = "Worker subprocess startup resolves Cargo's test binary env override when present."
@@ -2722,6 +2724,7 @@ fn worker_command(
     run_id: RunId,
     mode: RunExecutionMode,
     run_dir: &std::path::Path,
+    run_agent_token: Option<String>,
 ) -> anyhow::Result<Command> {
     let current_exe = std::env::current_exe().context("reading current executable path")?;
     let exe = std::env::var_os(EnvVars::CARGO_BIN_EXE_FABRO).map_or(current_exe, PathBuf::from);
@@ -2768,6 +2771,10 @@ fn worker_command(
     cmd.env(EnvVars::FABRO_CONFIG, state.active_config_path());
     cmd.env_remove(EnvVars::FABRO_WORKER_TOKEN);
     cmd.env(EnvVars::FABRO_WORKER_TOKEN, worker_token);
+    cmd.env_remove(EnvVars::FABRO_RUN_AGENT_TOKEN);
+    if let Some(run_agent_token) = run_agent_token {
+        cmd.env(EnvVars::FABRO_RUN_AGENT_TOKEN, run_agent_token);
+    }
     if let Some(pem) = state.server_secret(EnvVars::GITHUB_APP_PRIVATE_KEY) {
         cmd.env(EnvVars::GITHUB_APP_PRIVATE_KEY, pem);
     }
@@ -2776,6 +2783,63 @@ fn worker_command(
     fabro_proc::pre_exec_setpgid(cmd.as_std_mut());
 
     Ok(cmd)
+}
+
+async fn issue_run_agent_token_for_run(
+    state: &AppState,
+    run_store: &RunDatabase,
+) -> Option<String> {
+    let run_state = match run_store.state().await {
+        Ok(run_state) => run_state,
+        Err(err) => {
+            warn!(error = %err, "Failed to load run state for run-agent token");
+            return None;
+        }
+    };
+    let Some(Principal::User(user)) = run_state
+        .spec
+        .provenance
+        .as_ref()
+        .and_then(|provenance| provenance.subject.as_ref())
+    else {
+        return None;
+    };
+    match issue_run_agent_token(state, user) {
+        Ok(token) => token,
+        Err(err) => {
+            warn!(error = %err, "Failed to issue run-agent token");
+            None
+        }
+    }
+}
+
+fn issue_run_agent_token(state: &AppState, user: &UserPrincipal) -> anyhow::Result<Option<String>> {
+    let settings = state.server_settings();
+    let AuthMode::Enabled(config) =
+        jwt_auth::resolve_auth_mode_with_lookup(&settings.server, |name| {
+            state.server_secret(name)
+        })?;
+    let Some(key) = config.jwt_key.as_ref() else {
+        return Ok(None);
+    };
+    let Some(issuer) = config.jwt_issuer.as_deref() else {
+        return Ok(None);
+    };
+    let subject = auth::JwtSubject {
+        identity:    user.identity.clone(),
+        login:       user.login.clone(),
+        name:        user.login.clone(),
+        email:       String::new(),
+        avatar_url:  user.avatar_url.clone().unwrap_or_default(),
+        user_url:    String::new(),
+        auth_method: user.auth_method,
+    };
+    Ok(Some(auth::issue(
+        key,
+        issuer,
+        &subject,
+        chrono::Duration::hours(RUN_AGENT_TOKEN_TTL_HOURS),
+    )))
 }
 
 fn resolved_log_destination(state: &AppState) -> anyhow::Result<LogDestination> {
@@ -3199,6 +3263,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         catalog: state.catalog(),
         on_node: None,
         registry_override,
+        fabro_run_tools: None,
     };
 
     let execution = async {
@@ -3337,6 +3402,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         run_id,
         run_store.subscribe(),
     ));
+    let run_agent_token = issue_run_agent_token_for_run(state.as_ref(), &run_store).await;
 
     let state_for_build = Arc::clone(&state);
     let run_dir_for_build = run_dir.clone();
@@ -3346,6 +3412,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             run_id,
             execution_mode,
             &run_dir_for_build,
+            run_agent_token,
         )
     })
     .await;

@@ -11,12 +11,17 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
-use fabro_config::{ServerSettingsBuilder, Storage, load_llm_catalog_settings};
+use fabro_api::types as api_types;
+use fabro_config::user::active_settings_path;
+use fabro_config::{CliLayer, RunLayer, ServerSettingsBuilder, Storage, load_llm_catalog_settings};
 use fabro_interview::{
     AnswerSubmission, ControlInterviewer, WorkerControlEnvelope, WorkerControlMessage,
 };
+use fabro_manifest::{ManifestBuildInput, RunOverrideInput};
 use fabro_model::Catalog;
+use fabro_server::manifest_validation;
 use fabro_store::{EventEnvelope, RunProjection, RunProjectionReducer};
+use fabro_tool::fabro_client::ClientBackend;
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{RunMode, RunNamespace};
 use fabro_types::{
@@ -29,6 +34,7 @@ use fabro_workflow::event::{Emitter, RunEventSink};
 use fabro_workflow::operations::{self, StartServices};
 use fabro_workflow::run_control::RunControlState;
 use fabro_workflow::runtime_store::{RunStoreBackend, RunStoreHandle};
+use fabro_workflow::services::FabroRunToolServices;
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::{Mutex, RwLock as AsyncRwLock, mpsc};
@@ -65,6 +71,7 @@ pub(crate) async fn execute(
     run_dir: PathBuf,
     mode: RunWorkerMode,
     worker_token: &str,
+    run_agent_token: Option<&str>,
 ) -> Result<()> {
     let _ = fabro_proc::title_init();
     set_worker_title(&run_id, initial_worker_title_phase(mode));
@@ -82,6 +89,14 @@ pub(crate) async fn execute(
         client.clone_for_reuse(),
         worker_token.to_owned(),
     )));
+    let fabro_run_tools = build_fabro_run_tool_services(
+        run_agent_token,
+        &target,
+        run_id,
+        run_spec.source_directory.as_deref(),
+        &run_dir,
+    )
+    .await?;
     let interviewer = Arc::new(ControlInterviewer::new());
     let cancel_token = CancellationToken::new();
     let emitter = Arc::new(Emitter::new(run_id));
@@ -137,6 +152,7 @@ pub(crate) async fn execute(
         catalog,
         on_node: None,
         registry_override: None,
+        fabro_run_tools,
     };
 
     match mode {
@@ -149,6 +165,111 @@ pub(crate) async fn execute(
     }
 
     Ok(())
+}
+
+async fn build_fabro_run_tool_services(
+    run_agent_token: Option<&str>,
+    target: &fabro_client::ServerTarget,
+    current_run_id: RunId,
+    source_directory: Option<&str>,
+    run_dir: &Path,
+) -> Result<Option<FabroRunToolServices>> {
+    let Some(run_agent_token) = run_agent_token.filter(|token| !token.trim().is_empty()) else {
+        return Ok(None);
+    };
+    let client = server_client::connect_server_target_with_bearer(target, run_agent_token).await?;
+    let backend = ClientBackend::new(Arc::new(client))
+        .with_manifest_builder(Arc::new(WorkerRunManifestBuilder));
+    Ok(Some(FabroRunToolServices {
+        backend: Arc::new(backend),
+        current_run_id,
+        base_cwd: source_directory.map_or_else(|| run_dir.to_path_buf(), PathBuf::from),
+        user_settings_path: active_settings_path(None),
+    }))
+}
+
+#[derive(Default)]
+struct WorkerRunManifestBuilder;
+
+impl fabro_tool::RunManifestBuilder for WorkerRunManifestBuilder {
+    fn build_run_manifest(
+        &self,
+        spec: &fabro_tool::ValidatedCreateRunSpec,
+        cwd: &Path,
+        user_settings_path: &Path,
+    ) -> fabro_tool::ToolResult<api_types::RunManifest> {
+        let built = fabro_manifest::build_run_manifest(ManifestBuildInput {
+            workflow:           PathBuf::from(&spec.workflow),
+            cwd:                cwd.to_path_buf(),
+            run_overrides:      worker_run_overrides(spec),
+            cli_overrides:      Some(CliLayer::default()),
+            input_overrides:    spec.inputs.clone(),
+            args:               worker_manifest_args(spec),
+            run_id:             spec.run_id,
+            user_settings_path: Some(user_settings_path.to_path_buf()),
+        })
+        .map_err(|err| fabro_tool::ToolError::from_anyhow(&err))?;
+        let llm_catalog_settings = load_llm_catalog_settings(Some(user_settings_path))
+            .map_err(|err| fabro_tool::ToolError::message(err.to_string()))?;
+        let catalog = Arc::new(
+            Catalog::from_builtin_with_overrides(&llm_catalog_settings)
+                .map_err(|err| fabro_tool::ToolError::message(err.to_string()))?,
+        );
+        let mut validation =
+            manifest_validation::validate_manifest(&RunLayer::default(), &built.manifest, catalog)
+                .map_err(|err| fabro_tool::ToolError::from_anyhow(&err))?;
+        manifest_validation::promote_template_undefined_variables_to_errors(&mut validation);
+        if !validation.ok {
+            return Err(fabro_tool::ToolError::message(
+                "workflow manifest validation failed",
+            ));
+        }
+        Ok(built.manifest)
+    }
+}
+
+fn worker_manifest_args(
+    spec: &fabro_tool::ValidatedCreateRunSpec,
+) -> Option<api_types::ManifestArgs> {
+    let mut input = spec
+        .inputs
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>();
+    input.sort();
+    let mut label = spec
+        .labels
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>();
+    label.sort();
+    let payload = api_types::ManifestArgs {
+        auto_approve: spec.auto_approve.filter(|value| *value),
+        docker_image: None,
+        dry_run: spec.dry_run.filter(|value| *value),
+        input,
+        label,
+        model: spec.model.clone(),
+        preserve_sandbox: spec.preserve_sandbox.filter(|value| *value),
+        provider: spec.provider.clone(),
+        sandbox: spec.sandbox.clone(),
+        verbose: None,
+    };
+    (!fabro_manifest::manifest_args_is_empty(&payload)).then_some(payload)
+}
+
+fn worker_run_overrides(spec: &fabro_tool::ValidatedCreateRunSpec) -> Option<RunLayer> {
+    fabro_manifest::build_sparse_run_overrides(RunOverrideInput {
+        goal:             spec.goal.as_deref(),
+        model:            spec.model.as_deref(),
+        provider:         spec.provider.as_deref(),
+        sandbox:          spec.sandbox.as_deref(),
+        docker_image:     None,
+        preserve_sandbox: spec.preserve_sandbox,
+        dry_run:          spec.dry_run,
+        auto_approve:     spec.auto_approve,
+        labels:           spec.labels.clone(),
+    })
 }
 
 fn load_worker_vault(storage_dir: Option<&Path>) -> Result<Option<Arc<AsyncRwLock<Vault>>>> {

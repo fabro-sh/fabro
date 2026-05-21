@@ -24,7 +24,7 @@ use crate::records::{Checkpoint, Conclusion, RunSpec};
 use crate::run_control::RunControlState;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::runtime_store::RunStoreHandle;
-use crate::services::{EngineServices, RunServices};
+use crate::services::{EngineServices, FabroRunToolServices, RunServices};
 use crate::steering_hub::SteeringHub;
 use crate::transforms::{RenderMode, Transform};
 use crate::workflow_bundle::WorkflowBundle;
@@ -275,6 +275,7 @@ pub struct InitOptions {
     pub run_control:       Option<Arc<RunControlState>>,
     pub checkpoint:        Option<Checkpoint>,
     pub seed_context:      Option<Context>,
+    pub fabro_run_tools:   Option<FabroRunToolServices>,
 }
 
 /// Output of the INITIALIZE phase.

@@ -1,35 +1,34 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use fabro_client::Client;
 use fabro_types::{Run, RunId, RunStatusKind};
 use futures::future::try_join_all;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::common;
-use super::common::{RunSummaryResult, ToolError, ToolResult};
+use super::common::{FabroToolBackend, RunSummaryResult, ToolError, ToolResult};
 
 const SEARCH_GOAL_PREVIEW_CHARS: usize = 240;
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub(crate) struct FabroRunSearchParams {
-    pub(crate) run_ids:        Option<Vec<String>>,
-    pub(crate) workflow:       Option<String>,
-    pub(crate) labels:         Option<HashMap<String, String>>,
-    pub(crate) status:         Option<Vec<String>>,
-    pub(crate) archived:       Option<bool>,
-    pub(crate) created_after:  Option<String>,
-    pub(crate) created_before: Option<String>,
-    pub(crate) first:          Option<usize>,
-    pub(crate) after:          Option<String>,
-    pub(crate) parent_id:      Option<String>,
+pub struct FabroRunSearchParams {
+    pub run_ids:        Option<Vec<String>>,
+    pub workflow:       Option<String>,
+    pub labels:         Option<HashMap<String, String>>,
+    pub status:         Option<Vec<String>>,
+    pub archived:       Option<bool>,
+    pub created_after:  Option<String>,
+    pub created_before: Option<String>,
+    pub first:          Option<usize>,
+    pub after:          Option<String>,
+    pub parent_id:      Option<String>,
 }
 
 #[derive(Debug)]
-pub(crate) struct ValidatedSearchRuns {
-    pub(crate) raw:    FabroRunSearchParams,
-    pub(crate) status: Option<Vec<RunStatusKind>>,
+pub struct ValidatedSearchRuns {
+    pub raw:    FabroRunSearchParams,
+    pub status: Option<Vec<RunStatusKind>>,
 }
 
 impl TryFrom<FabroRunSearchParams> for ValidatedSearchRuns {
@@ -77,40 +76,40 @@ impl TryFrom<FabroRunSearchParams> for ValidatedSearchRuns {
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
-pub(crate) struct SearchRunsResult {
-    pub(crate) runs:        Vec<SearchRunSummaryResult>,
-    pub(crate) next_cursor: Option<String>,
+pub struct SearchRunsResult {
+    pub runs:        Vec<SearchRunSummaryResult>,
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
-pub(crate) struct SearchRunSummaryResult {
-    pub(crate) run_id:              String,
-    pub(crate) parent_id:           Option<String>,
-    pub(crate) children_count:      u64,
-    pub(crate) workflow_name:       Option<String>,
-    pub(crate) workflow_graph_name: Option<String>,
-    pub(crate) workflow_slug:       Option<String>,
-    pub(crate) status:              String,
-    pub(crate) archived:            bool,
-    pub(crate) created_at:          String,
-    pub(crate) started_at:          Option<String>,
-    pub(crate) completed_at:        Option<String>,
-    pub(crate) labels:              HashMap<String, String>,
-    pub(crate) source_directory:    Option<String>,
-    pub(crate) repo_origin_url:     Option<String>,
-    pub(crate) goal_preview:        String,
-    pub(crate) goal_truncated:      bool,
+pub struct SearchRunSummaryResult {
+    pub run_id:              String,
+    pub parent_id:           Option<String>,
+    pub children_count:      u64,
+    pub workflow_name:       Option<String>,
+    pub workflow_graph_name: Option<String>,
+    pub workflow_slug:       Option<String>,
+    pub status:              String,
+    pub archived:            bool,
+    pub created_at:          String,
+    pub started_at:          Option<String>,
+    pub completed_at:        Option<String>,
+    pub labels:              HashMap<String, String>,
+    pub source_directory:    Option<String>,
+    pub repo_origin_url:     Option<String>,
+    pub goal_preview:        String,
+    pub goal_truncated:      bool,
 }
 
-pub(crate) async fn search_runs(
-    client: Arc<Client>,
+pub async fn search_runs(
+    backend: Arc<dyn FabroToolBackend>,
     params: ValidatedSearchRuns,
 ) -> ToolResult<SearchRunsResult> {
     let status = params.status;
     let raw = params.raw;
     let parent_id = if let Some(parent_selector) = raw.parent_id.as_deref() {
         Some(
-            client
+            backend
                 .resolve_run(parent_selector)
                 .await
                 .map_err(|err| ToolError::from_anyhow(&err))?
@@ -120,14 +119,14 @@ pub(crate) async fn search_runs(
         None
     };
     let runs = if let Some(run_ids) = raw.run_ids.as_ref() {
-        resolve_requested_runs(&client, run_ids).await?
+        resolve_requested_runs(&backend, run_ids).await?
     } else if let Some(parent_id) = parent_id {
-        client
+        backend
             .list_store_runs_by_parent(parent_id)
             .await
             .map_err(|err| ToolError::from_anyhow(&err))?
     } else {
-        client
+        backend
             .list_store_runs()
             .await
             .map_err(|err| ToolError::from_anyhow(&err))?
@@ -263,15 +262,18 @@ fn filter_sort_and_page_runs(
     })
 }
 
-pub(crate) fn search_runs_text(result: &SearchRunsResult) -> String {
+pub fn search_runs_text(result: &SearchRunsResult) -> String {
     format!("found {} Fabro run(s)", result.runs.len())
 }
 
-async fn resolve_requested_runs(client: &Arc<Client>, run_ids: &[String]) -> ToolResult<Vec<Run>> {
+async fn resolve_requested_runs(
+    backend: &Arc<dyn FabroToolBackend>,
+    run_ids: &[String],
+) -> ToolResult<Vec<Run>> {
     let runs = try_join_all(run_ids.iter().map(|run_id| {
-        let client = Arc::clone(client);
+        let backend = Arc::clone(backend);
         async move {
-            client
+            backend
                 .resolve_run(run_id)
                 .await
                 .map_err(|err| ToolError::from_anyhow(&err))

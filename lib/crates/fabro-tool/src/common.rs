@@ -1,72 +1,162 @@
 use std::collections::HashMap;
+use std::path::Path;
 
+use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
-use fabro_client::Client;
+use fabro_api::types;
 use fabro_types::{Run, RunId, RunStatus};
 use fabro_util::exit::{self, ExitClass};
-use rmcp::model::{CallToolResult, Content};
 use schemars::JsonSchema;
 use serde::Serialize;
+use serde_json::Value;
 
 #[derive(Debug)]
-pub(crate) struct ToolError {
+pub struct ToolError {
     message: String,
 }
 
 impl ToolError {
-    pub(crate) fn message(message: impl Into<String>) -> Self {
+    pub fn message(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
         }
     }
 
-    pub(crate) fn from_anyhow(err: &anyhow::Error) -> Self {
+    pub fn from_anyhow(err: &anyhow::Error) -> Self {
         Self::message(format_tool_error(err))
     }
 
-    pub(crate) fn as_str(&self) -> &str {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
         &self.message
     }
 }
 
-pub(super) type ToolResult<T> = Result<T, ToolError>;
+impl std::fmt::Display for ToolError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ToolError {}
+
+pub type ToolResult<T> = Result<T, ToolError>;
+
+#[async_trait]
+pub trait FabroToolBackend: Send + Sync {
+    async fn create_run_from_spec(
+        &self,
+        spec: &crate::ValidatedCreateRunSpec,
+        cwd: &Path,
+        user_settings_path: &Path,
+        parent_id: Option<RunId>,
+    ) -> anyhow::Result<RunId>;
+
+    async fn resolve_run(&self, selector: &str) -> anyhow::Result<Run>;
+    async fn retrieve_run(&self, run_id: &RunId) -> anyhow::Result<Run>;
+    async fn start_run(&self, run_id: &RunId, resume: bool) -> anyhow::Result<Run>;
+    async fn cancel_run(&self, run_id: &RunId) -> anyhow::Result<Run>;
+    async fn interrupt_run(&self, run_id: &RunId) -> anyhow::Result<()>;
+    async fn steer_run(&self, run_id: &RunId, text: String, interrupt: bool) -> anyhow::Result<()>;
+    async fn archive_run(&self, run_id: &RunId) -> anyhow::Result<Run>;
+    async fn unarchive_run(&self, run_id: &RunId) -> anyhow::Result<Run>;
+    async fn list_store_runs(&self) -> anyhow::Result<Vec<Run>>;
+    async fn list_store_runs_by_parent(&self, parent_id: RunId) -> anyhow::Result<Vec<Run>>;
+    async fn link_run_parent(&self, child_id: &RunId, parent_id: &RunId) -> anyhow::Result<Run>;
+    async fn unlink_run_parent(&self, child_id: &RunId) -> anyhow::Result<Run>;
+    async fn get_run_state(&self, run_id: &RunId) -> anyhow::Result<fabro_types::RunProjection>;
+    async fn list_run_events(
+        &self,
+        run_id: &RunId,
+        after: Option<u32>,
+        limit: Option<usize>,
+    ) -> anyhow::Result<Vec<fabro_types::EventEnvelope>>;
+    async fn list_run_events_until(
+        &self,
+        run_id: &RunId,
+        after: Option<u32>,
+        limit: usize,
+    ) -> anyhow::Result<Vec<fabro_types::EventEnvelope>>;
+    async fn list_run_questions(&self, run_id: &RunId) -> anyhow::Result<Vec<types::ApiQuestion>>;
+    async fn submit_run_answer(
+        &self,
+        run_id: &RunId,
+        question_id: &str,
+        body: types::SubmitAnswerRequest,
+    ) -> anyhow::Result<()>;
+}
+
+pub trait RunManifestBuilder: Send + Sync {
+    fn build_run_manifest(
+        &self,
+        spec: &crate::ValidatedCreateRunSpec,
+        cwd: &Path,
+        user_settings_path: &Path,
+    ) -> ToolResult<types::RunManifest>;
+}
 
 #[derive(Debug, Serialize, JsonSchema)]
-pub(crate) struct RunSummaryResult {
-    pub(crate) run_id:              String,
-    pub(crate) parent_id:           Option<String>,
-    pub(crate) children_count:      u64,
-    pub(crate) workflow_name:       Option<String>,
-    pub(crate) workflow_graph_name: Option<String>,
-    pub(crate) workflow_slug:       Option<String>,
-    pub(crate) status:              String,
-    pub(crate) archived:            bool,
-    pub(crate) created_at:          String,
-    pub(crate) started_at:          Option<String>,
-    pub(crate) completed_at:        Option<String>,
-    pub(crate) labels:              HashMap<String, String>,
-    pub(crate) source_directory:    Option<String>,
-    pub(crate) repo_origin_url:     Option<String>,
-    pub(crate) goal:                String,
+pub struct RunSummaryResult {
+    pub run_id:              String,
+    pub parent_id:           Option<String>,
+    pub children_count:      u64,
+    pub workflow_name:       Option<String>,
+    pub workflow_graph_name: Option<String>,
+    pub workflow_slug:       Option<String>,
+    pub status:              String,
+    pub archived:            bool,
+    pub created_at:          String,
+    pub started_at:          Option<String>,
+    pub completed_at:        Option<String>,
+    pub labels:              HashMap<String, String>,
+    pub source_directory:    Option<String>,
+    pub repo_origin_url:     Option<String>,
+    pub goal:                String,
 }
 
-pub(crate) fn success_result<T: Serialize>(
-    value: &T,
-    text: impl Into<String>,
-) -> Result<CallToolResult, rmcp::ErrorData> {
-    let structured_content = serde_json::to_value(value).map_err(|err| {
-        rmcp::ErrorData::internal_error(
-            format!("failed to serialize Fabro MCP tool result: {err}"),
-            None,
-        )
-    })?;
-    let mut result = CallToolResult::structured(structured_content);
-    result.content = vec![Content::text(text.into())];
-    Ok(result)
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ToolDefinition {
+    pub name:        &'static str,
+    pub description: &'static str,
+    pub parameters:  Value,
 }
 
-pub(crate) fn error_result(err: ToolError) -> CallToolResult {
-    CallToolResult::error(vec![Content::text(err.message)])
+#[must_use]
+pub fn tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        tool_definition::<crate::FabroRunCreateParams>(
+            "fabro_run_create",
+            "Create one or more Fabro workflow runs, optionally under a parent run, starting them by default.",
+        ),
+        tool_definition::<crate::FabroRunSearchParams>(
+            "fabro_run_search",
+            "Search Fabro workflow runs by id, parent, workflow, labels, status, archival state, and creation time.",
+        ),
+        tool_definition::<crate::FabroRunInteractParams>(
+            "fabro_run_interact",
+            "Get, start, message, interrupt, cancel, archive, unarchive, link or unlink a parent, inspect questions, or answer a Fabro run.",
+        ),
+        tool_definition::<crate::FabroRunGatherParams>(
+            "fabro_run_gather",
+            "Wait for Fabro runs to reach terminal states, returning current state on timeout.",
+        ),
+        tool_definition::<crate::FabroRunEventsParams>(
+            "fabro_run_events",
+            "List, inspect, or search stored events for a Fabro workflow run.",
+        ),
+    ]
+}
+
+fn tool_definition<T>(name: &'static str, description: &'static str) -> ToolDefinition
+where
+    T: JsonSchema,
+{
+    ToolDefinition {
+        name,
+        description,
+        parameters: serde_json::to_value(schemars::schema_for!(T))
+            .expect("tool parameter schema should serialize"),
+    }
 }
 
 pub(super) fn validate_len(name: &str, len: usize, min: usize, max: usize) -> ToolResult<()> {
@@ -83,14 +173,17 @@ pub(super) fn validate_len(name: &str, len: usize, min: usize, max: usize) -> To
     Ok(())
 }
 
-pub(super) async fn retrieve_run(client: &Client, run_id: &RunId) -> ToolResult<Run> {
-    client
+pub(super) async fn retrieve_run(
+    backend: &dyn FabroToolBackend,
+    run_id: &RunId,
+) -> ToolResult<Run> {
+    backend
         .retrieve_run(run_id)
         .await
         .map_err(|err| ToolError::from_anyhow(&err))
 }
 
-pub(super) fn run_summary_result(run: &Run) -> RunSummaryResult {
+pub(crate) fn run_summary_result(run: &Run) -> RunSummaryResult {
     RunSummaryResult {
         run_id:              run.id.to_string(),
         parent_id:           run.parent_id.map(|parent_id| parent_id.to_string()),
@@ -119,7 +212,7 @@ pub(super) fn run_summary_result(run: &Run) -> RunSummaryResult {
     }
 }
 
-pub(super) fn parse_datetime_filter(name: &str, raw: &str) -> ToolResult<DateTime<Utc>> {
+pub(crate) fn parse_datetime_filter(name: &str, raw: &str) -> ToolResult<DateTime<Utc>> {
     if let Ok(timestamp) = DateTime::parse_from_rfc3339(raw) {
         return Ok(timestamp.with_timezone(&Utc));
     }
@@ -132,7 +225,7 @@ pub(super) fn parse_datetime_filter(name: &str, raw: &str) -> ToolResult<DateTim
     Ok(DateTime::from_naive_utc_and_offset(datetime, Utc))
 }
 
-pub(super) fn run_status_kind(status: RunStatus) -> &'static str {
+pub(crate) fn run_status_kind(status: RunStatus) -> &'static str {
     status.kind().into()
 }
 
