@@ -24,6 +24,10 @@ mock.module("../lib/queries", () => ({
   useRunQuestions: () => ({
     data: currentQuestions,
   }),
+  useRunPullRequest: () => ({
+    data:      null,
+    isLoading: false,
+  }),
   useRunState: () => ({
     data: currentRunState,
   }),
