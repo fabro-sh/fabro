@@ -16,11 +16,29 @@
 // May contain unused imports in some cases
 // @ts-ignore
 import type { PairTarget } from './pair-target';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { PairTranscriptBase } from './pair-transcript-base';
 
-/**
- * @type PairTranscriptSystemMessage
- */
-export type PairTranscriptSystemMessage = PairTranscriptBase;
+export interface PairTranscriptSystemMessage {
+    'kind': PairTranscriptSystemMessageKindEnum;
+    'seq': number;
+    'event_id': string;
+    'ts': string;
+    /**
+     * Durable run pair identifier.
+     */
+    'pair_id': string;
+    'target': PairTarget;
+    'system_message_kind': PairTranscriptSystemMessageSystemMessageKindEnum;
+    'text': string;
+}
+
+export const PairTranscriptSystemMessageKindEnum = {
+    SYSTEM_MESSAGE: 'system_message'
+} as const;
+
+export type PairTranscriptSystemMessageKindEnum = typeof PairTranscriptSystemMessageKindEnum[keyof typeof PairTranscriptSystemMessageKindEnum];
+export const PairTranscriptSystemMessageSystemMessageKindEnum = {
+    HUMAN_JOINED: 'human_joined',
+    HUMAN_LEFT: 'human_left'
+} as const;
+
+export type PairTranscriptSystemMessageSystemMessageKindEnum = typeof PairTranscriptSystemMessageSystemMessageKindEnum[keyof typeof PairTranscriptSystemMessageSystemMessageKindEnum];

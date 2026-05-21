@@ -13,14 +13,24 @@ use fabro_agent::{
     AgentEvent, AgentProfile, AnthropicProfile, Error as AgentError, GeminiProfile, OpenAiProfile,
     Session, SessionEvent, SessionOptions, ToolApprovalAdapter, WebFetchSummarizer,
 };
+use fabro_api::types::{CreateRunSessionRequest, SubmitTurnRequest};
 use fabro_llm::client::Client as LlmClient;
 use fabro_model::{AgentProfileKind, Catalog, ModelHandle, ProviderId};
 use fabro_sandbox::reconnect::reconnect_for_run;
 use fabro_store::{
     EventPayload, ProjectedRunSession, RunDatabase, project_run_session, project_run_sessions,
 };
-use fabro_types::{EventEnvelope, RunId, SessionId, TurnId};
-use serde_json::{Value, json};
+use fabro_types::run_event::{
+    RunSessionAssistantDeltaProps, RunSessionAssistantMessageProps, RunSessionCreatedProps,
+    RunSessionToolCallCompletedProps, RunSessionToolCallStartedProps, RunSessionTurnFailedProps,
+    RunSessionTurnInterruptedProps, RunSessionTurnStartedProps, RunSessionTurnSucceededProps,
+    RunSessionUserMessageProps,
+};
+use fabro_types::settings::{ModelRef as SettingsModelRef, ModelRegistry, ResolvedModelRef};
+use fabro_types::{
+    EventBody, EventEnvelope, PermissionLevel, RunEvent, RunId, SessionId, SessionRecord, TurnId,
+};
+use serde_json::Value;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -56,19 +66,6 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         )
 }
 
-#[derive(Debug, serde::Deserialize)]
-struct CreateRunSessionRequest {
-    #[serde(default)]
-    title: Option<String>,
-    #[serde(default)]
-    model: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct SubmitTurnRequest {
-    input: String,
-}
-
 async fn list_run_sessions(
     _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
@@ -78,7 +75,7 @@ async fn list_run_sessions(
         Ok(id) => id,
         Err(err) => return err.into_response(),
     };
-    let run_store = match open_run(&state, run_id).await {
+    let run_store = match open_run_reader(&state, run_id).await {
         Ok(store) => store,
         Err(response) => return response,
     };
@@ -111,14 +108,21 @@ async fn create_run_session(
 
     let session_id = SessionId::new();
     let now = Utc::now();
+    if let Err(err) = state
+        .store_ref()
+        .put_session_run_index(&session_id, &run_id)
+        .await
+    {
+        return store_error(&err).into_response();
+    }
+
     let event = match append_run_session_event(
         &run_store,
         run_id,
         session_id,
-        "run.session.created",
-        json!({
-            "title": request.title,
-            "model": model,
+        EventBody::RunSessionCreated(RunSessionCreatedProps {
+            title: request.title,
+            model,
         }),
         now,
     )
@@ -127,13 +131,6 @@ async fn create_run_session(
         Ok(event) => event,
         Err(err) => return store_error(&err).into_response(),
     };
-    if let Err(err) = state
-        .store_ref()
-        .put_session_run_index(&session_id, &run_id)
-        .await
-    {
-        return store_error(&err).into_response();
-    }
 
     let events = vec![event];
     match project_run_session(run_id, session_id, &events) {
@@ -155,11 +152,11 @@ async fn get_session(
         Ok(id) => id,
         Err(err) => return err.into_response(),
     };
-    let (_, _, session) = match load_session(&state, session_id).await {
+    let (_, session) = match load_session_read(&state, session_id).await {
         Ok(context) => context,
         Err(response) => return response,
     };
-    Json(session.record).into_response()
+    Json(session).into_response()
 }
 
 async fn session_method_not_found() -> Response {
@@ -180,6 +177,7 @@ async fn submit_turn(
         Ok(context) => context,
         Err(response) => return response,
     };
+    let input = request.input;
 
     let turn_id = TurnId::new();
     let turn_lease = match state.session_runtimes().reserve_turn(session_id, turn_id) {
@@ -192,21 +190,17 @@ async fn submit_turn(
 
     let (sender, receiver) = mpsc::channel(SESSION_SSE_BUFFER_CAPACITY);
     let now = Utc::now();
-    for (event_name, properties) in [
-        (
-            "run.session.turn.started",
-            json!({ "turn_id": turn_id, "input": request.input }),
-        ),
-        (
-            "run.session.user_message",
-            json!({ "turn_id": turn_id, "text": request.input }),
-        ),
+    for body in [
+        EventBody::RunSessionTurnStarted(RunSessionTurnStartedProps {
+            turn_id,
+            input: input.clone(),
+        }),
+        EventBody::RunSessionUserMessage(RunSessionUserMessageProps {
+            turn_id,
+            text: input.clone(),
+        }),
     ] {
-        match append_and_send_event(
-            &run_store, &sender, run_id, session_id, event_name, properties, now,
-        )
-        .await
-        {
+        match append_and_send_event(&run_store, &sender, run_id, session_id, body, now).await {
             Ok(()) => {}
             Err(err) => {
                 drop(turn_lease);
@@ -216,14 +210,7 @@ async fn submit_turn(
     }
 
     tokio::spawn(run_streaming_turn(
-        state,
-        run_id,
-        run_store,
-        session,
-        turn_id,
-        request.input,
-        sender,
-        turn_lease,
+        state, run_id, run_store, session, turn_id, input, sender, turn_lease,
     ));
     Sse::new(ReceiverStream::new(receiver))
         .keep_alive(KeepAlive::default())
@@ -261,8 +248,10 @@ async fn interrupt_turn(
         &run_store,
         run_id,
         session_id,
-        "run.session.turn.interrupted",
-        json!({ "turn_id": turn_id, "error": "Interrupted." }),
+        EventBody::RunSessionTurnInterrupted(RunSessionTurnInterruptedProps {
+            turn_id,
+            error: Some("Interrupted.".to_string()),
+        }),
         Utc::now(),
     )
     .await
@@ -295,8 +284,10 @@ async fn run_streaming_turn(
             &sender,
             run_id,
             session_id,
-            "run.session.turn.interrupted",
-            json!({ "turn_id": turn_id, "error": "Interrupted." }),
+            EventBody::RunSessionTurnInterrupted(RunSessionTurnInterruptedProps {
+                turn_id,
+                error: Some("Interrupted.".to_string()),
+            }),
             Utc::now(),
         )
         .await;
@@ -318,8 +309,11 @@ async fn run_streaming_turn(
                         &sender,
                         run_id,
                         session_id,
-                        "run.session.turn.failed",
-                        json!({ "turn_id": turn_id, "error": err.to_string() }),
+                        EventBody::RunSessionTurnFailed(RunSessionTurnFailedProps {
+                            turn_id,
+                            error: err.to_string(),
+                            output: None,
+                        }),
                         Utc::now(),
                     )
                     .await;
@@ -359,29 +353,31 @@ async fn run_streaming_turn(
                 &sender,
                 run_id,
                 session_id,
-                "run.session.turn.succeeded",
-                json!({ "turn_id": turn_id, "output": outcome.output }),
+                EventBody::RunSessionTurnSucceeded(RunSessionTurnSucceededProps {
+                    turn_id,
+                    output: outcome.output,
+                }),
                 Utc::now(),
             )
             .await;
         }
         Ok(Err(err)) => {
             turn_lease.entry().clear_session().await;
-            let event_name = if matches!(err, AgentError::Interrupted(_)) {
-                "run.session.turn.interrupted"
+            let body = if matches!(err, AgentError::Interrupted(_)) {
+                EventBody::RunSessionTurnInterrupted(RunSessionTurnInterruptedProps {
+                    turn_id,
+                    error: Some(err.to_string()),
+                })
             } else {
-                "run.session.turn.failed"
+                EventBody::RunSessionTurnFailed(RunSessionTurnFailedProps {
+                    turn_id,
+                    error: err.to_string(),
+                    output: outcome.output,
+                })
             };
-            let _ = append_and_send_event(
-                &run_store,
-                &sender,
-                run_id,
-                session_id,
-                event_name,
-                json!({ "turn_id": turn_id, "error": err.to_string(), "output": outcome.output }),
-                Utc::now(),
-            )
-            .await;
+            let _ =
+                append_and_send_event(&run_store, &sender, run_id, session_id, body, Utc::now())
+                    .await;
         }
         Err(err) => {
             turn_lease.entry().clear_session().await;
@@ -390,8 +386,11 @@ async fn run_streaming_turn(
                 &sender,
                 run_id,
                 session_id,
-                "run.session.turn.failed",
-                json!({ "turn_id": turn_id, "error": err.to_string(), "output": outcome.output }),
+                EventBody::RunSessionTurnFailed(RunSessionTurnFailedProps {
+                    turn_id,
+                    error: err.to_string(),
+                    output: outcome.output,
+                }),
                 Utc::now(),
             )
             .await;
@@ -493,42 +492,36 @@ fn canonical_session_model(
     if requested.is_empty() {
         return Err(ApiError::bad_request("Session model must not be empty."));
     }
-    if requested.contains('/') {
-        return resolve_provider_qualified_session_model(catalog, requested).map(Some);
-    }
-
-    let model = catalog.get(requested);
-    let provider = catalog.provider(&ProviderId::new(requested));
-    match (model, provider) {
-        (Some(_), Some(_)) => Err(ApiError::bad_request(format!(
-            "Session model reference '{requested}' is ambiguous; use a catalog model ID or provider/model reference."
+    let model_ref = requested
+        .parse::<SettingsModelRef>()
+        .map_err(|err| ApiError::bad_request(err.to_string()))?;
+    let registry = CatalogModelRegistry { catalog };
+    match model_ref
+        .resolve(&registry)
+        .map_err(|err| ApiError::bad_request(err.to_string()))?
+    {
+        ResolvedModelRef::Provider(provider) => Err(ApiError::bad_request(format!(
+            "Session model reference '{provider}' names a provider; include a model ID."
         ))),
-        (Some(model), None) => Ok(Some(model.id.clone())),
-        (None, Some(_)) => Err(ApiError::bad_request(format!(
-            "Session model reference '{requested}' names a provider; include a model ID."
-        ))),
-        (None, None) => Err(ApiError::bad_request(format!(
-            "Unknown session model '{requested}'."
-        ))),
+        ResolvedModelRef::Model {
+            provider: Some(provider),
+            model,
+        } => resolve_provider_qualified_session_model(catalog, &provider, &model).map(Some),
+        ResolvedModelRef::Model {
+            provider: None,
+            model,
+        } => catalog
+            .get(&model)
+            .map(|model| Some(model.id.clone()))
+            .ok_or_else(|| ApiError::bad_request(format!("Unknown session model '{model}'."))),
     }
 }
 
 fn resolve_provider_qualified_session_model(
     catalog: &Catalog,
-    requested: &str,
+    provider_ref: &str,
+    model_ref: &str,
 ) -> Result<String, ApiError> {
-    let Some((provider_ref, model_ref)) = requested.split_once('/') else {
-        return Err(ApiError::bad_request(format!(
-            "Invalid session model reference '{requested}'."
-        )));
-    };
-    let provider_ref = provider_ref.trim();
-    let model_ref = model_ref.trim();
-    if provider_ref.is_empty() || model_ref.is_empty() || model_ref.contains('/') {
-        return Err(ApiError::bad_request(format!(
-            "Session model reference '{requested}' must use provider/model."
-        )));
-    }
     let provider_id = ProviderId::new(provider_ref);
     let provider = catalog.provider(&provider_id).ok_or_else(|| {
         ApiError::bad_request(format!("Unknown session model provider '{provider_ref}'."))
@@ -543,6 +536,26 @@ fn resolve_provider_qualified_session_model(
         )));
     }
     Ok(model.id.clone())
+}
+
+struct CatalogModelRegistry<'a> {
+    catalog: &'a Catalog,
+}
+
+impl ModelRegistry for CatalogModelRegistry<'_> {
+    fn is_provider(&self, token: &str) -> bool {
+        self.catalog.provider(&ProviderId::new(token)).is_some()
+    }
+
+    fn is_model(&self, token: &str) -> bool {
+        self.catalog.get(token).is_some()
+    }
+
+    fn provider_of(&self, token: &str) -> Option<String> {
+        self.catalog
+            .get(token)
+            .map(|model| model.provider.to_string())
+    }
 }
 
 fn build_profile(
@@ -600,7 +613,10 @@ fn summarizer_model_id(
 
 fn build_ask_fabro_tool_approval() -> ToolApprovalFn {
     Arc::new(move |tool_name: &str, _args: &Value| {
-        if is_ask_fabro_auto_approved(tool_category(tool_name)) {
+        if fabro_agent::tool_permissions::is_tool_auto_approved(
+            PermissionLevel::ReadOnly,
+            tool_name,
+        ) {
             Ok(())
         } else {
             Err(format!(
@@ -608,19 +624,6 @@ fn build_ask_fabro_tool_approval() -> ToolApprovalFn {
             ))
         }
     })
-}
-
-fn tool_category(name: &str) -> &'static str {
-    match name {
-        "read_file" | "read_many_files" | "grep" | "glob" | "list_dir" => "read",
-        "write_file" | "edit_file" | "apply_patch" => "write",
-        "spawn_agent" | "send_input" | "wait" | "close_agent" => "subagent",
-        _ => "shell",
-    }
-}
-
-fn is_ask_fabro_auto_approved(category: &str) -> bool {
-    matches!(category, "read" | "subagent")
 }
 
 async fn drive_agent_session(
@@ -680,55 +683,57 @@ async fn persist_agent_event(
     sender: &SessionSseSender,
 ) -> anyhow::Result<()> {
     let ts = event.timestamp.into();
-    let Some((event_name, properties)) = agent_event_payload(turn_id, event.event) else {
+    let Some(body) = agent_event_payload(turn_id, event.event) else {
         return Ok(());
     };
-    append_and_send_event(
-        run_store, sender, run_id, session_id, event_name, properties, ts,
-    )
-    .await
-    .map_err(Into::into)
+    append_and_send_event(run_store, sender, run_id, session_id, body, ts)
+        .await
+        .map_err(Into::into)
 }
 
-fn agent_event_payload(event_turn_id: TurnId, event: AgentEvent) -> Option<(&'static str, Value)> {
+fn agent_event_payload(event_turn_id: TurnId, event: AgentEvent) -> Option<EventBody> {
     match event {
         AgentEvent::AssistantMessage {
             text, model, usage, ..
-        } => Some((
-            "run.session.assistant_message",
-            json!({ "turn_id": event_turn_id, "text": text, "model": model, "usage": usage }),
+        } => Some(EventBody::RunSessionAssistantMessage(
+            RunSessionAssistantMessageProps {
+                turn_id: event_turn_id,
+                text,
+                model: Some(model.model_id),
+                usage: serde_json::to_value(usage).unwrap_or(Value::Null),
+            },
         )),
-        AgentEvent::TextDelta { delta } | AgentEvent::ReasoningDelta { delta } => Some((
-            "run.session.assistant_delta",
-            json!({ "turn_id": event_turn_id, "delta": delta }),
-        )),
+        AgentEvent::TextDelta { delta } | AgentEvent::ReasoningDelta { delta } => Some(
+            EventBody::RunSessionAssistantDelta(RunSessionAssistantDeltaProps {
+                turn_id: event_turn_id,
+                delta,
+            }),
+        ),
         AgentEvent::ToolCallStarted {
             tool_name,
             tool_call_id,
             arguments,
-        } => Some((
-            "run.session.tool_call.started",
-            json!({
-                "turn_id": event_turn_id,
-                "tool_name": tool_name,
-                "tool_call_id": tool_call_id,
-                "arguments": arguments
-            }),
+        } => Some(EventBody::RunSessionToolCallStarted(
+            RunSessionToolCallStartedProps {
+                turn_id: event_turn_id,
+                tool_name,
+                tool_call_id,
+                arguments,
+            },
         )),
         AgentEvent::ToolCallCompleted {
             tool_name,
             tool_call_id,
             output,
             is_error,
-        } => Some((
-            "run.session.tool_call.completed",
-            json!({
-                "turn_id": event_turn_id,
-                "tool_name": tool_name,
-                "tool_call_id": tool_call_id,
-                "output": output,
-                "is_error": is_error
-            }),
+        } => Some(EventBody::RunSessionToolCallCompleted(
+            RunSessionToolCallCompletedProps {
+                turn_id: event_turn_id,
+                tool_name,
+                tool_call_id,
+                output,
+                is_error,
+            },
         )),
         _ => None,
     }
@@ -739,12 +744,10 @@ async fn append_and_send_event(
     sender: &SessionSseSender,
     run_id: RunId,
     session_id: SessionId,
-    event_name: &str,
-    properties: Value,
+    body: EventBody,
     ts: DateTime<Utc>,
 ) -> fabro_store::Result<()> {
-    let event =
-        append_run_session_event(run_store, run_id, session_id, event_name, properties, ts).await?;
+    let event = append_run_session_event(run_store, run_id, session_id, body, ts).await?;
     send_sse_event(sender, &event).await;
     Ok(())
 }
@@ -753,26 +756,26 @@ async fn append_run_session_event(
     run_store: &RunDatabase,
     run_id: RunId,
     session_id: SessionId,
-    event_name: &str,
-    properties: Value,
+    body: EventBody,
     ts: DateTime<Utc>,
 ) -> fabro_store::Result<EventEnvelope> {
-    let payload = EventPayload::new(
-        json!({
-            "id": format!("evt_{}", ulid::Ulid::new()),
-            "ts": ts,
-            "run_id": run_id,
-            "session_id": session_id,
-            "event": event_name,
-            "properties": properties,
-        }),
-        &run_id,
-    )?;
-    let seq = run_store.append_event(&payload).await?;
-    run_store
-        .get_event(seq)
-        .await?
-        .ok_or_else(|| fabro_store::Error::Other(format!("missing appended run event {seq}")))
+    let event = RunEvent {
+        id: format!("evt_{}", ulid::Ulid::new()),
+        ts,
+        run_id,
+        node_id: None,
+        node_label: None,
+        stage_id: None,
+        parallel_group_id: None,
+        parallel_branch_id: None,
+        session_id: Some(session_id.to_string()),
+        parent_session_id: None,
+        tool_call_id: None,
+        actor: None,
+        body,
+    };
+    let payload = EventPayload::new(event.to_value()?, &run_id)?;
+    run_store.append_event_envelope(&payload).await
 }
 
 async fn send_sse_event(sender: &SessionSseSender, event: &EventEnvelope) -> bool {
@@ -808,6 +811,26 @@ async fn load_session(
     }
 }
 
+async fn load_session_read(
+    state: &AppState,
+    session_id: SessionId,
+) -> Result<(RunId, SessionRecord), Response> {
+    let run_id = match state.store_ref().get_session_run_id(&session_id).await {
+        Ok(Some(run_id)) => run_id,
+        Ok(None) => return Err(ApiError::not_found("Session not found.").into_response()),
+        Err(err) => return Err(store_error(&err).into_response()),
+    };
+    let run_store = open_run_reader(state, run_id).await?;
+    let events = match run_store.list_events().await {
+        Ok(events) => events,
+        Err(err) => return Err(store_error(&err).into_response()),
+    };
+    match project_run_session(run_id, session_id, &events) {
+        Some(session) => Ok((run_id, session)),
+        None => Err(ApiError::not_found("Session not found.").into_response()),
+    }
+}
+
 async fn open_run(state: &AppState, run_id: RunId) -> Result<RunDatabase, Response> {
     state.store_ref().open_run(&run_id).await.map_err(|err| {
         if matches!(err, fabro_store::Error::RunNotFound(_)) {
@@ -816,6 +839,20 @@ async fn open_run(state: &AppState, run_id: RunId) -> Result<RunDatabase, Respon
             store_error(&err).into_response()
         }
     })
+}
+
+async fn open_run_reader(state: &AppState, run_id: RunId) -> Result<RunDatabase, Response> {
+    state
+        .store_ref()
+        .open_run_reader(&run_id)
+        .await
+        .map_err(|err| {
+            if matches!(err, fabro_store::Error::RunNotFound(_)) {
+                ApiError::not_found("Run not found.").into_response()
+            } else {
+                store_error(&err).into_response()
+            }
+        })
 }
 
 fn store_error(err: &fabro_store::Error) -> ApiError {

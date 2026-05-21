@@ -18,12 +18,35 @@
 import type { PairTarget } from './pair-target';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { PairTranscriptBase } from './pair-transcript-base';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { PairTranscriptToolCallAllOfDetailRef } from './pair-transcript-tool-call-all-of-detail-ref';
+import type { PairTranscriptDetailRef } from './pair-transcript-detail-ref';
 
-/**
- * @type PairTranscriptToolCall
- */
-export type PairTranscriptToolCall = PairTranscriptBase;
+export interface PairTranscriptToolCall {
+    'kind': PairTranscriptToolCallKindEnum;
+    'seq': number;
+    'event_id': string;
+    'ts': string;
+    /**
+     * Durable run pair identifier.
+     */
+    'pair_id': string;
+    'target': PairTarget;
+    'tool_call_id': string;
+    'tool_name': string;
+    'status': PairTranscriptToolCallStatusEnum;
+    'summary': string;
+    'is_error': boolean;
+    'truncated': boolean;
+    'detail_ref': PairTranscriptDetailRef;
+}
+
+export const PairTranscriptToolCallKindEnum = {
+    TOOL_CALL: 'tool_call'
+} as const;
+
+export type PairTranscriptToolCallKindEnum = typeof PairTranscriptToolCallKindEnum[keyof typeof PairTranscriptToolCallKindEnum];
+export const PairTranscriptToolCallStatusEnum = {
+    STARTED: 'started',
+    COMPLETED: 'completed'
+} as const;
+
+export type PairTranscriptToolCallStatusEnum = typeof PairTranscriptToolCallStatusEnum[keyof typeof PairTranscriptToolCallStatusEnum];

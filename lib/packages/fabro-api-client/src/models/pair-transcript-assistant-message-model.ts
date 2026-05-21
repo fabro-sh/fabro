@@ -14,7 +14,7 @@
 
 
 
-export interface PairTranscriptAssistantMessageAllOfModel {
+export interface PairTranscriptAssistantMessageModel {
     'provider': string;
     'model_id': string;
     'speed'?: string | null;

@@ -200,15 +200,14 @@ models/pair-start-request.ts
 models/pair-status.ts
 models/pair-target-selector.ts
 models/pair-target.ts
-models/pair-transcript-assistant-message-all-of-model.ts
+models/pair-transcript-assistant-message-model.ts
 models/pair-transcript-assistant-message.ts
-models/pair-transcript-base.ts
+models/pair-transcript-detail-ref.ts
 models/pair-transcript-entry.ts
 models/pair-transcript-error.ts
 models/pair-transcript-response-meta.ts
 models/pair-transcript-response.ts
 models/pair-transcript-system-message.ts
-models/pair-transcript-tool-call-all-of-detail-ref.ts
 models/pair-transcript-tool-call.ts
 models/pair-transcript-user-message.ts
 models/pair-transcript-warning.ts

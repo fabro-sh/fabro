@@ -30,6 +30,7 @@ use tokio::sync::{Mutex as AsyncMutex, RwLock as AsyncRwLock};
 use crate::config::{ToolApprovalAdapter, ToolApprovalFn, ToolHookCallback};
 use crate::error::InterruptReason;
 use crate::subagent::{SessionFactory, SubAgentManager};
+use crate::tool_permissions::{is_auto_approved, tool_category};
 use crate::tools::WebFetchSummarizer;
 use crate::{
     AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, LocalSandbox, Message,
@@ -118,26 +119,6 @@ impl AgentArgs {
             .or(output_format)
             .or(Some(OutputFormat::Text));
     }
-}
-
-fn tool_category(name: &str) -> &'static str {
-    match name {
-        "read_file" | "read_many_files" | "grep" | "glob" | "list_dir" => "read",
-        "write_file" | "edit_file" | "apply_patch" => "write",
-        // subagent tools inherit parent permissions, always allowed
-        "spawn_agent" | "send_input" | "wait" | "close_agent" => "subagent",
-        // shell and unknown tools require highest permission
-        _ => "shell",
-    }
-}
-
-fn is_auto_approved(level: PermissionLevel, category: &str) -> bool {
-    matches!(
-        (level, category),
-        (_, "read" | "subagent")
-            | (PermissionLevel::ReadWrite | PermissionLevel::Full, "write")
-            | (PermissionLevel::Full, "shell")
-    )
 }
 
 #[allow(

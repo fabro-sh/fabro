@@ -77,9 +77,3 @@ pub struct RunSessionTurnInterruptedProps {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error:   Option<String>,
 }
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RunSessionContextCompactedProps {
-    pub turn_id: TurnId,
-    pub summary: String,
-}

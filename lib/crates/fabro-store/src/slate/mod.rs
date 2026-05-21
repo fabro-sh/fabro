@@ -317,19 +317,6 @@ impl Database {
             let entry: SessionRunIndexEntry = serde_json::from_slice(&bytes)?;
             return Ok(Some(entry.run_id));
         }
-
-        let query = ListRunsQuery::default();
-        for run_id in self.catalog_index().await?.list(&query).await? {
-            let run = self.open_run_reader(&run_id).await?;
-            let events = run.list_events().await?;
-            if events.iter().any(|event| {
-                event.event.session_id.as_deref() == Some(&session_id.to_string())
-                    && event.event.event_name() == "run.session.created"
-            }) {
-                self.put_session_run_index(session_id, &run_id).await?;
-                return Ok(Some(run_id));
-            }
-        }
         Ok(None)
     }
 

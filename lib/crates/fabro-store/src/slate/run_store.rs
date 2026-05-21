@@ -235,6 +235,10 @@ impl RunDatabase {
 
 impl RunDatabase {
     pub async fn append_event(&self, payload: &EventPayload) -> Result<u32> {
+        Ok(self.append_event_envelope(payload).await?.seq)
+    }
+
+    pub async fn append_event_envelope(&self, payload: &EventPayload) -> Result<EventEnvelope> {
         if self.read_only {
             return Err(Error::ReadOnly);
         }
@@ -262,7 +266,7 @@ impl RunDatabase {
             match Self::build_cached_projection(&self.inner.db, &self.inner.run_id).await {
                 Ok(Some(entry)) => {
                     self.inner.shared_projection_cache.replace(entry).await;
-                    return Ok(seq);
+                    return Ok(event);
                 }
                 Ok(None) => {
                     self.inner
@@ -289,7 +293,7 @@ impl RunDatabase {
             );
             return Err(err);
         }
-        Ok(seq)
+        Ok(event)
     }
 
     pub async fn list_events(&self) -> Result<Vec<EventEnvelope>> {

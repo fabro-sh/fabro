@@ -16,11 +16,27 @@
 // May contain unused imports in some cases
 // @ts-ignore
 import type { PairTarget } from './pair-target';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { PairTranscriptBase } from './pair-transcript-base';
 
-/**
- * @type PairTranscriptUserMessage
- */
-export type PairTranscriptUserMessage = PairTranscriptBase;
+export interface PairTranscriptUserMessage {
+    'kind': PairTranscriptUserMessageKindEnum;
+    'seq': number;
+    'event_id': string;
+    'ts': string;
+    /**
+     * Durable run pair identifier.
+     */
+    'pair_id': string;
+    'target': PairTarget;
+    /**
+     * Durable pair message identifier.
+     */
+    'message_id': string;
+    'client_message_id'?: string | null;
+    'text': string;
+}
+
+export const PairTranscriptUserMessageKindEnum = {
+    USER_MESSAGE: 'user_message'
+} as const;
+
+export type PairTranscriptUserMessageKindEnum = typeof PairTranscriptUserMessageKindEnum[keyof typeof PairTranscriptUserMessageKindEnum];

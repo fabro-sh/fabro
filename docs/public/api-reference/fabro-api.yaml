@@ -5077,12 +5077,13 @@ components:
       discriminator:
         propertyName: kind
 
-    PairTranscriptBase:
+    PairTranscriptUserMessage:
       type: object
-      required: [kind, seq, event_id, ts, pair_id, target]
+      required: [kind, seq, event_id, ts, pair_id, target, message_id, text]
       properties:
         kind:
           type: string
+          enum: [user_message]
         seq:
           type: integer
           minimum: 1
@@ -5095,138 +5096,167 @@ components:
           $ref: "#/components/schemas/PairId"
         target:
           $ref: "#/components/schemas/PairTarget"
-
-    PairTranscriptUserMessage:
-      allOf:
-        - $ref: "#/components/schemas/PairTranscriptBase"
-        - type: object
-          required: [message_id, text]
-          properties:
-            kind:
-              type: string
-              enum: [user_message]
-            message_id:
-              $ref: "#/components/schemas/PairMessageId"
-            client_message_id:
-              type: ["string", "null"]
-            text:
-              type: string
+        message_id:
+          $ref: "#/components/schemas/PairMessageId"
+        client_message_id:
+          type: ["string", "null"]
+        text:
+          type: string
 
     PairTranscriptSystemMessage:
-      allOf:
-        - $ref: "#/components/schemas/PairTranscriptBase"
-        - type: object
-          required: [system_message_kind, text]
-          properties:
-            kind:
-              type: string
-              enum: [system_message]
-            system_message_kind:
-              type: string
-              enum: [human_joined, human_left]
-            text:
-              type: string
+      type: object
+      required: [kind, seq, event_id, ts, pair_id, target, system_message_kind, text]
+      properties:
+        kind:
+          type: string
+          enum: [system_message]
+        seq:
+          type: integer
+          minimum: 1
+        event_id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        pair_id:
+          $ref: "#/components/schemas/PairId"
+        target:
+          $ref: "#/components/schemas/PairTarget"
+        system_message_kind:
+          type: string
+          enum: [human_joined, human_left]
+        text:
+          type: string
 
     PairTranscriptAssistantMessage:
-      allOf:
-        - $ref: "#/components/schemas/PairTranscriptBase"
-        - type: object
-          required: [text, model, tool_call_count]
+      type: object
+      required: [kind, seq, event_id, ts, pair_id, target, text, model, tool_call_count]
+      properties:
+        kind:
+          type: string
+          enum: [assistant_message]
+        seq:
+          type: integer
+          minimum: 1
+        event_id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        pair_id:
+          $ref: "#/components/schemas/PairId"
+        target:
+          $ref: "#/components/schemas/PairTarget"
+        text:
+          type: string
+        model:
+          type: object
+          required: [provider, model_id]
           properties:
-            kind:
+            provider:
               type: string
-              enum: [assistant_message]
-            text:
+            model_id:
               type: string
-            model:
-              type: object
-              required: [provider, model_id]
-              properties:
-                provider:
-                  type: string
-                model_id:
-                  type: string
-                speed:
-                  type: ["string", "null"]
-            tool_call_count:
-              type: integer
-              minimum: 0
+            speed:
+              type: ["string", "null"]
+        tool_call_count:
+          type: integer
+          minimum: 0
 
     PairTranscriptToolCall:
-      allOf:
-        - $ref: "#/components/schemas/PairTranscriptBase"
-        - type: object
-          required: [tool_call_id, tool_name, status, summary, is_error, truncated, detail_ref]
-          properties:
-            kind:
-              type: string
-              enum: [tool_call]
-            tool_call_id:
-              type: string
-            tool_name:
-              type: string
-            status:
-              type: string
-              enum: [started, completed]
-            summary:
-              type: string
-            is_error:
-              type: boolean
-            truncated:
-              type: boolean
-            detail_ref:
-              type: object
-              required: [seq]
-              properties:
-                seq:
-                  type: integer
-                  minimum: 1
-                tool_call_id:
-                  type: string
+      type: object
+      required: [kind, seq, event_id, ts, pair_id, target, tool_call_id, tool_name, status, summary, is_error, truncated, detail_ref]
+      properties:
+        kind:
+          type: string
+          enum: [tool_call]
+        seq:
+          type: integer
+          minimum: 1
+        event_id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        pair_id:
+          $ref: "#/components/schemas/PairId"
+        target:
+          $ref: "#/components/schemas/PairTarget"
+        tool_call_id:
+          type: string
+        tool_name:
+          type: string
+        status:
+          type: string
+          enum: [started, completed]
+        summary:
+          type: string
+        is_error:
+          type: boolean
+        truncated:
+          type: boolean
+        detail_ref:
+          $ref: "#/components/schemas/PairTranscriptDetailRef"
 
     PairTranscriptError:
-      allOf:
-        - $ref: "#/components/schemas/PairTranscriptBase"
-        - type: object
-          required: [message, detail_ref]
-          properties:
-            kind:
-              type: string
-              enum: [error]
-            message:
-              type: string
-            detail_ref:
-              type: object
-              required: [seq]
-              properties:
-                seq:
-                  type: integer
-                  minimum: 1
-                tool_call_id:
-                  type: string
+      type: object
+      required: [kind, seq, event_id, ts, pair_id, target, message, detail_ref]
+      properties:
+        kind:
+          type: string
+          enum: [error]
+        seq:
+          type: integer
+          minimum: 1
+        event_id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        pair_id:
+          $ref: "#/components/schemas/PairId"
+        target:
+          $ref: "#/components/schemas/PairTarget"
+        message:
+          type: string
+        detail_ref:
+          $ref: "#/components/schemas/PairTranscriptDetailRef"
 
     PairTranscriptWarning:
-      allOf:
-        - $ref: "#/components/schemas/PairTranscriptBase"
-        - type: object
-          required: [warning_kind, message, detail_ref]
-          properties:
-            kind:
-              type: string
-              enum: [warning]
-            warning_kind:
-              type: string
-            message:
-              type: string
-            detail_ref:
-              type: object
-              required: [seq]
-              properties:
-                seq:
-                  type: integer
-                  minimum: 1
-                tool_call_id:
-                  type: string
+      type: object
+      required: [kind, seq, event_id, ts, pair_id, target, warning_kind, message, detail_ref]
+      properties:
+        kind:
+          type: string
+          enum: [warning]
+        seq:
+          type: integer
+          minimum: 1
+        event_id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        pair_id:
+          $ref: "#/components/schemas/PairId"
+        target:
+          $ref: "#/components/schemas/PairTarget"
+        warning_kind:
+          type: string
+        message:
+          type: string
+        detail_ref:
+          $ref: "#/components/schemas/PairTranscriptDetailRef"
+
+    PairTranscriptDetailRef:
+      type: object
+      required: [seq]
+      properties:
+        seq:
+          type: integer
+          minimum: 1
+        tool_call_id:
+          type: string
 
     RunEventDetailResponse:
       type: object

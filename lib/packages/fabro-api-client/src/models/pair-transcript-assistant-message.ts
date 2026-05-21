@@ -18,12 +18,25 @@
 import type { PairTarget } from './pair-target';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { PairTranscriptAssistantMessageAllOfModel } from './pair-transcript-assistant-message-all-of-model';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { PairTranscriptBase } from './pair-transcript-base';
+import type { PairTranscriptAssistantMessageModel } from './pair-transcript-assistant-message-model';
 
-/**
- * @type PairTranscriptAssistantMessage
- */
-export type PairTranscriptAssistantMessage = PairTranscriptBase;
+export interface PairTranscriptAssistantMessage {
+    'kind': PairTranscriptAssistantMessageKindEnum;
+    'seq': number;
+    'event_id': string;
+    'ts': string;
+    /**
+     * Durable run pair identifier.
+     */
+    'pair_id': string;
+    'target': PairTarget;
+    'text': string;
+    'model': PairTranscriptAssistantMessageModel;
+    'tool_call_count': number;
+}
+
+export const PairTranscriptAssistantMessageKindEnum = {
+    ASSISTANT_MESSAGE: 'assistant_message'
+} as const;
+
+export type PairTranscriptAssistantMessageKindEnum = typeof PairTranscriptAssistantMessageKindEnum[keyof typeof PairTranscriptAssistantMessageKindEnum];

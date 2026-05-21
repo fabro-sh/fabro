@@ -73,14 +73,15 @@ fn render_event(event: &EventEnvelope, json_output: bool) -> Result<()> {
         return Ok(());
     }
 
-    let properties = event.event.properties()?;
     match event.event.event_name() {
         "run.session.assistant_delta" => {
+            let properties = event.event.properties()?;
             if let Some(delta) = properties.get("delta").and_then(serde_json::Value::as_str) {
                 print!("{delta}");
             }
         }
         "run.session.assistant_message" => {
+            let properties = event.event.properties()?;
             if let Some(text) = properties
                 .get("text")
                 .and_then(serde_json::Value::as_str)

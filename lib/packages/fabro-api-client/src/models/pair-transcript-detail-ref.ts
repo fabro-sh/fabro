@@ -13,18 +13,8 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { PairTarget } from './pair-target';
 
-export interface PairTranscriptBase {
-    'kind': string;
+export interface PairTranscriptDetailRef {
     'seq': number;
-    'event_id': string;
-    'ts': string;
-    /**
-     * Durable run pair identifier.
-     */
-    'pair_id': string;
-    'target': PairTarget;
+    'tool_call_id'?: string;
 }

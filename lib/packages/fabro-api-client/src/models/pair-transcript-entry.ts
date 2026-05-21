@@ -21,7 +21,10 @@ import type { PairTarget } from './pair-target';
 import type { PairTranscriptAssistantMessage } from './pair-transcript-assistant-message';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { PairTranscriptAssistantMessageAllOfModel } from './pair-transcript-assistant-message-all-of-model';
+import type { PairTranscriptAssistantMessageModel } from './pair-transcript-assistant-message-model';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { PairTranscriptDetailRef } from './pair-transcript-detail-ref';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { PairTranscriptError } from './pair-transcript-error';
@@ -31,9 +34,6 @@ import type { PairTranscriptSystemMessage } from './pair-transcript-system-messa
 // May contain unused imports in some cases
 // @ts-ignore
 import type { PairTranscriptToolCall } from './pair-transcript-tool-call';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { PairTranscriptToolCallAllOfDetailRef } from './pair-transcript-tool-call-all-of-detail-ref';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { PairTranscriptUserMessage } from './pair-transcript-user-message';

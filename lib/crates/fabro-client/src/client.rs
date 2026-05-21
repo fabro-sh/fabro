@@ -622,23 +622,20 @@ impl Client {
         run_id: RunId,
         body: types::CreateRunSessionRequest,
     ) -> Result<SessionRecord> {
-        let base_url = self.base_url();
-        let mut url = fabro_http::Url::parse(&base_url)
-            .with_context(|| format!("invalid server base URL {base_url}"))?;
-        url.path_segments_mut()
-            .map_err(|()| anyhow!("server base URL cannot accept path segments"))?
-            .extend(["api", "v1", "runs", &run_id.to_string(), "sessions"]);
         let response = self
-            .send_http(|http_client| {
-                let url = url.clone();
+            .send_api(|client| {
                 let body = body.clone();
-                async move { http_client.post(url).json(&body).send().await }
+                async move {
+                    client
+                        .create_run_session()
+                        .id(run_id.to_string())
+                        .body(body)
+                        .send()
+                        .await
+                }
             })
             .await?;
-        response
-            .json::<SessionRecord>()
-            .await
-            .context("server returned invalid JSON for run session")
+        Ok(response.into_inner())
     }
 
     #[expect(

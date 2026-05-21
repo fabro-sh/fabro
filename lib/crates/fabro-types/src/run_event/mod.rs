@@ -118,8 +118,6 @@ pub enum EventBody {
     RunSessionTurnFailed(RunSessionTurnFailedProps),
     #[serde(rename = "run.session.turn.interrupted")]
     RunSessionTurnInterrupted(RunSessionTurnInterruptedProps),
-    #[serde(rename = "run.session.context.compacted")]
-    RunSessionContextCompacted(RunSessionContextCompactedProps),
     #[serde(rename = "run.parent.linked")]
     RunParentLinked(RunParentLinkedProps),
     #[serde(rename = "run.parent.unlinked")]
@@ -439,7 +437,6 @@ impl EventBody {
             Self::RunSessionTurnSucceeded(_) => "run.session.turn.succeeded",
             Self::RunSessionTurnFailed(_) => "run.session.turn.failed",
             Self::RunSessionTurnInterrupted(_) => "run.session.turn.interrupted",
-            Self::RunSessionContextCompacted(_) => "run.session.context.compacted",
             Self::RunParentLinked(_) => "run.parent.linked",
             Self::RunParentUnlinked(_) => "run.parent.unlinked",
             Self::RunCompleted(_) => "run.completed",
@@ -607,7 +604,6 @@ fn is_known_event_name(event: &str) -> bool {
             | "run.session.turn.succeeded"
             | "run.session.turn.failed"
             | "run.session.turn.interrupted"
-            | "run.session.context.compacted"
             | "run.parent.linked"
             | "run.parent.unlinked"
             | "run.completed"

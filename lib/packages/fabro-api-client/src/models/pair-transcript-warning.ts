@@ -18,12 +18,25 @@
 import type { PairTarget } from './pair-target';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { PairTranscriptBase } from './pair-transcript-base';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { PairTranscriptToolCallAllOfDetailRef } from './pair-transcript-tool-call-all-of-detail-ref';
+import type { PairTranscriptDetailRef } from './pair-transcript-detail-ref';
 
-/**
- * @type PairTranscriptWarning
- */
-export type PairTranscriptWarning = PairTranscriptBase;
+export interface PairTranscriptWarning {
+    'kind': PairTranscriptWarningKindEnum;
+    'seq': number;
+    'event_id': string;
+    'ts': string;
+    /**
+     * Durable run pair identifier.
+     */
+    'pair_id': string;
+    'target': PairTarget;
+    'warning_kind': string;
+    'message': string;
+    'detail_ref': PairTranscriptDetailRef;
+}
+
+export const PairTranscriptWarningKindEnum = {
+    WARNING: 'warning'
+} as const;
+
+export type PairTranscriptWarningKindEnum = typeof PairTranscriptWarningKindEnum[keyof typeof PairTranscriptWarningKindEnum];
