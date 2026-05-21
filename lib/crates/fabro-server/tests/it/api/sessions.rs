@@ -92,6 +92,10 @@ async fn run_bound_session_is_created_as_run_event_and_resolves_by_flat_id() {
         .collect();
     assert_eq!(session_events.len(), 1);
     assert_eq!(session_events[0]["event"], "run.session.created");
+    assert!(
+        session_events[0]["properties"].get("permissions").is_none(),
+        "run session creation event should not expose permissions"
+    );
 }
 
 #[tokio::test]

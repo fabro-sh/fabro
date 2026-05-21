@@ -225,9 +225,7 @@ mod tests {
         RunSessionAssistantMessageProps, RunSessionCreatedProps, RunSessionTurnStartedProps,
         RunSessionTurnSucceededProps, RunSessionUserMessageProps,
     };
-    use fabro_types::{
-        EventBody, EventEnvelope, PermissionLevel, RunEvent, SessionMessage, TurnId, fixtures,
-    };
+    use fabro_types::{EventBody, EventEnvelope, RunEvent, SessionMessage, TurnId, fixtures};
     use serde_json::json;
 
     use super::{project_run_session, project_run_session_with_context};
@@ -241,9 +239,8 @@ mod tests {
                 1,
                 session_id,
                 EventBody::RunSessionCreated(RunSessionCreatedProps {
-                    title:       Some("Ask".to_string()),
-                    model:       Some("test-model".to_string()),
-                    permissions: PermissionLevel::ReadOnly,
+                    title: Some("Ask".to_string()),
+                    model: Some("test-model".to_string()),
                 }),
             ),
             event(
@@ -306,9 +303,8 @@ mod tests {
                 1,
                 session_id,
                 EventBody::RunSessionCreated(RunSessionCreatedProps {
-                    title:       Some("Ask".to_string()),
-                    model:       Some("test-model".to_string()),
-                    permissions: PermissionLevel::ReadOnly,
+                    title: Some("Ask".to_string()),
+                    model: Some("test-model".to_string()),
                 }),
             ),
             event(

@@ -190,7 +190,6 @@ export * from './pair-transcript-tool-call-all-of-detail-ref';
 export * from './pair-transcript-user-message';
 export * from './pair-transcript-warning';
 export * from './pending-interview-record';
-export * from './permission-level';
 export * from './pre-run-push-outcome';
 export * from './pre-run-push-outcome-failed';
 export * from './pre-run-push-outcome-not-attempted';

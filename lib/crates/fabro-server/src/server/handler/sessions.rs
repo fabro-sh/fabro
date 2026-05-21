@@ -20,7 +20,7 @@ use fabro_store::{
     EventPayload, ProjectedRunSession, RunDatabase, project_run_session, project_run_session_turn,
     project_run_session_turns, project_run_sessions,
 };
-use fabro_types::{EventEnvelope, PermissionLevel, RunId, SessionId, TurnId, TurnStatus};
+use fabro_types::{EventEnvelope, RunId, SessionId, TurnId, TurnStatus};
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 use tokio::sync::broadcast::error::RecvError;
@@ -124,7 +124,6 @@ async fn create_run_session(
         json!({
             "title": request.title,
             "model": request.model,
-            "permissions": PermissionLevel::ReadOnly,
         }),
         now,
     )
@@ -651,9 +650,9 @@ async fn build_agent_session(
         Arc::clone(&catalog),
     );
     let config = SessionOptions {
-        tool_hooks: Some(Arc::new(ToolApprovalAdapter(build_tool_approval(
-            PermissionLevel::ReadOnly,
-        )))),
+        tool_hooks: Some(Arc::new(ToolApprovalAdapter(
+            build_ask_fabro_tool_approval(),
+        ))),
         ..SessionOptions::default()
     };
 
@@ -722,13 +721,13 @@ fn summarizer_model_id(
     }
 }
 
-fn build_tool_approval(level: PermissionLevel) -> ToolApprovalFn {
+fn build_ask_fabro_tool_approval() -> ToolApprovalFn {
     Arc::new(move |tool_name: &str, _args: &Value| {
-        if is_auto_approved(level, tool_category(tool_name)) {
+        if is_ask_fabro_auto_approved(tool_category(tool_name)) {
             Ok(())
         } else {
             Err(format!(
-                "{tool_name} tool denied at current permission level"
+                "{tool_name} tool denied by Ask Fabro read-only policy"
             ))
         }
     })
@@ -743,13 +742,8 @@ fn tool_category(name: &str) -> &'static str {
     }
 }
 
-fn is_auto_approved(level: PermissionLevel, category: &str) -> bool {
-    matches!(
-        (level, category),
-        (_, "read" | "subagent")
-            | (PermissionLevel::ReadWrite | PermissionLevel::Full, "write")
-            | (PermissionLevel::Full, "shell")
-    )
+fn is_ask_fabro_auto_approved(category: &str) -> bool {
+    matches!(category, "read" | "subagent")
 }
 
 async fn drive_agent_session(

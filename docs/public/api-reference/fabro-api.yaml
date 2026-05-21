@@ -5459,14 +5459,6 @@ components:
           type: string
           format: date-time
 
-    PermissionLevel:
-      description: Agent tool permission level applied to a session.
-      type: string
-      enum:
-        - read-only
-        - read-write
-        - full
-
     SessionSummary:
       description: List projection of an Ask Fabro session.
       type: object

@@ -1,15 +1,14 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{PermissionLevel, TurnId};
+use crate::TurnId;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSessionCreatedProps {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title:       Option<String>,
+    pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model:       Option<String>,
-    pub permissions: PermissionLevel,
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
