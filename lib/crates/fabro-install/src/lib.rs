@@ -20,9 +20,8 @@ pub struct PendingSettingsWrite<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingDevTokenWrite {
-    pub path:              PathBuf,
-    pub token:             String,
-    pub previous_contents: Option<String>,
+    path:  PathBuf,
+    token: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,22 +124,8 @@ pub fn default_web_url() -> String {
 }
 
 pub fn prepare_dev_token_write_for_install(path: &Path) -> Result<PreparedInstallDevToken> {
-    match std::fs::read_to_string(path) {
-        Ok(contents) => {
-            let token = contents.trim().to_string();
-            if dev_token::validate_dev_token_format(&token) {
-                return Ok(PreparedInstallDevToken { token, write: None });
-            }
-            return Err(anyhow::anyhow!(
-                "invalid dev token format in {}",
-                path.display()
-            ));
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-        Err(err) => {
-            return Err(anyhow::Error::from(err))
-                .with_context(|| format!("read dev token {}", path.display()));
-        }
+    if let Some(token) = dev_token::read_dev_token_for_install(path)? {
+        return Ok(PreparedInstallDevToken { token, write: None });
     }
 
     let token = dev_token::generate_dev_token();
@@ -149,7 +134,6 @@ pub fn prepare_dev_token_write_for_install(path: &Path) -> Result<PreparedInstal
         write: Some(PendingDevTokenWrite {
             path: path.to_path_buf(),
             token,
-            previous_contents: None,
         }),
     })
 }
@@ -191,7 +175,7 @@ fn github_integration_table(doc: &mut toml::Value) -> Result<&mut toml::Table> {
         .context("settings.toml [server.integrations.github] is not a table")
 }
 
-pub fn set_server_listen(doc: &mut toml::Value, listen_config: &InstallListenConfig) -> Result<()> {
+fn set_server_listen(doc: &mut toml::Value, listen_config: &InstallListenConfig) -> Result<()> {
     let root = root_table_mut(doc)?;
     let server = ensure_table(root, "server")?;
     let mut listen = toml::Table::default();
@@ -212,7 +196,7 @@ pub fn set_server_listen(doc: &mut toml::Value, listen_config: &InstallListenCon
     Ok(())
 }
 
-pub fn set_cli_target_http(doc: &mut toml::Value, web_url: &str) -> Result<()> {
+fn set_cli_target_http(doc: &mut toml::Value, web_url: &str) -> Result<()> {
     let root = root_table_mut(doc)?;
     let cli = ensure_table(root, "cli")?;
     let mut target = toml::Table::default();
@@ -476,7 +460,7 @@ pub fn write_sandbox_settings(
     Ok(())
 }
 
-fn restore_optional_file(path: &Path, previous_contents: Option<&str>) -> Result<()> {
+pub fn restore_optional_file(path: &Path, previous_contents: Option<&str>) -> Result<()> {
     match previous_contents {
         Some(contents) => {
             if let Some(parent) = path.parent() {
@@ -499,19 +483,13 @@ fn restore_optional_file(path: &Path, previous_contents: Option<&str>) -> Result
 }
 
 pub fn rollback_dev_token_write(write: &PendingDevTokenWrite) -> Result<()> {
-    match write.previous_contents.as_deref() {
-        Some(contents) => {
-            dev_token::write_dev_token(&write.path, contents.trim())
-                .with_context(|| format!("restoring dev token {}", write.path.display()))?;
+    match std::fs::remove_file(&write.path) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => {
+            return Err(anyhow::Error::new(err)
+                .context(format!("removing dev token {}", write.path.display())));
         }
-        None => match std::fs::remove_file(&write.path) {
-            Ok(()) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => {
-                return Err(anyhow::Error::new(err)
-                    .context(format!("removing dev token {}", write.path.display())));
-            }
-        },
     }
 
     Ok(())
@@ -573,6 +551,42 @@ fn persist_vault_secrets_direct(
     Ok(())
 }
 
+fn direct_persistence_error(err: anyhow::Error, rollback_failures: &[String]) -> anyhow::Error {
+    if rollback_failures.is_empty() {
+        err.context("persisting install outputs directly")
+    } else {
+        err.context(format!(
+            "persisting install outputs directly; rollback failures: {}",
+            rollback_failures.join("; ")
+        ))
+    }
+}
+
+fn rollback_direct_persistence(
+    settings_write: Option<&PendingSettingsWrite<'_>>,
+    vault_path: &Path,
+    previous_vault: Option<&str>,
+    dev_token_write: Option<&PendingDevTokenWrite>,
+) -> Vec<String> {
+    let mut failures = Vec::new();
+
+    if let Some(write) = settings_write {
+        if let Err(err) = restore_optional_file(write.path, write.previous_contents) {
+            failures.push(err.to_string());
+        }
+    }
+    if let Err(err) = restore_optional_file(vault_path, previous_vault) {
+        failures.push(err.to_string());
+    }
+    if let Some(write) = dev_token_write {
+        if let Err(err) = rollback_dev_token_write(write) {
+            failures.push(err.to_string());
+        }
+    }
+
+    failures
+}
+
 impl InstallPersistencePlan<'_> {
     pub fn persist_direct(&self) -> std::result::Result<(), PersistInstallOutputsError> {
         let server_env_report = persist_server_env_secrets(
@@ -604,30 +618,13 @@ impl InstallPersistencePlan<'_> {
         if let Err(err) =
             persist_vault_secrets_direct(self.storage_dir, &self.vault_writes, &self.vault_removals)
         {
-            let mut rollback_failures = Vec::new();
-            if let Some(write) = self.settings_write.as_ref() {
-                if let Err(restore_err) = restore_optional_file(write.path, write.previous_contents)
-                {
-                    rollback_failures.push(restore_err.to_string());
-                }
-            }
-            if let Err(restore_err) = restore_optional_file(&vault_path, previous_vault.as_deref())
-            {
-                rollback_failures.push(restore_err.to_string());
-            }
-            if let Some(write) = self.dev_token_write.as_ref() {
-                if let Err(restore_err) = rollback_dev_token_write(write) {
-                    rollback_failures.push(restore_err.to_string());
-                }
-            }
-            let error = if rollback_failures.is_empty() {
-                err.context("persisting install outputs directly")
-            } else {
-                err.context(format!(
-                    "persisting install outputs directly; rollback failures: {}",
-                    rollback_failures.join("; ")
-                ))
-            };
+            let rollback_failures = rollback_direct_persistence(
+                self.settings_write.as_ref(),
+                &vault_path,
+                previous_vault.as_deref(),
+                self.dev_token_write.as_ref(),
+            );
+            let error = direct_persistence_error(err, &rollback_failures);
             return Err(PersistInstallOutputsError::new(
                 error,
                 true,
@@ -637,30 +634,13 @@ impl InstallPersistencePlan<'_> {
 
         if let Some(write) = self.dev_token_write.as_ref() {
             if let Err(err) = write_pending_dev_token(write) {
-                let mut rollback_failures = Vec::new();
-                if let Some(settings_write) = self.settings_write.as_ref() {
-                    if let Err(restore_err) =
-                        restore_optional_file(settings_write.path, settings_write.previous_contents)
-                    {
-                        rollback_failures.push(restore_err.to_string());
-                    }
-                }
-                if let Err(restore_err) =
-                    restore_optional_file(&vault_path, previous_vault.as_deref())
-                {
-                    rollback_failures.push(restore_err.to_string());
-                }
-                if let Err(restore_err) = rollback_dev_token_write(write) {
-                    rollback_failures.push(restore_err.to_string());
-                }
-                let error = if rollback_failures.is_empty() {
-                    err.context("persisting install outputs directly")
-                } else {
-                    err.context(format!(
-                        "persisting install outputs directly; rollback failures: {}",
-                        rollback_failures.join("; ")
-                    ))
-                };
+                let rollback_failures = rollback_direct_persistence(
+                    self.settings_write.as_ref(),
+                    &vault_path,
+                    previous_vault.as_deref(),
+                    Some(write),
+                );
+                let error = direct_persistence_error(err, &rollback_failures);
                 return Err(PersistInstallOutputsError::new(
                     error,
                     true,
@@ -682,7 +662,7 @@ pub fn persist_install_outputs_direct(
 ) -> std::result::Result<(), PersistInstallOutputsError> {
     InstallPersistencePlan {
         storage_dir,
-        settings_write: settings_write.cloned(),
+        settings_write: settings_write.copied(),
         server_env_writes: server_env_writes.to_vec(),
         server_env_removals: server_env_removals.to_vec(),
         dev_token_write: None,
@@ -698,6 +678,9 @@ mod tests {
 
     use fabro_config::{ServerSettingsBuilder, Storage, UserSettingsBuilder, envfile};
     use fabro_types::settings::cli::CliTargetSettings;
+    use fabro_util::dev_token::{
+        generate_dev_token, read_dev_token_file, validate_dev_token_format, write_dev_token,
+    };
     use fabro_vault::{SecretType as VaultSecretType, Vault};
 
     use super::{
@@ -1110,9 +1093,7 @@ stale = "remove-me"
 
         let prepared = prepare_dev_token_write_for_install(&path).unwrap();
 
-        assert!(fabro_util::dev_token::validate_dev_token_format(
-            &prepared.token
-        ));
+        assert!(validate_dev_token_format(&prepared.token));
         assert!(
             prepared.write.is_some(),
             "missing token file should stage a write"
@@ -1129,8 +1110,8 @@ stale = "remove-me"
         let path = Storage::new(dir.path())
             .runtime_directory()
             .dev_token_path();
-        let token = fabro_util::dev_token::generate_dev_token();
-        fabro_util::dev_token::write_dev_token(&path, &token).unwrap();
+        let token = generate_dev_token();
+        write_dev_token(&path, &token).unwrap();
 
         let prepared = prepare_dev_token_write_for_install(&path).unwrap();
 
@@ -1175,10 +1156,7 @@ stale = "remove-me"
         .persist_direct()
         .unwrap();
 
-        assert_eq!(
-            fabro_util::dev_token::read_dev_token_file(&path).as_deref(),
-            Some(token.as_str())
-        );
+        assert_eq!(read_dev_token_file(&path).as_deref(), Some(token.as_str()));
 
         #[cfg(unix)]
         {

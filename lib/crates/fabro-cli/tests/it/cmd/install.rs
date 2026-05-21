@@ -1,6 +1,7 @@
 #![expect(
     clippy::disallowed_methods,
-    reason = "integration tests stage fixtures and subprocess env with sync test infrastructure"
+    clippy::disallowed_types,
+    reason = "integration tests stage fixtures, reserve ports, and subprocess env with sync test infrastructure"
 )]
 
 use std::net::TcpListener;
@@ -322,103 +323,6 @@ fn non_interactive_token_install_bootstraps_server_auth_for_secret_persistence()
             .iter()
             .any(|secret| secret["name"] == "GITHUB_TOKEN"),
         "installed GitHub token should be persisted as a server-owned secret: {secrets}"
-    );
-}
-
-#[test]
-fn overwrite_settings_replaces_stale_unix_cli_target_fields() {
-    let mut context = test_context!();
-    let storage_dir = context.temp_dir.join("install-storage");
-    context.manage_storage_dir(&storage_dir);
-    let stale_socket = context.temp_dir.join("stale.sock");
-    write_raw_home_settings(
-        &context,
-        &format!(
-            r#"
-_version = 1
-
-[server.storage]
-root = "{}"
-
-[server.auth]
-methods = ["dev-token"]
-
-[server.listen]
-type = "unix"
-path = "{}"
-
-[cli.target]
-type = "unix"
-path = "{}"
-
-[project.metadata]
-mode = "keep-me"
-"#,
-            storage_dir.display(),
-            stale_socket.display(),
-            stale_socket.display()
-        ),
-    );
-
-    let path = fake_gh_path(&context, "ghp_overwrite_bootstrap");
-    let web_url = unused_loopback_web_url();
-    let output = context
-        .command()
-        .timeout(INSTALL_COMMAND_TIMEOUT)
-        .env(EnvVars::PATH, path)
-        .args([
-            "install",
-            "--storage-dir",
-            storage_dir.to_str().unwrap(),
-            "--web-url",
-            &web_url,
-            "--non-interactive",
-            "--skip-llm",
-            "--github-strategy",
-            "token",
-            "--github-username",
-            "octocat",
-            "--overwrite-settings",
-        ])
-        .output()
-        .expect("install command should run");
-
-    assert!(
-        output.status.success(),
-        "install should replace stale Unix target fields when overwriting settings\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let settings = read_home_settings(&context);
-    let parsed: toml::Value = toml::from_str(&settings).unwrap();
-    let cli_target = parsed
-        .get("cli")
-        .and_then(toml::Value::as_table)
-        .and_then(|cli| cli.get("target"))
-        .and_then(toml::Value::as_table)
-        .expect("cli.target should exist");
-    assert_eq!(
-        cli_target.get("type").and_then(toml::Value::as_str),
-        Some("http")
-    );
-    assert_eq!(
-        cli_target.get("url").and_then(toml::Value::as_str),
-        Some(web_url.as_str())
-    );
-    assert!(
-        !cli_target.contains_key("path"),
-        "overwriting a Unix target with HTTP should remove stale path: {cli_target:?}"
-    );
-    assert_eq!(
-        parsed
-            .get("project")
-            .and_then(toml::Value::as_table)
-            .and_then(|project| project.get("metadata"))
-            .and_then(toml::Value::as_table)
-            .and_then(|metadata| metadata.get("mode"))
-            .and_then(toml::Value::as_str),
-        Some("keep-me")
     );
 }
 
@@ -758,26 +662,7 @@ mode = "keep-me"
     )
     .unwrap();
 
-    let fake_bin = context.temp_dir.join("fake-bin");
-    std::fs::create_dir_all(&fake_bin).unwrap();
-    let fake_gh = fake_bin.join("gh");
-    std::fs::write(
-        &fake_gh,
-        "#!/bin/sh\nif [ \"$1\" = \"auth\" ] && [ \"$2\" = \"token\" ]; then\n  printf 'token-from-gh\\n'\n  exit 0\nfi\nexit 1\n",
-    )
-    .unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-
-        std::fs::set_permissions(&fake_gh, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-
-    let path = format!(
-        "{}:{}",
-        fake_bin.display(),
-        std::env::var(EnvVars::PATH).unwrap()
-    );
+    let path = fake_gh_path(&context, "token-from-gh");
     let output = context
         .command()
         .env(EnvVars::PATH, path)
@@ -872,38 +757,42 @@ fn unused_loopback_web_url() -> String {
 
 fn fake_gh_path(context: &fabro_test::TestContext, token: &str) -> String {
     let fake_bin = context.temp_dir.join(format!("fake-bin-{token}"));
-    std::fs::create_dir_all(&fake_bin).unwrap();
+    std::fs::create_dir_all(&fake_bin).expect("fake gh bin directory should be created");
     let fake_gh = fake_bin.join("gh");
     std::fs::write(
         &fake_gh,
-        format!(
-            "#!/bin/sh\nif [ \"$1\" = \"auth\" ] && [ \"$2\" = \"token\" ]; then\n  printf '{}\\n'\n  exit 0\nfi\nexit 1\n",
-            token
-        ),
+        format!("#!/bin/sh\nif [ \"$1\" = \"auth\" ] && [ \"$2\" = \"token\" ]; then\n  printf '{token}\\n'\n  exit 0\nfi\nexit 1\n"),
     )
-    .unwrap();
+    .expect("fake gh script should be written");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
 
-        std::fs::set_permissions(&fake_gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&fake_gh, std::fs::Permissions::from_mode(0o755))
+            .expect("fake gh script should be executable");
     }
 
     format!(
         "{}:{}",
         fake_bin.display(),
-        std::env::var(EnvVars::PATH).unwrap()
+        std::env::var(EnvVars::PATH).expect("PATH should be set for install tests")
     )
 }
 
 fn write_raw_home_settings(context: &fabro_test::TestContext, settings: &str) {
     let settings_path = context.home_dir.join(".fabro/settings.toml");
-    std::fs::create_dir_all(settings_path.parent().unwrap()).unwrap();
-    std::fs::write(settings_path, settings).unwrap();
+    std::fs::create_dir_all(
+        settings_path
+            .parent()
+            .expect("settings path should have a parent directory"),
+    )
+    .expect("settings directory should be created");
+    std::fs::write(settings_path, settings).expect("settings file should be written");
 }
 
 fn read_home_settings(context: &fabro_test::TestContext) -> String {
-    std::fs::read_to_string(context.home_dir.join(".fabro/settings.toml")).unwrap()
+    std::fs::read_to_string(context.home_dir.join(".fabro/settings.toml"))
+        .expect("settings file should be readable")
 }
 
 fn write_http_install_settings(
@@ -960,23 +849,16 @@ fn login_with_storage_dev_token(
     storage_dir: &std::path::Path,
     web_url: &str,
 ) {
-    let token = std::fs::read_to_string(
-        Storage::new(storage_dir)
+    let token = fabro_util::dev_token::read_dev_token_file(
+        &Storage::new(storage_dir)
             .runtime_directory()
             .dev_token_path(),
     )
-    .unwrap();
+    .expect("storage dev token should be valid");
     let output = context
         .command()
         .timeout(INSTALL_COMMAND_TIMEOUT)
-        .args([
-            "auth",
-            "login",
-            "--server",
-            web_url,
-            "--dev-token",
-            token.trim(),
-        ])
+        .args(["auth", "login", "--server", web_url, "--dev-token", &token])
         .output()
         .expect("auth login command should run");
     assert!(

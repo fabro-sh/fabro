@@ -63,20 +63,25 @@ pub fn read_dev_token_or_err(path: &Path) -> Result<String> {
     }
 }
 
-pub fn read_or_mint_dev_token_for_install(path: &Path) -> Result<String> {
+pub fn read_dev_token_for_install(path: &Path) -> Result<Option<String>> {
     match fs::read_to_string(path) {
         Ok(contents) => {
             let token = contents.trim().to_string();
             if validate_dev_token_format(&token) {
-                return Ok(token);
+                Ok(Some(token))
+            } else {
+                Err(anyhow!("invalid dev token format in {}", path.display()))
             }
-            return Err(anyhow!("invalid dev token format in {}", path.display()));
         }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-        Err(err) => {
-            return Err(anyhow::Error::from(err))
-                .with_context(|| format!("read dev token {}", path.display()));
-        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(anyhow::Error::from(err))
+            .with_context(|| format!("read dev token {}", path.display())),
+    }
+}
+
+pub fn read_or_mint_dev_token_for_install(path: &Path) -> Result<String> {
+    if let Some(token) = read_dev_token_for_install(path)? {
+        return Ok(token);
     }
 
     let token = generate_dev_token();

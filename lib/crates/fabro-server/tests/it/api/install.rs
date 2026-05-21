@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use fabro_config::{ServerSettingsBuilder, Storage};
+use fabro_config::{ServerSettingsBuilder, Storage, envfile};
 use fabro_install::OBJECT_STORE_MANAGED_COMMENT;
 use fabro_model::ProviderId;
 use fabro_server::install::{
@@ -930,11 +930,11 @@ async fn token_install_finish_persists_settings_env_and_vault() {
     );
 
     let storage = fabro_config::Storage::new(temp_dir.path());
-    let server_env = std::fs::read_to_string(storage.runtime_directory().env_path()).unwrap();
-    assert!(server_env.contains("SESSION_SECRET="));
-    assert!(server_env.contains("FABRO_DEV_TOKEN="));
-    assert!(!server_env.contains("AWS_ACCESS_KEY_ID="));
-    assert!(!server_env.contains("AWS_SECRET_ACCESS_KEY="));
+    let server_env = envfile::read_env_file(&storage.runtime_directory().env_path()).unwrap();
+    assert!(server_env.contains_key(fabro_static::EnvVars::SESSION_SECRET));
+    assert!(server_env.contains_key(fabro_static::EnvVars::FABRO_DEV_TOKEN));
+    assert!(!server_env.contains_key(fabro_static::EnvVars::AWS_ACCESS_KEY_ID));
+    assert!(!server_env.contains_key(fabro_static::EnvVars::AWS_SECRET_ACCESS_KEY));
     let finish_dev_token = finish_body["dev_token"]
         .as_str()
         .expect("token install should return a dev token");
@@ -942,7 +942,12 @@ async fn token_install_finish_persists_settings_env_and_vault() {
         fabro_util::dev_token::read_dev_token_file(&storage.runtime_directory().dev_token_path())
             .expect("token install should write the storage dev token");
     assert_eq!(storage_dev_token, finish_dev_token);
-    assert!(server_env.contains(&format!("FABRO_DEV_TOKEN={finish_dev_token}")));
+    assert_eq!(
+        server_env
+            .get(fabro_static::EnvVars::FABRO_DEV_TOKEN)
+            .map(String::as_str),
+        Some(finish_dev_token)
+    );
 
     let vault = Vault::load(storage.secrets_path()).unwrap();
     assert!(vault.get("ANTHROPIC_API_KEY").is_some());
@@ -2328,8 +2333,12 @@ async fn install_finish_failure_does_not_create_dev_token_files() {
         "storage dev token file should not be created when persistence fails"
     );
 
-    let server_env = std::fs::read_to_string(storage.runtime_directory().env_path()).unwrap();
-    assert!(server_env.contains("FABRO_DEV_TOKEN="));
+    let server_env = envfile::read_env_file(&storage.runtime_directory().env_path()).unwrap();
+    assert!(
+        server_env
+            .get(fabro_static::EnvVars::FABRO_DEV_TOKEN)
+            .is_some_and(|value| !value.is_empty())
+    );
 }
 
 #[tokio::test]

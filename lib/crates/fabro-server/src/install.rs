@@ -1634,10 +1634,6 @@ async fn post_install_finish(
     )]
     let previous_settings = std::fs::read_to_string(state.config_path.as_ref()).ok();
 
-    let leftover_env_keys_on_failure: Vec<String> = server_env_writes
-        .iter()
-        .map(|write| write.key.clone())
-        .collect();
     let persistence_plan = InstallPersistencePlan {
         storage_dir: state.storage_dir.as_ref(),
         settings_write: Some(PendingSettingsWrite {
@@ -1657,7 +1653,11 @@ async fn post_install_finish(
         let detail = err.to_string();
         let title = status.canonical_reason().unwrap_or("Unknown").to_string();
         let leftover_env_keys: Vec<String> = if err.server_env_applied {
-            leftover_env_keys_on_failure
+            persistence_plan
+                .server_env_writes
+                .iter()
+                .map(|write| write.key.clone())
+                .collect()
         } else {
             Vec::new()
         };
