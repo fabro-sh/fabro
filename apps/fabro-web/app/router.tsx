@@ -9,6 +9,7 @@ import * as Start from "./routes/start";
 import * as ChatsLayout from "./routes/chats-layout";
 import * as ChatsNew from "./routes/chats-new";
 import * as ChatsDetail from "./routes/chats-detail";
+import * as AskFabro from "./routes/ask-fabro";
 import * as Automations from "./routes/automations";
 import * as AutomationDetail from "./routes/automation-detail";
 import * as AutomationDefinition from "./routes/automation-definition";
@@ -104,6 +105,7 @@ export const routes: RouteObject[] = [
               route(":chatId", ChatsDetail),
             ],
           }),
+          route("ask-fabro", AskFabro),
           route("automations", Automations),
           route("automations/:name", AutomationDetail, {
             children: [
