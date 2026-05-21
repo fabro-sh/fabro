@@ -174,6 +174,15 @@ pub struct PaginationParams {
     pub offset: u32,
 }
 
+pub(crate) fn paginate_items<T>(items: Vec<T>, pagination: &PaginationParams) -> (Vec<T>, bool) {
+    let limit = pagination.limit.clamp(1, 100) as usize;
+    let offset = pagination.offset.min(MAX_PAGE_OFFSET) as usize;
+    let mut data: Vec<_> = items.into_iter().skip(offset).take(limit + 1).collect();
+    let has_more = data.len() > limit;
+    data.truncate(limit);
+    (data, has_more)
+}
+
 #[derive(serde::Deserialize)]
 pub(crate) struct DfParams {
     #[serde(default)]

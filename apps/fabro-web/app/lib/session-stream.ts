@@ -1,6 +1,13 @@
-import type { EventEnvelope } from "@qltysh/fabro-api-client";
+import {
+  SessionsApiAxiosParamCreator,
+  type EventEnvelope,
+  type SubmitTurnRequest,
+} from "@qltysh/fabro-api-client";
 
-import { ApiError, extractRequestId } from "./api-client";
+import {
+  apiErrorFromFetchResponse,
+  generatedApiConfiguration,
+} from "./api-client";
 
 export type SessionStreamEvent = EventEnvelope;
 
@@ -37,19 +44,13 @@ export async function streamSessionTurn({
   fetchImpl = fetch,
   onEvent,
 }: StreamSessionTurnOptions): Promise<StreamSessionTurnResult> {
-  const body: { input: string; turn_id?: string } = { input };
+  const body: SubmitTurnRequest = { input };
   if (turnId) body.turn_id = turnId;
 
-  const response = await fetchImpl(`/api/v1/sessions/${encodeURIComponent(sessionId)}/turns`, {
-    method: "POST",
-    credentials: "same-origin",
-    headers: {
-      accept: "text/event-stream",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
+  const request = await SessionsApiAxiosParamCreator(
+    generatedApiConfiguration,
+  ).submitSessionTurn(sessionId, body, { signal });
+  const response = await fetchImpl(request.url, fetchInitFromAxiosRequest(request.options));
   await throwIfApiError(response);
 
   await readEventStream(response, onEvent);
@@ -63,58 +64,38 @@ export async function attachSessionEvents({
   fetchImpl = fetch,
   onEvent,
 }: AttachSessionEventsOptions): Promise<void> {
-  const params = new URLSearchParams();
-  if (sinceSeq != null) params.set("since_seq", String(sinceSeq));
-  const query = params.toString();
-  const response = await fetchImpl(
-    `/api/v1/sessions/${encodeURIComponent(sessionId)}/attach${query ? `?${query}` : ""}`,
-    {
-      method: "GET",
-      credentials: "same-origin",
-      headers: { accept: "text/event-stream" },
-      signal,
-    },
-  );
+  const request = await SessionsApiAxiosParamCreator(
+    generatedApiConfiguration,
+  ).attachSessionEvents(sessionId, sinceSeq, { signal });
+  const response = await fetchImpl(request.url, fetchInitFromAxiosRequest(request.options));
   await throwIfApiError(response);
 
   await readEventStream(response, onEvent);
 }
 
 async function throwIfApiError(response: Response): Promise<void> {
-  if (response.ok) return;
-
-  const body = await readErrorBody(response);
-  const requestId = response.headers.get("x-request-id") ?? extractRequestId(body);
-  throw new ApiError({
-    status: response.status,
-    message: extractErrorDetail(body) ?? (response.statusText || `HTTP ${response.status}`),
-    requestId,
-    body,
-  });
+  const error = await apiErrorFromFetchResponse(response);
+  if (error) throw error;
 }
 
-async function readErrorBody(response: Response): Promise<unknown> {
-  const contentType = response.headers.get("content-type") ?? "";
-  if (contentType.includes("application/json")) {
-    return response.json().catch(() => null);
+function fetchInitFromAxiosRequest(options: {
+  method?: string;
+  headers?: unknown;
+  data?: unknown;
+  signal?: unknown;
+}): RequestInit {
+  const init: RequestInit = {
+    method: options.method,
+    credentials: "same-origin",
+    headers: options.headers as HeadersInit,
+    signal: options.signal as AbortSignal | undefined,
+  };
+  if (options.data !== undefined) {
+    init.body = typeof options.data === "string"
+      ? options.data
+      : JSON.stringify(options.data);
   }
-  const text = await response.text().catch(() => "");
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-}
-
-function extractErrorDetail(body: unknown): string | null {
-  if (!body || typeof body !== "object") return null;
-  const errors = (body as Record<string, unknown>).errors;
-  if (!Array.isArray(errors) || errors.length === 0) return null;
-  const first = errors[0];
-  if (!first || typeof first !== "object") return null;
-  const detail = (first as Record<string, unknown>).detail;
-  return typeof detail === "string" && detail.length > 0 ? detail : null;
+  return init;
 }
 
 async function readEventStream(
@@ -144,10 +125,11 @@ function drainSseBuffer(
 ): string {
   let cursor = 0;
   while (true) {
-    const next = buffer.indexOf("\n\n", cursor);
-    if (next === -1) return buffer.slice(cursor);
+    const match = /\r?\n\r?\n/g.exec(buffer.slice(cursor));
+    if (!match) return buffer.slice(cursor);
+    const next = cursor + match.index;
     const frame = buffer.slice(cursor, next);
-    cursor = next + 2;
+    cursor = next + match[0].length;
     const data = frame
       .split(/\r?\n/)
       .filter((line) => line.startsWith("data:"))

@@ -29,10 +29,10 @@ use tokio::fs;
 use tracing::info;
 
 use super::super::{
-    AppState, ListResponse, MAX_PAGE_OFFSET, PaginationParams, RunExecutionMode,
-    answer_from_request, api_question_from_pending_interview, default_page_limit,
-    delete_run_internal, load_pending_interview, managed_run, parse_run_id_path,
-    reject_if_archived, resolve_interp_string, submit_pending_interview_answer, workflow_event,
+    AppState, ListResponse, PaginationParams, RunExecutionMode, answer_from_request,
+    api_question_from_pending_interview, default_page_limit, delete_run_internal,
+    load_pending_interview, managed_run, paginate_items, parse_run_id_path, reject_if_archived,
+    resolve_interp_string, submit_pending_interview_answer, workflow_event,
 };
 use crate::error::ApiError;
 use crate::principal_middleware::{
@@ -145,15 +145,6 @@ pub(crate) fn board_columns(include_archived: bool) -> Vec<BoardColumnDefinition
         });
     }
     columns
-}
-
-fn paginate_items<T>(items: Vec<T>, pagination: &PaginationParams) -> (Vec<T>, bool) {
-    let limit = pagination.limit.clamp(1, 100) as usize;
-    let offset = pagination.offset.min(MAX_PAGE_OFFSET) as usize;
-    let mut data: Vec<_> = items.into_iter().skip(offset).take(limit + 1).collect();
-    let has_more = data.len() > limit;
-    data.truncate(limit);
-    (data, has_more)
 }
 
 async fn list_board_runs(

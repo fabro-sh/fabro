@@ -5555,20 +5555,44 @@ components:
 
     SessionDetail:
       description: Session metadata plus durable transcript projection.
-      allOf:
-        - $ref: "#/components/schemas/SessionRecord"
-        - type: object
-          required:
-            - messages
-            - last_seq
-          properties:
-            messages:
-              type: array
-              items:
-                $ref: "#/components/schemas/SessionMessage"
-            last_seq:
-              type: integer
-              minimum: 0
+      type: object
+      required:
+        - id
+        - run_id
+        - status
+        - active_turn
+        - created_at
+        - updated_at
+        - messages
+        - last_seq
+      properties:
+        id:
+          $ref: "#/components/schemas/SessionId"
+        run_id:
+          type: string
+        title:
+          type: ["string", "null"]
+        status:
+          $ref: "#/components/schemas/SessionStatus"
+        model:
+          type: ["string", "null"]
+        active_turn:
+          oneOf:
+            - $ref: "#/components/schemas/SessionTurn"
+            - type: "null"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionMessage"
+        last_seq:
+          type: integer
+          minimum: 0
 
     CreateRunSessionRequest:
       type: object

@@ -200,6 +200,34 @@ function apiErrorFromAxios(error: unknown): ApiError | null {
   });
 }
 
+export async function apiErrorFromFetchResponse(response: Response): Promise<ApiError | null> {
+  if (response.ok) return null;
+
+  const body = await readFetchErrorBody(response);
+  const requestId = requestIdFromHeaders(response.headers) ?? extractRequestId(body);
+  return new ApiError({
+    status: response.status,
+    message: extractErrorDetail(body) ?? (response.statusText || `HTTP ${response.status}`),
+    requestId,
+    body,
+  });
+}
+
+async function readFetchErrorBody(response: Response): Promise<unknown> {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    return response.json().catch(() => null);
+  }
+
+  const text = await response.text().catch(() => "");
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
 function extractErrorDetail(body: unknown): string | null {
   if (!body || typeof body !== "object") return null;
   const errors = (body as Record<string, unknown>).errors;

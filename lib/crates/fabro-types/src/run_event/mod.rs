@@ -559,6 +559,10 @@ impl EventBody {
         }
     }
 
+    pub fn is_run_session_event(&self) -> bool {
+        self.event_name().starts_with("run.session.")
+    }
+
     fn properties_value(&self) -> serde_json::Result<Value> {
         if let Self::Unknown { properties, .. } = self {
             return Ok(properties.clone());

@@ -14,7 +14,9 @@ use fabro_agent::{
     AgentEvent, AgentProfile, AnthropicProfile, Error as AgentError, GeminiProfile, OpenAiProfile,
     Session, SessionEvent, SessionOptions, ToolApprovalAdapter, WebFetchSummarizer,
 };
-use fabro_api::types::{CreateRunSessionRequest, SubmitTurnRequest};
+use fabro_api::types::{
+    CreateRunSessionRequest, PaginatedEventList, PaginationMeta, SubmitTurnRequest,
+};
 use fabro_llm::client::Client as LlmClient;
 use fabro_model::{AgentProfileKind, Catalog, ModelHandle, ProviderId};
 use fabro_sandbox::reconnect::reconnect_for_run;
@@ -35,11 +37,14 @@ use serde_json::Value;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
-use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
+use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, warn};
 
 use super::super::session_runtime::{InterruptTurnError, SessionTurnLease, StartTurnError};
-use super::super::{AppState, EventListParams, MAX_PAGE_OFFSET, default_page_limit};
+use super::super::{
+    AppState, EventListParams, PaginationParams, paginate_items, parse_run_id_path,
+};
 use crate::error::ApiError;
 use crate::principal_middleware::RequiredUser;
 use crate::server_secrets::LlmClientResult;
@@ -80,22 +85,10 @@ enum RunSessionListOrder {
 
 #[derive(serde::Deserialize)]
 struct ListRunSessionsParams {
-    #[serde(rename = "page[limit]", default = "default_page_limit")]
-    limit:  u32,
-    #[serde(rename = "page[offset]", default)]
-    offset: u32,
+    #[serde(flatten)]
+    pagination: PaginationParams,
     #[serde(default)]
-    order:  RunSessionListOrder,
-}
-
-impl ListRunSessionsParams {
-    fn limit(&self) -> usize {
-        self.limit.clamp(1, 100) as usize
-    }
-
-    fn offset(&self) -> usize {
-        self.offset.min(MAX_PAGE_OFFSET) as usize
-    }
+    order:      RunSessionListOrder,
 }
 
 async fn list_run_sessions(
@@ -104,9 +97,9 @@ async fn list_run_sessions(
     Path(run_id): Path<String>,
     Query(params): Query<ListRunSessionsParams>,
 ) -> Response {
-    let run_id = match parse_run_id(&run_id) {
+    let run_id = match parse_run_id_path(&run_id) {
         Ok(id) => id,
-        Err(err) => return err.into_response(),
+        Err(response) => return response,
     };
     let run_store = match open_run_reader(&state, run_id).await {
         Ok(store) => store,
@@ -121,24 +114,16 @@ async fn list_run_sessions(
                         .updated_at
                         .cmp(&left.updated_at)
                         .then_with(|| right.created_at.cmp(&left.created_at))
-                        .then_with(|| right.id.to_string().cmp(&left.id.to_string()))
+                        .then_with(|| right.id.cmp(&left.id))
                 }),
                 RunSessionListOrder::CreatedDesc => sessions.sort_by(|left, right| {
                     right
                         .created_at
                         .cmp(&left.created_at)
-                        .then_with(|| right.id.to_string().cmp(&left.id.to_string()))
+                        .then_with(|| right.id.cmp(&left.id))
                 }),
             }
-            let limit = params.limit();
-            let offset = params.offset();
-            let mut data = sessions
-                .into_iter()
-                .skip(offset)
-                .take(limit.saturating_add(1))
-                .collect::<Vec<_>>();
-            let has_more = data.len() > limit;
-            data.truncate(limit);
+            let (data, has_more) = paginate_items(sessions, &params.pagination);
             Json(serde_json::json!({
                 "data": data,
                 "meta": { "has_more": has_more }
@@ -155,9 +140,9 @@ async fn create_run_session(
     Path(run_id): Path<String>,
     Json(request): Json<CreateRunSessionRequest>,
 ) -> Response {
-    let run_id = match parse_run_id(&run_id) {
+    let run_id = match parse_run_id_path(&run_id) {
         Ok(id) => id,
-        Err(err) => return err.into_response(),
+        Err(response) => return response,
     };
     let run_store = match open_run(&state, run_id).await {
         Ok(store) => store,
@@ -244,23 +229,18 @@ async fn list_session_events(
         Ok(context) => context,
         Err(response) => return response,
     };
-    let limit = params.limit();
     match run_store
-        .list_events_from_with_limit(params.since_seq(), usize::MAX / 2)
+        .list_events_for_session_from_with_limit(session_id, params.since_seq(), params.limit())
         .await
     {
-        Ok(events) => {
-            let mut data = events
-                .into_iter()
-                .filter(|event| event_matches_session(event, session_id))
-                .take(limit.saturating_add(1))
-                .collect::<Vec<_>>();
+        Ok(mut data) => {
+            let limit = params.limit();
             let has_more = data.len() > limit;
             data.truncate(limit);
-            Json(serde_json::json!({
-                "data": data,
-                "meta": { "has_more": has_more }
-            }))
+            Json(PaginatedEventList {
+                data,
+                meta: PaginationMeta { has_more },
+            })
             .into_response()
         }
         Err(err) => store_error(&err).into_response(),
@@ -297,13 +277,17 @@ async fn attach_session_events(
         },
     };
     let shutdown = state.shutdown_token();
-    let (sender, receiver) = mpsc::unbounded_channel();
+    let (sender, receiver) = mpsc::channel(SESSION_SSE_BUFFER_CAPACITY);
     tokio::spawn(async move {
         let mut next_seq = start_seq;
 
         loop {
             let Ok(replay_batch) = run_store
-                .list_events_from_with_limit(next_seq, ATTACH_REPLAY_BATCH_LIMIT)
+                .list_events_for_session_from_with_limit(
+                    session_id,
+                    next_seq,
+                    ATTACH_REPLAY_BATCH_LIMIT,
+                )
                 .await
             else {
                 return;
@@ -312,14 +296,9 @@ async fn attach_session_events(
 
             for event in replay_batch.into_iter().take(ATTACH_REPLAY_BATCH_LIMIT) {
                 next_seq = event.seq.saturating_add(1);
-                if event_matches_session(&event, session_id) {
-                    if let Some(sse_event) = session_sse_event(&event) {
-                        if sender
-                            .send(Ok::<Event, std::convert::Infallible>(sse_event))
-                            .is_err()
-                        {
-                            return;
-                        }
+                if let Some(sse_event) = session_sse_event(&event) {
+                    if !send_attach_sse_event(&sender, &shutdown, sse_event).await {
+                        return;
                     }
                 }
             }
@@ -333,10 +312,12 @@ async fn attach_session_events(
         let Ok(mut live_stream) = run_store.watch_events_from(next_seq) else {
             return;
         };
+        let session_id_string = session_id.to_string();
         loop {
             tokio::select! {
                 biased;
                 () = shutdown.cancelled() => break,
+                () = sender.closed() => break,
                 next = live_stream.next() => {
                     let Some(result) = next else {
                         return;
@@ -344,12 +325,9 @@ async fn attach_session_events(
                     let Ok(event) = result else {
                         return;
                     };
-                    if event_matches_session(&event, session_id) {
+                    if event_matches_session(&event, &session_id_string) {
                         if let Some(sse_event) = session_sse_event(&event) {
-                            if sender
-                                .send(Ok::<Event, std::convert::Infallible>(sse_event))
-                                .is_err()
-                            {
+                            if !send_attach_sse_event(&sender, &shutdown, sse_event).await {
                                 return;
                             }
                         }
@@ -359,7 +337,7 @@ async fn attach_session_events(
         }
     });
 
-    Sse::new(UnboundedReceiverStream::new(receiver))
+    Sse::new(ReceiverStream::new(receiver))
         .keep_alive(KeepAlive::default())
         .into_response()
 }
@@ -1100,29 +1078,26 @@ fn session_sse_event(event: &EventEnvelope) -> Option<Event> {
     )
 }
 
-fn event_matches_session(event: &EventEnvelope, session_id: SessionId) -> bool {
+async fn send_attach_sse_event(
+    sender: &SessionSseSender,
+    shutdown: &CancellationToken,
+    event: Event,
+) -> bool {
+    tokio::select! {
+        biased;
+        () = shutdown.cancelled() => false,
+        () = sender.closed() => false,
+        result = sender.send(Ok(event)) => result.is_ok(),
+    }
+}
+
+fn event_matches_session(event: &EventEnvelope, session_id: &str) -> bool {
     event
         .event
         .session_id
         .as_deref()
-        .is_some_and(|id| id == session_id.to_string())
-        && is_run_session_event(&event.event.body)
-}
-
-fn is_run_session_event(body: &EventBody) -> bool {
-    matches!(
-        body,
-        EventBody::RunSessionCreated(_)
-            | EventBody::RunSessionTurnStarted(_)
-            | EventBody::RunSessionUserMessage(_)
-            | EventBody::RunSessionAssistantDelta(_)
-            | EventBody::RunSessionAssistantMessage(_)
-            | EventBody::RunSessionToolCallStarted(_)
-            | EventBody::RunSessionToolCallCompleted(_)
-            | EventBody::RunSessionTurnSucceeded(_)
-            | EventBody::RunSessionTurnFailed(_)
-            | EventBody::RunSessionTurnInterrupted(_)
-    )
+        .is_some_and(|id| id == session_id)
+        && event.event.body.is_run_session_event()
 }
 
 async fn load_session(
@@ -1175,11 +1150,14 @@ async fn load_session_run_reader(
         Err(err) => return Err(store_error(&err).into_response()),
     };
     let run_store = open_run_reader(state, run_id).await?;
-    let events = match run_store.list_events().await {
+    let events = match run_store
+        .list_events_for_session_from_with_limit(session_id, 1, 0)
+        .await
+    {
         Ok(events) => events,
         Err(err) => return Err(store_error(&err).into_response()),
     };
-    if fabro_store::project_run_session(run_id, session_id, &events).is_none() {
+    if events.is_empty() {
         return Err(ApiError::not_found("Session not found.").into_response());
     }
     Ok((run_id, run_store))
@@ -1211,12 +1189,6 @@ async fn open_run_reader(state: &AppState, run_id: RunId) -> Result<RunDatabase,
 
 fn store_error(err: &fabro_store::Error) -> ApiError {
     ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-}
-
-fn parse_run_id(value: &str) -> Result<RunId, ApiError> {
-    value
-        .parse()
-        .map_err(|err| ApiError::bad_request(format!("Invalid run ID: {err}")))
 }
 
 fn parse_session_id(value: &str) -> Result<SessionId, ApiError> {

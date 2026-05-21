@@ -91,6 +91,25 @@ describe("session stream helpers", () => {
     expect(events[0]?.seq).toBe(7);
   });
 
+  test("parses CRLF-delimited SSE frames", async () => {
+    const events: SessionStreamEvent[] = [];
+    const fetchMock = mock(() =>
+      Promise.resolve(
+        streamResponse([
+          'data: {"seq":8,"event":{"event":"run.session.assistant_message","properties":{}}}\r\n\r\n',
+        ]),
+      ),
+    );
+
+    await attachSessionEvents({
+      sessionId: "ses_1",
+      fetchImpl: fetchMock,
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(events[0]?.seq).toBe(8);
+  });
+
   test("converts non-2xx responses to ApiError", async () => {
     const fetchMock = mock(() =>
       Promise.resolve(
