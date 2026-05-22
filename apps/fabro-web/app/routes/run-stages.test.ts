@@ -228,6 +228,49 @@ describe("eventsToActivity", () => {
     ]);
   });
 
+  test("renders pair messages as transcript turns for the matching stage", () => {
+    const events: EventEnvelope[] = [
+      envelope(1, {
+        event: "agent.pair.system_message",
+        ts: "2026-04-09T12:00:00Z",
+        stage_id: "nap@1",
+        node_id: "nap",
+        properties: {
+          text: "A human has joined this workflow run for live pairing.",
+          kind: "human_joined",
+          visit: 1,
+        },
+      }),
+      envelope(2, {
+        event: "agent.pair.user_message",
+        ts: "2026-04-09T12:00:05Z",
+        stage_id: "nap@1",
+        node_id: "nap",
+        properties: { text: "try a smaller diff", visit: 1 },
+      }),
+      envelope(3, {
+        event: "agent.pair.user_message",
+        ts: "2026-04-09T12:00:06Z",
+        stage_id: "other@1",
+        node_id: "other",
+        properties: { text: "wrong stage", visit: 1 },
+      }),
+    ];
+
+    expect(eventsToActivity(events, "nap@1")).toEqual([
+      {
+        kind: "pair_system",
+        ts: "2026-04-09T12:00:00Z",
+        content: "A human has joined this workflow run for live pairing.",
+      },
+      {
+        kind: "pair_user",
+        ts: "2026-04-09T12:00:05Z",
+        content: "try a smaller diff",
+      },
+    ]);
+  });
+
   test("renders prompt.completed as an assistant turn for prompt-shape stages", () => {
     const events: EventEnvelope[] = [
       envelope(1, {

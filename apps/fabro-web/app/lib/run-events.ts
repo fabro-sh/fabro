@@ -73,6 +73,8 @@ export const STAGE_ACTIVITY_EVENT_TYPES = [
   "agent.tool.completed",
   "agent.steering.injected",
   "agent.interrupt.injected",
+  "agent.pair.user_message",
+  "agent.pair.system_message",
   "command.started",
   "command.completed",
 ] as const;

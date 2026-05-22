@@ -77,6 +77,15 @@ describe("queryKeysForRunEvent", () => {
       queryKeys.runs.stageEvents("run-1", "nap@1"),
     ]);
   });
+
+  test("pair messages invalidate the stage events query", () => {
+    expect(queryKeysForRunEvent("run-1", "agent.pair.user_message", "nap@1")).toEqual([
+      queryKeys.runs.stageEvents("run-1", "nap@1"),
+    ]);
+    expect(queryKeysForRunEvent("run-1", "agent.pair.system_message", "nap@1")).toEqual([
+      queryKeys.runs.stageEvents("run-1", "nap@1"),
+    ]);
+  });
 });
 
 describe("subscribeToRunEvents", () => {

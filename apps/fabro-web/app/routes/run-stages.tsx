@@ -69,6 +69,8 @@ type TurnType =
   | { kind: "system"; ts: string; content: string }
   | { kind: "steer"; ts: string; content: string }
   | { kind: "interrupt"; ts: string; content: string }
+  | { kind: "pair_user"; ts: string; content: string }
+  | { kind: "pair_system"; ts: string; content: string }
   | { kind: "assistant"; ts: string; content: string; inputTokens: number; outputTokens: number }
   | { kind: "tool"; ts: string; toolName: string; input: string; result: string; isError: boolean; durationMs: number }
   | {
@@ -97,13 +99,24 @@ type PanelSelection = ThreadDnaSelection;
 
 const STAGE_ACTIVITY_EVENT_SET = new Set<string>(STAGE_ACTIVITY_EVENT_TYPES);
 
-const EVENT_KINDS = ["system", "steer", "interrupt", "assistant", "tool", "command"] as const;
+const EVENT_KINDS = [
+  "system",
+  "steer",
+  "interrupt",
+  "pair_user",
+  "pair_system",
+  "assistant",
+  "tool",
+  "command",
+] as const;
 type EventKind = (typeof EVENT_KINDS)[number];
 
 const EVENT_KIND_LABEL: Record<EventKind, string> = {
   system: "System",
   steer: "Steer",
   interrupt: "Interrupt",
+  pair_user: "Human",
+  pair_system: "System",
   assistant: "Agent",
   tool: "Tool",
   command: "Command",
@@ -231,6 +244,20 @@ export function eventsToActivity(events: EventEnvelope[], stageId: string): Turn
       case "agent.interrupt.injected":
         turns.push({ kind: "interrupt", ts: e.ts, content: "Agent interrupted" });
         break;
+      case "agent.pair.user_message": {
+        const text = getString(props, "text") ?? e.text ?? "";
+        if (text) {
+          turns.push({ kind: "pair_user", ts: e.ts, content: text });
+        }
+        break;
+      }
+      case "agent.pair.system_message": {
+        const text = getString(props, "text") ?? e.text ?? "";
+        if (text) {
+          turns.push({ kind: "pair_system", ts: e.ts, content: text });
+        }
+        break;
+      }
       case "agent.tool.started": {
         const callId = getString(props, "tool_call_id") ?? e.tool_call_id ?? "";
         const args = props.arguments ?? e.arguments;
@@ -423,6 +450,26 @@ export function buildThreadDnaItems(
           });
           prevEndMs = tsMs;
           break;
+        case "pair_user":
+          out.push({
+            category: "user",
+            label: "pair.user",
+            startMs: Math.max(0, tsMs - anchorMs),
+            durationMs: 0,
+            selection,
+          });
+          prevEndMs = tsMs;
+          break;
+        case "pair_system":
+          out.push({
+            category: "system",
+            label: "pair.system",
+            startMs: Math.max(0, tsMs - anchorMs),
+            durationMs: 0,
+            selection,
+          });
+          prevEndMs = tsMs;
+          break;
         case "assistant": {
           // turn.ts is the moment the assistant message arrived (end of
           // generation). Its bar represents the gap from the last activity
@@ -519,6 +566,10 @@ function turnLabel(turn: TurnType): string {
       return "Steer";
     case "interrupt":
       return "Interrupt";
+    case "pair_user":
+      return "Human";
+    case "pair_system":
+      return "System";
     case "assistant":
       return "Agent";
     case "tool":
@@ -536,6 +587,10 @@ function turnTone(turn: TurnType): string {
       return "bg-overlay-strong text-fg-2";
     case "interrupt":
       return "bg-coral/15 text-coral";
+    case "pair_user":
+      return "bg-overlay-strong text-fg-2";
+    case "pair_system":
+      return "bg-amber/15 text-amber";
     case "assistant":
       return "bg-teal-500/15 text-teal-500";
     case "tool":
@@ -582,6 +637,8 @@ export function turnSummary(turn: TurnType): string {
     case "system":
     case "steer":
     case "interrupt":
+    case "pair_user":
+    case "pair_system":
     case "assistant":
       return oneLine(turn.content);
     case "tool":
@@ -611,6 +668,8 @@ export function turnMetric(turn: TurnType): string | null {
     case "steer":
     case "interrupt":
     case "system":
+    case "pair_user":
+    case "pair_system":
       return null;
   }
 }
@@ -620,6 +679,8 @@ export function searchableText(turn: TurnType): string {
     case "system":
     case "steer":
     case "interrupt":
+    case "pair_user":
+    case "pair_system":
     case "assistant":
       return turn.content;
     case "tool":
@@ -775,6 +836,8 @@ function EventDetails({
       {(turn.kind === "system" ||
         turn.kind === "steer" ||
         turn.kind === "interrupt" ||
+        turn.kind === "pair_user" ||
+        turn.kind === "pair_system" ||
         turn.kind === "assistant") && (
         <DetailField label="Content">
           <Markdown content={turn.content} />
