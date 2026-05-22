@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useMemo } from "react";
 import {
   AssistantRuntimeProvider,
   useLocalRuntime,
@@ -6,23 +6,11 @@ import {
 import { Thread, makeMarkdownText } from "@assistant-ui/react-ui";
 import { XMarkIcon } from "@heroicons/react/24/outline";
 
-import { createScriptedAdapter } from "../../lib/chats-runtime";
-import type { Chat } from "../../lib/chats-types";
+import { createAskFabroAdapter } from "../../lib/ask-fabro-runtime";
 import SidebarComposer from "./sidebar-composer";
 import ToolFallback from "./tool-fallback";
 
 const MarkdownText = makeMarkdownText();
-
-/** The sidebar runs against an empty, store-less chat: the scripted adapter
- * only reads `scriptIndex`, advanced locally per reply via `scriptIndexRef`. */
-const EMPTY_CHAT: Chat = {
-  id: "ask-fabro",
-  title: "",
-  createdAt: 0,
-  scriptIndex: 0,
-  seedMessages: [],
-  pendingResponse: false,
-};
 
 export const SIDEBAR_WIDTH = 420;
 
@@ -31,24 +19,25 @@ export const SIDEBAR_WIDTH = 420;
  * collapses to zero when closed; renders assistant-ui's `<Thread>` with a
  * stripped composer scoped to the narrow column via the `.ask-fabro-sidebar`
  * CSS in app.css.
+ *
+ * The sidebar is parameterized by `runId`: the agent's session is scoped to
+ * that run (and only that run; the server enforces this via the same-run
+ * worker token attached to the session's run-control tools).
  */
 export default function AskFabroSidebar({
   isOpen,
   onClose,
+  runId,
+  defaultModel,
 }: {
   isOpen: boolean;
   onClose: () => void;
+  runId: string;
+  defaultModel?: string | null;
 }) {
-  const scriptIndexRef = useRef(0);
   const adapter = useMemo(
-    () =>
-      createScriptedAdapter({
-        getChat: () => ({ ...EMPTY_CHAT, scriptIndex: scriptIndexRef.current }),
-        onReplyComplete: () => {
-          scriptIndexRef.current += 1;
-        },
-      }),
-    [],
+    () => createAskFabroAdapter({ runId, defaultModel }),
+    [runId, defaultModel],
   );
   const runtime = useLocalRuntime(adapter);
 
