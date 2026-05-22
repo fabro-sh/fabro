@@ -42,10 +42,10 @@ pub use layers::{
     CliAuthLayer, CliExecAgentLayer, CliExecLayer, CliExecModelLayer, CliLayer, CliLoggingLayer,
     CliOutputLayer, CliTargetLayer, CliUpdatesLayer, CostRates, CredentialRef,
     CredentialRefParseError, DaytonaDockerfileLayer, DaytonaSandboxLayer, DaytonaSnapshotLayer,
-    DaytonaVolumeLayer, DockerSandboxLayer, FeaturesLayer, GitAuthorLayer, GithubIntegrationLayer,
-    HeaderValueRef, HookAgentMarker, HookEntry, HookTlsMode, IntegrationWebhooksLayer,
-    InterviewProviderLayer, InterviewsLayer, LlmLayer, LlmModelFeatures, LlmModelLimits, LogFilter,
-    McpEntryLayer, MergeMap, ModelControls, ModelCostTable, ModelRefOrSplice, ModelSettings,
+    DaytonaVolumeLayer, DockerSandboxLayer, GitAuthorLayer, GithubIntegrationLayer, HeaderValueRef,
+    HookAgentMarker, HookEntry, HookTlsMode, IntegrationWebhooksLayer, InterviewProviderLayer,
+    InterviewsLayer, LlmLayer, LlmModelFeatures, LlmModelLimits, LogFilter, McpEntryLayer,
+    MergeMap, ModelControls, ModelCostTable, ModelRefOrSplice, ModelSettings,
     NotificationProviderLayer, NotificationRouteLayer, ObjectStoreLocalLayer, ObjectStoreS3Layer,
     PrepareStep, ProjectLayer, ProviderSettings, ReasoningEffortFeature, ReplaceMap, RunAgentLayer,
     RunArtifactsLayer, RunCheckpointLayer, RunCloneLayer, RunExecutionLayer, RunGitLayer,
@@ -61,8 +61,7 @@ pub(crate) use layers::{Combine, SettingsLayer};
 pub use logging::{resolve_log_destination, resolve_log_destination_with_env};
 pub use parse::ParseError;
 pub use resolve::{
-    ResolveError, resolve_cli, resolve_features, resolve_project, resolve_run, resolve_server,
-    resolve_workflow,
+    ResolveError, resolve_cli, resolve_project, resolve_run, resolve_server, resolve_workflow,
 };
 use serde::de::DeserializeOwned;
 pub use storage::{RunScratch, RuntimeDirectory, Storage};

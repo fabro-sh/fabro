@@ -50,9 +50,7 @@ client_id = "Iv1.abcdef"
     let top_level = body
         .as_object()
         .expect("server settings response should be an object");
-    assert_eq!(top_level.len(), 2);
     assert!(top_level.contains_key("server"));
-    assert!(top_level.contains_key("features"));
 
     assert_eq!(body["server"]["listen"]["type"], "tcp");
     assert_eq!(body["server"]["listen"]["address"], "127.0.0.1:32276");
@@ -68,7 +66,7 @@ client_id = "Iv1.abcdef"
         body["server"]["integrations"]["github"]["client_id"],
         "Iv1.abcdef"
     );
-    assert_eq!(body["features"]["session_sandboxes"], false);
+    assert!(body.get("features").is_none());
     assert!(body.get("cli").is_none());
     assert!(body.get("run").is_none());
 }

@@ -16,7 +16,6 @@ import {
   MagnifyingGlassIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
-import { useSystemInfo } from "../lib/queries";
 
 export const handle = { hideHeader: true, wide: true };
 
@@ -45,10 +44,6 @@ function BranchIcon({ className }: { className?: string }) {
 }
 
 export default function Start() {
-  const systemInfo = useSystemInfo();
-  const features = systemInfo.data?.features ?? {
-    session_sandboxes: false,
-  };
   const [prompt, setPrompt] = useState("");
   const [project, setProject] = useState(projects[0]);
   const [branch, setBranch] = useState(branches[0]);
@@ -105,22 +100,20 @@ export default function Start() {
               />
 
               <div className="absolute bottom-3 inset-x-3 flex items-center justify-between">
-                {features.session_sandboxes && (
-                  <div className="flex items-center gap-1.5">
-                    <Picker
-                      value={project}
-                      onChange={setProject}
-                      options={projects}
-                      icon={<FolderIcon className="size-3.5 text-fg-muted" />}
-                    />
-                    <Picker
-                      value={branch}
-                      onChange={setBranch}
-                      options={branches}
-                      icon={<BranchIcon className="size-3.5 text-fg-muted" />}
-                    />
-                  </div>
-                )}
+                <div className="flex items-center gap-1.5">
+                  <Picker
+                    value={project}
+                    onChange={setProject}
+                    options={projects}
+                    icon={<FolderIcon className="size-3.5 text-fg-muted" />}
+                  />
+                  <Picker
+                    value={branch}
+                    onChange={setBranch}
+                    options={branches}
+                    icon={<BranchIcon className="size-3.5 text-fg-muted" />}
+                  />
+                </div>
 
                 <div className="ml-auto flex items-center gap-3">
                   <span className="text-xs text-fg-muted select-none">

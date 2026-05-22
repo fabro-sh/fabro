@@ -871,49 +871,6 @@ provider = "invalid-provider"
 }
 
 #[test]
-fn system_features_use_dense_server_and_manifest_defaults() {
-    let source = r#"
-_version = 1
-
-[server.auth]
-methods = ["dev-token"]
-
-[features]
-session_sandboxes = true
-"#;
-    let server_settings = server_settings_from_toml(source);
-    let manifest_run_settings = resolve_manifest_run_settings(
-        &run_manifest::manifest_run_defaults(Some(&manifest_run_defaults_from_toml(source))),
-    );
-    let features = system_features(&server_settings, &manifest_run_settings);
-
-    assert_eq!(features.session_sandboxes, Some(true));
-}
-
-#[test]
-fn system_features_ignore_manifest_run_settings_resolution() {
-    let source = r#"
-_version = 1
-
-[server.auth]
-methods = ["dev-token"]
-
-[features]
-session_sandboxes = true
-
-[run.sandbox]
-provider = "invalid-provider"
-"#;
-    let server_settings = server_settings_from_toml(source);
-    let manifest_run_settings = resolve_manifest_run_settings(
-        &run_manifest::manifest_run_defaults(Some(&manifest_run_defaults_from_toml(source))),
-    );
-    let features = system_features(&server_settings, &manifest_run_settings);
-
-    assert_eq!(features.session_sandboxes, Some(true));
-}
-
-#[test]
 fn system_sandbox_provider_uses_manifest_defaults() {
     let source = r#"
 _version = 1

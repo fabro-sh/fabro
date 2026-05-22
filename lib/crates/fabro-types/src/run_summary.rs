@@ -33,7 +33,6 @@ pub struct AskFabro {
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum AskFabroUnavailableReason {
-    FeatureDisabled,
     NoSandbox,
     SandboxNotReady,
     LlmUnconfigured,

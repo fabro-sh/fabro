@@ -60,6 +60,3 @@ provider = "local"
 prefix = ""
 flush_interval = "1ms"
 disk_cache = false
-
-[features]
-session_sandboxes = false

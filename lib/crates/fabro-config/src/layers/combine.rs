@@ -13,7 +13,6 @@ use fabro_types::settings::{Duration, InterpString, Size};
 
 use super::LogFilter;
 use super::cli::{CliAuthLayer, CliLoggingLayer, CliTargetLayer};
-use super::features::FeaturesLayer;
 use super::llm::{CostRates, CredentialRef, HeaderValueRef, ReasoningEffortFeature};
 use super::run::{
     DaytonaSnapshotLayer, DaytonaVolumeLayer, HookAgentMarker, HookEntry, HookTlsMode,
@@ -148,7 +147,6 @@ impl_combine_self!(
     CliAuthLayer,
     CliLoggingLayer,
     CliTargetLayer,
-    FeaturesLayer,
     DaytonaNetworkLayer,
     DaytonaSnapshotLayer,
     InterviewProviderLayer,
