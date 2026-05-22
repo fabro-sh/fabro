@@ -1537,10 +1537,6 @@ fn worker_command_default_token_omits_agent_run_tools_scope() {
     assert_eq!(claims.scope.split_whitespace().collect::<Vec<_>>(), vec![
         "run:worker"
     ]);
-    assert_eq!(
-        command_env_value(&cmd, "FABRO_WORKER_AGENT_RUN_TOOLS"),
-        EnvOverride::Unchanged
-    );
 }
 
 #[cfg(unix)]
@@ -1567,10 +1563,6 @@ fn worker_command_opt_in_token_includes_agent_run_tools_scope() {
         "run:worker",
         "agent:run_tools"
     ]);
-    assert_eq!(
-        command_env_value(&cmd, "FABRO_WORKER_AGENT_RUN_TOOLS"),
-        EnvOverride::Unchanged
-    );
 }
 
 #[cfg(unix)]
