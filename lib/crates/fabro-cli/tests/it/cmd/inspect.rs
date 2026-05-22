@@ -175,6 +175,7 @@ fn inspect_resolves_selector_via_server_endpoint() {
                 "slack": null
               },
               "agent": {
+                "fabro_tools": false,
                 "permissions": null,
                 "mcps": {}
               },

@@ -917,6 +917,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
             },
             "run": {
               "agent": {
+                "fabro_tools": false,
                 "mcps": {},
                 "permissions": null
               },

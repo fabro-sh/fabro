@@ -1544,13 +1544,6 @@ fn worker_command_default_token_omits_agent_run_tools_scope() {
     assert_eq!(claims.scope.split_whitespace().collect::<Vec<_>>(), vec![
         "run:worker"
     ]);
-    // After `env_clear`, an `env_remove` for a variable that was never set is
-    // a no-op and does not appear in `get_envs()`, so the observable state is
-    // `Unchanged`. Both `Unchanged` and `Removed` mean "absent from child env".
-    assert_eq!(
-        command_env_value(&cmd, EnvVars::FABRO_WORKER_AGENT_RUN_TOOLS),
-        EnvOverride::Unchanged
-    );
 }
 
 #[cfg(unix)]
@@ -1584,10 +1577,6 @@ fn worker_command_opt_in_token_includes_agent_run_tools_scope() {
         "run:worker",
         "agent:run_tools"
     ]);
-    assert_eq!(
-        command_env_value(&cmd, EnvVars::FABRO_WORKER_AGENT_RUN_TOOLS),
-        EnvOverride::Set("true".to_string())
-    );
 }
 
 #[cfg(unix)]
