@@ -3109,7 +3109,7 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
         return;
     }
 
-    execute_run_subprocess(state, run_id).await;
+    Box::pin(execute_run_subprocess(state, run_id)).await;
 }
 
 async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {

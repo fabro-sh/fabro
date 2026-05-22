@@ -493,7 +493,7 @@ pub struct RunAgentLayer {
     /// Agent-scoped MCP server entries, keyed by name.
     #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
     #[option(value_type = "table")]
-    pub mcps:        StickyMap<McpEntryLayer>,
+    pub mcps: StickyMap<McpEntryLayer>,
 }
 
 /// A single MCP entry. `type` selects the transport; `script`/`command` are

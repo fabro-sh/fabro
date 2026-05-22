@@ -555,12 +555,12 @@ mod run_agent_fabro_tools {
     #[test]
     fn resolves_true_from_run_agent_table() {
         let settings = WorkflowSettingsBuilder::from_toml(
-            r#"
+            r"
 _version = 1
 
 [run.agent]
 fabro_tools = true
-"#,
+",
         )
         .expect("run.agent.fabro_tools should resolve");
 
@@ -570,12 +570,12 @@ fabro_tools = true
     #[test]
     fn resolves_explicit_false_from_run_agent_table() {
         let settings = WorkflowSettingsBuilder::from_toml(
-            r#"
+            r"
 _version = 1
 
 [run.agent]
 fabro_tools = false
-"#,
+",
         )
         .expect("run.agent.fabro_tools false should resolve");
 
@@ -585,20 +585,20 @@ fabro_tools = false
     #[test]
     fn higher_layer_false_overrides_lower_true() {
         let workflow = parse_settings(
-            r#"
+            r"
 _version = 1
 
 [run.agent]
 fabro_tools = false
-"#,
+",
         );
         let user = parse_settings(
-            r#"
+            r"
 _version = 1
 
 [run.agent]
 fabro_tools = true
-"#,
+",
         );
         let merged = workflow.combine(user);
 
