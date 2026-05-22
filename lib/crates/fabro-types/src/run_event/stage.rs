@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::ExecOutputTail;
-use crate::{BilledModelUsage, DiffSummary, FailureDetail, Outcome, StageOutcome};
+use crate::{BilledModelUsage, DiffSummary, FailureDetail, Outcome, StageOutcome, StageTiming};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StageStartedProps {
@@ -17,7 +17,8 @@ pub struct StageStartedProps {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StageCompletedProps {
     pub index: usize,
-    pub duration_ms: u64,
+    /// Per-attempt timing breakdown for this stage visit.
+    pub timing: StageTiming,
     pub status: StageOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preferred_label: Option<String>,
@@ -51,14 +52,15 @@ pub struct StageCompletedProps {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StageFailedProps {
-    pub index:       usize,
+    pub index:      usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failure:     Option<FailureDetail>,
-    pub will_retry:  bool,
+    pub failure:    Option<FailureDetail>,
+    pub will_retry: bool,
+    /// Per-attempt timing breakdown for this stage visit.
     #[serde(default)]
-    pub duration_ms: u64,
+    pub timing:     StageTiming,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub billing:     Option<BilledModelUsage>,
+    pub billing:    Option<BilledModelUsage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

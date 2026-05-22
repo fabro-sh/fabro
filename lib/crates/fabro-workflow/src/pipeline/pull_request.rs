@@ -172,7 +172,7 @@ fn format_arc_details_section(
     parts.push(String::new());
 
     // Cost table
-    let total_duration = format_duration_ms(conclusion.duration_ms);
+    let total_duration = format_duration_ms(conclusion.timing.wall_time_ms);
     let total_cost_str = format_cost(conclusion.billing.as_ref().and_then(|b| b.total_usd_micros));
     let stage_count = conclusion.stages.len();
     parts.push(format!(
@@ -184,7 +184,7 @@ fn format_arc_details_section(
     parts.push("| Stage | Duration | Cost | Retries |".to_string());
     parts.push("|---|---|---|---|".to_string());
     for stage in &conclusion.stages {
-        let dur = format_duration_ms(stage.duration_ms);
+        let dur = format_duration_ms(stage.timing.wall_time_ms);
         let cost = format_cost(stage.billing_usd_micros);
         parts.push(format!(
             "| {} | {} | {} | {} |",
@@ -870,28 +870,28 @@ mod tests {
         Conclusion {
             timestamp:            Utc::now(),
             status:               crate::outcome::StageOutcome::Succeeded,
-            duration_ms:          150_000,
+            timing:               fabro_types::RunTiming::wall_only(150_000),
             failure:              None,
             final_git_commit_sha: None,
             stages:               vec![
                 StageSummary {
                     stage_id:           "plan".to_string(),
                     stage_label:        "plan".to_string(),
-                    duration_ms:        45_000,
+                    timing:             fabro_types::StageTiming::wall_only(45_000),
                     billing_usd_micros: Some(120_000),
                     retries:            0,
                 },
                 StageSummary {
                     stage_id:           "implement".to_string(),
                     stage_label:        "implement".to_string(),
-                    duration_ms:        90_000,
+                    timing:             fabro_types::StageTiming::wall_only(90_000),
                     billing_usd_micros: Some(250_000),
                     retries:            0,
                 },
                 StageSummary {
                     stage_id:           "simplify".to_string(),
                     stage_label:        "simplify".to_string(),
-                    duration_ms:        15_000,
+                    timing:             fabro_types::StageTiming::wall_only(15_000),
                     billing_usd_micros: Some(50_000),
                     retries:            0,
                 },
@@ -1244,7 +1244,7 @@ mod tests {
             node_id: "plan".to_string(),
             name: "plan".to_string(),
             index: 0,
-            duration_ms: 1,
+            timing: fabro_types::StageTiming::wall_only(1),
             status: "succeeded".to_string(),
             preferred_label: None,
             suggested_next_ids: vec![],
@@ -1600,7 +1600,7 @@ mod tests {
             .await
             .unwrap();
         append_event(&run_store, &fixtures::RUN_1, &Event::WorkflowRunCompleted {
-            duration_ms:          1,
+            timing:               fabro_types::RunTiming::wall_only(1),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -1717,7 +1717,7 @@ mod tests {
             node_id: "plan".to_string(),
             name: "plan".to_string(),
             index: 0,
-            duration_ms: 1,
+            timing: fabro_types::StageTiming::wall_only(1),
             status: "succeeded".to_string(),
             preferred_label: None,
             suggested_next_ids: vec![],
@@ -1888,7 +1888,7 @@ mod tests {
             .await
             .unwrap();
         append_event(&run_store, &fixtures::RUN_1, &Event::WorkflowRunCompleted {
-            duration_ms:          1,
+            timing:               fabro_types::RunTiming::wall_only(1),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,

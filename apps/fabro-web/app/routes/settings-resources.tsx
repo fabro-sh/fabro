@@ -5,7 +5,7 @@ import type {
   SystemResourcesResponse,
 } from "@qltysh/fabro-api-client";
 import { formatBytesAsMemory, formatDurationMs } from "../lib/format";
-import { useSystemResources } from "../lib/queries";
+import { useServerSettings, useSystemInfo, useSystemResources } from "../lib/queries";
 import {
   Badge,
   Mono,
@@ -21,7 +21,7 @@ export function meta() {
 }
 
 const DESCRIPTION =
-  "Server-visible CPU, memory, and storage filesystem usage for this Fabro process.";
+  "Server-visible run concurrency, CPU, memory, and storage filesystem usage for this Fabro process.";
 
 export default function SettingsResources() {
   const resourcesQuery = useSystemResources();
@@ -30,6 +30,7 @@ export default function SettingsResources() {
   return (
     <div className="space-y-6">
       <SettingsPageIntro description={DESCRIPTION} />
+      <RunsPanel />
       {resources ? (
         <>
           <CpuPanel cpu={resources.cpu} />
@@ -45,6 +46,32 @@ export default function SettingsResources() {
         </>
       )}
     </div>
+  );
+}
+
+function RunsPanel() {
+  const infoQuery = useSystemInfo(5_000);
+  const settingsQuery = useServerSettings();
+  const info = infoQuery.data;
+  const settings = settingsQuery.data;
+
+  if (!info || !settings) {
+    return <PanelSkeleton />;
+  }
+
+  const active = info.runs?.active ?? 0;
+  const max = settings.server.scheduler.max_concurrent_runs;
+  const percent = max > 0 ? (active / max) * 100 : null;
+
+  return (
+    <Panel title="Runs">
+      <Row
+        title="Active"
+        help="Runs currently queued or executing against the scheduler ceiling."
+      >
+        <UsageMeter percent={percent} label={`${active} / ${max} active`} />
+      </Row>
+    </Panel>
   );
 }
 

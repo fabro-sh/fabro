@@ -3,7 +3,7 @@ import type { PaginatedRunStageList } from "@qltysh/fabro-api-client";
 
 import type { Stage } from "../components/stage-sidebar";
 import { isVisibleStage } from "../data/runs";
-import { formatDurationSecs } from "./format";
+import { formatDurationMs } from "./format";
 
 export const ACTIVE_STAGE_STATES: ReadonlySet<StageState> = new Set([
   StageState.RUNNING,
@@ -70,8 +70,8 @@ export function mapRunStagesToSidebarStages(
       nodeId: stage.node_id,
       visit: stage.visit,
       status: stage.status,
-      duration: stage.duration_secs != null
-        ? formatDurationSecs(stage.duration_secs)
+      duration: stage.wall_time_ms != null
+        ? formatDurationMs(stage.wall_time_ms)
         : "--",
       startedAt: stage.started_at ?? null,
     }));

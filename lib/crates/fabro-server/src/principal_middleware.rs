@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 
@@ -14,7 +15,7 @@ use crate::auth::{AuthErrorCode, JwtError, REFRESH_TOKEN_PREFIX};
 use crate::error::ApiError;
 use crate::jwt_auth::{self, AuthMode, ConfiguredAuth};
 use crate::server::{AppState, parse_blob_id_path, parse_run_id_path, parse_stage_id_path};
-use crate::worker_token::{self, WORKER_TOKEN_KID};
+use crate::worker_token::{self, WORKER_TOKEN_KID, WorkerScopeSet};
 
 #[derive(Clone, Debug)]
 pub(crate) struct RequestAuthContext {
@@ -22,6 +23,7 @@ pub(crate) struct RequestAuthContext {
     pub auth_status:     AuthStatus,
     pub auth_error_code: Option<AuthErrorCode>,
     pub user_profile:    Option<UserProfile>,
+    pub worker_scopes:   WorkerScopeSet,
 }
 
 #[derive(Clone, Debug)]
@@ -54,7 +56,9 @@ pub(crate) struct AuthContextSlot(pub(crate) Arc<Mutex<RequestAuthContext>>);
 pub(crate) struct RequestAuth(pub(crate) AuthContextSlot);
 
 pub(crate) struct RequiredUser(pub(crate) UserPrincipal);
+pub(crate) struct RequiredRunToolActor(pub(crate) Principal);
 pub(crate) struct RequireRunScoped(pub(crate) RunId);
+pub(crate) struct RequireRunScopedOrRunTools(pub(crate) RunId, pub(crate) Principal);
 pub(crate) struct RequireRunBlob(pub(crate) RunId, pub(crate) RunBlobId);
 pub(crate) struct RequireRunStageScoped(pub(crate) RunId, pub(crate) String);
 pub(crate) struct RequireStageArtifact(pub(crate) RunId, pub(crate) StageId);
@@ -74,6 +78,7 @@ impl RequestAuthContext {
             auth_status:     AuthStatus::Missing,
             auth_error_code: None,
             user_profile:    None,
+            worker_scopes:   WorkerScopeSet::default(),
         }
     }
 
@@ -84,6 +89,18 @@ impl RequestAuthContext {
             auth_status: AuthStatus::Authenticated,
             auth_error_code: None,
             user_profile,
+            worker_scopes: WorkerScopeSet::default(),
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn authenticated_worker(run_id: RunId, scopes: WorkerScopeSet) -> Self {
+        Self {
+            principal:       Principal::Worker { run_id },
+            auth_status:     AuthStatus::Authenticated,
+            auth_error_code: None,
+            user_profile:    None,
+            worker_scopes:   scopes,
         }
     }
 
@@ -110,6 +127,7 @@ impl RequestAuthContext {
             auth_status:     status,
             auth_error_code: code,
             user_profile:    None,
+            worker_scopes:   WorkerScopeSet::default(),
         }
     }
 
@@ -197,6 +215,19 @@ impl<S: Send + Sync> FromRequestParts<S> for RequiredUser {
     }
 }
 
+impl<S: Send + Sync> FromRequestParts<S> for RequiredRunToolActor {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
+        let slot = parts
+            .extensions
+            .get::<AuthContextSlot>()
+            .cloned()
+            .unwrap_or_else(AuthContextSlot::initial);
+        require_run_tool_actor(&slot).map(Self)
+    }
+}
+
 impl FromRequestParts<Arc<AppState>> for RequireRunScoped {
     type Rejection = Response;
 
@@ -211,6 +242,30 @@ impl FromRequestParts<Arc<AppState>> for RequireRunScoped {
         require_worker_or_user_for_run(&auth_slot_from_parts(parts), &run_id)
             .map_err(IntoResponse::into_response)?;
         Ok(Self(run_id))
+    }
+}
+
+impl FromRequestParts<Arc<AppState>> for RequireRunScopedOrRunTools {
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &Arc<AppState>,
+    ) -> Result<Self, Self::Rejection> {
+        let Path(params): Path<HashMap<String, String>> = Path::from_request_parts(parts, state)
+            .await
+            .map_err(IntoResponse::into_response)?;
+        let Some(id) = params.get("id") else {
+            return Err(
+                ApiError::new(StatusCode::BAD_REQUEST, "Run ID path parameter missing.")
+                    .into_response(),
+            );
+        };
+        let run_id = parse_run_id_path(id)?;
+        let actor =
+            require_worker_or_user_for_run_or_run_tools(&auth_slot_from_parts(parts), &run_id)
+                .map_err(IntoResponse::into_response)?;
+        Ok(Self(run_id, actor))
     }
 }
 
@@ -339,6 +394,18 @@ pub(crate) fn require_authenticated_user(
     }
 }
 
+pub(crate) fn require_run_tool_actor(slot: &AuthContextSlot) -> Result<Principal, ApiError> {
+    let context = slot.0.lock().expect("auth context lock poisoned");
+    match &context.principal {
+        Principal::User(user) => Ok(Principal::User(user.clone())),
+        Principal::Worker { run_id } if context.worker_scopes.has_agent_run_tools() => {
+            Ok(Principal::Worker { run_id: *run_id })
+        }
+        Principal::Worker { .. } => Err(ApiError::forbidden()),
+        _ => Err(auth_rejection(context.auth_status, context.auth_error_code)),
+    }
+}
+
 fn require_worker_or_user_for_run(
     slot: &AuthContextSlot,
     route_run_id: &RunId,
@@ -347,6 +414,23 @@ fn require_worker_or_user_for_run(
     match &context.principal {
         Principal::User(_) => Ok(()),
         Principal::Worker { run_id } if run_id == route_run_id => Ok(()),
+        Principal::Worker { .. } => Err(ApiError::forbidden()),
+        _ => Err(auth_rejection(context.auth_status, context.auth_error_code)),
+    }
+}
+
+fn require_worker_or_user_for_run_or_run_tools(
+    slot: &AuthContextSlot,
+    route_run_id: &RunId,
+) -> Result<Principal, ApiError> {
+    let context = slot.0.lock().expect("auth context lock poisoned");
+    match &context.principal {
+        Principal::User(user) => Ok(Principal::User(user.clone())),
+        Principal::Worker { run_id }
+            if run_id == route_run_id || context.worker_scopes.has_agent_run_tools() =>
+        {
+            Ok(Principal::Worker { run_id: *run_id })
+        }
         Principal::Worker { .. } => Err(ApiError::forbidden()),
         _ => Err(auth_rejection(context.auth_status, context.auth_error_code)),
     }
@@ -391,7 +475,7 @@ fn classify_request(req: &Request, state: &AppState) -> RequestAuthContext {
 
     if header.kid.as_deref() == Some(WORKER_TOKEN_KID) {
         return match worker_token::decode_worker_token(token, state.worker_token_keys()) {
-            Ok(run_id) => RequestAuthContext::authenticated(Principal::Worker { run_id }, None),
+            Ok(decoded) => RequestAuthContext::authenticated_worker(decoded.run_id, decoded.scopes),
             Err(JwtError::AccessTokenExpired) => RequestAuthContext::rejected(
                 AuthStatus::Expired,
                 Some(AuthErrorCode::AccessTokenExpired),
@@ -460,8 +544,8 @@ mod tests {
     use super::*;
     use crate::auth::{self, AuthErrorCode};
     use crate::worker_token::{
-        WORKER_TOKEN_ISSUER, WORKER_TOKEN_SCOPE, WorkerTokenClaims, issue_worker_token,
-        worker_token_header,
+        WORKER_RUN_TOOLS_SCOPE, WORKER_TOKEN_ISSUER, WORKER_TOKEN_SCOPE, WorkerScopeSet,
+        WorkerTokenClaims, issue_worker_token, worker_token_header,
     };
 
     const TEST_JWT_ISSUER: &str = "https://fabro.example";
@@ -604,6 +688,26 @@ mod tests {
 
         assert_eq!(context.auth_status, AuthStatus::Authenticated);
         assert_eq!(context.principal, Principal::Worker { run_id });
+        assert!(!context.worker_scopes.has_agent_run_tools());
+    }
+
+    #[test]
+    fn classifies_run_tools_worker_scope() {
+        let state = crate::test_support::test_app_state();
+        let run_id = RunId::new();
+        let token = issue_worker_claims(
+            state.as_ref(),
+            run_id,
+            u64::MAX / 2,
+            &format!("{WORKER_TOKEN_SCOPE} {WORKER_RUN_TOOLS_SCOPE}"),
+        );
+        let request = request_with_bearer(Some(&token), auth_mode_for_state(state.as_ref()));
+
+        let context = classify_request(&request, state.as_ref());
+
+        assert_eq!(context.auth_status, AuthStatus::Authenticated);
+        assert_eq!(context.principal, Principal::Worker { run_id });
+        assert!(context.worker_scopes.has_agent_run_tools());
     }
 
     #[test]
@@ -712,5 +816,51 @@ mod tests {
 
         assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
         assert_eq!(err.code(), Some("access_token_invalid"));
+    }
+
+    #[test]
+    fn run_tool_actor_rejects_base_worker_scope() {
+        let run_id = RunId::new();
+        let slot = AuthContextSlot::initial();
+        slot.replace(RequestAuthContext::authenticated(
+            Principal::Worker { run_id },
+            None,
+        ));
+
+        let err = require_run_tool_actor(&slot).unwrap_err();
+
+        assert_eq!(err.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn run_tool_actor_accepts_worker_with_run_tools_scope() {
+        let run_id = RunId::new();
+        let slot = AuthContextSlot::initial();
+        slot.replace(RequestAuthContext::authenticated_worker(
+            run_id,
+            WorkerScopeSet::run_worker_with_agent_run_tools(),
+        ));
+
+        assert_eq!(require_run_tool_actor(&slot).unwrap(), Principal::Worker {
+            run_id
+        },);
+    }
+
+    #[test]
+    fn run_scoped_or_run_tools_accepts_cross_run_with_run_tools_scope() {
+        let token_run_id = RunId::new();
+        let route_run_id = RunId::new();
+        let slot = AuthContextSlot::initial();
+        slot.replace(RequestAuthContext::authenticated_worker(
+            token_run_id,
+            WorkerScopeSet::run_worker_with_agent_run_tools(),
+        ));
+
+        assert_eq!(
+            require_worker_or_user_for_run_or_run_tools(&slot, &route_run_id).unwrap(),
+            Principal::Worker {
+                run_id: token_run_id,
+            },
+        );
     }
 }

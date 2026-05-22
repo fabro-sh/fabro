@@ -2,18 +2,17 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use fabro_api::types;
-use fabro_client::Client;
 use fabro_types::RunId;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::common;
-use super::common::{ToolError, ToolResult};
+use super::common::{FabroToolBackend, ToolError, ToolResult};
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum RunInteractAction {
+pub enum RunInteractAction {
     Get,
     Start,
     Message,
@@ -32,19 +31,19 @@ pub(crate) enum RunInteractAction {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub(crate) struct FabroRunInteractParams {
-    pub(crate) action:      RunInteractAction,
-    pub(crate) run_id:      String,
-    pub(crate) parent_id:   Option<String>,
-    pub(crate) message:     Option<String>,
-    pub(crate) interrupt:   Option<bool>,
-    pub(crate) question_id: Option<String>,
-    pub(crate) answer:      Option<AnswerValue>,
+pub struct FabroRunInteractParams {
+    pub action:      RunInteractAction,
+    pub run_id:      String,
+    pub parent_id:   Option<String>,
+    pub message:     Option<String>,
+    pub interrupt:   Option<bool>,
+    pub question_id: Option<String>,
+    pub answer:      Option<AnswerValue>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(transparent)]
-pub(crate) struct AnswerValue(Value);
+pub struct AnswerValue(Value);
 
 impl From<Value> for AnswerValue {
     fn from(value: Value) -> Self {
@@ -53,7 +52,7 @@ impl From<Value> for AnswerValue {
 }
 
 impl AnswerValue {
-    fn into_inner(self) -> Value {
+    pub(crate) fn into_inner(self) -> Value {
         self.0
     }
 }
@@ -106,13 +105,13 @@ impl JsonSchema for AnswerValue {
 }
 
 #[derive(Debug)]
-pub(crate) struct ValidatedInteractRun {
-    pub(crate) run_id: String,
-    pub(crate) action: ValidatedInteractAction,
+pub struct ValidatedInteractRun {
+    pub run_id: String,
+    pub action: ValidatedInteractAction,
 }
 
 #[derive(Debug)]
-pub(crate) enum ValidatedInteractAction {
+pub enum ValidatedInteractAction {
     Get,
     Start,
     Message {
@@ -225,94 +224,94 @@ impl TryFrom<FabroRunInteractParams> for ValidatedInteractRun {
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
-pub(crate) struct InteractRunResult {
-    pub(crate) run_id: String,
-    pub(crate) action: RunInteractAction,
-    pub(crate) result: Value,
+pub struct InteractRunResult {
+    pub run_id: String,
+    pub action: RunInteractAction,
+    pub result: Value,
 }
 
-pub(crate) async fn interact_run(
-    client: Arc<Client>,
+pub async fn interact_run(
+    backend: Arc<dyn FabroToolBackend>,
     params: ValidatedInteractRun,
 ) -> ToolResult<InteractRunResult> {
-    let run_id = client
+    let run_id = backend
         .resolve_run(&params.run_id)
         .await
         .map_err(|err| ToolError::from_anyhow(&err))?
         .id;
     let action = params.action.action();
     let result = match params.action {
-        ValidatedInteractAction::Get => interact_get(&client, &run_id).await?,
+        ValidatedInteractAction::Get => interact_get(backend.as_ref(), &run_id).await?,
         ValidatedInteractAction::Start => {
-            let summary = client
+            let summary = backend
                 .start_run(&run_id, false)
                 .await
                 .map_err(|err| ToolError::from_anyhow(&err))?;
             json!({ "summary": common::run_summary_result(&summary) })
         }
         ValidatedInteractAction::Message { message, interrupt } => {
-            client
+            backend
                 .steer_run(&run_id, message.clone(), interrupt)
                 .await
                 .map_err(|err| ToolError::from_anyhow(&err))?;
             json!({ "message": message, "interrupt": interrupt })
         }
         ValidatedInteractAction::Interrupt => {
-            client
+            backend
                 .interrupt_run(&run_id)
                 .await
                 .map_err(|err| ToolError::from_anyhow(&err))?;
             json!({ "interrupted": true })
         }
         ValidatedInteractAction::Cancel => {
-            let summary = client
+            let summary = backend
                 .cancel_run(&run_id)
                 .await
                 .map_err(|err| ToolError::from_anyhow(&err))?;
             json!({ "summary": common::run_summary_result(&summary) })
         }
         ValidatedInteractAction::Archive => {
-            let summary = client
+            let summary = backend
                 .archive_run(&run_id)
                 .await
                 .map_err(|err| ToolError::from_anyhow(&err))?;
             json!({ "summary": common::run_summary_result(&summary) })
         }
         ValidatedInteractAction::Unarchive => {
-            let summary = client
+            let summary = backend
                 .unarchive_run(&run_id)
                 .await
                 .map_err(|err| ToolError::from_anyhow(&err))?;
             json!({ "summary": common::run_summary_result(&summary) })
         }
         ValidatedInteractAction::LinkParent { parent_id } => {
-            let parent_id = client
+            let parent_id = backend
                 .resolve_run(&parent_id)
                 .await
                 .map_err(|err| ToolError::from_anyhow(&err))?
                 .id;
-            let summary = client
+            let summary = backend
                 .link_run_parent(&run_id, &parent_id)
                 .await
                 .map_err(|err| ToolError::from_anyhow(&err))?;
             json!({ "summary": common::run_summary_result(&summary) })
         }
         ValidatedInteractAction::UnlinkParent => {
-            let summary = client
+            let summary = backend
                 .unlink_run_parent(&run_id)
                 .await
                 .map_err(|err| ToolError::from_anyhow(&err))?;
             json!({ "summary": common::run_summary_result(&summary) })
         }
         ValidatedInteractAction::GetQuestions => {
-            let questions = client
+            let questions = backend
                 .list_run_questions(&run_id)
                 .await
                 .map_err(|err| ToolError::from_anyhow(&err))?;
             json!({ "questions": questions })
         }
         ValidatedInteractAction::Answer { question_id, body } => {
-            client
+            backend
                 .submit_run_answer(&run_id, &question_id, body)
                 .await
                 .map_err(|err| ToolError::from_anyhow(&err))?;
@@ -327,16 +326,16 @@ pub(crate) async fn interact_run(
     })
 }
 
-pub(crate) fn interact_run_text(result: &InteractRunResult) -> String {
+pub fn interact_run_text(result: &InteractRunResult) -> String {
     format!(
         "completed {:?} for Fabro run {}",
         result.action, result.run_id
     )
 }
 
-async fn interact_get(client: &Client, run_id: &RunId) -> ToolResult<Value> {
-    let summary = common::retrieve_run(client, run_id).await?;
-    let projection = client
+async fn interact_get(backend: &dyn FabroToolBackend, run_id: &RunId) -> ToolResult<Value> {
+    let summary = common::retrieve_run(backend, run_id).await?;
+    let projection = backend
         .get_run_state(run_id)
         .await
         .map_err(|err| ToolError::from_anyhow(&err))?;

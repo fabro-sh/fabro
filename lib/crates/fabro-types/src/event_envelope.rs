@@ -16,7 +16,8 @@ mod tests {
     use super::EventEnvelope;
     use crate::run_event::RunCompletedProps;
     use crate::{
-        EventBody, ParallelBranchId, Principal, RunEvent, StageId, SuccessReason, fixtures,
+        EventBody, ParallelBranchId, Principal, RunEvent, RunTiming, StageId, SuccessReason,
+        fixtures,
     };
 
     #[test]
@@ -35,7 +36,7 @@ mod tests {
             tool_call_id:       None,
             actor:              None,
             body:               EventBody::RunCompleted(RunCompletedProps {
-                duration_ms:          42,
+                timing:               RunTiming::wall_only(42),
                 artifact_count:       0,
                 status:               "success".to_string(),
                 reason:               SuccessReason::Completed,
@@ -79,7 +80,7 @@ mod tests {
                 model:             Some("claude-sonnet".to_string()),
             }),
             body:               EventBody::RunCompleted(RunCompletedProps {
-                duration_ms:          100,
+                timing:               RunTiming::wall_only(100),
                 artifact_count:       1,
                 status:               "success".to_string(),
                 reason:               SuccessReason::Completed,

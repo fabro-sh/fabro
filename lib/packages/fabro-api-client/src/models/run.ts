@@ -15,6 +15,9 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { AskFabro } from './ask-fabro';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { AutomationRef } from './automation-ref';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -54,6 +57,9 @@ import type { RunSandbox } from './run-sandbox';
 import type { RunTimestamps } from './run-timestamps';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { RunTiming } from './run-timing';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { WorkflowRef } from './workflow-ref';
 
 /**
@@ -82,7 +88,9 @@ export interface Run {
     'models': Array<RunModel>;
     'source_directory': string | null;
     'timestamps': RunTimestamps;
+    'timing': RunTiming | null;
     'billing': RunBillingSummary | null;
+    'ask_fabro': AskFabro;
     'diff': DiffSummary | null;
     'pull_request': PullRequestLink | null;
     'current_question': RunQuestion | null;

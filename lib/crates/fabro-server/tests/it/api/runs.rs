@@ -53,6 +53,58 @@ async fn request_json(
 }
 
 #[tokio::test]
+async fn run_responses_include_ask_fabro_affordance() {
+    let settings = settings_from_toml(
+        r"
+_version = 1
+
+[features]
+session_sandboxes = true
+",
+    );
+    let state = fabro_server::test_support::TestAppStateBuilder::new()
+        .runtime_settings(settings.server_settings, settings.manifest_run_defaults)
+        .env_lookup(|name| (name == "OPENAI_API_KEY").then(|| "test-key".to_string()))
+        .build();
+    let app = fabro_server::test_support::build_test_router(state);
+    let created = create_run(&app, minimal_manifest_json(MINIMAL_DOT)).await;
+    let run_id = created["id"].as_str().unwrap();
+
+    assert_eq!(created["ask_fabro"]["available"], false);
+    assert_eq!(
+        created["ask_fabro"]["unavailable_reason"],
+        "sandbox_not_ready"
+    );
+    assert_eq!(created["ask_fabro"]["default_model"], "gpt-5.4");
+
+    let get_request = Request::builder()
+        .method("GET")
+        .uri(api(&format!("/runs/{run_id}")))
+        .body(Body::empty())
+        .unwrap();
+    let fetched = response_json(
+        app.clone().oneshot(get_request).await.unwrap(),
+        StatusCode::OK,
+        format!("GET /api/v1/runs/{run_id}"),
+    )
+    .await;
+    assert_eq!(fetched["ask_fabro"], created["ask_fabro"]);
+
+    let list_request = Request::builder()
+        .method("GET")
+        .uri(api("/runs"))
+        .body(Body::empty())
+        .unwrap();
+    let list = response_json(
+        app.clone().oneshot(list_request).await.unwrap(),
+        StatusCode::OK,
+        "GET /api/v1/runs",
+    )
+    .await;
+    assert_eq!(list["data"][0]["ask_fabro"], created["ask_fabro"]);
+}
+
+#[tokio::test]
 async fn retrieve_run_settings_returns_dense_snapshot() {
     let storage_dir = tempfile::tempdir().unwrap();
     let settings = settings_from_toml(&format!(

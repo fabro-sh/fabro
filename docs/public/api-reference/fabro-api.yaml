@@ -822,6 +822,26 @@ paths:
       operationId: listRunSessions
       tags: [Sessions]
       summary: List run sessions
+      parameters:
+        - name: page[limit]
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: page[offset]
+          in: query
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [updated_desc, created_desc]
+            default: updated_desc
       responses:
         "200":
           description: Ask Fabro sessions for the run
@@ -870,11 +890,11 @@ paths:
       summary: Get session
       responses:
         "200":
-          description: Session record
+          description: Session detail
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SessionRecord"
+                $ref: "#/components/schemas/SessionDetail"
         "404":
           description: Session not found
           headers:
@@ -884,6 +904,84 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/sessions/{id}/events:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/SessionId"
+    get:
+      operationId: listSessionEvents
+      tags: [Sessions]
+      summary: List session events
+      description: Returns run event envelopes filtered to this session's durable `run.session.*` events. `since_seq` uses the owning run event sequence.
+      parameters:
+        - name: since_seq
+          in: query
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Session-scoped run events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedEventList"
+        "404":
+          description: Session not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/sessions/{id}/attach:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/SessionId"
+    get:
+      operationId: attachSessionEvents
+      tags: [Sessions]
+      summary: Attach to session events
+      description: Replays and streams this session's durable `run.session.*` events from the owning run event log. The stream remains open until the client disconnects or the server shuts down.
+      parameters:
+        - name: since_seq
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Streamed session-scoped run events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "404":
+          description: Session not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/sessions/{id}/turns:
     parameters:
       - name: id
@@ -905,6 +1003,11 @@ paths:
       responses:
         "200":
           description: Streamed session events
+          headers:
+            x-fabro-turn-id:
+              description: Durable turn id accepted for this streamed turn.
+              schema:
+                $ref: "#/components/schemas/TurnId"
           content:
             text/event-stream:
               schema:
@@ -932,6 +1035,10 @@ paths:
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
+            x-fabro-active-turn-id:
+              description: Durable id of the currently active turn.
+              schema:
+                $ref: "#/components/schemas/TurnId"
           content:
             application/json:
               schema:
@@ -5311,6 +5418,22 @@ components:
       type: string
       enum: [idle, running, failed]
 
+    SessionTurn:
+      description: Currently active durable session turn.
+      type: object
+      required:
+        - id
+        - started_at
+        - input
+      properties:
+        id:
+          $ref: "#/components/schemas/TurnId"
+        started_at:
+          type: string
+          format: date-time
+        input:
+          type: string
+
     SessionMessage:
       description: Persisted full-fidelity session transcript message.
       type: object
@@ -5346,6 +5469,7 @@ components:
         - id
         - run_id
         - status
+        - active_turn
         - created_at
         - updated_at
       properties:
@@ -5359,6 +5483,10 @@ components:
           $ref: "#/components/schemas/SessionStatus"
         model:
           type: ["string", "null"]
+        active_turn:
+          oneOf:
+            - $ref: "#/components/schemas/SessionTurn"
+            - type: "null"
         created_at:
           type: string
           format: date-time
@@ -5373,6 +5501,7 @@ components:
         - id
         - run_id
         - status
+        - active_turn
         - created_at
         - updated_at
       properties:
@@ -5386,12 +5515,57 @@ components:
           $ref: "#/components/schemas/SessionStatus"
         model:
           type: ["string", "null"]
+        active_turn:
+          oneOf:
+            - $ref: "#/components/schemas/SessionTurn"
+            - type: "null"
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+
+    SessionDetail:
+      description: Session metadata plus durable transcript projection.
+      type: object
+      required:
+        - id
+        - run_id
+        - status
+        - active_turn
+        - created_at
+        - updated_at
+        - messages
+        - last_seq
+      properties:
+        id:
+          $ref: "#/components/schemas/SessionId"
+        run_id:
+          type: string
+        title:
+          type: ["string", "null"]
+        status:
+          $ref: "#/components/schemas/SessionStatus"
+        model:
+          type: ["string", "null"]
+        active_turn:
+          oneOf:
+            - $ref: "#/components/schemas/SessionTurn"
+            - type: "null"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionMessage"
+        last_seq:
+          type: integer
+          minimum: 0
 
     CreateRunSessionRequest:
       type: object
@@ -5409,6 +5583,8 @@ components:
       properties:
         input:
           type: string
+        turn_id:
+          $ref: "#/components/schemas/TurnId"
 
     PaginatedSessionList:
       description: Paginated list of sessions.
@@ -7556,11 +7732,13 @@ components:
           type: ["string", "null"]
           format: date-time
           description: Wall-clock time the latest attempt of this stage started, if known.
-        duration_ms:
-          type: ["integer", "null"]
-          format: uint64
-          minimum: 0
-          description: Wall-clock duration of the stage's latest terminal attempt, if known.
+        timing:
+          oneOf:
+            - $ref: "#/components/schemas/StageTiming"
+            - type: "null"
+          description: |
+            Per-attempt timing breakdown for the latest terminal attempt:
+            wall time plus the active inference/tool breakdown.
         usage:
           $ref: "#/components/schemas/BilledTokenCounts"
         model:
@@ -7716,17 +7894,15 @@ components:
       required:
         - stage_id
         - stage_label
-        - duration_ms
+        - timing
         - retries
       properties:
         stage_id:
           type: string
         stage_label:
           type: string
-        duration_ms:
-          type: integer
-          format: uint64
-          minimum: 0
+        timing:
+          $ref: "#/components/schemas/StageTiming"
         billing_usd_micros:
           type: ["integer", "null"]
           format: int64
@@ -7741,7 +7917,7 @@ components:
       required:
         - timestamp
         - status
-        - duration_ms
+        - timing
         - stages
         - total_retries
         - diff
@@ -7751,10 +7927,8 @@ components:
           format: date-time
         status:
           $ref: "#/components/schemas/StageOutcome"
-        duration_ms:
-          type: integer
-          format: uint64
-          minimum: 0
+        timing:
+          $ref: "#/components/schemas/RunTiming"
         failure:
           oneOf:
             - $ref: "#/components/schemas/RunFailure"
@@ -7881,7 +8055,9 @@ components:
         - models
         - source_directory
         - timestamps
+        - timing
         - billing
+        - ask_fabro
         - diff
         - pull_request
         - current_question
@@ -7937,10 +8113,19 @@ components:
           type: ["string", "null"]
         timestamps:
           $ref: "#/components/schemas/RunTimestamps"
+        timing:
+          oneOf:
+            - $ref: "#/components/schemas/RunTiming"
+            - type: "null"
+          description: |
+            Run-level timing rollup. Wall time is the run's clock duration;
+            active timing sums work across stage visits.
         billing:
           oneOf:
             - $ref: "#/components/schemas/RunBillingSummary"
             - type: "null"
+        ask_fabro:
+          $ref: "#/components/schemas/AskFabro"
         diff:
           oneOf:
             - $ref: "#/components/schemas/DiffSummary"
@@ -7957,6 +8142,27 @@ components:
           type: ["string", "null"]
         links:
           $ref: "#/components/schemas/RunLinks"
+
+    AskFabro:
+      description: Readiness and defaults for starting an Ask Fabro session on this run.
+      type: object
+      required:
+        - available
+        - unavailable_reason
+        - default_model
+      properties:
+        available:
+          type: boolean
+        unavailable_reason:
+          type: ["string", "null"]
+          enum:
+            - feature_disabled
+            - no_sandbox
+            - sandbox_not_ready
+            - llm_unconfigured
+            - null
+        default_model:
+          type: ["string", "null"]
 
     WorkflowRef:
       type: object
@@ -8041,11 +8247,6 @@ components:
         completed_at:
           type: ["string", "null"]
           format: date-time
-        duration_ms:
-          type: ["integer", "null"]
-          format: int64
-        elapsed_secs:
-          type: ["number", "null"]
 
     RunBillingSummary:
       type: object
@@ -8185,10 +8386,12 @@ components:
           example: unit-tests
         status:
           $ref: "#/components/schemas/CheckRunStatus"
-        duration_secs:
-          type: number
-          description: Duration of the check run in seconds.
-          example: 154.0
+        wall_time_ms:
+          type: integer
+          format: uint64
+          minimum: 0
+          description: Wall-clock duration of the check run in milliseconds.
+          example: 154000
 
     # ── Reusable Sub-Schemas ───────────────────────────────────────────
 
@@ -8584,20 +8787,75 @@ components:
           format: uri
           example: https://github.com/fabro-sh/fabro/pull/123
 
-    RunTimings:
-      description: Timing information for a run.
+    StageTiming:
+      description: |
+        Timing breakdown for one stage visit. Fields are all milliseconds.
+        `wall_time_ms` is elapsed clock time; `inference_time_ms` is Fabro-
+        observed LLM request/stream elapsed time; `tool_time_ms` is tool or
+        command execution elapsed time; `active_time_ms` equals
+        `inference_time_ms + tool_time_ms`.
       type: object
       required:
-        - elapsed_secs
+        - wall_time_ms
+        - active_time_ms
       properties:
-        elapsed_secs:
-          type: number
-          description: Wall-clock time elapsed in seconds.
-          example: 420.0
-        elapsed_warning:
-          type: boolean
-          description: Whether the elapsed time exceeds the expected threshold.
-          example: false
+        wall_time_ms:
+          type: integer
+          format: uint64
+          minimum: 0
+          example: 1500
+        inference_time_ms:
+          type: integer
+          format: uint64
+          minimum: 0
+          default: 0
+          example: 900
+        tool_time_ms:
+          type: integer
+          format: uint64
+          minimum: 0
+          default: 0
+          example: 200
+        active_time_ms:
+          type: integer
+          format: uint64
+          minimum: 0
+          description: Equals `inference_time_ms + tool_time_ms`.
+          example: 1100
+
+    RunTiming:
+      description: |
+        Timing rollup for an entire run. Active fields sum work across stage
+        visits, so `active_time_ms` can exceed `wall_time_ms` when parallel
+        branches run concurrently.
+      type: object
+      required:
+        - wall_time_ms
+        - active_time_ms
+      properties:
+        wall_time_ms:
+          type: integer
+          format: uint64
+          minimum: 0
+          example: 420000
+        inference_time_ms:
+          type: integer
+          format: uint64
+          minimum: 0
+          default: 0
+          example: 120000
+        tool_time_ms:
+          type: integer
+          format: uint64
+          minimum: 0
+          default: 0
+          example: 60000
+        active_time_ms:
+          type: integer
+          format: uint64
+          minimum: 0
+          description: Equals `inference_time_ms + tool_time_ms`.
+          example: 180000
 
     SandboxProvider:
       description: Sandbox execution provider.
@@ -8677,7 +8935,7 @@ components:
         - reasoning_tokens
         - cache_read_tokens
         - cache_write_tokens
-        - runtime_secs
+        - timing
       properties:
         runs:
           type: integer
@@ -8712,10 +8970,12 @@ components:
           format: int64
           description: Total billed USD amount in micros.
           example: 20340000
-        runtime_secs:
-          type: number
-          description: Total runtime in seconds.
-          example: 3501.0
+        timing:
+          $ref: "#/components/schemas/RunTiming"
+          description: |
+            Aggregate timing rollup across every completed run. Active timing
+            sums work across stage visits, so `active_time_ms` can exceed
+            `wall_time_ms`.
 
     BillingStageRef:
       description: Reference to a workflow node in a billing stage row.
@@ -8837,10 +9097,12 @@ components:
           $ref: "#/components/schemas/StageHandler"
         status:
           $ref: "#/components/schemas/StageState"
-        duration_secs:
-          type: number
-          description: Time spent in this stage, in seconds.
-          example: 154.0
+        wall_time_ms:
+          type: integer
+          format: uint64
+          minimum: 0
+          description: Wall-clock time the latest attempt spent in this stage, in milliseconds.
+          example: 154000
         node_id:
           type: string
           description: Node id in the workflow graph; multiple stages with different visits share the same node_id.
@@ -9193,13 +9455,13 @@ components:
     # ── Billing Schemas ──────────────────────────────────────────────────
 
     RunBillingStage:
-      description: Token counts and billed totals for one workflow node within a run. Rows are grouped by node; billing and runtime sum every visit of that node.
+      description: Token counts and billed totals for one workflow node within a run. Rows are grouped by node; billing and timing sum every visit of that node.
       type: object
       required:
         - stage
         - model
         - billing
-        - runtime_secs
+        - timing
       properties:
         stage:
           $ref: "#/components/schemas/BillingStageRef"
@@ -9210,10 +9472,11 @@ components:
             - type: "null"
         billing:
           $ref: "#/components/schemas/BilledTokenCounts"
-        runtime_secs:
-          type: number
-          description: Wall-clock runtime in seconds, summed across every visit of this node.
-          example: 154.0
+        timing:
+          $ref: "#/components/schemas/StageTiming"
+          description: |
+            Per-node timing summed across every visit. `wall_time_ms` is the
+            sum of visit wall times; the active breakdown sums work timing.
         started_at:
           type: ["string", "null"]
           format: date-time
@@ -9229,7 +9492,7 @@ components:
       description: Aggregate billing totals across all stages of a run.
       type: object
       required:
-        - runtime_secs
+        - timing
         - input_tokens
         - output_tokens
         - total_tokens
@@ -9237,10 +9500,11 @@ components:
         - cache_read_tokens
         - cache_write_tokens
       properties:
-        runtime_secs:
-          type: number
-          description: Total wall-clock runtime in seconds.
-          example: 389.0
+        timing:
+          $ref: "#/components/schemas/RunTiming"
+          description: |
+            Run-level timing rollup. `wall_time_ms` is summed across stage
+            visits; active timing sums work across visits.
         input_tokens:
           type: integer
           description: Total input tokens consumed.

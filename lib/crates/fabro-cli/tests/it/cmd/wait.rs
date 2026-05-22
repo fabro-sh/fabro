@@ -96,8 +96,20 @@ fn wait_completed_run_json_outputs_status_and_duration() {
     let run = setup_seeded_completed_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
-        r#""duration_ms":\s*\d+"#.to_string(),
-        r#""duration_ms": [DURATION_MS]"#.to_string(),
+        r#""wall_time_ms":\s*\d+"#.to_string(),
+        r#""wall_time_ms": [WALL_TIME_MS]"#.to_string(),
+    ));
+    filters.push((
+        r#""inference_time_ms":\s*\d+"#.to_string(),
+        r#""inference_time_ms": [INFERENCE_TIME_MS]"#.to_string(),
+    ));
+    filters.push((
+        r#""tool_time_ms":\s*\d+"#.to_string(),
+        r#""tool_time_ms": [TOOL_TIME_MS]"#.to_string(),
+    ));
+    filters.push((
+        r#""active_time_ms":\s*\d+"#.to_string(),
+        r#""active_time_ms": [ACTIVE_TIME_MS]"#.to_string(),
     ));
     let mut cmd = context.command();
     cmd.args(["wait", "--json", &run.run_id]);
@@ -109,7 +121,12 @@ fn wait_completed_run_json_outputs_status_and_duration() {
     {
       "run_id": "[ULID]",
       "status": "succeeded",
-      "duration_ms": [DURATION_MS]
+      "timing": {
+        "wall_time_ms": [WALL_TIME_MS],
+        "inference_time_ms": [INFERENCE_TIME_MS],
+        "tool_time_ms": [TOOL_TIME_MS],
+        "active_time_ms": [ACTIVE_TIME_MS]
+      }
     }
     ----- stderr -----
     "###);

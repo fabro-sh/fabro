@@ -38,7 +38,18 @@ export default function SettingsIntegrations() {
           <PanelSkeleton />
         </>
       )}
+      <ProjectManagementPanel />
     </div>
+  );
+}
+
+function ProjectManagementPanel() {
+  return (
+    <Panel title="Project Management">
+      <Row title="Linear" help="Sync runs with Linear issues and projects.">
+        <span className="text-sm text-fg-muted">Coming Soon</span>
+      </Row>
+    </Panel>
   );
 }
 

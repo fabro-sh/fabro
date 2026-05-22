@@ -14,8 +14,36 @@ use crate::lifecycle::{
     AttemptContext, AttemptResultContext, EdgeContext, EdgeDecision, NodeDecision, NoopLifecycle,
     RunLifecycle,
 };
-use crate::outcome::{NodeResult, NodeResultExt, Outcome};
+use crate::outcome::{NodeResult, NodeResultExt, Outcome, OutcomeMeta};
 use crate::state::ExecutionState;
+
+/// Build a [`NodeResult`] from an attempt outcome, pulling the inference and
+/// tool breakdown from `outcome.timing` when handlers populated it. The wall
+/// time comes from the executor's stopwatch since that is the source of
+/// authoritative per-attempt clock time.
+fn node_result_from_outcome<M: OutcomeMeta>(
+    outcome: Outcome<M>,
+    wall_time: std::time::Duration,
+    attempts: u32,
+    max_attempts: u32,
+) -> NodeResult<M> {
+    let inference_time = outcome
+        .timing
+        .map(|t| std::time::Duration::from_millis(t.inference_time_ms))
+        .unwrap_or_default();
+    let tool_time = outcome
+        .timing
+        .map(|t| std::time::Duration::from_millis(t.tool_time_ms))
+        .unwrap_or_default();
+    NodeResult::new(
+        outcome,
+        wall_time,
+        inference_time,
+        tool_time,
+        attempts,
+        max_attempts,
+    )
+}
 
 #[derive(Default)]
 pub struct ExecutorOptions {
@@ -269,9 +297,9 @@ impl<G: Graph + 'static> Executor<G> {
         graph: &G,
     ) -> Result<NodeResult<G::Meta>> {
         let policy = self.handler.retry_policy(node, graph);
-        let start = Instant::now();
 
         for attempt in 1..=policy.max_attempts {
+            let attempt_start = Instant::now();
             let attempt_ctx = AttemptContext {
                 node,
                 attempt,
@@ -288,8 +316,12 @@ impl<G: Graph + 'static> Executor<G> {
             match self.handler.execute(node, &state.context, graph).await {
                 Ok(outcome) if outcome.status.retry_requested() && can_retry => {
                     let delay = policy.backoff.delay_for_attempt(attempt);
-                    let result =
-                        NodeResult::new(outcome, start.elapsed(), attempt, policy.max_attempts);
+                    let result = node_result_from_outcome(
+                        outcome,
+                        attempt_start.elapsed(),
+                        attempt,
+                        policy.max_attempts,
+                    );
                     let ctx = AttemptResultContext {
                         node,
                         result: &result,
@@ -302,9 +334,9 @@ impl<G: Graph + 'static> Executor<G> {
                 }
                 Ok(outcome) if outcome.status.retry_requested() => {
                     let final_outcome = self.handler.on_retries_exhausted(node, outcome);
-                    let result = NodeResult::new(
+                    let result = node_result_from_outcome(
                         final_outcome,
-                        start.elapsed(),
+                        attempt_start.elapsed(),
                         attempt,
                         policy.max_attempts,
                     );
@@ -319,8 +351,12 @@ impl<G: Graph + 'static> Executor<G> {
                     return Ok(result);
                 }
                 Ok(outcome) => {
-                    let result =
-                        NodeResult::new(outcome, start.elapsed(), attempt, policy.max_attempts);
+                    let result = node_result_from_outcome(
+                        outcome,
+                        attempt_start.elapsed(),
+                        attempt,
+                        policy.max_attempts,
+                    );
                     let ctx = AttemptResultContext {
                         node,
                         result: &result,
@@ -333,8 +369,12 @@ impl<G: Graph + 'static> Executor<G> {
                 }
                 Err(e) if can_retry && e.is_retryable() => {
                     let delay = policy.backoff.delay_for_attempt(attempt);
-                    let fail_result =
-                        NodeResult::from_error(&e, start.elapsed(), attempt, policy.max_attempts);
+                    let fail_result = NodeResult::from_error(
+                        &e,
+                        attempt_start.elapsed(),
+                        attempt,
+                        policy.max_attempts,
+                    );
                     let ctx = AttemptResultContext {
                         node,
                         result: &fail_result,
@@ -348,8 +388,12 @@ impl<G: Graph + 'static> Executor<G> {
                 Err(e @ Error::Handler { .. }) => {
                     // Convert handler failures to fail outcomes so routing continues.
                     let outcome = e.to_fail_outcome();
-                    let result =
-                        NodeResult::new(outcome, start.elapsed(), attempt, policy.max_attempts);
+                    let result = node_result_from_outcome(
+                        outcome,
+                        attempt_start.elapsed(),
+                        attempt,
+                        policy.max_attempts,
+                    );
                     let ctx = AttemptResultContext {
                         node,
                         result: &result,
@@ -1287,6 +1331,80 @@ mod tests {
         executor.run(&g, state).await.unwrap();
         let log = retry_log.lock().unwrap().clone();
         assert_eq!(log, vec![(1, true), (2, false)]);
+    }
+
+    #[tokio::test]
+    async fn executor_retry_attempt_wall_time_excludes_prior_attempts_and_backoff() {
+        let wall_times = Arc::new(Mutex::new(Vec::<Duration>::new()));
+
+        struct WallTimeTracker(Arc<Mutex<Vec<Duration>>>);
+        #[async_trait]
+        impl RunLifecycle<TestGraph> for WallTimeTracker {
+            async fn after_attempt(
+                &self,
+                ctx: &AttemptResultContext<'_, TestGraph>,
+                _s: &ExecutionState,
+            ) -> Result<()> {
+                self.0.lock().unwrap().push(ctx.result.wall_time);
+                Ok(())
+            }
+        }
+
+        struct SlowRetryThenSuccess(AtomicU32);
+        #[async_trait]
+        impl NodeHandler<TestGraph> for SlowRetryThenSuccess {
+            async fn execute(
+                &self,
+                _n: &TestNode,
+                _c: &Context,
+                _g: &TestGraph,
+            ) -> Result<Outcome> {
+                sleep(Duration::from_millis(5)).await;
+                let call = self.0.fetch_add(1, Ordering::Relaxed);
+                if call == 0 {
+                    Ok(Outcome {
+                        status: StageOutcome::Failed {
+                            retry_requested: true,
+                        },
+                        ..Outcome::default()
+                    })
+                } else {
+                    Ok(Outcome::success())
+                }
+            }
+
+            fn retry_policy(&self, _n: &TestNode, _g: &TestGraph) -> RetryPolicy {
+                RetryPolicy {
+                    max_attempts: 2,
+                    backoff:      BackoffPolicy {
+                        initial_delay: Duration::from_millis(500),
+                        factor:        1.0,
+                        max_delay:     Duration::from_millis(500),
+                        jitter:        false,
+                    },
+                }
+            }
+        }
+
+        let g = linear_graph(&["start", "end"]);
+        let state = ExecutionState::new(&g).unwrap();
+        let executor =
+            ExecutorBuilder::new(Arc::new(SlowRetryThenSuccess(AtomicU32::new(0)))
+                as Arc<dyn NodeHandler<TestGraph>>)
+            .lifecycle(Box::new(WallTimeTracker(Arc::clone(&wall_times))))
+            .build();
+
+        executor.run(&g, state).await.unwrap();
+
+        let wall_times = wall_times.lock().unwrap().clone();
+        assert_eq!(wall_times.len(), 2);
+        for wall_time in wall_times {
+            assert!(wall_time >= Duration::from_millis(5));
+            assert!(
+                wall_time < Duration::from_millis(300),
+                "attempt wall time should not include retry backoff or prior attempts: {wall_time:?}"
+            );
+        }
     }
 
     #[tokio::test]

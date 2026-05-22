@@ -28,6 +28,9 @@ import type { StageCompletion } from './stage-completion';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { StageState } from './stage-state';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { StageTiming } from './stage-timing';
 
 /**
  * Observable projection data for one workflow stage execution.
@@ -62,10 +65,7 @@ export interface StageProjection {
      * Wall-clock time the latest attempt of this stage started, if known.
      */
     'started_at'?: string | null;
-    /**
-     * Wall-clock duration of the stage\'s latest terminal attempt, if known.
-     */
-    'duration_ms'?: number | null;
+    'timing'?: StageTiming | null;
     'usage': BilledTokenCounts;
     'model'?: BillingModelRef | null;
     /**

@@ -16,6 +16,9 @@
 // May contain unused imports in some cases
 // @ts-ignore
 import type { SessionStatus } from './session-status';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { SessionTurn } from './session-turn';
 
 /**
  * Ask Fabro session metadata derived from the owning run event stream.
@@ -29,6 +32,7 @@ export interface SessionRecord {
     'title'?: string | null;
     'status': SessionStatus;
     'model'?: string | null;
+    'active_turn': SessionTurn | null;
     'created_at': string;
     'updated_at': string;
 }

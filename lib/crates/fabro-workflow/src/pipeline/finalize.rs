@@ -72,7 +72,7 @@ pub(crate) async fn build_conclusion_from_store(
     run_store: &RunStoreHandle,
     status: StageOutcome,
     failure: Option<RunFailure>,
-    run_duration_ms: u64,
+    run_wall_time_ms: u64,
     final_git_commit_sha: Option<String>,
 ) -> Conclusion {
     let projection = run_store.state().await.ok();
@@ -82,7 +82,7 @@ pub(crate) async fn build_conclusion_from_store(
         .unwrap_or_default();
     let projection_billing = projection
         .as_ref()
-        .map(billing_rollup_from_projection)
+        .map(|projection| billing_rollup_from_projection(projection, None))
         .unwrap_or_default();
     let checkpoint = projection
         .as_ref()
@@ -94,7 +94,7 @@ pub(crate) async fn build_conclusion_from_store(
         &projection_order,
         status,
         failure,
-        run_duration_ms,
+        run_wall_time_ms,
         final_git_commit_sha,
     )
 }
@@ -105,7 +105,7 @@ fn build_conclusion_from_parts(
     projection_order: &HashMap<String, u32>,
     status: StageOutcome,
     failure: Option<RunFailure>,
-    run_duration_ms: u64,
+    run_wall_time_ms: u64,
     final_git_commit_sha: Option<String>,
 ) -> Conclusion {
     // Looping workflows revisit nodes; `completed_nodes` accumulates duplicates
@@ -154,7 +154,8 @@ fn build_conclusion_from_parts(
             let summary = StageSummary {
                 stage_id: node_id.to_string(),
                 stage_label: node_id.to_string(),
-                duration_ms: billing.map_or(0, |stage| stage.duration_ms),
+                timing: billing
+                    .map_or_else(fabro_types::StageTiming::default, |stage| stage.timing),
                 billing_usd_micros: billing.and_then(|stage| stage.billing.total_usd_micros),
                 retries,
             };
@@ -182,7 +183,7 @@ fn build_conclusion_from_parts(
     Conclusion {
         timestamp: chrono::Utc::now(),
         status,
-        duration_ms: run_duration_ms,
+        timing: projection_billing.timing.with_wall_time(run_wall_time_ms),
         failure,
         final_git_commit_sha,
         stages,
@@ -438,12 +439,12 @@ async fn compute_final_patch(
 }
 
 pub(crate) fn billing_from_projection(projection: &RunProjection) -> Option<BilledTokenCounts> {
-    billing_rollup_from_projection(projection).billing_if_present()
+    billing_rollup_from_projection(projection, None).billing_if_present()
 }
 
 pub(crate) fn build_terminal_event(
     outcome: &Result<Outcome, Error>,
-    duration_ms: u64,
+    timing: fabro_types::RunTiming,
     artifact_count: usize,
     final_git_commit_sha: Option<String>,
     final_patch: Option<String>,
@@ -462,7 +463,7 @@ pub(crate) fn build_terminal_event(
     {
         let total_usd_micros = billing.as_ref().and_then(|b| b.total_usd_micros);
         return Event::WorkflowRunCompleted {
-            duration_ms,
+            timing,
             artifact_count,
             status: outcome_status.to_string(),
             reason: match outcome_status {
@@ -493,7 +494,7 @@ pub(crate) fn build_terminal_event(
     };
     Event::WorkflowRunFailed {
         failure,
-        duration_ms,
+        timing,
         final_git_commit_sha,
         final_patch,
         diff_summary,
@@ -533,7 +534,7 @@ pub async fn finalize(executed: Executed, options: &FinalizeOptions) -> Result<C
         graph,
         outcome,
         run_options,
-        duration_ms,
+        wall_time_ms,
         final_context: _,
         engine,
         model: _,
@@ -554,7 +555,7 @@ pub async fn finalize(executed: Executed, options: &FinalizeOptions) -> Result<C
         .unwrap_or_default();
     let projection_billing = projection
         .as_ref()
-        .map(billing_rollup_from_projection)
+        .map(|projection| billing_rollup_from_projection(projection, None))
         .unwrap_or_default();
     let checkpoint = projection
         .as_ref()
@@ -565,7 +566,7 @@ pub async fn finalize(executed: Executed, options: &FinalizeOptions) -> Result<C
         &projection_order,
         final_status,
         failure_reason,
-        duration_ms,
+        wall_time_ms,
         options.last_git_sha.clone(),
     );
 
@@ -584,7 +585,7 @@ pub async fn finalize(executed: Executed, options: &FinalizeOptions) -> Result<C
 
     let terminal_event = build_terminal_event(
         &outcome,
-        duration_ms,
+        conclusion.timing,
         artifact_count,
         options.last_git_sha.clone(),
         final_patch,
@@ -698,7 +699,7 @@ mod tests {
         graph: Graph,
         outcome: Result<Outcome, Error>,
         run_options: RunOptions,
-        duration_ms: u64,
+        wall_time_ms: u64,
         services: Arc<RunServices>,
     ) -> Executed {
         let mut engine = EngineServices::test_default();
@@ -707,7 +708,7 @@ mod tests {
             graph,
             outcome,
             run_options,
-            duration_ms,
+            wall_time_ms,
             final_context: Context::new(),
             engine: Arc::new(engine),
             model: "test-model".to_string(),
@@ -955,7 +956,7 @@ mod tests {
         let failed_usage = test_usage("gpt-old", 100, 10);
         let success_usage = test_usage("gpt-new", 200, 20);
         let failed = projection.stage_entry("verify", 1, first_event_seq(1));
-        failed.duration_ms = Some(1200);
+        failed.timing = Some(fabro_types::StageTiming::wall_only(1200));
         failed.usage = BilledTokenCounts::from_billed_usage(std::slice::from_ref(&failed_usage));
         failed.model = Some(failed_usage.model().clone());
         failed.completion = Some(StageCompletion {
@@ -967,7 +968,7 @@ mod tests {
             timestamp:      chrono::Utc::now(),
         });
         let succeeded = projection.stage_entry("verify", 2, first_event_seq(2));
-        succeeded.duration_ms = Some(800);
+        succeeded.timing = Some(fabro_types::StageTiming::wall_only(800));
         succeeded.usage =
             BilledTokenCounts::from_billed_usage(std::slice::from_ref(&success_usage));
         succeeded.model = Some(success_usage.model().clone());
@@ -979,10 +980,10 @@ mod tests {
         });
 
         let projection_order = stage_projection_order(&projection);
-        let projection_billing = billing_rollup_from_projection(&projection);
+        let projection_billing = billing_rollup_from_projection(&projection, None);
         let mut latest_outcome = Outcome::success();
         latest_outcome.usage = Some(success_usage);
-        latest_outcome.duration_ms = Some(800);
+        latest_outcome.timing = Some(fabro_types::StageTiming::wall_only(800));
         let mut checkpoint = checkpoint_with(
             vec!["verify", "verify"],
             HashMap::from([("verify".to_string(), latest_outcome)]),
@@ -1007,7 +1008,7 @@ mod tests {
         );
         assert_eq!(conclusion.stages.len(), 1);
         assert_eq!(conclusion.stages[0].stage_id, "verify");
-        assert_eq!(conclusion.stages[0].duration_ms, 2000);
+        assert_eq!(conclusion.stages[0].timing.wall_time_ms, 2000);
         assert_eq!(conclusion.stages[0].billing_usd_micros, Some(330));
         assert_eq!(conclusion.stages[0].retries, 1);
     }
@@ -1104,7 +1105,7 @@ mod tests {
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),
             status:               StageOutcome::Succeeded,
-            duration_ms:          10,
+            timing:               fabro_types::RunTiming::wall_only(10),
             failure:              None,
             final_git_commit_sha: None,
             stages:               Vec::new(),
@@ -1167,7 +1168,7 @@ mod tests {
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),
             status:               StageOutcome::Succeeded,
-            duration_ms:          10,
+            timing:               fabro_types::RunTiming::wall_only(10),
             failure:              None,
             final_git_commit_sha: None,
             stages:               Vec::new(),
@@ -1219,7 +1220,7 @@ mod tests {
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),
             status:               StageOutcome::Succeeded,
-            duration_ms:          10,
+            timing:               fabro_types::RunTiming::wall_only(10),
             failure:              None,
             final_git_commit_sha: None,
             stages:               Vec::new(),

@@ -570,7 +570,14 @@ mod tests {
         let g = linear_graph(&["start", "end"]);
         let state = ExecutionState::new(&g).unwrap();
         let node = g.get_node("start").unwrap();
-        let result = NodeResult::new(Outcome::success(), Duration::ZERO, 1, 1);
+        let result = NodeResult::new(
+            Outcome::success(),
+            Duration::ZERO,
+            Duration::ZERO,
+            Duration::ZERO,
+            1,
+            1,
+        );
         let ctx = AttemptResultContext {
             node:          &node,
             result:        &result,
@@ -667,7 +674,14 @@ mod tests {
         let g = linear_graph(&["start", "end"]);
         let state = ExecutionState::new(&g).unwrap();
         let node = g.get_node("start").unwrap();
-        let mut result = NodeResult::new(Outcome::success(), Duration::ZERO, 1, 1);
+        let mut result = NodeResult::new(
+            Outcome::success(),
+            Duration::ZERO,
+            Duration::ZERO,
+            Duration::ZERO,
+            1,
+            1,
+        );
         lc.after_node(&node, &mut result, &state).await.unwrap();
         let calls = log.lock().unwrap().clone();
         assert_eq!(calls, vec!["a:after_node", "b:after_node"]);
@@ -683,7 +697,14 @@ mod tests {
         let g = linear_graph(&["start", "end"]);
         let state = ExecutionState::new(&g).unwrap();
         let node = g.get_node("start").unwrap();
-        let result = NodeResult::new(Outcome::success(), Duration::ZERO, 1, 1);
+        let result = NodeResult::new(
+            Outcome::success(),
+            Duration::ZERO,
+            Duration::ZERO,
+            Duration::ZERO,
+            1,
+            1,
+        );
         lc.after_record(&node, &result, &state).await.unwrap();
         let calls = log.lock().unwrap().clone();
         assert_eq!(calls, vec!["a:after_record", "b:after_record"]);

@@ -6,7 +6,7 @@ use super::{BilledTokenCounts, ExecOutputTail, RunNoticeLevel};
 use crate::status::{BlockedReason, SuccessReason};
 use crate::{
     DiffSummary, ForkSourceRef, GitContext, Graph, PairId, PairTarget, RunBlobId, RunControlAction,
-    RunFailure, RunId, RunProvenance, WorkflowSettings,
+    RunFailure, RunId, RunProvenance, RunTiming, WorkflowSettings,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -183,7 +183,8 @@ pub struct RunUnarchivedProps {}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunCompletedProps {
-    pub duration_ms:          u64,
+    /// Run wall-clock time, with active timing breakdown for the run rollup.
+    pub timing:               RunTiming,
     pub artifact_count:       usize,
     pub status:               String,
     pub reason:               SuccessReason,
@@ -202,7 +203,8 @@ pub struct RunCompletedProps {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunFailedProps {
     pub failure:              RunFailure,
-    pub duration_ms:          u64,
+    /// Run wall-clock time at failure, with active timing breakdown.
+    pub timing:               RunTiming,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_git_commit_sha: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

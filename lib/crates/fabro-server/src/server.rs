@@ -82,9 +82,9 @@ use fabro_types::settings::server::{
 };
 use fabro_types::settings::{InterpString, RunNamespace};
 use fabro_types::{
-    AgentBackend, EventBody, InterviewQuestionRecord, PairId, PairMessageId, PairTarget, Principal,
-    PullRequestLink, QuestionType, RunBlobId, RunControlAction, RunEvent, RunId, ServerSettings,
-    SessionCapability,
+    AgentBackend, AskFabro, AskFabroUnavailableReason, EventBody, InterviewQuestionRecord, PairId,
+    PairMessageId, PairTarget, Principal, PullRequestLink, QuestionType, RunBlobId,
+    RunControlAction, RunEvent, RunId, ServerSettings, SessionCapability,
 };
 use fabro_util::error::{
     SharedError, collect_causes, render_compact_with_causes, render_with_causes,
@@ -132,13 +132,14 @@ use crate::ip_allowlist::{IpAllowlistConfig, ip_allowlist_middleware};
 use crate::jwt_auth::{self, AuthMode};
 use crate::principal_middleware::{
     AuthContextSlot, RequestAuth, RequestAuthContext, RequireRunBlob, RequireRunScoped,
-    RequireRunStageScoped, RequireStageArtifact, RequiredUser, principal_middleware,
+    RequireRunScopedOrRunTools, RequireRunStageScoped, RequireStageArtifact, RequiredUser,
+    principal_middleware,
 };
 use crate::request_id::{self, RequestId};
 use crate::run_files::{FilesInFlight, new_files_in_flight};
 use crate::server_secrets::{LlmClientResult, ServerSecrets};
 use crate::spawn_env::{apply_render_graph_env, apply_worker_env};
-use crate::worker_token::{WorkerTokenKeys, issue_worker_token};
+use crate::worker_token::{WorkerScopeSet, WorkerTokenKeys, issue_worker_token_with_scopes};
 use crate::{
     canonical_host, demo, diagnostics, run_manifest, security_headers, static_files,
     vault_legacy_migration, web_auth,
@@ -172,6 +173,15 @@ pub struct PaginationParams {
     pub limit:  u32,
     #[serde(rename = "page[offset]", default)]
     pub offset: u32,
+}
+
+pub(crate) fn paginate_items<T>(items: Vec<T>, pagination: &PaginationParams) -> (Vec<T>, bool) {
+    let limit = pagination.limit.clamp(1, 100) as usize;
+    let offset = pagination.offset.min(MAX_PAGE_OFFSET) as usize;
+    let mut data: Vec<_> = items.into_iter().skip(offset).take(limit + 1).collect();
+    let has_more = data.len() > limit;
+    data.truncate(limit);
+    (data, has_more)
 }
 
 #[derive(serde::Deserialize)]
@@ -251,9 +261,9 @@ struct ModelBillingTotals {
 /// In-memory aggregate billing counters, reset on server restart.
 #[derive(Default)]
 struct BillingAccumulator {
-    total_runs:         i64,
-    total_runtime_secs: f64,
-    by_model:           HashMap<ModelRef, ModelBillingTotals>,
+    total_runs:   i64,
+    total_timing: fabro_types::RunTiming,
+    by_model:     HashMap<ModelRef, ModelBillingTotals>,
 }
 
 pub(crate) type RegistryFactoryOverride =
@@ -630,6 +640,43 @@ pub struct AppState {
 
 type PullRequestCreateLocks = Arc<Mutex<HashMap<RunId, Arc<AsyncMutex<()>>>>>;
 
+struct AskFabroReadiness {
+    feature_enabled: bool,
+    default_model:   Option<String>,
+}
+
+impl AskFabroReadiness {
+    fn decorate(&self, mut run: fabro_types::Run) -> fabro_types::Run {
+        run.ask_fabro = self.ask_fabro_for(&run);
+        run
+    }
+
+    fn ask_fabro_for(&self, run: &fabro_types::Run) -> AskFabro {
+        let unavailable_reason = if !self.feature_enabled {
+            Some(AskFabroUnavailableReason::FeatureDisabled)
+        } else if run.sandbox.is_none() {
+            Some(AskFabroUnavailableReason::NoSandbox)
+        } else if run
+            .sandbox
+            .as_ref()
+            .and_then(|sandbox| sandbox.runtime.as_ref())
+            .is_none()
+        {
+            Some(AskFabroUnavailableReason::SandboxNotReady)
+        } else if self.default_model.is_none() {
+            Some(AskFabroUnavailableReason::LlmUnconfigured)
+        } else {
+            None
+        };
+
+        AskFabro {
+            available: unavailable_reason.is_none(),
+            unavailable_reason,
+            default_model: self.default_model.clone(),
+        }
+    }
+}
+
 struct PullRequestCreateGuard {
     locks:  PullRequestCreateLocks,
     run_id: RunId,
@@ -702,7 +749,7 @@ fn accumulate_billing_rollup(
     rollup: &fabro_workflow::ProjectionBillingRollup,
 ) {
     accumulator.total_runs += 1;
-    accumulator.total_runtime_secs += rollup.runtime_ms as f64 / 1000.0;
+    accumulator.total_timing = accumulator.total_timing.saturating_add(&rollup.timing);
     for model in &rollup.by_model {
         let entry = accumulator.by_model.entry(model.model.clone()).or_default();
         entry.stages += model.stages;
@@ -714,7 +761,7 @@ pub(crate) fn run_stage_from_stage_id(
     stage_id: &StageId,
     name: impl Into<String>,
     status: StageState,
-    duration_secs: Option<f64>,
+    wall_time_ms: Option<u64>,
     started_at: Option<chrono::DateTime<chrono::Utc>>,
     handler: StageHandler,
 ) -> RunStage {
@@ -723,7 +770,7 @@ pub(crate) fn run_stage_from_stage_id(
         name: name.into(),
         handler,
         status,
-        duration_secs,
+        wall_time_ms,
         node_id: stage_id.node_id().to_string(),
         visit: std::num::NonZeroU32::new(stage_id.visit())
             .expect("StageId stores a non-zero visit"),
@@ -806,6 +853,46 @@ impl AppState {
                 warn!(error = ?err, "Failed to resolve LLM client while checking ready providers");
                 Vec::new()
             }
+        }
+    }
+
+    pub(crate) async fn decorate_run_summary(&self, run: fabro_types::Run) -> fabro_types::Run {
+        self.ask_fabro_readiness().await.decorate(run)
+    }
+
+    pub(crate) async fn decorate_run_summaries(
+        &self,
+        runs: Vec<fabro_types::Run>,
+    ) -> Vec<fabro_types::Run> {
+        let readiness = self.ask_fabro_readiness().await;
+        runs.into_iter()
+            .map(|run| readiness.decorate(run))
+            .collect()
+    }
+
+    async fn ask_fabro_readiness(&self) -> AskFabroReadiness {
+        let feature_enabled = self.server_settings().features.session_sandboxes;
+        if !feature_enabled {
+            return AskFabroReadiness {
+                feature_enabled,
+                default_model: None,
+            };
+        }
+
+        let provider_ids = self.ready_llm_provider_ids().await;
+        let default_model = if provider_ids.is_empty() {
+            None
+        } else {
+            Some(
+                self.catalog()
+                    .default_for_configured_ids(&provider_ids)
+                    .id
+                    .clone(),
+            )
+        };
+        AskFabroReadiness {
+            feature_enabled,
+            default_model,
         }
     }
 
@@ -2236,7 +2323,13 @@ pub(crate) async fn reconcile_incomplete_runs_on_startup(
             "Fabro server restarted before the run reached a terminal state.".to_string(),
         );
         let failure_event = workflow_event::Event::workflow_run_failed_from_error(
-            &error, 0, reason, None, None, None, None,
+            &error,
+            fabro_types::RunTiming::default(),
+            reason,
+            None,
+            None,
+            None,
+            None,
         );
         workflow_event::append_event(&run_store, &summary.id, &failure_event).await?;
         reconciled += 1;
@@ -2281,7 +2374,13 @@ async fn persist_shutdown_run_failures(
             "Fabro server shut down before the run reached a terminal state.".to_string(),
         );
         let failure_event = workflow_event::Event::workflow_run_failed_from_error(
-            &error, 0, reason, None, None, None, None,
+            &error,
+            fabro_types::RunTiming::default(),
+            reason,
+            None,
+            None,
+            None,
+            None,
         );
         workflow_event::append_event(&run_store, &run_id, &failure_event).await?;
     }
@@ -2353,7 +2452,7 @@ async fn persist_cancelled_run_status(state: &AppState, run_id: RunId) -> anyhow
 
     let failure_event = workflow_event::Event::workflow_run_failed_from_error(
         &WorkflowError::Cancelled,
-        0,
+        fabro_types::RunTiming::default(),
         FailureReason::Cancelled,
         None,
         None,
@@ -2389,7 +2488,7 @@ async fn fail_run_before_execution(
         Ok(run_store) => {
             let failure_event = workflow_event::Event::workflow_run_failed_from_error(
                 &WorkflowError::engine(message.clone()),
-                0,
+                fabro_types::RunTiming::default(),
                 reason,
                 None,
                 None,
@@ -2689,7 +2788,13 @@ async fn append_worker_exit_failure(
         format!("Worker exited before emitting a terminal run event: {wait_status}"),
     );
     let failure_event = workflow_event::Event::workflow_run_failed_from_error(
-        &error, 0, reason, None, None, None, None,
+        &error,
+        fabro_types::RunTiming::default(),
+        reason,
+        None,
+        None,
+        None,
+        None,
     );
 
     if let Err(err) = workflow_event::append_event(run_store, &run_id, &failure_event).await {
@@ -2718,8 +2823,12 @@ fn worker_command(
         )
     })?;
     let server_target = daemon.bind.to_target();
-    let worker_token = issue_worker_token(state.worker_token_keys(), &run_id)
-        .map_err(|_| anyhow::anyhow!("failed to sign worker token"))?;
+    let worker_token = issue_worker_token_with_scopes(
+        state.worker_token_keys(),
+        &run_id,
+        WorkerScopeSet::run_worker_with_agent_run_tools(),
+    )
+    .map_err(|_| anyhow::anyhow!("failed to sign worker token"))?;
     let server_destination = resolved_log_destination(state)?;
     let worker_stdout = match server_destination {
         LogDestination::Stdout => Stdio::inherit(),
@@ -3183,6 +3292,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         catalog: state.catalog(),
         on_node: None,
         registry_override,
+        fabro_run_tools: None,
     };
 
     let execution = async {
@@ -3224,7 +3334,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
                 .expect("aggregate_billing lock poisoned");
             accumulate_billing_rollup(
                 &mut agg,
-                &fabro_workflow::billing_rollup_from_projection(projection),
+                &fabro_workflow::billing_rollup_from_projection(projection, None),
             );
         }
     }
@@ -3345,7 +3455,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             let message = format!("Failed to spawn worker: {err}");
             let failure_event = workflow_event::Event::workflow_run_failed_from_error(
                 &WorkflowError::engine_with_anyhow("Failed to spawn worker", err),
-                0,
+                fabro_types::RunTiming::default(),
                 FailureReason::LaunchFailed,
                 None,
                 None,
@@ -3365,7 +3475,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         let _ = child.start_kill();
         let failure_event = workflow_event::Event::workflow_run_failed_from_error(
             &WorkflowError::engine(message.clone()),
-            0,
+            fabro_types::RunTiming::default(),
             FailureReason::LaunchFailed,
             None,
             None,
@@ -3393,7 +3503,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         let _ = child.start_kill();
         let failure_event = workflow_event::Event::workflow_run_failed_from_error(
             &WorkflowError::engine(message.clone()),
-            0,
+            fabro_types::RunTiming::default(),
             FailureReason::LaunchFailed,
             None,
             None,
@@ -3412,7 +3522,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         let _ = child.start_kill();
         let failure_event = workflow_event::Event::workflow_run_failed_from_error(
             &WorkflowError::engine(message.clone()),
-            0,
+            fabro_types::RunTiming::default(),
             FailureReason::LaunchFailed,
             None,
             None,
@@ -3444,7 +3554,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             let _ = child.start_kill();
             let failure_event = workflow_event::Event::workflow_run_failed_from_error(
                 &WorkflowError::engine_with_source("Worker wait failed", err),
-                0,
+                fabro_types::RunTiming::default(),
                 FailureReason::Terminated,
                 None,
                 None,
@@ -3509,7 +3619,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             .expect("aggregate_billing lock poisoned");
         accumulate_billing_rollup(
             &mut agg,
-            &fabro_workflow::billing_rollup_from_projection(&final_state),
+            &fabro_workflow::billing_rollup_from_projection(&final_state, None),
         );
     }
 

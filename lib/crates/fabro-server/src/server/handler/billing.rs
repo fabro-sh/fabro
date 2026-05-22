@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use fabro_types::{RunProjection, StageHandler, StageProjection, StageState};
+use fabro_types::{RunProjection, StageHandler, StageProjection, StageState, StageTiming};
 
 use super::super::{
     ApiError, AppState, BillingByModel, BillingStageRef, IntoResponse, Json, ListResponse,
@@ -54,7 +54,7 @@ async fn list_run_stages(
                 stage_id,
                 stage_id.node_id().to_string(),
                 stage.effective_state(),
-                stage.runtime_secs(now),
+                stage.live_wall_time_ms(now),
                 stage.started_at,
                 handler,
             )
@@ -79,7 +79,8 @@ async fn get_run_billing(
     };
     let projection = cached.projection;
 
-    let rollup = fabro_workflow::billing_rollup_from_projection(&projection);
+    let catalog = state.catalog();
+    let rollup = fabro_workflow::billing_rollup_from_projection(&projection, Some(&catalog));
     let by_model = rollup
         .by_model
         .iter()
@@ -96,23 +97,25 @@ async fn get_run_billing(
         .map(|stage| (stage.node_id.as_str(), stage))
         .collect::<HashMap<_, _>>();
     let live_rows = live_billing_rows(&projection, Utc::now());
-    let runtime_secs = live_rows.iter().map(|row| row.runtime_secs).sum::<f64>();
+    let totals_timing = live_rows.iter().fold(StageTiming::default(), |acc, row| {
+        acc.saturating_add(&row.timing)
+    });
     let stages = live_rows
         .into_iter()
         .map(|row| {
             let rollup_stage = rollup_by_node.get(row.node_id.as_str());
             RunBillingStage {
-                billing:      rollup_stage
+                billing:    rollup_stage
                     .map(|stage| stage.billing.clone())
                     .unwrap_or_default(),
-                model:        rollup_stage.and_then(|stage| stage.model.as_ref()).cloned(),
-                runtime_secs: row.runtime_secs,
-                stage:        BillingStageRef {
+                model:      rollup_stage.and_then(|stage| stage.model.as_ref()).cloned(),
+                timing:     row.timing,
+                stage:      BillingStageRef {
                     id:   row.node_id.clone(),
                     name: row.node_id,
                 },
-                started_at:   row.started_at,
-                state:        row.state,
+                started_at: row.started_at,
+                state:      row.state,
             }
         })
         .collect::<Vec<_>>();
@@ -121,14 +124,14 @@ async fn get_run_billing(
         by_model,
         stages,
         totals: RunBillingTotals {
-            cache_read_tokens: rollup.totals.cache_read_tokens,
+            cache_read_tokens:  rollup.totals.cache_read_tokens,
             cache_write_tokens: rollup.totals.cache_write_tokens,
-            input_tokens: rollup.totals.input_tokens,
-            output_tokens: rollup.totals.output_tokens,
-            reasoning_tokens: rollup.totals.reasoning_tokens,
-            runtime_secs,
-            total_tokens: rollup.totals.total_tokens,
-            total_usd_micros: rollup.totals.total_usd_micros,
+            input_tokens:       rollup.totals.input_tokens,
+            output_tokens:      rollup.totals.output_tokens,
+            reasoning_tokens:   rollup.totals.reasoning_tokens,
+            timing:             totals_timing.into(),
+            total_tokens:       rollup.totals.total_tokens,
+            total_usd_micros:   rollup.totals.total_usd_micros,
         },
     };
 
@@ -137,7 +140,7 @@ async fn get_run_billing(
 
 struct LiveBillingRow {
     node_id:      String,
-    runtime_secs: f64,
+    timing:       StageTiming,
     started_at:   Option<DateTime<Utc>>,
     state:        Option<StageState>,
     latest_visit: u32,
@@ -157,7 +160,7 @@ fn live_billing_rows(projection: &RunProjection, now: DateTime<Utc>) -> Vec<Live
             let index = rows.len();
             rows.push(LiveBillingRow {
                 node_id:      node_id.to_string(),
-                runtime_secs: 0.0,
+                timing:       StageTiming::default(),
                 started_at:   None,
                 state:        None,
                 latest_visit: 0,
@@ -165,7 +168,8 @@ fn live_billing_rows(projection: &RunProjection, now: DateTime<Utc>) -> Vec<Live
             index
         });
         let row = &mut rows[index];
-        row.runtime_secs += billing_runtime_secs(stage, now).unwrap_or(0.0);
+        let stage_timing = billing_stage_timing(stage, now);
+        row.timing = row.timing.saturating_add(&stage_timing);
 
         if stage_id.visit() >= row.latest_visit {
             row.latest_visit = stage_id.visit();
@@ -177,16 +181,23 @@ fn live_billing_rows(projection: &RunProjection, now: DateTime<Utc>) -> Vec<Live
     rows
 }
 
-fn billing_runtime_secs(stage: &StageProjection, now: DateTime<Utc>) -> Option<f64> {
-    stage
-        .duration_ms
-        .map(|ms| ms as f64 / 1000.0)
-        .or_else(|| stage.runtime_secs(now))
+/// Per-visit timing for a stage. For terminal visits, the stored breakdown is
+/// used directly. For in-flight visits, fall back to the live wall-clock since
+/// `started_at` (no active breakdown yet — that is only finalized at terminal
+/// event time in v1).
+fn billing_stage_timing(stage: &StageProjection, now: DateTime<Utc>) -> StageTiming {
+    if let Some(timing) = stage.timing {
+        return timing;
+    }
+    if let Some(live_wall) = stage.live_wall_time_ms(now) {
+        return StageTiming::wall_only(live_wall);
+    }
+    StageTiming::default()
 }
 
 fn stage_has_billing_row(stage: &StageProjection) -> bool {
     stage.completion.is_some()
-        || stage.duration_ms.is_some()
+        || stage.timing.is_some()
         || !stage.usage.is_zero()
         || stage.started_at.is_some()
 }

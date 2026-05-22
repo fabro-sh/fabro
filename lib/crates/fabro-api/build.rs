@@ -364,6 +364,8 @@ fn main() {
         ("BillingModelRef", "fabro_model::ModelRef", &[]),
         ("BillingSpeed", "fabro_model::Speed", &[]),
         ("ExecOutputTail", "fabro_types::ExecOutputTail", &[]),
+        ("StageTiming", "fabro_types::StageTiming", &[]),
+        ("RunTiming", "fabro_types::RunTiming", &[]),
         ("ProviderId", "fabro_model::ProviderId", &[]),
         ("Model", "fabro_model::Model", &[]),
         ("Provider", "fabro_model::Provider", &[]),
@@ -472,12 +474,15 @@ fn main() {
         ("SandboxState", "fabro_types::SandboxState", &[]),
         ("SandboxResources", "fabro_types::SandboxResources", &[]),
         ("SandboxTimestamps", "fabro_types::SandboxTimestamps", &[]),
+        ("AskFabro", "fabro_types::AskFabro", &[]),
         ("SessionId", "fabro_types::SessionId", &[]),
         ("TurnId", "fabro_types::TurnId", &[]),
         ("SessionStatus", "fabro_types::SessionStatus", &[]),
+        ("SessionTurn", "fabro_types::SessionTurn", &[]),
         ("SessionMessage", "fabro_types::SessionMessage", &[]),
         ("SessionRecord", "fabro_types::SessionRecord", &[]),
         ("SessionSummary", "fabro_types::SessionSummary", &[]),
+        ("SessionDetail", "fabro_types::SessionDetail", &[]),
     ];
     for (name, path, impls) in replacements {
         settings.with_replacement(*name, *path, impls.iter().copied());

@@ -36,8 +36,12 @@ function makeRun(overrides: Partial<Run> = {}): Run {
       started_at:     "2026-04-08T12:00:00Z",
       last_event_at:  null,
       completed_at:   null,
-      duration_ms:    65000,
-      elapsed_secs:   65,
+    },
+    timing:           {
+      wall_time_ms:      65000,
+      inference_time_ms: 0,
+      tool_time_ms:      0,
+      active_time_ms:    0,
     },
     billing:          { total_usd_micros: 500000 },
     diff:             null,
@@ -130,9 +134,8 @@ describe("mapRunToRunItem", () => {
         started_at:     null,
         last_event_at:  null,
         completed_at:   null,
-        duration_ms:    null,
-        elapsed_secs:   null,
       },
+      timing:           null,
       billing:          null,
     });
     const item = mapRunToRunItem(summary);

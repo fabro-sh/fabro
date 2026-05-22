@@ -2390,7 +2390,7 @@ index 1111111..2222222 160000
         projection.conclusion = Some(fabro_types::Conclusion {
             timestamp:            chrono::Utc::now(),
             status:               fabro_types::StageOutcome::Succeeded,
-            duration_ms:          1,
+            timing:               fabro_types::RunTiming::wall_only(1),
             failure:              None,
             final_git_commit_sha: None,
             stages:               Vec::new(),

@@ -40,7 +40,7 @@ async fn execute_and_emit_terminal(initialized: InitializedState) -> Executed {
     let billing = state.as_ref().and_then(billing_from_projection);
     let event = build_terminal_event(
         &executed.outcome,
-        executed.duration_ms,
+        fabro_types::RunTiming::wall_only(executed.wall_time_ms),
         0,
         None,
         None,

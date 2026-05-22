@@ -21,6 +21,7 @@ fabro-manifest = { path = "../fabro-manifest" }
 fabro-config = { path = "../fabro-config" }
 fabro-model = { path = "../fabro-model" }
 fabro-server = { path = "../fabro-server" }
+fabro-tool = { path = "../fabro-tool" }
 fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 futures.workspace = true

@@ -160,7 +160,7 @@ mod tests {
             .await
             .unwrap();
         event::append_event(&run_store, run_id, &Event::WorkflowRunCompleted {
-            duration_ms:          10,
+            timing:               fabro_types::RunTiming::wall_only(10),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -185,7 +185,7 @@ mod tests {
             .unwrap();
         let failure_event = Event::workflow_run_failed_from_error(
             &crate::error::Error::engine("boom"),
-            10,
+            fabro_types::RunTiming::wall_only(10),
             FailureReason::WorkflowError,
             None,
             None,

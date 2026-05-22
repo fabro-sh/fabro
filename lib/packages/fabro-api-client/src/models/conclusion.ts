@@ -24,6 +24,9 @@ import type { RunDiff } from './run-diff';
 import type { RunFailure } from './run-failure';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { RunTiming } from './run-timing';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { StageOutcome } from './stage-outcome';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -35,7 +38,7 @@ import type { StageSummary } from './stage-summary';
 export interface Conclusion {
     'timestamp': string;
     'status': StageOutcome;
-    'duration_ms': number;
+    'timing': RunTiming;
     'failure'?: RunFailure | null;
     'final_git_commit_sha'?: string | null;
     'stages': Array<StageSummary>;

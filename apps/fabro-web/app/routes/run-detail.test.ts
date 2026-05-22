@@ -24,6 +24,10 @@ mock.module("../lib/queries", () => ({
   useRunQuestions: () => ({
     data: currentQuestions,
   }),
+  useRunPullRequest: () => ({
+    data:      null,
+    isLoading: false,
+  }),
   useRunState: () => ({
     data: currentRunState,
   }),
@@ -100,9 +104,8 @@ function makeRunSummary(
       started_at:     null,
       last_event_at:  null,
       completed_at:   null,
-      duration_ms:    null,
-      elapsed_secs:   null,
     },
+    timing:           null,
     billing:          null,
     diff:             diffSummary,
     pull_request:     pullRequest,

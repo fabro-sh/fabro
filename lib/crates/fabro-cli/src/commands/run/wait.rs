@@ -82,7 +82,8 @@ fn build_json_output(
         "status": run_status_kind(status),
     });
     if let Some(c) = conclusion {
-        value["duration_ms"] = c.duration_ms.into();
+        value["timing"] =
+            serde_json::to_value(c.timing).unwrap_or_else(|_| serde_json::Value::Null);
         if let Some(total_usd_micros) = c
             .billing
             .as_ref()
@@ -112,7 +113,7 @@ fn print_human_output(
 
     let details = match conclusion {
         Some(c) => {
-            let duration = format_duration_ms(c.duration_ms);
+            let duration = format_duration_ms(c.timing.wall_time_ms);
             let cost = c
                 .billing
                 .as_ref()
@@ -152,7 +153,7 @@ mod tests {
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),
             status:               StageOutcome::Succeeded,
-            duration_ms:          12345,
+            timing:               fabro_types::RunTiming::wall_only(12345),
             failure:              None,
             final_git_commit_sha: None,
             stages:               vec![],
@@ -177,7 +178,7 @@ mod tests {
         );
         assert_eq!(json["run_id"], run_id.to_string());
         assert_eq!(json["status"], "succeeded");
-        assert_eq!(json["duration_ms"], 12345);
+        assert_eq!(json["timing"]["wall_time_ms"], 12345);
         assert_eq!(json["total_usd_micros"], 420_000);
     }
 
@@ -193,7 +194,7 @@ mod tests {
         );
         assert_eq!(json["run_id"], run_id.to_string());
         assert_eq!(json["status"], "failed");
-        assert!(json.get("duration_ms").is_none());
+        assert!(json.get("timing").is_none());
         assert!(json.get("total_usd_micros").is_none());
     }
 
@@ -211,7 +212,7 @@ mod tests {
             status:               StageOutcome::Failed {
                 retry_requested: false,
             },
-            duration_ms:          500,
+            timing:               fabro_types::RunTiming::wall_only(500),
             failure:              Some(RunFailure {
                 reason: FailureReason::WorkflowError,
                 detail: FailureDetail::new("error", FailureCategory::Deterministic),
@@ -230,7 +231,7 @@ mod tests {
             Some(&conclusion),
         );
         assert!(json.get("total_usd_micros").is_none());
-        assert_eq!(json["duration_ms"], 500);
+        assert_eq!(json["timing"]["wall_time_ms"], 500);
     }
 
     #[test]
@@ -240,7 +241,7 @@ mod tests {
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),
             status:               StageOutcome::Succeeded,
-            duration_ms:          8000,
+            timing:               fabro_types::RunTiming::wall_only(8000),
             failure:              None,
             final_git_commit_sha: None,
             stages:               vec![],

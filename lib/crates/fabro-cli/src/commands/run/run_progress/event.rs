@@ -132,11 +132,11 @@ pub(super) enum ProgressEvent {
         script:  Option<String>,
     },
     StageCompleted {
-        node_id:     String,
-        name:        String,
-        duration_ms: u64,
-        status:      String,
-        usage:       Option<ProgressUsage>,
+        node_id: String,
+        name:    String,
+        timing:  fabro_types::StageTiming,
+        status:  String,
+        usage:   Option<ProgressUsage>,
     },
     StageFailed {
         node_id: String,
@@ -350,7 +350,7 @@ pub(super) fn from_run_event(stored: &RunEvent) -> Option<ProgressEvent> {
         EventBody::StageCompleted(props) => Some(ProgressEvent::StageCompleted {
             node_id,
             name: node_label,
-            duration_ms: props.duration_ms,
+            timing: props.timing,
             status: props.status.to_string(),
             usage: props
                 .billing
@@ -550,7 +550,7 @@ mod tests {
             node_id: "plan".into(),
             name: "Plan".into(),
             index: 0,
-            duration_ms: 5000,
+            timing: fabro_types::StageTiming::wall_only(5000),
             status: "succeeded".into(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),
@@ -576,9 +576,9 @@ mod tests {
             ProgressEvent::StageCompleted {
                 node_id,
                 name,
-                duration_ms,
+                timing,
                 ..
-            } if node_id == "plan" && name == "Plan" && duration_ms == 5000
+            } if node_id == "plan" && name == "Plan" && timing.wall_time_ms == 5000
         ));
     }
 

@@ -1,8 +1,8 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -14,7 +14,9 @@ use fabro_agent::{
     AgentEvent, AgentProfile, AnthropicProfile, Error as AgentError, GeminiProfile, OpenAiProfile,
     Session, SessionEvent, SessionOptions, ToolApprovalAdapter, WebFetchSummarizer,
 };
-use fabro_api::types::{CreateRunSessionRequest, SubmitTurnRequest};
+use fabro_api::types::{
+    CreateRunSessionRequest, PaginatedEventList, PaginationMeta, SubmitTurnRequest,
+};
 use fabro_llm::client::Client as LlmClient;
 use fabro_model::{AgentProfileKind, Catalog, ModelHandle, ProviderId};
 use fabro_sandbox::reconnect::reconnect_for_run;
@@ -23,22 +25,26 @@ use fabro_store::{
 };
 use fabro_types::run_event::{
     RunSessionAssistantDeltaProps, RunSessionAssistantMessageProps, RunSessionCreatedProps,
-    RunSessionToolCallCompletedProps, RunSessionToolCallStartedProps, RunSessionTurnFailedProps,
-    RunSessionTurnInterruptedProps, RunSessionTurnStartedProps, RunSessionTurnSucceededProps,
-    RunSessionUserMessageProps,
+    RunSessionToolCallCompletedProps, RunSessionToolCallStartedProps, RunSessionTurnFailedCode,
+    RunSessionTurnFailedProps, RunSessionTurnInterruptedProps, RunSessionTurnStartedProps,
+    RunSessionTurnSucceededProps, RunSessionUserMessageProps,
 };
 use fabro_types::settings::{ModelRef as SettingsModelRef, ModelRegistry, ResolvedModelRef};
 use fabro_types::{
-    EventBody, EventEnvelope, PermissionLevel, RunEvent, RunId, SessionId, SessionRecord, TurnId,
+    EventBody, EventEnvelope, PermissionLevel, RunEvent, RunId, SessionDetail, SessionId, TurnId,
 };
 use serde_json::Value;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
+use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, warn};
 
 use super::super::session_runtime::{InterruptTurnError, SessionTurnLease, StartTurnError};
-use super::super::{AppState, ListResponse};
+use super::super::{
+    AppState, EventListParams, PaginationParams, paginate_items, parse_run_id_path,
+};
 use crate::error::ApiError;
 use crate::principal_middleware::RequiredUser;
 use crate::server_secrets::LlmClientResult;
@@ -57,6 +63,8 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             "/sessions/{id}",
             get(get_session).fallback(session_method_not_found),
         )
+        .route("/sessions/{id}/events", get(list_session_events))
+        .route("/sessions/{id}/attach", get(attach_session_events))
         .route(
             "/sessions/{id}/turns",
             post(submit_turn).fallback(session_method_not_found),
@@ -67,14 +75,31 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         )
 }
 
+#[derive(Debug, Clone, Copy, Default, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RunSessionListOrder {
+    #[default]
+    UpdatedDesc,
+    CreatedDesc,
+}
+
+#[derive(serde::Deserialize)]
+struct ListRunSessionsParams {
+    #[serde(flatten)]
+    pagination: PaginationParams,
+    #[serde(default)]
+    order:      RunSessionListOrder,
+}
+
 async fn list_run_sessions(
     _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(run_id): Path<String>,
+    Query(params): Query<ListRunSessionsParams>,
 ) -> Response {
-    let run_id = match parse_run_id(&run_id) {
+    let run_id = match parse_run_id_path(&run_id) {
         Ok(id) => id,
-        Err(err) => return err.into_response(),
+        Err(response) => return response,
     };
     let run_store = match open_run_reader(&state, run_id).await {
         Ok(store) => store,
@@ -82,7 +107,28 @@ async fn list_run_sessions(
     };
     match run_store.list_events().await {
         Ok(events) => {
-            Json(ListResponse::new(project_run_sessions(run_id, &events))).into_response()
+            let mut sessions = project_run_sessions(run_id, &events);
+            match params.order {
+                RunSessionListOrder::UpdatedDesc => sessions.sort_by(|left, right| {
+                    right
+                        .updated_at
+                        .cmp(&left.updated_at)
+                        .then_with(|| right.created_at.cmp(&left.created_at))
+                        .then_with(|| right.id.cmp(&left.id))
+                }),
+                RunSessionListOrder::CreatedDesc => sessions.sort_by(|left, right| {
+                    right
+                        .created_at
+                        .cmp(&left.created_at)
+                        .then_with(|| right.id.cmp(&left.id))
+                }),
+            }
+            let (data, has_more) = paginate_items(sessions, &params.pagination);
+            Json(serde_json::json!({
+                "data": data,
+                "meta": { "has_more": has_more }
+            }))
+            .into_response()
         }
         Err(err) => store_error(&err).into_response(),
     }
@@ -94,9 +140,9 @@ async fn create_run_session(
     Path(run_id): Path<String>,
     Json(request): Json<CreateRunSessionRequest>,
 ) -> Response {
-    let run_id = match parse_run_id(&run_id) {
+    let run_id = match parse_run_id_path(&run_id) {
         Ok(id) => id,
-        Err(err) => return err.into_response(),
+        Err(response) => return response,
     };
     let run_store = match open_run(&state, run_id).await {
         Ok(store) => store,
@@ -157,11 +203,143 @@ async fn get_session(
         Ok(context) => context,
         Err(response) => return response,
     };
-    Json(session).into_response()
+    Json(SessionDetail::new(
+        session.record,
+        session.runtime_context,
+        session.last_seq,
+    ))
+    .into_response()
 }
 
 async fn session_method_not_found() -> Response {
     StatusCode::NOT_FOUND.into_response()
+}
+
+async fn list_session_events(
+    _auth: RequiredUser,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(params): Query<EventListParams>,
+) -> Response {
+    let session_id = match parse_session_id(&id) {
+        Ok(id) => id,
+        Err(err) => return err.into_response(),
+    };
+    let (_, run_store) = match load_session_run_reader(&state, session_id).await {
+        Ok(context) => context,
+        Err(response) => return response,
+    };
+    match run_store
+        .list_events_for_session_from_with_limit(session_id, params.since_seq(), params.limit())
+        .await
+    {
+        Ok(mut data) => {
+            let limit = params.limit();
+            let has_more = data.len() > limit;
+            data.truncate(limit);
+            Json(PaginatedEventList {
+                data,
+                meta: PaginationMeta { has_more },
+            })
+            .into_response()
+        }
+        Err(err) => store_error(&err).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct AttachSessionParams {
+    #[serde(default)]
+    since_seq: Option<u32>,
+}
+
+async fn attach_session_events(
+    _auth: RequiredUser,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(params): Query<AttachSessionParams>,
+) -> Response {
+    const ATTACH_REPLAY_BATCH_LIMIT: usize = 256;
+
+    let session_id = match parse_session_id(&id) {
+        Ok(id) => id,
+        Err(err) => return err.into_response(),
+    };
+    let (_, run_store) = match load_session_run_reader(&state, session_id).await {
+        Ok(context) => context,
+        Err(response) => return response,
+    };
+    let start_seq = match params.since_seq {
+        Some(seq) => seq.max(1),
+        None => match run_store.list_events().await {
+            Ok(events) => events.last().map_or(1, |event| event.seq.saturating_add(1)),
+            Err(err) => return store_error(&err).into_response(),
+        },
+    };
+    let shutdown = state.shutdown_token();
+    let (sender, receiver) = mpsc::channel(SESSION_SSE_BUFFER_CAPACITY);
+    tokio::spawn(async move {
+        let mut next_seq = start_seq;
+
+        loop {
+            let Ok(replay_batch) = run_store
+                .list_events_for_session_from_with_limit(
+                    session_id,
+                    next_seq,
+                    ATTACH_REPLAY_BATCH_LIMIT,
+                )
+                .await
+            else {
+                return;
+            };
+            let replay_has_more = replay_batch.len() > ATTACH_REPLAY_BATCH_LIMIT;
+
+            for event in replay_batch.into_iter().take(ATTACH_REPLAY_BATCH_LIMIT) {
+                next_seq = event.seq.saturating_add(1);
+                if let Some(sse_event) = session_sse_event(&event) {
+                    if !send_attach_sse_event(&sender, &shutdown, sse_event).await {
+                        return;
+                    }
+                }
+            }
+
+            if replay_has_more {
+                continue;
+            }
+            break;
+        }
+
+        let Ok(mut live_stream) = run_store.watch_events_from(next_seq) else {
+            return;
+        };
+        let session_id_string = session_id.to_string();
+        loop {
+            tokio::select! {
+                biased;
+                () = shutdown.cancelled() => break,
+                () = sender.closed() => break,
+                next = live_stream.next() => {
+                    let Some(result) = next else {
+                        return;
+                    };
+                    let Ok(event) = result else {
+                        return;
+                    };
+                    if event_matches_session(&event, &session_id_string) {
+                        if let Some(sse_event) = session_sse_event(&event) {
+                            if !send_attach_sse_event(&sender, &shutdown, sse_event).await {
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    Sse::new(ReceiverStream::new(receiver))
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 async fn submit_turn(
@@ -180,12 +358,25 @@ async fn submit_turn(
     };
     let input = request.input;
 
-    let turn_id = TurnId::new();
+    let turn_id = match request.turn_id {
+        Some(turn_id) => turn_id,
+        None => TurnId::new(),
+    };
     let turn_lease = match state.session_runtimes().reserve_turn(session_id, turn_id) {
         Ok(lease) => lease,
-        Err(StartTurnError::ActiveTurn) => {
-            return ApiError::new(StatusCode::CONFLICT, "Session already has an active turn.")
-                .into_response();
+        Err(StartTurnError::ActiveTurn { turn_id }) => {
+            let mut response = ApiError::with_code(
+                StatusCode::CONFLICT,
+                "Session already has an active turn.",
+                "session_active_turn",
+            )
+            .into_response();
+            if let Ok(value) = HeaderValue::from_str(&turn_id.to_string()) {
+                response
+                    .headers_mut()
+                    .insert("x-fabro-active-turn-id", value);
+            }
+            return response;
         }
     };
 
@@ -213,9 +404,13 @@ async fn submit_turn(
     tokio::spawn(run_streaming_turn(
         state, run_id, run_store, session, turn_id, input, sender, turn_lease,
     ));
-    Sse::new(ReceiverStream::new(receiver))
+    let mut response = Sse::new(ReceiverStream::new(receiver))
         .keep_alive(KeepAlive::default())
-        .into_response()
+        .into_response();
+    if let Ok(value) = HeaderValue::from_str(&turn_id.to_string()) {
+        response.headers_mut().insert("x-fabro-turn-id", value);
+    }
+    response
 }
 
 async fn interrupt_turn(
@@ -310,11 +505,13 @@ async fn run_streaming_turn(
                         &sender,
                         run_id,
                         session_id,
-                        EventBody::RunSessionTurnFailed(RunSessionTurnFailedProps {
+                        turn_failed_body(
                             turn_id,
-                            error: err.to_string(),
-                            output: None,
-                        }),
+                            err.to_string(),
+                            None,
+                            err.code(),
+                            err.retryable(),
+                        ),
                         Utc::now(),
                     )
                     .await;
@@ -370,11 +567,8 @@ async fn run_streaming_turn(
                     error: Some(err.to_string()),
                 })
             } else {
-                EventBody::RunSessionTurnFailed(RunSessionTurnFailedProps {
-                    turn_id,
-                    error: err.to_string(),
-                    output: outcome.output,
-                })
+                let code = agent_failure_code(&err);
+                turn_failed_body(turn_id, err.to_string(), outcome.output, code, false)
             };
             let _ =
                 append_and_send_event(&run_store, &sender, run_id, session_id, body, Utc::now())
@@ -387,11 +581,13 @@ async fn run_streaming_turn(
                 &sender,
                 run_id,
                 session_id,
-                EventBody::RunSessionTurnFailed(RunSessionTurnFailedProps {
+                turn_failed_body(
                     turn_id,
-                    error: err.to_string(),
-                    output: outcome.output,
-                }),
+                    err.to_string(),
+                    outcome.output,
+                    RunSessionTurnFailedCode::AgentError,
+                    false,
+                ),
                 Utc::now(),
             )
             .await;
@@ -404,13 +600,45 @@ struct TurnExecutionOutcome {
     output: Option<String>,
 }
 
+#[derive(Debug, thiserror::Error)]
+enum AskFabroBuildError {
+    #[error("{0}")]
+    LlmUnconfigured(String),
+    #[error("{0}")]
+    ModelUnavailable(String),
+    #[error("run has no sandbox available for Ask Fabro")]
+    NoSandbox,
+    #[error("run sandbox is unavailable for Ask Fabro: {0}")]
+    SandboxUnavailable(#[source] anyhow::Error),
+    #[error("failed to create Ask Fabro agent session: {0}")]
+    Agent(#[source] anyhow::Error),
+}
+
+impl AskFabroBuildError {
+    fn code(&self) -> RunSessionTurnFailedCode {
+        match self {
+            Self::NoSandbox => RunSessionTurnFailedCode::NoSandbox,
+            Self::SandboxUnavailable(_) => RunSessionTurnFailedCode::SandboxUnavailable,
+            Self::LlmUnconfigured(_) => RunSessionTurnFailedCode::LlmUnconfigured,
+            Self::ModelUnavailable(_) => RunSessionTurnFailedCode::ModelUnavailable,
+            Self::Agent(_) => RunSessionTurnFailedCode::AgentError,
+        }
+    }
+
+    fn retryable(&self) -> bool {
+        matches!(self, Self::SandboxUnavailable(_))
+    }
+}
+
 async fn build_agent_session(
     state: &AppState,
     run_id: RunId,
     session: &ProjectedRunSession,
-) -> anyhow::Result<Session> {
+) -> Result<Session, AskFabroBuildError> {
     let catalog = state.catalog();
-    let llm_result = state.resolve_llm_client().await?;
+    let llm_result = state.resolve_llm_client().await.map_err(|err| {
+        AskFabroBuildError::LlmUnconfigured(format!("LLM credentials are not configured: {err}"))
+    })?;
     for (provider, issue) in &llm_result.auth_issues {
         warn!(provider = %provider, error = %issue, "LLM provider unavailable due to auth issue");
     }
@@ -420,21 +648,39 @@ async fn build_agent_session(
     let (provider_id, model, profile_kind) =
         selected_session_model(&catalog, &llm_result, session)?;
     if !llm_result.client.has_provider(provider_id.as_str()) {
-        anyhow::bail!("LLM credentials not configured for provider '{provider_id}'");
+        let message = format!("LLM credentials not configured for provider '{provider_id}'");
+        return if session.record.model.is_some() {
+            Err(AskFabroBuildError::ModelUnavailable(message))
+        } else {
+            Err(AskFabroBuildError::LlmUnconfigured(message))
+        };
     }
 
-    let run_store = state.store_ref().open_run_reader(&run_id).await?;
-    let projection = run_store.state().await?;
+    let run_store = state
+        .store_ref()
+        .open_run_reader(&run_id)
+        .await
+        .map_err(|err| AskFabroBuildError::Agent(anyhow::Error::new(err)))?;
+    let projection = run_store
+        .state()
+        .await
+        .map_err(|err| AskFabroBuildError::Agent(anyhow::Error::new(err)))?;
     let sandbox_record = projection
         .sandbox
         .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("run has no sandbox available for Ask Fabro"))?;
+        .ok_or(AskFabroBuildError::NoSandbox)?;
+    if sandbox_record.runtime.is_none() {
+        return Err(AskFabroBuildError::SandboxUnavailable(anyhow::anyhow!(
+            "run sandbox runtime is not ready"
+        )));
+    }
     let sandbox = reconnect_for_run(
         sandbox_record,
         state.vault_or_env("DAYTONA_API_KEY"),
         Some(run_id),
     )
-    .await?;
+    .await
+    .map_err(AskFabroBuildError::SandboxUnavailable)?;
     let sandbox: Arc<dyn fabro_agent::Sandbox> = Arc::from(sandbox);
     let profile = build_profile(
         provider_id,
@@ -459,26 +705,32 @@ async fn build_agent_session(
         config,
         None,
     )
-    .map_err(Into::into)
+    .map_err(|err| AskFabroBuildError::Agent(anyhow::Error::new(err)))
 }
 
 fn selected_session_model(
     catalog: &Catalog,
     llm_result: &LlmClientResult,
     session: &ProjectedRunSession,
-) -> anyhow::Result<(ProviderId, String, AgentProfileKind)> {
+) -> Result<(ProviderId, String, AgentProfileKind), AskFabroBuildError> {
     let configured_provider_ids = llm_result.provider_ids();
     let selected = match session.record.model.as_deref() {
-        Some(model_id) => catalog
-            .get(model_id)
-            .ok_or_else(|| anyhow::anyhow!("session model '{model_id}' is not in the catalog"))?,
+        Some(model_id) => catalog.get(model_id).ok_or_else(|| {
+            AskFabroBuildError::ModelUnavailable(format!(
+                "session model '{model_id}' is not in the catalog"
+            ))
+        })?,
         None => catalog.default_for_configured_ids(&configured_provider_ids),
     };
     let provider_id = selected.provider.clone();
     let model = selected.id.clone();
     let profile_kind = catalog
         .effective_agent_profile(&provider_id, Some(&model))
-        .ok_or_else(|| anyhow::anyhow!("provider '{provider_id}' is not configured"))?;
+        .ok_or_else(|| {
+            AskFabroBuildError::ModelUnavailable(format!(
+                "provider '{provider_id}' is not configured"
+            ))
+        })?;
     Ok((provider_id, model, profile_kind))
 }
 
@@ -672,6 +924,33 @@ fn record_turn_output(output: &mut Option<String>, event: &SessionEvent) {
     }
 }
 
+fn turn_failed_body(
+    turn_id: TurnId,
+    error: String,
+    output: Option<String>,
+    code: RunSessionTurnFailedCode,
+    retryable: bool,
+) -> EventBody {
+    EventBody::RunSessionTurnFailed(RunSessionTurnFailedProps {
+        turn_id,
+        error,
+        output,
+        code,
+        retryable,
+    })
+}
+
+fn agent_failure_code(err: &AgentError) -> RunSessionTurnFailedCode {
+    match err {
+        AgentError::ToolExecution(message)
+            if message.contains("denied") || message.contains("not allowed") =>
+        {
+            RunSessionTurnFailedCode::ToolDenied
+        }
+        _ => RunSessionTurnFailedCode::AgentError,
+    }
+}
+
 async fn persist_agent_event(
     run_store: &RunDatabase,
     run_id: RunId,
@@ -789,6 +1068,38 @@ async fn send_sse_event(sender: &SessionSseSender, event: &EventEnvelope) -> boo
         .is_ok()
 }
 
+fn session_sse_event(event: &EventEnvelope) -> Option<Event> {
+    let data = serde_json::to_string(event).ok()?;
+    Some(
+        Event::default()
+            .id(event.seq.to_string())
+            .event(event.event.event_name())
+            .data(data),
+    )
+}
+
+async fn send_attach_sse_event(
+    sender: &SessionSseSender,
+    shutdown: &CancellationToken,
+    event: Event,
+) -> bool {
+    tokio::select! {
+        biased;
+        () = shutdown.cancelled() => false,
+        () = sender.closed() => false,
+        result = sender.send(Ok(event)) => result.is_ok(),
+    }
+}
+
+fn event_matches_session(event: &EventEnvelope, session_id: &str) -> bool {
+    event
+        .event
+        .session_id
+        .as_deref()
+        .is_some_and(|id| id == session_id)
+        && event.event.body.is_run_session_event()
+}
+
 async fn load_session(
     state: &AppState,
     session_id: SessionId,
@@ -812,7 +1123,7 @@ async fn load_session(
 async fn load_session_read(
     state: &AppState,
     session_id: SessionId,
-) -> Result<(RunId, SessionRecord), Response> {
+) -> Result<(RunId, ProjectedRunSession), Response> {
     let run_id = match state.store_ref().get_session_run_id(&session_id).await {
         Ok(Some(run_id)) => run_id,
         Ok(None) => return Err(ApiError::not_found("Session not found.").into_response()),
@@ -823,10 +1134,33 @@ async fn load_session_read(
         Ok(events) => events,
         Err(err) => return Err(store_error(&err).into_response()),
     };
-    match project_run_session(run_id, session_id, &events) {
+    match fabro_store::project_run_session_with_context(run_id, session_id, &events) {
         Some(session) => Ok((run_id, session)),
         None => Err(ApiError::not_found("Session not found.").into_response()),
     }
+}
+
+async fn load_session_run_reader(
+    state: &AppState,
+    session_id: SessionId,
+) -> Result<(RunId, RunDatabase), Response> {
+    let run_id = match state.store_ref().get_session_run_id(&session_id).await {
+        Ok(Some(run_id)) => run_id,
+        Ok(None) => return Err(ApiError::not_found("Session not found.").into_response()),
+        Err(err) => return Err(store_error(&err).into_response()),
+    };
+    let run_store = open_run_reader(state, run_id).await?;
+    let events = match run_store
+        .list_events_for_session_from_with_limit(session_id, 1, 0)
+        .await
+    {
+        Ok(events) => events,
+        Err(err) => return Err(store_error(&err).into_response()),
+    };
+    if events.is_empty() {
+        return Err(ApiError::not_found("Session not found.").into_response());
+    }
+    Ok((run_id, run_store))
 }
 
 async fn open_run(state: &AppState, run_id: RunId) -> Result<RunDatabase, Response> {
@@ -855,12 +1189,6 @@ async fn open_run_reader(state: &AppState, run_id: RunId) -> Result<RunDatabase,
 
 fn store_error(err: &fabro_store::Error) -> ApiError {
     ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-}
-
-fn parse_run_id(value: &str) -> Result<RunId, ApiError> {
-    value
-        .parse()
-        .map_err(|err| ApiError::bad_request(format!("Invalid run ID: {err}")))
 }
 
 fn parse_session_id(value: &str) -> Result<SessionId, ApiError> {

@@ -16,4 +16,8 @@
 
 export interface SubmitTurnRequest {
     'input': string;
+    /**
+     * Durable session turn identifier.
+     */
+    'turn_id'?: string;
 }

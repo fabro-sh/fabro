@@ -98,6 +98,7 @@ mod tests {
             ("GITHUB_APP_CLIENT_SECRET".to_string(), "leak".to_string()),
             ("GITHUB_APP_WEBHOOK_SECRET".to_string(), "leak".to_string()),
             ("FABRO_DEV_TOKEN".to_string(), "garbage".to_string()),
+            ("FABRO_WORKER_TOKEN".to_string(), "leak".to_string()),
             ("MY_API_KEY".to_string(), "blocked".to_string()),
         ]);
         let mut cmd = env_command();
@@ -132,6 +133,7 @@ mod tests {
         assert!(!actual.contains_key("GITHUB_APP_PRIVATE_KEY"));
         assert!(!actual.contains_key("GITHUB_APP_CLIENT_SECRET"));
         assert!(!actual.contains_key("GITHUB_APP_WEBHOOK_SECRET"));
+        assert!(!actual.contains_key("FABRO_WORKER_TOKEN"));
         assert!(!actual.contains_key("MY_API_KEY"));
     }
 

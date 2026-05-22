@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use fabro_agent::subagent::{SessionFactory, SubAgentManager};
+use fabro_agent::tool_registry::{RegisteredTool, ToolContext, ToolRegistry};
 use fabro_agent::{
     AgentEvent, AgentProfile, AnthropicProfile, CompletionCoordinator, GeminiProfile,
     Message as AgentMessage, OpenAiProfile, Sandbox, Session, SessionOptions, StaticEnvProvider,
@@ -11,13 +12,16 @@ use fabro_agent::{
 use fabro_auth::{CredentialSource, EnvCredentialSource};
 use fabro_graphviz::graph::{AttrValue, Node};
 use fabro_llm::client::Client;
-use fabro_llm::types::{Message, ReasoningEffort, Request, Speed, TokenCounts};
+use fabro_llm::types::{
+    Message, ReasoningEffort, Request, Speed, TokenCounts, ToolDefinition as LlmToolDefinition,
+};
 use fabro_mcp::config::McpServerSettings;
 #[cfg(test)]
 use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{AgentProfileKind, Catalog, FallbackTarget, ModelRef, ProviderId};
 use fabro_types::settings::run::RunModelControls;
-use fabro_types::{SessionCapability, StageId};
+use fabro_types::{RunId, SessionCapability, StageId};
+use serde::de::DeserializeOwned;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -31,6 +35,7 @@ use crate::context::keys::Fidelity;
 use crate::error::Error;
 use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::billed_model_usage_from_llm;
+use crate::services::FabroRunToolServices;
 use crate::steering_hub::{ActiveControlHandle, SteeringHub};
 
 /// Spawn a task that, when the run-level token cancels, sets the agent
@@ -184,6 +189,149 @@ fn build_profile(
                 .with_catalog(catalog),
         ),
     }
+}
+
+pub(crate) fn register_fabro_run_tools(
+    registry: &mut ToolRegistry,
+    services: &FabroRunToolServices,
+) {
+    for definition in fabro_tool::tool_definitions() {
+        registry.register(fabro_run_tool(definition, services.clone()));
+    }
+}
+
+fn fabro_run_tool(
+    definition: &fabro_tool::ToolDefinition,
+    services: FabroRunToolServices,
+) -> RegisteredTool {
+    let name = definition.name.to_string();
+    RegisteredTool {
+        definition: LlmToolDefinition {
+            name:        name.clone(),
+            description: definition.description.to_string(),
+            parameters:  definition.parameters.clone(),
+        },
+        executor:   Arc::new(move |args, _context: ToolContext| {
+            let name = name.clone();
+            let services = services.clone();
+            Box::pin(async move {
+                execute_fabro_run_tool(&name, args, services)
+                    .await
+                    .map_err(|err| err.to_string())
+            })
+        }),
+    }
+}
+
+async fn execute_fabro_run_tool(
+    name: &str,
+    args: serde_json::Value,
+    services: FabroRunToolServices,
+) -> fabro_tool::ToolResult<String> {
+    match name {
+        fabro_tool::FABRO_RUN_CREATE_TOOL_NAME => {
+            let params = parse_fabro_tool_args::<fabro_tool::FabroRunCreateParams>(name, args)?;
+            ensure_current_run_parent(&params, services.current_run_id)?;
+            let validated = fabro_tool::ValidatedCreateRuns::try_from(params)?;
+            let result = fabro_tool::create_runs_with_options(
+                Arc::clone(&services.backend),
+                &services.base_cwd,
+                &services.user_settings_path,
+                validated,
+                fabro_tool::CreateRunOptions {
+                    forced_parent_id: Some(services.current_run_id),
+                },
+            )
+            .await?;
+            let summary = fabro_tool::create_runs_text(&result);
+            render_fabro_tool_result(&summary, &result)
+        }
+        fabro_tool::FABRO_RUN_SEARCH_TOOL_NAME => {
+            let params = parse_fabro_tool_args::<fabro_tool::FabroRunSearchParams>(name, args)?;
+            let result = fabro_tool::search_runs(
+                Arc::clone(&services.backend),
+                fabro_tool::ValidatedSearchRuns::try_from(params)?,
+            )
+            .await?;
+            let summary = fabro_tool::search_runs_text(&result);
+            render_fabro_tool_result(&summary, &result)
+        }
+        fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME => {
+            let params = parse_fabro_tool_args::<fabro_tool::FabroRunInteractParams>(name, args)?;
+            let result = fabro_tool::interact_run(
+                Arc::clone(&services.backend),
+                fabro_tool::ValidatedInteractRun::try_from(params)?,
+            )
+            .await?;
+            let summary = fabro_tool::interact_run_text(&result);
+            render_fabro_tool_result(&summary, &result)
+        }
+        fabro_tool::FABRO_RUN_GATHER_TOOL_NAME => {
+            let params = parse_fabro_tool_args::<fabro_tool::FabroRunGatherParams>(name, args)?;
+            let result = fabro_tool::gather_runs(
+                Arc::clone(&services.backend),
+                fabro_tool::ValidatedGatherRuns::try_from(params)?,
+            )
+            .await?;
+            let summary = fabro_tool::gather_runs_text(&result);
+            render_fabro_tool_result(&summary, &result)
+        }
+        fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME => {
+            let params = parse_fabro_tool_args::<fabro_tool::FabroRunEventsParams>(name, args)?;
+            let result = fabro_tool::run_events(
+                Arc::clone(&services.backend),
+                fabro_tool::ValidatedRunEvents::try_from(params)?,
+            )
+            .await?;
+            let summary = fabro_tool::run_events_text(&result);
+            render_fabro_tool_result(&summary, &result)
+        }
+        _ => Err(fabro_tool::ToolError::message(format!(
+            "unknown Fabro run tool `{name}`"
+        ))),
+    }
+}
+
+fn parse_fabro_tool_args<T>(name: &str, args: serde_json::Value) -> fabro_tool::ToolResult<T>
+where
+    T: DeserializeOwned,
+{
+    serde_json::from_value(args)
+        .map_err(|err| fabro_tool::ToolError::message(format!("invalid {name} arguments: {err}")))
+}
+
+fn ensure_current_run_parent(
+    params: &fabro_tool::FabroRunCreateParams,
+    current_run_id: RunId,
+) -> fabro_tool::ToolResult<()> {
+    let current_parent = current_run_id.to_string();
+    for run in &params.runs {
+        match run.parent_id.as_deref().map(str::trim) {
+            None => {}
+            Some("") => {
+                return Err(fabro_tool::ToolError::message(
+                    "parent_id must be omitted or match the current run; blank parent_id is invalid",
+                ));
+            }
+            Some(parent_id) if parent_id == current_parent => {}
+            Some(parent_id) => {
+                return Err(fabro_tool::ToolError::message(format!(
+                    "parent_id must be omitted or match the current run {current_parent}; got {parent_id}"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn render_fabro_tool_result<T>(summary: &str, result: &T) -> fabro_tool::ToolResult<String>
+where
+    T: serde::Serialize,
+{
+    let json = serde_json::to_string_pretty(result).map_err(|err| {
+        fabro_tool::ToolError::message(format!("failed to serialize tool result: {err}"))
+    })?;
+    Ok(format!("{summary}\n{json}"))
 }
 
 pub(super) fn effective_request_controls(
@@ -342,6 +490,7 @@ pub struct AgentApiBackend {
     source:             Arc<dyn CredentialSource>,
     steering_hub:       Arc<SteeringHub>,
     catalog:            Arc<Catalog>,
+    fabro_run_tools:    Option<FabroRunToolServices>,
 }
 
 impl AgentApiBackend {
@@ -384,6 +533,7 @@ impl AgentApiBackend {
             source,
             steering_hub,
             catalog,
+            fabro_run_tools: None,
         }
     }
 
@@ -424,6 +574,12 @@ impl AgentApiBackend {
     #[must_use]
     pub fn with_run_model_controls(mut self, controls: RunModelControls) -> Self {
         self.run_model_controls = controls;
+        self
+    }
+
+    #[must_use]
+    pub fn with_fabro_run_tools(mut self, services: FabroRunToolServices) -> Self {
+        self.fabro_run_tools = Some(services);
         self
     }
 
@@ -468,6 +624,7 @@ impl AgentApiBackend {
             self.tool_env.as_ref(),
             tool_hooks,
             self.mcp_servers.clone(),
+            self.fabro_run_tools.clone(),
         )
         .await
     }
@@ -483,6 +640,7 @@ impl AgentApiBackend {
         tool_env: Option<&Arc<dyn ToolEnvProvider>>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
         mcp_servers: Vec<McpServerSettings>,
+        fabro_run_tools: Option<FabroRunToolServices>,
     ) -> Result<Session, Error> {
         let controls = effective_request_controls(run_model_controls, node)?;
         let client = Client::from_source(source, Arc::clone(&catalog))
@@ -517,13 +675,18 @@ impl AgentApiBackend {
         let factory_catalog = Arc::clone(&catalog);
         let factory_env = Arc::clone(sandbox);
         let factory_tool_env = tool_env.cloned();
+        let factory_fabro_run_tools = fabro_run_tools.clone();
         let factory: SessionFactory = Arc::new(move || {
-            let child_profile: Arc<dyn AgentProfile> = Arc::from(build_profile(
+            let mut child_profile = build_profile(
                 &factory_model,
                 factory_provider.provider_id.clone(),
                 factory_provider.profile_kind,
                 Arc::clone(&factory_catalog),
-            ));
+            );
+            if let Some(services) = factory_fabro_run_tools.clone() {
+                register_fabro_run_tools(child_profile.tool_registry_mut(), &services);
+            }
+            let child_profile: Arc<dyn AgentProfile> = Arc::from(child_profile);
             let mut session = Session::new(
                 factory_client.clone(),
                 child_profile,
@@ -542,6 +705,9 @@ impl AgentApiBackend {
         });
 
         profile.register_subagent_tools(manager, factory, 0);
+        if let Some(services) = fabro_run_tools {
+            register_fabro_run_tools(profile.tool_registry_mut(), &services);
+        }
         let profile: Arc<dyn AgentProfile> = Arc::from(profile);
 
         let mut session = Session::new(
@@ -950,6 +1116,7 @@ impl CodergenBackend for AgentApiBackend {
                             self.tool_env.as_ref(),
                             tool_hooks.clone(),
                             self.mcp_servers.clone(),
+                            self.fabro_run_tools.clone(),
                         )
                         .await;
                         if cancel_token.is_cancelled() {
@@ -1150,16 +1317,27 @@ impl CompletionCoordinator for SteeringCompletionCoordinator {
 
 #[cfg(test)]
 mod tests {
+    use std::path::{Path, PathBuf};
+
+    use chrono::TimeZone;
     use fabro_agent::subagent::SessionFactory;
-    use fabro_agent::{AgentProfile, ToolRegistry};
+    use fabro_agent::{AgentProfile, LocalSandbox, ToolRegistry};
+    use fabro_api::types;
     use fabro_auth::{EnvCredentialSource, VaultCredentialSource};
     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
     use fabro_llm::{Error as LlmError, ProviderErrorDetail, ProviderErrorKind};
+    use fabro_tool::FabroToolBackend;
+    use fabro_types::{
+        EventEnvelope, Run, RunId, RunLifecycle, RunLinks, RunOrigin, RunProjection, RunStatus,
+        RunTimestamps, SuccessReason, WorkflowRef,
+    };
     use fabro_vault::{SecretType, Vault};
     use futures::stream;
     use tokio::sync::RwLock as AsyncRwLock;
+    use tokio_util::sync::CancellationToken;
 
     use super::*;
+    use crate::services::FabroRunToolServices;
 
     struct ShutdownTestProfile {
         registry: ToolRegistry,
@@ -1247,6 +1425,342 @@ mod tests {
             SteeringHub::for_tests(),
         );
         assert!(backend.sessions.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn agent_run_tools_register_exact_shared_definitions() {
+        let mut registry = ToolRegistry::new();
+        let (services, _backend) = fabro_run_tool_services();
+        register_fabro_run_tools(&mut registry, &services);
+
+        let mut registered = registry
+            .names()
+            .into_iter()
+            .filter(|name| name.starts_with("fabro_run_"))
+            .collect::<Vec<_>>();
+        registered.sort();
+        assert_eq!(registered, vec![
+            fabro_tool::FABRO_RUN_CREATE_TOOL_NAME,
+            fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
+            fabro_tool::FABRO_RUN_GATHER_TOOL_NAME,
+            fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
+            fabro_tool::FABRO_RUN_SEARCH_TOOL_NAME,
+        ]);
+
+        for definition in fabro_tool::tool_definitions() {
+            let registered = registry
+                .get(definition.name)
+                .expect("shared Fabro run tool should be registered");
+            assert_eq!(registered.definition.description, definition.description);
+            assert_eq!(registered.definition.parameters, definition.parameters);
+        }
+    }
+
+    #[tokio::test]
+    async fn agent_run_create_injects_current_run_as_parent() {
+        let (services, backend) = fabro_run_tool_services();
+        let mut registry = ToolRegistry::new();
+        register_fabro_run_tools(&mut registry, &services);
+        let tool = registry
+            .get(fabro_tool::FABRO_RUN_CREATE_TOOL_NAME)
+            .expect("create tool should be registered");
+
+        let output = (tool.executor)(
+            serde_json::json!({
+                "runs": [{
+                    "workflow": "child.fabro",
+                    "start": false
+                }]
+            }),
+            tool_context(),
+        )
+        .await
+        .expect("create tool should succeed");
+
+        assert!(output.contains("created 1 Fabro run(s)"));
+        assert_eq!(backend.created_parent_ids.lock().unwrap().as_slice(), &[
+            Some(current_run_id())
+        ]);
+    }
+
+    #[tokio::test]
+    async fn agent_run_create_rejects_conflicting_parent_id() {
+        let mut registry = ToolRegistry::new();
+        let (services, _backend) = fabro_run_tool_services();
+        register_fabro_run_tools(&mut registry, &services);
+        let tool = registry
+            .get(fabro_tool::FABRO_RUN_CREATE_TOOL_NAME)
+            .expect("create tool should be registered");
+
+        let err = (tool.executor)(
+            serde_json::json!({
+                "runs": [{
+                    "workflow": "child.fabro",
+                    "parent_id": "01KRBZW4DW0000000000000002",
+                    "start": false
+                }]
+            }),
+            tool_context(),
+        )
+        .await
+        .expect_err("conflicting parent should be rejected");
+
+        assert!(err.contains("parent_id"));
+        assert!(err.contains("current run"));
+    }
+
+    #[tokio::test]
+    async fn agent_run_tools_share_create_gather_and_events_backend() {
+        let (services, backend) = fabro_run_tool_services();
+        let mut registry = ToolRegistry::new();
+        register_fabro_run_tools(&mut registry, &services);
+
+        let create = registry
+            .get(fabro_tool::FABRO_RUN_CREATE_TOOL_NAME)
+            .unwrap();
+        (create.executor)(
+            serde_json::json!({
+                "runs": [{
+                    "workflow": "child.fabro",
+                    "start": false
+                }]
+            }),
+            tool_context(),
+        )
+        .await
+        .expect("create should succeed");
+
+        let gather = registry
+            .get(fabro_tool::FABRO_RUN_GATHER_TOOL_NAME)
+            .unwrap();
+        let gathered = (gather.executor)(
+            serde_json::json!({
+                "run_ids": [child_run_id().to_string()],
+                "timeout_seconds": 0
+            }),
+            tool_context(),
+        )
+        .await
+        .expect("gather should succeed");
+
+        let events = registry
+            .get(fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME)
+            .unwrap();
+        let listed = (events.executor)(
+            serde_json::json!({
+                "action": "list",
+                "run_id": child_run_id().to_string(),
+                "first": 5
+            }),
+            tool_context(),
+        )
+        .await
+        .expect("events should succeed");
+
+        assert!(gathered.contains("gathered 1 Fabro run(s)"));
+        assert!(listed.contains("returned 0 Fabro event(s)"));
+        assert_eq!(backend.created_parent_ids.lock().unwrap().as_slice(), &[
+            Some(current_run_id())
+        ]);
+    }
+
+    fn fabro_run_tool_services() -> (FabroRunToolServices, Arc<MockRunToolBackend>) {
+        let backend = Arc::new(MockRunToolBackend {
+            child_id:           child_run_id(),
+            created_parent_ids: Mutex::new(Vec::new()),
+        });
+        let services = FabroRunToolServices {
+            backend:            backend.clone(),
+            current_run_id:     current_run_id(),
+            base_cwd:           PathBuf::from("/tmp/fabro-test"),
+            user_settings_path: PathBuf::from("/tmp/fabro-test/settings.toml"),
+        };
+        (services, backend)
+    }
+
+    fn tool_context() -> ToolContext {
+        ToolContext {
+            env:               Arc::new(LocalSandbox::new(PathBuf::from("."))),
+            cancel:            CancellationToken::new(),
+            tool_env_provider: None,
+        }
+    }
+
+    fn current_run_id() -> RunId {
+        run_id("01KRBZW5C00000000000000001")
+    }
+
+    fn child_run_id() -> RunId {
+        run_id("01KRBZW5C00000000000000002")
+    }
+
+    fn run_id(raw: &str) -> RunId {
+        raw.parse().expect("test run id should parse")
+    }
+
+    fn run(run_id: RunId, parent_id: Option<RunId>, children_count: u64) -> Run {
+        Run {
+            id: run_id,
+            parent_id,
+            children_count,
+            title: "Test run".to_string(),
+            goal: "Test run".to_string(),
+            workflow: WorkflowRef {
+                slug:       Some("simple".to_string()),
+                name:       Some("Simple".to_string()),
+                graph_name: None,
+                node_count: 0,
+                edge_count: 0,
+            },
+            automation: None,
+            repository: None,
+            created_by: None,
+            origin: RunOrigin::default(),
+            labels: HashMap::new(),
+            lifecycle: RunLifecycle {
+                status:          RunStatus::Succeeded {
+                    reason: SuccessReason::Completed,
+                },
+                pending_control: None,
+                queue_position:  None,
+                error:           None,
+                archived:        false,
+                archived_at:     None,
+            },
+            sandbox: None,
+            models: Vec::new(),
+            source_directory: None,
+            timestamps: RunTimestamps {
+                created_at:    chrono::Utc.with_ymd_and_hms(2026, 5, 21, 12, 0, 0).unwrap(),
+                started_at:    None,
+                last_event_at: None,
+                completed_at:  None,
+            },
+            timing: None,
+            billing: None,
+            ask_fabro: fabro_types::AskFabro::default(),
+            diff: None,
+            pull_request: None,
+            current_question: None,
+            superseded_by: None,
+            links: RunLinks { web: None },
+        }
+    }
+
+    struct MockRunToolBackend {
+        child_id:           RunId,
+        created_parent_ids: Mutex<Vec<Option<RunId>>>,
+    }
+
+    #[async_trait]
+    impl FabroToolBackend for MockRunToolBackend {
+        async fn create_run_from_spec(
+            &self,
+            _spec: &fabro_tool::ValidatedCreateRunSpec,
+            _cwd: &Path,
+            _user_settings_path: &Path,
+            parent_id: Option<RunId>,
+        ) -> anyhow::Result<RunId> {
+            self.created_parent_ids.lock().unwrap().push(parent_id);
+            Ok(self.child_id)
+        }
+
+        async fn resolve_run(&self, selector: &str) -> anyhow::Result<Run> {
+            let run_id = selector.parse::<RunId>()?;
+            Ok(run(run_id, None, 0))
+        }
+
+        async fn retrieve_run(&self, run_id: &RunId) -> anyhow::Result<Run> {
+            assert_eq!(*run_id, self.child_id);
+            Ok(run(self.child_id, Some(current_run_id()), 0))
+        }
+
+        async fn start_run(&self, _run_id: &RunId, _resume: bool) -> anyhow::Result<Run> {
+            unreachable!("agent create test uses start=false")
+        }
+
+        async fn cancel_run(&self, _run_id: &RunId) -> anyhow::Result<Run> {
+            unreachable!()
+        }
+
+        async fn interrupt_run(&self, _run_id: &RunId) -> anyhow::Result<()> {
+            unreachable!()
+        }
+
+        async fn steer_run(
+            &self,
+            _run_id: &RunId,
+            _text: String,
+            _interrupt: bool,
+        ) -> anyhow::Result<()> {
+            unreachable!()
+        }
+
+        async fn archive_run(&self, _run_id: &RunId) -> anyhow::Result<Run> {
+            unreachable!()
+        }
+
+        async fn unarchive_run(&self, _run_id: &RunId) -> anyhow::Result<Run> {
+            unreachable!()
+        }
+
+        async fn list_store_runs(&self) -> anyhow::Result<Vec<Run>> {
+            unreachable!()
+        }
+
+        async fn list_store_runs_by_parent(&self, _parent_id: RunId) -> anyhow::Result<Vec<Run>> {
+            unreachable!()
+        }
+
+        async fn link_run_parent(
+            &self,
+            _child_id: &RunId,
+            _parent_id: &RunId,
+        ) -> anyhow::Result<Run> {
+            unreachable!()
+        }
+
+        async fn unlink_run_parent(&self, _child_id: &RunId) -> anyhow::Result<Run> {
+            unreachable!()
+        }
+
+        async fn get_run_state(&self, _run_id: &RunId) -> anyhow::Result<RunProjection> {
+            unreachable!()
+        }
+
+        async fn list_run_events(
+            &self,
+            _run_id: &RunId,
+            _after: Option<u32>,
+            _limit: Option<usize>,
+        ) -> anyhow::Result<Vec<EventEnvelope>> {
+            Ok(Vec::new())
+        }
+
+        async fn list_run_events_until(
+            &self,
+            _run_id: &RunId,
+            _after: Option<u32>,
+            _limit: usize,
+        ) -> anyhow::Result<Vec<EventEnvelope>> {
+            Ok(Vec::new())
+        }
+
+        async fn list_run_questions(
+            &self,
+            _run_id: &RunId,
+        ) -> anyhow::Result<Vec<types::ApiQuestion>> {
+            unreachable!()
+        }
+
+        async fn submit_run_answer(
+            &self,
+            _run_id: &RunId,
+            _question_id: &str,
+            _body: types::SubmitAnswerRequest,
+        ) -> anyhow::Result<()> {
+            unreachable!()
+        }
     }
 
     fn new_file_tracking() -> FileTracking {

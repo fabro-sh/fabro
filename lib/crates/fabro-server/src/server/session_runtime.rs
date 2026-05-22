@@ -31,8 +31,10 @@ impl SessionRuntimeManager {
                 .active_turn
                 .lock()
                 .expect("session active turn lock poisoned");
-            if active.is_some() {
-                return Err(StartTurnError::ActiveTurn);
+            if let Some(active) = active.as_ref() {
+                return Err(StartTurnError::ActiveTurn {
+                    turn_id: active.turn_id,
+                });
             }
             *active = Some(ActiveTurn {
                 turn_id,
@@ -134,7 +136,7 @@ struct ActiveTurn {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StartTurnError {
-    ActiveTurn,
+    ActiveTurn { turn_id: TurnId },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

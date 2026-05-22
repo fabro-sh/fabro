@@ -133,12 +133,12 @@ fn assert_non_llm_billing(billing: &serde_json::Value, expected_stage_ids: &[&st
         "every non-LLM stage should have null model and zero token counts: {stages:?}"
     );
 
-    let runtime_secs: f64 = stages
+    let stage_wall_sum: u64 = stages
         .iter()
         .map(|stage| {
-            stage["runtime_secs"]
-                .as_f64()
-                .expect("stage should include runtime_secs")
+            stage["timing"]["wall_time_ms"]
+                .as_u64()
+                .expect("stage should include timing.wall_time_ms")
         })
         .sum();
 
@@ -153,11 +153,11 @@ fn assert_non_llm_billing(billing: &serde_json::Value, expected_stage_ids: &[&st
     assert_eq!(billing["totals"]["output_tokens"], 0);
     assert!(billing["totals"]["total_usd_micros"].is_null());
 
-    let total_runtime_secs = billing["totals"]["runtime_secs"]
-        .as_f64()
-        .expect("totals should include runtime_secs");
-    assert!(
-        (total_runtime_secs - runtime_secs).abs() < f64::EPSILON,
-        "total runtime {total_runtime_secs} should equal summed stage runtime {runtime_secs}"
+    let total_wall_time_ms = billing["totals"]["timing"]["wall_time_ms"]
+        .as_u64()
+        .expect("totals should include timing.wall_time_ms");
+    assert_eq!(
+        total_wall_time_ms, stage_wall_sum,
+        "total wall_time_ms {total_wall_time_ms} should equal summed stage wall_time_ms {stage_wall_sum}"
     );
 }

@@ -1,18 +1,15 @@
-use std::sync::Arc;
-
-use fabro_client::Client;
 use fabro_types::{MAX_PAIR_MESSAGE_BYTES, PairId, PairMessageRequest, StageId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use strum::IntoStaticStr;
 
-use super::common::{ToolError, ToolResult};
+use super::common::{FabroToolBackend, ToolError, ToolResult};
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, IntoStaticStr)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
-pub(crate) enum RunPairAction {
+pub enum RunPairAction {
     Status,
     Start,
     Get,
@@ -22,25 +19,25 @@ pub(crate) enum RunPairAction {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub(crate) struct FabroRunPairParams {
-    pub(crate) action:            RunPairAction,
-    pub(crate) run_id:            Option<String>,
-    pub(crate) pair_id:           Option<String>,
-    pub(crate) stage_id:          Option<String>,
-    pub(crate) text:              Option<String>,
-    pub(crate) client_message_id: Option<String>,
-    pub(crate) since_seq:         Option<u32>,
-    pub(crate) limit:             Option<u32>,
+pub struct FabroRunPairParams {
+    pub action:            RunPairAction,
+    pub run_id:            Option<String>,
+    pub pair_id:           Option<String>,
+    pub stage_id:          Option<String>,
+    pub text:              Option<String>,
+    pub client_message_id: Option<String>,
+    pub since_seq:         Option<u32>,
+    pub limit:             Option<u32>,
 }
 
 #[derive(Debug)]
-pub(crate) struct ValidatedPairRun {
-    pub(crate) run_id: String,
-    pub(crate) action: ValidatedPairAction,
+pub struct ValidatedPairRun {
+    pub run_id: String,
+    pub action: ValidatedPairAction,
 }
 
 #[derive(Debug)]
-pub(crate) enum ValidatedPairAction {
+pub enum ValidatedPairAction {
     Status,
     Start {
         stage_id: StageId,
@@ -169,17 +166,17 @@ fn parse_pair_id_for_action(raw: Option<&str>, action: RunPairAction) -> ToolRes
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
-pub(crate) struct PairRunResult {
-    pub(crate) run_id: String,
-    pub(crate) action: RunPairAction,
-    pub(crate) result: Value,
+pub struct PairRunResult {
+    pub run_id: String,
+    pub action: RunPairAction,
+    pub result: Value,
 }
 
-pub(crate) async fn pair_run(
-    client: Arc<Client>,
+pub async fn pair_run(
+    backend: std::sync::Arc<dyn FabroToolBackend>,
     params: ValidatedPairRun,
 ) -> ToolResult<PairRunResult> {
-    let run_id = client
+    let run_id = backend
         .resolve_run(&params.run_id)
         .await
         .map_err(|err| ToolError::from_anyhow(&err))?
@@ -188,19 +185,19 @@ pub(crate) async fn pair_run(
     let action = params.action.action();
     let result = match params.action {
         ValidatedPairAction::Status => json!(
-            client
+            backend
                 .get_run_pair_status(&run_id)
                 .await
                 .map_err(|err| ToolError::from_anyhow(&err))?
         ),
         ValidatedPairAction::Start { stage_id } => json!(
-            client
+            backend
                 .start_run_pair(&run_id, stage_id)
                 .await
                 .map_err(|err| ToolError::from_anyhow(&err))?
         ),
         ValidatedPairAction::Get { pair_id } => json!(
-            client
+            backend
                 .get_run_pair(&run_id, &pair_id)
                 .await
                 .map_err(|err| ToolError::from_anyhow(&err))?
@@ -210,7 +207,7 @@ pub(crate) async fn pair_run(
             text,
             client_message_id,
         } => json!(
-            client
+            backend
                 .send_run_pair_message(&run_id, &pair_id, PairMessageRequest {
                     text,
                     client_message_id,
@@ -219,7 +216,7 @@ pub(crate) async fn pair_run(
                 .map_err(|err| ToolError::from_anyhow(&err))?
         ),
         ValidatedPairAction::End { pair_id } => json!(
-            client
+            backend
                 .end_run_pair(&run_id, &pair_id)
                 .await
                 .map_err(|err| ToolError::from_anyhow(&err))?
@@ -229,7 +226,7 @@ pub(crate) async fn pair_run(
             since_seq,
             limit,
         } => json!(
-            client
+            backend
                 .get_run_pair_transcript(&run_id, &pair_id, since_seq, limit)
                 .await
                 .map_err(|err| ToolError::from_anyhow(&err))?
@@ -243,7 +240,7 @@ pub(crate) async fn pair_run(
     })
 }
 
-pub(crate) fn pair_run_text(result: &PairRunResult) -> String {
+pub fn pair_run_text(result: &PairRunResult) -> String {
     match result.action {
         RunPairAction::Status => format!("read pair status for Fabro run {}", result.run_id),
         RunPairAction::Start => format!("started pair for Fabro run {}", result.run_id),

@@ -15,15 +15,13 @@
 
 
 /**
- * Timing information for a run.
+ * Currently active durable session turn.
  */
-export interface RunTimings {
+export interface SessionTurn {
     /**
-     * Wall-clock time elapsed in seconds.
+     * Durable session turn identifier.
      */
-    'elapsed_secs': number;
-    /**
-     * Whether the elapsed time exceeds the expected threshold.
-     */
-    'elapsed_warning'?: boolean;
+    'id': string;
+    'started_at': string;
+    'input': string;
 }
