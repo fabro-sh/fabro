@@ -130,6 +130,7 @@ enabled = true",
         Section::of::<fabro_config::RunAgentLayer>(
             "[run.agent]",
             r#"[run.agent]
+fabro_tools = true
 permissions = "read-write""#,
         ),
     ]

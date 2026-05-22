@@ -403,6 +403,17 @@ include = ["test-results/**", "playwright-report/**", "*.trace.zip"]
 
 Artifact collection is opt-in — when no `[run.artifacts]` section is present, no file scanning occurs.
 
+### `[run.agent]`
+
+Configure workflow agent behavior that is not tied to a single stage.
+
+```toml title="run.toml"
+[run.agent]
+fabro_tools = true
+```
+
+`fabro_tools` defaults to `false`. Set it to `true` only for runs whose agents should be able to create, search, inspect, and interact with Fabro runs through the built-in Fabro run tools. This setting is separate from normal agent `permissions` and from MCP server configuration.
+
 ### `[run.agent.mcps]`
 
 Configure [MCP servers](/agents/mcp) available to agent stages during the workflow run. Each server is a named TOML table under `[run.agent.mcps]`. All three transport types are supported: `stdio`, `http`, and `sandbox`.
