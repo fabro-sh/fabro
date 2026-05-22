@@ -9,7 +9,9 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
+use fabro_model::ModelRef;
 use serde::{Deserialize, Serialize, de};
+use strum::{Display, EnumString, IntoStaticStr};
 
 use crate::id::ulid_id;
 use crate::pair::{PairId, PairMessageId};
@@ -260,8 +262,21 @@ impl ContentPart {
 /// Captured separately from [`MessageSource`] so audit/UI provenance
 /// (`steer`, `pair`, …) does not collapse the LLM role that the message
 /// replays as.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    IntoStaticStr,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum MessageKind {
     System,
     User,
@@ -270,8 +285,21 @@ pub enum MessageKind {
 }
 
 /// Audit/UI provenance for a committed transcript message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    IntoStaticStr,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum MessageSource {
     SystemPrompt,
     TurnInput,
@@ -333,10 +361,11 @@ pub struct TranscriptMessage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pair:        Option<PairMessageRef>,
     pub content:     Vec<ContentPart>,
+    /// Provider + model identity for the response that produced this
+    /// message, when applicable. Strongly typed via [`ModelRef`] so
+    /// provider and model id can never drift apart.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider:    Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model:       Option<String>,
+    pub model:       Option<ModelRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -357,7 +386,6 @@ impl TranscriptMessage {
             actor: None,
             pair: None,
             content,
-            provider: None,
             model: None,
             response_id: None,
             usage: None,
@@ -438,7 +466,6 @@ mod tests {
             actor:       None,
             pair:        None,
             content:     vec![ContentPart::text("please continue")],
-            provider:    None,
             model:       None,
             response_id: None,
             usage:       None,
@@ -462,7 +489,6 @@ mod tests {
         assert!(!obj.contains_key("turn_id"));
         assert!(!obj.contains_key("actor"));
         assert!(!obj.contains_key("pair"));
-        assert!(!obj.contains_key("provider"));
         assert!(!obj.contains_key("model"));
         assert!(!obj.contains_key("response_id"));
         assert!(!obj.contains_key("usage"));
