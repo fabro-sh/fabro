@@ -19,6 +19,7 @@ use fabro_interview::{
 };
 use fabro_model::Catalog;
 use fabro_server::run_tool_manifest;
+use fabro_static::EnvVars;
 use fabro_store::{EventEnvelope, RunProjection, RunProjectionReducer};
 use fabro_tool::fabro_client::ClientBackend;
 use fabro_types::settings::InterpString;
@@ -93,14 +94,20 @@ pub(crate) async fn execute(
         client.clone_for_reuse(),
         worker_token.to_owned(),
     )));
-    let fabro_run_tools = build_fabro_run_tool_services(
-        worker_token,
-        client.clone_for_reuse(),
-        run_id,
-        run_spec.source_directory.as_deref(),
-        &run_dir,
-        Arc::clone(&catalog),
-    );
+    let fabro_run_tools = if fabro_run_tools_enabled_from_env(
+        process_env_var(EnvVars::FABRO_WORKER_AGENT_RUN_TOOLS).as_deref(),
+    ) {
+        build_fabro_run_tool_services(
+            worker_token,
+            client.clone_for_reuse(),
+            run_id,
+            run_spec.source_directory.as_deref(),
+            &run_dir,
+            Arc::clone(&catalog),
+        )
+    } else {
+        None
+    };
     let interviewer = Arc::new(ControlInterviewer::new());
     let cancel_token = CancellationToken::new();
     let emitter = Arc::new(Emitter::new(run_id));
@@ -163,6 +170,10 @@ pub(crate) async fn execute(
     }
 
     Ok(())
+}
+
+fn fabro_run_tools_enabled_from_env(value: Option<&str>) -> bool {
+    value == Some("true")
 }
 
 fn build_fabro_run_tool_services(
@@ -1130,6 +1141,19 @@ mod tests {
         fn does_not_require_github_credentials_for_clone_provider_in_dry_run() {
             let run = run_with(HashMap::new(), "docker", RunMode::DryRun);
             assert!(!requires_github_credentials(&run));
+        }
+    }
+
+    mod fabro_run_tools_env_gate {
+        use super::super::fabro_run_tools_enabled_from_env;
+
+        #[test]
+        fn fabro_run_tools_enabled_env_requires_true() {
+            assert!(!fabro_run_tools_enabled_from_env(None));
+            assert!(!fabro_run_tools_enabled_from_env(Some("")));
+            assert!(!fabro_run_tools_enabled_from_env(Some("false")));
+            assert!(!fabro_run_tools_enabled_from_env(Some("1")));
+            assert!(fabro_run_tools_enabled_from_env(Some("true")));
         }
     }
 }
