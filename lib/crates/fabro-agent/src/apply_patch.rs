@@ -63,11 +63,11 @@ fn extract_context_line(line: &str) -> String {
     }
 }
 
-/// Parses a v4a format patch string into a list of patch operations.
+/// Parses Codex apply_patch text into a list of patch operations.
 ///
 /// # Errors
 /// Returns an error if the patch format is invalid.
-pub fn parse_v4a_patch(text: &str) -> Result<Vec<PatchOperation>, String> {
+pub fn parse_apply_patch(text: &str) -> Result<Vec<PatchOperation>, String> {
     let lines: Vec<&str> = text.trim().lines().collect();
     let lines = patch_lines_with_valid_boundaries(&lines)?;
     let mut ops = Vec::new();
@@ -490,7 +490,7 @@ pub fn make_apply_patch_tool() -> RegisteredTool {
                     .as_str()
                     .ok_or_else(|| "apply_patch expects raw patch text".to_string())?;
 
-                let ops = parse_v4a_patch(patch_text)?;
+                let ops = parse_apply_patch(patch_text)?;
                 apply_patch_operations(&ops, ctx.env.as_ref()).await
             })
         }),
@@ -511,7 +511,7 @@ mod tests {
     use crate::tool_registry::ToolContext;
 
     #[test]
-    fn parse_v4a_add_file() {
+    fn parse_apply_patch_add_file() {
         let patch = "\
 *** Begin Patch
 *** Add File: src/new_file.rs
@@ -520,7 +520,7 @@ mod tests {
 +}
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0], PatchOperation::Add {
             path:    "src/new_file.rs".into(),
@@ -529,13 +529,13 @@ mod tests {
     }
 
     #[test]
-    fn parse_v4a_delete_file() {
+    fn parse_apply_patch_delete_file() {
         let patch = "\
 *** Begin Patch
 *** Delete File: src/old_file.rs
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0], PatchOperation::Delete {
             path: "src/old_file.rs".into(),
@@ -543,7 +543,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_v4a_update_file() {
+    fn parse_apply_patch_update_file() {
         let patch = "\
 *** Begin Patch
 *** Update File: src/lib.rs
@@ -552,7 +552,7 @@ mod tests {
 +    println!(\"new\");
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         assert_eq!(ops.len(), 1);
         match &ops[0] {
             PatchOperation::Update {
@@ -580,7 +580,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_v4a_multi_operation() {
+    fn parse_apply_patch_multi_operation() {
         let patch = "\
 *** Begin Patch
 *** Add File: src/a.rs
@@ -592,7 +592,7 @@ mod tests {
 +    new_call();
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         assert_eq!(ops.len(), 3);
         assert!(matches!(&ops[0], PatchOperation::Add { .. }));
         assert!(matches!(&ops[1], PatchOperation::Delete { .. }));
@@ -600,7 +600,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_v4a_bare_at_at_hunk() {
+    fn parse_apply_patch_bare_at_at_hunk() {
         let patch = "\
 *** Begin Patch
 *** Update File: src/game.py
@@ -609,7 +609,7 @@ mod tests {
 +from src.cards import Card, Suit
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         assert_eq!(ops.len(), 1);
         match &ops[0] {
             PatchOperation::Update { path, hunks, .. } => {
@@ -623,7 +623,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_v4a_multiple_bare_at_at_hunks() {
+    fn parse_apply_patch_multiple_bare_at_at_hunks() {
         let patch = "\
 *** Begin Patch
 *** Update File: src/game.py
@@ -635,7 +635,7 @@ mod tests {
 +    stock: list[Card] = field(default_factory=list)
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         match &ops[0] {
             PatchOperation::Update { hunks, .. } => {
                 assert_eq!(hunks.len(), 2);
@@ -692,7 +692,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_v4a_mixed_bare_and_contextual_hunks() {
+    fn parse_apply_patch_mixed_bare_and_contextual_hunks() {
         let patch = "\
 *** Begin Patch
 *** Update File: src/lib.rs
@@ -704,7 +704,7 @@ mod tests {
 +    new_teardown();
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         match &ops[0] {
             PatchOperation::Update { hunks, .. } => {
                 assert_eq!(hunks.len(), 2);
@@ -716,7 +716,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_v4a_bare_at_at_with_context_lines() {
+    fn parse_apply_patch_bare_at_at_with_context_lines() {
         let patch = "\
 *** Begin Patch
 *** Update File: src/lib.rs
@@ -727,7 +727,7 @@ mod tests {
  }
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         match &ops[0] {
             PatchOperation::Update { hunks, .. } => {
                 assert_eq!(hunks.len(), 1);
@@ -749,7 +749,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_v4a_bare_at_at_add_only_appends_to_file() {
+    fn parse_apply_patch_bare_at_at_add_only_appends_to_file() {
         let patch = "\
 *** Begin Patch
 *** Update File: src/lib.rs
@@ -758,7 +758,7 @@ mod tests {
 *** End Patch";
 
         // Parsing succeeds — the hunk is structurally valid
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         match &ops[0] {
             PatchOperation::Update { hunks, .. } => {
                 assert_eq!(hunks[0].context_line, "");
@@ -952,7 +952,7 @@ mod tests {
 +new content
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         let result = apply_patch_operations(&ops, &env).await.unwrap();
 
         assert_eq!(
@@ -972,7 +972,7 @@ mod tests {
 *** Update File: empty.txt
 *** End Patch";
 
-        let err = parse_v4a_patch(patch).expect_err("empty update hunk should be rejected");
+        let err = parse_apply_patch(patch).expect_err("empty update hunk should be rejected");
 
         assert!(err.contains("Update file hunk for path 'empty.txt' is empty"));
     }
@@ -989,7 +989,7 @@ mod tests {
 +inserted
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         let result = apply_patch_operations(&ops, &env).await.unwrap();
 
         assert_eq!(
@@ -1018,7 +1018,7 @@ mod tests {
 +has newline now
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         apply_patch_operations(&ops, &env).await.unwrap();
 
         assert_eq!(
@@ -1036,7 +1036,7 @@ please apply this
 +hello
 *** End Patch";
 
-        let err = parse_v4a_patch(patch).expect_err("patch envelope must start on first line");
+        let err = parse_apply_patch(patch).expect_err("patch envelope must start on first line");
 
         assert!(err.contains("The first line of the patch must be '*** Begin Patch'"));
     }
@@ -1081,7 +1081,7 @@ please apply this
 +new
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         let err = apply_patch_operations(&ops, &env).await.unwrap_err();
 
         assert!(err.contains("Failed to read file to update missing.txt"));
@@ -1095,7 +1095,7 @@ please apply this
 *** Delete File: missing.txt
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         let err = apply_patch_operations(&ops, &env).await.unwrap_err();
 
         assert_eq!(
@@ -1136,7 +1136,7 @@ please apply this
     // Phase 1: Context without trailing @@
 
     #[test]
-    fn parse_v4a_context_without_trailing_markers() {
+    fn parse_apply_patch_context_without_trailing_markers() {
         let patch = "\
 *** Begin Patch
 *** Update File: src/hello.py
@@ -1145,7 +1145,7 @@ please apply this
 +    print(\"new\")
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         match &ops[0] {
             PatchOperation::Update { hunks, .. } => {
                 assert_eq!(hunks[0].context_line, "def hello():");
@@ -1157,7 +1157,7 @@ please apply this
     // Phase 2: Stacked @@ anchors
 
     #[test]
-    fn parse_v4a_stacked_context_uses_last() {
+    fn parse_apply_patch_stacked_context_uses_last() {
         let patch = "\
 *** Begin Patch
 *** Update File: src/foo.py
@@ -1167,7 +1167,7 @@ please apply this
 +        return 42
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         match &ops[0] {
             PatchOperation::Update { hunks, .. } => {
                 assert_eq!(hunks.len(), 1);
@@ -1180,7 +1180,7 @@ please apply this
     // Phase 3: *** End of File
 
     #[test]
-    fn parse_v4a_end_of_file_marker() {
+    fn parse_apply_patch_end_of_file_marker() {
         let patch = "\
 *** Begin Patch
 *** Update File: src/lib.py
@@ -1190,7 +1190,7 @@ please apply this
 *** End of File
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         match &ops[0] {
             PatchOperation::Update { hunks, .. } => {
                 assert_eq!(hunks.len(), 1);
@@ -1223,7 +1223,7 @@ please apply this
     // Phase 4: *** Move to:
 
     #[test]
-    fn parse_v4a_move_to() {
+    fn parse_apply_patch_move_to() {
         let patch = "\
 *** Begin Patch
 *** Update File: src/old.py
@@ -1233,7 +1233,7 @@ please apply this
 +    return 1
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         match &ops[0] {
             PatchOperation::Update {
                 path,
@@ -1315,7 +1315,7 @@ please apply this
     // Phase 6: Heredoc stripping
 
     #[test]
-    fn parse_v4a_strips_heredoc_wrapper() {
+    fn parse_apply_patch_strips_heredoc_wrapper() {
         let patch = "\
 <<'EOF'
 *** Begin Patch
@@ -1326,7 +1326,7 @@ please apply this
 *** End Patch
 EOF";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         assert_eq!(ops.len(), 1);
         match &ops[0] {
             PatchOperation::Update { hunks, .. } => {
@@ -1337,7 +1337,7 @@ EOF";
     }
 
     #[test]
-    fn parse_v4a_strips_heredoc_unquoted() {
+    fn parse_apply_patch_strips_heredoc_unquoted() {
         let patch = "\
 <<EOF
 *** Begin Patch
@@ -1346,13 +1346,13 @@ EOF";
 *** End Patch
 EOF";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         assert_eq!(ops.len(), 1);
         assert!(matches!(&ops[0], PatchOperation::Add { .. }));
     }
 
     #[test]
-    fn parse_v4a_strips_heredoc_double_quoted() {
+    fn parse_apply_patch_strips_heredoc_double_quoted() {
         let patch = "\
 <<\"EOF\"
 *** Begin Patch
@@ -1360,7 +1360,7 @@ EOF";
 *** End Patch
 EOF";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         assert_eq!(ops.len(), 1);
         assert!(matches!(&ops[0], PatchOperation::Delete { .. }));
     }
@@ -1418,7 +1418,7 @@ class GameState:
 +            self.waste.append(card)
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         apply_patch_operations(&ops, &env).await.unwrap();
 
         let content = env.read_file("src/game.py", None, None).await.unwrap();
@@ -1471,7 +1471,7 @@ def main():
 +    print(f\"result: {result}\")
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         let result = apply_patch_operations(&ops, &env).await.unwrap();
 
         assert!(result.contains("A src/new_util.py"));
@@ -1532,7 +1532,7 @@ class User:
 *** End Patch
 EOF";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         let result = apply_patch_operations(&ops, &env).await.unwrap();
 
         assert!(result.contains("M src/models/account.py"));
@@ -1593,7 +1593,7 @@ def gamma():
 +    return \"c\"
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         apply_patch_operations(&ops, &env).await.unwrap();
 
         let content = env.read_file("src/stubs.py", None, None).await.unwrap();
@@ -1621,7 +1621,7 @@ def gamma():
 +    println!(\"world\");
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         apply_patch_operations(&ops, &env).await.unwrap();
 
         let content = env.read_file("src/lib.rs", None, None).await.unwrap();

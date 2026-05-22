@@ -4,13 +4,13 @@ use fabro_model::{AgentProfileKind, Catalog, ProviderId};
 
 use super::EnvContext;
 use crate::agent_profile::AgentProfile;
+use crate::apply_patch;
 use crate::config::SessionOptions;
 use crate::profiles::{BaseProfile, assemble_system_prompt};
 use crate::sandbox::Sandbox;
 use crate::skills::Skill;
 use crate::tool_registry::ToolRegistry;
 use crate::tools::{WebFetchSummarizer, register_core_tools};
-use crate::v4a_patch::make_apply_patch_tool;
 
 pub struct OpenAiProfile {
     base: BaseProfile,
@@ -31,7 +31,7 @@ impl OpenAiProfile {
         let mut registry = ToolRegistry::new();
 
         register_core_tools(&mut registry, &config, summarizer);
-        registry.register(make_apply_patch_tool());
+        registry.register(apply_patch::make_apply_patch_tool());
 
         Self {
             base: BaseProfile {

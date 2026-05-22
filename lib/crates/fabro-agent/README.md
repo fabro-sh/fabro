@@ -74,7 +74,7 @@ pub trait AgentProfile: Send + Sync {
 
 Built-in profiles:
 - **`AnthropicProfile`** -- 200K context, extended thinking beta headers, tools: `read_file`, `write_file`, `edit_file`, `shell`, `grep`, `glob`
-- **`OpenAiProfile`** -- 128K context, reasoning effort support, tools: `read_file`, `write_file`, `shell`, `grep`, `glob`, `apply_patch` (v4a format)
+- **`OpenAiProfile`** -- 128K context, reasoning effort support, tools: `read_file`, `write_file`, `shell`, `grep`, `glob`, `apply_patch` (Codex apply_patch format)
 - **`GeminiProfile`** -- 1M context, safety settings, tools: all Anthropic tools plus `read_many_files`, `list_dir`, `web_search`, `web_fetch`
 
 ### `Sandbox`

@@ -2,6 +2,7 @@
 pub mod docker_sandbox;
 
 pub mod agent_profile;
+pub mod apply_patch;
 pub mod cli;
 pub mod compaction;
 pub mod config;
@@ -25,7 +26,6 @@ pub mod tool_registry;
 pub mod tools;
 pub mod truncation;
 pub mod types;
-pub mod v4a_patch;
 
 pub use agent_profile::AgentProfile;
 pub use config::{SessionOptions, ToolApprovalAdapter, ToolHookCallback, ToolHookDecision};
