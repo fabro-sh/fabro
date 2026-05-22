@@ -287,14 +287,13 @@ export default function RunSandbox({ params }: { params: { id: string } }) {
   };
 
   // The outer flex spans from the tab bar's bottom border down to the
-  // steer bar — `-mt-6` cancels the outlet wrapper's top gap, and we
-  // intentionally omit `pb-[clearance]` here so the column divider can
-  // run the full height. Each column adds its own `pt-6` and dock
-  // clearance to its content instead.
+  // steer bar — `-mt-3` cancels the outlet wrapper's top padding so the
+  // column divider runs the full height, and we omit `pb-[clearance]`
+  // here. Each column adds its own `pt-3` and dock clearance instead.
   return (
-    <div className="-mt-6 flex min-h-0 flex-1">
+    <div className="-mt-3 flex min-h-0 flex-1">
       <aside
-        className={`w-80 shrink-0 min-h-0 overflow-y-auto pt-6 pr-6 ${TERMINAL_DOCK_CLEARANCE_CLASS}`}
+        className={`w-80 shrink-0 min-h-0 overflow-y-auto pt-3 pr-6 ${TERMINAL_DOCK_CLEARANCE_CLASS}`}
       >
         {sandboxQuery.error ? (
           <ErrorState
@@ -311,7 +310,7 @@ export default function RunSandbox({ params }: { params: { id: string } }) {
       </aside>
       <div className="flex min-w-0 min-h-0 flex-1 flex-col border-l border-line">
         <div
-          className={`flex min-h-0 flex-1 flex-col pt-6 pl-6 ${TERMINAL_DOCK_CLEARANCE_CLASS}`}
+          className={`flex min-h-0 flex-1 flex-col pt-3 pl-6 ${TERMINAL_DOCK_CLEARANCE_CLASS}`}
         >
           {(() => {
             const modeToggle = (
