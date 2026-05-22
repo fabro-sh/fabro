@@ -1530,17 +1530,10 @@ fn worker_command_default_token_omits_agent_run_tools_scope() {
     )
     .unwrap();
 
-    let EnvOverride::Set(token) = command_env_value(&cmd, EnvVars::FABRO_WORKER_TOKEN) else {
-        panic!("worker token env should be set");
-    };
-    let claims = jsonwebtoken::decode::<crate::worker_token::WorkerTokenClaims>(
-        &token,
-        state.worker_token_keys().decoding_key(),
-        state.worker_token_keys().validation(),
-    )
-    .expect("worker token should decode")
-    .claims;
+    assert_worker_command_passes_token_only_by_env(&cmd);
+    let claims = worker_token_claims(&cmd, state.as_ref());
 
+    assert_eq!(claims.run_id, run_id.to_string());
     assert_eq!(claims.scope.split_whitespace().collect::<Vec<_>>(), vec![
         "run:worker"
     ]);
@@ -1562,17 +1555,10 @@ fn worker_command_opt_in_token_includes_agent_run_tools_scope() {
     )
     .unwrap();
 
-    let EnvOverride::Set(token) = command_env_value(&cmd, EnvVars::FABRO_WORKER_TOKEN) else {
-        panic!("worker token env should be set");
-    };
-    let claims = jsonwebtoken::decode::<crate::worker_token::WorkerTokenClaims>(
-        &token,
-        state.worker_token_keys().decoding_key(),
-        state.worker_token_keys().validation(),
-    )
-    .expect("worker token should decode")
-    .claims;
+    assert_worker_command_passes_token_only_by_env(&cmd);
+    let claims = worker_token_claims(&cmd, state.as_ref());
 
+    assert_eq!(claims.run_id, run_id.to_string());
     assert_eq!(claims.scope.split_whitespace().collect::<Vec<_>>(), vec![
         "run:worker",
         "agent:run_tools"
@@ -2086,6 +2072,40 @@ fn command_env_value(cmd: &Command, key: &str) -> EnvOverride {
             })
         })
         .unwrap_or(EnvOverride::Unchanged)
+}
+
+#[cfg(unix)]
+fn assert_worker_command_passes_token_only_by_env(cmd: &Command) {
+    assert!(matches!(
+        command_env_value(cmd, EnvVars::FABRO_WORKER_TOKEN),
+        EnvOverride::Set(_)
+    ));
+    assert_eq!(
+        command_env_value(cmd, EnvVars::FABRO_DEV_TOKEN),
+        EnvOverride::Unchanged
+    );
+    let args = cmd
+        .as_std()
+        .get_args()
+        .map(|arg| arg.to_string_lossy())
+        .collect::<Vec<_>>();
+    assert!(!args.iter().any(|arg| arg == "--artifact-upload-token"));
+    assert!(!args.iter().any(|arg| arg == "--worker-token"));
+}
+
+#[cfg(unix)]
+fn worker_token_claims(cmd: &Command, state: &AppState) -> crate::worker_token::WorkerTokenClaims {
+    let EnvOverride::Set(token) = command_env_value(cmd, EnvVars::FABRO_WORKER_TOKEN) else {
+        panic!("worker token env should be set");
+    };
+
+    jsonwebtoken::decode::<crate::worker_token::WorkerTokenClaims>(
+        &token,
+        state.worker_token_keys().decoding_key(),
+        state.worker_token_keys().validation(),
+    )
+    .expect("worker token should decode")
+    .claims
 }
 
 #[tokio::test]

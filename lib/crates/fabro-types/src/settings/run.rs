@@ -417,9 +417,26 @@ pub struct InterviewProviderSettings {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunAgentSettings {
+    #[serde(default)]
     pub fabro_tools: bool,
     pub permissions: Option<AgentPermissions>,
     pub mcps:        HashMap<String, McpServerSettings>,
+}
+
+#[cfg(test)]
+mod run_agent_settings_tests {
+    use super::RunAgentSettings;
+
+    #[test]
+    fn deserializes_missing_fabro_tools_as_false() {
+        let settings: RunAgentSettings = serde_json::from_value(serde_json::json!({
+            "permissions": null,
+            "mcps": {}
+        }))
+        .expect("legacy run agent settings should deserialize");
+
+        assert!(!settings.fabro_tools);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
