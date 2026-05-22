@@ -1,4 +1,4 @@
-import { type ComponentType, useCallback, useState } from "react";
+import { type ComponentType, type ReactNode, useCallback, useState } from "react";
 import { Link } from "react-router";
 import type { StageHandler, StageState } from "@qltysh/fabro-api-client";
 import {
@@ -101,6 +101,33 @@ function SidebarRow({ to, icon: Icon, iconClass, label, trailing, active, collap
   );
 }
 
+/** Section heading. When a `toggle` is given it sits inline with the heading
+ * (or stands alone, centered, when collapsed) rather than on its own row. */
+function SectionHeading({
+  title,
+  collapsed,
+  toggle,
+}: {
+  title: string;
+  collapsed: boolean;
+  toggle?: ReactNode;
+}) {
+  if (collapsed) {
+    return (
+      <>
+        <h3 className="sr-only">{title}</h3>
+        {toggle && <div className="flex h-7 items-center justify-center">{toggle}</div>}
+      </>
+    );
+  }
+  return (
+    <div className="flex h-7 items-center justify-between">
+      <h3 className="px-2 text-xs font-medium uppercase tracking-wider text-fg-muted">{title}</h3>
+      {toggle}
+    </div>
+  );
+}
+
 interface StageSidebarProps {
   stages: Stage[];
   runId: string;
@@ -144,35 +171,31 @@ export function StageSidebar({ stages, runId, selectedStageId, activeLink }: Sta
     return stage.duration;
   }
 
-  const headingClass = collapsed
-    ? "sr-only"
-    : "px-2 text-xs font-medium uppercase tracking-wider text-fg-muted";
+  const toggleButton = (
+    <button
+      type="button"
+      onClick={toggleCollapsed}
+      aria-expanded={!collapsed}
+      aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      className="-mr-1 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-fg-3 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500"
+    >
+      {collapsed ? (
+        <ChevronDoubleRightIcon className="size-4" />
+      ) : (
+        <ChevronDoubleLeftIcon className="size-4" />
+      )}
+    </button>
+  );
 
   return (
     <nav
       className={`${collapsed ? "w-12" : "w-56"} shrink-0 transition-[width] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]`}
     >
-      <div className={`flex h-7 items-center ${collapsed ? "justify-center" : "justify-end px-1"}`}>
-        <button
-          type="button"
-          onClick={toggleCollapsed}
-          aria-expanded={!collapsed}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="inline-flex size-7 items-center justify-center rounded-md text-fg-3 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500"
-        >
-          {collapsed ? (
-            <ChevronDoubleRightIcon className="size-4" />
-          ) : (
-            <ChevronDoubleLeftIcon className="size-4" />
-          )}
-        </button>
-      </div>
-
-      <div className="mt-2 space-y-6">
+      <div className="space-y-6">
         {stages.length > 0 && (
           <div>
-            <h3 className={headingClass}>Stages</h3>
+            <SectionHeading title="Stages" collapsed={collapsed} toggle={toggleButton} />
             <ul className="mt-2 space-y-0.5 overflow-hidden">
               {stages.map((stage) => {
                 const config = statusConfig[stage.status];
@@ -195,7 +218,11 @@ export function StageSidebar({ stages, runId, selectedStageId, activeLink }: Sta
         )}
 
         <div>
-          <h3 className={headingClass}>Workflow</h3>
+          <SectionHeading
+            title="Workflow"
+            collapsed={collapsed}
+            toggle={stages.length === 0 ? toggleButton : undefined}
+          />
           {collapsed && stages.length > 0 && (
             <div aria-hidden="true" className="mx-3 border-t border-line" />
           )}
