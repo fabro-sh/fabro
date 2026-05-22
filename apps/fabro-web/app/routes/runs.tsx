@@ -28,9 +28,9 @@ import { EmptyState } from "../components/state";
 import { InlineMarkdown } from "../components/inline-markdown";
 import { PullRequestChip } from "../components/pull-request-chip";
 import { useToast } from "../components/toast";
+import { mutateBoardRunCaches } from "../lib/board-cache";
 import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
 import { useAuthConfig, useBoardsRuns, useSystemInfo } from "../lib/queries";
-import { queryKeys } from "../lib/query-keys";
 import { archiveRun, canArchive } from "../lib/run-actions";
 import type { BoardColumn, PaginatedBoardRunList } from "@qltysh/fabro-api-client";
 
@@ -112,6 +112,13 @@ export function buildBoardColumns(response: BoardRunsResponse): Column[] {
       items: grouped.get(col.id) ?? [],
     };
   });
+}
+
+export function placeArchivedColumnLast(columns: Column[], includeArchived: boolean): Column[] {
+  if (!includeArchived) return columns;
+  const archived = columns.find((column) => column.id === "archived");
+  if (archived == null) return columns;
+  return [...columns.filter((column) => column.id !== "archived"), archived];
 }
 
 function boardLifecycleStatusLabel(run: Pick<RunItem, "column" | "lifecycleStatusLabel">): string | null {
@@ -459,7 +466,7 @@ function ColumnActionsMenu({ column }: { column: Column }) {
       }
     } finally {
       setPending(false);
-      void mutate(queryKeys.boards.runs());
+      mutateBoardRunCaches(mutate);
     }
   }
 
@@ -871,7 +878,7 @@ export default function Runs() {
     (sum, col) => sum + col.items.length,
     0,
   );
-  const visibleColumns = filteredColumns.filter(
+  const visibleColumns = placeArchivedColumnLast(filteredColumns, includeArchived).filter(
     (col) => col.id !== "queued" || col.items.length > 0,
   );
 

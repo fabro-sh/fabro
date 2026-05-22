@@ -14,6 +14,7 @@ import {
   humanInTheLoopApi,
   runsApi,
 } from "./api-client";
+import { mutateBoardRunCaches } from "./board-cache";
 import { queryKeys } from "./query-keys";
 import type { LifecycleAction, LifecycleActionError } from "./run-actions";
 import {
@@ -97,7 +98,7 @@ function useLifecycleMutation(
       onSuccess: (result) => {
         if (!id || !result.ok) return;
         void mutate(queryKeys.runs.detail(id));
-        void mutate(queryKeys.boards.runs());
+        mutateBoardRunCaches(mutate);
         void mutate(queryKeys.runs.billing(id));
       },
     },
@@ -116,8 +117,7 @@ export function useUpdateRunTitle(id: string | undefined) {
       onSuccess: (run) => {
         if (!id) return;
         void mutate(queryKeys.runs.detail(id), run, { revalidate: false });
-        void mutate(queryKeys.boards.runs());
-        void mutate(queryKeys.boards.runs(true));
+        mutateBoardRunCaches(mutate);
       },
     },
   );

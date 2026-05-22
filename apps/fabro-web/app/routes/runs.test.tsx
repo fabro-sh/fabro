@@ -3,6 +3,7 @@ import type { BoardColumn, Run } from "@qltysh/fabro-api-client";
 
 import {
   buildBoardColumns,
+  placeArchivedColumnLast,
   runsQuickStartCommands,
   shouldRefreshBoardForEvent,
 } from "./runs";
@@ -129,6 +130,45 @@ describe("runs route board mapping", () => {
     });
 
     expect(columns.some((column) => column.id === "archived")).toBe(false);
+  });
+
+  test("puts archived last when the archived view is active", () => {
+    const columns = buildBoardColumns({
+      columns: [
+        { id: "queued", name: "Queued" },
+        { id: "initializing", name: "Initializing" },
+        { id: "running", name: "Running" },
+        { id: "blocked", name: "Blocked" },
+        { id: "succeeded", name: "Succeeded" },
+        { id: "failed", name: "Failed" },
+        { id: "archived", name: "Archived" },
+      ],
+      data: [
+        boardRun("running-run", "running"),
+        boardRun("succeeded-run", "succeeded"),
+        boardRun("archived-run", "archived"),
+      ],
+      meta: { has_more: false },
+    });
+
+    expect(placeArchivedColumnLast(columns, true).map((column) => column.id)).toEqual([
+      "queued",
+      "initializing",
+      "running",
+      "blocked",
+      "succeeded",
+      "failed",
+      "archived",
+    ]);
+    expect(placeArchivedColumnLast(columns, false).map((column) => column.id)).toEqual([
+      "queued",
+      "initializing",
+      "running",
+      "blocked",
+      "succeeded",
+      "failed",
+      "archived",
+    ]);
   });
 
   test("refreshes for blocked status and interview events", () => {
