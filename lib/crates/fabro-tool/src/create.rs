@@ -19,7 +19,7 @@ pub struct FabroRunCreateParams {
 #[derive(Debug)]
 pub enum CreateRunSpecInput {
     Workflow(String),
-    Spec(CreateRunSpec),
+    Spec(Box<CreateRunSpec>),
 }
 
 impl<'de> Deserialize<'de> for CreateRunSpecInput {
@@ -31,6 +31,7 @@ impl<'de> Deserialize<'de> for CreateRunSpecInput {
         match value {
             Value::String(workflow) => Ok(Self::Workflow(workflow)),
             Value::Object(_) => CreateRunSpec::deserialize(value)
+                .map(Box::new)
                 .map(Self::Spec)
                 .map_err(de::Error::custom),
             other => Err(de::Error::custom(format!(
@@ -54,7 +55,7 @@ fn json_value_kind(value: &Value) -> &'static str {
 
 impl From<CreateRunSpec> for CreateRunSpecInput {
     fn from(spec: CreateRunSpec) -> Self {
-        Self::Spec(spec)
+        Self::Spec(Box::new(spec))
     }
 }
 
@@ -308,7 +309,7 @@ impl TryFrom<CreateRunSpecInput> for ValidatedCreateRunSpec {
                     start:            None,
                 })
             }
-            CreateRunSpecInput::Spec(spec) => Self::try_from(spec),
+            CreateRunSpecInput::Spec(spec) => Self::try_from(*spec),
         }
     }
 }
