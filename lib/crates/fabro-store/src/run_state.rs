@@ -489,53 +489,9 @@ fn apply_todo_created(state: &mut RunProjection, props: &TodoCreatedProps) {
 }
 
 fn apply_todo_updated(state: &mut RunProjection, props: &TodoUpdatedProps) {
-    let Some(list) = state.todos_by_list.get_mut(&props.list_id) else {
-        return;
-    };
-    let Some(index) = list.items.iter().position(|todo| todo.id == props.todo_id) else {
-        return;
-    };
-    let mut todo = list.items[index].clone();
-    if let Some(status) = props.status {
-        todo.status = status;
+    if let Some(list) = state.todos_by_list.get_mut(&props.list_id) {
+        list.apply_patch(&props.todo_id, &fabro_types::TodoPatch::from_props(props));
     }
-    if let Some(order) = props.order {
-        todo.order = order;
-    }
-    if let Some(subject) = props.subject.as_ref() {
-        todo.subject.clone_from(subject);
-    }
-    if let Some(description) = props.description.as_ref() {
-        todo.description.clone_from(description);
-    }
-    if let Some(active_form) = props.active_form.as_ref() {
-        todo.active_form.clone_from(active_form);
-    }
-    if let Some(owner) = props.owner.as_ref() {
-        todo.owner.clone_from(owner);
-    }
-    if let Some(add_blocks) = props.add_blocks.as_ref() {
-        for id in add_blocks {
-            if !todo.blocks.contains(id) {
-                todo.blocks.push(id.clone());
-            }
-        }
-    }
-    if let Some(add_blocked_by) = props.add_blocked_by.as_ref() {
-        for id in add_blocked_by {
-            if !todo.blocked_by.contains(id) {
-                todo.blocked_by.push(id.clone());
-            }
-        }
-    }
-    for (key, value) in &props.metadata_patch {
-        if value.is_null() {
-            todo.metadata.remove(key);
-        } else {
-            todo.metadata.insert(key.clone(), value.clone());
-        }
-    }
-    list.upsert(todo);
 }
 
 fn apply_todo_deleted(state: &mut RunProjection, props: &TodoDeletedProps) {

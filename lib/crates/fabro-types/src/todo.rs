@@ -14,6 +14,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString, IntoStaticStr};
 
 /// Lifecycle status for a todo / task.
 ///
@@ -21,8 +22,21 @@ use serde::{Deserialize, Serialize};
 /// `status: "deleted"` in `TaskUpdate`). The projection treats it as a hard
 /// delete: any `todo.updated` carrying `status: Deleted` is followed by a
 /// `todo.deleted` event and the todo disappears from the projected list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    IntoStaticStr,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum TodoStatus {
     Pending,
     InProgress,
@@ -30,46 +44,41 @@ pub enum TodoStatus {
     Deleted,
 }
 
-impl TodoStatus {
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::InProgress => "in_progress",
-            Self::Completed => "completed",
-            Self::Deleted => "deleted",
-        }
-    }
-}
-
 /// Scoping convention for a [`TodoListProjection`].
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    IntoStaticStr,
+)]
 pub enum TodoListKind {
     /// `update_plan` (OpenAI Codex-compatible). Scoped to the emitting
     /// session.
     #[default]
+    #[serde(rename = "openai_plan")]
+    #[strum(to_string = "openai_plan")]
     OpenAiPlan,
     /// `TaskCreate` / `TaskUpdate` / `TaskList` (Anthropic). Scoped to the
     /// root agent session and shared by subagent sessions.
+    #[serde(rename = "anthropic_tasks")]
+    #[strum(to_string = "anthropic_tasks")]
     AnthropicTasks,
 }
 
 impl TodoListKind {
-    /// Wire prefix used in list identifiers.
-    #[must_use]
-    pub fn prefix(self) -> &'static str {
-        match self {
-            Self::OpenAiPlan => "openai_plan",
-            Self::AnthropicTasks => "anthropic_tasks",
-        }
-    }
-
     /// Build the list identifier (`"<prefix>:<session>"`) used as the
     /// projection key.
     #[must_use]
     pub fn list_id(self, session: &str) -> String {
-        format!("{}:{}", self.prefix(), session)
+        format!("{}:{}", <&'static str>::from(self), session)
     }
 }
 
@@ -122,6 +131,95 @@ impl TodoProjection {
             metadata: BTreeMap::new(),
         }
     }
+
+    /// Apply a [`TodoPatch`] in place. `add_blocks` / `add_blocked_by`
+    /// dedupe against existing entries. `metadata_patch` keys with a `null`
+    /// JSON value delete that key; non-null values overwrite. Returns
+    /// whether the `order` field changed (used by [`TodoListProjection`]
+    /// to decide whether to re-sort).
+    pub fn apply_patch(&mut self, patch: &TodoPatch<'_>) -> bool {
+        let order_changed = patch.order.is_some_and(|o| o != self.order);
+        if let Some(status) = patch.status {
+            self.status = status;
+        }
+        if let Some(order) = patch.order {
+            self.order = order;
+        }
+        if let Some(subject) = patch.subject {
+            self.subject.clear();
+            self.subject.push_str(subject);
+        }
+        if let Some(description) = patch.description {
+            self.description.clear();
+            self.description.push_str(description);
+        }
+        if let Some(active_form) = patch.active_form.as_ref() {
+            self.active_form.clone_from(active_form);
+        }
+        if let Some(owner) = patch.owner.as_ref() {
+            self.owner.clone_from(owner);
+        }
+        if let Some(extra) = patch.add_blocks {
+            for id in extra {
+                if !self.blocks.iter().any(|x| x == id) {
+                    self.blocks.push(id.clone());
+                }
+            }
+        }
+        if let Some(extra) = patch.add_blocked_by {
+            for id in extra {
+                if !self.blocked_by.iter().any(|x| x == id) {
+                    self.blocked_by.push(id.clone());
+                }
+            }
+        }
+        for (key, value) in patch.metadata_patch {
+            if value.is_null() {
+                self.metadata.remove(key);
+            } else {
+                self.metadata.insert(key.clone(), value.clone());
+            }
+        }
+        order_changed
+    }
+}
+
+/// Borrowed view of a `todo.updated` patch shared by the in-memory runtime
+/// (`fabro-agent`) and the persisted-event reducer (`fabro-store`). Each
+/// field follows the same "absent = no change" convention as
+/// `TodoUpdatedProps`. `active_form` / `owner` are double-`Option` to
+/// distinguish "unchanged" from "cleared".
+#[derive(Debug, Clone, Copy)]
+pub struct TodoPatch<'a> {
+    pub status:         Option<TodoStatus>,
+    pub order:          Option<u32>,
+    pub subject:        Option<&'a str>,
+    pub description:    Option<&'a str>,
+    pub active_form:    Option<&'a Option<String>>,
+    pub owner:          Option<&'a Option<String>>,
+    pub add_blocks:     Option<&'a [String]>,
+    pub add_blocked_by: Option<&'a [String]>,
+    pub metadata_patch: &'a BTreeMap<String, serde_json::Value>,
+}
+
+impl<'a> TodoPatch<'a> {
+    /// Borrow a [`TodoUpdatedProps`](super::run_event::TodoUpdatedProps) as
+    /// a patch view. Used by the `fabro-store` reducer when replaying
+    /// persisted events.
+    #[must_use]
+    pub fn from_props(props: &'a super::run_event::TodoUpdatedProps) -> Self {
+        Self {
+            status:         props.status,
+            order:          props.order,
+            subject:        props.subject.as_deref(),
+            description:    props.description.as_deref(),
+            active_form:    props.active_form.as_ref(),
+            owner:          props.owner.as_ref(),
+            add_blocks:     props.add_blocks.as_deref(),
+            add_blocked_by: props.add_blocked_by.as_deref(),
+            metadata_patch: &props.metadata_patch,
+        }
+    }
 }
 
 /// All currently-projected todos for one `list_id`.
@@ -163,11 +261,20 @@ impl TodoListProjection {
             Some(index) => self.items[index] = todo,
             None => self.items.push(todo),
         }
-        self.items.sort_by(|left, right| {
-            left.order
-                .cmp(&right.order)
-                .then_with(|| left.id.cmp(&right.id))
-        });
+        self.sort();
+    }
+
+    /// Apply `patch` to the todo with id `todo_id`, returning `true` when
+    /// the todo was found. Only re-sorts when `order` actually changed.
+    pub fn apply_patch(&mut self, todo_id: &str, patch: &TodoPatch<'_>) -> bool {
+        let Some(index) = self.items.iter().position(|t| t.id == todo_id) else {
+            return false;
+        };
+        let order_changed = self.items[index].apply_patch(patch);
+        if order_changed {
+            self.sort();
+        }
+        true
     }
 
     /// Remove a todo by id. Returns whether anything was removed.
@@ -175,6 +282,14 @@ impl TodoListProjection {
         let before = self.items.len();
         self.items.retain(|todo| todo.id != id);
         before != self.items.len()
+    }
+
+    fn sort(&mut self) {
+        self.items.sort_by(|left, right| {
+            left.order
+                .cmp(&right.order)
+                .then_with(|| left.id.cmp(&right.id))
+        });
     }
 }
 

@@ -9,8 +9,10 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use fabro_types::{TodoListKind, TodoListProjection, TodoProjection, TodoStatus};
-use serde_json::Value;
+use fabro_types::{
+    TodoCreatedProps, TodoDeletedProps, TodoListKind, TodoListProjection, TodoPatch,
+    TodoProjection, TodoStatus, TodoUpdatedProps,
+};
 
 use crate::tool_registry::ToolContext;
 use crate::types::AgentEvent;
@@ -46,120 +48,49 @@ impl TodoRuntime {
         list_id: String,
         todo: TodoProjection,
     ) {
+        let props = TodoCreatedProps {
+            list_id:     list_id.clone(),
+            list_kind:   kind,
+            todo_id:     todo.id.clone(),
+            status:      todo.status,
+            order:       todo.order,
+            subject:     todo.subject.clone(),
+            description: todo.description.clone(),
+            active_form: todo.active_form.clone(),
+            owner:       todo.owner.clone(),
+            blocks:      todo.blocks.clone(),
+            blocked_by:  todo.blocked_by.clone(),
+            metadata:    todo.metadata.clone(),
+        };
         {
             let mut guard = self.lists.lock().expect("todo runtime lock poisoned");
-            let list = guard
-                .entry(list_id.clone())
-                .or_insert_with(|| TodoListProjection::new(kind, list_id.clone()));
-            list.upsert(todo.clone());
+            guard
+                .entry(list_id)
+                .or_insert_with(|| TodoListProjection::new(kind, props.list_id.clone()))
+                .upsert(todo);
         }
-        ctx.emit_agent_event(AgentEvent::TodoCreated {
-            list_id,
-            list_kind: kind,
-            todo_id: todo.id,
-            status: todo.status,
-            order: todo.order,
-            subject: todo.subject,
-            description: todo.description,
-            active_form: todo.active_form,
-            owner: todo.owner,
-            blocks: todo.blocks,
-            blocked_by: todo.blocked_by,
-            metadata: todo.metadata,
-        });
+        ctx.emit_agent_event(AgentEvent::TodoCreated(props));
     }
 
     /// Apply a typed update patch and emit `todo.updated` (or `todo.deleted`
     /// if `status == Deleted`). Returns whether a todo was found.
-    pub fn update(&self, ctx: &ToolContext, patch: TodoUpdate<'_>) -> bool {
-        let TodoUpdate {
-            list_id,
-            kind,
-            todo_id,
-            status,
-            order,
-            subject,
-            description,
-            active_form,
-            owner,
-            add_blocks,
-            add_blocked_by,
-            metadata_patch,
-        } = patch;
-
+    pub fn update(&self, ctx: &ToolContext, props: TodoUpdatedProps) -> bool {
         // If the patch is a deletion, delegate to `delete` (atomic update).
-        if matches!(status, Some(TodoStatus::Deleted)) {
-            return self.delete(ctx, kind, list_id.to_string(), todo_id.to_string());
+        if matches!(props.status, Some(TodoStatus::Deleted)) {
+            return self.delete(ctx, props.list_kind, props.list_id, props.todo_id);
         }
 
-        let updated_event_payload;
-        {
+        let applied = {
             let mut guard = self.lists.lock().expect("todo runtime lock poisoned");
-            let Some(list) = guard.get_mut(list_id) else {
+            let Some(list) = guard.get_mut(&props.list_id) else {
                 return false;
             };
-            let Some(index) = list.items.iter().position(|item| item.id == todo_id) else {
-                return false;
-            };
-            let mut todo = list.items[index].clone();
-            if let Some(status) = status {
-                todo.status = status;
-            }
-            if let Some(order) = order {
-                todo.order = order;
-            }
-            if let Some(subject) = subject {
-                todo.subject = subject.to_string();
-            }
-            if let Some(description) = description {
-                todo.description = description.to_string();
-            }
-            if let Some(active_form) = active_form.clone() {
-                todo.active_form = active_form;
-            }
-            if let Some(owner) = owner.clone() {
-                todo.owner = owner;
-            }
-            if let Some(extra) = add_blocks.as_ref() {
-                for id in extra {
-                    if !todo.blocks.contains(id) {
-                        todo.blocks.push(id.clone());
-                    }
-                }
-            }
-            if let Some(extra) = add_blocked_by.as_ref() {
-                for id in extra {
-                    if !todo.blocked_by.contains(id) {
-                        todo.blocked_by.push(id.clone());
-                    }
-                }
-            }
-            for (key, value) in &metadata_patch {
-                if value.is_null() {
-                    todo.metadata.remove(key);
-                } else {
-                    todo.metadata.insert(key.clone(), value.clone());
-                }
-            }
-            list.upsert(todo);
-
-            updated_event_payload = AgentEvent::TodoUpdated {
-                list_id: list_id.to_string(),
-                list_kind: kind,
-                todo_id: todo_id.to_string(),
-                status,
-                order,
-                subject: subject.map(ToString::to_string),
-                description: description.map(ToString::to_string),
-                active_form,
-                owner,
-                add_blocks,
-                add_blocked_by,
-                metadata_patch,
-            };
+            list.apply_patch(&props.todo_id, &TodoPatch::from_props(&props))
+        };
+        if applied {
+            ctx.emit_agent_event(AgentEvent::TodoUpdated(props));
         }
-        ctx.emit_agent_event(updated_event_payload);
-        true
+        applied
     }
 
     /// Remove `todo_id` from `list_id` and emit `todo.deleted`. Returns
@@ -179,33 +110,14 @@ impl TodoRuntime {
             list.remove(&todo_id)
         };
         if removed {
-            ctx.emit_agent_event(AgentEvent::TodoDeleted {
+            ctx.emit_agent_event(AgentEvent::TodoDeleted(TodoDeletedProps {
                 list_id,
                 list_kind: kind,
                 todo_id,
-            });
+            }));
         }
         removed
     }
-}
-
-/// Strongly-typed input to [`TodoRuntime::update`]. `None` fields leave
-/// the corresponding column unchanged. `metadata_patch` keys with `null`
-/// values are deleted; non-null values overwrite.
-#[derive(Debug, Default)]
-pub struct TodoUpdate<'a> {
-    pub list_id:        &'a str,
-    pub kind:           TodoListKind,
-    pub todo_id:        &'a str,
-    pub status:         Option<TodoStatus>,
-    pub order:          Option<u32>,
-    pub subject:        Option<&'a str>,
-    pub description:    Option<&'a str>,
-    pub active_form:    Option<Option<String>>,
-    pub owner:          Option<Option<String>>,
-    pub add_blocks:     Option<Vec<String>>,
-    pub add_blocked_by: Option<Vec<String>>,
-    pub metadata_patch: BTreeMap<String, Value>,
 }
 
 #[cfg(test)]
@@ -241,7 +153,6 @@ mod tests {
             tool_env_provider: None,
             session_id: Some("ses_a".to_string()),
             root_session_id: Some("ses_a".to_string()),
-            tool_call_id: Some("call_1".to_string()),
             agent_event_emitter: Some(emitter),
         }
     }
@@ -251,32 +162,25 @@ mod tests {
         let runtime = TodoRuntime::new();
         let collector = Arc::new(CollectingEmitter::default());
         let ctx = ctx_with(collector.clone());
+        let list_id = TodoListKind::OpenAiPlan.list_id("ses_a");
 
         runtime.create(
             &ctx,
             TodoListKind::OpenAiPlan,
-            "openai_plan:ses_a".to_string(),
+            list_id.clone(),
             TodoProjection::new("a", 0, "first"),
         );
-        runtime.update(&ctx, TodoUpdate {
-            list_id: "openai_plan:ses_a",
-            kind: TodoListKind::OpenAiPlan,
-            todo_id: "a",
+        runtime.update(&ctx, TodoUpdatedProps {
             status: Some(TodoStatus::InProgress),
-            ..TodoUpdate::default()
+            ..TodoUpdatedProps::new(&list_id, TodoListKind::OpenAiPlan, "a")
         });
-        runtime.delete(
-            &ctx,
-            TodoListKind::OpenAiPlan,
-            "openai_plan:ses_a".to_string(),
-            "a".to_string(),
-        );
+        runtime.delete(&ctx, TodoListKind::OpenAiPlan, list_id, "a".to_string());
 
         let events = collector.events.lock().unwrap().clone();
         assert_eq!(events.len(), 3);
-        assert!(matches!(events[0], AgentEvent::TodoCreated { .. }));
-        assert!(matches!(events[1], AgentEvent::TodoUpdated { .. }));
-        assert!(matches!(events[2], AgentEvent::TodoDeleted { .. }));
+        assert!(matches!(events[0], AgentEvent::TodoCreated(_)));
+        assert!(matches!(events[1], AgentEvent::TodoUpdated(_)));
+        assert!(matches!(events[2], AgentEvent::TodoDeleted(_)));
     }
 
     #[test]
@@ -284,30 +188,22 @@ mod tests {
         let runtime = TodoRuntime::new();
         let collector = Arc::new(CollectingEmitter::default());
         let ctx = ctx_with(collector.clone());
+        let list_id = TodoListKind::AnthropicTasks.list_id("r");
 
         runtime.create(
             &ctx,
             TodoListKind::AnthropicTasks,
-            "anthropic_tasks:r".to_string(),
+            list_id.clone(),
             TodoProjection::new("1", 0, "task"),
         );
-        runtime.update(&ctx, TodoUpdate {
-            list_id: "anthropic_tasks:r",
-            kind: TodoListKind::AnthropicTasks,
-            todo_id: "1",
+        runtime.update(&ctx, TodoUpdatedProps {
             status: Some(TodoStatus::Deleted),
-            ..TodoUpdate::default()
+            ..TodoUpdatedProps::new(&list_id, TodoListKind::AnthropicTasks, "1")
         });
 
         let events = collector.events.lock().unwrap().clone();
-        assert!(matches!(events[1], AgentEvent::TodoDeleted { .. }));
-        assert!(
-            runtime
-                .snapshot("anthropic_tasks:r")
-                .unwrap()
-                .items
-                .is_empty()
-        );
+        assert!(matches!(events[1], AgentEvent::TodoDeleted(_)));
+        assert!(runtime.snapshot(&list_id).unwrap().items.is_empty());
     }
 
     #[test]
@@ -315,12 +211,11 @@ mod tests {
         let runtime = TodoRuntime::new();
         let collector = Arc::new(CollectingEmitter::default());
         let ctx = ctx_with(collector);
-        let found = runtime.update(&ctx, TodoUpdate {
-            list_id: "anthropic_tasks:r",
-            kind: TodoListKind::AnthropicTasks,
-            todo_id: "missing",
-            ..TodoUpdate::default()
-        });
+        let list_id = TodoListKind::AnthropicTasks.list_id("r");
+        let found = runtime.update(
+            &ctx,
+            TodoUpdatedProps::new(&list_id, TodoListKind::AnthropicTasks, "missing"),
+        );
         assert!(!found);
     }
 }

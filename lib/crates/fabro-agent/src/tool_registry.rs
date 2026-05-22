@@ -28,30 +28,11 @@ pub struct ToolContext {
     /// Root session for this session's agent tree. Equal to `session_id`
     /// for the root agent; subagent sessions inherit the parent's root.
     pub root_session_id:     Option<String>,
-    /// Tool call ID assigned by the model. Threaded into emitted run events
-    /// so the UI can correlate event lines to the originating tool call.
-    pub tool_call_id:        Option<String>,
     /// Narrow emitter for typed agent events (todo mutations and similar).
     pub agent_event_emitter: Option<Arc<dyn AgentEventEmitter>>,
 }
 
 impl ToolContext {
-    /// Construct a minimal context (no session metadata, no emitter, no env
-    /// provider). Useful for tools that do not need session identity, and
-    /// for ad-hoc tests.
-    #[must_use]
-    pub fn minimal(env: Arc<dyn Sandbox>, cancel: CancellationToken) -> Self {
-        Self {
-            env,
-            cancel,
-            tool_env_provider: None,
-            session_id: None,
-            root_session_id: None,
-            tool_call_id: None,
-            agent_event_emitter: None,
-        }
-    }
-
     pub async fn resolve_tool_env(&self) -> anyhow::Result<Option<HashMap<String, String>>> {
         match &self.tool_env_provider {
             Some(provider) => Ok(Some(provider.resolve().await?)),
@@ -236,7 +217,6 @@ mod tests {
             tool_env_provider: None,
             session_id: None,
             root_session_id: None,
-            tool_call_id: None,
             agent_event_emitter: None,
         };
         let result = (tool.executor)(serde_json::json!({}), ctx).await;

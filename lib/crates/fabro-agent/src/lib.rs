@@ -57,7 +57,7 @@ pub use skills::Skill;
 pub use subagent::{
     SubAgent, SubAgentEventCallback, SubAgentManager, SubAgentResult, SubAgentStatus,
 };
-pub use todo_runtime::{TodoRuntime, TodoUpdate};
+pub use todo_runtime::TodoRuntime;
 pub use todo_tools::{
     make_task_create_tool, make_task_list_tool, make_task_update_tool, make_update_plan_tool,
 };

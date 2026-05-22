@@ -6,16 +6,17 @@
 //! - [`make_task_create_tool`] / [`make_task_update_tool`] /
 //!   [`make_task_list_tool`] — Claude task tools.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use fabro_llm::types::ToolDefinition;
-use fabro_types::{TodoListKind, TodoProjection, TodoStatus};
+use fabro_types::{TodoListKind, TodoProjection, TodoStatus, TodoUpdatedProps};
 use serde_json::Value;
 
-use crate::todo_runtime::{TodoRuntime, TodoUpdate};
+use crate::todo_runtime::TodoRuntime;
 use crate::tool_registry::{RegisteredTool, ToolContext};
 
 /// Compute the OpenAI plan scope (`openai_plan:<session_id>`). Returns an
@@ -38,27 +39,22 @@ fn anthropic_task_scope(ctx: &ToolContext) -> Result<String, String> {
         .ok_or_else(|| "task tools require an active session".to_string())
 }
 
-fn parse_openai_status(value: &str) -> Result<TodoStatus, String> {
-    match value {
-        "pending" => Ok(TodoStatus::Pending),
-        "in_progress" => Ok(TodoStatus::InProgress),
-        "completed" => Ok(TodoStatus::Completed),
-        other => Err(format!(
-            "Invalid status `{other}` (expected pending|in_progress|completed)"
-        )),
+/// Parse a wire status string into a [`TodoStatus`], optionally rejecting
+/// `"deleted"` (OpenAI's `update_plan` does not accept deletions).
+fn parse_status(value: &str, allow_deleted: bool) -> Result<TodoStatus, String> {
+    let status = TodoStatus::from_str(value).map_err(|_| {
+        if allow_deleted {
+            format!("Invalid status `{value}` (expected pending|in_progress|completed|deleted)")
+        } else {
+            format!("Invalid status `{value}` (expected pending|in_progress|completed)")
+        }
+    })?;
+    if !allow_deleted && status == TodoStatus::Deleted {
+        return Err(format!(
+            "Invalid status `{value}` (expected pending|in_progress|completed)"
+        ));
     }
-}
-
-fn parse_anthropic_status(value: &str) -> Result<TodoStatus, String> {
-    match value {
-        "pending" => Ok(TodoStatus::Pending),
-        "in_progress" => Ok(TodoStatus::InProgress),
-        "completed" => Ok(TodoStatus::Completed),
-        "deleted" => Ok(TodoStatus::Deleted),
-        other => Err(format!(
-            "Invalid status `{other}` (expected pending|in_progress|completed|deleted)"
-        )),
-    }
+    Ok(status)
 }
 
 /// Deterministic todo id derived from `<list_id>::<step>`. Codex identifies
@@ -122,78 +118,74 @@ pub fn make_update_plan_tool(runtime: Arc<TodoRuntime>) -> RegisteredTool {
                     .and_then(Value::as_array)
                     .ok_or_else(|| "Missing required parameter: plan".to_string())?;
 
-                // Parse incoming steps and enforce step-text uniqueness.
-                let mut incoming: Vec<(String, TodoStatus)> = Vec::with_capacity(plan.len());
-                let mut seen: BTreeSet<String> = BTreeSet::new();
+                // Parse incoming steps, precompute ids, and enforce step-text uniqueness.
+                let mut incoming: Vec<(String, String, TodoStatus)> =
+                    Vec::with_capacity(plan.len());
+                let mut seen_steps: HashSet<&str> = HashSet::with_capacity(plan.len());
                 for (index, entry) in plan.iter().enumerate() {
                     let step = entry
                         .get("step")
                         .and_then(Value::as_str)
-                        .ok_or_else(|| format!("plan[{index}] is missing `step`"))?
-                        .to_string();
+                        .ok_or_else(|| format!("plan[{index}] is missing `step`"))?;
                     let status = entry
                         .get("status")
                         .and_then(Value::as_str)
                         .ok_or_else(|| format!("plan[{index}] is missing `status`"))?;
-                    let status = parse_openai_status(status)?;
-                    if !seen.insert(step.clone()) {
+                    let status = parse_status(status, false)?;
+                    if !seen_steps.insert(step) {
                         return Err(format!(
                             "Duplicate plan step `{step}` — step text must be unique"
                         ));
                     }
-                    incoming.push((step, status));
+                    let todo_id = openai_step_id(&list_id, step);
+                    incoming.push((todo_id, step.to_string(), status));
                 }
 
-                let previous = runtime
+                // Snapshot previous state into a HashMap for O(1) lookup.
+                let previous: HashMap<String, TodoProjection> = runtime
                     .snapshot(&list_id)
-                    .map(|list| list.items)
+                    .map(|list| list.items.into_iter().map(|t| (t.id.clone(), t)).collect())
                     .unwrap_or_default();
-                let previous_ids: BTreeSet<String> =
-                    previous.iter().map(|todo| todo.id.clone()).collect();
-
-                let incoming_ids: BTreeSet<String> = incoming
-                    .iter()
-                    .map(|(step, _)| openai_step_id(&list_id, step))
-                    .collect();
+                let incoming_ids: HashSet<&str> =
+                    incoming.iter().map(|(id, _, _)| id.as_str()).collect();
 
                 // Deletes: anything in previous but not in incoming.
-                for todo in &previous {
-                    if !incoming_ids.contains(&todo.id) {
-                        runtime.delete(
-                            &ctx,
-                            TodoListKind::OpenAiPlan,
-                            list_id.clone(),
-                            todo.id.clone(),
-                        );
+                for id in previous.keys() {
+                    if !incoming_ids.contains(id.as_str()) {
+                        runtime.delete(&ctx, TodoListKind::OpenAiPlan, list_id.clone(), id.clone());
                     }
                 }
 
-                // Upserts: each incoming step becomes a create (new) or
-                // update (existing id with changed status/order).
-                for (index, (step, status)) in incoming.iter().enumerate() {
-                    let todo_id = openai_step_id(&list_id, step);
+                // Upserts: each incoming step becomes a create (new) or update.
+                for (index, (todo_id, step, status)) in incoming.iter().enumerate() {
                     let order = u32::try_from(index).unwrap_or(u32::MAX);
-                    if previous_ids.contains(&todo_id) {
-                        let prev = previous
-                            .iter()
-                            .find(|todo| todo.id == todo_id)
-                            .expect("previous_ids consistency");
-                        if prev.status == *status && prev.order == order && prev.subject == *step {
-                            continue;
+                    match previous.get(todo_id) {
+                        Some(prev)
+                            if prev.status == *status
+                                && prev.order == order
+                                && prev.subject == *step =>
+                        {
+                            // No change.
                         }
-                        runtime.update(&ctx, TodoUpdate {
-                            list_id: &list_id,
-                            kind: TodoListKind::OpenAiPlan,
-                            todo_id: &todo_id,
-                            status: Some(*status),
-                            order: Some(order),
-                            subject: Some(step.as_str()),
-                            ..TodoUpdate::default()
-                        });
-                    } else {
-                        let mut projection = TodoProjection::new(todo_id, order, step.clone());
-                        projection.status = *status;
-                        runtime.create(&ctx, TodoListKind::OpenAiPlan, list_id.clone(), projection);
+                        Some(_) => {
+                            runtime.update(&ctx, TodoUpdatedProps {
+                                status: Some(*status),
+                                order: Some(order),
+                                subject: Some(step.clone()),
+                                ..TodoUpdatedProps::new(&list_id, TodoListKind::OpenAiPlan, todo_id)
+                            });
+                        }
+                        None => {
+                            let mut projection =
+                                TodoProjection::new(todo_id.clone(), order, step.clone());
+                            projection.status = *status;
+                            runtime.create(
+                                &ctx,
+                                TodoListKind::OpenAiPlan,
+                                list_id.clone(),
+                                projection,
+                            );
+                        }
                     }
                 }
 
@@ -223,6 +215,32 @@ impl AnthropicTaskCounters {
         };
         counter.fetch_add(1, Ordering::Relaxed) + 1
     }
+}
+
+fn optional_string(args: &Value, key: &str) -> Option<String> {
+    args.get(key)
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+}
+
+fn optional_string_vec(args: &Value, key: &str) -> Option<Vec<String>> {
+    args.get(key).and_then(Value::as_array).map(|values| {
+        values
+            .iter()
+            .filter_map(|v| v.as_str().map(ToString::to_string))
+            .collect()
+    })
+}
+
+fn metadata_map(args: &Value) -> BTreeMap<String, Value> {
+    args.get("metadata")
+        .and_then(Value::as_object)
+        .map(|map| {
+            map.iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect::<BTreeMap<_, _>>()
+        })
+        .unwrap_or_default()
 }
 
 #[must_use]
@@ -258,27 +276,14 @@ pub fn make_task_create_tool(runtime: Arc<TodoRuntime>) -> RegisteredTool {
                     .and_then(Value::as_str)
                     .ok_or_else(|| "Missing required parameter: description".to_string())?
                     .to_string();
-                let active_form = args
-                    .get("activeForm")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string);
-                let metadata = args
-                    .get("metadata")
-                    .and_then(Value::as_object)
-                    .map(|map| {
-                        map.iter()
-                            .map(|(k, v)| (k.clone(), v.clone()))
-                            .collect::<BTreeMap<_, _>>()
-                    })
-                    .unwrap_or_default();
                 let task_id = counters.next(&list_id);
                 let id_string = task_id.to_string();
                 let order = u32::try_from(task_id.saturating_sub(1)).unwrap_or(u32::MAX);
 
-                let mut projection = TodoProjection::new(id_string.clone(), order, subject.clone());
+                let mut projection = TodoProjection::new(id_string, order, subject.clone());
                 projection.description = description;
-                projection.active_form = active_form;
-                projection.metadata = metadata;
+                projection.active_form = optional_string(&args, "activeForm");
+                projection.metadata = metadata_map(&args);
 
                 runtime.create(&ctx, TodoListKind::AnthropicTasks, list_id, projection);
 
@@ -326,71 +331,27 @@ pub fn make_task_update_tool(runtime: Arc<TodoRuntime>) -> RegisteredTool {
                 let status = args
                     .get("status")
                     .and_then(Value::as_str)
-                    .map(parse_anthropic_status)
+                    .map(|s| parse_status(s, true))
                     .transpose()?;
-                let subject = args
-                    .get("subject")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string);
-                let description = args
-                    .get("description")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string);
-                let active_form = args
-                    .get("activeForm")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string);
-                let owner = args
-                    .get("owner")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string);
-                let add_blocks = args
-                    .get("addBlocks")
-                    .and_then(Value::as_array)
-                    .map(|values| {
-                        values
-                            .iter()
-                            .filter_map(|v| v.as_str().map(ToString::to_string))
-                            .collect::<Vec<_>>()
-                    });
-                let add_blocked_by =
-                    args.get("addBlockedBy")
-                        .and_then(Value::as_array)
-                        .map(|values| {
-                            values
-                                .iter()
-                                .filter_map(|v| v.as_str().map(ToString::to_string))
-                                .collect::<Vec<_>>()
-                        });
-                let metadata_patch = args
-                    .get("metadata")
-                    .and_then(Value::as_object)
-                    .map(|map| {
-                        map.iter()
-                            .map(|(k, v)| (k.clone(), v.clone()))
-                            .collect::<BTreeMap<_, _>>()
-                    })
-                    .unwrap_or_default();
 
-                let found = runtime.update(&ctx, TodoUpdate {
-                    list_id: &list_id,
-                    kind: TodoListKind::AnthropicTasks,
-                    todo_id: &task_id,
+                let props = TodoUpdatedProps {
                     status,
-                    order: None,
-                    subject: subject.as_deref(),
-                    description: description.as_deref(),
-                    active_form: Some(active_form),
-                    owner: Some(owner),
-                    add_blocks,
-                    add_blocked_by,
-                    metadata_patch,
-                });
-                if !found {
+                    subject: optional_string(&args, "subject"),
+                    description: optional_string(&args, "description"),
+                    active_form: Some(optional_string(&args, "activeForm")),
+                    owner: Some(optional_string(&args, "owner")),
+                    add_blocks: optional_string_vec(&args, "addBlocks"),
+                    add_blocked_by: optional_string_vec(&args, "addBlockedBy"),
+                    metadata_patch: metadata_map(&args),
+                    ..TodoUpdatedProps::new(&list_id, TodoListKind::AnthropicTasks, &task_id)
+                };
+
+                if runtime.update(&ctx, props) {
+                    Ok(format!("Task #{task_id} updated"))
+                } else {
                     // Anthropic spec: missing task returns a non-error result.
-                    return Ok("Task not found".to_string());
+                    Ok("Task not found".to_string())
                 }
-                Ok(format!("Task #{task_id} updated"))
             })
         }),
     }
@@ -417,39 +378,30 @@ pub fn make_task_list_tool(runtime: Arc<TodoRuntime>) -> RegisteredTool {
                 if items.is_empty() {
                     return Ok("No tasks found".to_string());
                 }
+                // Pre-build a status lookup so the per-row blocker filter is
+                // O(B) rather than O(B * N).
+                let status_by_id: HashMap<&str, TodoStatus> =
+                    items.iter().map(|t| (t.id.as_str(), t.status)).collect();
+
                 let mut out = String::new();
                 for todo in items {
-                    let _ = write!(
-                        out,
-                        "#{} [{}] {}",
-                        todo.id,
-                        todo.status.as_str(),
-                        todo.subject
-                    );
+                    let _ = write!(out, "#{} [{}] {}", todo.id, todo.status, todo.subject);
                     if let Some(owner) = todo.owner.as_ref() {
                         let _ = write!(out, " (owner: {owner})");
                     }
                     // Uncompleted blockers only — Claude's convention.
-                    let active_blockers: Vec<&String> = todo
-                        .blocked_by
-                        .iter()
-                        .filter(|id| {
-                            items
-                                .iter()
-                                .find(|other| &&other.id == id)
-                                .is_none_or(|blocker| blocker.status != TodoStatus::Completed)
-                        })
-                        .collect();
-                    if !active_blockers.is_empty() {
-                        let _ = write!(
-                            out,
-                            " (blocked by: {})",
-                            active_blockers
-                                .iter()
-                                .map(|s| s.as_str())
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        );
+                    let mut blockers = todo.blocked_by.iter().filter(|id| {
+                        status_by_id
+                            .get(id.as_str())
+                            .copied()
+                            .is_none_or(|s| s != TodoStatus::Completed)
+                    });
+                    if let Some(first) = blockers.next() {
+                        let _ = write!(out, " (blocked by: {first}");
+                        for blocker in blockers {
+                            let _ = write!(out, ", {blocker}");
+                        }
+                        out.push(')');
                     }
                     out.push('\n');
                 }
@@ -485,9 +437,16 @@ mod tests {
             tool_env_provider: None,
             session_id: Some(session.to_string()),
             root_session_id: Some(root.to_string()),
-            tool_call_id: Some("call_1".to_string()),
             agent_event_emitter: Some(Arc::new(SilentEmitter)),
         }
+    }
+
+    fn openai_list(session: &str) -> String {
+        TodoListKind::OpenAiPlan.list_id(session)
+    }
+
+    fn anthropic_list(session: &str) -> String {
+        TodoListKind::AnthropicTasks.list_id(session)
     }
 
     #[tokio::test]
@@ -507,9 +466,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(out, "Plan updated");
-        let list = runtime
-            .snapshot(&TodoListKind::OpenAiPlan.list_id("ses_a"))
-            .unwrap();
+        let list = runtime.snapshot(&openai_list("ses_a")).unwrap();
         assert_eq!(list.items.len(), 2);
         assert_eq!(list.items[0].subject, "a");
         assert_eq!(list.items[1].subject, "b");
@@ -520,7 +477,6 @@ mod tests {
     async fn update_plan_updates_status_and_order() {
         let runtime = Arc::new(TodoRuntime::new());
         let tool = make_update_plan_tool(runtime.clone());
-        let ctx = ctx_for("ses_a", "ses_a");
         (tool.executor)(
             serde_json::json!({
                 "plan": [
@@ -528,11 +484,10 @@ mod tests {
                     {"step": "b", "status": "pending"},
                 ]
             }),
-            ctx,
+            ctx_for("ses_a", "ses_a"),
         )
         .await
         .unwrap();
-        let ctx = ctx_for("ses_a", "ses_a");
         (tool.executor)(
             serde_json::json!({
                 "plan": [
@@ -540,13 +495,11 @@ mod tests {
                     {"step": "a", "status": "completed"},
                 ]
             }),
-            ctx,
+            ctx_for("ses_a", "ses_a"),
         )
         .await
         .unwrap();
-        let list = runtime
-            .snapshot(&TodoListKind::OpenAiPlan.list_id("ses_a"))
-            .unwrap();
+        let list = runtime.snapshot(&openai_list("ses_a")).unwrap();
         assert_eq!(list.items.len(), 2);
         assert_eq!(list.items[0].subject, "b");
         assert_eq!(list.items[0].status, TodoStatus::InProgress);
@@ -578,9 +531,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let list = runtime
-            .snapshot(&TodoListKind::OpenAiPlan.list_id("ses_a"))
-            .unwrap();
+        let list = runtime.snapshot(&openai_list("ses_a")).unwrap();
         assert_eq!(list.items.len(), 1);
         assert_eq!(list.items[0].subject, "b");
     }
@@ -620,12 +571,8 @@ mod tests {
         )
         .await
         .unwrap();
-        let parent = runtime
-            .snapshot(&TodoListKind::OpenAiPlan.list_id("ses_parent"))
-            .unwrap();
-        let child = runtime
-            .snapshot(&TodoListKind::OpenAiPlan.list_id("ses_child"))
-            .unwrap();
+        let parent = runtime.snapshot(&openai_list("ses_parent")).unwrap();
+        let child = runtime.snapshot(&openai_list("ses_child")).unwrap();
         assert_eq!(parent.items.len(), 1);
         assert_eq!(parent.items[0].subject, "parent_step");
         assert_eq!(child.items.len(), 1);
@@ -643,9 +590,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(out, "Task #1 created successfully: Do thing");
-        let list = runtime
-            .snapshot(&TodoListKind::AnthropicTasks.list_id("ses_a"))
-            .unwrap();
+        let list = runtime.snapshot(&anthropic_list("ses_a")).unwrap();
         assert_eq!(list.items.len(), 1);
         assert_eq!(list.items[0].id, "1");
         assert_eq!(list.items[0].subject, "Do thing");
@@ -719,9 +664,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let list = runtime
-            .snapshot(&TodoListKind::AnthropicTasks.list_id("ses_a"))
-            .unwrap();
+        let list = runtime.snapshot(&anthropic_list("ses_a")).unwrap();
         let meta = &list.items[0].metadata;
         assert!(!meta.contains_key("k1"));
         assert_eq!(meta.get("k2"), Some(&serde_json::json!("v2")));
@@ -757,9 +700,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let list = runtime
-            .snapshot(&TodoListKind::AnthropicTasks.list_id("ses_a"))
-            .unwrap();
+        let list = runtime.snapshot(&anthropic_list("ses_a")).unwrap();
         assert_eq!(list.items[0].blocks, vec!["b1", "b2", "b3"]);
         assert_eq!(list.items[0].blocked_by, vec!["c1"]);
     }
@@ -807,14 +748,8 @@ mod tests {
         .unwrap();
 
         // Only one list keyed by the parent root.
-        assert!(
-            runtime
-                .snapshot(&TodoListKind::AnthropicTasks.list_id("ses_child"))
-                .is_none()
-        );
-        let list = runtime
-            .snapshot(&TodoListKind::AnthropicTasks.list_id("ses_parent"))
-            .unwrap();
+        assert!(runtime.snapshot(&anthropic_list("ses_child")).is_none());
+        let list = runtime.snapshot(&anthropic_list("ses_parent")).unwrap();
         assert_eq!(list.items.len(), 2);
     }
 }

@@ -59,6 +59,34 @@ pub struct TodoUpdatedProps {
     pub metadata_patch: BTreeMap<String, serde_json::Value>,
 }
 
+impl TodoUpdatedProps {
+    /// Build an empty patch targeting `todo_id` in `list_id`. All optional
+    /// patch fields default to "leave alone". Use the returned value with
+    /// struct-update syntax to fill in the fields the caller wants to
+    /// change.
+    #[must_use]
+    pub fn new(
+        list_id: impl Into<String>,
+        list_kind: TodoListKind,
+        todo_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            list_id: list_id.into(),
+            list_kind,
+            todo_id: todo_id.into(),
+            status: None,
+            order: None,
+            subject: None,
+            description: None,
+            active_form: None,
+            owner: None,
+            add_blocks: None,
+            add_blocked_by: None,
+            metadata_patch: BTreeMap::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TodoDeletedProps {
     pub list_id:   String,
