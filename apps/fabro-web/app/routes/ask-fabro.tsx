@@ -27,7 +27,11 @@ export default function AskFabro() {
     // grows by the vertical padding amount to recover the full viewport area.
     <div className="relative isolate -mx-4 -my-6 flex h-[calc(100%+3rem)] sm:-mx-6 lg:-mx-8">
       <DemoWorkspace isOpen={isOpen} onOpen={() => setIsOpen(true)} />
-      <AskFabroSidebar isOpen={isOpen} onClose={() => setIsOpen(false)} />
+      <AskFabroSidebar
+        isOpen={isOpen}
+        onClose={() => setIsOpen(false)}
+        runId="demo"
+      />
     </div>
   );
 }

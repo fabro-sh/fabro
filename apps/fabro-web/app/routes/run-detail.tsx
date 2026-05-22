@@ -22,13 +22,13 @@ import {
   useLocation,
   useMatches,
   useNavigate,
-  useSearchParams,
 } from "react-router";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 
 import AskFabroSidebar, {
   SIDEBAR_WIDTH,
 } from "../components/chats/ask-fabro-sidebar";
+import type { AskFabro } from "@qltysh/fabro-api-client";
 import { EditableRunTitle } from "../components/editable-run-title";
 import { GitPullRequestIcon } from "../components/icons";
 import { InterviewDock } from "../components/interview-dock";
@@ -360,12 +360,15 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const questionsQuery = useRunQuestions(params.id, isBlocked);
   const pendingQuestions = questionsQuery.data ?? [];
   const { pathname } = useLocation();
-  const [searchParams] = useSearchParams();
-  // The "Ask Fabro" assistant is gated behind ?ask=1 while the feature is in
-  // prototype: the trigger button and the docked sidebar only render then.
-  const askEnabled = searchParams.get("ask") === "1";
+  // Ask Fabro readiness is computed server-side per run: feature flag, the
+  // run's sandbox state, and whether any LLM provider is configured. The
+  // trigger button is always rendered for visibility; it disables when the
+  // server reports `available: false`, with a tooltip explaining why.
+  const askFabro = summary?.ask_fabro ?? null;
+  const askAvailable = askFabro?.available ?? false;
+  const askDefaultModel = askFabro?.default_model ?? null;
   const [askOpen, setAskOpen] = useState(false);
-  const sidebarWidth = askEnabled && askOpen ? SIDEBAR_WIDTH : 0;
+  const sidebarWidth = askAvailable && askOpen ? SIDEBAR_WIDTH : 0;
   const { setSidebarWidth } = useAskFabroLayout();
   const matches = useMatches();
   const basePath = `/runs/${params.id}`;
@@ -632,20 +635,11 @@ export default function RunDetail({ params }: { params: { id: string } }) {
           onCancel={() => void cancelMutation.trigger()}
         />
 
-        {askEnabled && (
-          <button
-            type="button"
-            onClick={() => setAskOpen(true)}
-            disabled={askOpen}
-            className={classNames(
-              SECONDARY_BUTTON_CLASS,
-              "disabled:cursor-not-allowed disabled:opacity-60",
-            )}
-          >
-            <SparklesIcon className="size-4 text-teal-300" aria-hidden="true" />
-            Ask Fabro
-          </button>
-        )}
+        <AskFabroTriggerButton
+          askFabro={askFabro}
+          askOpen={askOpen}
+          onOpen={() => setAskOpen(true)}
+        />
       </div>
 
       <ConfirmDialog
@@ -721,11 +715,16 @@ export default function RunDetail({ params }: { params: { id: string } }) {
         )}
       </div>
 
-      {askEnabled && (
+      {askAvailable && (
         // Docked below the top nav (h-16) and above the steer bar (z-30); the
         // sidebar animates its own width, so the wrapper collapses when closed.
         <div className="fixed top-16 right-0 bottom-0 z-40">
-          <AskFabroSidebar isOpen={askOpen} onClose={() => setAskOpen(false)} />
+          <AskFabroSidebar
+            isOpen={askOpen}
+            onClose={() => setAskOpen(false)}
+            runId={params.id}
+            defaultModel={askDefaultModel}
+          />
         </div>
       )}
     </div>
@@ -736,6 +735,46 @@ function isLifecycleActionFailure(
   value: RunDetailActionResult,
 ): value is Extract<LifecycleMutationResult, { ok: false }> {
   return "ok" in value && value.ok === false;
+}
+
+const ASK_FABRO_UNAVAILABLE_TOOLTIPS: Record<string, string> = {
+  feature_disabled:  "Ask Fabro is disabled",
+  no_sandbox:        "Run sandbox isn't ready",
+  sandbox_not_ready: "Run sandbox isn't ready",
+  llm_unconfigured:  "No LLM configured",
+};
+
+function AskFabroTriggerButton({
+  askFabro,
+  askOpen,
+  onOpen,
+}: {
+  askFabro: AskFabro | null;
+  askOpen: boolean;
+  onOpen: () => void;
+}) {
+  const available = askFabro?.available ?? false;
+  const disabled = !available || askOpen;
+  const unavailableReason = askFabro?.unavailable_reason ?? null;
+  const button = (
+    <button
+      type="button"
+      onClick={onOpen}
+      disabled={disabled}
+      className={classNames(
+        SECONDARY_BUTTON_CLASS,
+        "disabled:cursor-not-allowed disabled:opacity-60",
+      )}
+    >
+      <SparklesIcon className="size-4 text-teal-300" aria-hidden="true" />
+      Ask Fabro
+    </button>
+  );
+  if (!available && unavailableReason) {
+    const tooltip = ASK_FABRO_UNAVAILABLE_TOOLTIPS[unavailableReason] ?? "Ask Fabro is unavailable";
+    return <Tooltip label={tooltip}>{button}</Tooltip>;
+  }
+  return button;
 }
 
 export function handleLifecycleToastResult(
