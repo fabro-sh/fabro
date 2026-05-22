@@ -18,6 +18,7 @@ pub mod types {
         Model, ModelCosts, ModelFeatures, ModelLimits, ModelRef as BillingModelRef, ModelTestMode,
         Provider, ReasoningEffortFeature, Speed as BillingSpeed,
     };
+    pub use fabro_types::settings::ServerNamespace;
     pub use fabro_types::settings::server::{
         GithubIntegrationSettings, GithubIntegrationStrategy, IntegrationWebhooksSettings,
         IpAllowEntry, LogDestination, ObjectStoreSettings, ServerApiSettings,
@@ -27,7 +28,6 @@ pub mod types {
         ServerSlateDbSettings, ServerStorageSettings, ServerWebSettings, SlackIntegrationSettings,
         WebhookStrategy,
     };
-    pub use fabro_types::settings::{FeaturesNamespace, ServerNamespace};
     pub use fabro_types::status::{
         BlockedReason, FailureReason, RunControlAction, RunStatus, SuccessReason,
     };

@@ -1,10 +1,24 @@
+// Copyright 2026 OpenAI
+// SPDX-License-Identifier: Apache-2.0
+// Ported from openai/codex codex-rs/apply-patch at 932f72c225.
+
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 use fabro_llm::types::ToolDefinition;
 
-use crate::sandbox::{Sandbox, format_lines_numbered};
+use crate::sandbox::Sandbox;
 use crate::tool_registry::RegisteredTool;
-use crate::truncation::{TruncationMode, truncate_output};
+
+const APPLY_PATCH_LARK_GRAMMAR: &str = include_str!("apply_patch.lark");
+
+fn apply_patch_lark_grammar_definition() -> String {
+    APPLY_PATCH_LARK_GRAMMAR
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Change {
@@ -49,33 +63,17 @@ fn extract_context_line(line: &str) -> String {
     }
 }
 
-/// Parses a v4a format patch string into a list of patch operations.
+/// Parses Codex apply_patch text into a list of patch operations.
 ///
 /// # Errors
 /// Returns an error if the patch format is invalid.
-pub fn parse_v4a_patch(text: &str) -> Result<Vec<PatchOperation>, String> {
-    let mut lines: Vec<&str> = text.lines().collect();
+pub fn parse_apply_patch(text: &str) -> Result<Vec<PatchOperation>, String> {
+    let lines: Vec<&str> = text.trim().lines().collect();
+    let lines = patch_lines_with_valid_boundaries(&lines)?;
     let mut ops = Vec::new();
     let mut i = 0;
 
-    // Strip heredoc wrapper
-    if let Some(first) = lines.first() {
-        let trimmed = first.trim();
-        if (trimmed == "<<EOF" || trimmed == "<<'EOF'" || trimmed == "<<\"EOF\"")
-            && lines.last().map(|l| l.trim()) == Some("EOF")
-        {
-            lines = lines[1..lines.len() - 1].to_vec();
-        }
-    }
-
-    // Find "*** Begin Patch"
-    while i < lines.len() {
-        if lines[i].trim() == "*** Begin Patch" {
-            i += 1;
-            break;
-        }
-        i += 1;
-    }
+    i += 1;
 
     while i < lines.len() {
         let line = lines[i].trim();
@@ -88,20 +86,23 @@ pub fn parse_v4a_patch(text: &str) -> Result<Vec<PatchOperation>, String> {
             let path = path.to_string();
             i += 1;
             let mut content = String::new();
+            let mut add_lines = 0;
             while i < lines.len() {
                 let l = lines[i];
                 if l.starts_with("*** ") {
                     break;
                 }
                 if let Some(text_line) = l.strip_prefix('+') {
-                    if !content.is_empty() {
-                        content.push('\n');
-                    }
                     content.push_str(text_line);
+                    content.push('\n');
+                    add_lines += 1;
                 } else {
                     return Err(format!("Expected '+' prefix in Add File block, got: {l}"));
                 }
                 i += 1;
+            }
+            if add_lines == 0 {
+                return Err(format!("Add file hunk for path '{path}' is empty"));
             }
             ops.push(PatchOperation::Add { path, content });
         } else if let Some(path) = line.strip_prefix("*** Delete File: ") {
@@ -179,6 +180,9 @@ pub fn parse_v4a_patch(text: &str) -> Result<Vec<PatchOperation>, String> {
                     return Err(format!("Expected @@ context line, got: {l}"));
                 }
             }
+            if hunks.is_empty() {
+                return Err(format!("Update file hunk for path '{path}' is empty"));
+            }
             ops.push(PatchOperation::Update {
                 path,
                 new_path,
@@ -192,6 +196,38 @@ pub fn parse_v4a_patch(text: &str) -> Result<Vec<PatchOperation>, String> {
     Ok(ops)
 }
 
+fn patch_lines_with_valid_boundaries<'a>(lines: &'a [&'a str]) -> Result<&'a [&'a str], String> {
+    match check_patch_boundaries_strict(lines) {
+        Ok(()) => Ok(lines),
+        Err(original_error) => {
+            if let [first, .., last] = lines {
+                if (*first == "<<EOF" || *first == "<<'EOF'" || *first == "<<\"EOF\"")
+                    && last.ends_with("EOF")
+                    && lines.len() >= 4
+                {
+                    let inner = &lines[1..lines.len() - 1];
+                    check_patch_boundaries_strict(inner)?;
+                    return Ok(inner);
+                }
+            }
+            Err(original_error)
+        }
+    }
+}
+
+fn check_patch_boundaries_strict(lines: &[&str]) -> Result<(), String> {
+    let first_line = lines.first().map(|line| line.trim());
+    let last_line = lines.last().map(|line| line.trim());
+
+    match (first_line, last_line) {
+        (Some("*** Begin Patch"), Some("*** End Patch")) => Ok(()),
+        (Some(first), _) if first != "*** Begin Patch" => {
+            Err("The first line of the patch must be '*** Begin Patch'".to_string())
+        }
+        _ => Err("The last line of the patch must be '*** End Patch'".to_string()),
+    }
+}
+
 /// Applies a list of patch operations using the given sandbox.
 ///
 /// # Errors
@@ -200,50 +236,63 @@ pub async fn apply_patch_operations(
     ops: &[PatchOperation],
     env: &dyn Sandbox,
 ) -> Result<String, String> {
-    let mut results = Vec::new();
+    if ops.is_empty() {
+        return Err("No files were modified.".to_string());
+    }
+
+    let mut added = Vec::new();
+    let mut modified = Vec::new();
+    let mut deleted = Vec::new();
 
     for op in ops {
         match op {
             PatchOperation::Add { path, content } => {
-                env.write_file(path, content)
-                    .await
-                    .map_err(|e| e.display_with_causes())?;
-                results.push(format!("Added file: {path}"));
+                env.write_file(path, content).await.map_err(|e| {
+                    format!("Failed to write file {path}: {}", e.display_with_causes())
+                })?;
+                added.push(path.clone());
             }
             PatchOperation::Delete { path } => {
-                env.delete_file(path)
-                    .await
-                    .map_err(|e| e.display_with_causes())?;
-                results.push(format!("Deleted file: {path}"));
+                if !env.file_exists(path).await.map_err(|e| {
+                    format!("Failed to delete file {path}: {}", e.display_with_causes())
+                })? {
+                    return Err(format!("Failed to delete file {path}: file does not exist"));
+                }
+                env.delete_file(path).await.map_err(|e| {
+                    format!("Failed to delete file {path}: {}", e.display_with_causes())
+                })?;
+                deleted.push(path.clone());
             }
             PatchOperation::Update {
                 path,
                 new_path,
                 hunks,
             } => {
-                let original = env
-                    .read_file(path, None, None)
-                    .await
-                    .map_err(|e| e.display_with_causes())?;
-                let updated = apply_hunks(&original, hunks)
-                    .map_err(|err| format_patch_error(&err, path, &original))?;
+                let original = env.read_file(path, None, None).await.map_err(|e| {
+                    format!(
+                        "Failed to read file to update {path}: {}",
+                        e.display_with_causes()
+                    )
+                })?;
+                let updated = apply_hunks(path, &original, hunks)?;
                 let dest = new_path.as_deref().unwrap_or(path);
-                env.write_file(dest, &updated)
-                    .await
-                    .map_err(|e| e.display_with_causes())?;
+                env.write_file(dest, &updated).await.map_err(|e| {
+                    format!("Failed to write file {dest}: {}", e.display_with_causes())
+                })?;
                 if new_path.is_some() {
-                    env.delete_file(path)
-                        .await
-                        .map_err(|e| e.display_with_causes())?;
-                    results.push(format!("Moved file: {path} → {dest}"));
-                } else {
-                    results.push(format!("Updated file: {path}"));
+                    env.delete_file(path).await.map_err(|e| {
+                        format!(
+                            "Failed to remove original {path}: {}",
+                            e.display_with_causes()
+                        )
+                    })?;
                 }
+                modified.push(dest.to_string());
             }
         }
     }
 
-    Ok(results.join("\n"))
+    Ok(format_summary(&added, &modified, &deleted))
 }
 
 fn normalize_char(c: char) -> char {
@@ -252,188 +301,196 @@ fn normalize_char(c: char) -> char {
         '\u{201C}' | '\u{201D}' | '\u{201E}' | '\u{201F}' => '"',
         '\u{2010}' | '\u{2011}' | '\u{2012}' | '\u{2013}' | '\u{2014}' | '\u{2015}'
         | '\u{2212}' => '-',
-        '\u{00A0}' | '\u{2007}' | '\u{202F}' => ' ',
+        '\u{00A0}' | '\u{2002}' | '\u{2003}' | '\u{2004}' | '\u{2005}' | '\u{2006}'
+        | '\u{2007}' | '\u{2008}' | '\u{2009}' | '\u{200A}' | '\u{202F}' | '\u{205F}'
+        | '\u{3000}' => ' ',
         other => other,
     }
 }
 
 fn normalize_unicode(s: &str) -> String {
-    s.chars().map(normalize_char).collect()
+    s.trim().chars().map(normalize_char).collect()
 }
 
-fn find_line_match(lines: &[String], target: &str, start: usize) -> Option<usize> {
-    let slice = &lines[start..];
+fn seek_sequence(lines: &[String], pattern: &[String], start: usize, eof: bool) -> Option<usize> {
+    if pattern.is_empty() {
+        return Some(start);
+    }
+    if pattern.len() > lines.len() {
+        return None;
+    }
 
-    // Pass 1: exact
-    if let Some(pos) = slice.iter().position(|l| l.as_str() == target) {
-        return Some(start + pos);
+    let search_start = if eof && lines.len() >= pattern.len() {
+        lines.len() - pattern.len()
+    } else {
+        start
+    };
+
+    for i in search_start..=lines.len().saturating_sub(pattern.len()) {
+        if lines[i..i + pattern.len()] == *pattern {
+            return Some(i);
+        }
     }
-    // Pass 2: trim_end
-    let target_te = target.trim_end();
-    if let Some(pos) = slice.iter().position(|l| l.trim_end() == target_te) {
-        return Some(start + pos);
+    for i in search_start..=lines.len().saturating_sub(pattern.len()) {
+        if pattern
+            .iter()
+            .enumerate()
+            .all(|(offset, pat)| lines[i + offset].trim_end() == pat.trim_end())
+        {
+            return Some(i);
+        }
     }
-    // Pass 3: trim
-    let target_t = target.trim();
-    if let Some(pos) = slice.iter().position(|l| l.trim() == target_t) {
-        return Some(start + pos);
+    for i in search_start..=lines.len().saturating_sub(pattern.len()) {
+        if pattern
+            .iter()
+            .enumerate()
+            .all(|(offset, pat)| lines[i + offset].trim() == pat.trim())
+        {
+            return Some(i);
+        }
     }
-    // Pass 4: unicode normalization
-    let target_n = normalize_unicode(target_t);
-    slice
-        .iter()
-        .position(|l| normalize_unicode(l.trim()) == target_n)
-        .map(|p| start + p)
+
+    (search_start..=lines.len().saturating_sub(pattern.len())).find(|&i| {
+        pattern
+            .iter()
+            .enumerate()
+            .all(|(offset, pat)| normalize_unicode(&lines[i + offset]) == normalize_unicode(pat))
+    })
 }
 
-fn find_line_match_reverse(lines: &[String], target: &str) -> Option<usize> {
-    // Pass 1: exact
-    if let Some(pos) = lines.iter().rposition(|l| l.as_str() == target) {
-        return Some(pos);
+fn apply_hunks(path: &str, content: &str, hunks: &[Hunk]) -> Result<String, String> {
+    let mut original_lines: Vec<String> = content.split('\n').map(String::from).collect();
+    if original_lines.last().is_some_and(String::is_empty) {
+        original_lines.pop();
     }
-    // Pass 2: trim_end
-    let target_te = target.trim_end();
-    if let Some(pos) = lines.iter().rposition(|l| l.trim_end() == target_te) {
-        return Some(pos);
+
+    let replacements = compute_replacements(&original_lines, path, hunks)?;
+    let mut new_lines = apply_replacements(original_lines, &replacements);
+    if !new_lines.last().is_some_and(String::is_empty) {
+        new_lines.push(String::new());
     }
-    // Pass 3: trim
-    let target_t = target.trim();
-    if let Some(pos) = lines.iter().rposition(|l| l.trim() == target_t) {
-        return Some(pos);
-    }
-    // Pass 4: unicode normalization
-    let target_n = normalize_unicode(target_t);
-    lines
-        .iter()
-        .rposition(|l| normalize_unicode(l.trim()) == target_n)
+    Ok(new_lines.join("\n"))
 }
 
-fn apply_hunks(content: &str, hunks: &[Hunk]) -> Result<String, String> {
-    let mut lines: Vec<String> = content.lines().map(String::from).collect();
-    let mut cursor = 0;
+fn compute_replacements(
+    original_lines: &[String],
+    path: &str,
+    hunks: &[Hunk],
+) -> Result<Vec<(usize, usize, Vec<String>)>, String> {
+    let mut replacements = Vec::new();
+    let mut line_index = 0;
 
     for hunk in hunks {
-        let has_explicit_context = !hunk.context_line.is_empty();
-
-        let context_pos = if hunk.end_of_file {
-            if has_explicit_context {
-                find_line_match_reverse(&lines, &hunk.context_line)
+        if !hunk.context_line.is_empty() {
+            if let Some(index) = seek_sequence(
+                original_lines,
+                std::slice::from_ref(&hunk.context_line),
+                line_index,
+                false,
+            ) {
+                line_index = index + 1;
             } else {
-                let first_match_text = hunk
-                    .changes
-                    .iter()
-                    .find_map(|c| match c {
-                        Change::Remove(t) | Change::Context(t) => Some(t.as_str()),
-                        Change::Add(_) => None,
-                    })
-                    .ok_or("Hunk with bare @@ has no remove or context lines to locate position")?;
-                find_line_match_reverse(&lines, first_match_text)
-            }
-            .ok_or_else(|| {
-                let target = if has_explicit_context {
-                    &hunk.context_line
-                } else {
-                    "first change line"
-                };
-                format!("Could not find context line in file: '{target}'")
-            })?
-        } else if has_explicit_context {
-            find_line_match(&lines, &hunk.context_line, cursor).ok_or_else(|| {
-                format!(
-                    "Could not find context line in file: '{}'",
+                return Err(format!(
+                    "Failed to find context '{}' in {path}",
                     hunk.context_line
-                )
-            })?
-        } else {
-            // Bare @@ — locate position from the first remove or context line
-            let first_match_text = hunk
-                .changes
-                .iter()
-                .find_map(|c| match c {
-                    Change::Remove(t) | Change::Context(t) => Some(t.as_str()),
-                    Change::Add(_) => None,
-                })
-                .ok_or("Hunk with bare @@ has no remove or context lines to locate position")?;
-            find_line_match(&lines, first_match_text, cursor)
-                .ok_or_else(|| format!("Could not find line in file: '{first_match_text}'"))?
-        };
-
-        // Build what we expect to find and what to replace with
-        let mut new_lines: Vec<String> = Vec::new();
-
-        let mut file_idx = context_pos;
-        if has_explicit_context {
-            // The context line itself is preserved
-            new_lines.push(lines[context_pos].clone());
-            file_idx = context_pos + 1;
+                ));
+            }
         }
 
+        let mut old_lines = Vec::new();
+        let mut new_lines = Vec::new();
         for change in &hunk.changes {
             match change {
-                Change::Remove(_) => {
-                    file_idx += 1;
-                }
-                Change::Add(text) => {
-                    new_lines.push(text.clone());
-                }
-                Change::Context(_) => {
-                    if file_idx < lines.len() {
-                        new_lines.push(lines[file_idx].clone());
-                    }
-                    file_idx += 1;
+                Change::Remove(line) => old_lines.push(line.clone()),
+                Change::Add(line) => new_lines.push(line.clone()),
+                Change::Context(line) => {
+                    old_lines.push(line.clone());
+                    new_lines.push(line.clone());
                 }
             }
         }
 
-        // Calculate total lines consumed from original
-        let explicit_context_count = usize::from(has_explicit_context);
-        let total_original_lines = explicit_context_count
-            + hunk
-                .changes
-                .iter()
-                .filter(|c| matches!(c, Change::Remove(_) | Change::Context(_)))
-                .count();
+        if old_lines.is_empty() {
+            let insertion_index = original_lines.len();
+            replacements.push((insertion_index, 0, new_lines));
+            continue;
+        }
 
-        // Replace the range
-        let end = (context_pos + total_original_lines).min(lines.len());
-        let replacement_len = new_lines.len();
-        lines.splice(context_pos..end, new_lines);
-        cursor = context_pos + replacement_len;
+        let mut pattern: &[String] = &old_lines;
+        let mut new_slice: &[String] = &new_lines;
+        let mut found = seek_sequence(original_lines, pattern, line_index, hunk.end_of_file);
+        if found.is_none() && pattern.last().is_some_and(String::is_empty) {
+            pattern = &pattern[..pattern.len() - 1];
+            if new_slice.last().is_some_and(String::is_empty) {
+                new_slice = &new_slice[..new_slice.len() - 1];
+            }
+            found = seek_sequence(original_lines, pattern, line_index, hunk.end_of_file);
+        }
+
+        if let Some(start_index) = found {
+            replacements.push((start_index, pattern.len(), new_slice.to_vec()));
+            line_index = start_index + pattern.len();
+        } else {
+            return Err(format!(
+                "Failed to find expected lines in {path}:\n{}",
+                old_lines.join("\n")
+            ));
+        }
     }
 
-    Ok(lines.join("\n"))
+    replacements.sort_by_key(|(start_index, _, _)| *start_index);
+    Ok(replacements)
 }
 
-fn format_patch_error(error: &str, path: &str, content: &str) -> String {
-    let numbered = format_lines_numbered(content, None, None);
-    let truncated = truncate_output(&numbered, 9_000, TruncationMode::HeadTail);
-    format!("{error}\n\nCurrent contents of {path}:\n{truncated}")
+fn apply_replacements(
+    mut lines: Vec<String>,
+    replacements: &[(usize, usize, Vec<String>)],
+) -> Vec<String> {
+    for (start_index, old_len, new_segment) in replacements.iter().rev() {
+        for _ in 0..*old_len {
+            if *start_index < lines.len() {
+                lines.remove(*start_index);
+            }
+        }
+        for (offset, new_line) in new_segment.iter().enumerate() {
+            lines.insert(*start_index + offset, new_line.clone());
+        }
+    }
+    lines
+}
+
+fn format_summary(added: &[String], modified: &[String], deleted: &[String]) -> String {
+    let mut output = String::from("Success. Updated the following files:\n");
+    for path in added {
+        let _ = writeln!(output, "A {path}");
+    }
+    for path in modified {
+        let _ = writeln!(output, "M {path}");
+    }
+    for path in deleted {
+        let _ = writeln!(output, "D {path}");
+    }
+    output
 }
 
 pub fn make_apply_patch_tool() -> RegisteredTool {
     RegisteredTool {
-        definition: ToolDefinition {
-            name:        "apply_patch".into(),
-            description: "Apply a v4a format patch to modify files".into(),
-            parameters:  serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "patch": {
-                        "type": "string",
-                        "description": "The patch content in v4a format"
-                    }
-                },
-                "required": ["patch"]
+        definition: ToolDefinition::custom(
+            "apply_patch",
+            "Use the `apply_patch` tool to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON.",
+            serde_json::json!({
+                "type": "grammar",
+                "syntax": "lark",
+                "definition": apply_patch_lark_grammar_definition(),
             }),
-        },
+        ),
         executor:   Arc::new(|args, ctx| {
             Box::pin(async move {
                 let patch_text = args
-                    .get("patch")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| "Missing required parameter: patch".to_string())?;
+                    .as_str()
+                    .ok_or_else(|| "apply_patch expects raw patch text".to_string())?;
 
-                let ops = parse_v4a_patch(patch_text)?;
+                let ops = parse_apply_patch(patch_text)?;
                 apply_patch_operations(&ops, ctx.env.as_ref()).await
             })
         }),
@@ -444,11 +501,17 @@ pub fn make_apply_patch_tool() -> RegisteredTool {
 mod tests {
     use std::collections::HashMap;
 
+    use fabro_llm::types::{
+        ContentPart, FinishReason, Message as LlmMessage, Response, Role, TokenCounts, ToolCall,
+    };
+    use tokio_util::sync::CancellationToken;
+
     use super::*;
     use crate::test_support::MutableMockSandbox;
+    use crate::tool_registry::ToolContext;
 
     #[test]
-    fn parse_v4a_add_file() {
+    fn parse_apply_patch_add_file() {
         let patch = "\
 *** Begin Patch
 *** Add File: src/new_file.rs
@@ -457,22 +520,22 @@ mod tests {
 +}
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0], PatchOperation::Add {
             path:    "src/new_file.rs".into(),
-            content: "fn main() {\n    println!(\"hello\");\n}".into(),
+            content: "fn main() {\n    println!(\"hello\");\n}\n".into(),
         });
     }
 
     #[test]
-    fn parse_v4a_delete_file() {
+    fn parse_apply_patch_delete_file() {
         let patch = "\
 *** Begin Patch
 *** Delete File: src/old_file.rs
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0], PatchOperation::Delete {
             path: "src/old_file.rs".into(),
@@ -480,7 +543,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_v4a_update_file() {
+    fn parse_apply_patch_update_file() {
         let patch = "\
 *** Begin Patch
 *** Update File: src/lib.rs
@@ -489,7 +552,7 @@ mod tests {
 +    println!(\"new\");
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         assert_eq!(ops.len(), 1);
         match &ops[0] {
             PatchOperation::Update {
@@ -517,7 +580,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_v4a_multi_operation() {
+    fn parse_apply_patch_multi_operation() {
         let patch = "\
 *** Begin Patch
 *** Add File: src/a.rs
@@ -529,7 +592,7 @@ mod tests {
 +    new_call();
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         assert_eq!(ops.len(), 3);
         assert!(matches!(&ops[0], PatchOperation::Add { .. }));
         assert!(matches!(&ops[1], PatchOperation::Delete { .. }));
@@ -537,7 +600,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_v4a_bare_at_at_hunk() {
+    fn parse_apply_patch_bare_at_at_hunk() {
         let patch = "\
 *** Begin Patch
 *** Update File: src/game.py
@@ -546,7 +609,7 @@ mod tests {
 +from src.cards import Card, Suit
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         assert_eq!(ops.len(), 1);
         match &ops[0] {
             PatchOperation::Update { path, hunks, .. } => {
@@ -560,7 +623,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_v4a_multiple_bare_at_at_hunks() {
+    fn parse_apply_patch_multiple_bare_at_at_hunks() {
         let patch = "\
 *** Begin Patch
 *** Update File: src/game.py
@@ -572,7 +635,7 @@ mod tests {
 +    stock: list[Card] = field(default_factory=list)
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         match &ops[0] {
             PatchOperation::Update { hunks, .. } => {
                 assert_eq!(hunks.len(), 2);
@@ -618,7 +681,7 @@ mod tests {
         }];
 
         let result = apply_patch_operations(&ops, &env).await.unwrap();
-        assert!(result.contains("Updated file: src/game.py"));
+        assert!(result.contains("M src/game.py"));
 
         let content = env.read_file("src/game.py", None, None).await.unwrap();
         assert!(content.contains("from src.cards import Card, Suit"));
@@ -629,7 +692,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_v4a_mixed_bare_and_contextual_hunks() {
+    fn parse_apply_patch_mixed_bare_and_contextual_hunks() {
         let patch = "\
 *** Begin Patch
 *** Update File: src/lib.rs
@@ -641,7 +704,7 @@ mod tests {
 +    new_teardown();
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         match &ops[0] {
             PatchOperation::Update { hunks, .. } => {
                 assert_eq!(hunks.len(), 2);
@@ -653,7 +716,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_v4a_bare_at_at_with_context_lines() {
+    fn parse_apply_patch_bare_at_at_with_context_lines() {
         let patch = "\
 *** Begin Patch
 *** Update File: src/lib.rs
@@ -664,7 +727,7 @@ mod tests {
  }
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         match &ops[0] {
             PatchOperation::Update { hunks, .. } => {
                 assert_eq!(hunks.len(), 1);
@@ -686,7 +749,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_v4a_bare_at_at_add_only_errors_on_apply() {
+    fn parse_apply_patch_bare_at_at_add_only_appends_to_file() {
         let patch = "\
 *** Begin Patch
 *** Update File: src/lib.rs
@@ -695,7 +758,7 @@ mod tests {
 *** End Patch";
 
         // Parsing succeeds — the hunk is structurally valid
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         match &ops[0] {
             PatchOperation::Update { hunks, .. } => {
                 assert_eq!(hunks[0].context_line, "");
@@ -705,12 +768,10 @@ mod tests {
             _ => panic!("Expected Update operation"),
         }
 
-        // Applying fails — no remove/context line to locate position
         match &ops[0] {
             PatchOperation::Update { hunks, .. } => {
-                let result = apply_hunks("fn main() {}\n", hunks);
-                assert!(result.is_err());
-                assert!(result.unwrap_err().contains("no remove or context lines"));
+                let result = apply_hunks("src/lib.rs", "fn main() {}\n", hunks).unwrap();
+                assert_eq!(result, "fn main() {}\nnew_line();\n");
             }
             _ => panic!("Expected Update operation"),
         }
@@ -741,10 +802,10 @@ mod tests {
         }];
 
         let result = apply_patch_operations(&ops, &env).await.unwrap();
-        assert!(result.contains("Updated file: src/lib.rs"));
+        assert!(result.contains("M src/lib.rs"));
 
         let content = env.read_file("src/lib.rs", None, None).await.unwrap();
-        assert_eq!(content, "fn unchanged() {\n    new_line();\n}");
+        assert_eq!(content, "fn unchanged() {\n    new_line();\n}\n");
     }
 
     #[tokio::test]
@@ -780,7 +841,7 @@ mod tests {
         }];
 
         let result = apply_patch_operations(&ops, &env).await.unwrap();
-        assert!(result.contains("Updated file: src/lib.rs"));
+        assert!(result.contains("M src/lib.rs"));
 
         let content = env.read_file("src/lib.rs", None, None).await.unwrap();
         assert!(content.contains("new_setup()"));
@@ -798,7 +859,7 @@ mod tests {
         }];
 
         let result = apply_patch_operations(&ops, &env).await.unwrap();
-        assert!(result.contains("Added file: src/new.rs"));
+        assert!(result.contains("A src/new.rs"));
 
         let content = env.read_file("src/new.rs", None, None).await.unwrap();
         assert_eq!(content, "fn new() {}");
@@ -827,7 +888,7 @@ mod tests {
         }];
 
         let result = apply_patch_operations(&ops, &env).await.unwrap();
-        assert!(result.contains("Updated file: src/lib.rs"));
+        assert!(result.contains("M src/lib.rs"));
 
         let content = env.read_file("src/lib.rs", None, None).await.unwrap();
         assert!(content.contains("println!(\"new\")"));
@@ -835,30 +896,157 @@ mod tests {
     }
 
     #[test]
-    fn format_patch_error_includes_numbered_contents() {
-        let result = format_patch_error(
-            "Could not find context line in file: 'fn missing()'",
-            "src/lib.rs",
-            "fn hello() {\n    println!(\"hi\");\n}",
-        );
-        assert!(result.contains("Could not find context line in file: 'fn missing()'"));
-        assert!(result.contains("Current contents of src/lib.rs:"));
-        assert!(result.contains("1 | fn hello() {"));
-        assert!(result.contains("2 |     println!(\"hi\");"));
-        assert!(result.contains("3 | }"));
-    }
+    fn apply_patch_tool_definition_is_custom_freeform() {
+        let tool = make_apply_patch_tool();
 
-    #[test]
-    fn format_patch_error_truncates_large_files() {
-        let lines: Vec<String> = (1..=1_000).map(|i| format!("line number {i:04}")).collect();
-        let content = lines.join("\n");
-        let result = format_patch_error("some error", "big.txt", &content);
-        assert!(result.len() < 10_000);
-        assert!(result.contains("truncated") || result.contains("removed"));
+        assert_eq!(tool.definition.name, "apply_patch");
+        assert!(tool.definition.is_custom());
+        assert_eq!(
+            tool.definition
+                .custom_format()
+                .and_then(|format| format.get("type")),
+            Some(&serde_json::json!("grammar"))
+        );
+        assert_eq!(
+            tool.definition
+                .custom_format()
+                .and_then(|format| format.get("syntax")),
+            Some(&serde_json::json!("lark"))
+        );
     }
 
     #[tokio::test]
-    async fn apply_patch_error_includes_file_contents() {
+    async fn apply_patch_tool_executor_accepts_raw_patch_string() {
+        let env = Arc::new(MutableMockSandbox::new(HashMap::new()));
+        let tool = make_apply_patch_tool();
+        let patch = "\
+*** Begin Patch
+*** Add File: hello.txt
++hello
+*** End Patch
+";
+        let ctx = ToolContext {
+            env,
+            cancel: CancellationToken::new(),
+            tool_env_provider: None,
+            session_id: None,
+            root_session_id: None,
+            tool_call_id: None,
+            agent_event_emitter: None,
+        };
+
+        let output = (tool.executor)(serde_json::json!(patch), ctx)
+            .await
+            .expect("raw custom patch should apply");
+
+        assert_eq!(
+            output,
+            "Success. Updated the following files:\nA hello.txt\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_patch_add_overwrites_existing_file_with_codex_summary() {
+        let mut files = HashMap::new();
+        files.insert("duplicate.txt".to_string(), "old content\n".to_string());
+        let env = MutableMockSandbox::new(files);
+        let patch = "\
+*** Begin Patch
+*** Add File: duplicate.txt
++new content
+*** End Patch";
+
+        let ops = parse_apply_patch(patch).unwrap();
+        let result = apply_patch_operations(&ops, &env).await.unwrap();
+
+        assert_eq!(
+            result,
+            "Success. Updated the following files:\nA duplicate.txt\n"
+        );
+        assert_eq!(
+            env.read_file("duplicate.txt", None, None).await.unwrap(),
+            "new content\n"
+        );
+    }
+
+    #[test]
+    fn parse_update_file_hunk_rejects_empty_update() {
+        let patch = "\
+*** Begin Patch
+*** Update File: empty.txt
+*** End Patch";
+
+        let err = parse_apply_patch(patch).expect_err("empty update hunk should be rejected");
+
+        assert!(err.contains("Update file hunk for path 'empty.txt' is empty"));
+    }
+
+    #[tokio::test]
+    async fn pure_addition_update_hunk_appends_before_final_newline() {
+        let mut files = HashMap::new();
+        files.insert("insert_only.txt".to_string(), "alpha\nomega\n".to_string());
+        let env = MutableMockSandbox::new(files);
+        let patch = "\
+*** Begin Patch
+*** Update File: insert_only.txt
+@@
++inserted
+*** End Patch";
+
+        let ops = parse_apply_patch(patch).unwrap();
+        let result = apply_patch_operations(&ops, &env).await.unwrap();
+
+        assert_eq!(
+            result,
+            "Success. Updated the following files:\nM insert_only.txt\n"
+        );
+        assert_eq!(
+            env.read_file("insert_only.txt", None, None).await.unwrap(),
+            "alpha\nomega\ninserted\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_normalizes_missing_trailing_newline() {
+        let mut files = HashMap::new();
+        files.insert(
+            "no_newline.txt".to_string(),
+            "no newline at end".to_string(),
+        );
+        let env = MutableMockSandbox::new(files);
+        let patch = "\
+*** Begin Patch
+*** Update File: no_newline.txt
+@@
+-no newline at end
++has newline now
+*** End Patch";
+
+        let ops = parse_apply_patch(patch).unwrap();
+        apply_patch_operations(&ops, &env).await.unwrap();
+
+        assert_eq!(
+            env.read_file("no_newline.txt", None, None).await.unwrap(),
+            "has newline now\n"
+        );
+    }
+
+    #[test]
+    fn parse_rejects_text_before_patch_envelope() {
+        let patch = "\
+please apply this
+*** Begin Patch
+*** Add File: hello.txt
++hello
+*** End Patch";
+
+        let err = parse_apply_patch(patch).expect_err("patch envelope must start on first line");
+
+        assert!(err.contains("The first line of the patch must be '*** Begin Patch'"));
+    }
+
+    #[tokio::test]
+    async fn apply_patch_error_reports_failed_context() {
         let mut files = HashMap::new();
         files.insert(
             "src/game.py".to_string(),
@@ -880,9 +1068,44 @@ mod tests {
         }];
 
         let err = apply_patch_operations(&ops, &env).await.unwrap_err();
-        assert!(err.contains("Could not find context line"));
-        assert!(err.contains("Current contents of src/game.py:"));
-        assert!(err.contains("1 | def real_fn():"));
+        assert_eq!(
+            err,
+            "Failed to find context 'def nonexistent():' in src/game.py"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_missing_target_file_rejected() {
+        let env = MutableMockSandbox::new(HashMap::new());
+        let patch = "\
+*** Begin Patch
+*** Update File: missing.txt
+@@
+-old
++new
+*** End Patch";
+
+        let ops = parse_apply_patch(patch).unwrap();
+        let err = apply_patch_operations(&ops, &env).await.unwrap_err();
+
+        assert!(err.contains("Failed to read file to update missing.txt"));
+    }
+
+    #[tokio::test]
+    async fn delete_missing_target_file_rejected() {
+        let env = MutableMockSandbox::new(HashMap::new());
+        let patch = "\
+*** Begin Patch
+*** Delete File: missing.txt
+*** End Patch";
+
+        let ops = parse_apply_patch(patch).unwrap();
+        let err = apply_patch_operations(&ops, &env).await.unwrap_err();
+
+        assert_eq!(
+            err,
+            "Failed to delete file missing.txt: file does not exist"
+        );
     }
 
     // Phase 0: Forward-order hunk application
@@ -908,7 +1131,7 @@ mod tests {
                 ],
             },
         ];
-        let result = apply_hunks(content, &hunks).unwrap();
+        let result = apply_hunks("example.py", content, &hunks).unwrap();
         assert!(result.contains("return 1"));
         assert!(result.contains("return 2"));
         assert!(!result.contains("    pass"));
@@ -917,7 +1140,7 @@ mod tests {
     // Phase 1: Context without trailing @@
 
     #[test]
-    fn parse_v4a_context_without_trailing_markers() {
+    fn parse_apply_patch_context_without_trailing_markers() {
         let patch = "\
 *** Begin Patch
 *** Update File: src/hello.py
@@ -926,7 +1149,7 @@ mod tests {
 +    print(\"new\")
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         match &ops[0] {
             PatchOperation::Update { hunks, .. } => {
                 assert_eq!(hunks[0].context_line, "def hello():");
@@ -938,7 +1161,7 @@ mod tests {
     // Phase 2: Stacked @@ anchors
 
     #[test]
-    fn parse_v4a_stacked_context_uses_last() {
+    fn parse_apply_patch_stacked_context_uses_last() {
         let patch = "\
 *** Begin Patch
 *** Update File: src/foo.py
@@ -948,7 +1171,7 @@ mod tests {
 +        return 42
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         match &ops[0] {
             PatchOperation::Update { hunks, .. } => {
                 assert_eq!(hunks.len(), 1);
@@ -961,7 +1184,7 @@ mod tests {
     // Phase 3: *** End of File
 
     #[test]
-    fn parse_v4a_end_of_file_marker() {
+    fn parse_apply_patch_end_of_file_marker() {
         let patch = "\
 *** Begin Patch
 *** Update File: src/lib.py
@@ -971,7 +1194,7 @@ mod tests {
 *** End of File
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         match &ops[0] {
             PatchOperation::Update { hunks, .. } => {
                 assert_eq!(hunks.len(), 1);
@@ -993,15 +1216,18 @@ mod tests {
                 Change::Add("    return 99".into()),
             ],
         }];
-        let result = apply_hunks(content, &hunks).unwrap();
+        let result = apply_hunks("example.py", content, &hunks).unwrap();
         // First "pass" should be untouched, second should be replaced
-        assert_eq!(result, "def foo():\n    pass\n\ndef bar():\n    return 99");
+        assert_eq!(
+            result,
+            "def foo():\n    pass\n\ndef bar():\n    return 99\n"
+        );
     }
 
     // Phase 4: *** Move to:
 
     #[test]
-    fn parse_v4a_move_to() {
+    fn parse_apply_patch_move_to() {
         let patch = "\
 *** Begin Patch
 *** Update File: src/old.py
@@ -1011,7 +1237,7 @@ mod tests {
 +    return 1
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         match &ops[0] {
             PatchOperation::Update {
                 path,
@@ -1049,11 +1275,11 @@ mod tests {
         }];
 
         let result = apply_patch_operations(&ops, &env).await.unwrap();
-        assert!(result.contains("Moved file"));
+        assert!(result.contains("M src/new.py"));
 
         // New path exists with updated content
         let content = env.read_file("src/new.py", None, None).await.unwrap();
-        assert_eq!(content, "def hello():\n    return 1");
+        assert_eq!(content, "def hello():\n    return 1\n");
 
         // Old path is deleted
         let old = env.read_file("src/old.py", None, None).await;
@@ -1071,9 +1297,9 @@ mod tests {
             end_of_file:  false,
             changes:      vec![Change::Add("extra".into())],
         }];
-        let result = apply_hunks(content, &hunks).unwrap();
+        let result = apply_hunks("example.txt", content, &hunks).unwrap();
         // Should match line 1 (exact), so "extra" inserted after "indented" (line 1)
-        assert_eq!(result, "  indented\nindented\nextra");
+        assert_eq!(result, "  indented\nindented\nextra\n");
     }
 
     #[test]
@@ -1084,7 +1310,7 @@ mod tests {
             end_of_file:  false,
             changes:      vec![Change::Add("print(\"world\")".into())],
         }];
-        let result = apply_hunks(content, &hunks).unwrap();
+        let result = apply_hunks("example.py", content, &hunks).unwrap();
         // Original line preserved, new line added after
         assert!(result.contains("print(\u{201C}hello\u{201D})"));
         assert!(result.contains("print(\"world\")"));
@@ -1093,7 +1319,7 @@ mod tests {
     // Phase 6: Heredoc stripping
 
     #[test]
-    fn parse_v4a_strips_heredoc_wrapper() {
+    fn parse_apply_patch_strips_heredoc_wrapper() {
         let patch = "\
 <<'EOF'
 *** Begin Patch
@@ -1104,7 +1330,7 @@ mod tests {
 *** End Patch
 EOF";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         assert_eq!(ops.len(), 1);
         match &ops[0] {
             PatchOperation::Update { hunks, .. } => {
@@ -1115,7 +1341,7 @@ EOF";
     }
 
     #[test]
-    fn parse_v4a_strips_heredoc_unquoted() {
+    fn parse_apply_patch_strips_heredoc_unquoted() {
         let patch = "\
 <<EOF
 *** Begin Patch
@@ -1124,13 +1350,13 @@ EOF";
 *** End Patch
 EOF";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         assert_eq!(ops.len(), 1);
         assert!(matches!(&ops[0], PatchOperation::Add { .. }));
     }
 
     #[test]
-    fn parse_v4a_strips_heredoc_double_quoted() {
+    fn parse_apply_patch_strips_heredoc_double_quoted() {
         let patch = "\
 <<\"EOF\"
 *** Begin Patch
@@ -1138,7 +1364,7 @@ EOF";
 *** End Patch
 EOF";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         assert_eq!(ops.len(), 1);
         assert!(matches!(&ops[0], PatchOperation::Delete { .. }));
     }
@@ -1196,7 +1422,7 @@ class GameState:
 +            self.waste.append(card)
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         apply_patch_operations(&ops, &env).await.unwrap();
 
         let content = env.read_file("src/game.py", None, None).await.unwrap();
@@ -1240,7 +1466,7 @@ def main():
 +    return 42
 *** Delete File: src/old_util.py
 *** Update File: src/main.py
-@@ from old_util import old_helper
+@@
 -from old_util import old_helper
 +from new_util import new_helper
 @@ def main():
@@ -1249,15 +1475,15 @@ def main():
 +    print(f\"result: {result}\")
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         let result = apply_patch_operations(&ops, &env).await.unwrap();
 
-        assert!(result.contains("Added file: src/new_util.py"));
-        assert!(result.contains("Deleted file: src/old_util.py"));
-        assert!(result.contains("Updated file: src/main.py"));
+        assert!(result.contains("A src/new_util.py"));
+        assert!(result.contains("D src/old_util.py"));
+        assert!(result.contains("M src/main.py"));
 
         let new_util = env.read_file("src/new_util.py", None, None).await.unwrap();
-        assert_eq!(new_util, "def new_helper():\n    return 42");
+        assert_eq!(new_util, "def new_helper():\n    return 42\n");
 
         assert!(env.read_file("src/old_util.py", None, None).await.is_err());
 
@@ -1310,10 +1536,10 @@ class User:
 *** End Patch
 EOF";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         let result = apply_patch_operations(&ops, &env).await.unwrap();
 
-        assert!(result.contains("Moved file"));
+        assert!(result.contains("M src/models/account.py"));
 
         // Old path gone
         assert!(
@@ -1371,7 +1597,7 @@ def gamma():
 +    return \"c\"
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         apply_patch_operations(&ops, &env).await.unwrap();
 
         let content = env.read_file("src/stubs.py", None, None).await.unwrap();
@@ -1399,7 +1625,7 @@ def gamma():
 +    println!(\"world\");
 *** End Patch";
 
-        let ops = parse_v4a_patch(patch).unwrap();
+        let ops = parse_apply_patch(patch).unwrap();
         apply_patch_operations(&ops, &env).await.unwrap();
 
         let content = env.read_file("src/lib.rs", None, None).await.unwrap();
@@ -1411,9 +1637,7 @@ def gamma():
     async fn e2e_through_tool_executor() {
         use crate::config::SessionOptions;
         use crate::session::Session;
-        use crate::test_support::{
-            MockLlmProvider, TestProfile, make_client, text_response, tool_call_response,
-        };
+        use crate::test_support::{MockLlmProvider, TestProfile, make_client, text_response};
         use crate::tool_registry::ToolRegistry;
 
         // Set up sandbox with a file
@@ -1429,6 +1653,10 @@ def farewell(name):
 "
             .to_string(),
         );
+        files.insert(
+            "src/obsolete.py".to_string(),
+            "def old():\n    pass\n".to_string(),
+        );
         let env = Arc::new(MutableMockSandbox::new(files));
 
         // Register apply_patch tool
@@ -1438,6 +1666,9 @@ def farewell(name):
         // The patch an LLM would produce (canonical format)
         let patch_text = "\
 *** Begin Patch
+*** Add File: src/created.py
++def created():
++    return \"created\"
 *** Update File: src/app.py
 @@ def greet(name):
 -    return f\"Hi, {name}\"
@@ -1445,14 +1676,29 @@ def farewell(name):
 @@ def farewell(name):
 -    return f\"Bye, {name}\"
 +    return f\"Goodbye, {name}!\"
+*** Delete File: src/obsolete.py
 *** End Patch";
 
+        let mut tool_call = ToolCall::new("call_1", "apply_patch", serde_json::json!(patch_text));
+        tool_call.tool_type = "custom".to_string();
+        tool_call.raw_arguments = Some(patch_text.to_string());
         let responses = vec![
-            tool_call_response(
-                "apply_patch",
-                "call_1",
-                serde_json::json!({"patch": patch_text}),
-            ),
+            Response {
+                id:            "resp_call_1".to_string(),
+                model:         "mock-model".to_string(),
+                provider:      "mock".to_string(),
+                message:       LlmMessage {
+                    role:         Role::Assistant,
+                    content:      vec![ContentPart::ToolCall(tool_call)],
+                    name:         None,
+                    tool_call_id: None,
+                },
+                finish_reason: FinishReason::ToolCalls,
+                usage:         TokenCounts::default(),
+                raw:           None,
+                warnings:      vec![],
+                rate_limit:    None,
+            },
             text_response("Done! Updated greet and farewell functions."),
         ];
 
@@ -1477,5 +1723,82 @@ def farewell(name):
         assert!(content.contains("Goodbye, {name}!"));
         assert!(!content.contains("Hi, {name}"));
         assert!(!content.contains("Bye, {name}"));
+
+        let created = env.read_file("src/created.py", None, None).await.unwrap();
+        assert!(created.contains("def created():"));
+        assert!(env.read_file("src/obsolete.py", None, None).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn failed_custom_tool_call_returns_codex_style_error_to_session_history() {
+        use crate::config::SessionOptions;
+        use crate::session::Session;
+        use crate::test_support::{MockLlmProvider, TestProfile, make_client, text_response};
+        use crate::tool_registry::ToolRegistry;
+        use crate::types::Message as AgentMessage;
+
+        let mut files = HashMap::new();
+        files.insert(
+            "src/app.py".to_string(),
+            "def present():\n    return 1\n".to_string(),
+        );
+        let env = Arc::new(MutableMockSandbox::new(files));
+
+        let mut registry = ToolRegistry::new();
+        registry.register(make_apply_patch_tool());
+
+        let patch_text = "\
+*** Begin Patch
+*** Update File: src/app.py
+@@ def missing():
+-    return 1
++    return 2
+*** End Patch";
+        let mut tool_call = ToolCall::new("call_1", "apply_patch", serde_json::json!(patch_text));
+        tool_call.tool_type = "custom".to_string();
+        tool_call.raw_arguments = Some(patch_text.to_string());
+
+        let responses = vec![
+            Response {
+                id:            "resp_call_1".to_string(),
+                model:         "mock-model".to_string(),
+                provider:      "mock".to_string(),
+                message:       LlmMessage {
+                    role:         Role::Assistant,
+                    content:      vec![ContentPart::ToolCall(tool_call)],
+                    name:         None,
+                    tool_call_id: None,
+                },
+                finish_reason: FinishReason::ToolCalls,
+                usage:         TokenCounts::default(),
+                raw:           None,
+                warnings:      vec![],
+                rate_limit:    None,
+            },
+            text_response("I will correct the patch."),
+        ];
+
+        let provider = Arc::new(MockLlmProvider::new(responses));
+        let client = make_client(provider).await;
+        let profile = Arc::new(TestProfile::with_tools(registry));
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
+        session.initialize().await.unwrap();
+        session
+            .process_input("Patch a missing function")
+            .await
+            .unwrap();
+
+        let turns = session.history().turns();
+        match &turns[2] {
+            AgentMessage::ToolResults { results, .. } => {
+                assert_eq!(results.len(), 1);
+                assert!(results[0].is_error);
+                assert_eq!(
+                    results[0].content.as_str(),
+                    Some("Failed to find context 'def missing():' in src/app.py")
+                );
+            }
+            other => panic!("expected tool result turn, got {other:?}"),
+        }
     }
 }

@@ -5,7 +5,7 @@ use crate::SettingsLayer;
 const CURRENT_VERSION: u32 = 1;
 
 const ALLOWED_TOP_LEVEL_KEYS: &[&str] = &[
-    "_version", "project", "workflow", "run", "cli", "server", "features", "llm",
+    "_version", "project", "workflow", "run", "cli", "server", "llm",
 ];
 
 /// Legacy `[llm]` keys that pre-date the settings-driven catalog plan and
@@ -38,7 +38,7 @@ impl fmt::Display for ParseError {
                 } else {
                     write!(
                         f,
-                        "unknown top-level settings key `{key}`: expected one of `_version`, `project`, `workflow`, `run`, `cli`, `server`, `features`, `llm`"
+                        "unknown top-level settings key `{key}`: expected one of `_version`, `project`, `workflow`, `run`, `cli`, `server`, `llm`"
                     )
                 }
             }
@@ -188,6 +188,18 @@ mod tests {
     fn rejects_unknown_top_level_key() {
         let err = "unknown_key = 1".parse::<SettingsLayer>().unwrap_err();
         assert!(matches!(err, ParseError::UnknownTopLevelKey { .. }));
+    }
+
+    #[test]
+    fn rejects_legacy_features_section() {
+        let namespace = "features";
+        let err = format!("[{namespace}]\nremoved_flag = true\n")
+            .parse::<SettingsLayer>()
+            .unwrap_err();
+        match err {
+            ParseError::UnknownTopLevelKey { key, .. } => assert_eq!(key, "features"),
+            other => panic!("expected UnknownTopLevelKey, got: {other:?}"),
+        }
     }
 
     #[test]

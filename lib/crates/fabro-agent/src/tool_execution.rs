@@ -302,10 +302,12 @@ async fn execute_one_tool(
 ) -> ToolResult {
     match registered_tool {
         Some(tool) => {
-            if let Err(validation_error) =
-                validate_tool_args(&tool.definition.parameters, &tc.arguments)
-            {
-                return ToolResult::error(&tc.id, validation_error);
+            if tc.tool_type != "custom" {
+                if let Err(validation_error) =
+                    validate_tool_args(&tool.definition.parameters, &tc.arguments)
+                {
+                    return ToolResult::error(&tc.id, validation_error);
+                }
             }
 
             let agent_event_emitter: Option<Arc<dyn AgentEventEmitter>> =

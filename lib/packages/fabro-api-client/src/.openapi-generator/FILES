@@ -105,7 +105,6 @@ models/execute-query-response.ts
 models/failure-category.ts
 models/failure-detail.ts
 models/failure-reason.ts
-models/features-namespace.ts
 models/file-checkpoint.ts
 models/file-diff.ts
 models/fork-request.ts
@@ -402,7 +401,6 @@ models/system-cpu-resource-scope.ts
 models/system-cpu-resources.ts
 models/system-disk-resource-scope.ts
 models/system-disk-resources.ts
-models/system-features.ts
 models/system-info-response.ts
 models/system-memory-resource-scope.ts
 models/system-memory-resources.ts

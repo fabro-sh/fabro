@@ -37,10 +37,9 @@ pub use fabro_api::types::{
     RunStage, SandboxDetails, SandboxFileEntry, SandboxFileListResponse, SandboxService,
     SandboxServiceListResponse, SshAccessRequest, SshAccessResponse, StageHandler, StageState,
     StartRunRequest, SubmitAnswerRequest, SystemCpuResourceScope, SystemCpuResources,
-    SystemDiskResourceScope, SystemDiskResources, SystemFeatures, SystemInfoResponse,
-    SystemMemoryResourceScope, SystemMemoryResources, SystemRepairRunIssue,
-    SystemRepairRunsResponse, SystemResourcesResponse, SystemRunCounts, TimelineEntryResponse,
-    VncPreviewResponse, WriteBlobResponse,
+    SystemDiskResourceScope, SystemDiskResources, SystemInfoResponse, SystemMemoryResourceScope,
+    SystemMemoryResources, SystemRepairRunIssue, SystemRepairRunsResponse, SystemResourcesResponse,
+    SystemRunCounts, TimelineEntryResponse, VncPreviewResponse, WriteBlobResponse,
 };
 use fabro_auth::{CredentialSource, VaultCredentialSource, auth_issue_message};
 #[cfg(test)]
@@ -641,8 +640,7 @@ pub struct AppState {
 type PullRequestCreateLocks = Arc<Mutex<HashMap<RunId, Arc<AsyncMutex<()>>>>>;
 
 struct AskFabroReadiness {
-    feature_enabled: bool,
-    default_model:   Option<String>,
+    default_model: Option<String>,
 }
 
 impl AskFabroReadiness {
@@ -652,9 +650,7 @@ impl AskFabroReadiness {
     }
 
     fn ask_fabro_for(&self, run: &fabro_types::Run) -> AskFabro {
-        let unavailable_reason = if !self.feature_enabled {
-            Some(AskFabroUnavailableReason::FeatureDisabled)
-        } else if run.sandbox.is_none() {
+        let unavailable_reason = if run.sandbox.is_none() {
             Some(AskFabroUnavailableReason::NoSandbox)
         } else if run
             .sandbox
@@ -871,14 +867,6 @@ impl AppState {
     }
 
     async fn ask_fabro_readiness(&self) -> AskFabroReadiness {
-        let feature_enabled = self.server_settings().features.session_sandboxes;
-        if !feature_enabled {
-            return AskFabroReadiness {
-                feature_enabled,
-                default_model: None,
-            };
-        }
-
         let provider_ids = self.ready_llm_provider_ids().await;
         let default_model = if provider_ids.is_empty() {
             None
@@ -890,10 +878,7 @@ impl AppState {
                     .clone(),
             )
         };
-        AskFabroReadiness {
-            feature_enabled,
-            default_model,
-        }
+        AskFabroReadiness { default_model }
     }
 
     pub(crate) fn vault_or_env(&self, name: &str) -> Option<String> {
@@ -1501,16 +1486,6 @@ async fn github_webhook(
     }
 
     StatusCode::OK
-}
-
-fn system_features(
-    server_settings: &ServerSettings,
-    _manifest_run_settings: &std::result::Result<RunNamespace, SharedError>,
-) -> SystemFeatures {
-    let session_sandboxes = server_settings.features.session_sandboxes;
-    SystemFeatures {
-        session_sandboxes: Some(session_sandboxes),
-    }
 }
 
 struct PrunePlan {

@@ -4,14 +4,13 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::settings::{
-    CliNamespace, FeaturesNamespace, InterpString, ObjectStoreSettings, ProjectNamespace,
-    RunNamespace, ServerNamespace, WorkflowNamespace,
+    CliNamespace, InterpString, ObjectStoreSettings, ProjectNamespace, RunNamespace,
+    ServerNamespace, WorkflowNamespace,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ServerSettings {
-    pub server:   ServerNamespace,
-    pub features: FeaturesNamespace,
+    pub server: ServerNamespace,
 }
 
 impl ServerSettings {
@@ -43,8 +42,7 @@ fn override_local_object_store_root(
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct UserSettings {
-    pub cli:      CliNamespace,
-    pub features: FeaturesNamespace,
+    pub cli: CliNamespace,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

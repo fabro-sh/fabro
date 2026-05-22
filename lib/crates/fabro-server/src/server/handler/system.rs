@@ -6,8 +6,8 @@ use super::super::{
     PruneRunsRequest, PruneRunsResponse, Query, RequiredUser, Response, Router, RunStatus, State,
     StatusCode, SystemInfoResponse, SystemRepairRunIssue, SystemRepairRunsResponse,
     SystemRunCounts, build_disk_usage_response, build_prune_plan, delete_run_internal, diagnostics,
-    get, post, resolve_interp_string, resource_sampler, spawn_blocking, system_features,
-    system_sandbox_provider, to_i64,
+    get, post, resolve_interp_string, resource_sampler, spawn_blocking, system_sandbox_provider,
+    to_i64,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -76,10 +76,6 @@ async fn get_system_info(_auth: RequiredUser, State(state): State<Arc<AppState>>
             active: Some(to_i64(active_runs)),
         }),
         sandbox_provider: Some(system_sandbox_provider(&manifest_run_settings)),
-        features:         Some(system_features(
-            server_settings.as_ref(),
-            &manifest_run_settings,
-        )),
     };
     (StatusCode::OK, Json(response)).into_response()
 }

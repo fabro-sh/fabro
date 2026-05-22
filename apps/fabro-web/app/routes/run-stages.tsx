@@ -1480,8 +1480,8 @@ export default function RunStages() {
   }
 
   return (
-    <div className="-mr-4 -mt-6 flex min-h-0 flex-1 sm:-mr-6 lg:-mr-8">
-      <div className="shrink-0 pb-6 pr-3 pt-6">
+    <div className="-mr-4 -mt-3 flex min-h-0 flex-1 sm:-mr-6 lg:-mr-8">
+      <div className="shrink-0 pb-6 pr-3 pt-3">
         <StageSidebar stages={stages} runId={id} selectedStageId={selectedStage.id} />
       </div>
 

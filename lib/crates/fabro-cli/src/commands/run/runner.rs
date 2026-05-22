@@ -34,6 +34,7 @@ use fabro_workflow::operations::{self, StartServices};
 use fabro_workflow::run_control::RunControlState;
 use fabro_workflow::runtime_store::{RunStoreBackend, RunStoreHandle};
 use fabro_workflow::services::FabroRunToolServices;
+use jsonwebtoken::dangerous::insecure_decode;
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::{Mutex, RwLock as AsyncRwLock, mpsc};
@@ -93,7 +94,7 @@ pub(crate) async fn execute(
         client.clone_for_reuse(),
         worker_token.to_owned(),
     )));
-    let fabro_run_tools = if run_spec.settings.run.agent.fabro_tools {
+    let fabro_run_tools = if fabro_run_tools_enabled_from_worker_token(worker_token) {
         build_fabro_run_tool_services(
             worker_token,
             client.clone_for_reuse(),
@@ -167,6 +168,34 @@ pub(crate) async fn execute(
     }
 
     Ok(())
+}
+
+const WORKER_TOKEN_SCOPE: &str = "run:worker";
+const WORKER_RUN_TOOLS_SCOPE: &str = "agent:run_tools";
+
+#[derive(serde::Deserialize)]
+struct WorkerTokenScopeClaim {
+    scope: String,
+}
+
+fn fabro_run_tools_enabled_from_worker_token(worker_token: &str) -> bool {
+    // Local tool registration only. The server validates the token signature and
+    // scopes.
+    insecure_decode::<WorkerTokenScopeClaim>(worker_token)
+        .is_ok_and(|token| worker_scope_has_run_tools(&token.claims.scope))
+}
+
+fn worker_scope_has_run_tools(scope_claim: &str) -> bool {
+    let mut has_run_worker = false;
+    let mut has_agent_run_tools = false;
+    for scope in scope_claim.split_whitespace() {
+        match scope {
+            WORKER_TOKEN_SCOPE => has_run_worker = true,
+            WORKER_RUN_TOOLS_SCOPE => has_agent_run_tools = true,
+            _ => return false,
+        }
+    }
+    has_run_worker && has_agent_run_tools
 }
 
 fn build_fabro_run_tool_services(
@@ -767,6 +796,41 @@ mod tests {
         assert!(super::clone_sandbox_requires_github_credentials("docker"));
         assert!(super::clone_sandbox_requires_github_credentials("daytona"));
         assert!(!super::clone_sandbox_requires_github_credentials("local"));
+    }
+
+    #[test]
+    fn fabro_run_tools_enabled_token_requires_run_tools_scope() {
+        assert!(!super::fabro_run_tools_enabled_from_worker_token(
+            "not-a-jwt"
+        ));
+        assert!(!super::fabro_run_tools_enabled_from_worker_token(
+            &worker_token_with_claims(&serde_json::json!({ "scope": "run:worker" })),
+        ));
+        assert!(!super::fabro_run_tools_enabled_from_worker_token(
+            &worker_token_with_claims(&serde_json::json!({ "scope": "agent:run_tools" })),
+        ));
+        assert!(!super::fabro_run_tools_enabled_from_worker_token(
+            &worker_token_with_claims(&serde_json::json!({ "scope": "run:worker agent:wrong" })),
+        ));
+        assert!(!super::fabro_run_tools_enabled_from_worker_token(
+            &worker_token_with_claims(
+                &serde_json::json!({ "other": "run:worker agent:run_tools" }),
+            ),
+        ));
+        assert!(super::fabro_run_tools_enabled_from_worker_token(
+            &worker_token_with_claims(
+                &serde_json::json!({ "scope": "run:worker agent:run_tools" }),
+            ),
+        ));
+    }
+
+    fn worker_token_with_claims(claims: &serde_json::Value) -> String {
+        jsonwebtoken::encode(
+            &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256),
+            claims,
+            &jsonwebtoken::EncodingKey::from_secret(b"test-worker-token"),
+        )
+        .expect("test worker token should encode")
     }
 
     fn test_user_principal(login: &str) -> Principal {

@@ -700,8 +700,8 @@ export default function RunDetail({ params }: { params: { id: string } }) {
       <div
         className={
           fullHeight
-            ? "mt-6 flex min-h-0 flex-1 flex-col"
-            : "mt-6 pb-[var(--fabro-interview-dock-clearance)]"
+            ? "pt-3 flex min-h-0 flex-1 flex-col"
+            : "pt-3 pb-[var(--fabro-interview-dock-clearance)]"
         }
       >
         <Outlet />
@@ -744,10 +744,9 @@ const ASK_FABRO_UNAVAILABLE_TOOLTIPS: Record<
   AskFabroUnavailableReasonEnum,
   string
 > = {
-  [AskFabroUnavailableReasonEnum.FEATURE_DISABLED]: "Ask Fabro is disabled",
-  [AskFabroUnavailableReasonEnum.NO_SANDBOX]:       "Run sandbox isn't ready",
-  [AskFabroUnavailableReasonEnum.SANDBOX_NOT_READY]:"Run sandbox isn't ready",
-  [AskFabroUnavailableReasonEnum.LLM_UNCONFIGURED]: "No LLM configured",
+  [AskFabroUnavailableReasonEnum.NO_SANDBOX]:        "Run sandbox isn't ready",
+  [AskFabroUnavailableReasonEnum.SANDBOX_NOT_READY]: "Run sandbox isn't ready",
+  [AskFabroUnavailableReasonEnum.LLM_UNCONFIGURED]:  "No LLM configured",
 };
 
 function AskFabroTriggerButton({

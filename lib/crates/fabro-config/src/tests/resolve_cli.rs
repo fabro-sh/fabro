@@ -35,9 +35,6 @@ _version = 1
 [cli.target]
 type = "http"
 url = "https://config.example.com"
-
-[features]
-session_sandboxes = true
 "#,
     )
     .expect("user settings should resolve");
@@ -48,7 +45,6 @@ session_sandboxes = true
             url: InterpString::parse("https://config.example.com"),
         })
     );
-    assert!(user_settings.features.session_sandboxes);
 }
 
 #[test]
@@ -61,9 +57,6 @@ _version = 1
 
 [cli.output]
 verbosity = "verbose"
-
-[features]
-session_sandboxes = true
 "#,
     )
     .unwrap();
@@ -72,7 +65,6 @@ session_sandboxes = true
         let user_settings = fabro_config::UserSettingsBuilder::load_default()
             .expect("user settings should resolve");
         assert_eq!(user_settings.cli.output.verbosity, OutputVerbosity::Verbose);
-        assert!(user_settings.features.session_sandboxes);
     });
 }
 
@@ -85,7 +77,6 @@ fn user_settings_resolve_returns_defaults_when_default_settings_file_is_missing(
             .expect("user settings should resolve");
         assert_eq!(user_settings.cli.output.format, OutputFormat::Text);
         assert_eq!(user_settings.cli.output.verbosity, OutputVerbosity::Normal);
-        assert!(!user_settings.features.session_sandboxes);
     });
 }
 

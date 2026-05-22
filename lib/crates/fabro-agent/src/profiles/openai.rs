@@ -4,6 +4,7 @@ use fabro_model::{AgentProfileKind, Catalog, ProviderId};
 
 use super::EnvContext;
 use crate::agent_profile::AgentProfile;
+use crate::apply_patch;
 use crate::config::SessionOptions;
 use crate::profiles::{BaseProfile, assemble_system_prompt};
 use crate::sandbox::Sandbox;
@@ -12,7 +13,6 @@ use crate::todo_runtime::TodoRuntime;
 use crate::todo_tools::make_update_plan_tool;
 use crate::tool_registry::ToolRegistry;
 use crate::tools::{WebFetchSummarizer, register_core_tools};
-use crate::v4a_patch::make_apply_patch_tool;
 
 pub struct OpenAiProfile {
     base: BaseProfile,
@@ -33,7 +33,7 @@ impl OpenAiProfile {
         let mut registry = ToolRegistry::new();
 
         register_core_tools(&mut registry, &config, summarizer);
-        registry.register(make_apply_patch_tool());
+        registry.register(apply_patch::make_apply_patch_tool());
         // Codex-compatible `update_plan` is OpenAI-only.
         let todo_runtime = Arc::new(TodoRuntime::new());
         registry.register(make_update_plan_tool(todo_runtime));
@@ -146,8 +146,8 @@ If completing the task requires writing or modifying files:
 and focused on the task.
 - Use `git log` and `git blame` to search the history of the codebase if additional context is needed.
 - NEVER add copyright or license headers unless specifically requested.
-- When apply_patch fails, the error includes the current file contents — use them to construct \
-a corrected patch without re-reading the file.
+- When apply_patch fails, use the error text to construct a corrected patch. Re-read the target \
+file if you need fresh context.
 - Do not `git commit` your changes or create new git branches unless explicitly requested.
 
 # Validating Your Work
@@ -164,12 +164,12 @@ Use the provided tools to interact with the codebase and environment.
 Read files to understand code before modifying. Use offset/limit for large files.
 
 ## apply_patch
-Use the v4a patch format for all file modifications. The format uses `*** Begin Patch` / \
+Use the `apply_patch` tool for all file modifications. This is a freeform tool: pass the raw \
+patch text directly, never wrap it in JSON. The format uses `*** Begin Patch` / \
 `*** End Patch` delimiters with `*** Add File:`, `*** Delete File:`, `*** Update File:` \
-operations. Update hunks use `@@ context line text` headers — place a line of \
-existing code after `@@ ` to anchor each hunk. Use `-` for \
-removals, `+` for additions, and space-prefix for unchanged context lines. Show 3 lines \
-of context around each change. NEVER use `applypatch` or `apply-patch`, only `apply_patch`.
+operations. Use `-` for removals, `+` for additions, and space-prefix for unchanged context \
+lines. Show 3 lines of context around each change. NEVER use `applypatch` or `apply-patch`, \
+only `apply_patch`.
 
 Example:
 ```
@@ -248,7 +248,7 @@ mod tests {
         assert!(prompt.contains("You are a coding agent powered by openai"));
         assert!(prompt.contains("<environment>"));
         assert!(prompt.contains("linux"));
-        assert!(prompt.contains("v4a patch format"));
+        assert!(prompt.contains("freeform tool"));
         assert!(prompt.contains("*** Begin Patch"));
     }
 
@@ -325,6 +325,9 @@ mod tests {
         assert!(names.contains(&"web_search".to_string()));
         assert!(names.contains(&"web_fetch".to_string()));
         assert!(names.contains(&"update_plan".to_string()));
+
+        let apply_patch = profile.tool_registry().get("apply_patch").unwrap();
+        assert!(apply_patch.definition.is_custom());
     }
 
     #[test]

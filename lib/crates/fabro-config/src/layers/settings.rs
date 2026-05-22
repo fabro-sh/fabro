@@ -10,7 +10,6 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 use super::cli::CliLayer;
-use super::features::FeaturesLayer;
 use super::llm::LlmLayer;
 use super::project::ProjectLayer;
 use super::run::RunLayer;
@@ -34,8 +33,6 @@ pub(crate) struct SettingsLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server:   Option<ServerLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub features: Option<FeaturesLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llm:      Option<LlmLayer>,
 }
 
@@ -51,15 +48,6 @@ impl From<CliLayer> for SettingsLayer {
     fn from(cli: CliLayer) -> Self {
         Self {
             cli: Some(cli),
-            ..Self::default()
-        }
-    }
-}
-
-impl From<FeaturesLayer> for SettingsLayer {
-    fn from(features: FeaturesLayer) -> Self {
-        Self {
-            features: Some(features),
             ..Self::default()
         }
     }

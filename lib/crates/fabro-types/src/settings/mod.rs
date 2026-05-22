@@ -1,9 +1,9 @@
 //! Namespaced settings schema.
 //!
 //! Top-level schema is strictly namespaced with `_version`, `[project]`,
-//! `[workflow]`, `[run]`, `[cli]`, `[server]`, and `[features]`. Value-language
-//! helpers live alongside the tree: durations, byte sizes, model references,
-//! and env interpolation.
+//! `[workflow]`, `[run]`, `[cli]`, and `[server]`. Value-language helpers live
+//! alongside the tree: durations, byte sizes, model references, and env
+//! interpolation.
 //!
 //! Stage 6.5b promoted these modules up out of the transitional
 //! `settings/v2/` subdirectory, so the `::v2::` path prefix no longer
@@ -11,7 +11,6 @@
 
 pub mod cli;
 pub mod duration;
-pub mod features;
 pub mod interp;
 pub mod model_ref;
 pub mod project;
@@ -26,7 +25,6 @@ pub use cli::{
     CliLoggingSettings, CliNamespace, CliOutputSettings, CliTargetSettings, CliUpdatesSettings,
 };
 pub use duration::{Duration, ParseDurationError};
-pub use features::FeaturesNamespace;
 pub use interp::{InterpString, Provenance, ResolveEnvError, Resolved};
 pub use model_ref::{
     AmbiguousModelRef, ModelRef, ModelRegistry, ParseModelRefError, ResolvedModelRef,
