@@ -2880,10 +2880,6 @@ fn worker_command(
     cmd.env(EnvVars::FABRO_CONFIG, state.active_config_path());
     cmd.env_remove(EnvVars::FABRO_WORKER_TOKEN);
     cmd.env(EnvVars::FABRO_WORKER_TOKEN, worker_token);
-    cmd.env_remove(EnvVars::FABRO_WORKER_AGENT_RUN_TOOLS);
-    if agent_fabro_tools_enabled {
-        cmd.env(EnvVars::FABRO_WORKER_AGENT_RUN_TOOLS, "true");
-    }
     if let Some(pem) = state.server_secret(EnvVars::GITHUB_APP_PRIVATE_KEY) {
         cmd.env(EnvVars::GITHUB_APP_PRIVATE_KEY, pem);
     }

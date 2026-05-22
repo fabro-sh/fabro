@@ -1538,7 +1538,7 @@ fn worker_command_default_token_omits_agent_run_tools_scope() {
         "run:worker"
     ]);
     assert_eq!(
-        command_env_value(&cmd, EnvVars::FABRO_WORKER_AGENT_RUN_TOOLS),
+        command_env_value(&cmd, "FABRO_WORKER_AGENT_RUN_TOOLS"),
         EnvOverride::Unchanged
     );
 }
@@ -1568,8 +1568,8 @@ fn worker_command_opt_in_token_includes_agent_run_tools_scope() {
         "agent:run_tools"
     ]);
     assert_eq!(
-        command_env_value(&cmd, EnvVars::FABRO_WORKER_AGENT_RUN_TOOLS),
-        EnvOverride::Set("true".to_string())
+        command_env_value(&cmd, "FABRO_WORKER_AGENT_RUN_TOOLS"),
+        EnvOverride::Unchanged
     );
 }
 
