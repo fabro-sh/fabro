@@ -744,10 +744,9 @@ const ASK_FABRO_UNAVAILABLE_TOOLTIPS: Record<
   AskFabroUnavailableReasonEnum,
   string
 > = {
-  [AskFabroUnavailableReasonEnum.FEATURE_DISABLED]: "Ask Fabro is disabled",
-  [AskFabroUnavailableReasonEnum.NO_SANDBOX]:       "Run sandbox isn't ready",
-  [AskFabroUnavailableReasonEnum.SANDBOX_NOT_READY]:"Run sandbox isn't ready",
-  [AskFabroUnavailableReasonEnum.LLM_UNCONFIGURED]: "No LLM configured",
+  [AskFabroUnavailableReasonEnum.NO_SANDBOX]:        "Run sandbox isn't ready",
+  [AskFabroUnavailableReasonEnum.SANDBOX_NOT_READY]: "Run sandbox isn't ready",
+  [AskFabroUnavailableReasonEnum.LLM_UNCONFIGURED]:  "No LLM configured",
 };
 
 function AskFabroTriggerButton({

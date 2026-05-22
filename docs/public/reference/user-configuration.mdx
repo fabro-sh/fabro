@@ -29,7 +29,7 @@ Files that omit `_version` are treated as version `1`. The legacy top-level `ver
 
 ## Who reads what
 
-`settings.toml` uses the same schema as `.fabro/project.toml` and `workflow.toml`, but each process only reads the fields it understands. The top-level schema is strictly namespaced — the only allowed domains are `[project]`, `[workflow]`, `[run]`, `[llm]`, `[cli]`, `[server]`, and `[features]`.
+`settings.toml` uses the same schema as `.fabro/project.toml` and `workflow.toml`, but each process only reads the fields it understands. The top-level schema is strictly namespaced — the only allowed domains are `[project]`, `[workflow]`, `[run]`, `[llm]`, `[cli]`, and `[server]`.
 
 | Scope | Examples |
 |---|---|
@@ -44,7 +44,7 @@ See [Server Configuration](/administration/server-configuration) for the server-
 
 ## Precedence
 
-Shared layered domains (`[project]`, `[workflow]`, `[run]`, `[features]`) use this override order:
+Shared layered domains (`[project]`, `[workflow]`, `[run]`) use this override order:
 
 1. **CLI flags** — always win
 2. **Environment overrides** — Fabro-defined override channels

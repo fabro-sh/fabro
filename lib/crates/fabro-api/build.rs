@@ -210,11 +210,6 @@ fn main() {
             &[],
         ),
         (
-            "FeaturesNamespace",
-            "fabro_types::settings::FeaturesNamespace",
-            &[],
-        ),
-        (
             "ServerListenSettings",
             "fabro_types::settings::server::ServerListenSettings",
             &[],

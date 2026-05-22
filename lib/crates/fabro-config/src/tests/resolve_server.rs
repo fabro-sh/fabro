@@ -198,20 +198,15 @@ methods = ["dev-token"]
 
 [server.storage]
 root = "/srv/fabro"
-
-[features]
-session_sandboxes = true
 "#,
     );
 
     let context = fabro_config::ServerSettingsBuilder::from_layer(&settings)
         .expect("settings should resolve");
-    let user_settings = fabro_config::UserSettingsBuilder::from_layer(&settings)
+    let _user_settings = fabro_config::UserSettingsBuilder::from_layer(&settings)
         .expect("user settings should resolve");
 
     assert_eq!(context.server.storage.root.as_source(), "/srv/fabro");
-    assert!(context.features.session_sandboxes);
-    assert_eq!(context.features, user_settings.features);
 }
 
 #[test]
@@ -227,9 +222,6 @@ methods = ["dev-token"]
 
 [server.storage]
 root = "/srv/from-home"
-
-[features]
-session_sandboxes = true
 "#,
     )
     .unwrap();
@@ -238,7 +230,6 @@ session_sandboxes = true
         let settings =
             fabro_config::ServerSettingsBuilder::load_default().expect("settings should resolve");
         assert_eq!(settings.server.storage.root.as_source(), "/srv/from-home");
-        assert!(settings.features.session_sandboxes);
     });
 }
 

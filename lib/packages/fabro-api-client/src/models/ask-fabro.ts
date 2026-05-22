@@ -24,7 +24,6 @@ export interface AskFabro {
 }
 
 export const AskFabroUnavailableReasonEnum = {
-    FEATURE_DISABLED: 'feature_disabled',
     NO_SANDBOX: 'no_sandbox',
     SANDBOX_NOT_READY: 'sandbox_not_ready',
     LLM_UNCONFIGURED: 'llm_unconfigured'

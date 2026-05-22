@@ -1,6 +1,5 @@
 mod cli;
 mod error;
-mod features;
 mod project;
 mod run;
 mod server;
@@ -9,7 +8,6 @@ mod workflow;
 pub use cli::resolve_cli;
 pub use error::ResolveError;
 use fabro_types::settings::InterpString;
-pub use features::resolve_features;
 pub use project::resolve_project;
 pub use run::resolve_run;
 pub use server::resolve_server;

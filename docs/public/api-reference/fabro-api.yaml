@@ -8156,7 +8156,6 @@ components:
         unavailable_reason:
           type: ["string", "null"]
           enum:
-            - feature_disabled
             - no_sandbox
             - sandbox_not_ready
             - llm_unconfigured
@@ -10026,12 +10025,10 @@ components:
     ServerSettings:
       description: Current in-memory server settings view.
       type: object
-      required: [server, features]
+      required: [server]
       properties:
         server:
           $ref: "#/components/schemas/ServerNamespace"
-        features:
-          $ref: "#/components/schemas/FeaturesNamespace"
 
     ServerNamespace:
       type: object
@@ -10070,13 +10067,6 @@ components:
           $ref: "#/components/schemas/ServerLoggingSettings"
         integrations:
           $ref: "#/components/schemas/ServerIntegrationsSettings"
-
-    FeaturesNamespace:
-      type: object
-      required: [session_sandboxes]
-      properties:
-        session_sandboxes:
-          type: boolean
 
     ServerListenSettings:
       oneOf:
@@ -10989,16 +10979,6 @@ components:
         sandbox_provider:
           type: string
           description: Effective sandbox provider for launched runs.
-        features:
-          $ref: "#/components/schemas/SystemFeatures"
-
-    SystemFeatures:
-      description: Server-level capability flags.
-      type: object
-      properties:
-        session_sandboxes:
-          type: boolean
-          description: Whether session sandboxes are enabled.
 
     SystemRunCounts:
       description: Counts of known runs in the active server process.

@@ -57,9 +57,6 @@ async fn run_responses_include_ask_fabro_affordance() {
     let settings = settings_from_toml(
         r"
 _version = 1
-
-[features]
-session_sandboxes = true
 ",
     );
     let state = fabro_server::test_support::TestAppStateBuilder::new()
@@ -149,9 +146,6 @@ goal = "Ship it"
 
 [cli.output]
 verbosity = "verbose"
-
-[features]
-session_sandboxes = true
 "#
     }]);
 

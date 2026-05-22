@@ -468,10 +468,7 @@ shared = "cli"
         cfg["user"]["cli"]["output"]["verbosity"].as_str(),
         Some("verbose")
     );
-    assert_eq!(
-        cfg["user"]["features"]["session_sandboxes"].as_bool(),
-        Some(false)
-    );
+    assert!(cfg["user"].get("features").is_none());
     assert_eq!(
         cfg["server"]["server"]["auth"]["methods"][0].as_str(),
         Some("dev-token")

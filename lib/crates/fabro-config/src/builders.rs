@@ -10,8 +10,7 @@ use fabro_util::error::SharedError;
 use crate::defaults::DEFAULTS_LAYER;
 use crate::load::load_settings_path;
 use crate::resolve::{
-    ResolveError, resolve_cli, resolve_features, resolve_project, resolve_run, resolve_server,
-    resolve_workflow,
+    ResolveError, resolve_cli, resolve_project, resolve_run, resolve_server, resolve_workflow,
 };
 use crate::user::load_settings_config;
 use crate::{
@@ -98,9 +97,8 @@ impl ServerSettingsBuilder {
         let layer = layer.clone().combine(DEFAULTS_LAYER.clone());
         let mut errors = Vec::new();
         let server = resolve_server(&layer.server.clone().unwrap_or_default(), &mut errors);
-        let features = resolve_features(&layer.features.clone().unwrap_or_default(), &mut errors);
         finish_result(
-            ServerSettings { server, features },
+            ServerSettings { server },
             "failed to resolve server settings",
             errors,
         )
@@ -148,9 +146,8 @@ impl UserSettingsBuilder {
         let layer = layer.clone().combine(DEFAULTS_LAYER.clone());
         let mut errors = Vec::new();
         let cli = resolve_cli(&layer.cli.clone().unwrap_or_default(), &mut errors);
-        let features = resolve_features(&layer.features.clone().unwrap_or_default(), &mut errors);
         finish_result(
-            UserSettings { cli, features },
+            UserSettings { cli },
             "failed to resolve user settings",
             errors,
         )
@@ -552,7 +549,6 @@ impl WorkflowSettingsBuilder {
         layer = layer.combine(DEFAULTS_LAYER.clone());
         layer.server = None;
         layer.cli = None;
-        layer.features = None;
         layer
     }
 

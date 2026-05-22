@@ -97,10 +97,9 @@ function sampleResources(overrides: ResourceOverrides = {}): SystemResourcesResp
 
 function sampleServerSettings(maxConcurrentRuns = 8): ServerSettings {
   return {
-    server:   {
+    server: {
       scheduler: { max_concurrent_runs: maxConcurrentRuns },
     },
-    features: { session_sandboxes: false },
   } as unknown as ServerSettings;
 }
 

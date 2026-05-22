@@ -15,9 +15,6 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { SystemFeatures } from './system-features';
-// May contain unused imports in some cases
-// @ts-ignore
 import type { SystemRunCounts } from './system-run-counts';
 
 /**
@@ -69,5 +66,4 @@ export interface SystemInfoResponse {
      * Effective sandbox provider for launched runs.
      */
     'sandbox_provider'?: string;
-    'features'?: SystemFeatures;
 }
