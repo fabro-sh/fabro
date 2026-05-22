@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::common;
 use super::common::{FabroToolBackend, RunSummaryResult, ToolError, ToolResult};
@@ -57,15 +57,11 @@ pub async fn run_get(
         .list_run_questions(&run_id)
         .await
         .map_err(|err| ToolError::from_anyhow(&err))?;
-    let projection_value = serde_json::to_value(&projection)
-        .map_err(|err| ToolError::message(format!("failed to serialize run projection: {err}")))?;
-    let questions_value = serde_json::to_value(&questions)
-        .map_err(|err| ToolError::message(format!("failed to serialize run questions: {err}")))?;
     Ok(RunGetResult {
         run_id:     run_id.to_string(),
         summary:    common::run_summary_result(&summary),
-        projection: projection_value,
-        questions:  questions_value,
+        projection: json!(projection),
+        questions:  json!(questions),
     })
 }
 
