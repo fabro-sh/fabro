@@ -66,7 +66,6 @@ pub(crate) struct WorkerScopeSet {
 }
 
 impl WorkerScopeSet {
-    #[cfg(test)]
     #[must_use]
     pub(crate) const fn run_worker() -> Self {
         Self {

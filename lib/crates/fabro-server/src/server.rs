@@ -2811,6 +2811,7 @@ fn worker_command(
     run_id: RunId,
     mode: RunExecutionMode,
     run_dir: &std::path::Path,
+    agent_fabro_tools_enabled: bool,
 ) -> anyhow::Result<Command> {
     let current_exe = std::env::current_exe().context("reading current executable path")?;
     let exe = std::env::var_os(EnvVars::CARGO_BIN_EXE_FABRO).map_or(current_exe, PathBuf::from);
@@ -2823,12 +2824,13 @@ fn worker_command(
         )
     })?;
     let server_target = daemon.bind.to_target();
-    let worker_token = issue_worker_token_with_scopes(
-        state.worker_token_keys(),
-        &run_id,
-        WorkerScopeSet::run_worker_with_agent_run_tools(),
-    )
-    .map_err(|_| anyhow::anyhow!("failed to sign worker token"))?;
+    let scopes = if agent_fabro_tools_enabled {
+        WorkerScopeSet::run_worker_with_agent_run_tools()
+    } else {
+        WorkerScopeSet::run_worker()
+    };
+    let worker_token = issue_worker_token_with_scopes(state.worker_token_keys(), &run_id, scopes)
+        .map_err(|_| anyhow::anyhow!("failed to sign worker token"))?;
     let server_destination = resolved_log_destination(state)?;
     let worker_stdout = match server_destination {
         LogDestination::Stdout => Stdio::inherit(),
@@ -2861,6 +2863,10 @@ fn worker_command(
     cmd.env(EnvVars::FABRO_CONFIG, state.active_config_path());
     cmd.env_remove(EnvVars::FABRO_WORKER_TOKEN);
     cmd.env(EnvVars::FABRO_WORKER_TOKEN, worker_token);
+    cmd.env_remove(EnvVars::FABRO_WORKER_AGENT_RUN_TOOLS);
+    if agent_fabro_tools_enabled {
+        cmd.env(EnvVars::FABRO_WORKER_AGENT_RUN_TOOLS, "true");
+    }
     if let Some(pem) = state.server_secret(EnvVars::GITHUB_APP_PRIVATE_KEY) {
         cmd.env(EnvVars::GITHUB_APP_PRIVATE_KEY, pem);
     }
@@ -3432,6 +3438,22 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         run_store.subscribe(),
     ));
 
+    let run_state = match run_store.state().await {
+        Ok(run_state) => run_state,
+        Err(err) => {
+            tracing::error!(run_id = %run_id, error = %err, "Failed to load run state");
+            fail_managed_run(
+                &state,
+                run_id,
+                FailureReason::WorkflowError,
+                format!("Failed to load run state: {err}"),
+            );
+            state.scheduler_notify.notify_one();
+            return;
+        }
+    };
+    let agent_fabro_tools_enabled = run_state.spec.settings.run.agent.fabro_tools;
+
     let state_for_build = Arc::clone(&state);
     let run_dir_for_build = run_dir.clone();
     let build_cmd_result = spawn_blocking(move || {
@@ -3440,6 +3462,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             run_id,
             execution_mode,
             &run_dir_for_build,
+            agent_fabro_tools_enabled,
         )
     })
     .await;
