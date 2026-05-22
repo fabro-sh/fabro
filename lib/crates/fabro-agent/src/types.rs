@@ -194,6 +194,33 @@ pub enum SessionState {
     Closed,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MemoryFileSummary {
+    pub path:         String,
+    pub byte_count:   usize,
+    pub loaded_bytes: usize,
+    pub truncated:    bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SkillSummary {
+    pub name:        String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct McpToolSummary {
+    pub name:          String,
+    pub original_name: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillActivationSource {
+    Slash,
+    Tool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentEvent {
     SessionStarted {
@@ -303,10 +330,26 @@ pub enum AgentEvent {
     McpServerReady {
         server_name: String,
         tool_count:  usize,
+        tools:       Vec<McpToolSummary>,
     },
     McpServerFailed {
         server_name: String,
         error:       String,
+    },
+    MemoryLoaded {
+        provider_profile:   String,
+        files:              Vec<MemoryFileSummary>,
+        total_loaded_bytes: usize,
+        budget_bytes:       usize,
+    },
+    SkillsDiscovered {
+        provider_profile: String,
+        source_dirs:      Vec<String>,
+        skills:           Vec<SkillSummary>,
+    },
+    SkillActivated {
+        skill_name: String,
+        source:     SkillActivationSource,
     },
     /// New todo / task was created. Carries the full row so the projection
     /// can be reconstructed from `todo.created` alone.
@@ -504,12 +547,50 @@ impl AgentEvent {
             Self::McpServerReady {
                 server_name,
                 tool_count,
+                tools,
             } => {
                 info!(
                     session_id,
                     server = server_name.as_str(),
                     tool_count,
+                    summary_count = tools.len(),
                     "MCP server ready"
+                );
+            }
+            Self::MemoryLoaded {
+                provider_profile,
+                files,
+                total_loaded_bytes,
+                budget_bytes,
+            } => {
+                info!(
+                    session_id,
+                    provider_profile = provider_profile.as_str(),
+                    file_count = files.len(),
+                    total_loaded_bytes,
+                    budget_bytes,
+                    "Agent memory loaded"
+                );
+            }
+            Self::SkillsDiscovered {
+                provider_profile,
+                source_dirs,
+                skills,
+            } => {
+                info!(
+                    session_id,
+                    provider_profile = provider_profile.as_str(),
+                    skill_count = skills.len(),
+                    source_dir_count = source_dirs.len(),
+                    "Agent skills discovered"
+                );
+            }
+            Self::SkillActivated { skill_name, source } => {
+                debug!(
+                    session_id,
+                    skill = skill_name.as_str(),
+                    source = ?source,
+                    "Agent skill activated"
                 );
             }
             Self::McpServerFailed { server_name, error } => {
@@ -752,6 +833,7 @@ mod tests {
         let event = AgentEvent::McpServerReady {
             server_name: "filesystem".into(),
             tool_count:  3,
+            tools:       Vec::new(),
         };
         assert!(matches!(event, AgentEvent::McpServerReady {
             tool_count: 3,
@@ -776,6 +858,7 @@ mod tests {
             AgentEvent::McpServerReady {
                 server_name: "fs".into(),
                 tool_count:  5,
+                tools:       Vec::new(),
             },
             AgentEvent::McpServerFailed {
                 server_name: "bad".into(),

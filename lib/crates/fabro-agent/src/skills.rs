@@ -7,6 +7,7 @@ use crate::error::{Error, InterruptReason};
 use crate::sandbox::Sandbox;
 use crate::tool_registry::RegisteredTool;
 use crate::tools::required_str;
+use crate::types::{AgentEvent, SkillActivationSource};
 
 #[derive(Debug, Clone)]
 pub struct Skill {
@@ -176,7 +177,7 @@ pub fn make_use_skill_tool(skills: Arc<Vec<Skill>>) -> RegisteredTool {
                 "required": ["skill_name"]
             }),
         },
-        executor:   Arc::new(move |args, _ctx| {
+        executor:   Arc::new(move |args, ctx| {
             let skills = skills.clone();
             Box::pin(async move {
                 let name = required_str(&args, "skill_name")?;
@@ -184,6 +185,10 @@ pub fn make_use_skill_tool(skills: Arc<Vec<Skill>>) -> RegisteredTool {
                     .iter()
                     .find(|s| s.name == name)
                     .ok_or_else(|| format!("Unknown skill: {name}"))?;
+                ctx.emit_agent_event(AgentEvent::SkillActivated {
+                    skill_name: name.to_string(),
+                    source:     SkillActivationSource::Tool,
+                });
                 Ok(skill.template.clone())
             })
         }),

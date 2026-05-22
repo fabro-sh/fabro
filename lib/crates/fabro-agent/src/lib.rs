@@ -43,7 +43,7 @@ pub use fabro_types::SteeringMessage;
 pub use history::History;
 pub use local_sandbox::LocalSandbox;
 pub use loop_detection::detect_loop;
-pub use memory::discover_memory;
+pub use memory::{MemoryDocument, discover_memory};
 pub use profiles::{AnthropicProfile, EnvContext, GeminiProfile, OpenAiProfile};
 pub use read_before_write_sandbox::ReadBeforeWriteSandbox;
 pub use sandbox::{
@@ -70,7 +70,10 @@ pub use tools::{
     make_shell_tool, make_shell_tool_with_config, make_write_file_tool, register_core_tools,
 };
 pub use truncation::{TruncationMode, truncate_lines, truncate_output, truncate_tool_output};
-pub use types::{AgentEvent, Message, SessionEvent, SessionState};
+pub use types::{
+    AgentEvent, McpToolSummary, MemoryFileSummary, Message, SessionEvent, SessionState,
+    SkillActivationSource, SkillSummary,
+};
 
 #[cfg(test)]
 #[allow(

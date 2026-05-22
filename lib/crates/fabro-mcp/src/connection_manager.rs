@@ -151,6 +151,22 @@ impl McpConnectionManager {
         &self.tools
     }
 
+    /// Names-only tool summaries for the given server, sorted by qualified
+    /// name. Returns `(qualified_name, original_tool_name)` pairs. Useful
+    /// for emitting deterministic `agent.mcp.ready` payloads without
+    /// leaking descriptions or input schemas.
+    #[must_use]
+    pub fn tool_summaries_for_server(&self, server_name: &str) -> Vec<(String, String)> {
+        let mut summaries: Vec<(String, String)> = self
+            .tools
+            .iter()
+            .filter(|(_, info)| info.server_name == server_name)
+            .map(|(qualified, info)| (qualified.clone(), info.original_tool_name.clone()))
+            .collect();
+        summaries.sort_by(|a, b| a.0.cmp(&b.0));
+        summaries
+    }
+
     /// Call a tool by its qualified name.
     pub async fn call_tool(
         &self,
@@ -302,5 +318,46 @@ mod tests {
     fn connection_manager_new_has_empty_tools() {
         let mgr = McpConnectionManager::new();
         assert!(mgr.all_tools().is_empty());
+    }
+
+    #[test]
+    fn tool_summaries_for_server_filters_and_sorts_by_qualified_name() {
+        let mut mgr = McpConnectionManager::new();
+        mgr.tools
+            .insert(qualified_tool_name("github", "list_issues"), ToolInfo {
+                server_name:        "github".to_string(),
+                original_tool_name: "list_issues".to_string(),
+                description:        "list issues".to_string(),
+                input_schema:       serde_json::json!({}),
+            });
+        mgr.tools
+            .insert(qualified_tool_name("github", "create_issue"), ToolInfo {
+                server_name:        "github".to_string(),
+                original_tool_name: "create_issue".to_string(),
+                description:        "create issue".to_string(),
+                input_schema:       serde_json::json!({}),
+            });
+        mgr.tools
+            .insert(qualified_tool_name("other", "noop"), ToolInfo {
+                server_name:        "other".to_string(),
+                original_tool_name: "noop".to_string(),
+                description:        "noop".to_string(),
+                input_schema:       serde_json::json!({}),
+            });
+
+        let summaries = mgr.tool_summaries_for_server("github");
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(summaries[0].0, "mcp__github__create_issue");
+        assert_eq!(summaries[0].1, "create_issue");
+        assert_eq!(summaries[1].0, "mcp__github__list_issues");
+        assert_eq!(summaries[1].1, "list_issues");
+
+        let other = mgr.tool_summaries_for_server("other");
+        assert_eq!(other.len(), 1);
+        assert_eq!(other[0].0, "mcp__other__noop");
+        assert_eq!(other[0].1, "noop");
+
+        let none = mgr.tool_summaries_for_server("missing");
+        assert!(none.is_empty());
     }
 }

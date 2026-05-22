@@ -215,7 +215,15 @@ pub struct AgentSubClosedProps {
 pub struct AgentMcpReadyProps {
     pub server_name: String,
     pub tool_count:  usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools:       Vec<AgentMcpToolSummary>,
     pub visit:       u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentMcpToolSummary {
+    pub name:          String,
+    pub original_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -223,4 +231,49 @@ pub struct AgentMcpFailedProps {
     pub server_name: String,
     pub error:       String,
     pub visit:       u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentMemoryLoadedProps {
+    pub provider_profile:   String,
+    pub files:              Vec<AgentMemoryFileProps>,
+    pub total_loaded_bytes: usize,
+    pub budget_bytes:       usize,
+    pub visit:              u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentMemoryFileProps {
+    pub path:         String,
+    pub byte_count:   usize,
+    pub loaded_bytes: usize,
+    pub truncated:    bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentSkillsDiscoveredProps {
+    pub provider_profile: String,
+    pub source_dirs:      Vec<String>,
+    pub skills:           Vec<AgentSkillSummary>,
+    pub visit:            u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentSkillSummary {
+    pub name:        String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentSkillActivationSource {
+    Slash,
+    Tool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentSkillActivatedProps {
+    pub skill_name: String,
+    pub source:     AgentSkillActivationSource,
+    pub visit:      u32,
 }

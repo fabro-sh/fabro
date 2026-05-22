@@ -94,7 +94,12 @@ impl Handler for PromptHandler {
             if docs.is_empty() {
                 None
             } else {
-                Some(docs.join("\n\n"))
+                Some(
+                    docs.into_iter()
+                        .map(|doc| doc.content)
+                        .collect::<Vec<_>>()
+                        .join("\n\n"),
+                )
             }
         } else {
             None
