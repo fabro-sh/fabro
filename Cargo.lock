@@ -2262,6 +2262,7 @@ dependencies = [
  "fabro-api",
  "fabro-auth",
  "fabro-build-support",
+ "fabro-client",
  "fabro-config",
  "fabro-github",
  "fabro-graphviz",

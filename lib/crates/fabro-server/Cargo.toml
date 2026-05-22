@@ -42,6 +42,7 @@ fabro-tool = { path = "../fabro-tool" }
 fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 fabro-api = { path = "../fabro-api" }
+fabro-client = { path = "../fabro-client" }
 fabro-store = { path = "../fabro-store" }
 fabro-vault = { path = "../fabro-vault" }
 fabro-http.workspace = true

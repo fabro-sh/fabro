@@ -1,4 +1,5 @@
 use std::convert::Infallible;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -23,6 +24,7 @@ use fabro_sandbox::reconnect::reconnect_for_run;
 use fabro_store::{
     EventPayload, ProjectedRunSession, RunDatabase, project_run_session, project_run_sessions,
 };
+use fabro_tool::fabro_client::ClientBackend;
 use fabro_types::run_event::{
     RunSessionAssistantDeltaProps, RunSessionAssistantMessageProps, RunSessionCreatedProps,
     RunSessionToolCallCompletedProps, RunSessionToolCallStartedProps, RunSessionTurnFailedCode,
@@ -33,6 +35,8 @@ use fabro_types::settings::{ModelRef as SettingsModelRef, ModelRegistry, Resolve
 use fabro_types::{
     EventBody, EventEnvelope, PermissionLevel, RunEvent, RunId, SessionDetail, SessionId, TurnId,
 };
+use fabro_workflow::handler::llm::api::register_fabro_run_tools_subset;
+use fabro_workflow::services::FabroRunToolServices;
 use serde_json::Value;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
@@ -48,6 +52,7 @@ use super::super::{
 use crate::error::ApiError;
 use crate::principal_middleware::RequiredUser;
 use crate::server_secrets::LlmClientResult;
+use crate::worker_token::{WorkerScopeSet, issue_worker_token_with_scopes};
 
 const SESSION_SSE_BUFFER_CAPACITY: usize = 1024;
 
@@ -682,13 +687,46 @@ async fn build_agent_session(
     .await
     .map_err(AskFabroBuildError::SandboxUnavailable)?;
     let sandbox: Arc<dyn fabro_agent::Sandbox> = Arc::from(sandbox);
-    let profile = build_profile(
+    let mut profile = build_profile(
         provider_id,
         profile_kind,
         &model,
         &llm_result.client,
         Arc::clone(&catalog),
     );
+
+    // Give the Ask Fabro agent access to run-control tools scoped to its
+    // owning run. The session reaches the local HTTP API via a same-run
+    // worker token; the server's auth middleware enforces the run scope so
+    // cross-run calls 403.
+    let worker_token = issue_worker_token_with_scopes(
+        state.worker_token_keys(),
+        &run_id,
+        WorkerScopeSet::run_worker_with_agent_run_tools(),
+    )
+    .map_err(|err| AskFabroBuildError::Agent(anyhow::anyhow!("{err:?}")))?;
+    let target = state
+        .self_server_target()
+        .map_err(AskFabroBuildError::Agent)?;
+    let api_client = fabro_client::Client::builder()
+        .target(target)
+        .credential(fabro_client::Credential::Worker(worker_token))
+        .connect()
+        .await
+        .map_err(AskFabroBuildError::Agent)?;
+    let backend = ClientBackend::new(Arc::new(api_client));
+    let services = FabroRunToolServices {
+        backend:            Arc::new(backend),
+        current_run_id:     run_id,
+        base_cwd:           PathBuf::new(),
+        user_settings_path: PathBuf::new(),
+    };
+    register_fabro_run_tools_subset(profile.tool_registry_mut(), &services, &[
+        fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
+        fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
+    ]);
+    let profile: Arc<dyn AgentProfile> = Arc::from(profile);
+
     let config = SessionOptions {
         tool_hooks: Some(Arc::new(ToolApprovalAdapter(
             build_ask_fabro_tool_approval(),
@@ -817,12 +855,12 @@ fn build_profile(
     model: &str,
     llm_client: &LlmClient,
     catalog: Arc<Catalog>,
-) -> Arc<dyn AgentProfile> {
+) -> Box<dyn AgentProfile> {
     let summarizer = Some(WebFetchSummarizer {
         client:   llm_client.clone(),
         model_id: summarizer_model_id(&provider_id, profile_kind, &catalog, model),
     });
-    let profile: Box<dyn AgentProfile> = match profile_kind {
+    match profile_kind {
         AgentProfileKind::OpenAi => Box::new(
             OpenAiProfile::with_summarizer(model, summarizer)
                 .with_provider_id(provider_id)
@@ -838,8 +876,7 @@ fn build_profile(
                 .with_provider_id(provider_id)
                 .with_catalog(catalog),
         ),
-    };
-    Arc::from(profile)
+    }
 }
 
 fn summarizer_model_id(
@@ -864,14 +901,26 @@ fn summarizer_model_id(
     }
 }
 
+/// Tool approval policy for Ask Fabro agent sessions.
+///
+/// File and shell tools stay locked down to the `ReadOnly` permission level,
+/// matching the rest of the session sandbox. The two run-control tools
+/// (`fabro_run_interact`, `fabro_run_events`) get full access — they're
+/// scoped by the same-run worker token, so the agent cannot reach across
+/// runs even though `interact` exposes mutating actions (start, cancel,
+/// steer, archive, answer).
 fn build_ask_fabro_tool_approval() -> ToolApprovalFn {
     Arc::new(move |tool_name: &str, _args: &Value| {
+        if matches!(
+            tool_name,
+            fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME | fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME
+        ) {
+            return Ok(());
+        }
         if is_tool_auto_approved(PermissionLevel::ReadOnly, tool_name) {
             Ok(())
         } else {
-            Err(format!(
-                "{tool_name} tool denied by Ask Fabro read-only policy"
-            ))
+            Err(format!("{tool_name} tool denied by Ask Fabro tool policy"))
         }
     })
 }
@@ -1201,4 +1250,48 @@ fn parse_turn_id(value: &str) -> Result<TurnId, ApiError> {
     value
         .parse()
         .map_err(|err| ApiError::bad_request(format!("Invalid turn ID: {err}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ask_fabro_tool_approval_allows_run_interact_and_run_events() {
+        let policy = build_ask_fabro_tool_approval();
+        assert!(policy("fabro_run_interact", &Value::Null).is_ok());
+        assert!(policy("fabro_run_events", &Value::Null).is_ok());
+    }
+
+    #[test]
+    fn ask_fabro_tool_approval_allows_read_only_tools() {
+        let policy = build_ask_fabro_tool_approval();
+        // read_file is part of the ReadOnly auto-approved set.
+        assert!(policy("read_file", &Value::Null).is_ok());
+    }
+
+    #[test]
+    fn ask_fabro_tool_approval_denies_write_and_shell_tools() {
+        let policy = build_ask_fabro_tool_approval();
+        let write = policy("write_file", &Value::Null).unwrap_err();
+        assert!(
+            write.contains("denied"),
+            "write_file should be denied; got: {write}"
+        );
+
+        let shell = policy("shell", &Value::Null).unwrap_err();
+        assert!(
+            shell.contains("denied"),
+            "shell should be denied; got: {shell}"
+        );
+    }
+
+    #[test]
+    fn ask_fabro_tool_approval_denies_other_mutating_run_tools() {
+        let policy = build_ask_fabro_tool_approval();
+        // Only `fabro_run_interact` and `fabro_run_events` are allow-listed.
+        // `fabro_run_create` and friends are not part of the Ask Fabro subset.
+        let err = policy("fabro_run_create", &Value::Null).unwrap_err();
+        assert!(err.contains("denied"), "fabro_run_create should be denied");
+    }
 }

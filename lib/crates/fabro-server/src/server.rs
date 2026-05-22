@@ -948,6 +948,26 @@ impl AppState {
         &self.worker_tokens
     }
 
+    /// Loopback target this server is bound to, derived from the runtime
+    /// daemon record. Used by in-process Ask Fabro sessions to call the local
+    /// API over the normal HTTP path (authed with a same-run worker token).
+    pub(crate) fn self_server_target(&self) -> anyhow::Result<fabro_client::ServerTarget> {
+        let storage_dir = self.server_storage_dir();
+        let runtime_directory = Storage::new(&storage_dir).runtime_directory();
+        let daemon = ServerDaemon::read(&runtime_directory)?.with_context(|| {
+            format!(
+                "server record {} is missing",
+                runtime_directory.record_path().display()
+            )
+        })?;
+        let target = daemon.bind.to_target();
+        if daemon.bind.tcp_port().is_some() {
+            fabro_client::ServerTarget::http_url(target)
+        } else {
+            fabro_client::ServerTarget::unix_socket_path(target)
+        }
+    }
+
     pub(crate) fn resolve_interp(&self, value: &InterpString) -> anyhow::Result<String> {
         value
             .resolve(|name| (self.env_lookup)(name))
