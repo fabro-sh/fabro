@@ -709,6 +709,10 @@ mod tests {
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: None,
+            session_id: None,
+            root_session_id: None,
+            tool_call_id: None,
+            agent_event_emitter: None,
         })
         .await;
         assert_eq!(result.unwrap(), "  1 | hello\n  2 | world");
@@ -733,6 +737,10 @@ mod tests {
                 env,
                 cancel: CancellationToken::new(),
                 tool_env_provider: None,
+                session_id: None,
+                root_session_id: None,
+                tool_call_id: None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -747,9 +755,13 @@ mod tests {
         let result = (tool.executor)(
             serde_json::json!({"file_path": "/out.txt", "content": "hello"}),
             ToolContext {
-                env:               env_clone,
-                cancel:            CancellationToken::new(),
-                tool_env_provider: None,
+                env:                 env_clone,
+                cancel:              CancellationToken::new(),
+                tool_env_provider:   None,
+                session_id:          None,
+                root_session_id:     None,
+                tool_call_id:        None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -777,9 +789,13 @@ mod tests {
                 "new_string": "goodbye"
             }),
             ToolContext {
-                env:               env_clone,
-                cancel:            CancellationToken::new(),
-                tool_env_provider: None,
+                env:                 env_clone,
+                cancel:              CancellationToken::new(),
+                tool_env_provider:   None,
+                session_id:          None,
+                root_session_id:     None,
+                tool_call_id:        None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -808,6 +824,10 @@ mod tests {
                 env,
                 cancel: CancellationToken::new(),
                 tool_env_provider: None,
+                session_id: None,
+                root_session_id: None,
+                tool_call_id: None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -833,6 +853,10 @@ mod tests {
                 env,
                 cancel: CancellationToken::new(),
                 tool_env_provider: None,
+                session_id: None,
+                root_session_id: None,
+                tool_call_id: None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -859,9 +883,13 @@ mod tests {
                 "replace_all": true
             }),
             ToolContext {
-                env:               env_clone,
-                cancel:            CancellationToken::new(),
-                tool_env_provider: None,
+                env:                 env_clone,
+                cancel:              CancellationToken::new(),
+                tool_env_provider:   None,
+                session_id:          None,
+                root_session_id:     None,
+                tool_call_id:        None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -888,6 +916,10 @@ mod tests {
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: None,
+            session_id: None,
+            root_session_id: None,
+            tool_call_id: None,
+            agent_event_emitter: None,
         })
         .await;
         let output = result.unwrap();
@@ -903,9 +935,13 @@ mod tests {
         let _result = (tool.executor)(
             serde_json::json!({"command": "sleep 1", "timeout_ms": 5000}),
             ToolContext {
-                env:               env_clone,
-                cancel:            CancellationToken::new(),
-                tool_env_provider: None,
+                env:                 env_clone,
+                cancel:              CancellationToken::new(),
+                tool_env_provider:   None,
+                session_id:          None,
+                root_session_id:     None,
+                tool_call_id:        None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -929,6 +965,10 @@ mod tests {
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: None,
+            session_id: None,
+            root_session_id: None,
+            tool_call_id: None,
+            agent_event_emitter: None,
         })
         .await;
         let output = result.unwrap();
@@ -953,6 +993,10 @@ mod tests {
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: None,
+            session_id: None,
+            root_session_id: None,
+            tool_call_id: None,
+            agent_event_emitter: None,
         })
         .await;
         let output = result.unwrap();
@@ -969,9 +1013,13 @@ mod tests {
         let _result = (tool.executor)(
             serde_json::json!({"command": "echo $MY_KEY"}),
             ToolContext {
-                env:               env_clone,
-                cancel:            CancellationToken::new(),
-                tool_env_provider: Some(Arc::new(crate::StaticEnvProvider(tool_env.clone()))),
+                env:                 env_clone,
+                cancel:              CancellationToken::new(),
+                tool_env_provider:   Some(Arc::new(crate::StaticEnvProvider(tool_env.clone()))),
+                session_id:          None,
+                root_session_id:     None,
+                tool_call_id:        None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -1013,9 +1061,13 @@ mod tests {
         let _result = (tool.executor)(
             serde_json::json!({"command": "echo $GITHUB_TOKEN"}),
             ToolContext {
-                env:               env.clone(),
-                cancel:            CancellationToken::new(),
-                tool_env_provider: Some(provider.clone()),
+                env:                 env.clone(),
+                cancel:              CancellationToken::new(),
+                tool_env_provider:   Some(provider.clone()),
+                session_id:          None,
+                root_session_id:     None,
+                tool_call_id:        None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -1030,9 +1082,13 @@ mod tests {
         let _result = (tool.executor)(
             serde_json::json!({"command": "echo $GITHUB_TOKEN"}),
             ToolContext {
-                env:               env.clone(),
-                cancel:            CancellationToken::new(),
-                tool_env_provider: Some(provider),
+                env:                 env.clone(),
+                cancel:              CancellationToken::new(),
+                tool_env_provider:   Some(provider),
+                session_id:          None,
+                root_session_id:     None,
+                tool_call_id:        None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -1056,6 +1112,10 @@ mod tests {
                 env,
                 cancel: CancellationToken::new(),
                 tool_env_provider: Some(Arc::new(FailingToolEnvProvider)),
+                session_id: None,
+                root_session_id: None,
+                tool_call_id: None,
+                agent_event_emitter: None,
             },
         )
         .await
@@ -1082,6 +1142,10 @@ mod tests {
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: Some(Arc::new(FailingToolEnvProvider)),
+            session_id: None,
+            root_session_id: None,
+            tool_call_id: None,
+            agent_event_emitter: None,
         })
         .await;
 
@@ -1094,9 +1158,13 @@ mod tests {
         let env = Arc::new(MockSandbox::default());
         let env_clone: Arc<dyn Sandbox> = env.clone();
         let _result = (tool.executor)(serde_json::json!({"command": "echo hello"}), ToolContext {
-            env:               env_clone,
-            cancel:            CancellationToken::new(),
-            tool_env_provider: None,
+            env:                 env_clone,
+            cancel:              CancellationToken::new(),
+            tool_env_provider:   None,
+            session_id:          None,
+            root_session_id:     None,
+            tool_call_id:        None,
+            agent_event_emitter: None,
         })
         .await;
         let captured = env.captured_env_vars.lock().unwrap().clone();
@@ -1122,9 +1190,13 @@ mod tests {
         let _result = (tool.executor)(
             serde_json::json!({"url": "https://example.com"}),
             ToolContext {
-                env:               env_clone,
-                cancel:            CancellationToken::new(),
-                tool_env_provider: Some(Arc::new(crate::StaticEnvProvider(tool_env.clone()))),
+                env:                 env_clone,
+                cancel:              CancellationToken::new(),
+                tool_env_provider:   Some(Arc::new(crate::StaticEnvProvider(tool_env.clone()))),
+                session_id:          None,
+                root_session_id:     None,
+                tool_call_id:        None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -1146,6 +1218,10 @@ mod tests {
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: None,
+            session_id: None,
+            root_session_id: None,
+            tool_call_id: None,
+            agent_event_emitter: None,
         })
         .await;
         let output = result.unwrap();
@@ -1164,6 +1240,10 @@ mod tests {
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: None,
+            session_id: None,
+            root_session_id: None,
+            tool_call_id: None,
+            agent_event_emitter: None,
         })
         .await;
         let output = result.unwrap();
@@ -1179,6 +1259,10 @@ mod tests {
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: None,
+            session_id: None,
+            root_session_id: None,
+            tool_call_id: None,
+            agent_event_emitter: None,
         })
         .await;
         let err = result.unwrap_err();
@@ -1196,6 +1280,10 @@ mod tests {
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: None,
+            session_id: None,
+            root_session_id: None,
+            tool_call_id: None,
+            agent_event_emitter: None,
         })
         .await;
         let err = result.unwrap_err();
@@ -1245,9 +1333,13 @@ mod tests {
         let result = (tool.executor)(
             serde_json::json!({"url": "https://example.com"}),
             ToolContext {
-                env:               env_clone,
-                cancel:            CancellationToken::new(),
-                tool_env_provider: None,
+                env:                 env_clone,
+                cancel:              CancellationToken::new(),
+                tool_env_provider:   None,
+                session_id:          None,
+                root_session_id:     None,
+                tool_call_id:        None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -1285,6 +1377,10 @@ mod tests {
                 env,
                 cancel: CancellationToken::new(),
                 tool_env_provider: None,
+                session_id: None,
+                root_session_id: None,
+                tool_call_id: None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -1303,9 +1399,13 @@ mod tests {
         let _result = (tool.executor)(
             serde_json::json!({"url": "https://example.com", "timeout_ms": 15000}),
             ToolContext {
-                env:               env_clone,
-                cancel:            CancellationToken::new(),
-                tool_env_provider: None,
+                env:                 env_clone,
+                cancel:              CancellationToken::new(),
+                tool_env_provider:   None,
+                session_id:          None,
+                root_session_id:     None,
+                tool_call_id:        None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -1325,9 +1425,13 @@ mod tests {
         let _result = (tool.executor)(
             serde_json::json!({"url": "https://example.com", "timeout_ms": 120_000}),
             ToolContext {
-                env:               env_clone,
-                cancel:            CancellationToken::new(),
-                tool_env_provider: None,
+                env:                 env_clone,
+                cancel:              CancellationToken::new(),
+                tool_env_provider:   None,
+                session_id:          None,
+                root_session_id:     None,
+                tool_call_id:        None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -1359,6 +1463,10 @@ mod tests {
                 env,
                 cancel: CancellationToken::new(),
                 tool_env_provider: None,
+                session_id: None,
+                root_session_id: None,
+                tool_call_id: None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -1386,6 +1494,10 @@ mod tests {
                 env,
                 cancel: CancellationToken::new(),
                 tool_env_provider: None,
+                session_id: None,
+                root_session_id: None,
+                tool_call_id: None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -1434,6 +1546,10 @@ mod tests {
                 env,
                 cancel: CancellationToken::new(),
                 tool_env_provider: None,
+                session_id: None,
+                root_session_id: None,
+                tool_call_id: None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -1465,6 +1581,10 @@ mod tests {
                 env,
                 cancel: CancellationToken::new(),
                 tool_env_provider: None,
+                session_id: None,
+                root_session_id: None,
+                tool_call_id: None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -1534,6 +1654,10 @@ mod tests {
                 env,
                 cancel: CancellationToken::new(),
                 tool_env_provider: None,
+                session_id: None,
+                root_session_id: None,
+                tool_call_id: None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -1588,6 +1712,10 @@ mod tests {
                 env,
                 cancel: CancellationToken::new(),
                 tool_env_provider: None,
+                session_id: None,
+                root_session_id: None,
+                tool_call_id: None,
+                agent_event_emitter: None,
             },
         )
         .await;
@@ -1611,9 +1739,13 @@ mod tests {
         // read_file tool should mark the file as agent-read
         let tool = make_read_file_tool();
         (tool.executor)(serde_json::json!({"file_path": "a.ts"}), ToolContext {
-            env:               Arc::clone(&env),
-            cancel:            CancellationToken::new(),
-            tool_env_provider: None,
+            env:                 Arc::clone(&env),
+            cancel:              CancellationToken::new(),
+            tool_env_provider:   None,
+            session_id:          None,
+            root_session_id:     None,
+            tool_call_id:        None,
+            agent_event_emitter: None,
         })
         .await
         .unwrap();
@@ -1640,9 +1772,13 @@ mod tests {
         // grep tool should mark matched files as agent-read
         let tool = make_grep_tool();
         (tool.executor)(serde_json::json!({"pattern": "content"}), ToolContext {
-            env:               Arc::clone(&env),
-            cancel:            CancellationToken::new(),
-            tool_env_provider: None,
+            env:                 Arc::clone(&env),
+            cancel:              CancellationToken::new(),
+            tool_env_provider:   None,
+            session_id:          None,
+            root_session_id:     None,
+            tool_call_id:        None,
+            agent_event_emitter: None,
         })
         .await
         .unwrap();

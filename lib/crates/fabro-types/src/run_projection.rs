@@ -8,6 +8,7 @@ use crate::{
     BilledTokenCounts, Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition,
     ModelRef, PullRequestLink, RunControlAction, RunDiff, RunId, RunSandbox, RunSpec, RunStatus,
     StageCompletion, StageHandler, StageId, StageState, StageTiming, StartRecord,
+    TodoListProjection,
 };
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -32,6 +33,11 @@ pub struct RunProjection {
     pub pull_request:       Option<PullRequestLink>,
     pub superseded_by:      Option<RunId>,
     pub pending_interviews: BTreeMap<String, PendingInterviewRecord>,
+    /// Projected todo / task lists, keyed by `list_id` (`openai_plan:<session>`
+    /// or `anthropic_tasks:<root_session>`). Maintained by replaying
+    /// `todo.created`, `todo.updated`, and `todo.deleted` events.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub todos_by_list:      BTreeMap<String, TodoListProjection>,
     stages:                 HashMap<StageId, StageProjection>,
 }
 
@@ -179,6 +185,7 @@ impl RunProjection {
             pull_request: None,
             superseded_by: None,
             pending_interviews: BTreeMap::new(),
+            todos_by_list: BTreeMap::new(),
             stages: HashMap::new(),
         }
     }

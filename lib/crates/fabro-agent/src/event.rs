@@ -2,6 +2,7 @@ use std::time::SystemTime;
 
 use tokio::sync::broadcast;
 
+use crate::tool_registry::AgentEventEmitter;
 use crate::types::{AgentEvent, SessionEvent};
 
 #[derive(Clone)]
@@ -28,6 +29,26 @@ impl Emitter {
         let _ = self.sender.send(wrapped);
     }
 
+    /// Emit an event with an explicit `parent_session_id`. Used by
+    /// session-bound emitter handles passed into tools so todo / task
+    /// mutations preserve the subagent → root agent link in the wire
+    /// envelope.
+    pub fn emit_with_parent(
+        &self,
+        session_id: String,
+        parent_session_id: Option<String>,
+        event: AgentEvent,
+    ) {
+        event.trace(&session_id);
+        let wrapped = SessionEvent {
+            event,
+            timestamp: SystemTime::now(),
+            session_id,
+            parent_session_id,
+        };
+        let _ = self.sender.send(wrapped);
+    }
+
     pub fn forward(&self, event: SessionEvent) {
         let _ = self.sender.send(event);
     }
@@ -41,6 +62,26 @@ impl Emitter {
 impl Default for Emitter {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Session-bound view of an [`Emitter`] suitable for handing to tools.
+/// Captures the session identity so each emitted agent event keeps the
+/// correct `session_id` / `parent_session_id` on the wire.
+#[derive(Clone)]
+pub struct SessionBoundEmitter {
+    pub emitter:           Emitter,
+    pub session_id:        String,
+    pub parent_session_id: Option<String>,
+}
+
+impl AgentEventEmitter for SessionBoundEmitter {
+    fn emit(&self, event: AgentEvent) {
+        self.emitter.emit_with_parent(
+            self.session_id.clone(),
+            self.parent_session_id.clone(),
+            event,
+        );
     }
 }
 

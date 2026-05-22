@@ -6,10 +6,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
 use crate::config::{SessionOptions, ToolHookCallback, ToolHookDecision};
-use crate::event::Emitter;
+use crate::event::{Emitter, SessionBoundEmitter};
 use crate::sandbox::Sandbox;
 use crate::session::ToolEnvProvider;
-use crate::tool_registry::{RegisteredTool, ToolContext, ToolRegistry};
+use crate::tool_registry::{AgentEventEmitter, RegisteredTool, ToolContext, ToolRegistry};
 use crate::truncation::truncate_tool_output;
 use crate::types::AgentEvent;
 
@@ -29,6 +29,7 @@ pub async fn execute_tool_calls(
     config: &SessionOptions,
     emitter: &Emitter,
     session_id: &str,
+    root_session_id: &str,
     tool_env_provider: Option<&Arc<dyn ToolEnvProvider>>,
 ) -> Vec<ToolResult> {
     if parallel && tool_calls.len() > 1 {
@@ -41,6 +42,7 @@ pub async fn execute_tool_calls(
             config,
             emitter,
             session_id,
+            root_session_id,
             tool_env_provider,
         )
         .await
@@ -54,6 +56,7 @@ pub async fn execute_tool_calls(
             config,
             emitter,
             session_id,
+            root_session_id,
             tool_env_provider,
         )
         .await
@@ -73,6 +76,7 @@ async fn execute_tool_calls_sequential(
     config: &SessionOptions,
     emitter: &Emitter,
     session_id: &str,
+    root_session_id: &str,
     tool_env_provider: Option<&Arc<dyn ToolEnvProvider>>,
 ) -> Vec<ToolResult> {
     let mut results = Vec::new();
@@ -91,6 +95,7 @@ async fn execute_tool_calls_sequential(
             config,
             emitter,
             session_id,
+            root_session_id,
             tool_env_provider,
         )
         .await;
@@ -112,6 +117,7 @@ async fn execute_tool_calls_parallel(
     config: &SessionOptions,
     emitter: &Emitter,
     session_id: &str,
+    root_session_id: &str,
     tool_env_provider: Option<&Arc<dyn ToolEnvProvider>>,
 ) -> Vec<ToolResult> {
     let tool_env_provider = tool_env_provider.cloned();
@@ -124,6 +130,7 @@ async fn execute_tool_calls_parallel(
             let cancel_token = cancel_token.clone();
             let tc = tc.clone();
             let session_id = session_id.to_owned();
+            let root_session_id = root_session_id.to_owned();
             let tool_hooks = tool_hooks.cloned();
             let tool_env_provider = tool_env_provider.clone();
             // Look up the tool before spawning since ToolRegistry is not Send.
@@ -138,6 +145,7 @@ async fn execute_tool_calls_parallel(
                     &config,
                     &emitter,
                     &session_id,
+                    &root_session_id,
                     tool_env_provider.as_ref(),
                 )
                 .await
@@ -162,6 +170,7 @@ pub async fn execute_and_emit_one_tool(
     config: &SessionOptions,
     emitter: &Emitter,
     session_id: &str,
+    root_session_id: &str,
     tool_env_provider: Option<&Arc<dyn ToolEnvProvider>>,
 ) -> ToolResult {
     execute_and_emit_one_tool_with_lookup(
@@ -173,6 +182,7 @@ pub async fn execute_and_emit_one_tool(
         config,
         emitter,
         session_id,
+        root_session_id,
         tool_env_provider,
     )
     .await
@@ -193,6 +203,7 @@ async fn execute_and_emit_one_tool_with_lookup(
     config: &SessionOptions,
     emitter: &Emitter,
     session_id: &str,
+    root_session_id: &str,
     tool_env_provider: Option<&Arc<dyn ToolEnvProvider>>,
 ) -> ToolResult {
     emitter.emit(session_id.to_owned(), AgentEvent::ToolCallStarted {
@@ -226,7 +237,17 @@ async fn execute_and_emit_one_tool_with_lookup(
         }
     }
 
-    let result = execute_one_tool(tc, registered_tool, env, cancel_token, tool_env_provider).await;
+    let result = execute_one_tool(
+        tc,
+        registered_tool,
+        env,
+        cancel_token,
+        emitter,
+        session_id,
+        root_session_id,
+        tool_env_provider,
+    )
+    .await;
 
     emitter.emit(session_id.to_owned(), AgentEvent::ToolCallOutputDelta {
         delta: result.content.to_string(),
@@ -265,11 +286,18 @@ async fn execute_and_emit_one_tool_with_lookup(
 }
 
 /// Execute a single tool call: argument validation and execution.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Single-tool execution threads session identity plus runtime handles to populate ToolContext."
+)]
 async fn execute_one_tool(
     tc: &ToolCall,
     registered_tool: Option<&RegisteredTool>,
     env: Arc<dyn Sandbox>,
     cancel_token: CancellationToken,
+    emitter: &Emitter,
+    session_id: &str,
+    root_session_id: &str,
     tool_env_provider: Option<&Arc<dyn ToolEnvProvider>>,
 ) -> ToolResult {
     match registered_tool {
@@ -280,10 +308,20 @@ async fn execute_one_tool(
                 return ToolResult::error(&tc.id, validation_error);
             }
 
+            let agent_event_emitter: Option<Arc<dyn AgentEventEmitter>> =
+                Some(Arc::new(SessionBoundEmitter {
+                    emitter:           emitter.clone(),
+                    session_id:        session_id.to_owned(),
+                    parent_session_id: None,
+                }));
             let ctx = ToolContext {
                 env,
                 cancel: cancel_token,
                 tool_env_provider: tool_env_provider.cloned(),
+                session_id: Some(session_id.to_owned()),
+                root_session_id: Some(root_session_id.to_owned()),
+                tool_call_id: Some(tc.id.clone()),
+                agent_event_emitter,
             };
             match (tool.executor)(tc.arguments.clone(), ctx).await {
                 Ok(output) => ToolResult::success(&tc.id, serde_json::json!(output)),
@@ -479,6 +517,7 @@ mod tests {
             &config,
             &emitter,
             "test-session",
+            "test-session",
             None,
         )
         .await;
@@ -509,6 +548,7 @@ mod tests {
             &config,
             &emitter,
             "test-session",
+            "test-session",
             None,
         )
         .await;
@@ -538,6 +578,7 @@ mod tests {
             CancellationToken::new(),
             &config,
             &emitter,
+            "test-session",
             "test-session",
             None,
         )
@@ -574,6 +615,7 @@ mod tests {
             &config,
             &emitter,
             "test-session",
+            "test-session",
             None,
         )
         .await;
@@ -605,6 +647,7 @@ mod tests {
             CancellationToken::new(),
             &config,
             &emitter,
+            "test-session",
             "test-session",
             None,
         )
@@ -646,6 +689,7 @@ mod tests {
             &config,
             &emitter,
             "test-session",
+            "test-session",
             None,
         )
         .await;
@@ -679,6 +723,7 @@ mod tests {
             &config,
             &emitter,
             "test-session",
+            "test-session",
             None,
         )
         .await;
@@ -698,6 +743,7 @@ mod tests {
             CancellationToken::new(),
             &config,
             &emitter,
+            "test-session",
             "test-session",
             None,
         )
@@ -727,6 +773,7 @@ mod tests {
             &config,
             &emitter,
             "test-session",
+            "test-session",
             None,
         )
         .await;
@@ -746,6 +793,7 @@ mod tests {
             CancellationToken::new(),
             &config,
             &emitter,
+            "test-session",
             "test-session",
             None,
         )
@@ -777,6 +825,7 @@ mod tests {
             &config,
             &emitter,
             "test-session",
+            "test-session",
             None,
         )
         .await;
@@ -807,6 +856,7 @@ mod tests {
             CancellationToken::new(),
             &config,
             &emitter,
+            "test-session",
             "test-session",
             None,
         )

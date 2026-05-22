@@ -308,6 +308,60 @@ pub enum AgentEvent {
         server_name: String,
         error:       String,
     },
+    /// New todo / task was created. Carries the full row so the projection
+    /// can be reconstructed from `todo.created` alone.
+    TodoCreated {
+        list_id:     String,
+        list_kind:   fabro_types::TodoListKind,
+        todo_id:     String,
+        status:      fabro_types::TodoStatus,
+        order:       u32,
+        subject:     String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        description: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        active_form: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        owner:       Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        blocks:      Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        blocked_by:  Vec<String>,
+        #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+        metadata:    std::collections::BTreeMap<String, serde_json::Value>,
+    },
+    /// Existing todo was mutated. Field-by-field optional patches; `None`
+    /// means "leave alone". `metadata_patch` keys with `null` values delete
+    /// that key in the projection.
+    TodoUpdated {
+        list_id:        String,
+        list_kind:      fabro_types::TodoListKind,
+        todo_id:        String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        status:         Option<fabro_types::TodoStatus>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        order:          Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject:        Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description:    Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        active_form:    Option<Option<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        owner:          Option<Option<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        add_blocks:     Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        add_blocked_by: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+        metadata_patch: std::collections::BTreeMap<String, serde_json::Value>,
+    },
+    /// Todo was removed.
+    TodoDeleted {
+        list_id:   String,
+        list_kind: fabro_types::TodoListKind,
+        todo_id:   String,
+    },
 }
 
 impl AgentEvent {
@@ -510,6 +564,21 @@ impl AgentEvent {
                     error,
                     "MCP server failed"
                 );
+            }
+            Self::TodoCreated {
+                list_id, todo_id, ..
+            } => {
+                debug!(session_id, list_id, todo_id, "Todo created");
+            }
+            Self::TodoUpdated {
+                list_id, todo_id, ..
+            } => {
+                debug!(session_id, list_id, todo_id, "Todo updated");
+            }
+            Self::TodoDeleted {
+                list_id, todo_id, ..
+            } => {
+                debug!(session_id, list_id, todo_id, "Todo deleted");
             }
         }
     }

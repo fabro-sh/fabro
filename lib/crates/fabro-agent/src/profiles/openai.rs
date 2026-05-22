@@ -8,6 +8,8 @@ use crate::config::SessionOptions;
 use crate::profiles::{BaseProfile, assemble_system_prompt};
 use crate::sandbox::Sandbox;
 use crate::skills::Skill;
+use crate::todo_runtime::TodoRuntime;
+use crate::todo_tools::make_update_plan_tool;
 use crate::tool_registry::ToolRegistry;
 use crate::tools::{WebFetchSummarizer, register_core_tools};
 use crate::v4a_patch::make_apply_patch_tool;
@@ -32,6 +34,9 @@ impl OpenAiProfile {
 
         register_core_tools(&mut registry, &config, summarizer);
         registry.register(make_apply_patch_tool());
+        // Codex-compatible `update_plan` is OpenAI-only.
+        let todo_runtime = Arc::new(TodoRuntime::new());
+        registry.register(make_update_plan_tool(todo_runtime));
 
         Self {
             base: BaseProfile {
@@ -298,19 +303,19 @@ mod tests {
     #[test]
     fn openai_subagent_tools_registered() {
         let mut profile = OpenAiProfile::new("o3-mini");
-        assert_eq!(profile.tool_registry().names().len(), 8);
+        assert_eq!(profile.tool_registry().names().len(), 9);
 
         let manager = Arc::new(AsyncMutex::new(SubAgentManager::new(3)));
         let factory: SessionFactory = Arc::new(|| panic!("should not be called in test"));
         profile.register_subagent_tools(manager, factory, 0);
-        assert_eq!(profile.tool_registry().names().len(), 12);
+        assert_eq!(profile.tool_registry().names().len(), 13);
     }
 
     #[test]
     fn openai_tools_registered() {
         let profile = OpenAiProfile::new("o3-mini");
         let names = profile.tool_registry().names();
-        assert_eq!(names.len(), 8);
+        assert_eq!(names.len(), 9);
         assert!(names.contains(&"read_file".to_string()));
         assert!(names.contains(&"write_file".to_string()));
         assert!(names.contains(&"shell".to_string()));
@@ -319,6 +324,16 @@ mod tests {
         assert!(names.contains(&"apply_patch".to_string()));
         assert!(names.contains(&"web_search".to_string()));
         assert!(names.contains(&"web_fetch".to_string()));
+        assert!(names.contains(&"update_plan".to_string()));
+    }
+
+    #[test]
+    fn openai_profile_excludes_anthropic_task_tools() {
+        let profile = OpenAiProfile::new("o3-mini");
+        let names = profile.tool_registry().names();
+        assert!(!names.contains(&"TaskCreate".to_string()));
+        assert!(!names.contains(&"TaskUpdate".to_string()));
+        assert!(!names.contains(&"TaskList".to_string()));
     }
 
     #[test]

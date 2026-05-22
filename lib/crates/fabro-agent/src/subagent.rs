@@ -331,7 +331,7 @@ pub fn make_spawn_agent_tool(
                 "required": ["task"]
             }),
         },
-        executor:   Arc::new(move |args, _ctx| {
+        executor:   Arc::new(move |args, ctx| {
             let manager = manager.clone();
             let session_factory = session_factory.clone();
             Box::pin(async move {
@@ -345,6 +345,12 @@ pub fn make_spawn_agent_tool(
 
                 // Note: working_dir and model require session factory changes to wire through
                 let mut session = session_factory();
+                // Inherit the parent agent's root session ID so todo tools
+                // that scope by root (e.g. Anthropic tasks) share one list
+                // across the parent and all subagents.
+                if let Some(root) = ctx.root_session_id.as_ref().or(ctx.session_id.as_ref()) {
+                    session.set_root_session_id(root.clone());
+                }
                 // Default subagent max_turns is 0 (unlimited) per spec (overridable via
                 // parameter)
                 session.set_max_turns(max_turns.unwrap_or(0));

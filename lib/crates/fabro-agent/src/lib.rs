@@ -19,6 +19,8 @@ pub mod sandbox;
 pub mod session;
 pub mod skills;
 pub mod subagent;
+pub mod todo_runtime;
+pub mod todo_tools;
 pub mod tool_execution;
 pub mod tool_permissions;
 pub mod tool_registry;
@@ -55,7 +57,11 @@ pub use skills::Skill;
 pub use subagent::{
     SubAgent, SubAgentEventCallback, SubAgentManager, SubAgentResult, SubAgentStatus,
 };
-pub use tool_registry::ToolRegistry;
+pub use todo_runtime::{TodoRuntime, TodoUpdate};
+pub use todo_tools::{
+    make_task_create_tool, make_task_list_tool, make_task_update_tool, make_update_plan_tool,
+};
+pub use tool_registry::{AgentEventEmitter, ToolRegistry};
 pub use tools::{
     WebFetchSummarizer, make_edit_file_tool, make_glob_tool, make_grep_tool, make_read_file_tool,
     make_shell_tool, make_shell_tool_with_config, make_write_file_tool, register_core_tools,

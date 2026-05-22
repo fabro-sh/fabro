@@ -4,7 +4,8 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use fabro_types::run_event::{
     AgentAcpStartedProps, AgentSessionActivatedProps, CheckpointCompletedProps, RunCompletedProps,
-    RunFailedProps, StageCompletedProps, StagePromptProps,
+    RunFailedProps, StageCompletedProps, StagePromptProps, TodoCreatedProps, TodoDeletedProps,
+    TodoUpdatedProps,
 };
 use fabro_types::settings::run::RunSandboxSettings;
 use fabro_types::{
@@ -14,7 +15,7 @@ use fabro_types::{
     RunControlAction, RunDiff, RunEvent, RunId, RunLifecycle, RunLinks, RunModel, RunOrigin,
     RunProjection, RunSandbox, RunSandboxRuntime, RunSpec, RunStatus, RunTimestamps,
     SandboxProvider, StageCompletion, StageHandler, StageId, StageOutcome, StageProjection,
-    StageState, StartRecord, WorkflowRef, first_event_seq,
+    StageState, StartRecord, TodoListProjection, TodoProjection, WorkflowRef, first_event_seq,
 };
 use fabro_util::error::render_compact_with_causes;
 use serde_json::Value;
@@ -452,10 +453,97 @@ impl RunProjectionReducer for RunProjection {
                 };
                 stage.parallel_results = Some(parallel_results);
             }
+            EventBody::TodoCreated(props) => {
+                apply_todo_created(self, props);
+            }
+            EventBody::TodoUpdated(props) => {
+                apply_todo_updated(self, props);
+            }
+            EventBody::TodoDeleted(props) => {
+                apply_todo_deleted(self, props);
+            }
             _ => {}
         }
 
         Ok(())
+    }
+}
+
+fn apply_todo_created(state: &mut RunProjection, props: &TodoCreatedProps) {
+    let list = state
+        .todos_by_list
+        .entry(props.list_id.clone())
+        .or_insert_with(|| TodoListProjection::new(props.list_kind, props.list_id.clone()));
+    list.upsert(TodoProjection {
+        id:          props.todo_id.clone(),
+        status:      props.status,
+        order:       props.order,
+        subject:     props.subject.clone(),
+        description: props.description.clone(),
+        active_form: props.active_form.clone(),
+        owner:       props.owner.clone(),
+        blocks:      props.blocks.clone(),
+        blocked_by:  props.blocked_by.clone(),
+        metadata:    props.metadata.clone(),
+    });
+}
+
+fn apply_todo_updated(state: &mut RunProjection, props: &TodoUpdatedProps) {
+    let Some(list) = state.todos_by_list.get_mut(&props.list_id) else {
+        return;
+    };
+    let Some(index) = list.items.iter().position(|todo| todo.id == props.todo_id) else {
+        return;
+    };
+    let mut todo = list.items[index].clone();
+    if let Some(status) = props.status {
+        todo.status = status;
+    }
+    if let Some(order) = props.order {
+        todo.order = order;
+    }
+    if let Some(subject) = props.subject.as_ref() {
+        todo.subject.clone_from(subject);
+    }
+    if let Some(description) = props.description.as_ref() {
+        todo.description.clone_from(description);
+    }
+    if let Some(active_form) = props.active_form.as_ref() {
+        todo.active_form.clone_from(active_form);
+    }
+    if let Some(owner) = props.owner.as_ref() {
+        todo.owner.clone_from(owner);
+    }
+    if let Some(add_blocks) = props.add_blocks.as_ref() {
+        for id in add_blocks {
+            if !todo.blocks.contains(id) {
+                todo.blocks.push(id.clone());
+            }
+        }
+    }
+    if let Some(add_blocked_by) = props.add_blocked_by.as_ref() {
+        for id in add_blocked_by {
+            if !todo.blocked_by.contains(id) {
+                todo.blocked_by.push(id.clone());
+            }
+        }
+    }
+    for (key, value) in &props.metadata_patch {
+        if value.is_null() {
+            todo.metadata.remove(key);
+        } else {
+            todo.metadata.insert(key.clone(), value.clone());
+        }
+    }
+    list.upsert(todo);
+}
+
+fn apply_todo_deleted(state: &mut RunProjection, props: &TodoDeletedProps) {
+    if let Some(list) = state.todos_by_list.get_mut(&props.list_id) {
+        list.remove(&props.todo_id);
+        if list.items.is_empty() {
+            state.todos_by_list.remove(&props.list_id);
+        }
     }
 }
 
@@ -3113,5 +3201,231 @@ mod tests {
         // Prior attempt's terminal data must not leak into the new attempt.
         assert!(stage.completion.is_none());
         assert_eq!(stage.timing.map(|t| t.wall_time_ms), None);
+    }
+
+    mod todo_reducer {
+        use fabro_types::run_event::{TodoCreatedProps, TodoDeletedProps, TodoUpdatedProps};
+        use fabro_types::{TodoListKind, TodoStatus};
+
+        use super::*;
+
+        fn created(
+            list: &str,
+            list_kind: TodoListKind,
+            id: &str,
+            order: u32,
+            subject: &str,
+        ) -> EventBody {
+            EventBody::TodoCreated(TodoCreatedProps {
+                list_id: list.to_string(),
+                list_kind,
+                todo_id: id.to_string(),
+                status: TodoStatus::Pending,
+                order,
+                subject: subject.to_string(),
+                description: String::new(),
+                active_form: None,
+                owner: None,
+                blocks: Vec::new(),
+                blocked_by: Vec::new(),
+                metadata: BTreeMap::new(),
+            })
+        }
+
+        fn updated_status(
+            list: &str,
+            list_kind: TodoListKind,
+            id: &str,
+            status: TodoStatus,
+        ) -> EventBody {
+            EventBody::TodoUpdated(TodoUpdatedProps {
+                list_id: list.to_string(),
+                list_kind,
+                todo_id: id.to_string(),
+                status: Some(status),
+                order: None,
+                subject: None,
+                description: None,
+                active_form: None,
+                owner: None,
+                add_blocks: None,
+                add_blocked_by: None,
+                metadata_patch: BTreeMap::new(),
+            })
+        }
+
+        fn deleted(list: &str, list_kind: TodoListKind, id: &str) -> EventBody {
+            EventBody::TodoDeleted(TodoDeletedProps {
+                list_id: list.to_string(),
+                list_kind,
+                todo_id: id.to_string(),
+            })
+        }
+
+        #[test]
+        fn replay_reconstructs_current_list() {
+            let mut state = initialized_projection();
+            let list = "openai_plan:ses_a";
+            state
+                .apply_event(&test_event(
+                    1,
+                    created(list, TodoListKind::OpenAiPlan, "a", 0, "first"),
+                    None,
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_event(
+                    2,
+                    created(list, TodoListKind::OpenAiPlan, "b", 1, "second"),
+                    None,
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_event(
+                    3,
+                    updated_status(list, TodoListKind::OpenAiPlan, "a", TodoStatus::InProgress),
+                    None,
+                ))
+                .unwrap();
+
+            let projection = state.todos_by_list.get(list).expect("list present");
+            assert_eq!(projection.items.len(), 2);
+            assert_eq!(projection.items[0].id, "a");
+            assert_eq!(projection.items[0].status, TodoStatus::InProgress);
+            assert_eq!(projection.items[1].id, "b");
+        }
+
+        #[test]
+        fn deleted_todos_are_absent() {
+            let mut state = initialized_projection();
+            let list = "openai_plan:ses_a";
+            state
+                .apply_event(&test_event(
+                    1,
+                    created(list, TodoListKind::OpenAiPlan, "a", 0, "first"),
+                    None,
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_event(
+                    2,
+                    created(list, TodoListKind::OpenAiPlan, "b", 1, "second"),
+                    None,
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_event(
+                    3,
+                    deleted(list, TodoListKind::OpenAiPlan, "a"),
+                    None,
+                ))
+                .unwrap();
+
+            let projection = state.todos_by_list.get(list).expect("list present");
+            assert_eq!(projection.items.len(), 1);
+            assert_eq!(projection.items[0].id, "b");
+        }
+
+        #[test]
+        fn multiple_lists_stay_isolated() {
+            let mut state = initialized_projection();
+            state
+                .apply_event(&test_event(
+                    1,
+                    created("openai_plan:s1", TodoListKind::OpenAiPlan, "a", 0, "p1"),
+                    None,
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_event(
+                    2,
+                    created("openai_plan:s2", TodoListKind::OpenAiPlan, "a", 0, "p2"),
+                    None,
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_event(
+                    3,
+                    created(
+                        "anthropic_tasks:s_root",
+                        TodoListKind::AnthropicTasks,
+                        "1",
+                        0,
+                        "claude task",
+                    ),
+                    None,
+                ))
+                .unwrap();
+
+            assert_eq!(state.todos_by_list.len(), 3);
+            assert_eq!(state.todos_by_list["openai_plan:s1"].items[0].subject, "p1");
+            assert_eq!(state.todos_by_list["openai_plan:s2"].items[0].subject, "p2");
+            assert_eq!(
+                state.todos_by_list["anthropic_tasks:s_root"].items[0].subject,
+                "claude task"
+            );
+        }
+
+        #[test]
+        fn metadata_patch_merges_and_null_deletes() {
+            let mut state = initialized_projection();
+            let list = "anthropic_tasks:r";
+            state
+                .apply_event(&test_event(
+                    1,
+                    created(list, TodoListKind::AnthropicTasks, "1", 0, "t"),
+                    None,
+                ))
+                .unwrap();
+            let mut meta = BTreeMap::new();
+            meta.insert("k1".to_string(), serde_json::json!("v1"));
+            meta.insert("k2".to_string(), serde_json::json!("v2"));
+            state
+                .apply_event(&test_event(
+                    2,
+                    EventBody::TodoUpdated(TodoUpdatedProps {
+                        list_id:        list.to_string(),
+                        list_kind:      TodoListKind::AnthropicTasks,
+                        todo_id:        "1".to_string(),
+                        status:         None,
+                        order:          None,
+                        subject:        None,
+                        description:    None,
+                        active_form:    None,
+                        owner:          None,
+                        add_blocks:     None,
+                        add_blocked_by: None,
+                        metadata_patch: meta,
+                    }),
+                    None,
+                ))
+                .unwrap();
+            let mut delete = BTreeMap::new();
+            delete.insert("k1".to_string(), serde_json::Value::Null);
+            state
+                .apply_event(&test_event(
+                    3,
+                    EventBody::TodoUpdated(TodoUpdatedProps {
+                        list_id:        list.to_string(),
+                        list_kind:      TodoListKind::AnthropicTasks,
+                        todo_id:        "1".to_string(),
+                        status:         None,
+                        order:          None,
+                        subject:        None,
+                        description:    None,
+                        active_form:    None,
+                        owner:          None,
+                        add_blocks:     None,
+                        add_blocked_by: None,
+                        metadata_patch: delete,
+                    }),
+                    None,
+                ))
+                .unwrap();
+
+            let todo = &state.todos_by_list[list].items[0];
+            assert!(!todo.metadata.contains_key("k1"));
+            assert_eq!(todo.metadata.get("k2"), Some(&serde_json::json!("v2")));
+        }
     }
 }

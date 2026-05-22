@@ -1635,9 +1635,13 @@ mod tests {
 
     fn tool_context() -> ToolContext {
         ToolContext {
-            env:               Arc::new(LocalSandbox::new(PathBuf::from("."))),
-            cancel:            CancellationToken::new(),
-            tool_env_provider: None,
+            env:                 Arc::new(LocalSandbox::new(PathBuf::from("."))),
+            cancel:              CancellationToken::new(),
+            tool_env_provider:   None,
+            session_id:          None,
+            root_session_id:     None,
+            tool_call_id:        None,
+            agent_event_emitter: None,
         }
     }
 

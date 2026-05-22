@@ -96,6 +96,13 @@ const STEERING_EVENTS = new Set([
   "agent.steer.buffered",
   "agent.steer.dropped",
 ]);
+// Todo / task mutation events refresh `getRunState` consumers (so the
+// projected `todos_by_list` map updates live) and the run events list.
+const TODO_EVENTS = new Set([
+  "todo.created",
+  "todo.updated",
+  "todo.deleted",
+]);
 
 export function queryKeysForRunEvent(
   runId: string,
@@ -157,6 +164,17 @@ export function queryKeysForRunEvent(
 
   if (STAGE_ACTIVITY_EVENTS.has(event)) {
     return stageId ? [queryKeys.runs.stageEvents(runId, stageId)] : [];
+  }
+
+  if (TODO_EVENTS.has(event)) {
+    const keys: Key[] = [
+      queryKeys.runs.state(runId),
+      queryKeys.runs.events(runId, 1000),
+    ];
+    if (stageId) {
+      keys.push(queryKeys.runs.stageEvents(runId, stageId));
+    }
+    return keys;
   }
 
   return [];

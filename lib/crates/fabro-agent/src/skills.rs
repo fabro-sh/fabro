@@ -582,6 +582,10 @@ name: trimmed
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: None,
+            session_id: None,
+            root_session_id: None,
+            tool_call_id: None,
+            agent_event_emitter: None,
         };
         let result = (tool.executor)(args, ctx).await;
         assert_eq!(
@@ -601,6 +605,10 @@ name: trimmed
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: None,
+            session_id: None,
+            root_session_id: None,
+            tool_call_id: None,
+            agent_event_emitter: None,
         };
         let result = (tool.executor)(args, ctx).await;
         assert!(result.is_err());
@@ -618,6 +626,10 @@ name: trimmed
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: None,
+            session_id: None,
+            root_session_id: None,
+            tool_call_id: None,
+            agent_event_emitter: None,
         };
         let result = (tool.executor)(args, ctx).await;
         assert!(result.is_err());

@@ -8031,11 +8031,88 @@ components:
           type: object
           additionalProperties:
             $ref: "#/components/schemas/PendingInterviewRecord"
+        todos_by_list:
+          type: object
+          description: |-
+            Projected todo / task lists, keyed by `list_id`
+            (`openai_plan:<session_id>` or
+            `anthropic_tasks:<root_session_id>`). Built by replaying
+            `todo.created`, `todo.updated`, and `todo.deleted` events.
+          additionalProperties:
+            $ref: "#/components/schemas/TodoListProjection"
         stages:
           type: object
           description: Map from StageId (`node_id@visit`) to stage projection data.
           additionalProperties:
             $ref: "#/components/schemas/StageProjection"
+
+    TodoStatus:
+      type: string
+      enum: [pending, in_progress, completed, deleted]
+      description: |-
+        Lifecycle for a todo / task. `deleted` is reachable for Anthropic
+        tasks; once observed, the todo is removed from the projection.
+
+    TodoListKind:
+      type: string
+      enum: [openai_plan, anthropic_tasks]
+      description: |-
+        Tool surface a todo list belongs to. Determines the `list_id`
+        prefix and scoping convention.
+
+    TodoProjection:
+      type: object
+      description: One projected todo / task item.
+      required:
+        - id
+        - status
+        - order
+        - subject
+      properties:
+        id:
+          type: string
+        status:
+          $ref: "#/components/schemas/TodoStatus"
+        order:
+          type: integer
+          format: uint32
+          minimum: 0
+        subject:
+          type: string
+        description:
+          type: string
+          default: ""
+        active_form:
+          type: ["string", "null"]
+        owner:
+          type: ["string", "null"]
+        blocks:
+          type: array
+          items:
+            type: string
+        blocked_by:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+          additionalProperties: true
+
+    TodoListProjection:
+      type: object
+      description: All currently-projected todos for one `list_id`.
+      required:
+        - kind
+        - list_id
+      properties:
+        kind:
+          $ref: "#/components/schemas/TodoListKind"
+        list_id:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TodoProjection"
 
     Run:
       description: Canonical public run shape.

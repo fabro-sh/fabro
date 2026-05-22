@@ -293,6 +293,11 @@ impl ToolEnvProvider for StaticEnvProvider {
 
 pub struct Session {
     id:                     String,
+    /// Root agent session ID for this session's agent tree. A root session
+    /// uses its own `id`; a subagent session inherits its parent's
+    /// `root_session_id` so todo tools that scope by root (Anthropic tasks)
+    /// share one list across all subagents.
+    root_session_id:        String,
     config:                 SessionOptions,
     history:                History,
     event_emitter:          Emitter,
@@ -325,8 +330,10 @@ impl Session {
         config: SessionOptions,
         subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
     ) -> Self {
+        let id = uuid::Uuid::new_v4().to_string();
         Self {
-            id: uuid::Uuid::new_v4().to_string(),
+            root_session_id: id.clone(),
+            id,
             config,
             history: History::default(),
             event_emitter: Emitter::new(),
@@ -396,6 +403,10 @@ impl Session {
             subagent_manager,
         );
         session.id = record.id.to_string();
+        // from_record represents a fresh root session by default; callers
+        // that materialize subagent sessions set the root explicitly via
+        // `set_root_session_id`.
+        session.root_session_id.clone_from(&session.id);
         session.history = History::from_session_messages(runtime_context).map_err(|err| {
             Error::InvalidState(format!("invalid persisted session context: {err}"))
         })?;
@@ -414,6 +425,19 @@ impl Session {
     #[must_use]
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    /// Root agent session ID for this session's agent tree. Equal to
+    /// [`Self::id`] for the root agent.
+    #[must_use]
+    pub fn root_session_id(&self) -> &str {
+        &self.root_session_id
+    }
+
+    /// Override the root session ID. Used by subagent construction to
+    /// inherit the parent's root.
+    pub fn set_root_session_id(&mut self, root: impl Into<String>) {
+        self.root_session_id = root.into();
     }
 
     #[must_use]
@@ -1464,6 +1488,7 @@ impl Session {
                 &self.config,
                 &self.event_emitter,
                 &self.id,
+                &self.root_session_id,
                 self.tool_env_provider.as_ref(),
             )
             .await;

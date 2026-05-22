@@ -4,6 +4,7 @@ pub mod misc;
 pub mod run;
 pub mod session;
 pub mod stage;
+pub mod todo;
 
 pub use agent::*;
 use chrono::{DateTime, Utc};
@@ -17,6 +18,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value, json};
 pub use session::*;
 pub use stage::*;
+pub use todo::*;
 
 use crate::{ParallelBranchId, Principal, RunId, StageId};
 
@@ -240,6 +242,12 @@ pub enum EventBody {
     AgentMcpReady(AgentMcpReadyProps),
     #[serde(rename = "agent.mcp.failed")]
     AgentMcpFailed(AgentMcpFailedProps),
+    #[serde(rename = "todo.created")]
+    TodoCreated(TodoCreatedProps),
+    #[serde(rename = "todo.updated")]
+    TodoUpdated(TodoUpdatedProps),
+    #[serde(rename = "todo.deleted")]
+    TodoDeleted(TodoDeletedProps),
     #[serde(rename = "subgraph.started")]
     SubgraphStarted(SubgraphStartedProps),
     #[serde(rename = "subgraph.completed")]
@@ -498,6 +506,9 @@ impl EventBody {
             Self::AgentSubClosed(_) => "agent.sub.closed",
             Self::AgentMcpReady(_) => "agent.mcp.ready",
             Self::AgentMcpFailed(_) => "agent.mcp.failed",
+            Self::TodoCreated(_) => "todo.created",
+            Self::TodoUpdated(_) => "todo.updated",
+            Self::TodoDeleted(_) => "todo.deleted",
             Self::SubgraphStarted(_) => "subgraph.started",
             Self::SubgraphCompleted(_) => "subgraph.completed",
             Self::SandboxInitializing(_) => "sandbox.initializing",
@@ -669,6 +680,9 @@ fn is_known_event_name(event: &str) -> bool {
             | "agent.sub.closed"
             | "agent.mcp.ready"
             | "agent.mcp.failed"
+            | "todo.created"
+            | "todo.updated"
+            | "todo.deleted"
             | "subgraph.started"
             | "subgraph.completed"
             | "sandbox.initializing"
@@ -1861,6 +1875,112 @@ mod tests {
                     .get("exec_output_tail")
                     .is_none()
             );
+        }
+    }
+
+    #[test]
+    fn todo_event_names_are_known() {
+        for name in ["todo.created", "todo.updated", "todo.deleted"] {
+            assert!(is_known_event_name(name), "{name} should be a known event");
+        }
+    }
+
+    #[test]
+    fn todo_created_serializes_with_canonical_name() {
+        let body = EventBody::TodoCreated(TodoCreatedProps {
+            list_id:     "openai_plan:ses_1".to_string(),
+            list_kind:   crate::TodoListKind::OpenAiPlan,
+            todo_id:     "todo_1".to_string(),
+            status:      crate::TodoStatus::Pending,
+            order:       0,
+            subject:     "do the thing".to_string(),
+            description: String::new(),
+            active_form: None,
+            owner:       None,
+            blocks:      Vec::new(),
+            blocked_by:  Vec::new(),
+            metadata:    std::collections::BTreeMap::new(),
+        });
+
+        let value = serde_json::to_value(&body).unwrap();
+        assert_eq!(value["event"], "todo.created");
+        assert_eq!(value["properties"]["list_id"], "openai_plan:ses_1");
+        assert_eq!(value["properties"]["todo_id"], "todo_1");
+        assert_eq!(value["properties"]["status"], "pending");
+        assert_eq!(value["properties"]["subject"], "do the thing");
+        // Optional fields are omitted.
+        let props = value["properties"].as_object().unwrap();
+        assert!(!props.contains_key("description"));
+        assert!(!props.contains_key("active_form"));
+        assert!(!props.contains_key("metadata"));
+    }
+
+    #[test]
+    fn todo_envelope_includes_session_metadata() {
+        let event = RunEvent {
+            id:                 "evt_todo".to_string(),
+            ts:                 DateTime::parse_from_rfc3339("2026-05-22T12:00:00.000Z")
+                .unwrap()
+                .with_timezone(&Utc),
+            run_id:             fixtures::RUN_1,
+            node_id:            Some("code".to_string()),
+            node_label:         None,
+            stage_id:           None,
+            parallel_group_id:  None,
+            parallel_branch_id: None,
+            session_id:         Some("ses_child".to_string()),
+            parent_session_id:  Some("ses_parent".to_string()),
+            tool_call_id:       Some("call_xyz".to_string()),
+            actor:              None,
+            body:               EventBody::TodoUpdated(TodoUpdatedProps {
+                list_id:        "anthropic_tasks:ses_root".to_string(),
+                list_kind:      crate::TodoListKind::AnthropicTasks,
+                todo_id:        "42".to_string(),
+                status:         Some(crate::TodoStatus::InProgress),
+                order:          None,
+                subject:        None,
+                description:    None,
+                active_form:    None,
+                owner:          None,
+                add_blocks:     None,
+                add_blocked_by: None,
+                metadata_patch: std::collections::BTreeMap::new(),
+            }),
+        };
+
+        let value = event.to_value().unwrap();
+        assert_eq!(value["event"], "todo.updated");
+        assert_eq!(value["session_id"], "ses_child");
+        assert_eq!(value["parent_session_id"], "ses_parent");
+        assert_eq!(value["tool_call_id"], "call_xyz");
+        assert_eq!(value["properties"]["list_id"], "anthropic_tasks:ses_root");
+        assert_eq!(value["properties"]["status"], "in_progress");
+
+        let parsed = RunEvent::from_value(value).unwrap();
+        match &parsed.body {
+            EventBody::TodoUpdated(props) => {
+                assert_eq!(props.status, Some(crate::TodoStatus::InProgress));
+            }
+            other => panic!("expected TodoUpdated body, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn todo_deleted_round_trips() {
+        let body = EventBody::TodoDeleted(TodoDeletedProps {
+            list_id:   "openai_plan:ses_1".to_string(),
+            list_kind: crate::TodoListKind::OpenAiPlan,
+            todo_id:   "todo_x".to_string(),
+        });
+
+        let value = serde_json::to_value(&body).unwrap();
+        assert_eq!(value["event"], "todo.deleted");
+        assert_eq!(value["properties"]["todo_id"], "todo_x");
+
+        let parsed: EventBody = serde_json::from_value(value).unwrap();
+        match parsed {
+            EventBody::TodoDeleted(props) => assert_eq!(props.todo_id, "todo_x"),
+            other => panic!("expected TodoDeleted, got {other:?}"),
         }
     }
 }

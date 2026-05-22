@@ -8,18 +8,62 @@ use tokio_util::sync::CancellationToken;
 
 use crate::sandbox::Sandbox;
 use crate::session::ToolEnvProvider;
+use crate::types::AgentEvent;
+
+/// Narrow handle a tool uses to publish typed agent events (e.g. todo
+/// mutations) onto the active session's event stream. The implementation
+/// must tag emitted events with the same `session_id` / `parent_session_id`
+/// the session is using.
+pub trait AgentEventEmitter: Send + Sync {
+    fn emit(&self, event: AgentEvent);
+}
 
 pub struct ToolContext {
-    pub env:               Arc<dyn Sandbox>,
-    pub cancel:            CancellationToken,
-    pub tool_env_provider: Option<Arc<dyn ToolEnvProvider>>,
+    pub env:                 Arc<dyn Sandbox>,
+    pub cancel:              CancellationToken,
+    pub tool_env_provider:   Option<Arc<dyn ToolEnvProvider>>,
+    /// Emitting session's ID. `None` when a tool is invoked outside of a
+    /// session (e.g. ad-hoc unit tests).
+    pub session_id:          Option<String>,
+    /// Root session for this session's agent tree. Equal to `session_id`
+    /// for the root agent; subagent sessions inherit the parent's root.
+    pub root_session_id:     Option<String>,
+    /// Tool call ID assigned by the model. Threaded into emitted run events
+    /// so the UI can correlate event lines to the originating tool call.
+    pub tool_call_id:        Option<String>,
+    /// Narrow emitter for typed agent events (todo mutations and similar).
+    pub agent_event_emitter: Option<Arc<dyn AgentEventEmitter>>,
 }
 
 impl ToolContext {
+    /// Construct a minimal context (no session metadata, no emitter, no env
+    /// provider). Useful for tools that do not need session identity, and
+    /// for ad-hoc tests.
+    #[must_use]
+    pub fn minimal(env: Arc<dyn Sandbox>, cancel: CancellationToken) -> Self {
+        Self {
+            env,
+            cancel,
+            tool_env_provider: None,
+            session_id: None,
+            root_session_id: None,
+            tool_call_id: None,
+            agent_event_emitter: None,
+        }
+    }
+
     pub async fn resolve_tool_env(&self) -> anyhow::Result<Option<HashMap<String, String>>> {
         match &self.tool_env_provider {
             Some(provider) => Ok(Some(provider.resolve().await?)),
             None => Ok(None),
+        }
+    }
+
+    /// Publish an agent event using the bound emitter. No-op when the
+    /// context has no emitter (test fixtures).
+    pub fn emit_agent_event(&self, event: AgentEvent) {
+        if let Some(emitter) = self.agent_event_emitter.as_ref() {
+            emitter.emit(event);
         }
     }
 }
@@ -190,6 +234,10 @@ mod tests {
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: None,
+            session_id: None,
+            root_session_id: None,
+            tool_call_id: None,
+            agent_event_emitter: None,
         };
         let result = (tool.executor)(serde_json::json!({}), ctx).await;
         assert_eq!(result.unwrap(), "ok");

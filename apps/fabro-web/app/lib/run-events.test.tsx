@@ -86,6 +86,23 @@ describe("queryKeysForRunEvent", () => {
       queryKeys.runs.stageEvents("run-1", "nap@1"),
     ]);
   });
+
+  test("todo events invalidate run state and run events", () => {
+    for (const event of ["todo.created", "todo.updated", "todo.deleted"]) {
+      expect(queryKeysForRunEvent("run-1", event)).toEqual([
+        queryKeys.runs.state("run-1"),
+        queryKeys.runs.events("run-1", 1000),
+      ]);
+    }
+  });
+
+  test("todo events with a stage id also invalidate that stage's events", () => {
+    expect(queryKeysForRunEvent("run-1", "todo.created", "code@1")).toEqual([
+      queryKeys.runs.state("run-1"),
+      queryKeys.runs.events("run-1", 1000),
+      queryKeys.runs.stageEvents("run-1", "code@1"),
+    ]);
+  });
 });
 
 describe("subscribeToRunEvents", () => {
