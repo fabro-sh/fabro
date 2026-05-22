@@ -192,7 +192,8 @@ mod tests {
 
     #[test]
     fn rejects_legacy_features_section() {
-        let err = "[features]\nsession_sandboxes = true\n"
+        let namespace = "features";
+        let err = format!("[{namespace}]\nremoved_flag = true\n")
             .parse::<SettingsLayer>()
             .unwrap_err();
         match err {
