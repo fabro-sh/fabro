@@ -8,7 +8,7 @@ import {
   streamSessionTurn,
   type SessionStreamEvent,
 } from "./session-stream";
-import { sessionsApi } from "./api-client";
+import { ApiError, sessionsApi } from "./api-client";
 
 const SESSION_STORAGE_PREFIX = "fabro:ask-fabro-session:";
 
@@ -296,8 +296,17 @@ export function createAskFabroAdapter(
         }
       }
 
-      // Propagate any error from the stream task.
-      await streamPromise;
+      // Propagate any error from the stream task. If the cached session was
+      // pruned server-side, clear it so the next turn creates a fresh session.
+      try {
+        await streamPromise;
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          persisted.clear(options.runId);
+          sessionId = null;
+        }
+        throw error;
+      }
       // Guarantee assistant-ui sees at least one result for an empty turn.
       if (!yielded) yield snapshot(acc);
     },

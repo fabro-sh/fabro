@@ -66,7 +66,6 @@ pub(crate) struct WorkerScopeSet {
 }
 
 impl WorkerScopeSet {
-    #[cfg(test)]
     #[must_use]
     pub(crate) const fn run_worker() -> Self {
         Self {
@@ -101,7 +100,6 @@ pub(crate) struct DecodedWorkerToken {
     pub(crate) scopes: WorkerScopeSet,
 }
 
-#[cfg(test)]
 pub(crate) fn issue_worker_token(
     keys: &WorkerTokenKeys,
     run_id: &RunId,

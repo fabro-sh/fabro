@@ -52,7 +52,7 @@ use super::super::{
 use crate::error::ApiError;
 use crate::principal_middleware::RequiredUser;
 use crate::server_secrets::LlmClientResult;
-use crate::worker_token::{WorkerScopeSet, issue_worker_token_with_scopes};
+use crate::worker_token::issue_worker_token;
 
 const SESSION_SSE_BUFFER_CAPACITY: usize = 1024;
 
@@ -697,14 +697,10 @@ async fn build_agent_session(
 
     // Give the Ask Fabro agent access to run-control tools scoped to its
     // owning run. The session reaches the local HTTP API via a same-run
-    // worker token; the server's auth middleware enforces the run scope so
-    // cross-run calls 403.
-    let worker_token = issue_worker_token_with_scopes(
-        state.worker_token_keys(),
-        &run_id,
-        WorkerScopeSet::run_worker_with_agent_run_tools(),
-    )
-    .map_err(|_| AskFabroBuildError::Agent(anyhow::anyhow!("failed to sign worker token")))?;
+    // worker token; the scoped backend rejects accidental cross-run tool calls
+    // and the server's auth middleware remains a backstop for direct HTTP.
+    let worker_token = issue_worker_token(state.worker_token_keys(), &run_id)
+        .map_err(|_| AskFabroBuildError::Agent(anyhow::anyhow!("failed to sign worker token")))?;
     let target = state
         .self_server_target()
         .map_err(AskFabroBuildError::Agent)?;
@@ -714,7 +710,7 @@ async fn build_agent_session(
         .connect()
         .await
         .map_err(AskFabroBuildError::Agent)?;
-    let backend = ClientBackend::new(Arc::new(api_client));
+    let backend = ClientBackend::new(Arc::new(api_client)).with_run_scope(run_id);
     let services = FabroRunToolServices {
         backend:            Arc::new(backend),
         current_run_id:     run_id,
