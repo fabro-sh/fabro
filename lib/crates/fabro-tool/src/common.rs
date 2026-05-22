@@ -166,6 +166,7 @@ pub struct ToolDefinition {
 
 pub const FABRO_RUN_CREATE_TOOL_NAME: &str = "fabro_run_create";
 pub const FABRO_RUN_SEARCH_TOOL_NAME: &str = "fabro_run_search";
+pub const FABRO_RUN_GET_TOOL_NAME: &str = "fabro_run_get";
 pub const FABRO_RUN_INTERACT_TOOL_NAME: &str = "fabro_run_interact";
 pub const FABRO_RUN_GATHER_TOOL_NAME: &str = "fabro_run_gather";
 pub const FABRO_RUN_EVENTS_TOOL_NAME: &str = "fabro_run_events";
@@ -181,9 +182,13 @@ static TOOL_DEFINITIONS: LazyLock<Vec<ToolDefinition>> = LazyLock::new(|| {
             FABRO_RUN_SEARCH_TOOL_NAME,
             "Search Fabro workflow runs by id, parent, workflow, labels, status, archival state, and creation time.",
         ),
+        tool_definition::<crate::FabroRunGetParams>(
+            FABRO_RUN_GET_TOOL_NAME,
+            "Read-only inspection of a Fabro run: returns its summary, projection, and pending questions without mutating state.",
+        ),
         tool_definition::<crate::FabroRunInteractParams>(
             FABRO_RUN_INTERACT_TOOL_NAME,
-            "Get, start, message, interrupt, cancel, archive, unarchive, link or unlink a parent, inspect questions, or answer a Fabro run.",
+            "Control a Fabro run: start, message, interrupt, cancel, archive, unarchive, link or unlink a parent, inspect or answer questions. Use fabro_run_get for read-only inspection.",
         ),
         tool_definition::<crate::FabroRunGatherParams>(
             FABRO_RUN_GATHER_TOOL_NAME,

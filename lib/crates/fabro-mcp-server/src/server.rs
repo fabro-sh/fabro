@@ -95,8 +95,30 @@ impl FabroMcpServer {
     }
 
     #[tool(
+        name = "fabro_run_get",
+        description = "Read-only inspection of a Fabro run: returns its summary, projection, and pending questions without mutating state."
+    )]
+    async fn fabro_run_get(
+        &self,
+        params: Parameters<run_tools::FabroRunGetParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let params = match run_tools::ValidatedRunGet::try_from(params.0) {
+            Ok(params) => params,
+            Err(err) => return Ok(error_result(&err)),
+        };
+        let backend = match self.backend().await {
+            Ok(backend) => backend,
+            Err(err) => return Ok(error_result(&err)),
+        };
+        match run_tools::run_get(backend, params).await {
+            Ok(result) => success_result(&result, run_tools::run_get_text(&result)),
+            Err(err) => Ok(error_result(&err)),
+        }
+    }
+
+    #[tool(
         name = "fabro_run_interact",
-        description = "Get, start, message, interrupt, cancel, archive, unarchive, link or unlink a parent, inspect questions, or answer a Fabro run."
+        description = "Control a Fabro run: start, message, interrupt, cancel, archive, unarchive, link or unlink a parent, inspect or answer questions. Use fabro_run_get for read-only inspection."
     )]
     async fn fabro_run_interact(
         &self,

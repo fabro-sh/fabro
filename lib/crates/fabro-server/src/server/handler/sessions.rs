@@ -738,7 +738,7 @@ async fn build_agent_session(
     };
     register_named_fabro_run_tools(profile.tool_registry_mut(), &services, &[
         fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
-        fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
+        fabro_tool::FABRO_RUN_GET_TOOL_NAME,
     ]);
     let ask_fabro_policy = build_ask_fabro_tool_access_policy();
     let profile: Arc<dyn AgentProfile> =
@@ -926,7 +926,7 @@ impl ToolAccessPolicy for AskFabroToolAccessPolicy {
             | "grep"
             | "glob"
             | fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME
-            | fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME => ToolAccess::Allowed,
+            | fabro_tool::FABRO_RUN_GET_TOOL_NAME => ToolAccess::Allowed,
             _ => ToolAccess::Denied,
         }
     }
@@ -1527,6 +1527,7 @@ mod tests {
             "web_fetch",
             fabro_tool::FABRO_RUN_CREATE_TOOL_NAME,
             fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
+            fabro_tool::FABRO_RUN_GET_TOOL_NAME,
             fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
         ] {
             registry.register(stub_tool(name));
@@ -1568,7 +1569,7 @@ mod tests {
             "grep",
             "glob",
             fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
-            fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
+            fabro_tool::FABRO_RUN_GET_TOOL_NAME,
         ] {
             assert_eq!(policy.access_for_tool(tool_name), ToolAccess::Allowed);
         }
@@ -1580,6 +1581,7 @@ mod tests {
             "web_search",
             "web_fetch",
             fabro_tool::FABRO_RUN_CREATE_TOOL_NAME,
+            fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
         ] {
             assert_eq!(policy.access_for_tool(tool_name), ToolAccess::Denied);
         }
@@ -1598,7 +1600,7 @@ mod tests {
 
         assert_eq!(names, vec![
             "fabro_run_events",
-            "fabro_run_interact",
+            "fabro_run_get",
             "glob",
             "grep",
             "read_file",
@@ -1625,7 +1627,7 @@ mod tests {
             "grep",
             "glob",
             fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
-            fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
+            fabro_tool::FABRO_RUN_GET_TOOL_NAME,
         ] {
             assert!(
                 prompt.contains(&format!("`{tool_name}`")),
@@ -1640,6 +1642,7 @@ mod tests {
             "web_search",
             "web_fetch",
             fabro_tool::FABRO_RUN_CREATE_TOOL_NAME,
+            fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
         ] {
             assert!(
                 !prompt.contains(hidden_tool),
