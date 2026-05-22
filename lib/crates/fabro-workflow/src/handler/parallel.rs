@@ -195,7 +195,7 @@ impl Handler for ParallelHandler {
                 None,
                 &gs.checkpoint_exclude_globs,
                 &gs.git_author,
-                gs.checkpoint_skip_hooks,
+                gs.checkpoint_skip_git_hooks,
             )
             .await;
             match result {
@@ -321,7 +321,7 @@ impl Handler for ParallelHandler {
                 .unwrap_or_default();
             let skip_git_hooks = git_state
                 .as_ref()
-                .is_some_and(|gs| gs.checkpoint_skip_hooks);
+                .is_some_and(|gs| gs.checkpoint_skip_git_hooks);
             let group_id = parallel_group_id.clone();
             let branch_scope = StageScope::for_parallel_branch(
                 setup.target_id.clone(),
@@ -677,9 +677,10 @@ fn parallel_branch_commit_cmd(
     skip_git_hooks: bool,
 ) -> String {
     let no_verify = if skip_git_hooks { " --no-verify" } else { "" };
-    format!(
-        "{git_remote} -c 'user.name={author_name}' -c 'user.email={author_email}' commit --allow-empty{no_verify} -m '{message}'",
-    )
+    let name = fabro_sandbox::shell_quote(&format!("user.name={author_name}"));
+    let email = fabro_sandbox::shell_quote(&format!("user.email={author_email}"));
+    let msg = fabro_sandbox::shell_quote(message);
+    format!("{git_remote} -c {name} -c {email} commit --allow-empty{no_verify} -m {msg}")
 }
 
 #[cfg(test)]

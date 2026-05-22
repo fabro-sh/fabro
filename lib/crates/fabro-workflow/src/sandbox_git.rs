@@ -22,13 +22,13 @@ pub struct GitCommandError {
 /// Captured git state for a workflow run, shared with handlers.
 #[derive(Debug, Clone)]
 pub struct GitState {
-    pub run_id:                   RunId,
-    pub base_sha:                 String,
-    pub run_branch:               Option<String>,
-    pub meta_branch:              Option<String>,
-    pub checkpoint_exclude_globs: Vec<String>,
-    pub checkpoint_skip_hooks:    bool,
-    pub git_author:               GitAuthor,
+    pub run_id:                    RunId,
+    pub base_sha:                  String,
+    pub run_branch:                Option<String>,
+    pub meta_branch:               Option<String>,
+    pub checkpoint_exclude_globs:  Vec<String>,
+    pub checkpoint_skip_git_hooks: bool,
+    pub git_author:                GitAuthor,
 }
 
 pub const GIT_REMOTE: &str =
