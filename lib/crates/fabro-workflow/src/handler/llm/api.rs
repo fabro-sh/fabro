@@ -191,12 +191,21 @@ fn build_profile(
     }
 }
 
-pub(crate) fn register_fabro_run_tools(
+pub fn register_fabro_run_tools(registry: &mut ToolRegistry, services: &FabroRunToolServices) {
+    register_fabro_run_tools_subset(registry, services, &[]);
+}
+
+/// Register a subset of Fabro run tools by tool name. Pass an empty `only`
+/// slice to register the full set (matches `register_fabro_run_tools`).
+pub fn register_fabro_run_tools_subset(
     registry: &mut ToolRegistry,
     services: &FabroRunToolServices,
+    only: &[&str],
 ) {
     for definition in fabro_tool::tool_definitions() {
-        registry.register(fabro_run_tool(definition, services.clone()));
+        if only.is_empty() || only.contains(&definition.name) {
+            registry.register(fabro_run_tool(definition, services.clone()));
+        }
     }
 }
 
@@ -1454,6 +1463,42 @@ mod tests {
             assert_eq!(registered.definition.description, definition.description);
             assert_eq!(registered.definition.parameters, definition.parameters);
         }
+    }
+
+    #[test]
+    fn agent_run_tools_subset_registers_only_listed_tools() {
+        let mut registry = ToolRegistry::new();
+        let (services, _backend) = fabro_run_tool_services();
+        register_fabro_run_tools_subset(&mut registry, &services, &[
+            fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
+            fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
+        ]);
+
+        let mut registered = registry
+            .names()
+            .into_iter()
+            .filter(|name| name.starts_with("fabro_run_"))
+            .collect::<Vec<_>>();
+        registered.sort();
+        assert_eq!(registered, vec![
+            fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
+            fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
+        ]);
+    }
+
+    #[test]
+    fn agent_run_tools_subset_empty_only_registers_all() {
+        let mut registry_full = ToolRegistry::new();
+        let mut registry_subset = ToolRegistry::new();
+        let (services, _backend) = fabro_run_tool_services();
+        register_fabro_run_tools(&mut registry_full, &services);
+        register_fabro_run_tools_subset(&mut registry_subset, &services, &[]);
+
+        let mut full = registry_full.names();
+        let mut subset = registry_subset.names();
+        full.sort();
+        subset.sort();
+        assert_eq!(full, subset);
     }
 
     #[tokio::test]
