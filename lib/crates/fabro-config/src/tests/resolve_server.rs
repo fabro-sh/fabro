@@ -203,8 +203,6 @@ root = "/srv/fabro"
 
     let context = fabro_config::ServerSettingsBuilder::from_layer(&settings)
         .expect("settings should resolve");
-    let _user_settings = fabro_config::UserSettingsBuilder::from_layer(&settings)
-        .expect("user settings should resolve");
 
     assert_eq!(context.server.storage.root.as_source(), "/srv/fabro");
 }

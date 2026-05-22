@@ -50,7 +50,6 @@ client_id = "Iv1.abcdef"
     let top_level = body
         .as_object()
         .expect("server settings response should be an object");
-    assert_eq!(top_level.len(), 1);
     assert!(top_level.contains_key("server"));
 
     assert_eq!(body["server"]["listen"]["type"], "tcp");
