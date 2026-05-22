@@ -229,11 +229,14 @@ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
             event: agent_event,
             session_id,
             parent_session_id,
+            tool_call_id,
         } => {
             let node_id = Some(stage.clone());
             let node_label = default_node_label(node_id.as_ref(), None);
             let stage_id = Some(StageId::new(stage.clone(), *visit));
-            let tool_call_id = agent_tool_call_id(agent_event).map(str::to_string);
+            let tool_call_id = tool_call_id
+                .clone()
+                .or_else(|| agent_tool_call_id(agent_event).map(str::to_string));
             let actor = agent_actor_for_event(
                 agent_event,
                 session_id.as_deref(),

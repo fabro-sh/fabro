@@ -553,6 +553,7 @@ mod tests {
             event,
             session_id: None,
             parent_session_id: None,
+            tool_call_id: None,
         }
     }
 

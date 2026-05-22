@@ -153,6 +153,7 @@ mod tests {
             tool_env_provider: None,
             session_id: Some("ses_a".to_string()),
             root_session_id: Some("ses_a".to_string()),
+            tool_call_id: None,
             agent_event_emitter: Some(emitter),
         }
     }

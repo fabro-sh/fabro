@@ -731,6 +731,7 @@ mod tests {
             timestamp:         std::time::SystemTime::now(),
             session_id:        "child".into(),
             parent_session_id: None,
+            tool_call_id:      None,
         }));
         callback(SubAgentCallbackEvent::Forwarded(SessionEvent {
             event:             AgentEvent::SessionStarted {
@@ -740,6 +741,7 @@ mod tests {
             timestamp:         std::time::SystemTime::now(),
             session_id:        "grandchild".into(),
             parent_session_id: Some("child".into()),
+            tool_call_id:      None,
         }));
 
         let child = rx.recv().await.unwrap();

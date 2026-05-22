@@ -454,6 +454,8 @@ pub enum Event {
         session_id:        Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_session_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_call_id:      Option<String>,
     },
     SubgraphStarted {
         node_id:    String,

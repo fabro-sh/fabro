@@ -28,6 +28,8 @@ pub struct ToolContext {
     /// Root session for this session's agent tree. Equal to `session_id`
     /// for the root agent; subagent sessions inherit the parent's root.
     pub root_session_id:     Option<String>,
+    /// Active model-native tool call ID, when available.
+    pub tool_call_id:        Option<String>,
     /// Narrow emitter for typed agent events (todo mutations and similar).
     pub agent_event_emitter: Option<Arc<dyn AgentEventEmitter>>,
 }
@@ -217,6 +219,7 @@ mod tests {
             tool_env_provider: None,
             session_id: None,
             root_session_id: None,
+            tool_call_id: None,
             agent_event_emitter: None,
         };
         let result = (tool.executor)(serde_json::json!({}), ctx).await;

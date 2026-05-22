@@ -338,8 +338,12 @@ pub fn make_task_update_tool(runtime: Arc<TodoRuntime>) -> RegisteredTool {
                     status,
                     subject: optional_string(&args, "subject"),
                     description: optional_string(&args, "description"),
-                    active_form: Some(optional_string(&args, "activeForm")),
-                    owner: Some(optional_string(&args, "owner")),
+                    active_form: args
+                        .get("activeForm")
+                        .map(|value| value.as_str().map(ToString::to_string)),
+                    owner: args
+                        .get("owner")
+                        .map(|value| value.as_str().map(ToString::to_string)),
                     add_blocks: optional_string_vec(&args, "addBlocks"),
                     add_blocked_by: optional_string_vec(&args, "addBlockedBy"),
                     metadata_patch: metadata_map(&args),
@@ -437,6 +441,7 @@ mod tests {
             tool_env_provider: None,
             session_id: Some(session.to_string()),
             root_session_id: Some(root.to_string()),
+            tool_call_id: None,
             agent_event_emitter: Some(Arc::new(SilentEmitter)),
         }
     }
@@ -668,6 +673,40 @@ mod tests {
         let meta = &list.items[0].metadata;
         assert!(!meta.contains_key("k1"));
         assert_eq!(meta.get("k2"), Some(&serde_json::json!("v2")));
+    }
+
+    #[tokio::test]
+    async fn task_update_omitted_optional_strings_do_not_clear_existing_values() {
+        let runtime = Arc::new(TodoRuntime::new());
+        let create = make_task_create_tool(runtime.clone());
+        let update = make_task_update_tool(runtime.clone());
+
+        (create.executor)(
+            serde_json::json!({
+                "subject": "t",
+                "description": "d",
+                "activeForm": "doing t"
+            }),
+            ctx_for("ses_a", "ses_a"),
+        )
+        .await
+        .unwrap();
+        (update.executor)(
+            serde_json::json!({"taskId": "1", "owner": "alice"}),
+            ctx_for("ses_a", "ses_a"),
+        )
+        .await
+        .unwrap();
+        (update.executor)(
+            serde_json::json!({"taskId": "1", "metadata": {"k": "v"}}),
+            ctx_for("ses_a", "ses_a"),
+        )
+        .await
+        .unwrap();
+
+        let list = runtime.snapshot(&anthropic_list("ses_a")).unwrap();
+        assert_eq!(list.items[0].active_form.as_deref(), Some("doing t"));
+        assert_eq!(list.items[0].owner.as_deref(), Some("alice"));
     }
 
     #[tokio::test]

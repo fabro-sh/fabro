@@ -584,6 +584,7 @@ name: trimmed
             tool_env_provider: None,
             session_id: None,
             root_session_id: None,
+            tool_call_id: None,
             agent_event_emitter: None,
         };
         let result = (tool.executor)(args, ctx).await;
@@ -606,6 +607,7 @@ name: trimmed
             tool_env_provider: None,
             session_id: None,
             root_session_id: None,
+            tool_call_id: None,
             agent_event_emitter: None,
         };
         let result = (tool.executor)(args, ctx).await;
@@ -626,6 +628,7 @@ name: trimmed
             tool_env_provider: None,
             session_id: None,
             root_session_id: None,
+            tool_call_id: None,
             agent_event_emitter: None,
         };
         let result = (tool.executor)(args, ctx).await;

@@ -128,6 +128,7 @@ impl AgentAcpBackend {
                         event:             AgentEvent::SteeringInjected { text, actor },
                         session_id:        Some(session_id.clone()),
                         parent_session_id: None,
+                        tool_call_id:      None,
                     },
                     &stage_scope,
                 );

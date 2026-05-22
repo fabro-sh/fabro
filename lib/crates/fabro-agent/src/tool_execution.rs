@@ -310,8 +310,9 @@ async fn execute_one_tool(
 
             let agent_event_emitter: Option<Arc<dyn AgentEventEmitter>> =
                 Some(Arc::new(SessionBoundEmitter {
-                    emitter:    emitter.clone(),
-                    session_id: session_id.to_owned(),
+                    emitter:      emitter.clone(),
+                    session_id:   session_id.to_owned(),
+                    tool_call_id: Some(tc.id.clone()),
                 }));
             let ctx = ToolContext {
                 env,
@@ -319,6 +320,7 @@ async fn execute_one_tool(
                 tool_env_provider: tool_env_provider.cloned(),
                 session_id: Some(session_id.to_owned()),
                 root_session_id: Some(root_session_id.to_owned()),
+                tool_call_id: Some(tc.id.clone()),
                 agent_event_emitter,
             };
             match (tool.executor)(tc.arguments.clone(), ctx).await {

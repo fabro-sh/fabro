@@ -711,6 +711,7 @@ mod tests {
             tool_env_provider: None,
             session_id: None,
             root_session_id: None,
+            tool_call_id: None,
             agent_event_emitter: None,
         })
         .await;
@@ -738,6 +739,7 @@ mod tests {
                 tool_env_provider: None,
                 session_id: None,
                 root_session_id: None,
+                tool_call_id: None,
                 agent_event_emitter: None,
             },
         )
@@ -758,6 +760,7 @@ mod tests {
                 tool_env_provider:   None,
                 session_id:          None,
                 root_session_id:     None,
+                tool_call_id:        None,
                 agent_event_emitter: None,
             },
         )
@@ -791,6 +794,7 @@ mod tests {
                 tool_env_provider:   None,
                 session_id:          None,
                 root_session_id:     None,
+                tool_call_id:        None,
                 agent_event_emitter: None,
             },
         )
@@ -822,6 +826,7 @@ mod tests {
                 tool_env_provider: None,
                 session_id: None,
                 root_session_id: None,
+                tool_call_id: None,
                 agent_event_emitter: None,
             },
         )
@@ -850,6 +855,7 @@ mod tests {
                 tool_env_provider: None,
                 session_id: None,
                 root_session_id: None,
+                tool_call_id: None,
                 agent_event_emitter: None,
             },
         )
@@ -882,6 +888,7 @@ mod tests {
                 tool_env_provider:   None,
                 session_id:          None,
                 root_session_id:     None,
+                tool_call_id:        None,
                 agent_event_emitter: None,
             },
         )
@@ -911,6 +918,7 @@ mod tests {
             tool_env_provider: None,
             session_id: None,
             root_session_id: None,
+            tool_call_id: None,
             agent_event_emitter: None,
         })
         .await;
@@ -932,6 +940,7 @@ mod tests {
                 tool_env_provider:   None,
                 session_id:          None,
                 root_session_id:     None,
+                tool_call_id:        None,
                 agent_event_emitter: None,
             },
         )
@@ -958,6 +967,7 @@ mod tests {
             tool_env_provider: None,
             session_id: None,
             root_session_id: None,
+            tool_call_id: None,
             agent_event_emitter: None,
         })
         .await;
@@ -985,6 +995,7 @@ mod tests {
             tool_env_provider: None,
             session_id: None,
             root_session_id: None,
+            tool_call_id: None,
             agent_event_emitter: None,
         })
         .await;
@@ -1007,6 +1018,7 @@ mod tests {
                 tool_env_provider:   Some(Arc::new(crate::StaticEnvProvider(tool_env.clone()))),
                 session_id:          None,
                 root_session_id:     None,
+                tool_call_id:        None,
                 agent_event_emitter: None,
             },
         )
@@ -1054,6 +1066,7 @@ mod tests {
                 tool_env_provider:   Some(provider.clone()),
                 session_id:          None,
                 root_session_id:     None,
+                tool_call_id:        None,
                 agent_event_emitter: None,
             },
         )
@@ -1074,6 +1087,7 @@ mod tests {
                 tool_env_provider:   Some(provider),
                 session_id:          None,
                 root_session_id:     None,
+                tool_call_id:        None,
                 agent_event_emitter: None,
             },
         )
@@ -1100,6 +1114,7 @@ mod tests {
                 tool_env_provider: Some(Arc::new(FailingToolEnvProvider)),
                 session_id: None,
                 root_session_id: None,
+                tool_call_id: None,
                 agent_event_emitter: None,
             },
         )
@@ -1129,6 +1144,7 @@ mod tests {
             tool_env_provider: Some(Arc::new(FailingToolEnvProvider)),
             session_id: None,
             root_session_id: None,
+            tool_call_id: None,
             agent_event_emitter: None,
         })
         .await;
@@ -1147,6 +1163,7 @@ mod tests {
             tool_env_provider:   None,
             session_id:          None,
             root_session_id:     None,
+            tool_call_id:        None,
             agent_event_emitter: None,
         })
         .await;
@@ -1178,6 +1195,7 @@ mod tests {
                 tool_env_provider:   Some(Arc::new(crate::StaticEnvProvider(tool_env.clone()))),
                 session_id:          None,
                 root_session_id:     None,
+                tool_call_id:        None,
                 agent_event_emitter: None,
             },
         )
@@ -1202,6 +1220,7 @@ mod tests {
             tool_env_provider: None,
             session_id: None,
             root_session_id: None,
+            tool_call_id: None,
             agent_event_emitter: None,
         })
         .await;
@@ -1223,6 +1242,7 @@ mod tests {
             tool_env_provider: None,
             session_id: None,
             root_session_id: None,
+            tool_call_id: None,
             agent_event_emitter: None,
         })
         .await;
@@ -1241,6 +1261,7 @@ mod tests {
             tool_env_provider: None,
             session_id: None,
             root_session_id: None,
+            tool_call_id: None,
             agent_event_emitter: None,
         })
         .await;
@@ -1261,6 +1282,7 @@ mod tests {
             tool_env_provider: None,
             session_id: None,
             root_session_id: None,
+            tool_call_id: None,
             agent_event_emitter: None,
         })
         .await;
@@ -1316,6 +1338,7 @@ mod tests {
                 tool_env_provider:   None,
                 session_id:          None,
                 root_session_id:     None,
+                tool_call_id:        None,
                 agent_event_emitter: None,
             },
         )
@@ -1356,6 +1379,7 @@ mod tests {
                 tool_env_provider: None,
                 session_id: None,
                 root_session_id: None,
+                tool_call_id: None,
                 agent_event_emitter: None,
             },
         )
@@ -1380,6 +1404,7 @@ mod tests {
                 tool_env_provider:   None,
                 session_id:          None,
                 root_session_id:     None,
+                tool_call_id:        None,
                 agent_event_emitter: None,
             },
         )
@@ -1405,6 +1430,7 @@ mod tests {
                 tool_env_provider:   None,
                 session_id:          None,
                 root_session_id:     None,
+                tool_call_id:        None,
                 agent_event_emitter: None,
             },
         )
@@ -1439,6 +1465,7 @@ mod tests {
                 tool_env_provider: None,
                 session_id: None,
                 root_session_id: None,
+                tool_call_id: None,
                 agent_event_emitter: None,
             },
         )
@@ -1469,6 +1496,7 @@ mod tests {
                 tool_env_provider: None,
                 session_id: None,
                 root_session_id: None,
+                tool_call_id: None,
                 agent_event_emitter: None,
             },
         )
@@ -1520,6 +1548,7 @@ mod tests {
                 tool_env_provider: None,
                 session_id: None,
                 root_session_id: None,
+                tool_call_id: None,
                 agent_event_emitter: None,
             },
         )
@@ -1554,6 +1583,7 @@ mod tests {
                 tool_env_provider: None,
                 session_id: None,
                 root_session_id: None,
+                tool_call_id: None,
                 agent_event_emitter: None,
             },
         )
@@ -1626,6 +1656,7 @@ mod tests {
                 tool_env_provider: None,
                 session_id: None,
                 root_session_id: None,
+                tool_call_id: None,
                 agent_event_emitter: None,
             },
         )
@@ -1683,6 +1714,7 @@ mod tests {
                 tool_env_provider: None,
                 session_id: None,
                 root_session_id: None,
+                tool_call_id: None,
                 agent_event_emitter: None,
             },
         )
@@ -1712,6 +1744,7 @@ mod tests {
             tool_env_provider:   None,
             session_id:          None,
             root_session_id:     None,
+            tool_call_id:        None,
             agent_event_emitter: None,
         })
         .await
@@ -1744,6 +1777,7 @@ mod tests {
             tool_env_provider:   None,
             session_id:          None,
             root_session_id:     None,
+            tool_call_id:        None,
             agent_event_emitter: None,
         })
         .await

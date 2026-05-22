@@ -443,6 +443,7 @@ impl HookExecutorImpl {
                         tool_env_provider:   None,
                         session_id:          None,
                         root_session_id:     None,
+                        tool_call_id:        Some(tc.id.clone()),
                         agent_event_emitter: None,
                     };
                     let result = match tool {

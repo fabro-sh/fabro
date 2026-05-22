@@ -556,6 +556,8 @@ pub struct SessionEvent {
     pub session_id:        String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id:      Option<String>,
 }
 
 #[cfg(test)]
@@ -574,6 +576,7 @@ mod tests {
             timestamp:         SystemTime::now(),
             session_id:        "sess_1".into(),
             parent_session_id: None,
+            tool_call_id:      None,
         };
         assert!(matches!(event.event, AgentEvent::SessionStarted {
             provider: Some(_),
@@ -702,6 +705,7 @@ mod tests {
             timestamp:         SystemTime::now(),
             session_id:        "sess_42".into(),
             parent_session_id: None,
+            tool_call_id:      None,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("sess_42"));
@@ -729,6 +733,7 @@ mod tests {
             timestamp:         SystemTime::now(),
             session_id:        "sess_child".into(),
             parent_session_id: Some("sess_parent".into()),
+            tool_call_id:      None,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("sess_child"));

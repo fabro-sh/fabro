@@ -1476,6 +1476,7 @@ mod tests {
             },
             session_id:        Some("ses_child".to_string()),
             parent_session_id: Some("ses_parent".to_string()),
+            tool_call_id:      None,
         });
 
         assert_eq!(stored.event_name(), "agent.tool.started");
@@ -1701,6 +1702,7 @@ mod tests {
                 },
                 session_id:        Some("ses_1".to_string()),
                 parent_session_id: None,
+                tool_call_id:      None,
             },
             Utc::now(),
             Some(&StageScope {
@@ -2021,6 +2023,36 @@ mod tests {
     }
 
     #[test]
+    fn agent_todo_event_populates_tool_call_id_header() {
+        let stored = to_run_event(&fixtures::RUN_1, &Event::Agent {
+            stage:             "code".to_string(),
+            visit:             1,
+            event:             AgentEvent::TodoCreated(fabro_types::TodoCreatedProps {
+                list_id:     "openai_plan:ses_1".to_string(),
+                list_kind:   ::fabro_types::TodoListKind::OpenAiPlan,
+                todo_id:     "todo_1".to_string(),
+                status:      ::fabro_types::TodoStatus::Pending,
+                order:       0,
+                subject:     "step".to_string(),
+                description: String::new(),
+                active_form: None,
+                owner:       None,
+                blocks:      Vec::new(),
+                blocked_by:  Vec::new(),
+                metadata:    BTreeMap::new(),
+            }),
+            session_id:        Some("ses_1".to_string()),
+            parent_session_id: None,
+            tool_call_id:      Some("call_todo".to_string()),
+        });
+
+        assert_eq!(stored.event_name(), "todo.created");
+        assert_eq!(stored.session_id.as_deref(), Some("ses_1"));
+        assert_eq!(stored.tool_call_id.as_deref(), Some("call_todo"));
+        assert!(matches!(stored.body, EventBody::TodoCreated(_)));
+    }
+
+    #[test]
     fn agent_assistant_message_populates_agent_actor() {
         let stored = to_run_event(&fixtures::RUN_1, &Event::Agent {
             stage:             "code".to_string(),
@@ -2037,6 +2069,7 @@ mod tests {
             },
             session_id:        Some("ses_agent".to_string()),
             parent_session_id: None,
+            tool_call_id:      None,
         });
         let actor = stored.actor.as_ref().expect("actor set");
         assert_eq!(actor, &Principal::Agent {
@@ -2067,6 +2100,7 @@ mod tests {
             },
             session_id:        Some("ses_agent".to_string()),
             parent_session_id: None,
+            tool_call_id:      None,
         });
 
         let EventBody::AgentMessage(message) = stored.body else {

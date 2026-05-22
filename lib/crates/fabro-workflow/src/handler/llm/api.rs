@@ -484,6 +484,7 @@ fn spawn_event_forwarder(
                         event:             event.event.clone(),
                         session_id:        Some(event.session_id.clone()),
                         parent_session_id: event.parent_session_id.clone(),
+                        tool_call_id:      event.tool_call_id.clone(),
                     },
                     &scope,
                 );
@@ -1640,6 +1641,7 @@ mod tests {
             tool_env_provider:   None,
             session_id:          None,
             root_session_id:     None,
+            tool_call_id:        None,
             agent_event_emitter: None,
         }
     }

@@ -594,6 +594,7 @@ mod tests {
             },
             session_id:        None,
             parent_session_id: None,
+            tool_call_id:      None,
         };
 
         let stored = to_run_event(&fixtures::RUN_1, &event);

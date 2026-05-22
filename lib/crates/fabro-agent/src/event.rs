@@ -18,12 +18,22 @@ impl Emitter {
     }
 
     pub fn emit(&self, session_id: String, event: AgentEvent) {
+        self.emit_with_tool_call_id(session_id, event, None);
+    }
+
+    pub fn emit_with_tool_call_id(
+        &self,
+        session_id: String,
+        event: AgentEvent,
+        tool_call_id: Option<String>,
+    ) {
         event.trace(&session_id);
         let wrapped = SessionEvent {
             event,
             timestamp: SystemTime::now(),
             session_id,
             parent_session_id: None,
+            tool_call_id,
         };
         // Ignore send error (no receivers)
         let _ = self.sender.send(wrapped);
@@ -52,13 +62,18 @@ impl Default for Emitter {
 /// when a subagent's events are forwarded through its parent.
 #[derive(Clone)]
 pub struct SessionBoundEmitter {
-    pub emitter:    Emitter,
-    pub session_id: String,
+    pub emitter:      Emitter,
+    pub session_id:   String,
+    pub tool_call_id: Option<String>,
 }
 
 impl AgentEventEmitter for SessionBoundEmitter {
     fn emit(&self, event: AgentEvent) {
-        self.emitter.emit(self.session_id.clone(), event);
+        self.emitter.emit_with_tool_call_id(
+            self.session_id.clone(),
+            event,
+            self.tool_call_id.clone(),
+        );
     }
 }
 
@@ -147,6 +162,7 @@ mod tests {
             timestamp:         SystemTime::now(),
             session_id:        "child".into(),
             parent_session_id: Some("parent".into()),
+            tool_call_id:      None,
         });
 
         let event = receiver.recv().await.unwrap();

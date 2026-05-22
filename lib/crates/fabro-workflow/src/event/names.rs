@@ -191,6 +191,7 @@ mod tests {
                 },
                 session_id:        None,
                 parent_session_id: None,
+                tool_call_id:      None,
             }),
             "agent.sub.spawned"
         );
