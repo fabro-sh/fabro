@@ -37,6 +37,7 @@ fabro-auth = { path = "../fabro-auth" }
 fabro-model = { path = "../fabro-model" }
 fabro-redact.workspace = true
 fabro-static.workspace = true
+fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 
 [dev-dependencies]

@@ -593,6 +593,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
                     billing,
                     tool_call_count: *tool_call_count,
                     visit: *visit,
+                    message: None,
                 })
             }
             AgentEvent::ToolCallStarted {
@@ -600,10 +601,13 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 tool_call_id,
                 arguments,
             } => EventBody::AgentToolStarted(fabro_types::AgentToolStartedProps {
-                tool_name:    tool_name.clone(),
-                tool_call_id: tool_call_id.clone(),
-                arguments:    arguments.clone(),
-                visit:        *visit,
+                tool_name:         tool_name.clone(),
+                tool_call_id:      tool_call_id.clone(),
+                arguments:         arguments.clone(),
+                visit:             *visit,
+                tool_call:         None,
+                turn_id:           None,
+                parent_message_id: None,
             }),
             AgentEvent::ToolCallCompleted {
                 tool_name,
@@ -616,6 +620,8 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 output:       output.clone(),
                 is_error:     *is_error,
                 visit:        *visit,
+                tool_result:  None,
+                turn_id:      None,
             }),
             AgentEvent::Error { error } => EventBody::AgentError(fabro_types::AgentErrorProps {
                 error: serde_json::to_value(error).expect("serializable agent error"),

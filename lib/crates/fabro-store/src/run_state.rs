@@ -2828,6 +2828,7 @@ mod tests {
             billing,
             tool_call_count: 0,
             visit: 1,
+            message: None,
         }
     }
 

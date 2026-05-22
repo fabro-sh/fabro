@@ -44,6 +44,7 @@ pub mod status;
 pub mod steering;
 pub mod timing;
 pub mod todo;
+pub mod transcript;
 
 pub use artifact::ArtifactUpload;
 pub use auth::{IdpIdentity, IdpIdentityError};
@@ -134,3 +135,7 @@ pub use status::{
 pub use steering::SteeringMessage;
 pub use timing::{RunTiming, StageTiming};
 pub use todo::{TodoListKind, TodoListProjection, TodoPatch, TodoProjection, TodoStatus};
+pub use transcript::{
+    AudioData, ContentPart, DocumentData, ImageData, MessageId, MessageKind, MessageSource,
+    PairMessageRef, ThinkingData, ToolCall, ToolResult, TranscriptMessage, TranscriptUsage,
+};

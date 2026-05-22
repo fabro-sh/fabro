@@ -924,6 +924,7 @@ mod tests {
                     billing:         BilledTokenCounts::default(),
                     tool_call_count: 0,
                     visit:           1,
+                    message:         None,
                 }),
             ),
         )
@@ -954,6 +955,7 @@ mod tests {
                         billing:         BilledTokenCounts::default(),
                         tool_call_count: 0,
                         visit:           1,
+                        message:         None,
                     }),
                 ),
             )

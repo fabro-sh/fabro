@@ -2041,6 +2041,7 @@ dependencies = [
  "fabro-redact",
  "fabro-static",
  "fabro-test",
+ "fabro-types",
  "fabro-util",
  "futures",
  "http",
