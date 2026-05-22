@@ -57,6 +57,11 @@ use crate::worker_token::issue_worker_token;
 
 const SESSION_SSE_BUFFER_CAPACITY: usize = 1024;
 
+const ASK_FABRO_RUN_TOOL_NAMES: &[&str] = &[
+    fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
+    fabro_tool::FABRO_RUN_GET_TOOL_NAME,
+];
+
 type SessionSseSender = mpsc::Sender<Result<Event, Infallible>>;
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -714,8 +719,8 @@ async fn build_agent_session(
         Arc::clone(&catalog),
     );
 
-    // Give the Ask Fabro agent access to run-control tools scoped to its
-    // owning run. The session reaches the local HTTP API via a same-run
+    // Give the Ask Fabro agent access to read-only run-inspection tools scoped
+    // to its owning run. The session reaches the local HTTP API via a same-run
     // worker token; the scoped backend rejects accidental cross-run tool calls
     // and the server's auth middleware remains a backstop for direct HTTP.
     let worker_token = issue_worker_token(state.worker_token_keys(), &run_id)
@@ -736,10 +741,11 @@ async fn build_agent_session(
         base_cwd:           PathBuf::new(),
         user_settings_path: PathBuf::new(),
     };
-    register_named_fabro_run_tools(profile.tool_registry_mut(), &services, &[
-        fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
-        fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
-    ]);
+    register_named_fabro_run_tools(
+        profile.tool_registry_mut(),
+        &services,
+        ASK_FABRO_RUN_TOOL_NAMES,
+    );
     let ask_fabro_policy = build_ask_fabro_tool_access_policy();
     let profile: Arc<dyn AgentProfile> =
         Arc::new(AskFabroProfile::new(profile, Arc::clone(&ask_fabro_policy)));
@@ -922,11 +928,8 @@ struct AskFabroToolAccessPolicy;
 impl ToolAccessPolicy for AskFabroToolAccessPolicy {
     fn access_for_tool(&self, tool_name: &str) -> ToolAccess {
         match tool_name {
-            "read_file"
-            | "grep"
-            | "glob"
-            | fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME
-            | fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME => ToolAccess::Allowed,
+            "read_file" | "grep" | "glob" => ToolAccess::Allowed,
+            name if ASK_FABRO_RUN_TOOL_NAMES.contains(&name) => ToolAccess::Allowed,
             _ => ToolAccess::Denied,
         }
     }
@@ -1527,6 +1530,7 @@ mod tests {
             "web_fetch",
             fabro_tool::FABRO_RUN_CREATE_TOOL_NAME,
             fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
+            fabro_tool::FABRO_RUN_GET_TOOL_NAME,
             fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
         ] {
             registry.register(stub_tool(name));
@@ -1568,7 +1572,7 @@ mod tests {
             "grep",
             "glob",
             fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
-            fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
+            fabro_tool::FABRO_RUN_GET_TOOL_NAME,
         ] {
             assert_eq!(policy.access_for_tool(tool_name), ToolAccess::Allowed);
         }
@@ -1580,6 +1584,7 @@ mod tests {
             "web_search",
             "web_fetch",
             fabro_tool::FABRO_RUN_CREATE_TOOL_NAME,
+            fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
         ] {
             assert_eq!(policy.access_for_tool(tool_name), ToolAccess::Denied);
         }
@@ -1598,7 +1603,7 @@ mod tests {
 
         assert_eq!(names, vec![
             "fabro_run_events",
-            "fabro_run_interact",
+            "fabro_run_get",
             "glob",
             "grep",
             "read_file",
@@ -1625,7 +1630,7 @@ mod tests {
             "grep",
             "glob",
             fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
-            fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
+            fabro_tool::FABRO_RUN_GET_TOOL_NAME,
         ] {
             assert!(
                 prompt.contains(&format!("`{tool_name}`")),
@@ -1640,6 +1645,7 @@ mod tests {
             "web_search",
             "web_fetch",
             fabro_tool::FABRO_RUN_CREATE_TOOL_NAME,
+            fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
         ] {
             assert!(
                 !prompt.contains(hidden_tool),

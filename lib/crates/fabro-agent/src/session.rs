@@ -31,7 +31,7 @@ use crate::file_tracker::FileTracker;
 use crate::history::History;
 use crate::loop_detection::detect_loop;
 use crate::mcp_integration;
-use crate::memory::discover_memory;
+use crate::memory::{BUDGET_BYTES, MemoryDocument, discover_memory};
 use crate::profiles::EnvContext;
 use crate::sandbox::Sandbox;
 use crate::skills::{
@@ -39,7 +39,10 @@ use crate::skills::{
 };
 use crate::subagent::{SubAgentCallbackEvent, SubAgentEventCallback, SubAgentManager};
 use crate::tool_execution::execute_tool_calls;
-use crate::types::{AgentEvent, Message, SessionEvent, SessionState};
+use crate::types::{
+    AgentEvent, McpToolSummary, MemoryFileSummary, Message, SessionEvent, SessionState,
+    SkillActivationSource, SkillSummary,
+};
 
 /// One queued external control item for a live session.
 #[derive(Debug, Clone)]
@@ -311,7 +314,7 @@ pub struct Session {
     cancel_token:           CancellationToken,
     round_token:            Arc<RwLock<CancellationToken>>,
     interrupt_reason:       Arc<Mutex<Option<InterruptReason>>>,
-    memory:                 Vec<String>,
+    memory:                 Vec<MemoryDocument>,
     env_context:            EnvContext,
     skills:                 Vec<Skill>,
     system_prompt:          String,
@@ -489,6 +492,29 @@ impl Session {
         )
         .await?;
 
+        let provider_profile = self.provider_profile.profile_kind().to_string();
+
+        // Emit memory loaded event with file metadata. Contents are deliberately
+        // omitted so the durable event stream never carries file bytes.
+        let memory_files: Vec<MemoryFileSummary> = self
+            .memory
+            .iter()
+            .map(|doc| MemoryFileSummary {
+                path:         doc.path.clone(),
+                byte_count:   doc.byte_count,
+                loaded_bytes: doc.loaded_bytes,
+                truncated:    doc.truncated,
+            })
+            .collect();
+        let total_loaded_bytes = self.memory.iter().map(|doc| doc.loaded_bytes).sum();
+        self.event_emitter
+            .emit(self.id.clone(), AgentEvent::MemoryLoaded {
+                provider_profile: provider_profile.clone(),
+                files: memory_files,
+                total_loaded_bytes,
+                budget_bytes: BUDGET_BYTES,
+            });
+
         // Discover skills
         let skill_dirs = if let Some(dirs) = &self.config.skill_dirs {
             dirs.clone()
@@ -499,6 +525,21 @@ impl Session {
         };
         self.skills = discover_skills(self.sandbox.as_ref(), &skill_dirs, &cancel_token).await?;
         debug!(skill_count = self.skills.len(), "Skills discovered");
+
+        let skill_summaries: Vec<SkillSummary> = self
+            .skills
+            .iter()
+            .map(|skill| SkillSummary {
+                name:        skill.name.clone(),
+                description: skill.description.clone(),
+            })
+            .collect();
+        self.event_emitter
+            .emit(self.id.clone(), AgentEvent::SkillsDiscovered {
+                provider_profile,
+                source_dirs: skill_dirs.clone(),
+                skills: skill_summaries,
+            });
 
         // Register use_skill tool when skills are available
         if !self.skills.is_empty() {
@@ -522,10 +563,19 @@ impl Session {
             for (server_name, result) in &results {
                 match result {
                     Ok(tool_count) => {
+                        let tools = manager
+                            .tool_summaries_for_server(server_name)
+                            .into_iter()
+                            .map(|(name, original_name)| McpToolSummary {
+                                name,
+                                original_name,
+                            })
+                            .collect();
                         self.event_emitter
                             .emit(self.id.clone(), AgentEvent::McpServerReady {
                                 server_name: server_name.clone(),
-                                tool_count:  *tool_count,
+                                tool_count: *tool_count,
+                                tools,
                             });
                     }
                     Err(e) => {
@@ -555,11 +605,15 @@ impl Session {
             "Environment context built"
         );
 
-        // Build system prompt once (static for the session lifetime)
+        // Build system prompt once (static for the session lifetime). Only
+        // the loaded memory text is passed to the profile; the document
+        // metadata is already surfaced via the `agent.memory.loaded` event.
+        let memory_contents: Vec<String> =
+            self.memory.iter().map(|doc| doc.content.clone()).collect();
         self.system_prompt = self.provider_profile.build_system_prompt(
             self.sandbox.as_ref(),
             &self.env_context,
-            &self.memory,
+            &memory_contents,
             self.config.user_instructions.as_deref(),
             &self.skills,
         );
@@ -1138,8 +1192,9 @@ impl Session {
         };
         if let Some(ref name) = expanded.skill_name {
             self.event_emitter
-                .emit(self.id.clone(), AgentEvent::SkillExpanded {
+                .emit(self.id.clone(), AgentEvent::SkillActivated {
                     skill_name: name.clone(),
+                    source:     SkillActivationSource::Slash,
                 });
         }
         let expanded_input = expanded.text;
@@ -1710,9 +1765,10 @@ mod tests {
 
     use super::*;
     use crate::config::{ToolAccess, ToolAccessPolicy, ToolApprovalAdapter, ToolExposureMode};
+    use crate::skills::{Skill, make_use_skill_tool};
     use crate::subagent::SubAgentStatus;
     use crate::test_support::*;
-    use crate::tool_registry::{RegisteredTool, ToolRegistry};
+    use crate::tool_registry::{RegisteredTool, ToolContext, ToolRegistry};
 
     struct NamedToolAccessPolicy {
         decisions: Vec<(&'static str, ToolAccess)>,
@@ -3649,16 +3705,18 @@ mod tests {
         // Initialize starts the MCP server and registers tools
         session.initialize().await.unwrap();
 
-        // Verify McpServerReady event was emitted
+        // Verify McpServerReady event was emitted with deterministic tool
+        // summaries pulled from the connection manager.
         let mut mcp_ready = false;
         while let Ok(event) = rx.try_recv() {
             if let AgentEvent::McpServerReady {
-                server_name,
-                tool_count,
+                server_name, tools, ..
             } = &event.event
             {
                 assert_eq!(server_name, "test-echo");
-                assert_eq!(*tool_count, 1);
+                assert_eq!(tools.len(), 1);
+                assert_eq!(tools[0].name, "mcp__test_echo__echo");
+                assert_eq!(tools[0].original_name, "echo");
                 mcp_ready = true;
             }
         }
@@ -3863,5 +3921,278 @@ mod tests {
                 .any(|e| matches!(e, AgentEvent::ProcessingEnd)),
             "ProcessingEnd event should be emitted when returning to Idle"
         );
+    }
+
+    async fn build_initialized_session(
+        sandbox: Arc<MockSandbox>,
+        config: SessionOptions,
+    ) -> Session {
+        let provider = Arc::new(MockLlmProvider::new(vec![text_response("ok")]));
+        let client = make_client(provider).await;
+        let profile = Arc::new(TestProfile::new());
+        Session::new(client, profile, sandbox, config, None)
+    }
+
+    #[tokio::test]
+    async fn initialize_emits_memory_loaded_with_file_metadata() {
+        let mut files = std::collections::HashMap::new();
+        files.insert("/home/test/AGENTS.md".into(), "Hello world".into());
+        let sandbox = Arc::new(MockSandbox {
+            files,
+            ..MockSandbox::linux()
+        });
+        let config = SessionOptions {
+            git_root: Some("/home/test".into()),
+            skill_dirs: Some(Vec::new()),
+            ..Default::default()
+        };
+        let mut session = build_initialized_session(sandbox, config).await;
+        let mut rx = session.subscribe();
+        session.initialize().await.unwrap();
+
+        let mut memory_event = None;
+        while let Ok(envelope) = rx.try_recv() {
+            if let AgentEvent::MemoryLoaded {
+                files,
+                budget_bytes,
+                provider_profile,
+                ..
+            } = envelope.event
+            {
+                memory_event = Some((files, budget_bytes, provider_profile));
+                break;
+            }
+        }
+        let (files, budget_bytes, provider_profile) =
+            memory_event.expect("MemoryLoaded should be emitted");
+        assert_eq!(provider_profile, "anthropic");
+        assert_eq!(budget_bytes, 32768);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "/home/test/AGENTS.md");
+        assert_eq!(files[0].byte_count, "Hello world".len());
+        assert_eq!(files[0].loaded_bytes, "Hello world".len());
+        assert!(!files[0].truncated);
+    }
+
+    #[tokio::test]
+    async fn initialize_emits_memory_loaded_event_with_empty_files_when_no_memory() {
+        let sandbox = Arc::new(MockSandbox::linux());
+        let config = SessionOptions {
+            git_root: Some("/home/test".into()),
+            skill_dirs: Some(Vec::new()),
+            ..Default::default()
+        };
+        let mut session = build_initialized_session(sandbox, config).await;
+        let mut rx = session.subscribe();
+        session.initialize().await.unwrap();
+
+        let mut saw_memory = false;
+        while let Ok(envelope) = rx.try_recv() {
+            if let AgentEvent::MemoryLoaded { files, .. } = envelope.event {
+                assert!(files.is_empty());
+                saw_memory = true;
+                break;
+            }
+        }
+        assert!(
+            saw_memory,
+            "MemoryLoaded must be emitted even when no memory files are loaded"
+        );
+    }
+
+    #[tokio::test]
+    async fn initialize_emits_skills_discovered_with_summaries() {
+        let mut files = std::collections::HashMap::new();
+        files.insert(
+            "/skills/commit/SKILL.md".into(),
+            "---\nname: commit\ndescription: Make a commit\n---\nDo commit".into(),
+        );
+        let sandbox = Arc::new(MockSandbox {
+            files,
+            glob_results: vec!["/skills/commit/SKILL.md".into()],
+            ..MockSandbox::linux()
+        });
+        let config = SessionOptions {
+            git_root: Some("/home/test".into()),
+            skill_dirs: Some(vec!["/skills".into()]),
+            ..Default::default()
+        };
+        let mut session = build_initialized_session(sandbox, config).await;
+        let mut rx = session.subscribe();
+        session.initialize().await.unwrap();
+
+        let mut got = None;
+        while let Ok(envelope) = rx.try_recv() {
+            if let AgentEvent::SkillsDiscovered {
+                provider_profile,
+                source_dirs,
+                skills,
+            } = envelope.event
+            {
+                got = Some((provider_profile, source_dirs, skills));
+                break;
+            }
+        }
+        let (provider_profile, source_dirs, skills) =
+            got.expect("SkillsDiscovered must be emitted");
+        assert_eq!(provider_profile, "anthropic");
+        assert_eq!(source_dirs, vec!["/skills".to_string()]);
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "commit");
+        assert_eq!(skills[0].description, "Make a commit");
+    }
+
+    #[tokio::test]
+    async fn initialize_emits_skills_discovered_event_when_no_skills() {
+        let sandbox = Arc::new(MockSandbox::linux());
+        let config = SessionOptions {
+            git_root: Some("/home/test".into()),
+            skill_dirs: Some(Vec::new()),
+            ..Default::default()
+        };
+        let mut session = build_initialized_session(sandbox, config).await;
+        let mut rx = session.subscribe();
+        session.initialize().await.unwrap();
+
+        let mut saw_skills = false;
+        while let Ok(envelope) = rx.try_recv() {
+            if let AgentEvent::SkillsDiscovered { skills, .. } = envelope.event {
+                assert!(skills.is_empty());
+                saw_skills = true;
+                break;
+            }
+        }
+        assert!(
+            saw_skills,
+            "SkillsDiscovered must be emitted even when no skills are present"
+        );
+    }
+
+    #[tokio::test]
+    async fn slash_skill_expansion_emits_skill_activated_with_slash_source() {
+        let mut files = std::collections::HashMap::new();
+        files.insert(
+            "/skills/commit/SKILL.md".into(),
+            "---\nname: commit\ndescription: Make a commit\n---\nRun commit. {{user_input}}".into(),
+        );
+        let sandbox = Arc::new(MockSandbox {
+            files,
+            glob_results: vec!["/skills/commit/SKILL.md".into()],
+            ..MockSandbox::linux()
+        });
+        let config = SessionOptions {
+            git_root: Some("/home/test".into()),
+            skill_dirs: Some(vec!["/skills".into()]),
+            ..Default::default()
+        };
+        let provider = Arc::new(MockLlmProvider::new(vec![text_response("ok")]));
+        let client = make_client(provider).await;
+        let profile = Arc::new(TestProfile::new());
+        let mut session = Session::new(client, profile, sandbox, config, None);
+        session.initialize().await.unwrap();
+
+        let mut rx = session.subscribe();
+        session.process_input("/commit fix things").await.unwrap();
+
+        let mut activations: Vec<(String, SkillActivationSource)> = Vec::new();
+        while let Ok(envelope) = rx.try_recv() {
+            if let AgentEvent::SkillActivated { skill_name, source } = envelope.event {
+                activations.push((skill_name, source));
+            }
+        }
+        assert!(
+            activations
+                .iter()
+                .any(|(name, source)| name == "commit" && *source == SkillActivationSource::Slash),
+            "expected slash skill activation, got {activations:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn use_skill_tool_success_emits_skill_activated_with_tool_source() {
+        let mut files = std::collections::HashMap::new();
+        files.insert(
+            "/skills/commit/SKILL.md".into(),
+            "---\nname: commit\ndescription: Make a commit\n---\nRun commit.".into(),
+        );
+        let sandbox = Arc::new(MockSandbox {
+            files,
+            glob_results: vec!["/skills/commit/SKILL.md".into()],
+            ..MockSandbox::linux()
+        });
+        let config = SessionOptions {
+            git_root: Some("/home/test".into()),
+            skill_dirs: Some(vec!["/skills".into()]),
+            enable_loop_detection: false,
+            ..Default::default()
+        };
+        let responses = vec![
+            tool_call_response(
+                "use_skill",
+                "call_1",
+                serde_json::json!({"skill_name": "commit"}),
+            ),
+            text_response("done"),
+        ];
+        let provider = Arc::new(MockLlmProvider::new(responses));
+        let client = make_client(provider).await;
+        let profile = Arc::new(TestProfile::new());
+        let mut session = Session::new(client, profile, sandbox, config, None);
+        session.initialize().await.unwrap();
+
+        let mut rx = session.subscribe();
+        session.process_input("please commit").await.unwrap();
+
+        let mut tool_activations = 0;
+        while let Ok(envelope) = rx.try_recv() {
+            if let AgentEvent::SkillActivated { source, skill_name } = envelope.event {
+                if source == SkillActivationSource::Tool && skill_name == "commit" {
+                    tool_activations += 1;
+                }
+            }
+        }
+        assert_eq!(
+            tool_activations, 1,
+            "expected exactly one tool-sourced skill activation"
+        );
+    }
+
+    #[tokio::test]
+    async fn use_skill_tool_failed_lookup_does_not_emit_activation() {
+        let sandbox = Arc::new(MockSandbox::linux());
+        let config = SessionOptions {
+            git_root: Some("/home/test".into()),
+            skill_dirs: Some(Vec::new()),
+            ..Default::default()
+        };
+        let provider = Arc::new(MockLlmProvider::new(vec![text_response("ok")]));
+        let client = make_client(provider).await;
+        let profile = Arc::new(TestProfile::new());
+        let mut session = Session::new(client, profile, sandbox, config, None);
+        session.initialize().await.unwrap();
+
+        // Build a use_skill tool with an empty skill list, then invoke it
+        // directly with a missing name. We must NOT see a SkillActivated event.
+        let skills_arc = Arc::new(Vec::<Skill>::new());
+        let tool = make_use_skill_tool(skills_arc);
+        let mut rx = session.subscribe();
+        let env: Arc<dyn Sandbox> = Arc::new(MockSandbox::default());
+        let ctx = ToolContext {
+            env,
+            cancel: CancellationToken::new(),
+            tool_env_provider: None,
+            session_id: Some(session.id().to_string()),
+            root_session_id: Some(session.id().to_string()),
+            tool_call_id: None,
+            agent_event_emitter: None,
+        };
+        let result = (tool.executor)(serde_json::json!({"skill_name": "nope"}), ctx).await;
+        assert!(result.is_err());
+
+        while let Ok(envelope) = rx.try_recv() {
+            if matches!(envelope.event, AgentEvent::SkillActivated { .. }) {
+                panic!("failed use_skill should not emit SkillActivated");
+            }
+        }
     }
 }

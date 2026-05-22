@@ -277,6 +277,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
             shadow_sha,
             &self.run_options.checkpoint_exclude_globs(),
             &git_author,
+            self.run_options.checkpoint_skip_git_hooks(),
         )
         .await;
 

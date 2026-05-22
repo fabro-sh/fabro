@@ -269,6 +269,16 @@ async fn execute_fabro_run_tool(
             let summary = fabro_tool::search_runs_text(&result);
             render_fabro_tool_result(&summary, &result)
         }
+        fabro_tool::FABRO_RUN_GET_TOOL_NAME => {
+            let params = parse_fabro_tool_args::<fabro_tool::FabroRunGetParams>(name, args)?;
+            let result = fabro_tool::run_get(
+                Arc::clone(&services.backend),
+                fabro_tool::ValidatedRunGet::try_from(params)?,
+            )
+            .await?;
+            let summary = fabro_tool::run_get_text(&result);
+            render_fabro_tool_result(&summary, &result)
+        }
         fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME => {
             let params = parse_fabro_tool_args::<fabro_tool::FabroRunInteractParams>(name, args)?;
             let result = fabro_tool::interact_run(
@@ -1461,6 +1471,7 @@ mod tests {
             fabro_tool::FABRO_RUN_CREATE_TOOL_NAME,
             fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
             fabro_tool::FABRO_RUN_GATHER_TOOL_NAME,
+            fabro_tool::FABRO_RUN_GET_TOOL_NAME,
             fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
             fabro_tool::FABRO_RUN_SEARCH_TOOL_NAME,
         ]);

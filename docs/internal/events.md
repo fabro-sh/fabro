@@ -1468,8 +1468,19 @@ Emitted when a sub-agent is spawned.
   "node_id": "code", "node_label": "code",
   "session_id": "ses_abc",
   "properties": {
-    "server_name": "filesystem",
-    "tool_count": 5
+    "server_name": "github",
+    "tool_count": 2,
+    "tools": [
+      {
+        "name": "mcp__github__create_issue",
+        "original_name": "create_issue"
+      },
+      {
+        "name": "mcp__github__list_issues",
+        "original_name": "list_issues"
+      }
+    ],
+    "visit": 1
   }
 }
 ```
@@ -1478,6 +1489,8 @@ Emitted when a sub-agent is spawned.
 |----------|------|-------------|
 | `server_name` | string | MCP server name |
 | `tool_count` | number | Number of tools available |
+| `tools` | array | Names-only tool summaries for the ready server, sorted by qualified `name`. Each entry has `name` (Fabro-qualified `mcp__{server}__{tool}` identifier) and `original_name` (server-provided tool name). Descriptions and input schemas are intentionally omitted. The field is omitted from serialized JSON for legacy parity when empty. |
+| `visit` | number | Stage visit count when the server became ready |
 
 ### `agent.mcp.failed`
 
@@ -1498,6 +1511,121 @@ Emitted when a sub-agent is spawned.
 |----------|------|-------------|
 | `server_name` | string | MCP server name |
 | `error` | string | Error message |
+
+### `agent.memory.loaded`
+
+Emitted once per session right after memory discovery, before skills and MCP
+initialization. The event is always emitted, even when no memory files are
+loaded (in which case `files` is an empty array). Memory file **contents are
+deliberately excluded** from the payload to keep the durable event stream free
+of project documentation bytes; consumers that need contents must read the
+files themselves.
+
+```json
+{
+  "id": "...", "ts": "...", "run_id": "...",
+  "event": "agent.memory.loaded",
+  "node_id": "code", "node_label": "code",
+  "session_id": "ses_abc",
+  "properties": {
+    "provider_profile": "anthropic",
+    "files": [
+      {
+        "path": "/repo/AGENTS.md",
+        "byte_count": 4096,
+        "loaded_bytes": 4096,
+        "truncated": false
+      }
+    ],
+    "total_loaded_bytes": 4096,
+    "budget_bytes": 32768,
+    "visit": 1
+  }
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `provider_profile` | string | Active agent profile (`anthropic`, `openai`, `gemini`) |
+| `files` | array | Discovered memory files. Empty when no memory was loaded. |
+| `files[].path` | string | Absolute path of the memory file in the sandbox |
+| `files[].byte_count` | number | Original file size in bytes |
+| `files[].loaded_bytes` | number | Bytes actually loaded into the prompt budget |
+| `files[].truncated` | boolean | `true` if the file was truncated to fit the budget |
+| `total_loaded_bytes` | number | Sum of `files[].loaded_bytes` |
+| `budget_bytes` | number | Total memory budget for the session (currently 32 KiB) |
+| `visit` | number | Stage visit count |
+
+### `agent.skills.discovered`
+
+Emitted once per session right after skill discovery completes. The event is
+always emitted, even when no skills are found (`skills` is an empty array).
+Skills are sorted by name. `source_dirs` lists the directories that were
+scanned in the configured precedence order.
+
+```json
+{
+  "id": "...", "ts": "...", "run_id": "...",
+  "event": "agent.skills.discovered",
+  "node_id": "code", "node_label": "code",
+  "session_id": "ses_abc",
+  "properties": {
+    "provider_profile": "anthropic",
+    "source_dirs": [
+      "/home/test/.fabro/skills",
+      "/repo/.fabro/skills",
+      "/repo/skills"
+    ],
+    "skills": [
+      { "name": "commit", "description": "Make a commit" }
+    ],
+    "visit": 1
+  }
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `provider_profile` | string | Active agent profile |
+| `source_dirs` | array | Directories scanned for `SKILL.md` files (in precedence order) |
+| `skills` | array | Discovered skills, sorted by `name`. Each entry is `{ name, description }`. |
+| `visit` | number | Stage visit count |
+
+### `agent.skill.activated`
+
+Emitted whenever a skill is activated in the running session. Sources:
+
+- `slash` — the user input matched a `/skill-name` token and the skill template
+  was expanded inline. This event replaces the previous internal-only
+  `agent.skill.expanded` notification.
+- `tool` — the model successfully called the `use_skill` tool and the skill
+  template was returned. Failed `use_skill` lookups (unknown names, missing
+  parameters) do **not** emit this event.
+
+```json
+{
+  "id": "...", "ts": "...", "run_id": "...",
+  "event": "agent.skill.activated",
+  "node_id": "code", "node_label": "code",
+  "session_id": "ses_abc",
+  "properties": {
+    "skill_name": "commit",
+    "source": "slash",
+    "visit": 1
+  }
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `skill_name` | string | Name of the activated skill |
+| `source` | string | `"slash"` for `/skill-name` expansion, `"tool"` for `use_skill` activations |
+| `visit` | number | Stage visit count |
+
+> `agent.skill.expanded` is no longer surfaced as a durable run event. The
+> internal `AgentEvent::SkillExpanded` variant remains classified as streaming
+> noise and is not persisted; slash-skill expansion is reported through
+> `agent.skill.activated` with `source == "slash"` instead.
 
 ### `agent.failover`
 

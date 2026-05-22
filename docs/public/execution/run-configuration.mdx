@@ -345,13 +345,15 @@ Configure how git checkpoint commits behave.
 ```toml title="run.toml"
 [run.checkpoint]
 exclude_globs = ["**/node_modules/**", "**/.cache/**", "**/dist/**"]
+skip_git_hooks = false
 ```
 
 | Field | Description |
 |---|---|
 | `exclude_globs` | Glob patterns for files to exclude from checkpoint commits. Uses git pathspec `:(glob,exclude)` syntax. |
+| `skip_git_hooks` | When `true`, Fabro-managed run-branch checkpoint commits bypass local Git commit hooks (e.g. `pre-commit`, `commit-msg`). Defaults to `false`. Does not affect Fabro workflow `[[run.hooks]]` or metadata-branch snapshots. |
 
-`exclude_globs` replaces across layers — the higher-precedence layer wins wholesale.
+`exclude_globs` replaces across layers — the higher-precedence layer wins wholesale. `skip_git_hooks` uses normal override semantics: the highest layer that sets it wins.
 
 ### `[run.inputs]`
 

@@ -99,6 +99,7 @@ team = "platform"
 
 [run.checkpoint]
 exclude_globs = ["**/node_modules/**", "**/.cache/**"]
+skip_git_hooks = false
 
 [run.inputs]
 default_branch = "main"
@@ -293,8 +294,9 @@ Configure checkpoint behavior for all runs.
 | Key | Description |
 |---|---|
 | `exclude_globs` | Glob patterns for files to exclude from checkpoint commits (for example, `["**/node_modules/**"]`) |
+| `skip_git_hooks` | When `true`, Fabro-managed run-branch checkpoint commits bypass local Git commit hooks. Defaults to `false`. Does not affect Fabro workflow `[[run.hooks]]` or metadata-branch snapshots. |
 
-`exclude_globs` replaces across layers — the highest-precedence layer wins wholesale. See [Run Configuration — Checkpoint](/execution/run-configuration#runcheckpoint) for per-run configuration.
+`exclude_globs` replaces across layers — the highest-precedence layer wins wholesale. `skip_git_hooks` uses normal override semantics. See [Run Configuration — Checkpoint](/execution/run-configuration#runcheckpoint) for per-run configuration.
 
 ## Secrets and environment variables
 

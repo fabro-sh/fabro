@@ -30,7 +30,8 @@ Pass `--server` when the MCP client should connect to a specific Fabro server, o
 |---|---|
 | `fabro_run_create` | Create one or more workflow runs, optionally under a parent run, starting them by default. |
 | `fabro_run_search` | Search runs by ID, parent, workflow, labels, status, archive state, and creation time. |
-| `fabro_run_interact` | Get, start, message, cancel, archive, unarchive, link or unlink a parent, inspect questions, or answer a run. |
+| `fabro_run_get` | Read-only inspection of a run: returns its summary, projection, and pending questions without mutating state. |
+| `fabro_run_interact` | Control a run: start, message, interrupt, cancel, archive, unarchive, link or unlink a parent, inspect or answer questions. |
 | `fabro_run_gather` | Wait for runs to reach terminal states, returning current state on timeout. |
 | `fabro_run_pair` | Inspect, start, message, end, or read transcript for a live run pairing session. |
 | `fabro_run_events` | List, inspect, or search stored events for a run. |

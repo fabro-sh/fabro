@@ -10631,12 +10631,19 @@ components:
 
     RunCheckpointSettings:
       type: object
-      required: [exclude_globs]
+      required: [exclude_globs, skip_git_hooks]
       properties:
         exclude_globs:
           type: array
           items:
             type: string
+        skip_git_hooks:
+          type: boolean
+          default: false
+          description: |
+            When true, Fabro-managed run-branch checkpoint commits bypass
+            local Git commit hooks. Does not affect Fabro `[[run.hooks]]`
+            or metadata-branch snapshots. Defaults to false.
 
     RunCloneSettings:
       type: object

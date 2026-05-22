@@ -22,12 +22,13 @@ pub struct GitCommandError {
 /// Captured git state for a workflow run, shared with handlers.
 #[derive(Debug, Clone)]
 pub struct GitState {
-    pub run_id:                   RunId,
-    pub base_sha:                 String,
-    pub run_branch:               Option<String>,
-    pub meta_branch:              Option<String>,
-    pub checkpoint_exclude_globs: Vec<String>,
-    pub git_author:               GitAuthor,
+    pub run_id:                    RunId,
+    pub base_sha:                  String,
+    pub run_branch:                Option<String>,
+    pub meta_branch:               Option<String>,
+    pub checkpoint_exclude_globs:  Vec<String>,
+    pub checkpoint_skip_git_hooks: bool,
+    pub git_author:                GitAuthor,
 }
 
 pub const GIT_REMOTE: &str =
@@ -68,6 +69,7 @@ pub async fn git_checkpoint(
     shadow_sha: Option<String>,
     exclude_globs: &[String],
     author: &GitAuthor,
+    skip_git_hooks: bool,
 ) -> std::result::Result<String, GitCommandError> {
     let mut all_excludes: Vec<String> = artifact_snapshot::EXCLUDE_DIRS
         .iter()
@@ -125,8 +127,9 @@ pub async fn git_checkpoint(
     }
 
     let msg_path_q = shell_quote(&msg_path);
+    let no_verify = if skip_git_hooks { " --no-verify" } else { "" };
     let commit_cmd = format!(
-        "{GIT_REMOTE} -c user.name={name} -c user.email={email} commit --allow-empty -F {msg_path_q}",
+        "{GIT_REMOTE} -c user.name={name} -c user.email={email} commit --allow-empty{no_verify} -F {msg_path_q}",
         name = shell_quote(&author.name),
         email = shell_quote(&author.email),
     );
@@ -174,6 +177,7 @@ pub(crate) async fn checked_git_checkpoint(
     shadow_sha: Option<String>,
     exclude_globs: &[String],
     author: &GitAuthor,
+    skip_git_hooks: bool,
 ) -> std::result::Result<String, SharedError> {
     runtime.ensure_git_available(sandbox).await.map_err(|err| {
         SharedError::new(anyhow::Error::new(err).context("sandbox git unavailable"))
@@ -187,6 +191,7 @@ pub(crate) async fn checked_git_checkpoint(
         shadow_sha,
         exclude_globs,
         author,
+        skip_git_hooks,
     )
     .await
     .map_err(|err| SharedError::new(anyhow::Error::new(err)))
@@ -1068,6 +1073,7 @@ mod tests {
             None,
             &[],
             &crate::git::GitAuthor::default(),
+            false,
         )
         .await
         .unwrap_err();
@@ -1094,6 +1100,7 @@ mod tests {
             None,
             &[],
             &crate::git::GitAuthor::default(),
+            false,
         )
         .await
         .unwrap_err();
@@ -1124,6 +1131,7 @@ mod tests {
             None,
             &[],
             &crate::git::GitAuthor::default(),
+            false,
         )
         .await
         .unwrap_err();
@@ -1143,6 +1151,7 @@ mod tests {
             None,
             &[],
             &crate::git::GitAuthor::default(),
+            false,
         )
         .await
         .unwrap_err();
@@ -1162,10 +1171,30 @@ mod tests {
         ]);
         let author = crate::git::GitAuthor::default();
 
-        let first =
-            git_checkpoint(&sandbox, "run1", "work", "success", 1, None, &[], &author).await;
-        let second =
-            git_checkpoint(&sandbox, "run1", "work", "success", 1, None, &[], &author).await;
+        let first = git_checkpoint(
+            &sandbox,
+            "run1",
+            "work",
+            "success",
+            1,
+            None,
+            &[],
+            &author,
+            false,
+        )
+        .await;
+        let second = git_checkpoint(
+            &sandbox,
+            "run1",
+            "work",
+            "success",
+            1,
+            None,
+            &[],
+            &author,
+            false,
+        )
+        .await;
 
         assert!(first.is_ok(), "first checkpoint failed: {:?}", first.err());
         assert!(
@@ -1226,6 +1255,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn git_checkpoint_appends_no_verify_when_skip_hooks_enabled() {
+        // add, commit, rev-parse
+        let sandbox = ScriptedSandbox::new(vec![exec_ok(), exec_ok(), exec_ok()]);
+        git_checkpoint(
+            &sandbox,
+            "run1",
+            "work",
+            "success",
+            1,
+            None,
+            &[],
+            &crate::git::GitAuthor::default(),
+            true,
+        )
+        .await
+        .expect("checkpoint should succeed");
+
+        let commands = sandbox.commands();
+        let commit_cmd = commands
+            .iter()
+            .find(|c| c.contains(" commit "))
+            .expect("commit command should be issued");
+        assert!(
+            commit_cmd.contains("--no-verify"),
+            "commit command should include --no-verify when skip_git_hooks=true; got {commit_cmd:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn git_checkpoint_omits_no_verify_when_skip_hooks_disabled() {
+        let sandbox = ScriptedSandbox::new(vec![exec_ok(), exec_ok(), exec_ok()]);
+        git_checkpoint(
+            &sandbox,
+            "run1",
+            "work",
+            "success",
+            1,
+            None,
+            &[],
+            &crate::git::GitAuthor::default(),
+            false,
+        )
+        .await
+        .expect("checkpoint should succeed");
+
+        let commands = sandbox.commands();
+        let commit_cmd = commands
+            .iter()
+            .find(|c| c.contains(" commit "))
+            .expect("commit command should be issued");
+        assert!(
+            !commit_cmd.contains("--no-verify"),
+            "commit command should omit --no-verify when skip_git_hooks=false; got {commit_cmd:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn git_checkpoint_includes_builtin_excludes() {
         // Set up a real git repo
         let repo_dir = tempfile::tempdir().unwrap();
@@ -1262,8 +1348,18 @@ mod tests {
 
         // Call git_checkpoint with empty user excludes — built-in excludes should still
         // apply
-        let result =
-            git_checkpoint(&sandbox, "run1", "work", "success", 1, None, &[], &author).await;
+        let result = git_checkpoint(
+            &sandbox,
+            "run1",
+            "work",
+            "success",
+            1,
+            None,
+            &[],
+            &author,
+            false,
+        )
+        .await;
         assert!(result.is_ok(), "git_checkpoint failed: {:?}", result.err());
 
         // Verify that excluded directories were NOT staged

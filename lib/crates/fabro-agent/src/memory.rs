@@ -7,7 +7,19 @@ use tracing::{debug, info, warn};
 use crate::error::{Error, InterruptReason};
 use crate::sandbox::Sandbox;
 
-const BUDGET_BYTES: usize = 32768;
+pub const BUDGET_BYTES: usize = 32768;
+
+/// One discovered memory file. `content` is what gets inlined into the
+/// system prompt. The remaining fields describe the file for
+/// observability and never carry the file's text.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemoryDocument {
+    pub path:         String,
+    pub content:      String,
+    pub byte_count:   usize,
+    pub loaded_bytes: usize,
+    pub truncated:    bool,
+}
 
 pub async fn discover_memory(
     env: &dyn Sandbox,
@@ -15,7 +27,7 @@ pub async fn discover_memory(
     working_dir: &str,
     profile_kind: AgentProfileKind,
     cancel_token: &CancellationToken,
-) -> Result<Vec<String>, Error> {
+) -> Result<Vec<MemoryDocument>, Error> {
     let directories = build_directory_walk(git_root, working_dir);
 
     let candidate_filenames: Vec<&str> = match profile_kind {
@@ -24,7 +36,7 @@ pub async fn discover_memory(
         AgentProfileKind::Gemini => vec!["AGENTS.md", "GEMINI.md"],
     };
 
-    let mut results = Vec::new();
+    let mut results: Vec<MemoryDocument> = Vec::new();
     let mut budget_remaining = BUDGET_BYTES;
     let mut seen_content = HashSet::new();
 
@@ -47,28 +59,42 @@ pub async fn discover_memory(
                     debug!(path = %path, "Project doc duplicate content, skipping");
                     continue;
                 }
-                if content.len() <= budget_remaining {
-                    debug!(path = %path, size_bytes = content.len(), "Project doc loaded");
-                    budget_remaining -= content.len();
-                    results.push(content);
+                let byte_count = content.len();
+                if byte_count <= budget_remaining {
+                    debug!(path = %path, size_bytes = byte_count, "Project doc loaded");
+                    budget_remaining -= byte_count;
+                    results.push(MemoryDocument {
+                        path,
+                        content,
+                        byte_count,
+                        loaded_bytes: byte_count,
+                        truncated: false,
+                    });
                 } else if budget_remaining > 0 {
                     warn!(
                         path = %path,
-                        size_bytes = content.len(),
+                        size_bytes = byte_count,
                         budget_remaining,
                         "Project doc truncated to fit budget"
                     );
                     let truncated = truncate_to_budget(&content, budget_remaining);
+                    let loaded_bytes = truncated.len();
                     budget_remaining = 0;
-                    results.push(truncated);
+                    results.push(MemoryDocument {
+                        path,
+                        content: truncated,
+                        byte_count,
+                        loaded_bytes,
+                        truncated: true,
+                    });
                 } else {
-                    warn!(path = %path, size_bytes = content.len(), "Project doc skipped, budget exhausted");
+                    warn!(path = %path, size_bytes = byte_count, "Project doc skipped, budget exhausted");
                 }
             }
         }
     }
 
-    let total_bytes: usize = results.iter().map(std::string::String::len).sum();
+    let total_bytes: usize = results.iter().map(|doc| doc.loaded_bytes).sum();
     info!(files = results.len(), total_bytes, "Project docs loaded");
 
     Ok(results)
@@ -144,7 +170,11 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(docs.len(), 1);
-        assert_eq!(docs[0], "Agent instructions");
+        assert_eq!(docs[0].content, "Agent instructions");
+        assert_eq!(docs[0].path, "/repo/AGENTS.md");
+        assert_eq!(docs[0].byte_count, "Agent instructions".len());
+        assert_eq!(docs[0].loaded_bytes, docs[0].byte_count);
+        assert!(!docs[0].truncated);
     }
 
     #[tokio::test]
@@ -169,8 +199,8 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(anthropic_docs.len(), 2);
-        assert_eq!(anthropic_docs[0], "agents");
-        assert_eq!(anthropic_docs[1], "claude");
+        assert_eq!(anthropic_docs[0].content, "agents");
+        assert_eq!(anthropic_docs[1].content, "claude");
 
         let env: Arc<dyn Sandbox> = Arc::new(MockSandbox {
             files: files.clone(),
@@ -186,8 +216,8 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(openai_docs.len(), 2);
-        assert_eq!(openai_docs[0], "agents");
-        assert_eq!(openai_docs[1], "copilot");
+        assert_eq!(openai_docs[0].content, "agents");
+        assert_eq!(openai_docs[1].content, "copilot");
 
         let env: Arc<dyn Sandbox> = Arc::new(MockSandbox {
             files,
@@ -203,8 +233,8 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(gemini_docs.len(), 2);
-        assert_eq!(gemini_docs[0], "agents");
-        assert_eq!(gemini_docs[1], "gemini");
+        assert_eq!(gemini_docs[0].content, "agents");
+        assert_eq!(gemini_docs[1].content, "gemini");
     }
 
     #[tokio::test]
@@ -230,10 +260,18 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(docs.len(), 2);
-        assert_eq!(docs[0], large_content);
+        assert_eq!(docs[0].content, large_content);
+        assert!(!docs[0].truncated);
+        assert_eq!(docs[0].byte_count, docs[0].content.len());
         // Second doc should be truncated to fit remaining budget
-        assert!(docs[1].ends_with("[Project instructions truncated at 32KB]"));
-        assert!(docs[0].len() + docs[1].len() <= BUDGET_BYTES);
+        assert!(
+            docs[1]
+                .content
+                .ends_with("[Project instructions truncated at 32KB]")
+        );
+        assert!(docs[1].truncated);
+        assert!(docs[1].byte_count > docs[1].content.len());
+        assert!(docs[0].content.len() + docs[1].content.len() <= BUDGET_BYTES);
     }
 
     #[tokio::test]
@@ -255,7 +293,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(docs.len(), 1);
-        assert_eq!(docs[0], "shared instructions");
+        assert_eq!(docs[0].content, "shared instructions");
     }
 
     #[tokio::test]
@@ -277,7 +315,35 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(docs.len(), 1);
-        assert_eq!(docs[0], "shared instructions");
+        assert_eq!(docs[0].content, "shared instructions");
+    }
+
+    #[tokio::test]
+    async fn truncated_file_reports_byte_count_distinct_from_loaded_bytes() {
+        let mut files = HashMap::new();
+        // Single file larger than the budget so we hit the truncation branch
+        // without any preceding consumption.
+        let large_content = "x".repeat(BUDGET_BYTES + 1024);
+        files.insert("/repo/AGENTS.md".into(), large_content.clone());
+
+        let env: Arc<dyn Sandbox> = Arc::new(MockSandbox {
+            files,
+            ..Default::default()
+        });
+        let docs = discover_memory(
+            env.as_ref(),
+            "/repo",
+            "/repo",
+            AgentProfileKind::Anthropic,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(docs.len(), 1);
+        assert!(docs[0].truncated);
+        assert_eq!(docs[0].byte_count, large_content.len());
+        assert!(docs[0].content.len() < docs[0].byte_count);
+        assert!(docs[0].content.len() <= BUDGET_BYTES);
     }
 
     #[tokio::test]
@@ -301,8 +367,8 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(docs.len(), 3);
-        assert_eq!(docs[0], "root agents");
-        assert_eq!(docs[1], "src agents");
-        assert_eq!(docs[2], "app agents");
+        assert_eq!(docs[0].content, "root agents");
+        assert_eq!(docs[1].content, "src agents");
+        assert_eq!(docs[2].content, "app agents");
     }
 }

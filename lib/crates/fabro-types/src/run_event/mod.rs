@@ -242,6 +242,12 @@ pub enum EventBody {
     AgentMcpReady(AgentMcpReadyProps),
     #[serde(rename = "agent.mcp.failed")]
     AgentMcpFailed(AgentMcpFailedProps),
+    #[serde(rename = "agent.memory.loaded")]
+    AgentMemoryLoaded(AgentMemoryLoadedProps),
+    #[serde(rename = "agent.skills.discovered")]
+    AgentSkillsDiscovered(AgentSkillsDiscoveredProps),
+    #[serde(rename = "agent.skill.activated")]
+    AgentSkillActivated(AgentSkillActivatedProps),
     #[serde(rename = "todo.created")]
     TodoCreated(TodoCreatedProps),
     #[serde(rename = "todo.updated")]
@@ -506,6 +512,9 @@ impl EventBody {
             Self::AgentSubClosed(_) => "agent.sub.closed",
             Self::AgentMcpReady(_) => "agent.mcp.ready",
             Self::AgentMcpFailed(_) => "agent.mcp.failed",
+            Self::AgentMemoryLoaded(_) => "agent.memory.loaded",
+            Self::AgentSkillsDiscovered(_) => "agent.skills.discovered",
+            Self::AgentSkillActivated(_) => "agent.skill.activated",
             Self::TodoCreated(_) => "todo.created",
             Self::TodoUpdated(_) => "todo.updated",
             Self::TodoDeleted(_) => "todo.deleted",
@@ -680,6 +689,9 @@ fn is_known_event_name(event: &str) -> bool {
             | "agent.sub.closed"
             | "agent.mcp.ready"
             | "agent.mcp.failed"
+            | "agent.memory.loaded"
+            | "agent.skills.discovered"
+            | "agent.skill.activated"
             | "todo.created"
             | "todo.updated"
             | "todo.deleted"
@@ -1982,5 +1994,139 @@ mod tests {
             EventBody::TodoDeleted(props) => assert_eq!(props.todo_id, "todo_x"),
             other => panic!("expected TodoDeleted, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn agent_memory_loaded_serializes_with_canonical_name() {
+        let body = EventBody::AgentMemoryLoaded(AgentMemoryLoadedProps {
+            provider_profile:   "anthropic".to_string(),
+            files:              vec![AgentMemoryFileProps {
+                path:         "/repo/AGENTS.md".to_string(),
+                byte_count:   100,
+                loaded_bytes: 100,
+                truncated:    false,
+            }],
+            total_loaded_bytes: 100,
+            budget_bytes:       32768,
+            visit:              1,
+        });
+        let value = serde_json::to_value(&body).unwrap();
+        assert_eq!(value["event"], "agent.memory.loaded");
+        assert_eq!(value["properties"]["provider_profile"], "anthropic");
+        assert_eq!(value["properties"]["files"][0]["path"], "/repo/AGENTS.md");
+        assert_eq!(value["properties"]["budget_bytes"], 32768);
+        assert!(
+            value["properties"]
+                .as_object()
+                .unwrap()
+                .get("content")
+                .is_none(),
+            "memory event must not include file content"
+        );
+        let _ = serde_json::from_value::<EventBody>(value).unwrap();
+    }
+
+    #[test]
+    fn agent_skills_discovered_serializes_with_canonical_name() {
+        let body = EventBody::AgentSkillsDiscovered(AgentSkillsDiscoveredProps {
+            provider_profile: "openai".to_string(),
+            source_dirs:      vec!["/repo/.fabro/skills".to_string()],
+            skills:           vec![AgentSkillSummary {
+                name:        "commit".to_string(),
+                description: "Create a commit".to_string(),
+            }],
+            visit:            2,
+        });
+        let value = serde_json::to_value(&body).unwrap();
+        assert_eq!(value["event"], "agent.skills.discovered");
+        assert_eq!(value["properties"]["skills"][0]["name"], "commit");
+        let _: EventBody = serde_json::from_value(value).unwrap();
+    }
+
+    #[test]
+    fn agent_skill_activated_serializes_source_variants() {
+        let slash = EventBody::AgentSkillActivated(AgentSkillActivatedProps {
+            skill_name: "commit".to_string(),
+            source:     AgentSkillActivationSource::Slash,
+            visit:      3,
+        });
+        let value = serde_json::to_value(&slash).unwrap();
+        assert_eq!(value["event"], "agent.skill.activated");
+        assert_eq!(value["properties"]["source"], "slash");
+
+        let tool = EventBody::AgentSkillActivated(AgentSkillActivatedProps {
+            skill_name: "commit".to_string(),
+            source:     AgentSkillActivationSource::Tool,
+            visit:      4,
+        });
+        let value = serde_json::to_value(&tool).unwrap();
+        assert_eq!(value["properties"]["source"], "tool");
+    }
+
+    #[test]
+    fn agent_mcp_ready_deserializes_legacy_payload_without_tools() {
+        let value = json!({
+            "id": "evt_mcp_ready",
+            "ts": "2026-05-22T12:00:00.000Z",
+            "run_id": fixtures::RUN_1,
+            "event": "agent.mcp.ready",
+            "properties": {
+                "server_name": "github",
+                "tool_count": 2,
+                "visit": 1
+            }
+        });
+        let parsed = RunEvent::from_value(value).unwrap();
+        match parsed.body {
+            EventBody::AgentMcpReady(props) => {
+                assert_eq!(props.server_name, "github");
+                assert_eq!(props.tool_count, 2);
+                assert!(props.tools.is_empty());
+                assert_eq!(props.visit, 1);
+            }
+            other => panic!("expected AgentMcpReady body, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn agent_mcp_ready_serializes_with_tool_summaries() {
+        let body = EventBody::AgentMcpReady(AgentMcpReadyProps {
+            server_name: "github".to_string(),
+            tool_count:  1,
+            tools:       vec![AgentMcpToolSummary {
+                name:          "mcp__github__create_issue".to_string(),
+                original_name: "create_issue".to_string(),
+            }],
+            visit:       1,
+        });
+        let value = serde_json::to_value(&body).unwrap();
+        assert_eq!(value["event"], "agent.mcp.ready");
+        assert_eq!(
+            value["properties"]["tools"][0]["name"],
+            "mcp__github__create_issue"
+        );
+        assert_eq!(
+            value["properties"]["tools"][0]["original_name"],
+            "create_issue"
+        );
+    }
+
+    #[test]
+    fn agent_mcp_ready_omits_tools_when_empty() {
+        let body = EventBody::AgentMcpReady(AgentMcpReadyProps {
+            server_name: "github".to_string(),
+            tool_count:  0,
+            tools:       Vec::new(),
+            visit:       1,
+        });
+        let value = serde_json::to_value(&body).unwrap();
+        assert!(
+            value["properties"]
+                .as_object()
+                .unwrap()
+                .get("tools")
+                .is_none(),
+            "empty tools should be omitted for legacy parity"
+        );
     }
 }

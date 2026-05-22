@@ -195,6 +195,7 @@ impl Handler for ParallelHandler {
                 None,
                 &gs.checkpoint_exclude_globs,
                 &gs.git_author,
+                gs.checkpoint_skip_git_hooks,
             )
             .await;
             match result {
@@ -318,6 +319,9 @@ impl Handler for ParallelHandler {
                 .as_ref()
                 .map(|gs| gs.git_author.clone())
                 .unwrap_or_default();
+            let skip_git_hooks = git_state
+                .as_ref()
+                .is_some_and(|gs| gs.checkpoint_skip_git_hooks);
             let group_id = parallel_group_id.clone();
             let branch_scope = StageScope::for_parallel_branch(
                 setup.target_id.clone(),
@@ -408,10 +412,12 @@ impl Handler for ParallelHandler {
                         .is_ok_and(fabro_sandbox::ExecResult::is_success)
                     {
                         let msg = format!("fabro({rid}): {nid} ({status_str})");
-                        let commit_cmd = format!(
-                            "{git_r} -c 'user.name={name}' -c 'user.email={email}' commit --allow-empty -m '{msg}'",
-                            name = git_author.name,
-                            email = git_author.email,
+                        let commit_cmd = parallel_branch_commit_cmd(
+                            git_r,
+                            &git_author.name,
+                            &git_author.email,
+                            &msg,
+                            skip_git_hooks,
                         );
                         let _ = setup
                             .sandbox
@@ -658,6 +664,23 @@ fn find_join_node(results: &[BranchResult], graph: &Graph) -> Option<String> {
     let mut common_sorted: Vec<&String> = common.into_iter().collect();
     common_sorted.sort();
     common_sorted.first().map(|id| (*id).clone())
+}
+
+/// Build the parallel-branch checkpoint commit command. Appends
+/// `--no-verify` when `skip_git_hooks` is true so the commit bypasses the
+/// repository's local Git commit hooks (e.g. `pre-commit`, `commit-msg`).
+fn parallel_branch_commit_cmd(
+    git_remote: &str,
+    author_name: &str,
+    author_email: &str,
+    message: &str,
+    skip_git_hooks: bool,
+) -> String {
+    let no_verify = if skip_git_hooks { " --no-verify" } else { "" };
+    let name = fabro_sandbox::shell_quote(&format!("user.name={author_name}"));
+    let email = fabro_sandbox::shell_quote(&format!("user.email={author_email}"));
+    let msg = fabro_sandbox::shell_quote(message);
+    format!("{git_remote} -c {name} -c {email} commit --allow-empty{no_verify} -m {msg}")
 }
 
 #[cfg(test)]
@@ -920,5 +943,37 @@ mod tests {
 
         let branch_count = context.get(keys::PARALLEL_BRANCH_COUNT);
         assert_eq!(branch_count, Some(serde_json::json!(2)));
+    }
+
+    #[test]
+    fn parallel_branch_commit_cmd_includes_no_verify_when_skip_hooks_enabled() {
+        let cmd = super::parallel_branch_commit_cmd(
+            super::GIT_REMOTE,
+            "Fabro",
+            "fabro@example.com",
+            "fabro(r1): branch_a (succeeded)",
+            true,
+        );
+        assert!(
+            cmd.contains("--no-verify"),
+            "expected --no-verify when skip_git_hooks=true; got {cmd:?}"
+        );
+        assert!(cmd.contains("commit --allow-empty"));
+    }
+
+    #[test]
+    fn parallel_branch_commit_cmd_omits_no_verify_when_skip_hooks_disabled() {
+        let cmd = super::parallel_branch_commit_cmd(
+            super::GIT_REMOTE,
+            "Fabro",
+            "fabro@example.com",
+            "fabro(r1): branch_a (succeeded)",
+            false,
+        );
+        assert!(
+            !cmd.contains("--no-verify"),
+            "expected no --no-verify when skip_git_hooks=false; got {cmd:?}"
+        );
+        assert!(cmd.contains("commit --allow-empty"));
     }
 }

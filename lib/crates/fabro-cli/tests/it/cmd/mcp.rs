@@ -26,6 +26,27 @@ use crate::support::{
     RealAuthHarness, TEST_DEV_TOKEN, run_projection_json, seed_dev_token_auth, unique_run_id,
 };
 
+const MCP_RUN_TOOL_NAMES: &[&str] = &[
+    "fabro_run_create",
+    "fabro_run_events",
+    "fabro_run_gather",
+    "fabro_run_get",
+    "fabro_run_interact",
+    "fabro_run_pair",
+    "fabro_run_search",
+];
+
+async fn assert_mcp_run_tool_count(client: &McpClient) {
+    assert_eq!(
+        client
+            .list_tools()
+            .await
+            .expect("MCP tools should be listed")
+            .len(),
+        MCP_RUN_TOOL_NAMES.len()
+    );
+}
+
 #[test]
 fn help() {
     let context = test_context!();
@@ -419,14 +440,7 @@ async fn stdio_server_initializes_and_lists_run_tools() {
 
     let tools = client.list_tools().await.unwrap();
     let names: Vec<_> = tools.iter().map(|(name, _, _)| name.as_str()).collect();
-    assert_eq!(names, vec![
-        "fabro_run_create",
-        "fabro_run_events",
-        "fabro_run_gather",
-        "fabro_run_interact",
-        "fabro_run_pair",
-        "fabro_run_search",
-    ]);
+    assert_eq!(names.as_slice(), MCP_RUN_TOOL_NAMES);
     for (name, _, schema) in &tools {
         assert!(
             schema.is_object(),
@@ -453,6 +467,24 @@ async fn stdio_server_initializes_and_lists_run_tools() {
             .pointer("/properties/answer")
             .is_some_and(serde_json::Value::is_object),
         "fabro_run_interact.answer should have an object JSON Schema: {interact_schema}"
+    );
+    let get_schema = tools
+        .iter()
+        .find(|(name, _, _)| name == "fabro_run_get")
+        .map(|(_, _, schema)| schema)
+        .expect("fabro_run_get tool should be listed");
+    assert!(
+        get_schema
+            .pointer("/properties/run_id")
+            .is_some_and(serde_json::Value::is_object),
+        "fabro_run_get.run_id should have an object JSON Schema: {get_schema}"
+    );
+    assert!(
+        get_schema
+            .get("required")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|required| required.iter().any(|field| field == "run_id")),
+        "fabro_run_get should require run_id: {get_schema}"
     );
     let create_schema = tools
         .iter()
@@ -512,7 +544,7 @@ async fn stdio_startup_and_list_tools_is_fast() {
     let start = std::time::Instant::now();
     let client = spawn_mcp_client(&context, &[]).await;
     let tools = client.list_tools().await.unwrap();
-    assert_eq!(tools.len(), 6);
+    assert_eq!(tools.len(), MCP_RUN_TOOL_NAMES.len());
     assert!(start.elapsed() < std::time::Duration::from_secs(2));
     client
         .shutdown()
@@ -731,7 +763,7 @@ async fn mcp_missing_default_settings_reports_configure_first_error_and_stays_al
         error.contains("Cannot reach Fabro server: no settings.toml configured."),
         "{error}"
     );
-    assert_eq!(client.list_tools().await.unwrap().len(), 6);
+    assert_mcp_run_tool_count(&client).await;
     client
         .shutdown()
         .await
@@ -1226,7 +1258,7 @@ async fn mcp_gather_rejects_too_many_runs() {
     .await;
 
     assert!(error.contains("run_ids"), "{error}");
-    assert_eq!(client.list_tools().await.unwrap().len(), 6);
+    assert_mcp_run_tool_count(&client).await;
     client
         .shutdown()
         .await
@@ -1266,7 +1298,7 @@ async fn mcp_gather_rejects_invalid_timeout_values_before_auth() {
     );
     assert!(poll_error.contains("poll_interval_seconds"), "{poll_error}");
     assert!(!poll_error.contains("fabro auth login"), "{poll_error}");
-    assert_eq!(client.list_tools().await.unwrap().len(), 6);
+    assert_mcp_run_tool_count(&client).await;
     client
         .shutdown()
         .await
@@ -1321,7 +1353,7 @@ async fn mcp_interact_error_does_not_stop_server() {
     .await;
 
     assert!(error.contains("message"), "{error}");
-    assert_eq!(client.list_tools().await.unwrap().len(), 6);
+    assert_mcp_run_tool_count(&client).await;
     client
         .shutdown()
         .await
@@ -1459,6 +1491,105 @@ async fn mcp_interact_actions_resolve_selector_and_call_expected_endpoints() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn mcp_get_resolves_selector_and_returns_summary_projection_and_questions() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let target_url = format!("{}/api/v1", server.base_url());
+    let target: fabro_client::ServerTarget = target_url.parse().unwrap();
+    seed_dev_token_auth(&context.home_dir, &target, TEST_DEV_TOKEN);
+    let run_id = unique_run_id();
+    let selector = "nightly";
+    let resolve = mock_resolved_run(&server, selector, &run_id);
+    let retrieve = server.mock(|when, then| {
+        when.method(GET).path(format!("/api/v1/runs/{run_id}"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .json_body(remote_run_summary_json(
+                &run_id,
+                "Simple",
+                "simple",
+                "Run tests",
+                &serde_json::json!({ "kind": "running" }),
+                "2026-04-05T12:00:00Z",
+            ));
+    });
+    let projection = server.mock(|when, then| {
+        when.method(GET)
+            .path(format!("/api/v1/runs/{run_id}/state"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .json_body(run_projection_json(
+                &run_id,
+                &serde_json::json!({ "kind": "running" }),
+            ));
+    });
+    let questions = server.mock(|when, then| {
+        when.method(GET)
+            .path(format!("/api/v1/runs/{run_id}/questions"))
+            .query_param("page[limit]", "100")
+            .query_param("page[offset]", "0");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .json_body(serde_json::json!({
+                "data": [{
+                    "id": "q-1",
+                    "text": "Proceed?",
+                    "stage": "gate",
+                    "question_type": "yes_no",
+                    "options": [],
+                    "allow_freeform": false,
+                    "timeout_seconds": null,
+                    "context_display": null
+                }],
+                "meta": { "has_more": false }
+            }));
+    });
+
+    let client = spawn_mcp_client(&context, &["--server", &target_url]).await;
+    let get = call_tool_json(
+        &client,
+        "fabro_run_get",
+        serde_json::json!({ "run_id": selector }),
+    )
+    .await;
+
+    assert_eq!(get["run_id"], run_id);
+    assert_eq!(get["summary"]["run_id"], run_id);
+    assert_eq!(get["summary"]["workflow_name"], "Simple");
+    assert_eq!(get["summary"]["workflow_slug"], "simple");
+    assert_eq!(get["projection"]["status"]["kind"], "running");
+    assert_eq!(get["questions"][0]["id"], "q-1");
+    resolve.assert();
+    retrieve.assert();
+    projection.assert();
+    questions.assert();
+    client
+        .shutdown()
+        .await
+        .expect("MCP client should shut down");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mcp_get_rejects_blank_run_id_before_auth_or_network() {
+    let context = test_context!();
+    let client = spawn_mcp_client(&context, &["--server", "http://127.0.0.1:9"]).await;
+
+    let error = call_tool_error_text(
+        &client,
+        "fabro_run_get",
+        serde_json::json!({ "run_id": "   " }),
+    )
+    .await;
+
+    assert!(error.contains("run_id"), "{error}");
+    assert_mcp_run_tool_count(&client).await;
+    client
+        .shutdown()
+        .await
+        .expect("MCP client should shut down");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn mcp_create_validation_errors_happen_before_auth_or_network() {
     let context = test_context!();
     let client = spawn_mcp_client(&context, &["--server", "http://127.0.0.1:9"]).await;
@@ -1509,7 +1640,7 @@ async fn mcp_create_validation_errors_happen_before_auth_or_network() {
         conflicting_goal_sources.contains("goal and goal_file are mutually exclusive"),
         "{conflicting_goal_sources}"
     );
-    assert_eq!(client.list_tools().await.unwrap().len(), 6);
+    assert_mcp_run_tool_count(&client).await;
     client
         .shutdown()
         .await
@@ -1545,7 +1676,7 @@ async fn mcp_create_string_shorthand_deserializes_before_auth() {
         error.contains("Run `fabro auth login` to authenticate."),
         "{error}"
     );
-    assert_eq!(client.list_tools().await.unwrap().len(), 6);
+    assert_mcp_run_tool_count(&client).await;
 
     client
         .shutdown()
@@ -1572,7 +1703,7 @@ async fn mcp_interact_answer_validation_happens_before_auth_or_network() {
     .await;
 
     assert!(error.contains("option, options, text"), "{error}");
-    assert_eq!(client.list_tools().await.unwrap().len(), 6);
+    assert_mcp_run_tool_count(&client).await;
     client
         .shutdown()
         .await
@@ -1815,7 +1946,7 @@ async fn mcp_events_requires_action_specific_inputs_before_auth() {
     );
     assert!(search_error.contains("query"), "{search_error}");
     assert!(!search_error.contains("fabro auth login"), "{search_error}");
-    assert_eq!(client.list_tools().await.unwrap().len(), 6);
+    assert_mcp_run_tool_count(&client).await;
     client
         .shutdown()
         .await
@@ -2100,7 +2231,7 @@ async fn mcp_tool_auth_error_mentions_login() {
         error.contains("Run `fabro auth login` to authenticate."),
         "{error}"
     );
-    assert_eq!(client.list_tools().await.unwrap().len(), 6);
+    assert_mcp_run_tool_count(&client).await;
 
     client
         .shutdown()

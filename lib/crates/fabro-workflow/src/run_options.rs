@@ -54,6 +54,10 @@ impl RunOptions {
         self.settings.run.checkpoint.exclude_globs.clone()
     }
 
+    pub fn checkpoint_skip_git_hooks(&self) -> bool {
+        self.settings.run.checkpoint.skip_git_hooks
+    }
+
     pub fn git_author(&self) -> GitAuthor {
         git_author_from_settings(&self.settings)
     }
