@@ -11,14 +11,14 @@ pub const BUDGET_BYTES: usize = 32768;
 
 /// One discovered memory file. `content` is what gets inlined into the
 /// system prompt. The remaining fields describe the file for
-/// observability and never carry the file's text.
+/// observability and never carry the file's text. The number of bytes
+/// actually loaded into the prompt is `content.len()`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MemoryDocument {
-    pub path:         String,
-    pub content:      String,
-    pub byte_count:   usize,
-    pub loaded_bytes: usize,
-    pub truncated:    bool,
+    pub path:       String,
+    pub content:    String,
+    pub byte_count: usize,
+    pub truncated:  bool,
 }
 
 pub async fn discover_memory(
@@ -67,7 +67,6 @@ pub async fn discover_memory(
                         path,
                         content,
                         byte_count,
-                        loaded_bytes: byte_count,
                         truncated: false,
                     });
                 } else if budget_remaining > 0 {
@@ -78,13 +77,11 @@ pub async fn discover_memory(
                         "Project doc truncated to fit budget"
                     );
                     let truncated = truncate_to_budget(&content, budget_remaining);
-                    let loaded_bytes = truncated.len();
                     budget_remaining = 0;
                     results.push(MemoryDocument {
                         path,
                         content: truncated,
                         byte_count,
-                        loaded_bytes,
                         truncated: true,
                     });
                 } else {
@@ -94,7 +91,7 @@ pub async fn discover_memory(
         }
     }
 
-    let total_bytes: usize = results.iter().map(|doc| doc.loaded_bytes).sum();
+    let total_bytes: usize = results.iter().map(|doc| doc.content.len()).sum();
     info!(files = results.len(), total_bytes, "Project docs loaded");
 
     Ok(results)
@@ -173,7 +170,7 @@ mod tests {
         assert_eq!(docs[0].content, "Agent instructions");
         assert_eq!(docs[0].path, "/repo/AGENTS.md");
         assert_eq!(docs[0].byte_count, "Agent instructions".len());
-        assert_eq!(docs[0].loaded_bytes, "Agent instructions".len());
+        assert_eq!(docs[0].content.len(), docs[0].byte_count);
         assert!(!docs[0].truncated);
     }
 
@@ -262,7 +259,7 @@ mod tests {
         assert_eq!(docs.len(), 2);
         assert_eq!(docs[0].content, large_content);
         assert!(!docs[0].truncated);
-        assert_eq!(docs[0].byte_count, docs[0].loaded_bytes);
+        assert_eq!(docs[0].byte_count, docs[0].content.len());
         // Second doc should be truncated to fit remaining budget
         assert!(
             docs[1]
@@ -270,7 +267,7 @@ mod tests {
                 .ends_with("[Project instructions truncated at 32KB]")
         );
         assert!(docs[1].truncated);
-        assert!(docs[1].byte_count > docs[1].loaded_bytes);
+        assert!(docs[1].byte_count > docs[1].content.len());
         assert!(docs[0].content.len() + docs[1].content.len() <= BUDGET_BYTES);
     }
 
@@ -342,8 +339,8 @@ mod tests {
         assert_eq!(docs.len(), 1);
         assert!(docs[0].truncated);
         assert_eq!(docs[0].byte_count, large_content.len());
-        assert!(docs[0].loaded_bytes < docs[0].byte_count);
-        assert!(docs[0].loaded_bytes <= BUDGET_BYTES);
+        assert!(docs[0].content.len() < docs[0].byte_count);
+        assert!(docs[0].content.len() <= BUDGET_BYTES);
     }
 
     #[tokio::test]

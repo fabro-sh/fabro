@@ -1,3 +1,4 @@
+use fabro_model::AgentProfileKind;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -235,7 +236,7 @@ pub struct AgentMcpFailedProps {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentMemoryLoadedProps {
-    pub provider_profile:   String,
+    pub provider_profile:   AgentProfileKind,
     pub files:              Vec<AgentMemoryFileProps>,
     pub total_loaded_bytes: usize,
     pub budget_bytes:       usize,
@@ -252,7 +253,7 @@ pub struct AgentMemoryFileProps {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentSkillsDiscoveredProps {
-    pub provider_profile: String,
+    pub provider_profile: AgentProfileKind,
     pub source_dirs:      Vec<String>,
     pub skills:           Vec<AgentSkillSummary>,
     pub visit:            u32,

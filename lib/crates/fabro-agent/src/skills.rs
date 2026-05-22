@@ -7,7 +7,7 @@ use crate::error::{Error, InterruptReason};
 use crate::sandbox::Sandbox;
 use crate::tool_registry::RegisteredTool;
 use crate::tools::required_str;
-use crate::types::{AgentEvent, SkillActivationSource};
+use crate::types::AgentEvent;
 
 #[derive(Debug, Clone)]
 pub struct Skill {
@@ -187,7 +187,7 @@ pub fn make_use_skill_tool(skills: Arc<Vec<Skill>>) -> RegisteredTool {
                     .ok_or_else(|| format!("Unknown skill: {name}"))?;
                 ctx.emit_agent_event(AgentEvent::SkillActivated {
                     skill_name: name.to_string(),
-                    source:     SkillActivationSource::Tool,
+                    source:     fabro_types::AgentSkillActivationSource::Tool,
                 });
                 Ok(skill.template.clone())
             })

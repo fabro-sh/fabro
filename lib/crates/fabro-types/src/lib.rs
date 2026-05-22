@@ -93,6 +93,7 @@ pub use run::{
 };
 pub use run_blob_id::RunBlobId;
 pub use run_event::{
+    AgentMcpToolSummary, AgentMemoryFileProps, AgentSkillActivationSource, AgentSkillSummary,
     EventBody, ExecOutputTail, InterviewOption, MetadataSnapshotFailureKind, MetadataSnapshotPhase,
     RunEvent, RunNoticeCode, RunNoticeLevel, RunPairEndedReason, RunPairFailedReason,
     SessionCapability, TodoCreatedProps, TodoDeletedProps, TodoUpdatedProps,

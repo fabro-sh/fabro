@@ -78,7 +78,6 @@ pub fn event_name(event: &Event) -> &'static str {
             AgentEvent::Warning { .. } => "agent.warning",
             AgentEvent::LoopDetected => "agent.loop.detected",
             AgentEvent::TurnLimitReached { .. } => "agent.turn.limit",
-            AgentEvent::SkillExpanded { .. } => "agent.skill.expanded",
             AgentEvent::SteeringInjected { .. } => "agent.steering.injected",
             AgentEvent::CompactionStarted { .. } => "agent.compaction.started",
             AgentEvent::CompactionCompleted { .. } => "agent.compaction.completed",

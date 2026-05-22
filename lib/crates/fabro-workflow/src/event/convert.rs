@@ -719,22 +719,14 @@ fn event_body_from_event(event: &Event) -> EventBody {
                     visit:    *visit,
                 })
             }
-            AgentEvent::McpServerReady {
-                server_name,
-                tool_count,
-                tools,
-            } => EventBody::AgentMcpReady(fabro_types::AgentMcpReadyProps {
-                server_name: server_name.clone(),
-                tool_count:  *tool_count,
-                tools:       tools
-                    .iter()
-                    .map(|tool| fabro_types::AgentMcpToolSummary {
-                        name:          tool.name.clone(),
-                        original_name: tool.original_name.clone(),
-                    })
-                    .collect(),
-                visit:       *visit,
-            }),
+            AgentEvent::McpServerReady { server_name, tools } => {
+                EventBody::AgentMcpReady(fabro_types::AgentMcpReadyProps {
+                    server_name: server_name.clone(),
+                    tool_count:  tools.len(),
+                    tools:       tools.clone(),
+                    visit:       *visit,
+                })
+            }
             AgentEvent::McpServerFailed { server_name, error } => {
                 EventBody::AgentMcpFailed(fabro_types::AgentMcpFailedProps {
                     server_name: server_name.clone(),
@@ -745,20 +737,11 @@ fn event_body_from_event(event: &Event) -> EventBody {
             AgentEvent::MemoryLoaded {
                 provider_profile,
                 files,
-                total_loaded_bytes,
                 budget_bytes,
             } => EventBody::AgentMemoryLoaded(fabro_types::AgentMemoryLoadedProps {
-                provider_profile:   provider_profile.clone(),
-                files:              files
-                    .iter()
-                    .map(|file| fabro_types::AgentMemoryFileProps {
-                        path:         file.path.clone(),
-                        byte_count:   file.byte_count,
-                        loaded_bytes: file.loaded_bytes,
-                        truncated:    file.truncated,
-                    })
-                    .collect(),
-                total_loaded_bytes: *total_loaded_bytes,
+                provider_profile:   *provider_profile,
+                total_loaded_bytes: files.iter().map(|f| f.loaded_bytes).sum(),
+                files:              files.clone(),
                 budget_bytes:       *budget_bytes,
                 visit:              *visit,
             }),
@@ -767,28 +750,15 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 source_dirs,
                 skills,
             } => EventBody::AgentSkillsDiscovered(fabro_types::AgentSkillsDiscoveredProps {
-                provider_profile: provider_profile.clone(),
+                provider_profile: *provider_profile,
                 source_dirs:      source_dirs.clone(),
-                skills:           skills
-                    .iter()
-                    .map(|skill| fabro_types::AgentSkillSummary {
-                        name:        skill.name.clone(),
-                        description: skill.description.clone(),
-                    })
-                    .collect(),
+                skills:           skills.clone(),
                 visit:            *visit,
             }),
             AgentEvent::SkillActivated { skill_name, source } => {
                 EventBody::AgentSkillActivated(fabro_types::AgentSkillActivatedProps {
                     skill_name: skill_name.clone(),
-                    source:     match source {
-                        fabro_agent::SkillActivationSource::Slash => {
-                            fabro_types::AgentSkillActivationSource::Slash
-                        }
-                        fabro_agent::SkillActivationSource::Tool => {
-                            fabro_types::AgentSkillActivationSource::Tool
-                        }
-                    },
+                    source:     *source,
                     visit:      *visit,
                 })
             }
@@ -800,7 +770,6 @@ fn event_body_from_event(event: &Event) -> EventBody {
             | AgentEvent::TextDelta { .. }
             | AgentEvent::ReasoningDelta { .. }
             | AgentEvent::ToolCallOutputDelta { .. }
-            | AgentEvent::SkillExpanded { .. }
             | AgentEvent::SessionStarted { .. }
             | AgentEvent::SessionEnded => panic!(
                 "agent event should not be converted through the stage-scoped Event::Agent wrapper"
@@ -2327,15 +2296,14 @@ mod tests {
             stage:             "code".to_string(),
             visit:             3,
             event:             AgentEvent::MemoryLoaded {
-                provider_profile:   "anthropic".to_string(),
-                files:              vec![fabro_agent::MemoryFileSummary {
+                provider_profile: fabro_model::AgentProfileKind::Anthropic,
+                files:            vec![fabro_types::AgentMemoryFileProps {
                     path:         "/repo/AGENTS.md".to_string(),
                     byte_count:   200,
                     loaded_bytes: 200,
                     truncated:    false,
                 }],
-                total_loaded_bytes: 200,
-                budget_bytes:       32768,
+                budget_bytes:     32768,
             },
             session_id:        Some("ses_1".to_string()),
             parent_session_id: None,
@@ -2345,7 +2313,10 @@ mod tests {
         match stored.body {
             EventBody::AgentMemoryLoaded(props) => {
                 assert_eq!(props.visit, 3);
-                assert_eq!(props.provider_profile, "anthropic");
+                assert_eq!(
+                    props.provider_profile,
+                    fabro_model::AgentProfileKind::Anthropic
+                );
                 assert_eq!(props.budget_bytes, 32768);
                 assert_eq!(props.total_loaded_bytes, 200);
                 assert_eq!(props.files.len(), 1);
@@ -2364,15 +2335,14 @@ mod tests {
             stage:             "code".to_string(),
             visit:             1,
             event:             AgentEvent::MemoryLoaded {
-                provider_profile:   "openai".to_string(),
-                files:              vec![fabro_agent::MemoryFileSummary {
+                provider_profile: fabro_model::AgentProfileKind::OpenAi,
+                files:            vec![fabro_types::AgentMemoryFileProps {
                     path:         "/repo/AGENTS.md".to_string(),
                     byte_count:   100,
                     loaded_bytes: 100,
                     truncated:    false,
                 }],
-                total_loaded_bytes: 100,
-                budget_bytes:       32768,
+                budget_bytes:     32768,
             },
             session_id:        None,
             parent_session_id: None,
@@ -2391,9 +2361,9 @@ mod tests {
             stage:             "code".to_string(),
             visit:             2,
             event:             AgentEvent::SkillsDiscovered {
-                provider_profile: "anthropic".to_string(),
+                provider_profile: fabro_model::AgentProfileKind::Anthropic,
                 source_dirs:      vec!["/repo/.fabro/skills".to_string()],
-                skills:           vec![fabro_agent::SkillSummary {
+                skills:           vec![fabro_types::AgentSkillSummary {
                     name:        "commit".to_string(),
                     description: "Make a commit".to_string(),
                 }],
@@ -2406,7 +2376,10 @@ mod tests {
         match stored.body {
             EventBody::AgentSkillsDiscovered(props) => {
                 assert_eq!(props.visit, 2);
-                assert_eq!(props.provider_profile, "anthropic");
+                assert_eq!(
+                    props.provider_profile,
+                    fabro_model::AgentProfileKind::Anthropic
+                );
                 assert_eq!(props.source_dirs, vec!["/repo/.fabro/skills".to_string()]);
                 assert_eq!(props.skills.len(), 1);
                 assert_eq!(props.skills[0].name, "commit");
@@ -2423,7 +2396,7 @@ mod tests {
             visit:             1,
             event:             AgentEvent::SkillActivated {
                 skill_name: "commit".to_string(),
-                source:     fabro_agent::SkillActivationSource::Slash,
+                source:     fabro_types::AgentSkillActivationSource::Slash,
             },
             session_id:        Some("ses_1".to_string()),
             parent_session_id: None,
@@ -2444,7 +2417,7 @@ mod tests {
             visit:             4,
             event:             AgentEvent::SkillActivated {
                 skill_name: "review".to_string(),
-                source:     fabro_agent::SkillActivationSource::Tool,
+                source:     fabro_types::AgentSkillActivationSource::Tool,
             },
             session_id:        None,
             parent_session_id: None,
@@ -2467,13 +2440,12 @@ mod tests {
             visit:             5,
             event:             AgentEvent::McpServerReady {
                 server_name: "github".to_string(),
-                tool_count:  2,
                 tools:       vec![
-                    fabro_agent::McpToolSummary {
+                    fabro_types::AgentMcpToolSummary {
                         name:          "mcp__github__create_issue".to_string(),
                         original_name: "create_issue".to_string(),
                     },
-                    fabro_agent::McpToolSummary {
+                    fabro_types::AgentMcpToolSummary {
                         name:          "mcp__github__list_issues".to_string(),
                         original_name: "list_issues".to_string(),
                     },
