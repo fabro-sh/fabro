@@ -10639,6 +10639,7 @@ components:
             type: string
         skip_git_hooks:
           type: boolean
+          default: false
           description: |
             When true, Fabro-managed run-branch checkpoint commits bypass
             local Git commit hooks. Does not affect Fabro `[[run.hooks]]`

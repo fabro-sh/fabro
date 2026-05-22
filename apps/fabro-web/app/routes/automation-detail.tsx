@@ -61,7 +61,7 @@ function sampleSettings({
       git: { author: null },
       prepare: { commands: prepareCommands, timeout_ms: 120_000 },
       execution: { mode: "normal", approval: "prompt" },
-      checkpoint: { exclude_globs: [] },
+      checkpoint: { exclude_globs: [], skip_git_hooks: false },
       clone: { enabled: true },
       run_branch: { enabled: true, push: true },
       meta_branch: { enabled: true, push: true },
