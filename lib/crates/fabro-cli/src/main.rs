@@ -54,11 +54,11 @@ async fn main() {
     // Capture the worker bearer token immediately and scrub it from the process
     // env before any subprocess can be spawned. Every descendant of the worker
     // (hooks, sandbox commands, devcontainer setup, MCP stdio, etc.) therefore
-    // inherits a process env that no longer contains FABRO_WORKER_TOKEN, so an
+    // inherits a process env that no longer contains this credential, so an
     // unscrubbed spawn site cannot leak it. The token flows to `runner::execute`
-    // through an explicit function argument instead of the environment.
+    // through explicit function arguments instead of the environment.
     let worker_token = if subcommand == Some("__run-worker") {
-        let token = process_env_var(EnvVars::FABRO_WORKER_TOKEN);
+        let worker_token = process_env_var(EnvVars::FABRO_WORKER_TOKEN);
         #[expect(
             clippy::disallowed_methods,
             reason = "Scrub the worker bearer from this process's env before any \
@@ -67,7 +67,7 @@ async fn main() {
         {
             std::env::remove_var(EnvVars::FABRO_WORKER_TOKEN);
         }
-        token
+        worker_token
     } else {
         None
     };

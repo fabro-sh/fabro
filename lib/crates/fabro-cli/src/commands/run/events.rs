@@ -372,7 +372,7 @@ fn format_event_pretty_value(envelope: &serde_json::Value, styles: &Styles) -> O
             }
         }
         "run.completed" => {
-            let duration = format_duration_ms(prop_field(envelope, "duration_ms"));
+            let duration = format_duration_ms(timing_wall_field(envelope));
             let status_str = match prop_str_field(envelope, "status") {
                 Some(status) if !status.is_empty() => status,
                 _ => "succeeded",
@@ -526,7 +526,7 @@ fn format_event_pretty_value(envelope: &serde_json::Value, styles: &Styles) -> O
         }
         "stage.completed" => {
             let label = str_field(envelope, "node_label").unwrap_or("?");
-            let duration = format_duration_ms(prop_field(envelope, "duration_ms"));
+            let duration = format_duration_ms(timing_wall_field(envelope));
             let billing = prop_field(envelope, "billing").or_else(|| prop_field(envelope, "usage"));
             let cost = format_cost(
                 billing
@@ -809,6 +809,13 @@ fn prop_str_field<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str
     prop_field(value, key)?.as_str()
 }
 
+/// Read `properties.timing.wall_time_ms` from a stage/run terminal event
+/// envelope. Returns `None` when timing is absent, which falls back to a
+/// blank display via `format_duration_ms`.
+fn timing_wall_field(envelope: &serde_json::Value) -> Option<&serde_json::Value> {
+    prop_field(envelope, "timing")?.get("wall_time_ms")
+}
+
 fn failure_message(failure: &serde_json::Value) -> Option<&serde_json::Value> {
     failure
         .get("detail")
@@ -1027,7 +1034,7 @@ mod tests {
     #[test]
     fn pretty_stage_completed() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:15Z","event":"stage.completed","node_label":"plan","properties":{"duration_ms":8000,"status":"succeeded","usage":{"cost":0.12,"input_tokens":10000,"output_tokens":5200}}}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:15Z","event":"stage.completed","node_label":"plan","properties":{"timing":{"wall_time_ms":8000,"inference_time_ms":0,"tool_time_ms":0,"active_time_ms":0},"status":"succeeded","usage":{"cost":0.12,"input_tokens":10000,"output_tokens":5200}}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("plan"), "got: {result}");
         assert!(result.contains("$0.12"), "got: {result}");
@@ -1106,7 +1113,7 @@ mod tests {
     #[test]
     fn pretty_workflow_run_completed() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"run.completed","properties":{"duration_ms":25000,"status":"succeeded","total_usd_micros":570000,"billing":{"input_tokens":5000,"output_tokens":2000,"total_tokens":7000,"cache_read_tokens":3000,"cache_write_tokens":500,"reasoning_tokens":800}}}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"run.completed","properties":{"timing":{"wall_time_ms":25000,"inference_time_ms":0,"tool_time_ms":0,"active_time_ms":0},"status":"succeeded","total_usd_micros":570000,"billing":{"input_tokens":5000,"output_tokens":2000,"total_tokens":7000,"cache_read_tokens":3000,"cache_write_tokens":500,"reasoning_tokens":800}}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("SUCCEEDED"), "got: {result}");
         assert!(result.contains("25s"), "got: {result}");
@@ -1120,7 +1127,7 @@ mod tests {
     #[test]
     fn pretty_workflow_run_completed_backward_compat() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"run.completed","properties":{"duration_ms":25000,"total_cost":0.57}}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"run.completed","properties":{"timing":{"wall_time_ms":25000,"inference_time_ms":0,"tool_time_ms":0,"active_time_ms":0},"total_cost":0.57}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("SUCCEEDED"), "got: {result}");
         assert!(result.contains("25s"), "got: {result}");
@@ -1131,7 +1138,7 @@ mod tests {
     #[test]
     fn pretty_workflow_run_completed_fail_status() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:32Z","event":"run.completed","properties":{"duration_ms":25000,"status":"failed"}}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:32Z","event":"run.completed","properties":{"timing":{"wall_time_ms":25000,"inference_time_ms":0,"tool_time_ms":0,"active_time_ms":0},"status":"failed"}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("FAIL"), "got: {result}");
     }

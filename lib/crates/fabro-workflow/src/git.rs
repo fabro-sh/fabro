@@ -500,7 +500,7 @@ mod tests {
             node_id: "work".into(),
             name: "Work".into(),
             index: 2,
-            duration_ms: 100,
+            timing: fabro_types::StageTiming::wall_only(100),
             status: "succeeded".into(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),

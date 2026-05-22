@@ -42,6 +42,7 @@ pub mod stage_id;
 pub mod start;
 pub mod status;
 pub mod steering;
+pub mod timing;
 
 pub use artifact::ArtifactUpload;
 pub use auth::{IdpIdentity, IdpIdentityError};
@@ -131,3 +132,4 @@ pub use status::{
     TerminalStatus,
 };
 pub use steering::SteeringMessage;
+pub use timing::{RunTiming, StageTiming};

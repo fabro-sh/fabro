@@ -956,7 +956,14 @@ mod tests {
         let node = graph.get_node("build").unwrap();
         let mut state = ExecutionState::new(&graph).unwrap();
         state.increment_visits("build");
-        let result = WfNodeResult::new(Outcome::success(), Duration::from_millis(10), 1, 1);
+        let result = WfNodeResult::new(
+            Outcome::success(),
+            Duration::from_millis(10),
+            Duration::ZERO,
+            Duration::ZERO,
+            1,
+            1,
+        );
 
         lifecycle
             .on_checkpoint(&node, &result, Some("exit"), &state)
@@ -999,7 +1006,14 @@ mod tests {
         let node = graph.get_node("build").unwrap();
         let mut state = ExecutionState::new(&graph).unwrap();
         state.increment_visits("build");
-        let result = WfNodeResult::new(Outcome::success(), Duration::from_millis(10), 1, 1);
+        let result = WfNodeResult::new(
+            Outcome::success(),
+            Duration::from_millis(10),
+            Duration::ZERO,
+            Duration::ZERO,
+            1,
+            1,
+        );
 
         lifecycle
             .on_checkpoint(&node, &result, Some("exit"), &state)
@@ -1060,7 +1074,14 @@ mod tests {
         let node = graph.get_node("build").unwrap();
         let mut state = ExecutionState::new(&graph).unwrap();
         state.increment_visits("build");
-        let result = WfNodeResult::new(Outcome::success(), Duration::from_millis(10), 1, 1);
+        let result = WfNodeResult::new(
+            Outcome::success(),
+            Duration::from_millis(10),
+            Duration::ZERO,
+            Duration::ZERO,
+            1,
+            1,
+        );
 
         lifecycle
             .on_checkpoint(&node, &result, Some("exit"), &state)
@@ -1127,7 +1148,14 @@ mod tests {
         let node = graph.get_node("build").unwrap();
         let mut state = ExecutionState::new(&graph).unwrap();
         state.increment_visits("build");
-        let result = WfNodeResult::new(Outcome::success(), Duration::from_millis(10), 1, 1);
+        let result = WfNodeResult::new(
+            Outcome::success(),
+            Duration::from_millis(10),
+            Duration::ZERO,
+            Duration::ZERO,
+            1,
+            1,
+        );
 
         lifecycle
             .on_checkpoint(&node, &result, Some("exit"), &state)
@@ -1189,7 +1217,14 @@ mod tests {
         let node = graph.get_node("build").unwrap();
         let mut checkpoint_state = ExecutionState::new(&graph).unwrap();
         checkpoint_state.increment_visits("build");
-        let result = WfNodeResult::new(Outcome::success(), Duration::from_millis(10), 1, 1);
+        let result = WfNodeResult::new(
+            Outcome::success(),
+            Duration::from_millis(10),
+            Duration::ZERO,
+            Duration::ZERO,
+            1,
+            1,
+        );
         lifecycle
             .on_checkpoint(&node, &result, Some("exit"), &checkpoint_state)
             .await
@@ -1220,7 +1255,7 @@ mod tests {
         let conclusion = Conclusion {
             timestamp:            chrono::Utc::now(),
             status:               StageOutcome::Succeeded,
-            duration_ms:          10,
+            timing:               fabro_types::RunTiming::wall_only(10),
             failure:              None,
             final_git_commit_sha: None,
             stages:               Vec::new(),

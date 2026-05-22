@@ -573,7 +573,18 @@ fn issue_test_user_jwt() -> String {
 fn issue_test_worker_token(run_id: &RunId) -> String {
     let keys = WorkerTokenKeys::from_master_secret(TEST_SESSION_SECRET.as_bytes())
         .expect("worker keys should derive");
-    issue_worker_token(&keys, run_id).expect("worker token should issue")
+    crate::worker_token::issue_worker_token(&keys, run_id).expect("worker token should issue")
+}
+
+fn issue_test_run_tools_worker_token(run_id: &RunId) -> String {
+    let keys = WorkerTokenKeys::from_master_secret(TEST_SESSION_SECRET.as_bytes())
+        .expect("worker keys should derive");
+    crate::worker_token::issue_worker_token_with_scopes(
+        &keys,
+        run_id,
+        crate::worker_token::WorkerScopeSet::run_worker_with_agent_run_tools(),
+    )
+    .expect("worker token should issue")
 }
 
 async fn create_run_with_bearer(app: &Router, bearer: &str) -> RunId {
@@ -600,6 +611,21 @@ fn bearer_request(method: Method, path: &str, bearer: &str, body: Body) -> Reque
         .uri(api(path))
         .header(header::AUTHORIZATION, format!("Bearer {bearer}"))
         .body(body)
+        .unwrap()
+}
+
+fn json_bearer_request(
+    method: Method,
+    path: &str,
+    bearer: &str,
+    body: &serde_json::Value,
+) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(api(path))
+        .header(header::AUTHORIZATION, format!("Bearer {bearer}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap()
 }
 
@@ -1535,6 +1561,10 @@ fn worker_command_always_sets_worker_token_env() {
     .expect("github worker token should decode")
     .claims;
     assert_eq!(github_claims.run_id, github_run_id.to_string());
+    assert_eq!(
+        github_claims.scope.split_whitespace().collect::<Vec<_>>(),
+        vec!["run:worker", "agent:run_tools"]
+    );
 
     let dev_token = tempfile::tempdir().unwrap();
     let dev_token_state =
@@ -1568,6 +1598,10 @@ fn worker_command_always_sets_worker_token_env() {
     .expect("dev-token worker token should decode")
     .claims;
     assert_eq!(dev_claims.run_id, dev_token_run_id.to_string());
+    assert_eq!(
+        dev_claims.scope.split_whitespace().collect::<Vec<_>>(),
+        vec!["run:worker", "agent:run_tools"]
+    );
 }
 
 #[cfg(unix)]
@@ -2709,7 +2743,7 @@ async fn persist_cancelled_run_status_ignores_already_terminal_runs() {
     let run_id = fixtures::RUN_1;
     create_durable_run_with_events(&state, run_id, &[
         workflow_event::Event::WorkflowRunCompleted {
-            duration_ms:          1000,
+            timing:               fabro_types::RunTiming::wall_only(1000),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -2745,7 +2779,7 @@ async fn delete_terminal_managed_run_does_not_send_cancel_signal() {
     let run_id = fixtures::RUN_1;
     create_durable_run_with_events(&state, run_id, &[
         workflow_event::Event::WorkflowRunCompleted {
-            duration_ms:          1000,
+            timing:               fabro_types::RunTiming::wall_only(1000),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -2855,7 +2889,7 @@ async fn list_run_stages_projects_retrying_until_completion() {
             node_id: "setup".to_string(),
             name: "Setup".to_string(),
             index: 0,
-            duration_ms: 5,
+            timing: fabro_types::StageTiming::wall_only(5),
             status: "succeeded".to_string(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),
@@ -2896,14 +2930,14 @@ async fn list_run_stages_projects_retrying_until_completion() {
         "work",
         1,
         &workflow_event::Event::StageFailed {
-            node_id:     "work".to_string(),
-            name:        "Work".to_string(),
-            index:       1,
-            failure:     FailureDetail::new("try again", FailureCategory::TransientInfra),
-            will_retry:  true,
-            duration_ms: 10,
-            billing:     None,
-            actor:       None,
+            node_id:    "work".to_string(),
+            name:       "Work".to_string(),
+            index:      1,
+            failure:    FailureDetail::new("try again", FailureCategory::TransientInfra),
+            will_retry: true,
+            timing:     fabro_types::StageTiming::wall_only(10),
+            billing:    None,
+            actor:      None,
         },
     )
     .await;
@@ -2947,7 +2981,7 @@ async fn list_run_stages_projects_retrying_until_completion() {
             node_id: "work".to_string(),
             name: "Work".to_string(),
             index: 1,
-            duration_ms: 25,
+            timing: fabro_types::StageTiming::wall_only(25),
             status: "partially_succeeded".to_string(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),
@@ -3077,7 +3111,7 @@ async fn list_run_stages_distinguishes_visits() {
             node_id: "verify".to_string(),
             name: "Verify".to_string(),
             index: 1,
-            duration_ms: 1500,
+            timing: fabro_types::StageTiming::wall_only(1500),
             status: "failed".to_string(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),
@@ -3137,7 +3171,7 @@ async fn list_run_stages_distinguishes_visits() {
     assert_eq!(first["visit"], 1);
     assert_eq!(first["handler"], "command");
     assert_eq!(first["status"], "failed");
-    assert_eq!(first["duration_secs"], 1.5);
+    assert_eq!(first["wall_time_ms"], 1500);
 
     let second = stage_entry(&body, "verify@2");
     assert_eq!(second["node_id"], "verify");
@@ -3177,7 +3211,7 @@ async fn run_billing_dedups_retried_nodes_and_sums_their_durations() {
             node_id: "verify".to_string(),
             name: "Verify".to_string(),
             index: 1,
-            duration_ms: 1500,
+            timing: fabro_types::StageTiming::wall_only(1500),
             status: "failed".to_string(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),
@@ -3208,7 +3242,7 @@ async fn run_billing_dedups_retried_nodes_and_sums_their_durations() {
             node_id: "verify".to_string(),
             name: "Verify".to_string(),
             index: 1,
-            duration_ms: 800,
+            timing: fabro_types::StageTiming::wall_only(800),
             status: "succeeded".to_string(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),
@@ -3280,16 +3314,16 @@ async fn run_billing_dedups_retried_nodes_and_sums_their_durations() {
     assert_eq!(stages[0]["stage"]["id"], "verify");
     // Duration on the row is the sum across visits (1.5s + 0.8s = 2.3s).
     assert!(
-        (stages[0]["runtime_secs"].as_f64().unwrap() - 2.3).abs() < f64::EPSILON,
+        stages[0]["timing"]["wall_time_ms"].as_u64().unwrap() == 2300,
         "row runtime_secs should sum visits, got {}",
-        stages[0]["runtime_secs"]
+        stages[0]["timing"]["wall_time_ms"]
     );
 
     // Totals must not double-count: a single 2.3s, not 4.6s.
     assert!(
-        (body["totals"]["runtime_secs"].as_f64().unwrap() - 2.3).abs() < f64::EPSILON,
+        body["totals"]["timing"]["wall_time_ms"].as_u64().unwrap() == 2300,
         "totals.runtime_secs should sum visits exactly once, got {}",
-        body["totals"]["runtime_secs"]
+        body["totals"]["timing"]["wall_time_ms"]
     );
 }
 
@@ -3316,14 +3350,14 @@ async fn run_billing_sums_usage_across_retry_visits_and_uses_latest_model() {
         "verify",
         1,
         &workflow_event::Event::StageFailed {
-            node_id:     "verify".to_string(),
-            name:        "Verify".to_string(),
-            index:       1,
-            failure:     FailureDetail::new("try again", FailureCategory::TransientInfra),
-            will_retry:  true,
-            duration_ms: 1200,
-            billing:     Some(failed_usage),
-            actor:       None,
+            node_id:    "verify".to_string(),
+            name:       "Verify".to_string(),
+            index:      1,
+            failure:    FailureDetail::new("try again", FailureCategory::TransientInfra),
+            will_retry: true,
+            timing:     fabro_types::StageTiming::wall_only(1200),
+            billing:    Some(failed_usage),
+            actor:      None,
         },
     )
     .await;
@@ -3336,7 +3370,7 @@ async fn run_billing_sums_usage_across_retry_visits_and_uses_latest_model() {
             node_id: "verify".to_string(),
             name: "Verify".to_string(),
             index: 1,
-            duration_ms: 800,
+            timing: fabro_types::StageTiming::wall_only(800),
             status: "succeeded".to_string(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),
@@ -3359,7 +3393,7 @@ async fn run_billing_sums_usage_across_retry_visits_and_uses_latest_model() {
 
     let mut latest_outcome: Outcome<Option<fabro_model::BilledModelUsage>> = Outcome::success();
     latest_outcome.usage = Some(success_usage);
-    latest_outcome.duration_ms = Some(800);
+    latest_outcome.timing = Some(fabro_types::StageTiming::wall_only(800));
     let run_store = state.store.open_run(&run_id).await.unwrap();
     workflow_event::append_event(
         &run_store,
@@ -3408,12 +3442,12 @@ async fn run_billing_sums_usage_across_retry_visits_and_uses_latest_model() {
     assert_eq!(stages[0]["billing"]["input_tokens"], 300);
     assert_eq!(stages[0]["billing"]["output_tokens"], 30);
     assert_eq!(stages[0]["billing"]["total_usd_micros"], 330);
-    assert!((stages[0]["runtime_secs"].as_f64().unwrap() - 2.0).abs() < f64::EPSILON);
+    assert!(stages[0]["timing"]["wall_time_ms"].as_u64().unwrap() == 2000);
 
     assert_eq!(body["totals"]["input_tokens"], 300);
     assert_eq!(body["totals"]["output_tokens"], 30);
     assert_eq!(body["totals"]["total_usd_micros"], 330);
-    assert!((body["totals"]["runtime_secs"].as_f64().unwrap() - 2.0).abs() < f64::EPSILON);
+    assert!(body["totals"]["timing"]["wall_time_ms"].as_u64().unwrap() == 2000);
 
     let by_model = body["by_model"].as_array().unwrap();
     assert_eq!(by_model.len(), 2);
@@ -3469,14 +3503,14 @@ async fn list_run_stages_shows_retrying_after_failed_event() {
         "work",
         1,
         &workflow_event::Event::StageFailed {
-            node_id:     "work".to_string(),
-            name:        "Work".to_string(),
-            index:       0,
-            failure:     FailureDetail::new("flake", FailureCategory::TransientInfra),
-            will_retry:  true,
-            duration_ms: 5,
-            billing:     None,
-            actor:       None,
+            node_id:    "work".to_string(),
+            name:       "Work".to_string(),
+            index:      0,
+            failure:    FailureDetail::new("flake", FailureCategory::TransientInfra),
+            will_retry: true,
+            timing:     fabro_types::StageTiming::wall_only(5),
+            billing:    None,
+            actor:      None,
         },
     )
     .await;
@@ -3549,14 +3583,14 @@ async fn list_run_stages_shows_retrying_when_failed_will_retry() {
         "work",
         1,
         &workflow_event::Event::StageFailed {
-            node_id:     "work".to_string(),
-            name:        "Work".to_string(),
-            index:       0,
-            failure:     FailureDetail::new("flake", FailureCategory::TransientInfra),
-            will_retry:  true,
-            duration_ms: 5,
-            billing:     None,
-            actor:       None,
+            node_id:    "work".to_string(),
+            name:       "Work".to_string(),
+            index:      0,
+            failure:    FailureDetail::new("flake", FailureCategory::TransientInfra),
+            will_retry: true,
+            timing:     fabro_types::StageTiming::wall_only(5),
+            billing:    None,
+            actor:      None,
         },
     )
     .await;
@@ -3597,14 +3631,14 @@ async fn run_billing_retried_node_then_succeeded_emits_one_row_with_final_attemp
             max_attempts: 3,
         },
         workflow_event::Event::StageFailed {
-            node_id:     "work".to_string(),
-            name:        "Work".to_string(),
-            index:       0,
-            failure:     FailureDetail::new("transient", FailureCategory::TransientInfra),
-            will_retry:  true,
-            duration_ms: 10,
-            billing:     None,
-            actor:       None,
+            node_id:    "work".to_string(),
+            name:       "Work".to_string(),
+            index:      0,
+            failure:    FailureDetail::new("transient", FailureCategory::TransientInfra),
+            will_retry: true,
+            timing:     fabro_types::StageTiming::wall_only(10),
+            billing:    None,
+            actor:      None,
         },
         workflow_event::Event::StageRetrying {
             node_id:      "work".to_string(),
@@ -3626,7 +3660,7 @@ async fn run_billing_retried_node_then_succeeded_emits_one_row_with_final_attemp
             node_id: "work".to_string(),
             name: "Work".to_string(),
             index: 0,
-            duration_ms: 25,
+            timing: fabro_types::StageTiming::wall_only(25),
             status: "succeeded".to_string(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),
@@ -3666,9 +3700,9 @@ async fn run_billing_retried_node_then_succeeded_emits_one_row_with_final_attemp
         row["state"], "succeeded",
         "final state mirrors the latest StageCompleted"
     );
-    let runtime = row["runtime_secs"].as_f64().unwrap();
-    assert!(
-        (runtime - 0.025).abs() < f64::EPSILON,
+    let runtime = row["timing"]["wall_time_ms"].as_u64().unwrap();
+    assert_eq!(
+        runtime, 25,
         "runtime should equal final attempt's 25ms, got {runtime}"
     );
 }
@@ -3695,7 +3729,7 @@ fn revisit_test_completed_with_visit(
         node_id: node_id.to_string(),
         name: node_id.to_string(),
         index: 0,
-        duration_ms,
+        timing: fabro_types::StageTiming::wall_only(duration_ms),
         status: "succeeded".to_string(),
         preferred_label: None,
         suggested_next_ids: Vec::new(),
@@ -3756,14 +3790,14 @@ async fn run_billing_revisited_node_collapses_to_two_rows_with_summed_visit_dura
         "A appeared first → A's row first"
     );
     assert_eq!(stages[1]["stage"]["id"], "b");
-    let a_runtime = stages[0]["runtime_secs"].as_f64().unwrap();
-    assert!(
-        (a_runtime - 0.1).abs() < f64::EPSILON,
+    let a_runtime = stages[0]["timing"]["wall_time_ms"].as_u64().unwrap();
+    assert_eq!(
+        a_runtime, 100,
         "A should sum both visit durations (1ms + 99ms), got {a_runtime}"
     );
-    let b_runtime = stages[1]["runtime_secs"].as_f64().unwrap();
-    assert!(
-        (b_runtime - 0.002).abs() < f64::EPSILON,
+    let b_runtime = stages[1]["timing"]["wall_time_ms"].as_u64().unwrap();
+    assert_eq!(
+        b_runtime, 2,
         "B should carry its single visit's duration (2ms), got {b_runtime}"
     );
 }
@@ -3809,7 +3843,12 @@ async fn create_unreadable_durable_run(state: &Arc<AppState>, run_id: RunId) {
             "run_id": run_id,
             "event": "run.completed",
             "properties": {
-                "duration_ms": 1,
+                "timing": {
+                    "wall_time_ms": 1,
+                    "inference_time_ms": 0,
+                    "tool_time_ms": 0,
+                    "active_time_ms": 0
+                },
                 "artifact_count": 0,
                 "status": "legacy-status",
                 "reason": "completed",
@@ -4052,7 +4091,7 @@ async fn create_completed_run_ready_for_pull_request(
             goal: Some("Ship the server-side PR".to_string()),
         },
         workflow_event::Event::WorkflowRunCompleted {
-            duration_ms:          1,
+            timing:               fabro_types::RunTiming::wall_only(1),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -6940,6 +6979,23 @@ async fn worker_token_accepts_run_scoped_routes_and_falls_back_to_user_jwt() {
         .unwrap();
     assert_status!(response, StatusCode::OK).await;
 
+    for path in [
+        format!("/runs/{run_id}"),
+        format!("/runs/{run_id}/questions"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(bearer_request(
+                Method::GET,
+                &path,
+                &worker_token,
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_status!(response, StatusCode::OK).await;
+    }
+
     let append_body = serde_json::to_vec(&serde_json::json!({
         "id": "evt-run-notice",
         "ts": "2026-04-23T12:00:00Z",
@@ -7026,6 +7082,203 @@ async fn worker_token_accepts_run_scoped_routes_and_falls_back_to_user_jwt() {
         .await
         .unwrap();
     assert_status!(response, StatusCode::FORBIDDEN).await;
+}
+
+#[tokio::test]
+async fn run_tool_worker_token_can_use_client_backend_routes_across_runs() {
+    let (state, app) = jwt_auth_app();
+    let user_jwt = issue_test_user_jwt();
+    let parent_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let target_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let run_tool_worker_token = issue_test_run_tools_worker_token(&parent_run_id);
+
+    let response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/runs",
+            &run_tool_worker_token,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_status!(response, StatusCode::OK).await;
+
+    let response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            &format!("/runs/resolve?selector={target_run_id}"),
+            &run_tool_worker_token,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_status!(response, StatusCode::OK).await;
+
+    for path in [
+        format!("/runs/{target_run_id}"),
+        format!("/runs/{target_run_id}/state"),
+        format!("/runs/{target_run_id}/events"),
+        format!("/runs/{target_run_id}/questions"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(bearer_request(
+                Method::GET,
+                &path,
+                &run_tool_worker_token,
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_status!(response, StatusCode::OK).await;
+    }
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::POST,
+            &format!("/runs/{target_run_id}/start"),
+            &run_tool_worker_token,
+            &json!({ "resume": false }),
+        ))
+        .await
+        .unwrap();
+    assert_status!(response, StatusCode::OK).await;
+
+    let response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::POST,
+            &format!("/runs/{target_run_id}/cancel"),
+            &run_tool_worker_token,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_status!(response, StatusCode::OK).await;
+
+    for path in [
+        format!("/runs/{target_run_id}/archive"),
+        format!("/runs/{target_run_id}/unarchive"),
+        format!("/runs/{target_run_id}/interrupt"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(bearer_request(
+                Method::POST,
+                &path,
+                &run_tool_worker_token,
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_ne!(response.status(), StatusCode::UNAUTHORIZED, "{path}");
+        assert_ne!(response.status(), StatusCode::FORBIDDEN, "{path}");
+    }
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::POST,
+            &format!("/runs/{target_run_id}/steer"),
+            &run_tool_worker_token,
+            &json!({ "text": "continue", "interrupt": false }),
+        ))
+        .await
+        .unwrap();
+    assert_ne!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_ne!(response.status(), StatusCode::FORBIDDEN);
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::POST,
+            &format!("/runs/{target_run_id}/questions/q-1/answer"),
+            &run_tool_worker_token,
+            &json!({ "kind": "yes" }),
+        ))
+        .await
+        .unwrap();
+    assert_ne!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_ne!(response.status(), StatusCode::FORBIDDEN);
+
+    let created_child = create_run_with_bearer(&app, &run_tool_worker_token).await;
+    let cached = state
+        .store
+        .get_cached_run(&created_child)
+        .await
+        .unwrap()
+        .expect("created run should be cached");
+    assert_eq!(
+        cached
+            .projection
+            .spec
+            .provenance
+            .as_ref()
+            .and_then(|provenance| provenance.subject.as_ref()),
+        Some(&Principal::Worker {
+            run_id: parent_run_id,
+        }),
+    );
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::PUT,
+            &format!("/runs/{created_child}/parent"),
+            &run_tool_worker_token,
+            &json!({ "parent_id": target_run_id.to_string() }),
+        ))
+        .await
+        .unwrap();
+    assert_status!(response, StatusCode::OK).await;
+
+    let response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::DELETE,
+            &format!("/runs/{created_child}/parent"),
+            &run_tool_worker_token,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_status!(response, StatusCode::OK).await;
+}
+
+#[tokio::test]
+async fn base_worker_token_is_rejected_by_run_tool_only_routes() {
+    let (_state, app) = jwt_auth_app();
+    let user_jwt = issue_test_user_jwt();
+    let run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let worker_token = issue_test_worker_token(&run_id);
+
+    for (method, path) in [
+        (Method::GET, "/runs".to_string()),
+        (Method::POST, "/runs".to_string()),
+        (Method::GET, "/runs/resolve?selector=latest".to_string()),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(bearer_request(
+                method.clone(),
+                &path,
+                &worker_token,
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                response.status(),
+                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
+            ),
+            "{method} {path} unexpectedly accepted base worker token with status {}",
+            response.status()
+        );
+    }
 }
 
 #[tokio::test]
@@ -7195,18 +7448,11 @@ async fn worker_token_is_rejected_on_user_only_routes() {
         (Method::POST, "/graph/render".to_string()),
         (Method::GET, "/attach".to_string()),
         (Method::GET, "/boards/runs".to_string()),
-        (Method::GET, format!("/runs/{run_id}")),
         (Method::DELETE, format!("/runs/{run_id}")),
-        (Method::GET, format!("/runs/{run_id}/questions")),
-        (Method::POST, format!("/runs/{run_id}/questions/q-1/answer")),
         (Method::GET, format!("/runs/{run_id}/attach")),
         (Method::GET, format!("/runs/{run_id}/checkpoint")),
-        (Method::POST, format!("/runs/{run_id}/cancel")),
-        (Method::POST, format!("/runs/{run_id}/start")),
         (Method::POST, format!("/runs/{run_id}/pause")),
         (Method::POST, format!("/runs/{run_id}/unpause")),
-        (Method::POST, format!("/runs/{run_id}/archive")),
-        (Method::POST, format!("/runs/{run_id}/unarchive")),
         (Method::GET, format!("/runs/{run_id}/graph")),
         (Method::GET, format!("/runs/{run_id}/graph/source")),
         (Method::GET, format!("/runs/{run_id}/stages")),
@@ -7544,7 +7790,7 @@ async fn patch_run_title_updates_active_and_archived_runs() {
         &run_store,
         &run_id,
         &workflow_event::Event::WorkflowRunCompleted {
-            duration_ms:          1,
+            timing:               fabro_types::RunTiming::wall_only(1),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -7692,7 +7938,7 @@ async fn cancel_terminal_durable_run_returns_conflict() {
     let run_id = fixtures::RUN_1;
     create_durable_run_with_events(&state, run_id, &[
         workflow_event::Event::WorkflowRunCompleted {
-            duration_ms:          1000,
+            timing:               fabro_types::RunTiming::wall_only(1000),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -7742,7 +7988,7 @@ async fn steer_terminal_durable_run_returns_run_not_steerable() {
     let run_id = fixtures::RUN_1;
     create_durable_run_with_events(&state, run_id, &[
         workflow_event::Event::WorkflowRunCompleted {
-            duration_ms:          1000,
+            timing:               fabro_types::RunTiming::wall_only(1000),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -8161,7 +8407,7 @@ async fn active_acp_steerable_marker_clears_on_terminal_paths() {
             node_id: "agent".to_string(),
             name: "agent".to_string(),
             index: 0,
-            duration_ms: 1,
+            timing: fabro_types::StageTiming::wall_only(1),
             status: "success".to_string(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),
@@ -8180,14 +8426,14 @@ async fn active_acp_steerable_marker_clears_on_terminal_paths() {
             max_attempts: 1,
         },
         workflow_event::Event::StageFailed {
-            node_id:     "agent".to_string(),
-            name:        "agent".to_string(),
-            index:       0,
-            failure:     FailureDetail::new("failed", FailureCategory::Deterministic),
-            will_retry:  false,
-            duration_ms: 1,
-            billing:     None,
-            actor:       None,
+            node_id:    "agent".to_string(),
+            name:       "agent".to_string(),
+            index:      0,
+            failure:    FailureDetail::new("failed", FailureCategory::Deterministic),
+            will_retry: false,
+            timing:     fabro_types::StageTiming::wall_only(1),
+            billing:    None,
+            actor:      None,
         },
     ];
 
@@ -8596,7 +8842,7 @@ async fn archive_and_unarchive_updates_listing_visibility() {
         workflow_event::Event::RunStarting,
         workflow_event::Event::RunRunning,
         workflow_event::Event::WorkflowRunCompleted {
-            duration_ms:          1000,
+            timing:               fabro_types::RunTiming::wall_only(1000),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -8930,7 +9176,7 @@ async fn delete_run_retry_after_missing_provider_resource_removes_metadata() {
             primary_repo_link: None,
         },
         workflow_event::Event::WorkflowRunCompleted {
-            duration_ms:          1,
+            timing:               fabro_types::RunTiming::wall_only(1),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -9058,7 +9304,10 @@ async fn get_aggregate_billing_returns_zeros_initially() {
     assert_eq!(body["totals"]["runs"].as_i64().unwrap(), 0);
     assert_eq!(body["totals"]["input_tokens"].as_i64().unwrap(), 0);
     assert_eq!(body["totals"]["output_tokens"].as_i64().unwrap(), 0);
-    assert_eq!(body["totals"]["runtime_secs"].as_f64().unwrap(), 0.0);
+    assert_eq!(
+        body["totals"]["timing"]["wall_time_ms"].as_u64().unwrap(),
+        0
+    );
     assert!(body["totals"]["total_usd_micros"].is_null());
     assert!(body["by_model"].as_array().unwrap().is_empty());
 }
@@ -9193,14 +9442,14 @@ fn aggregate_billing_counts_projection_rollup_usage_visits() {
                 },
             },
         ],
-        runtime_ms:         2000,
+        timing:             fabro_types::RunTiming::wall_only(2000),
         billed_visit_count: 2,
     };
 
     accumulate_billing_rollup(&mut accumulator, &rollup);
 
     assert_eq!(accumulator.total_runs, 1);
-    assert_eq!(accumulator.total_runtime_secs, 2.0);
+    assert_eq!(accumulator.total_timing.wall_time_ms, 2000);
     assert_eq!(accumulator.by_model.len(), 2);
     assert_eq!(
         accumulator.by_model[&ModelRef {
@@ -10430,7 +10679,7 @@ async fn boards_runs_excludes_archived_by_default() {
         workflow_event::Event::RunStarting,
         workflow_event::Event::RunRunning,
         workflow_event::Event::WorkflowRunCompleted {
-            duration_ms:          1000,
+            timing:               fabro_types::RunTiming::wall_only(1000),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -10479,7 +10728,7 @@ async fn boards_runs_includes_archived_when_flag_set() {
         workflow_event::Event::RunStarting,
         workflow_event::Event::RunRunning,
         workflow_event::Event::WorkflowRunCompleted {
-            duration_ms:          1000,
+            timing:               fabro_types::RunTiming::wall_only(1000),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -10499,7 +10748,7 @@ async fn boards_runs_includes_archived_when_flag_set() {
         workflow_event::Event::RunStarting,
         workflow_event::Event::RunRunning,
         workflow_event::Event::WorkflowRunCompleted {
-            duration_ms:          1000,
+            timing:               fabro_types::RunTiming::wall_only(1000),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -10572,7 +10821,7 @@ async fn get_run_exposes_canonical_operator_statuses() {
         workflow_event::Event::RunStarting,
         workflow_event::Event::RunRunning,
         workflow_event::Event::WorkflowRunCompleted {
-            duration_ms:          1000,
+            timing:               fabro_types::RunTiming::wall_only(1000),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,
@@ -10657,7 +10906,7 @@ async fn boards_runs_maps_statuses_to_columns() {
         workflow_event::Event::RunStarting,
         workflow_event::Event::RunRunning,
         workflow_event::Event::WorkflowRunCompleted {
-            duration_ms:          1000,
+            timing:               fabro_types::RunTiming::wall_only(1000),
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               SuccessReason::Completed,

@@ -10,7 +10,7 @@ use fabro_core::lifecycle::{
 };
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
-use fabro_types::{Principal, RunId};
+use fabro_types::{Principal, RunId, StageTiming};
 
 use super::circuit_breaker::CircuitBreakerLifecycle;
 use super::git::GitCheckpointResult;
@@ -71,6 +71,18 @@ fn actor_for_stage_failure(failure: &FailureDetail) -> Option<Principal> {
     failure
         .system_actor
         .map(|system_kind| Principal::System { system_kind })
+}
+
+/// Build a [`StageTiming`] from a [`WfNodeResult`]. Inference and tool time
+/// flow from the executor's `NodeResult` fields, which are populated from
+/// `outcome.timing` by [`fabro_core`]. Handlers without an active-time
+/// breakdown produce a wall-only timing.
+fn node_result_timing(result: &WfNodeResult) -> StageTiming {
+    StageTiming::new(
+        crate::millis_u64(result.wall_time),
+        crate::millis_u64(result.inference_time),
+        crate::millis_u64(result.tool_time),
+    )
 }
 
 fn response_from_outcome(node_id: &str, outcome: &Outcome) -> Option<String> {
@@ -154,7 +166,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                 node_id: gv.id.clone(),
                 name: gv.label().to_string(),
                 index: stage_index,
-                duration_ms: 0,
+                timing: StageTiming::wall_only(0),
                 status: StageOutcome::Succeeded.to_string(),
                 preferred_label: None,
                 suggested_next_ids: Vec::new(),
@@ -211,7 +223,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             let stage_index = state.stage_index;
             let scope = stage_scope_for(state, &gv.id);
 
-            let duration_ms = crate::millis_u64(ctx.result.duration);
+            let timing = node_result_timing(ctx.result);
             let failure = outcome.failure.clone().unwrap_or_else(|| {
                 FailureDetail::new("handler failed", FailureCategory::TransientInfra)
             });
@@ -223,7 +235,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                     index: stage_index,
                     failure,
                     will_retry: true,
-                    duration_ms,
+                    timing,
                     billing: outcome.usage.clone(),
                     actor,
                 },
@@ -259,7 +271,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         let gv = node.inner();
         let stage_index = state.stage_index;
         let scope = stage_scope_for(state, &gv.id);
-        let duration_ms = crate::millis_u64(result.duration);
+        let timing = node_result_timing(result);
         let (loop_failure_signatures, restart_failure_signatures) =
             snapshot_failure_signatures(&self.circuit_breaker);
 
@@ -275,7 +287,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                     index: stage_index,
                     failure,
                     will_retry: false,
-                    duration_ms,
+                    timing,
                     billing: outcome.usage.clone(),
                     actor,
                 },
@@ -287,7 +299,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                     node_id: gv.id.clone(),
                     name: gv.label().to_string(),
                     index: stage_index,
-                    duration_ms,
+                    timing,
                     status: outcome.status.to_string(),
                     preferred_label: outcome.preferred_label.clone(),
                     suggested_next_ids: outcome.suggested_next_ids.clone(),

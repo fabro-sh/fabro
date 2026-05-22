@@ -8,7 +8,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use strum::{Display, EnumString, IntoStaticStr};
 
-use crate::{ExecOutputTail, FailureSignature, SystemActorKind};
+use crate::{ExecOutputTail, FailureSignature, StageTiming, SystemActorKind};
 
 pub trait OutcomeMeta:
     Default + Clone + Send + Sync + fmt::Debug + Serialize + DeserializeOwned + 'static
@@ -274,8 +274,13 @@ pub struct Outcome<M: OutcomeMeta = ()> {
     pub usage:              M,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files_touched:      Vec<String>,
+    /// Stage timing breakdown captured by the workflow engine.
+    ///
+    /// `None` until the stage produces a terminal outcome with a measured
+    /// wall time. Stage handlers that perform no inference or tool work
+    /// populate this with [`StageTiming::wall_only`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub duration_ms:        Option<u64>,
+    pub timing:             Option<StageTiming>,
 }
 
 impl<M: OutcomeMeta> Default for Outcome<M> {
@@ -290,7 +295,7 @@ impl<M: OutcomeMeta> Default for Outcome<M> {
             failure:            None,
             usage:              M::default(),
             files_touched:      Vec::new(),
-            duration_ms:        None,
+            timing:             None,
         }
     }
 }
@@ -402,17 +407,35 @@ mod tests {
 
 #[derive(Debug, Clone)]
 pub struct NodeResult<M: OutcomeMeta = ()> {
-    pub outcome:      Outcome<M>,
-    pub duration:     Duration,
-    pub attempts:     u32,
-    pub max_attempts: u32,
+    pub outcome:        Outcome<M>,
+    /// Wall-clock time spent executing this node attempt (including handler
+    /// internal waits). Independent of the `inference_time` / `tool_time`
+    /// breakdown — those are work-only measurements.
+    pub wall_time:      Duration,
+    /// Sum of LLM request/stream elapsed time across this node attempt. Zero
+    /// for non-LLM handlers.
+    pub inference_time: Duration,
+    /// Sum of tool/command execution elapsed time across this node attempt.
+    /// Zero for handlers that do not invoke tools or commands.
+    pub tool_time:      Duration,
+    pub attempts:       u32,
+    pub max_attempts:   u32,
 }
 
 impl<M: OutcomeMeta> NodeResult<M> {
-    pub fn new(outcome: Outcome<M>, duration: Duration, attempts: u32, max_attempts: u32) -> Self {
+    pub fn new(
+        outcome: Outcome<M>,
+        wall_time: Duration,
+        inference_time: Duration,
+        tool_time: Duration,
+        attempts: u32,
+        max_attempts: u32,
+    ) -> Self {
         Self {
             outcome,
-            duration,
+            wall_time,
+            inference_time,
+            tool_time,
             attempts,
             max_attempts,
         }
@@ -421,7 +444,9 @@ impl<M: OutcomeMeta> NodeResult<M> {
     pub fn from_skip(outcome: Outcome<M>) -> Self {
         Self {
             outcome,
-            duration: Duration::ZERO,
+            wall_time: Duration::ZERO,
+            inference_time: Duration::ZERO,
+            tool_time: Duration::ZERO,
             attempts: 0,
             max_attempts: 0,
         }

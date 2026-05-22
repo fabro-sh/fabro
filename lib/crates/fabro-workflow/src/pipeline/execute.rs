@@ -143,7 +143,7 @@ pub async fn execute(init: Initialized) -> Executed {
                     graph,
                     outcome: Err(err),
                     run_options,
-                    duration_ms: crate::millis_u64(start.elapsed()),
+                    wall_time_ms: crate::millis_u64(start.elapsed()),
                     final_context: seed_context_from_checkpoint(checkpoint.as_ref()),
                     engine,
                     model,
@@ -163,7 +163,7 @@ pub async fn execute(init: Initialized) -> Executed {
                     graph,
                     outcome: Err(err),
                     run_options,
-                    duration_ms: crate::millis_u64(start.elapsed()),
+                    wall_time_ms: crate::millis_u64(start.elapsed()),
                     final_context: seed,
                     engine,
                     model,
@@ -178,7 +178,7 @@ pub async fn execute(init: Initialized) -> Executed {
                     graph,
                     outcome: Err(err),
                     run_options,
-                    duration_ms: crate::millis_u64(start.elapsed()),
+                    wall_time_ms: crate::millis_u64(start.elapsed()),
                     final_context: Context::new(),
                     engine,
                     model,
@@ -294,13 +294,13 @@ pub async fn execute(init: Initialized) -> Executed {
 
     engine.registry.shutdown_all(&engine.run.emitter).await;
 
-    let duration_ms = crate::millis_u64(start.elapsed());
+    let wall_time_ms = crate::millis_u64(start.elapsed());
 
     Executed {
         graph,
         outcome,
         run_options,
-        duration_ms,
+        wall_time_ms,
         final_context,
         engine,
         model,

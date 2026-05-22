@@ -57,7 +57,7 @@ fn remote_run_state_response(run_id: &str) -> serde_json::Value {
     state["conclusion"] = serde_json::json!({
             "timestamp": "2026-04-05T12:00:01Z",
             "status": "succeeded",
-            "duration_ms": 12,
+            "timing": {"wall_time_ms": 12, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
             "stages": [],
             "billing": null,
             "total_retries": 0,
@@ -74,7 +74,7 @@ fn run_completed_event(run_id: &str) -> serde_json::Value {
         "run_id": run_id,
         "ts": "2026-04-05T12:00:01Z",
         "properties": {
-            "duration_ms": 12,
+            "timing": {"wall_time_ms": 12, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
             "artifact_count": 0,
             "status": "succeeded",
             "reason": "completed"

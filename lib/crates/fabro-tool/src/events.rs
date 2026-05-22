@@ -1,48 +1,47 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use fabro_client::Client;
 use fabro_types::EventEnvelope;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::common;
-use super::common::{ToolError, ToolResult};
+use super::common::{FabroToolBackend, ToolError, ToolResult};
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum RunEventsAction {
+pub enum RunEventsAction {
     List,
     Details,
     Search,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub(crate) struct FabroRunEventsParams {
-    pub(crate) action:             RunEventsAction,
-    pub(crate) run_id:             String,
-    pub(crate) event_types:        Option<Vec<String>>,
-    pub(crate) categories:         Option<Vec<String>>,
-    pub(crate) direction:          Option<String>,
-    pub(crate) created_after:      Option<String>,
-    pub(crate) created_before:     Option<String>,
-    pub(crate) first:              Option<usize>,
-    pub(crate) after:              Option<u32>,
-    pub(crate) event_ids:          Option<Vec<String>>,
-    pub(crate) offset:             Option<usize>,
-    pub(crate) limit:              Option<usize>,
-    pub(crate) max_content_length: Option<usize>,
-    pub(crate) query:              Option<String>,
+pub struct FabroRunEventsParams {
+    pub action:             RunEventsAction,
+    pub run_id:             String,
+    pub event_types:        Option<Vec<String>>,
+    pub categories:         Option<Vec<String>>,
+    pub direction:          Option<String>,
+    pub created_after:      Option<String>,
+    pub created_before:     Option<String>,
+    pub first:              Option<usize>,
+    pub after:              Option<u32>,
+    pub event_ids:          Option<Vec<String>>,
+    pub offset:             Option<usize>,
+    pub limit:              Option<usize>,
+    pub max_content_length: Option<usize>,
+    pub query:              Option<String>,
 }
 
 #[derive(Debug)]
-pub(crate) struct ValidatedRunEvents {
-    pub(crate) raw:            FabroRunEventsParams,
-    pub(crate) descending:     bool,
-    pub(crate) first:          usize,
-    pub(crate) created_after:  Option<DateTime<Utc>>,
-    pub(crate) created_before: Option<DateTime<Utc>>,
+pub struct ValidatedRunEvents {
+    pub raw:            FabroRunEventsParams,
+    pub descending:     bool,
+    pub first:          usize,
+    pub created_after:  Option<DateTime<Utc>>,
+    pub created_before: Option<DateTime<Utc>>,
 }
 
 impl TryFrom<FabroRunEventsParams> for ValidatedRunEvents {
@@ -97,23 +96,23 @@ impl TryFrom<FabroRunEventsParams> for ValidatedRunEvents {
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
-pub(crate) struct RunEventsResult {
-    pub(crate) run_id:      String,
-    pub(crate) action:      RunEventsAction,
-    pub(crate) events:      Vec<RunEventResult>,
-    pub(crate) next_cursor: Option<u32>,
+pub struct RunEventsResult {
+    pub run_id:      String,
+    pub action:      RunEventsAction,
+    pub events:      Vec<RunEventResult>,
+    pub next_cursor: Option<u32>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
-pub(crate) struct RunEventResult {
-    pub(crate) event_id:  String,
-    pub(crate) sequence:  u32,
-    pub(crate) event:     Value,
-    pub(crate) truncated: bool,
+pub struct RunEventResult {
+    pub event_id:  String,
+    pub sequence:  u32,
+    pub event:     Value,
+    pub truncated: bool,
 }
 
-pub(crate) async fn run_events(
-    client: Arc<Client>,
+pub async fn run_events(
+    backend: Arc<dyn FabroToolBackend>,
     params: ValidatedRunEvents,
 ) -> ToolResult<RunEventsResult> {
     let descending = params.descending;
@@ -121,18 +120,18 @@ pub(crate) async fn run_events(
     let created_after = params.created_after;
     let created_before = params.created_before;
     let raw = params.raw;
-    let run_id = client
+    let run_id = backend
         .resolve_run(&raw.run_id)
         .await
         .map_err(|err| ToolError::from_anyhow(&err))?
         .id;
     let fetch_after = if descending { None } else { raw.after };
     let mut events = if let Some(limit) = event_fetch_limit(&raw, first) {
-        client
+        backend
             .list_run_events_until(&run_id, fetch_after, limit)
             .await
     } else {
-        client.list_run_events(&run_id, fetch_after, None).await
+        backend.list_run_events(&run_id, fetch_after, None).await
     }
     .map_err(|err| ToolError::from_anyhow(&err))?;
     if descending {
@@ -171,7 +170,7 @@ pub(crate) async fn run_events(
     })
 }
 
-pub(crate) fn run_events_text(result: &RunEventsResult) -> String {
+pub fn run_events_text(result: &RunEventsResult) -> String {
     format!("returned {} Fabro event(s)", result.events.len())
 }
 

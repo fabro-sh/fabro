@@ -1,7 +1,7 @@
 use fabro_types::run_event::run::RunFailedProps;
 use fabro_types::{
     Conclusion, EventBody, ExecOutputTail, FailureCategory, FailureDetail, FailureReason,
-    FailureSignature, RunDiff, RunFailure, StageOutcome, SystemActorKind,
+    FailureSignature, RunDiff, RunFailure, RunTiming, StageOutcome, SystemActorKind,
 };
 use serde_json::json;
 
@@ -32,7 +32,7 @@ fn run_failed_serializes_nested_failure_contract() {
                 detail
             },
         },
-        duration_ms:          42,
+        timing:               RunTiming::wall_only(42),
         final_git_commit_sha: Some("abc123".to_string()),
         final_patch:          Some("diff --git a/file b/file".to_string()),
         diff_summary:         None,
@@ -63,7 +63,12 @@ fn run_failed_serializes_nested_failure_contract() {
                     }
                 }
             },
-            "duration_ms": 42,
+            "timing": {
+                "wall_time_ms": 42,
+                "inference_time_ms": 0,
+                "tool_time_ms": 0,
+                "active_time_ms": 0
+            },
             "final_git_commit_sha": "abc123",
             "final_patch": "diff --git a/file b/file"
         })
@@ -81,7 +86,7 @@ fn run_failed_omits_empty_failure_optional_fields() {
             reason: FailureReason::WorkflowError,
             detail: FailureDetail::new("boom", FailureCategory::Deterministic),
         },
-        duration_ms:          1,
+        timing:               RunTiming::wall_only(1),
         final_git_commit_sha: None,
         final_patch:          None,
         diff_summary:         None,
@@ -100,7 +105,12 @@ fn run_failed_omits_empty_failure_optional_fields() {
                     "category": "deterministic"
                 }
             },
-            "duration_ms": 1
+            "timing": {
+                "wall_time_ms": 1,
+                "inference_time_ms": 0,
+                "tool_time_ms": 0,
+                "active_time_ms": 0
+            }
         })
     );
 }
@@ -114,7 +124,7 @@ fn conclusion_serializes_rich_failure() {
         status:               StageOutcome::Failed {
             retry_requested: false,
         },
-        duration_ms:          42,
+        timing:               RunTiming::wall_only(42),
         failure:              Some(RunFailure {
             reason: FailureReason::WorkflowError,
             detail: {

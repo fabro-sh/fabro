@@ -70,7 +70,7 @@ fn conclusion_json_uses_failure_object() {
             status:               StageOutcome::Failed {
                 retry_requested: false,
             },
-            duration_ms:          42,
+            timing:               fabro_types::RunTiming::wall_only(42),
             failure:              Some(RunFailure {
                 reason: FailureReason::WorkflowError,
                 detail: FailureDetail::new("boom", FailureCategory::Deterministic),
@@ -84,7 +84,12 @@ fn conclusion_json_uses_failure_object() {
         json!({
             "timestamp": "2026-05-13T12:00:00Z",
             "status": "failed",
-            "duration_ms": 42,
+            "timing": {
+                "wall_time_ms": 42,
+                "inference_time_ms": 0,
+                "tool_time_ms": 0,
+                "active_time_ms": 0
+            },
             "failure": {
                 "reason": "workflow_error",
                 "detail": {

@@ -2,20 +2,23 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use fabro_client::Client;
+use fabro_tool::fabro_client::ClientBackend;
+use fabro_tool::{self as run_tools, FabroToolBackend};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, ServerCapabilities, ServerInfo};
+use rmcp::model::{CallToolResult, Content, ServerCapabilities, ServerInfo};
 use rmcp::transport::stdio;
 use rmcp::{ErrorData, ServerHandler, serve_server, tool, tool_handler, tool_router};
+use serde::Serialize;
 use tokio::sync::OnceCell;
 
-use crate::{FabroMcpServerSettings, run_tools};
+use crate::FabroMcpServerSettings;
+use crate::manifest_builder::McpRunManifestBuilder;
 
 #[derive(Clone)]
 pub(crate) struct FabroMcpServer {
     settings:    Arc<FabroMcpServerSettings>,
-    client:      Arc<OnceCell<Arc<Client>>>,
+    backend:     Arc<OnceCell<Arc<dyn FabroToolBackend>>>,
     cwd:         PathBuf,
     tool_router: ToolRouter<Self>,
 }
@@ -41,7 +44,7 @@ impl FabroMcpServer {
         let cwd = settings.cwd.clone();
         Self {
             settings,
-            client: Arc::new(OnceCell::new()),
+            backend: Arc::new(OnceCell::new()),
             cwd,
             tool_router: Self::tool_router(),
         }
@@ -57,15 +60,15 @@ impl FabroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let params = match run_tools::ValidatedCreateRuns::try_from(params.0) {
             Ok(params) => params,
-            Err(err) => return Ok(run_tools::error_result(err)),
+            Err(err) => return Ok(error_result(&err)),
         };
-        let client = match self.client().await {
-            Ok(client) => client,
-            Err(err) => return Ok(run_tools::error_result(err)),
+        let backend = match self.backend().await {
+            Ok(backend) => backend,
+            Err(err) => return Ok(error_result(&err)),
         };
-        match run_tools::create_runs(client, &self.cwd, &self.settings.config_path, params).await {
-            Ok(result) => run_tools::success_result(&result, run_tools::create_runs_text(&result)),
-            Err(err) => Ok(run_tools::error_result(err)),
+        match run_tools::create_runs(backend, &self.cwd, &self.settings.config_path, params).await {
+            Ok(result) => success_result(&result, run_tools::create_runs_text(&result)),
+            Err(err) => Ok(error_result(&err)),
         }
     }
 
@@ -79,15 +82,15 @@ impl FabroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let params = match run_tools::ValidatedSearchRuns::try_from(params.0) {
             Ok(params) => params,
-            Err(err) => return Ok(run_tools::error_result(err)),
+            Err(err) => return Ok(error_result(&err)),
         };
-        let client = match self.client().await {
-            Ok(client) => client,
-            Err(err) => return Ok(run_tools::error_result(err)),
+        let backend = match self.backend().await {
+            Ok(backend) => backend,
+            Err(err) => return Ok(error_result(&err)),
         };
-        match run_tools::search_runs(client, params).await {
-            Ok(result) => run_tools::success_result(&result, run_tools::search_runs_text(&result)),
-            Err(err) => Ok(run_tools::error_result(err)),
+        match run_tools::search_runs(backend, params).await {
+            Ok(result) => success_result(&result, run_tools::search_runs_text(&result)),
+            Err(err) => Ok(error_result(&err)),
         }
     }
 
@@ -101,15 +104,15 @@ impl FabroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let params = match run_tools::ValidatedInteractRun::try_from(params.0) {
             Ok(params) => params,
-            Err(err) => return Ok(run_tools::error_result(err)),
+            Err(err) => return Ok(error_result(&err)),
         };
-        let client = match self.client().await {
-            Ok(client) => client,
-            Err(err) => return Ok(run_tools::error_result(err)),
+        let backend = match self.backend().await {
+            Ok(backend) => backend,
+            Err(err) => return Ok(error_result(&err)),
         };
-        match run_tools::interact_run(client, params).await {
-            Ok(result) => run_tools::success_result(&result, run_tools::interact_run_text(&result)),
-            Err(err) => Ok(run_tools::error_result(err)),
+        match run_tools::interact_run(backend, params).await {
+            Ok(result) => success_result(&result, run_tools::interact_run_text(&result)),
+            Err(err) => Ok(error_result(&err)),
         }
     }
 
@@ -123,15 +126,15 @@ impl FabroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let params = match run_tools::ValidatedGatherRuns::try_from(params.0) {
             Ok(params) => params,
-            Err(err) => return Ok(run_tools::error_result(err)),
+            Err(err) => return Ok(error_result(&err)),
         };
-        let client = match self.client().await {
-            Ok(client) => client,
-            Err(err) => return Ok(run_tools::error_result(err)),
+        let backend = match self.backend().await {
+            Ok(backend) => backend,
+            Err(err) => return Ok(error_result(&err)),
         };
-        match run_tools::gather_runs(client, params).await {
-            Ok(result) => run_tools::success_result(&result, run_tools::gather_runs_text(&result)),
-            Err(err) => Ok(run_tools::error_result(err)),
+        match run_tools::gather_runs(backend, params).await {
+            Ok(result) => success_result(&result, run_tools::gather_runs_text(&result)),
+            Err(err) => Ok(error_result(&err)),
         }
     }
 
@@ -145,27 +148,51 @@ impl FabroMcpServer {
     ) -> Result<CallToolResult, ErrorData> {
         let params = match run_tools::ValidatedRunEvents::try_from(params.0) {
             Ok(params) => params,
-            Err(err) => return Ok(run_tools::error_result(err)),
+            Err(err) => return Ok(error_result(&err)),
         };
-        let client = match self.client().await {
-            Ok(client) => client,
-            Err(err) => return Ok(run_tools::error_result(err)),
+        let backend = match self.backend().await {
+            Ok(backend) => backend,
+            Err(err) => return Ok(error_result(&err)),
         };
-        match run_tools::run_events(client, params).await {
-            Ok(result) => run_tools::success_result(&result, run_tools::run_events_text(&result)),
-            Err(err) => Ok(run_tools::error_result(err)),
+        match run_tools::run_events(backend, params).await {
+            Ok(result) => success_result(&result, run_tools::run_events_text(&result)),
+            Err(err) => Ok(error_result(&err)),
         }
     }
 
-    async fn client(&self) -> Result<Arc<Client>, run_tools::ToolError> {
-        self.client
+    async fn backend(&self) -> Result<Arc<dyn FabroToolBackend>, run_tools::ToolError> {
+        self.backend
             .get_or_try_init(|| async {
                 (self.settings.client_factory)()
                     .await
-                    .map(Arc::new)
+                    .map(|client| {
+                        Arc::new(
+                            ClientBackend::new(Arc::new(client))
+                                .with_manifest_builder(Arc::new(McpRunManifestBuilder)),
+                        ) as Arc<dyn FabroToolBackend>
+                    })
                     .map_err(|err| run_tools::ToolError::from_anyhow(&err))
             })
             .await
             .map(Arc::clone)
     }
+}
+
+fn success_result<T: Serialize>(
+    value: &T,
+    text: impl Into<String>,
+) -> Result<CallToolResult, rmcp::ErrorData> {
+    let structured_content = serde_json::to_value(value).map_err(|err| {
+        rmcp::ErrorData::internal_error(
+            format!("failed to serialize Fabro MCP tool result: {err}"),
+            None,
+        )
+    })?;
+    let mut result = CallToolResult::structured(structured_content);
+    result.content = vec![Content::text(text.into())];
+    Ok(result)
+}
+
+fn error_result(err: &run_tools::ToolError) -> CallToolResult {
+    CallToolResult::error(vec![Content::text(err.to_string())])
 }

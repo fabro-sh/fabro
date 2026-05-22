@@ -255,7 +255,7 @@ impl ProgressUI {
             ProgressEvent::StageCompleted {
                 node_id,
                 name,
-                duration_ms,
+                timing,
                 status,
                 usage,
             } => {
@@ -263,7 +263,7 @@ impl ProgressUI {
                     renderer,
                     &node_id,
                     &name,
-                    duration_ms,
+                    timing.wall_time_ms,
                     &status,
                     usage.as_ref(),
                 );
@@ -585,7 +585,7 @@ mod tests {
             node_id: node_id.into(),
             name: name.into(),
             index: 0,
-            duration_ms: 5000,
+            timing: fabro_types::StageTiming::wall_only(5000),
             status: "succeeded".into(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),

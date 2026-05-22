@@ -7130,7 +7130,7 @@ async fn workflow_run_with_vault_only_openai_codex_builds_pr_body() {
         Some(&Conclusion {
             timestamp:            Utc::now(),
             status:               StageOutcome::Succeeded,
-            duration_ms:          1,
+            timing:               fabro_types::RunTiming::wall_only(1),
             failure:              None,
             final_git_commit_sha: None,
             stages:               Vec::new(),

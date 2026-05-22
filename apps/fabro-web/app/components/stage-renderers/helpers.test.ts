@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { EventEnvelope } from "@qltysh/fabro-api-client";
 
 import {
+  extractStageContext,
   extractStageNotes,
   parseFanInOutcome,
   parseHumanInterviewPairs,
@@ -204,5 +205,67 @@ describe("extractStageNotes", () => {
 
   test("returns null when there is no stage.completed event", () => {
     expect(extractStageNotes([])).toBeNull();
+  });
+});
+
+describe("extractStageContext", () => {
+  test("keeps author-set keys and drops engine bookkeeping keys", () => {
+    const events: EventEnvelope[] = [
+      envelope(1, {
+        event: "stage.completed",
+        properties: {
+          context_updates: {
+            "plan.summary": "ship the thing",
+            review_score: 8,
+            last_stage: "implement",
+            last_response: "done",
+            "response.implement": "full text",
+            "internal.run_id": "run-1",
+            "current.preamble": "...",
+            "command.output": "blob:abc",
+            "human.gate.selected": "A",
+            "parallel.results": [],
+          },
+        },
+      }),
+    ];
+    const ctx = extractStageContext(events);
+    expect(ctx).not.toBeNull();
+    expect(ctx?.updates).toEqual({
+      "plan.summary": "ship the thing",
+      review_score: 8,
+    });
+  });
+
+  test("extracts routing hints from preferred_label and suggested_next_ids", () => {
+    const events: EventEnvelope[] = [
+      envelope(1, {
+        event: "stage.completed",
+        properties: {
+          preferred_label: "approve",
+          suggested_next_ids: ["review", "merge", 7],
+        },
+      }),
+    ];
+    const ctx = extractStageContext(events);
+    expect(ctx?.routing.preferredLabel).toBe("approve");
+    expect(ctx?.routing.suggestedNextIds).toEqual(["review", "merge"]);
+    expect(ctx?.updates).toEqual({});
+  });
+
+  test("returns null when the stage only wrote engine keys", () => {
+    const events: EventEnvelope[] = [
+      envelope(1, {
+        event: "stage.completed",
+        properties: {
+          context_updates: { last_stage: "implement", "command.output": "blob:x" },
+        },
+      }),
+    ];
+    expect(extractStageContext(events)).toBeNull();
+  });
+
+  test("returns null when the stage has not completed", () => {
+    expect(extractStageContext([])).toBeNull();
   });
 });

@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use crate::{
     BilledTokenCounts, Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition,
     ModelRef, PullRequestLink, RunControlAction, RunDiff, RunId, RunSandbox, RunSpec, RunStatus,
-    StageCompletion, StageHandler, StageId, StageState, StartRecord,
+    StageCompletion, StageHandler, StageId, StageState, StageTiming, StartRecord,
 };
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -71,8 +71,13 @@ pub struct StageProjection {
     pub started_at:        Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handler:           Option<StageHandler>,
+    /// Per-attempt timing breakdown for the latest terminal attempt.
+    ///
+    /// `None` for stages still in flight (`started_at` is set but no terminal
+    /// event has been observed yet). For live wall-time ticking, the UI uses
+    /// `started_at`; once terminal this carries the finalized breakdown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub duration_ms:       Option<u64>,
+    pub timing:            Option<StageTiming>,
     #[serde(default)]
     pub usage:             BilledTokenCounts,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -95,7 +100,7 @@ impl StageProjection {
             prompt: None,
             response: None,
             completion: None,
-            duration_ms: None,
+            timing: None,
             usage: BilledTokenCounts::default(),
             model: None,
             provider_used: None,
@@ -119,26 +124,27 @@ impl StageProjection {
         self.state
     }
 
-    /// Live wall-clock runtime in seconds.
+    /// Live wall-clock time in milliseconds.
     ///
     /// While the stage is non-terminal (`Pending`, `Running`, or `Retrying`),
     /// this returns the elapsed time since `started_at` so the UI can tick
-    /// client-side. Once terminal, the stored `duration_ms` is returned. This
-    /// also handles retries safely: a new `StageStarted` resets the state
-    /// back to `Running` and keeps the live computation correct even if a
-    /// previous attempt left a stale `duration_ms`.
+    /// client-side. Once terminal, the stored `timing.wall_time_ms` is
+    /// returned. This also handles retries safely: a new `StageStarted` resets
+    /// the state back to `Running` and keeps the live computation correct
+    /// even if a previous attempt left stale timing.
     #[must_use]
-    pub fn runtime_secs(&self, now: DateTime<Utc>) -> Option<f64> {
+    pub fn live_wall_time_ms(&self, now: DateTime<Utc>) -> Option<u64> {
         let state = self.effective_state();
         if matches!(
             state,
             StageState::Running | StageState::Retrying | StageState::Pending
         ) {
             return self.started_at.map(|started| {
-                now.signed_duration_since(started).num_milliseconds().max(0) as f64 / 1000.0
+                u64::try_from(now.signed_duration_since(started).num_milliseconds().max(0))
+                    .unwrap_or(0)
             });
         }
-        self.duration_ms.map(|ms| ms as f64 / 1000.0)
+        self.timing.map(|timing| timing.wall_time_ms)
     }
 
     /// Begin a new attempt (or visit) for this stage: clear every

@@ -15,15 +15,14 @@
 
 
 /**
- * Timing information for a run.
+ * Timing rollup for an entire run. Active fields sum work across stage visits, so `active_time_ms` can exceed `wall_time_ms` when parallel branches run concurrently.
  */
-export interface RunTimings {
+export interface RunTiming {
+    'wall_time_ms': number;
+    'inference_time_ms'?: number;
+    'tool_time_ms'?: number;
     /**
-     * Wall-clock time elapsed in seconds.
+     * Equals `inference_time_ms + tool_time_ms`.
      */
-    'elapsed_secs': number;
-    /**
-     * Whether the elapsed time exceeds the expected threshold.
-     */
-    'elapsed_warning'?: boolean;
+    'active_time_ms': number;
 }

@@ -1106,7 +1106,8 @@ mod runs {
         let run_id = RunId::with_timestamp(created_at, sequence);
         let source_directory = Some(format!("/demo/{repo_name}"));
         let repo_origin_url = Some(format!("https://github.com/demo/{repo_name}.git"));
-        let duration_ms = elapsed_secs.and_then(duration_ms_from_secs);
+        let wall_time_ms = elapsed_secs.and_then(duration_ms_from_secs);
+        let timing = wall_time_ms.map(fabro_types::RunTiming::wall_only);
         Run {
             id: run_id,
             parent_id: None,
@@ -1145,9 +1146,8 @@ mod runs {
                 started_at: Some(created_at),
                 last_event_at: Some(created_at),
                 completed_at: Some(created_at),
-                duration_ms,
-                elapsed_secs,
             },
+            timing,
             billing: total_usd_micros.map(|total_usd_micros| RunBillingSummary {
                 total_usd_micros: Some(total_usd_micros),
             }),
@@ -1351,7 +1351,7 @@ mod runs {
                 &StageId::new("detect-drift", 1),
                 "Detect Drift",
                 StageState::Succeeded,
-                Some(72.0),
+                Some(72_000),
                 None,
                 StageHandler::Command,
             ),
@@ -1359,7 +1359,7 @@ mod runs {
                 &StageId::new("propose-changes", 1),
                 "Propose Changes",
                 StageState::Succeeded,
-                Some(154.0),
+                Some(154_000),
                 None,
                 StageHandler::Agent,
             ),
@@ -1367,7 +1367,7 @@ mod runs {
                 &StageId::new("review-changes", 1),
                 "Review Changes",
                 StageState::Succeeded,
-                Some(45.0),
+                Some(45_000),
                 None,
                 StageHandler::Agent,
             ),
@@ -1375,7 +1375,7 @@ mod runs {
                 &StageId::new("apply-changes", 1),
                 "Apply Changes",
                 StageState::Succeeded,
-                Some(118.0),
+                Some(118_000),
                 None,
                 StageHandler::Command,
             ),
@@ -1513,15 +1513,15 @@ mod runs {
         RunBilling {
             stages:   vec![
                 RunBillingStage {
-                    stage:        BillingStageRef {
+                    stage:      BillingStageRef {
                         id:   "detect-drift".into(),
                         name: "Detect Drift".into(),
                     },
-                    model:        Some(billing_model(
+                    model:      Some(billing_model(
                         fabro_model::ProviderId::anthropic(),
                         "claude-opus-4-6",
                     )),
-                    billing:      BilledTokenCounts {
+                    billing:    BilledTokenCounts {
                         cache_read_tokens:  0,
                         cache_write_tokens: 0,
                         input_tokens:       12480,
@@ -1530,20 +1530,20 @@ mod runs {
                         total_tokens:       15690,
                         total_usd_micros:   Some(480_000),
                     },
-                    runtime_secs: 72.0,
-                    started_at:   None,
-                    state:        Some(StageState::Succeeded),
+                    timing:     fabro_types::StageTiming::wall_only(72_000),
+                    started_at: None,
+                    state:      Some(StageState::Succeeded),
                 },
                 RunBillingStage {
-                    stage:        BillingStageRef {
+                    stage:      BillingStageRef {
                         id:   "propose-changes".into(),
                         name: "Propose Changes".into(),
                     },
-                    model:        Some(billing_model(
+                    model:      Some(billing_model(
                         fabro_model::ProviderId::gemini(),
                         "gemini-3.1-pro-preview",
                     )),
-                    billing:      BilledTokenCounts {
+                    billing:    BilledTokenCounts {
                         cache_read_tokens:  0,
                         cache_write_tokens: 0,
                         input_tokens:       28640,
@@ -1552,20 +1552,20 @@ mod runs {
                         total_tokens:       37390,
                         total_usd_micros:   Some(720_000),
                     },
-                    runtime_secs: 154.0,
-                    started_at:   None,
-                    state:        Some(StageState::Succeeded),
+                    timing:     fabro_types::StageTiming::wall_only(154_000),
+                    started_at: None,
+                    state:      Some(StageState::Succeeded),
                 },
                 RunBillingStage {
-                    stage:        BillingStageRef {
+                    stage:      BillingStageRef {
                         id:   "review-changes".into(),
                         name: "Review Changes".into(),
                     },
-                    model:        Some(billing_model(
+                    model:      Some(billing_model(
                         fabro_model::ProviderId::openai(),
                         "gpt-5.3-codex",
                     )),
-                    billing:      BilledTokenCounts {
+                    billing:    BilledTokenCounts {
                         cache_read_tokens:  0,
                         cache_write_tokens: 0,
                         input_tokens:       9120,
@@ -1574,20 +1574,20 @@ mod runs {
                         total_tokens:       11760,
                         total_usd_micros:   Some(190_000),
                     },
-                    runtime_secs: 45.0,
-                    started_at:   None,
-                    state:        Some(StageState::Succeeded),
+                    timing:     fabro_types::StageTiming::wall_only(45_000),
+                    started_at: None,
+                    state:      Some(StageState::Succeeded),
                 },
                 RunBillingStage {
-                    stage:        BillingStageRef {
+                    stage:      BillingStageRef {
                         id:   "apply-changes".into(),
                         name: "Apply Changes".into(),
                     },
-                    model:        Some(billing_model(
+                    model:      Some(billing_model(
                         fabro_model::ProviderId::anthropic(),
                         "claude-opus-4-6",
                     )),
-                    billing:      BilledTokenCounts {
+                    billing:    BilledTokenCounts {
                         cache_read_tokens:  0,
                         cache_write_tokens: 0,
                         input_tokens:       21300,
@@ -1596,15 +1596,15 @@ mod runs {
                         total_tokens:       27780,
                         total_usd_micros:   Some(870_000),
                     },
-                    runtime_secs: 118.0,
-                    started_at:   None,
-                    state:        Some(StageState::Running),
+                    timing:     fabro_types::StageTiming::wall_only(118_000),
+                    started_at: None,
+                    state:      Some(StageState::Running),
                 },
             ],
             totals:   RunBillingTotals {
                 cache_read_tokens:  0,
                 cache_write_tokens: 0,
-                runtime_secs:       389.0,
+                timing:             fabro_types::RunTiming::wall_only(389_000),
                 input_tokens:       71540,
                 output_tokens:      21080,
                 reasoning_tokens:   0,
@@ -1988,7 +1988,7 @@ mod billing {
                 input_tokens:       643_860,
                 output_tokens:      189_720,
                 reasoning_tokens:   0,
-                runtime_secs:       3_501.0,
+                timing:             fabro_types::RunTiming::wall_only(3_501_000),
                 total_tokens:       833_580,
                 total_usd_micros:   Some(20_340_000),
             },

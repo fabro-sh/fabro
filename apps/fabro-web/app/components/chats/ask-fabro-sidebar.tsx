@@ -24,7 +24,7 @@ const EMPTY_CHAT: Chat = {
   pendingResponse: false,
 };
 
-const SIDEBAR_WIDTH = 420;
+export const SIDEBAR_WIDTH = 420;
 
 /**
  * Right-docked "Ask Fabro" assistant panel. An animated-width column that

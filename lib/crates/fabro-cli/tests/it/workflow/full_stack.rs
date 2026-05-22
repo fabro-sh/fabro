@@ -37,8 +37,8 @@ fn scenario_full_stack(sandbox: &str) {
         "conclusion: {conclusion}"
     );
     assert!(
-        conclusion["duration_ms"].as_u64().unwrap_or(0) > 0,
-        "duration_ms should be > 0"
+        conclusion["timing"]["wall_time_ms"].as_u64().unwrap_or(0) > 0,
+        "timing.wall_time_ms should be > 0"
     );
 
     // RunSpec should have key fields

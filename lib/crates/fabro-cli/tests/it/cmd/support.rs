@@ -174,10 +174,9 @@ pub(crate) fn remote_run_summary_json(
             "created_at": timestamp,
             "started_at": timestamp,
             "last_event_at": null,
-            "completed_at": null,
-            "duration_ms": null,
-            "elapsed_secs": null
+            "completed_at": null
         },
+        "timing": null,
         "billing": null,
         "diff": null,
         "pull_request": null,
@@ -1108,7 +1107,7 @@ async fn append_seeded_simple_completion_events(
         None,
         "run.completed",
         serde_json::json!({
-            "duration_ms": 123,
+            "timing": {"wall_time_ms": 123, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
             "artifact_count": 0,
             "status": "succeeded",
             "reason": "completed",
@@ -1274,7 +1273,7 @@ async fn append_seeded_git_completion_events(
         None,
         "run.completed",
         serde_json::json!({
-            "duration_ms": 456,
+            "timing": {"wall_time_ms": 456, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
             "artifact_count": 0,
             "status": "succeeded",
             "reason": "completed",
@@ -1335,7 +1334,7 @@ async fn append_seeded_git_noop_events(
         None,
         "run.completed",
         serde_json::json!({
-            "duration_ms": 123,
+            "timing": {"wall_time_ms": 123, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
             "artifact_count": 0,
             "status": "succeeded",
             "reason": "completed",
@@ -1395,7 +1394,7 @@ async fn append_seeded_artifact_run_events(
         None,
         "run.completed",
         serde_json::json!({
-            "duration_ms": 123,
+            "timing": {"wall_time_ms": 123, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
             "artifact_count": 6,
             "status": "succeeded",
             "reason": "completed",
@@ -1544,7 +1543,7 @@ fn test_labels(context: &TestContext) -> Vec<String> {
 fn stage_completed_properties(index: usize, response: Option<&str>) -> serde_json::Value {
     serde_json::json!({
         "index": index,
-        "duration_ms": 1,
+        "timing": {"wall_time_ms": 1, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
         "status": "succeeded",
         "preferred_label": null,
         "suggested_next_ids": [],
@@ -1741,7 +1740,7 @@ pub(crate) fn compact_inspect(output: &Output) -> Value {
                     "conclusion": conclusion.as_object().map(|_| {
                         serde_json::json!({
                             "status": conclusion["status"],
-                            "duration_ms": "[DURATION_MS]",
+                            "timing": "[TIMING]",
                             "stage_count": conclusion["stages"].as_array().map(|stages| stages.len()),
                         })
                     }),
@@ -1802,7 +1801,7 @@ pub(crate) fn compact_git_inspect(output: &Output) -> Value {
                     "conclusion": conclusion.as_object().map(|_| {
                         serde_json::json!({
                             "status": conclusion["status"],
-                            "duration_ms": "[DURATION_MS]",
+                            "timing": "[TIMING]",
                             "final_git_commit_sha": "[SHA]",
                             "stage_count": conclusion["stages"].as_array().map(|stages| stages.len()),
                         })

@@ -364,6 +364,8 @@ fn main() {
         ("BillingModelRef", "fabro_model::ModelRef", &[]),
         ("BillingSpeed", "fabro_model::Speed", &[]),
         ("ExecOutputTail", "fabro_types::ExecOutputTail", &[]),
+        ("StageTiming", "fabro_types::StageTiming", &[]),
+        ("RunTiming", "fabro_types::RunTiming", &[]),
         ("ProviderId", "fabro_model::ProviderId", &[]),
         ("Model", "fabro_model::Model", &[]),
         ("Provider", "fabro_model::Provider", &[]),

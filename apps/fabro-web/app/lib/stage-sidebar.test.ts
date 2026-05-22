@@ -26,7 +26,7 @@ describe("mapRunStagesToSidebarStages", () => {
           name: "Apply Changes",
           handler: "command",
           status: "succeeded",
-          duration_secs: 12.5,
+          wall_time_ms: 12500,
           node_id: "apply",
           visit: 1,
         },

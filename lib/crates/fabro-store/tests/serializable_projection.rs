@@ -131,7 +131,7 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
     stage.script_invocation = Some(json!({ "command": "cargo test" }));
     stage.script_timing = Some(json!({ "duration_ms": 10 }));
     stage.parallel_results = Some(json!([{ "stage": "fanout@1" }]));
-    stage.duration_ms = Some(1234);
+    stage.timing = Some(fabro_types::StageTiming::wall_only(1234));
     let usage = sample_usage();
     let usage_counts = BilledTokenCounts::from_billed_usage(std::slice::from_ref(&usage));
     stage.usage = usage_counts.clone();
@@ -186,7 +186,7 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
         node.parallel_results,
         Some(json!([{ "stage": "fanout@1" }]))
     );
-    assert_eq!(node.duration_ms, Some(1234));
+    assert_eq!(node.timing.map(|t| t.wall_time_ms), Some(1234));
     assert_eq!(node.usage, usage_counts);
     assert_eq!(node.model.as_ref(), Some(usage.model()));
 }

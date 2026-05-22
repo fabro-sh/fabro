@@ -1,4 +1,4 @@
-import { formatElapsedSecs, formatDurationSecs } from "../lib/format";
+import { formatDurationMs } from "../lib/format";
 import {
   BoardColumn,
   type Run,
@@ -91,7 +91,7 @@ export function mapRunListItem(item: Run): RunItem {
     lifecycleStatusLabel: lifecycleStatusLabel(item.lifecycle.status, item.lifecycle.archived),
     number: item.pull_request?.number,
     pullRequestUrl: item.pull_request?.html_url,
-    elapsed: item.timestamps.elapsed_secs != null ? formatElapsedSecs(item.timestamps.elapsed_secs) : undefined,
+    elapsed: item.timing != null ? formatDurationMs(item.timing.wall_time_ms) : undefined,
     resources: undefined,
     question: item.current_question?.text,
     sandboxId: runtime?.id ?? undefined,

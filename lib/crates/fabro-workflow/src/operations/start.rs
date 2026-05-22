@@ -49,6 +49,7 @@ use crate::run_metadata::metadata_branch_name;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::run_status::{FailureReason, RunStatus};
 use crate::runtime_store::RunStoreHandle;
+use crate::services::FabroRunToolServices;
 use crate::steering_hub::SteeringHub;
 use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
 
@@ -82,6 +83,7 @@ struct RunSession {
     run_control:       Option<Arc<RunControlState>>,
     vault:             Option<Arc<AsyncRwLock<Vault>>>,
     catalog:           Arc<Catalog>,
+    fabro_run_tools:   Option<FabroRunToolServices>,
 }
 
 struct ResolvedStartLlm {
@@ -108,6 +110,7 @@ pub struct StartServices {
     pub catalog:            Arc<Catalog>,
     pub on_node:            crate::OnNodeCallback,
     pub registry_override:  Option<Arc<HandlerRegistry>>,
+    pub fabro_run_tools:    Option<FabroRunToolServices>,
 }
 
 pub struct Started {
@@ -272,7 +275,7 @@ async fn persist_terminal_engine_failure(
     };
     let failure_event = Event::workflow_run_failed_from_error(
         error,
-        crate::millis_u64(duration),
+        fabro_types::RunTiming::wall_only(crate::millis_u64(duration)),
         reason,
         None,
         None,
@@ -434,6 +437,7 @@ impl RunSession {
             workflow_bundle,
             vault: services.vault,
             catalog,
+            fabro_run_tools: services.fabro_run_tools,
         })
     }
 }
@@ -887,6 +891,7 @@ impl RunSession {
             run_control: self.run_control,
             checkpoint,
             seed_context: self.seed_context,
+            fabro_run_tools: self.fabro_run_tools,
         };
         let mut initialized = Box::pin(pipeline::initialize(persisted, init_options)).await?;
         initialized.on_node = on_node;
@@ -998,7 +1003,7 @@ impl Drop for DetachedRunBootstrapGuard {
                 handle.spawn(async move {
                     let failure_event = Event::workflow_run_failed_from_error(
                         &Error::engine(reason.to_string()),
-                        0,
+                        fabro_types::RunTiming::default(),
                         reason,
                         None,
                         None,
@@ -1065,7 +1070,7 @@ impl Drop for DetachedRunCompletionGuard {
             handle.spawn(async move {
                 let failure_event = Event::workflow_run_failed_from_error(
                     &Error::engine(message.to_string()),
-                    0,
+                    fabro_types::RunTiming::default(),
                     reason,
                     None,
                     None,
@@ -1095,8 +1100,15 @@ async fn persist_detached_failure(
 ) -> Result<(), Error> {
     let message = error.to_string();
 
-    let failure_event =
-        Event::workflow_run_failed_from_error(error, 0, reason, None, None, None, None);
+    let failure_event = Event::workflow_run_failed_from_error(
+        error,
+        fabro_types::RunTiming::default(),
+        reason,
+        None,
+        None,
+        None,
+        None,
+    );
     if let Err(err) = append_event_to_sink(event_sink, &run_id, &failure_event).await {
         tracing::warn!(error = %err, "Failed to append detached failure event");
     }
@@ -1402,6 +1414,7 @@ reasoning = false
             catalog: test_catalog(),
             on_node: None,
             registry_override: Some(registry),
+            fabro_run_tools: None,
         }
     }
 
@@ -1713,7 +1726,7 @@ reasoning = false
         let conclusion = crate::records::Conclusion {
             timestamp:            Utc::now(),
             status:               StageOutcome::Succeeded,
-            duration_ms:          1,
+            timing:               fabro_types::RunTiming::wall_only(1),
             failure:              None,
             final_git_commit_sha: None,
             stages:               vec![],
@@ -1755,7 +1768,7 @@ reasoning = false
             .await
             .unwrap();
         crate::event::append_event(&run_store, &fixtures::RUN_1, &Event::WorkflowRunCompleted {
-            duration_ms:          conclusion.duration_ms,
+            timing:               conclusion.timing,
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               crate::run_status::SuccessReason::Completed,

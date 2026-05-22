@@ -77,8 +77,8 @@ impl ServerRunInfo {
         &self.run.labels
     }
 
-    pub(crate) fn duration_ms(&self) -> Option<u64> {
-        self.run.timestamps.duration_ms
+    pub(crate) fn wall_time_ms(&self) -> Option<u64> {
+        self.run.timing.as_ref().map(|t| t.wall_time_ms)
     }
 
     pub(crate) fn total_usd_micros(&self) -> Option<i64> {

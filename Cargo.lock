@@ -1753,6 +1753,7 @@ dependencies = [
  "fabro-telemetry",
  "fabro-template",
  "fabro-test",
+ "fabro-tool",
  "fabro-types",
  "fabro-util",
  "fabro-validate",
@@ -2114,6 +2115,7 @@ dependencies = [
  "fabro-manifest",
  "fabro-model",
  "fabro-server",
+ "fabro-tool",
  "fabro-types",
  "fabro-util",
  "futures",
@@ -2278,6 +2280,7 @@ dependencies = [
  "fabro-static",
  "fabro-store",
  "fabro-test",
+ "fabro-tool",
  "fabro-types",
  "fabro-util",
  "fabro-validate",
@@ -2447,6 +2450,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabro-tool"
+version = "0.240.0-nightly.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "fabro-api",
+ "fabro-client",
+ "fabro-types",
+ "fabro-util",
+ "futures",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "fabro-tracker"
 version = "0.240.0-nightly.1"
 dependencies = [
@@ -2539,6 +2562,7 @@ dependencies = [
  "dirs",
  "fabro-acp",
  "fabro-agent",
+ "fabro-api",
  "fabro-auth",
  "fabro-checkpoint",
  "fabro-config",
@@ -2560,6 +2584,7 @@ dependencies = [
  "fabro-store",
  "fabro-template",
  "fabro-test",
+ "fabro-tool",
  "fabro-types",
  "fabro-util",
  "fabro-validate",

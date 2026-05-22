@@ -14,10 +14,21 @@ import {
   FolderIcon,
   RectangleStackIcon,
   SignalIcon,
+  SparklesIcon,
 } from "@heroicons/react/20/solid";
-import { Link, Outlet, useLocation, useMatches, useNavigate } from "react-router";
+import {
+  Link,
+  Outlet,
+  useLocation,
+  useMatches,
+  useNavigate,
+  useSearchParams,
+} from "react-router";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 
+import AskFabroSidebar, {
+  SIDEBAR_WIDTH,
+} from "../components/chats/ask-fabro-sidebar";
 import { EditableRunTitle } from "../components/editable-run-title";
 import { GitPullRequestIcon } from "../components/icons";
 import { InterviewDock } from "../components/interview-dock";
@@ -37,6 +48,7 @@ import type {
   RunLifecycle,
   WorkflowRef,
 } from "@qltysh/fabro-api-client";
+import { useAskFabroLayout } from "../lib/ask-fabro-layout";
 import { useDemoMode } from "../lib/demo-mode";
 import { useSWRConfig } from "swr";
 import {
@@ -348,6 +360,13 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const questionsQuery = useRunQuestions(params.id, isBlocked);
   const pendingQuestions = questionsQuery.data ?? [];
   const { pathname } = useLocation();
+  const [searchParams] = useSearchParams();
+  // The "Ask Fabro" assistant is gated behind ?ask=1 while the feature is in
+  // prototype: the trigger button and the docked sidebar only render then.
+  const askEnabled = searchParams.get("ask") === "1";
+  const [askOpen, setAskOpen] = useState(false);
+  const sidebarWidth = askEnabled && askOpen ? SIDEBAR_WIDTH : 0;
+  const { setSidebarWidth } = useAskFabroLayout();
   const matches = useMatches();
   const basePath = `/runs/${params.id}`;
   const previewMutation = usePreviewRun(params.id);
@@ -379,6 +398,13 @@ export default function RunDetail({ params }: { params: { id: string } }) {
 
   useRunEvents(params.id);
   useRunToasts(params.id);
+
+  // Publish the docked sidebar's width so the app shell insets `<main>` and
+  // the page content shifts left while the sidebar is open.
+  useEffect(() => {
+    setSidebarWidth(sidebarWidth);
+    return () => setSidebarWidth(0);
+  }, [sidebarWidth, setSidebarWidth]);
 
   useEffect(() => {
     if (previewMutation.data?.intent === "preview") {
@@ -605,6 +631,21 @@ export default function RunDetail({ params }: { params: { id: string } }) {
           cancelPending={cancelPending}
           onCancel={() => void cancelMutation.trigger()}
         />
+
+        {askEnabled && (
+          <button
+            type="button"
+            onClick={() => setAskOpen(true)}
+            disabled={askOpen}
+            className={classNames(
+              SECONDARY_BUTTON_CLASS,
+              "disabled:cursor-not-allowed disabled:opacity-60",
+            )}
+          >
+            <SparklesIcon className="size-4 text-teal-300" aria-hidden="true" />
+            Ask Fabro
+          </button>
+        )}
       </div>
 
       <ConfirmDialog
@@ -669,13 +710,24 @@ export default function RunDetail({ params }: { params: { id: string } }) {
         <Outlet />
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-page">
+      <div
+        className="fixed bottom-0 left-0 z-30 border-t border-line bg-page transition-[right] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
+        style={{ right: sidebarWidth }}
+      >
         {hasPendingQuestions ? (
           <InterviewDock runId={params.id} questions={pendingQuestions} />
         ) : (
           <SteerBar ref={steerBarRef} runId={params.id} />
         )}
       </div>
+
+      {askEnabled && (
+        // Docked below the top nav (h-16) and above the steer bar (z-30); the
+        // sidebar animates its own width, so the wrapper collapses when closed.
+        <div className="fixed top-16 right-0 bottom-0 z-40">
+          <AskFabroSidebar isOpen={askOpen} onClose={() => setAskOpen(false)} />
+        </div>
+      )}
     </div>
   );
 }

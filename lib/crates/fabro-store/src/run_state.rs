@@ -333,7 +333,7 @@ impl RunProjectionReducer for RunProjection {
                 };
                 stage.response = response;
                 stage.completion = Some(completion);
-                stage.duration_ms = Some(props.duration_ms);
+                stage.timing = Some(props.timing);
                 if let Some(billing) = &props.billing {
                     stage.usage.replace_with_billed_usage(billing);
                     stage.model = Some(billing.model().clone());
@@ -354,7 +354,7 @@ impl RunProjectionReducer for RunProjection {
                     failure_reason,
                     timestamp: ts,
                 });
-                stage.duration_ms = Some(props.duration_ms);
+                stage.timing = Some(props.timing);
                 if let Some(billing) = &props.billing {
                     stage.usage.replace_with_billed_usage(billing);
                     stage.model = Some(billing.model().clone());
@@ -620,10 +620,10 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> Run {
         .conclusion
         .as_ref()
         .map(|conclusion| conclusion.timestamp);
-    let duration_ms = state
+    let run_timing = state
         .conclusion
         .as_ref()
-        .map(|conclusion| conclusion.duration_ms);
+        .map(|conclusion| conclusion.timing);
     let total_usd_micros = state
         .conclusion
         .as_ref()
@@ -669,9 +669,8 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> Run {
             started_at: start_time,
             last_event_at: Some(state.last_event_at),
             completed_at,
-            duration_ms,
-            elapsed_secs: elapsed_secs(duration_ms),
         },
+        timing: run_timing,
         billing: total_usd_micros.map(|total_usd_micros| RunBillingSummary {
             total_usd_micros: Some(total_usd_micros),
         }),
@@ -702,10 +701,6 @@ fn run_models(state: &RunProjection) -> Vec<RunModel> {
     });
     models.dedup_by(|left, right| left.provider == right.provider && left.name == right.name);
     models
-}
-
-fn elapsed_secs(duration_ms: Option<u64>) -> Option<f64> {
-    duration_ms.map(|ms| ms as f64 / 1000.0)
 }
 
 fn checkpoint_from_props(props: &CheckpointCompletedProps, timestamp: DateTime<Utc>) -> Checkpoint {
@@ -752,7 +747,7 @@ fn conclusion_from_completed(
         timestamp,
         status: StageOutcome::from_str(&props.status)
             .map_err(|err| Error::InvalidEvent(format!("invalid completed stage status: {err}")))?,
-        duration_ms: props.duration_ms,
+        timing: props.timing,
         failure: None,
         final_git_commit_sha: props.final_git_commit_sha.clone(),
         stages: Vec::new(),
@@ -771,7 +766,7 @@ fn conclusion_from_failed(props: &RunFailedProps, timestamp: DateTime<Utc>) -> C
         status: StageOutcome::Failed {
             retry_requested: false,
         },
-        duration_ms: props.duration_ms,
+        timing: props.timing,
         failure: Some(props.failure.clone()),
         final_git_commit_sha: props.final_git_commit_sha.clone(),
         stages: Vec::new(),
@@ -812,7 +807,7 @@ fn stage_outcome_from_props(props: &StageCompletedProps) -> Outcome<Option<Bille
         failure:            props.failure.clone(),
         usage:              props.billing.clone(),
         files_touched:      props.files_touched.clone(),
-        duration_ms:        Some(props.duration_ms),
+        timing:             Some(props.timing),
     }
 }
 
@@ -1468,7 +1463,7 @@ mod tests {
                 3,
                 EventBody::StageCompleted(StageCompletedProps {
                     index: 0,
-                    duration_ms: 789,
+                    timing: fabro_types::StageTiming::wall_only(789),
                     status: StageOutcome::Succeeded,
                     preferred_label: None,
                     suggested_next_ids: Vec::new(),
@@ -1491,7 +1486,7 @@ mod tests {
             .unwrap();
 
         let stage = state.stage(&StageId::new("build", 1)).unwrap();
-        assert_eq!(stage.duration_ms, Some(789));
+        assert_eq!(stage.timing.map(|t| t.wall_time_ms), Some(789));
         assert_eq!(stage.usage, usage_counts(&usage));
         assert_eq!(stage.model.as_ref(), Some(usage.model()));
     }
@@ -1525,7 +1520,7 @@ mod tests {
                         "category": "transient_infra"
                     },
                     "will_retry": false,
-                    "duration_ms": 654,
+                    "timing": {"wall_time_ms": 654, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
                     "billing": usage_json(&usage)
                 }),
                 Some("build"),
@@ -1533,7 +1528,7 @@ mod tests {
             .unwrap();
 
         let stage = state.stage(&stage_id).unwrap();
-        assert_eq!(stage.duration_ms, Some(654));
+        assert_eq!(stage.timing.map(|t| t.wall_time_ms), Some(654));
         assert_eq!(stage.usage, usage_counts(&usage));
         assert_eq!(stage.model.as_ref(), Some(usage.model()));
     }
@@ -1553,7 +1548,7 @@ mod tests {
                     seq,
                     EventBody::StageCompleted(StageCompletedProps {
                         index: 0,
-                        duration_ms,
+                        timing: fabro_types::StageTiming::wall_only(duration_ms),
                         status: StageOutcome::Succeeded,
                         preferred_label: None,
                         suggested_next_ids: Vec::new(),
@@ -1578,10 +1573,10 @@ mod tests {
 
         let first_stage = state.stage(&StageId::new("build", 1)).unwrap();
         let second_stage = state.stage(&StageId::new("build", 2)).unwrap();
-        assert_eq!(first_stage.duration_ms, Some(111));
+        assert_eq!(first_stage.timing.map(|t| t.wall_time_ms), Some(111));
         assert_eq!(first_stage.usage, usage_counts(&first_usage));
         assert_eq!(first_stage.model.as_ref(), Some(first_usage.model()));
-        assert_eq!(second_stage.duration_ms, Some(222));
+        assert_eq!(second_stage.timing.map(|t| t.wall_time_ms), Some(222));
         assert_eq!(second_stage.usage, usage_counts(&second_usage));
         assert_eq!(second_stage.model.as_ref(), Some(second_usage.model()));
     }
@@ -1597,7 +1592,7 @@ mod tests {
                 3,
                 EventBody::StageCompleted(StageCompletedProps {
                     index: 0,
-                    duration_ms: 333,
+                    timing: fabro_types::StageTiming::wall_only(333),
                     status: StageOutcome::Succeeded,
                     preferred_label: None,
                     suggested_next_ids: Vec::new(),
@@ -1624,7 +1619,7 @@ mod tests {
             "legacy node_visits must not override stored stage_id"
         );
         let stage = state.stage(&scoped_stage_id).unwrap();
-        assert_eq!(stage.duration_ms, Some(333));
+        assert_eq!(stage.timing.map(|t| t.wall_time_ms), Some(333));
         assert_eq!(stage.usage, usage_counts(&usage));
         assert_eq!(stage.model.as_ref(), Some(usage.model()));
         assert_eq!(stage.response.as_deref(), Some("done"));
@@ -1640,14 +1635,14 @@ mod tests {
             .apply_event(&test_stage_event(
                 3,
                 EventBody::StageFailed(StageFailedProps {
-                    index:       0,
-                    failure:     Some(fabro_types::FailureDetail::new(
+                    index:      0,
+                    failure:    Some(fabro_types::FailureDetail::new(
                         "try again",
                         fabro_types::FailureCategory::TransientInfra,
                     )),
-                    will_retry:  true,
-                    duration_ms: 444,
-                    billing:     Some(usage.clone()),
+                    will_retry: true,
+                    timing:     fabro_types::StageTiming::wall_only(444),
+                    billing:    Some(usage.clone()),
                 }),
                 scoped_stage_id.clone(),
             ))
@@ -1658,7 +1653,7 @@ mod tests {
             "current-visit fallback must not override stored stage_id"
         );
         let stage = state.stage(&scoped_stage_id).unwrap();
-        assert_eq!(stage.duration_ms, Some(444));
+        assert_eq!(stage.timing.map(|t| t.wall_time_ms), Some(444));
         assert_eq!(stage.usage, usage_counts(&usage));
         assert_eq!(stage.model.as_ref(), Some(usage.model()));
         let completion = stage.completion.as_ref().unwrap();
@@ -2146,7 +2141,7 @@ mod tests {
                         reason: FailureReason::WorkflowError,
                         detail: FailureDetail::new("boom", FailureCategory::Deterministic),
                     },
-                    duration_ms:          42,
+                    timing:               fabro_types::RunTiming::wall_only(42),
                     final_git_commit_sha: Some("abc123".to_string()),
                     final_patch:          Some(patch.to_string()),
                     diff_summary:         None,
@@ -2223,7 +2218,7 @@ mod tests {
                 5,
                 "run.completed",
                 &json!({
-                    "duration_ms": 42,
+                    "timing": {"wall_time_ms": 42, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
                     "artifact_count": 0,
                     "status": "succeeded",
                     "reason": "completed",
@@ -2264,7 +2259,7 @@ mod tests {
                             "category": "deterministic"
                         }
                     },
-                    "duration_ms": 42,
+                    "timing": {"wall_time_ms": 42, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
                     "diff_summary": {
                         "files_changed": 5,
                         "additions": 20,
@@ -2305,7 +2300,7 @@ mod tests {
                             detail
                         },
                     },
-                    duration_ms:          42,
+                    timing:               fabro_types::RunTiming::wall_only(42),
                     final_git_commit_sha: None,
                     final_patch:          None,
                     diff_summary:         None,
@@ -2346,7 +2341,7 @@ mod tests {
                 1,
                 EventBody::RunFailed(RunFailedProps {
                     failure:              failure.clone(),
-                    duration_ms:          42,
+                    timing:               fabro_types::RunTiming::wall_only(42),
                     final_git_commit_sha: Some("abc123".to_string()),
                     final_patch:          None,
                     diff_summary:         None,
@@ -2373,7 +2368,7 @@ mod tests {
             .apply_event(&test_event(
                 1,
                 EventBody::RunCompleted(RunCompletedProps {
-                    duration_ms:          10,
+                    timing:               fabro_types::RunTiming::wall_only(10),
                     artifact_count:       0,
                     status:               "succeeded".to_string(),
                     reason:               SuccessReason::Completed,
@@ -2539,7 +2534,7 @@ mod tests {
             .apply_event(&test_event(
                 1,
                 EventBody::RunCompleted(RunCompletedProps {
-                    duration_ms:          10,
+                    timing:               fabro_types::RunTiming::wall_only(10),
                     artifact_count:       0,
                     status:               "succeeded".to_string(),
                     reason:               SuccessReason::PartialSuccess,
@@ -2679,7 +2674,7 @@ mod tests {
             .apply_event(&test_event(
                 1,
                 EventBody::RunCompleted(RunCompletedProps {
-                    duration_ms:          10,
+                    timing:               fabro_types::RunTiming::wall_only(10),
                     artifact_count:       0,
                     status:               "succeeded".to_string(),
                     reason:               SuccessReason::Completed,
@@ -2722,7 +2717,7 @@ mod tests {
             index: 0,
             failure: Some(FailureDetail::new("boom", FailureCategory::TransientInfra)),
             will_retry,
-            duration_ms,
+            timing: fabro_types::StageTiming::wall_only(duration_ms),
             billing: None,
         }
     }
@@ -2739,7 +2734,7 @@ mod tests {
     fn completed_props(duration_ms: u64, status: StageOutcome) -> StageCompletedProps {
         StageCompletedProps {
             index: 0,
-            duration_ms,
+            timing: fabro_types::StageTiming::wall_only(duration_ms),
             status,
             preferred_label: None,
             suggested_next_ids: Vec::new(),
@@ -3016,7 +3011,7 @@ mod tests {
             .unwrap();
 
         let stage = state.stage(&stage_id).unwrap();
-        assert_eq!(stage.duration_ms, Some(42));
+        assert_eq!(stage.timing.map(|t| t.wall_time_ms), Some(42));
         assert_eq!(stage.usage, usage_counts(&usage));
         assert_eq!(stage.model.as_ref(), Some(usage.model()));
         assert_eq!(stage.state, StageState::Succeeded);
@@ -3044,7 +3039,7 @@ mod tests {
             .unwrap();
 
         let stage = state.stage(&stage_id).unwrap();
-        assert_eq!(stage.duration_ms, Some(10));
+        assert_eq!(stage.timing.map(|t| t.wall_time_ms), Some(10));
         assert_eq!(stage.state, StageState::Failed);
     }
 
@@ -3117,6 +3112,6 @@ mod tests {
         assert_eq!(stage.state, StageState::Running);
         // Prior attempt's terminal data must not leak into the new attempt.
         assert!(stage.completion.is_none());
-        assert_eq!(stage.duration_ms, None);
+        assert_eq!(stage.timing.map(|t| t.wall_time_ms), None);
     }
 }
