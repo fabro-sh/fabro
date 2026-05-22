@@ -532,3 +532,80 @@ issues = "{{ env.GH_PERM_LEVEL }}"
         assert_eq!(issues.as_source(), "{{ env.GH_PERM_LEVEL }}");
     }
 }
+
+mod run_agent_fabro_tools {
+    use crate::layers::Combine;
+    use crate::{SettingsLayer, WorkflowSettingsBuilder};
+
+    fn parse_settings(source: &str) -> SettingsLayer {
+        source
+            .parse::<SettingsLayer>()
+            .expect("fixture should parse via SettingsLayer")
+    }
+
+    #[test]
+    fn defaults_to_false_when_run_agent_is_absent() {
+        let settings = WorkflowSettingsBuilder::from_layer(&SettingsLayer::default())
+            .expect("empty settings should resolve")
+            .run;
+
+        assert!(!settings.agent.fabro_tools);
+    }
+
+    #[test]
+    fn resolves_true_from_run_agent_table() {
+        let settings = WorkflowSettingsBuilder::from_toml(
+            r#"
+_version = 1
+
+[run.agent]
+fabro_tools = true
+"#,
+        )
+        .expect("run.agent.fabro_tools should resolve");
+
+        assert!(settings.run.agent.fabro_tools);
+    }
+
+    #[test]
+    fn resolves_explicit_false_from_run_agent_table() {
+        let settings = WorkflowSettingsBuilder::from_toml(
+            r#"
+_version = 1
+
+[run.agent]
+fabro_tools = false
+"#,
+        )
+        .expect("run.agent.fabro_tools false should resolve");
+
+        assert!(!settings.run.agent.fabro_tools);
+    }
+
+    #[test]
+    fn higher_layer_false_overrides_lower_true() {
+        let workflow = parse_settings(
+            r#"
+_version = 1
+
+[run.agent]
+fabro_tools = false
+"#,
+        );
+        let user = parse_settings(
+            r#"
+_version = 1
+
+[run.agent]
+fabro_tools = true
+"#,
+        );
+        let merged = workflow.combine(user);
+
+        let settings = WorkflowSettingsBuilder::from_layer(&merged)
+            .expect("merged settings should resolve")
+            .run;
+
+        assert!(!settings.agent.fabro_tools);
+    }
+}

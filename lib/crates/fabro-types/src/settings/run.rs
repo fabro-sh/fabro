@@ -417,6 +417,7 @@ pub struct InterviewProviderSettings {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunAgentSettings {
+    pub fabro_tools: bool,
     pub permissions: Option<AgentPermissions>,
     pub mcps:        HashMap<String, McpServerSettings>,
 }

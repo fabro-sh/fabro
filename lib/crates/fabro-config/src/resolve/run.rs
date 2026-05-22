@@ -350,6 +350,7 @@ fn resolve_agent(agent: Option<&RunAgentLayer>) -> RunAgentSettings {
     };
 
     RunAgentSettings {
+        fabro_tools: agent.fabro_tools.unwrap_or(false),
         permissions: agent.permissions,
         mcps:        agent
             .mcps

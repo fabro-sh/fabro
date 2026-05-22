@@ -464,7 +464,7 @@ pub struct InterviewProviderLayer {
     pub channel: Option<InterpString>,
 }
 
-/// `[run.agent]` — agent knobs only (permissions, MCPs).
+/// `[run.agent]` — agent knobs only (Fabro tools, permissions, MCPs).
 #[derive(
     Debug,
     Clone,
@@ -477,6 +477,11 @@ pub struct InterviewProviderLayer {
 )]
 #[serde(deny_unknown_fields)]
 pub struct RunAgentLayer {
+    /// Allow workflow agents to use Fabro run-management tools.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(default = "false", value_type = "boolean")]
+    pub fabro_tools: Option<bool>,
+
     /// Default tool permission level for workflow agents.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[option(
@@ -484,6 +489,7 @@ pub struct RunAgentLayer {
         value_type = "\"read-only\" | \"read-write\" | \"full\""
     )]
     pub permissions: Option<AgentPermissions>,
+
     /// Agent-scoped MCP server entries, keyed by name.
     #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
     #[option(value_type = "table")]
