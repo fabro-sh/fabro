@@ -454,6 +454,12 @@ async fn stdio_server_initializes_and_lists_run_tools() {
             .is_some_and(serde_json::Value::is_object),
         "fabro_run_interact.answer should have an object JSON Schema: {interact_schema}"
     );
+    let create_schema = tools
+        .iter()
+        .find(|(name, _, _)| name == "fabro_run_create")
+        .map(|(_, _, schema)| schema)
+        .expect("fabro_run_create tool should be listed");
+    assert_create_schema_accepts_string_and_object_specs(create_schema);
     client
         .shutdown()
         .await
@@ -1495,6 +1501,44 @@ async fn mcp_create_validation_errors_happen_before_auth_or_network() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn mcp_create_string_shorthand_deserializes_before_auth() {
+    let context = test_context!();
+    let harness =
+        RealAuthHarness::start_with_dev_token(fabro_test::GitHubAppState::default()).await;
+    let target_url = harness.api_target();
+    let workflow = context.install_fixture("simple.fabro");
+    let client = spawn_mcp_client(&context, &["--server", &target_url]).await;
+
+    let result = client
+        .call_tool(
+            "fabro_run_create",
+            serde_json::json!({ "runs": [workflow] }),
+            std::time::Duration::from_secs(30),
+        )
+        .await
+        .expect("string shorthand should deserialize and return a tool-level auth error");
+    assert_eq!(result.is_error, Some(true), "tool should return error");
+    let error = result
+        .content
+        .first()
+        .and_then(|content| serde_json::to_value(content).ok())
+        .and_then(|content| content["text"].as_str().map(ToOwned::to_owned))
+        .expect("tool error should include text");
+    assert!(!error.contains("CreateRunSpec"), "{error}");
+    assert!(
+        error.contains("Run `fabro auth login` to authenticate."),
+        "{error}"
+    );
+    assert_eq!(client.list_tools().await.unwrap().len(), 6);
+
+    client
+        .shutdown()
+        .await
+        .expect("MCP client should shut down");
+    harness.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn mcp_interact_answer_validation_happens_before_auth_or_network() {
     let context = test_context!();
     let client = spawn_mcp_client(&context, &["--server", "http://127.0.0.1:9"]).await;
@@ -2201,6 +2245,35 @@ async fn call_tool_error_text(
         .and_then(|content| serde_json::to_value(content).ok())
         .and_then(|content| content["text"].as_str().map(ToOwned::to_owned))
         .expect("tool error should include text")
+}
+
+fn assert_create_schema_accepts_string_and_object_specs(schema: &serde_json::Value) {
+    let variants = schema
+        .pointer("/properties/runs/items/anyOf")
+        .and_then(serde_json::Value::as_array)
+        .expect("fabro_run_create runs items should use anyOf");
+
+    assert!(
+        variants.iter().any(|variant| variant["type"] == "string"),
+        "fabro_run_create should advertise workflow string shorthand: {schema}"
+    );
+    let object_variant = variants
+        .iter()
+        .find(|variant| variant["type"] == "object")
+        .unwrap_or_else(|| {
+            panic!("fabro_run_create should advertise object create specs: {schema}")
+        });
+    assert!(
+        object_variant.pointer("/properties/workflow").is_some(),
+        "object create spec should include workflow property: {schema}"
+    );
+    assert!(
+        object_variant
+            .get("required")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|required| required.iter().any(|field| field == "workflow")),
+        "object create spec should require workflow: {schema}"
+    );
 }
 
 async fn create_mcp_run(client: &McpClient, workflow: PathBuf, start: bool) -> String {

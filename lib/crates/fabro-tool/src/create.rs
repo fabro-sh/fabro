@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use fabro_types::RunId;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
 use serde_json::Value;
 
 use super::common::{self, FabroToolBackend, ToolError, ToolResult};
@@ -13,7 +13,177 @@ use super::manifest;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct FabroRunCreateParams {
-    pub runs: Vec<CreateRunSpec>,
+    pub runs: Vec<CreateRunSpecInput>,
+}
+
+#[derive(Debug)]
+pub enum CreateRunSpecInput {
+    Workflow(String),
+    Spec(CreateRunSpec),
+}
+
+impl<'de> Deserialize<'de> for CreateRunSpecInput {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        match value {
+            Value::String(workflow) => Ok(Self::Workflow(workflow)),
+            Value::Object(_) => CreateRunSpec::deserialize(value)
+                .map(Self::Spec)
+                .map_err(de::Error::custom),
+            other => Err(de::Error::custom(format!(
+                "expected workflow string shorthand or create spec object, got {}",
+                json_value_kind(&other)
+            ))),
+        }
+    }
+}
+
+fn json_value_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+impl From<CreateRunSpec> for CreateRunSpecInput {
+    fn from(spec: CreateRunSpec) -> Self {
+        Self::Spec(spec)
+    }
+}
+
+impl JsonSchema for CreateRunSpecInput {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> Cow<'static, str> {
+        "CreateRunSpecInput".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Fabro run create specification. Use a workflow string shorthand, or an object when setting create options.",
+            "anyOf": [
+                {
+                    "type": "string",
+                    "description": "Workflow selector shorthand. Equivalent to an object with only the workflow field set."
+                },
+                {
+                    "type": "object",
+                    "description": "Full create-run specification.",
+                    "required": ["workflow"],
+                    "properties": {
+                        "workflow": {
+                            "type": "string",
+                            "description": "Workflow selector, such as a workflow name or workflow file path."
+                        },
+                        "cwd": {
+                            "anyOf": [
+                                { "type": "string" },
+                                { "type": "null" }
+                            ],
+                            "description": "Working directory used to resolve relative workflow paths."
+                        },
+                        "run_id": {
+                            "anyOf": [
+                                { "type": "string" },
+                                { "type": "null" }
+                            ],
+                            "description": "Optional run id to use for the created run."
+                        },
+                        "parent_id": {
+                            "anyOf": [
+                                { "type": "string" },
+                                { "type": "null" }
+                            ],
+                            "description": "Optional parent run id or selector."
+                        },
+                        "goal": {
+                            "anyOf": [
+                                { "type": "string" },
+                                { "type": "null" }
+                            ],
+                            "description": "Optional goal override for the run."
+                        },
+                        "inputs": {
+                            "type": "object",
+                            "description": "Workflow input overrides keyed by input name.",
+                            "additionalProperties": {
+                                "description": "Run input override value. Inputs are TOML-compatible scalar values: string, boolean, integer, or float.",
+                                "anyOf": [
+                                    { "type": "string" },
+                                    { "type": "boolean" },
+                                    { "type": "integer" },
+                                    { "type": "number" }
+                                ]
+                            }
+                        },
+                        "labels": {
+                            "type": "object",
+                            "description": "Labels to attach to the created run.",
+                            "additionalProperties": { "type": "string" }
+                        },
+                        "dry_run": {
+                            "anyOf": [
+                                { "type": "boolean" },
+                                { "type": "null" }
+                            ],
+                            "description": "Whether the run should use dry-run mode."
+                        },
+                        "auto_approve": {
+                            "anyOf": [
+                                { "type": "boolean" },
+                                { "type": "null" }
+                            ],
+                            "description": "Whether agent approval prompts should be auto-approved."
+                        },
+                        "model": {
+                            "anyOf": [
+                                { "type": "string" },
+                                { "type": "null" }
+                            ],
+                            "description": "Model override for the run."
+                        },
+                        "provider": {
+                            "anyOf": [
+                                { "type": "string" },
+                                { "type": "null" }
+                            ],
+                            "description": "Provider override for the run."
+                        },
+                        "sandbox": {
+                            "anyOf": [
+                                { "type": "string" },
+                                { "type": "null" }
+                            ],
+                            "description": "Sandbox provider override for the run."
+                        },
+                        "preserve_sandbox": {
+                            "anyOf": [
+                                { "type": "boolean" },
+                                { "type": "null" }
+                            ],
+                            "description": "Whether to preserve the sandbox after the run."
+                        },
+                        "start": {
+                            "anyOf": [
+                                { "type": "boolean" },
+                                { "type": "null" }
+                            ],
+                            "description": "Whether to start the run immediately after creation. Defaults to true."
+                        }
+                    }
+                }
+            ]
+        })
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -108,6 +278,38 @@ impl TryFrom<FabroRunCreateParams> for ValidatedCreateRuns {
             .map(ValidatedCreateRunSpec::try_from)
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self { runs })
+    }
+}
+
+impl TryFrom<CreateRunSpecInput> for ValidatedCreateRunSpec {
+    type Error = ToolError;
+
+    fn try_from(spec: CreateRunSpecInput) -> Result<Self, Self::Error> {
+        match spec {
+            CreateRunSpecInput::Workflow(workflow) => {
+                let workflow = workflow.trim();
+                if workflow.is_empty() {
+                    return Err(ToolError::message("workflow must not be blank"));
+                }
+                Self::try_from(CreateRunSpec {
+                    workflow:         workflow.to_string(),
+                    cwd:              None,
+                    run_id:           None,
+                    parent_id:        None,
+                    goal:             None,
+                    inputs:           HashMap::new(),
+                    labels:           HashMap::new(),
+                    dry_run:          None,
+                    auto_approve:     None,
+                    model:            None,
+                    provider:         None,
+                    sandbox:          None,
+                    preserve_sandbox: None,
+                    start:            None,
+                })
+            }
+            CreateRunSpecInput::Spec(spec) => Self::try_from(spec),
+        }
     }
 }
 
@@ -329,6 +531,75 @@ mod tests {
         assert_eq!(spec.parent_id.as_deref(), Some("nightly-parent"));
     }
 
+    #[test]
+    fn create_params_accept_string_shorthand() {
+        let params: FabroRunCreateParams = serde_json::from_value(json!({
+            "runs": ["simple.fabro"]
+        }))
+        .expect("string shorthand should deserialize");
+
+        let params = ValidatedCreateRuns::try_from(params)
+            .expect("string shorthand should validate as workflow selector");
+        let spec = &params.runs[0];
+        assert_eq!(spec.workflow, "simple.fabro");
+        assert_eq!(spec.cwd, None);
+        assert_eq!(spec.run_id, None);
+        assert_eq!(spec.parent_id, None);
+        assert!(spec.inputs.is_empty());
+        assert!(spec.labels.is_empty());
+        assert_eq!(spec.start, None);
+    }
+
+    #[test]
+    fn create_params_preserve_object_form_options() {
+        let params: FabroRunCreateParams = serde_json::from_value(json!({
+            "runs": [{
+                "workflow": "simple.fabro",
+                "dry_run": true,
+                "auto_approve": true,
+                "labels": { "source": "mcp-test" },
+                "start": false
+            }]
+        }))
+        .expect("object form should deserialize");
+
+        let params =
+            ValidatedCreateRuns::try_from(params).expect("object form should still validate");
+        let spec = &params.runs[0];
+        assert_eq!(spec.workflow, "simple.fabro");
+        assert_eq!(spec.dry_run, Some(true));
+        assert_eq!(spec.auto_approve, Some(true));
+        assert_eq!(
+            spec.labels.get("source").map(String::as_str),
+            Some("mcp-test")
+        );
+        assert_eq!(spec.start, Some(false));
+    }
+
+    #[test]
+    fn create_params_reject_blank_string_shorthand_workflow() {
+        let params: FabroRunCreateParams = serde_json::from_value(json!({
+            "runs": ["  "]
+        }))
+        .expect("blank shorthand should deserialize before validation");
+
+        let err = ValidatedCreateRuns::try_from(params).expect_err("blank workflow should fail");
+        assert!(err.to_string().contains("workflow"), "{err}");
+    }
+
+    #[test]
+    fn create_params_missing_object_workflow_keeps_field_error() {
+        let err = serde_json::from_value::<FabroRunCreateParams>(json!({
+            "runs": [{ "dry_run": true }]
+        }))
+        .expect_err("object form without workflow should fail deserialization");
+
+        assert!(
+            err.to_string().contains("missing field `workflow`"),
+            "{err}"
+        );
+    }
+
     #[tokio::test]
     async fn create_runs_resolves_parent_selector_and_sends_parent_id_to_backend() {
         let temp = tempfile::tempdir().expect("tempdir should be created");
@@ -342,22 +613,25 @@ mod tests {
             resolved_selectors: Mutex::new(Vec::new()),
         });
         let params = ValidatedCreateRuns::try_from(FabroRunCreateParams {
-            runs: vec![CreateRunSpec {
-                workflow:         "simple.fabro".to_string(),
-                cwd:              None,
-                run_id:           None,
-                parent_id:        Some("nightly-parent".to_string()),
-                goal:             None,
-                inputs:           HashMap::new(),
-                labels:           HashMap::new(),
-                dry_run:          Some(true),
-                auto_approve:     Some(true),
-                model:            None,
-                provider:         None,
-                sandbox:          None,
-                preserve_sandbox: None,
-                start:            Some(false),
-            }],
+            runs: vec![
+                CreateRunSpec {
+                    workflow:         "simple.fabro".to_string(),
+                    cwd:              None,
+                    run_id:           None,
+                    parent_id:        Some("nightly-parent".to_string()),
+                    goal:             None,
+                    inputs:           HashMap::new(),
+                    labels:           HashMap::new(),
+                    dry_run:          Some(true),
+                    auto_approve:     Some(true),
+                    model:            None,
+                    provider:         None,
+                    sandbox:          None,
+                    preserve_sandbox: None,
+                    start:            Some(false),
+                }
+                .into(),
+            ],
         })
         .expect("create params should validate");
 
@@ -387,22 +661,24 @@ mod tests {
             created_parent_ids: Mutex::new(Vec::new()),
             resolved_selectors: Mutex::new(Vec::new()),
         });
-        let runs = (0..2)
-            .map(|_| CreateRunSpec {
-                workflow:         "simple.fabro".to_string(),
-                cwd:              None,
-                run_id:           None,
-                parent_id:        Some("nightly-parent".to_string()),
-                goal:             None,
-                inputs:           HashMap::new(),
-                labels:           HashMap::new(),
-                dry_run:          Some(true),
-                auto_approve:     Some(true),
-                model:            None,
-                provider:         None,
-                sandbox:          None,
-                preserve_sandbox: None,
-                start:            Some(false),
+        let runs: Vec<CreateRunSpecInput> = (0..2)
+            .map(|_| {
+                CreateRunSpecInput::from(CreateRunSpec {
+                    workflow:         "simple.fabro".to_string(),
+                    cwd:              None,
+                    run_id:           None,
+                    parent_id:        Some("nightly-parent".to_string()),
+                    goal:             None,
+                    inputs:           HashMap::new(),
+                    labels:           HashMap::new(),
+                    dry_run:          Some(true),
+                    auto_approve:     Some(true),
+                    model:            None,
+                    provider:         None,
+                    sandbox:          None,
+                    preserve_sandbox: None,
+                    start:            Some(false),
+                })
             })
             .collect();
         let params = ValidatedCreateRuns::try_from(FabroRunCreateParams { runs })
@@ -434,22 +710,25 @@ mod tests {
             resolved_selectors: Mutex::new(Vec::new()),
         });
         let params = ValidatedCreateRuns::try_from(FabroRunCreateParams {
-            runs: vec![CreateRunSpec {
-                workflow:         "simple.fabro".to_string(),
-                cwd:              None,
-                run_id:           None,
-                parent_id:        Some(parent_id.to_string()),
-                goal:             None,
-                inputs:           HashMap::new(),
-                labels:           HashMap::new(),
-                dry_run:          Some(true),
-                auto_approve:     Some(true),
-                model:            None,
-                provider:         None,
-                sandbox:          None,
-                preserve_sandbox: None,
-                start:            Some(false),
-            }],
+            runs: vec![
+                CreateRunSpec {
+                    workflow:         "simple.fabro".to_string(),
+                    cwd:              None,
+                    run_id:           None,
+                    parent_id:        Some(parent_id.to_string()),
+                    goal:             None,
+                    inputs:           HashMap::new(),
+                    labels:           HashMap::new(),
+                    dry_run:          Some(true),
+                    auto_approve:     Some(true),
+                    model:            None,
+                    provider:         None,
+                    sandbox:          None,
+                    preserve_sandbox: None,
+                    start:            Some(false),
+                }
+                .into(),
+            ],
         })
         .expect("create params should validate");
 

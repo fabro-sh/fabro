@@ -257,4 +257,48 @@ mod tests {
         assert!(!schema_text.contains("\"node_id\""));
         assert!(!schema_text.contains("\"visit\""));
     }
+
+    #[test]
+    fn fabro_run_create_tool_advertises_string_and_object_run_specs() {
+        let settings = FabroMcpServerSettings {
+            cwd:            PathBuf::from("."),
+            config_path:    PathBuf::from("fabro.toml"),
+            client_factory: Arc::new(|| {
+                Box::pin(async { panic!("client should not be constructed while listing tools") })
+            }),
+        };
+        let server = FabroMcpServer::new(Arc::new(settings));
+        let tools = server.tool_router.list_all();
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name.as_ref() == "fabro_run_create")
+            .expect("fabro_run_create should be registered");
+        let schema = Value::Object(tool.input_schema.as_ref().clone());
+        let variants = schema
+            .pointer("/properties/runs/items/anyOf")
+            .and_then(Value::as_array)
+            .expect("runs items should advertise string and object variants");
+
+        assert!(
+            variants.iter().any(|variant| variant["type"] == "string"),
+            "runs items should include workflow string shorthand: {schema}"
+        );
+        let object_variant = variants
+            .iter()
+            .find(|variant| variant["type"] == "object")
+            .unwrap_or_else(|| {
+                panic!("runs items should include object create spec variant: {schema}")
+            });
+        assert!(
+            object_variant.pointer("/properties/workflow").is_some(),
+            "object create spec should expose workflow property: {schema}"
+        );
+        assert!(
+            object_variant
+                .get("required")
+                .and_then(Value::as_array)
+                .is_some_and(|required| required.iter().any(|name| name == "workflow")),
+            "object create spec should require workflow: {schema}"
+        );
+    }
 }

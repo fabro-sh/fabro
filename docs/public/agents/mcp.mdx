@@ -34,6 +34,28 @@ Pass `--server` when the MCP client should connect to a specific Fabro server, o
 | `fabro_run_gather` | Wait for runs to reach terminal states, returning current state on timeout. |
 | `fabro_run_events` | List, inspect, or search stored events for a run. |
 
+For a simple create call, `fabro_run_create` accepts a workflow selector string:
+
+```json
+{ "runs": ["sleeper"] }
+```
+
+Use the object form when you need create options:
+
+```json
+{
+  "runs": [
+    {
+      "workflow": "sleeper",
+      "auto_approve": true,
+      "dry_run": true,
+      "labels": { "source": "mcp" },
+      "start": true
+    }
+  ]
+}
+```
+
 Run summaries returned by the MCP server include parent metadata. Use `parent_id` on `fabro_run_create` to create a child run, `parent_id` on `fabro_run_search` to list direct children, and the `link_parent` or `unlink_parent` actions on `fabro_run_interact` to change an existing run's parent.
 
 ## Fabro agents as MCP clients

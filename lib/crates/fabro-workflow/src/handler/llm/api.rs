@@ -306,7 +306,11 @@ fn ensure_current_run_parent(
 ) -> fabro_tool::ToolResult<()> {
     let current_parent = current_run_id.to_string();
     for run in &params.runs {
-        match run.parent_id.as_deref().map(str::trim) {
+        let parent_id = match run {
+            fabro_tool::CreateRunSpecInput::Workflow(_) => None,
+            fabro_tool::CreateRunSpecInput::Spec(spec) => spec.parent_id.as_deref().map(str::trim),
+        };
+        match parent_id {
             None => {}
             Some("") => {
                 return Err(fabro_tool::ToolError::message(

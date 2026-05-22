@@ -21,9 +21,9 @@ pub use common::{
     tool_definitions,
 };
 pub use create::{
-    CreateRunOptions, CreateRunSpec, CreateRunsResult, CreatedRunResult, FabroRunCreateParams,
-    RunInputValue, ValidatedCreateRunSpec, ValidatedCreateRuns, create_runs, create_runs_text,
-    create_runs_with_options,
+    CreateRunOptions, CreateRunSpec, CreateRunSpecInput, CreateRunsResult, CreatedRunResult,
+    FabroRunCreateParams, RunInputValue, ValidatedCreateRunSpec, ValidatedCreateRuns, create_runs,
+    create_runs_text, create_runs_with_options,
 };
 pub use events::{
     FabroRunEventsParams, RunEventResult, RunEventsAction, RunEventsResult, ValidatedRunEvents,
