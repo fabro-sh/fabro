@@ -1999,7 +1999,7 @@ mod tests {
     #[test]
     fn agent_memory_loaded_serializes_with_canonical_name() {
         let body = EventBody::AgentMemoryLoaded(AgentMemoryLoadedProps {
-            provider_profile:   fabro_model::AgentProfileKind::Anthropic,
+            provider_profile:   "anthropic".to_string(),
             files:              vec![AgentMemoryFileProps {
                 path:         "/repo/AGENTS.md".to_string(),
                 byte_count:   100,
@@ -2029,7 +2029,7 @@ mod tests {
     #[test]
     fn agent_skills_discovered_serializes_with_canonical_name() {
         let body = EventBody::AgentSkillsDiscovered(AgentSkillsDiscoveredProps {
-            provider_profile: fabro_model::AgentProfileKind::OpenAi,
+            provider_profile: "openai".to_string(),
             source_dirs:      vec!["/repo/.fabro/skills".to_string()],
             skills:           vec![AgentSkillSummary {
                 name:        "commit".to_string(),

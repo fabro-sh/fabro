@@ -3,7 +3,7 @@ use std::time::SystemTime;
 use chrono::{DateTime, Utc};
 use fabro_llm::Error as LlmError;
 use fabro_llm::types::{ContentPart, ThinkingData, TokenCounts, ToolCall, ToolResult};
-use fabro_model::{AgentProfileKind, ModelRef};
+use fabro_model::ModelRef;
 use fabro_types::SessionMessage;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -194,6 +194,33 @@ pub enum SessionState {
     Closed,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryFileSummary {
+    pub path:         String,
+    pub byte_count:   usize,
+    pub loaded_bytes: usize,
+    pub truncated:    bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillSummary {
+    pub name:        String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillActivationSource {
+    Slash,
+    Tool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpToolSummary {
+    pub name:          String,
+    pub original_name: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentEvent {
     SessionStarted {
@@ -299,25 +326,27 @@ pub enum AgentEvent {
     },
     McpServerReady {
         server_name: String,
-        tools:       Vec<fabro_types::AgentMcpToolSummary>,
+        tool_count:  usize,
+        tools:       Vec<McpToolSummary>,
     },
     McpServerFailed {
         server_name: String,
         error:       String,
     },
     MemoryLoaded {
-        provider_profile: AgentProfileKind,
-        files:            Vec<fabro_types::AgentMemoryFileProps>,
-        budget_bytes:     usize,
+        provider_profile:   String,
+        files:              Vec<MemoryFileSummary>,
+        total_loaded_bytes: usize,
+        budget_bytes:       usize,
     },
     SkillsDiscovered {
-        provider_profile: AgentProfileKind,
+        provider_profile: String,
         source_dirs:      Vec<String>,
-        skills:           Vec<fabro_types::AgentSkillSummary>,
+        skills:           Vec<SkillSummary>,
     },
     SkillActivated {
         skill_name: String,
-        source:     fabro_types::AgentSkillActivationSource,
+        source:     SkillActivationSource,
     },
     /// New todo / task was created. Carries the full row so the projection
     /// can be reconstructed from `todo.created` alone.
@@ -508,24 +537,30 @@ impl AgentEvent {
             Self::SubAgentClosed { agent_id, depth } => {
                 debug!(session_id, agent_id, depth, "Sub-agent closed");
             }
-            Self::McpServerReady { server_name, tools } => {
+            Self::McpServerReady {
+                server_name,
+                tool_count,
+                tools,
+            } => {
                 info!(
                     session_id,
                     server = server_name.as_str(),
-                    tool_count = tools.len(),
+                    tool_count,
+                    summary_count = tools.len(),
                     "MCP server ready"
                 );
             }
             Self::MemoryLoaded {
                 provider_profile,
                 files,
+                total_loaded_bytes,
                 budget_bytes,
             } => {
                 info!(
                     session_id,
-                    provider_profile = %provider_profile,
+                    provider_profile = provider_profile.as_str(),
                     file_count = files.len(),
-                    total_loaded_bytes = files.iter().map(|f| f.loaded_bytes).sum::<usize>(),
+                    total_loaded_bytes,
                     budget_bytes,
                     "Agent memory loaded"
                 );
@@ -780,6 +815,7 @@ mod tests {
     fn mcp_server_ready_constructible() {
         let event = AgentEvent::McpServerReady {
             server_name: "filesystem".into(),
+            tool_count:  0,
             tools:       Vec::new(),
         };
         assert!(matches!(
@@ -804,6 +840,7 @@ mod tests {
         let events = vec![
             AgentEvent::McpServerReady {
                 server_name: "fs".into(),
+                tool_count:  0,
                 tools:       Vec::new(),
             },
             AgentEvent::McpServerFailed {

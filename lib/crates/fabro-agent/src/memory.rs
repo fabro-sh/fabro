@@ -11,14 +11,14 @@ pub const BUDGET_BYTES: usize = 32768;
 
 /// One discovered memory file. `content` is what gets inlined into the
 /// system prompt. The remaining fields describe the file for
-/// observability and never carry the file's text. The number of bytes
-/// actually loaded into the prompt is `content.len()`.
+/// observability and never carry the file's text.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MemoryDocument {
-    pub path:       String,
-    pub content:    String,
-    pub byte_count: usize,
-    pub truncated:  bool,
+    pub path:         String,
+    pub content:      String,
+    pub byte_count:   usize,
+    pub loaded_bytes: usize,
+    pub truncated:    bool,
 }
 
 pub async fn discover_memory(
@@ -67,6 +67,7 @@ pub async fn discover_memory(
                         path,
                         content,
                         byte_count,
+                        loaded_bytes: byte_count,
                         truncated: false,
                     });
                 } else if budget_remaining > 0 {
@@ -77,11 +78,13 @@ pub async fn discover_memory(
                         "Project doc truncated to fit budget"
                     );
                     let truncated = truncate_to_budget(&content, budget_remaining);
+                    let loaded_bytes = truncated.len();
                     budget_remaining = 0;
                     results.push(MemoryDocument {
                         path,
                         content: truncated,
                         byte_count,
+                        loaded_bytes,
                         truncated: true,
                     });
                 } else {
@@ -91,7 +94,7 @@ pub async fn discover_memory(
         }
     }
 
-    let total_bytes: usize = results.iter().map(|doc| doc.content.len()).sum();
+    let total_bytes: usize = results.iter().map(|doc| doc.loaded_bytes).sum();
     info!(files = results.len(), total_bytes, "Project docs loaded");
 
     Ok(results)
@@ -170,7 +173,7 @@ mod tests {
         assert_eq!(docs[0].content, "Agent instructions");
         assert_eq!(docs[0].path, "/repo/AGENTS.md");
         assert_eq!(docs[0].byte_count, "Agent instructions".len());
-        assert_eq!(docs[0].content.len(), docs[0].byte_count);
+        assert_eq!(docs[0].loaded_bytes, docs[0].byte_count);
         assert!(!docs[0].truncated);
     }
 
