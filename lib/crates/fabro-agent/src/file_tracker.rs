@@ -82,9 +82,9 @@ impl FileTracker {
                     };
                     for line in content.lines() {
                         let line = line.trim();
-                        if let Some(path) = line.strip_prefix("Added file: ") {
+                        if let Some(path) = line.strip_prefix("A ") {
                             self.record_write(path.trim());
-                        } else if let Some(path) = line.strip_prefix("Updated file: ") {
+                        } else if let Some(path) = line.strip_prefix("M ") {
                             self.record_edit(path.trim());
                         }
                     }
@@ -189,7 +189,9 @@ mod tests {
         )];
         let results = vec![ToolResult::success(
             "tc1",
-            serde_json::json!("Added file: src/new.rs\nUpdated file: src/old.rs"),
+            serde_json::json!(
+                "Success. Updated the following files:\nA src/new.rs\nM src/old.rs\n"
+            ),
         )];
         tracker.record_from_tool_calls(&tool_calls, &results);
         assert_eq!(

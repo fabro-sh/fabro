@@ -444,6 +444,53 @@ pub struct ToolDefinition {
     pub parameters:  serde_json::Value,
 }
 
+const CUSTOM_TOOL_TYPE_KEY: &str = "x-fabro-tool-type";
+const CUSTOM_TOOL_FORMAT_KEY: &str = "x-fabro-custom-tool-format";
+
+impl ToolDefinition {
+    #[must_use]
+    pub fn function(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        parameters: serde_json::Value,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            parameters,
+        }
+    }
+
+    #[must_use]
+    pub fn custom(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        format: impl Into<serde_json::Value>,
+    ) -> Self {
+        Self {
+            name:        name.into(),
+            description: description.into(),
+            parameters:  serde_json::json!({
+                CUSTOM_TOOL_TYPE_KEY: "custom",
+                CUSTOM_TOOL_FORMAT_KEY: format.into(),
+            }),
+        }
+    }
+
+    #[must_use]
+    pub fn is_custom(&self) -> bool {
+        self.parameters
+            .get(CUSTOM_TOOL_TYPE_KEY)
+            .and_then(serde_json::Value::as_str)
+            == Some("custom")
+    }
+
+    #[must_use]
+    pub fn custom_format(&self) -> Option<&serde_json::Value> {
+        self.parameters.get(CUSTOM_TOOL_FORMAT_KEY)
+    }
+}
+
 // --- 5.3 ToolChoice ---
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

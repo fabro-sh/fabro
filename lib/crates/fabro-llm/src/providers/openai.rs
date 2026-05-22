@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use base64::Engine;
@@ -306,6 +307,7 @@ fn provider_error_from_openai_error_json(error: &serde_json::Value) -> Error {
 async fn translate_input(messages: &[Message]) -> (Option<String>, Vec<serde_json::Value>) {
     let mut instructions_parts: Vec<String> = Vec::new();
     let mut input: Vec<serde_json::Value> = Vec::new();
+    let mut tool_call_types: HashMap<String, (String, String)> = HashMap::new();
 
     for msg in messages {
         match msg.role {
@@ -386,10 +388,6 @@ async fn translate_input(messages: &[Message]) -> (Option<String>, Vec<serde_jso
                             }));
                         }
                         ContentPart::ToolCall(tc) if !tc.name.is_empty() => {
-                            let args = tc
-                                .raw_arguments
-                                .as_ref()
-                                .map_or_else(|| tc.arguments.to_string(), Clone::clone);
                             // Use the item-level ID (fc_xxx) for the `id` field;
                             // fall back to tc.id if no provider_metadata was stored.
                             let item_id = tc
@@ -398,13 +396,38 @@ async fn translate_input(messages: &[Message]) -> (Option<String>, Vec<serde_jso
                                 .and_then(|m| m.get("id"))
                                 .and_then(serde_json::Value::as_str)
                                 .unwrap_or(&tc.id);
-                            input.push(serde_json::json!({
-                                "type": "function_call",
-                                "id": item_id,
-                                "call_id": tc.id,
-                                "name": tc.name,
-                                "arguments": args,
-                            }));
+                            tool_call_types
+                                .insert(tc.id.clone(), (tc.tool_type.clone(), tc.name.clone()));
+                            if tc.tool_type == "custom" {
+                                let raw_input = tc.raw_arguments.as_ref().map_or_else(
+                                    || {
+                                        tc.arguments.as_str().map_or_else(
+                                            || tc.arguments.to_string(),
+                                            str::to_string,
+                                        )
+                                    },
+                                    Clone::clone,
+                                );
+                                input.push(serde_json::json!({
+                                    "type": "custom_tool_call",
+                                    "id": item_id,
+                                    "call_id": tc.id,
+                                    "name": tc.name,
+                                    "input": raw_input,
+                                }));
+                            } else {
+                                let args = tc
+                                    .raw_arguments
+                                    .as_ref()
+                                    .map_or_else(|| tc.arguments.to_string(), Clone::clone);
+                                input.push(serde_json::json!({
+                                    "type": "function_call",
+                                    "id": item_id,
+                                    "call_id": tc.id,
+                                    "name": tc.name,
+                                    "arguments": args,
+                                }));
+                            }
                         }
                         ContentPart::Other { data, .. } if part.is_opaque_openai() => {
                             input.push(data.clone());
@@ -420,12 +443,24 @@ async fn translate_input(messages: &[Message]) -> (Option<String>, Vec<serde_jso
                             .content
                             .as_str()
                             .map_or_else(|| tr.content.to_string(), str::to_string);
-                        let mut item = serde_json::json!({
-                            "type": "function_call_output",
-                            "call_id": tr.tool_call_id,
-                            "output": output,
-                        });
-                        if tr.is_error {
+                        let is_custom = tool_call_types
+                            .get(&tr.tool_call_id)
+                            .is_some_and(|(tool_type, _)| tool_type == "custom")
+                            || msg.name.as_deref() == Some("apply_patch");
+                        let mut item = if is_custom {
+                            serde_json::json!({
+                                "type": "custom_tool_call_output",
+                                "call_id": tr.tool_call_id,
+                                "output": output,
+                            })
+                        } else {
+                            serde_json::json!({
+                                "type": "function_call_output",
+                                "call_id": tr.tool_call_id,
+                                "output": output,
+                            })
+                        };
+                        if tr.is_error && !is_custom {
                             item["status"] = serde_json::json!("incomplete");
                         }
                         input.push(item);
@@ -449,12 +484,21 @@ fn translate_tools(tools: &[ToolDefinition]) -> Vec<serde_json::Value> {
     tools
         .iter()
         .map(|t| {
-            serde_json::json!({
-                "type": "function",
-                "name": t.name,
-                "description": t.description,
-                "parameters": t.parameters,
-            })
+            if t.is_custom() {
+                serde_json::json!({
+                    "type": "custom",
+                    "name": t.name,
+                    "description": t.description,
+                    "format": t.custom_format().cloned().unwrap_or_else(|| serde_json::json!({})),
+                })
+            } else {
+                serde_json::json!({
+                    "type": "function",
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.parameters,
+                })
+            }
         })
         .collect()
 }
@@ -656,6 +700,37 @@ fn parse_output(output: &[serde_json::Value]) -> (Vec<ContentPart>, bool) {
                 }
                 parts.push(ContentPart::ToolCall(tc));
             }
+            Some("custom_tool_call") => {
+                let item_id = item
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                let call_id = item
+                    .get("call_id")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(item_id)
+                    .to_string();
+                let name = item
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                if name.is_empty() {
+                    continue;
+                }
+                has_tool_calls = true;
+                let raw_input = item
+                    .get("input")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                let mut tc = ToolCall::new(call_id, name, serde_json::json!(raw_input));
+                tc.tool_type = "custom".to_string();
+                tc.raw_arguments = Some(raw_input.to_string());
+                if !item_id.is_empty() {
+                    tc.provider_metadata = Some(serde_json::json!({"id": item_id}));
+                }
+                parts.push(ContentPart::ToolCall(tc));
+            }
             _ => {}
         }
     }
@@ -773,7 +848,10 @@ fn process_sse_event(
         "response.created" => handle_response_created(state, &json),
         "response.output_text.delta" => handle_text_delta(state, &json, &mut events),
         "response.function_call_arguments.delta" => {
-            handle_tool_call_delta(state, &json, &mut events);
+            handle_tool_call_delta(state, &json, &mut events, "function");
+        }
+        "response.custom_tool_call_input.delta" => {
+            handle_tool_call_delta(state, &json, &mut events, "custom");
         }
         "response.output_item.done" => handle_output_item_done(state, &json, &mut events),
         "response.completed" | "response.incomplete" => {
@@ -845,6 +923,7 @@ fn handle_tool_call_delta(
     state: &mut SseStreamState,
     json: &serde_json::Value,
     events: &mut Vec<StreamEvent>,
+    tool_type: &str,
 ) {
     let Some(delta) = json.get("delta").and_then(serde_json::Value::as_str) else {
         return;
@@ -871,6 +950,9 @@ fn handle_tool_call_delta(
     if let Some(idx) = tc_index {
         if let Some(ref mut raw) = state.tool_calls[idx].raw_arguments {
             raw.push_str(delta);
+            if tool_type == "custom" {
+                state.tool_calls[idx].arguments = serde_json::json!(raw.clone());
+            }
         }
     } else {
         let name = json
@@ -878,7 +960,16 @@ fn handle_tool_call_delta(
             .and_then(serde_json::Value::as_str)
             .unwrap_or("")
             .to_string();
-        let mut tc = ToolCall::new(lookup_id, name, serde_json::json!({}));
+        let mut tc = ToolCall::new(
+            lookup_id,
+            name,
+            if tool_type == "custom" {
+                serde_json::json!(delta)
+            } else {
+                serde_json::json!({})
+            },
+        );
+        tc.tool_type = tool_type.to_string();
         tc.raw_arguments = Some(delta.to_string());
         // Preserve item-level ID (fc_xxx) for Responses API round-trip
         if !item_id.is_empty() && item_id != *lookup_id {
@@ -897,6 +988,7 @@ fn handle_tool_call_delta(
 
     events.push(StreamEvent::ToolCallDelta {
         tool_call: ToolCall {
+            tool_type: tool_type.to_string(),
             raw_arguments: Some(delta.to_string()),
             ..current_tc
         },
@@ -963,6 +1055,46 @@ fn handle_output_item_done(
 
             if let Some(existing) = state.tool_calls.iter_mut().find(|t| t.id == call_id) {
                 existing.name.clone_from(&name);
+                existing.arguments = tc.arguments.clone();
+                existing.raw_arguments.clone_from(&tc.raw_arguments);
+                existing.provider_metadata.clone_from(&tc.provider_metadata);
+            } else {
+                state.tool_calls.push(tc.clone());
+            }
+
+            events.push(StreamEvent::ToolCallEnd { tool_call: tc });
+        }
+        Some("custom_tool_call") => {
+            let item = json.get("item").unwrap_or(json);
+            let item_id = item
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            let call_id = item
+                .get("call_id")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(item_id)
+                .to_string();
+            let name = item
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let raw_input = item
+                .get("input")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+
+            let mut tc = ToolCall::new(&call_id, &name, serde_json::json!(raw_input));
+            tc.tool_type = "custom".to_string();
+            tc.raw_arguments = Some(raw_input.to_string());
+            if !item_id.is_empty() {
+                tc.provider_metadata = Some(serde_json::json!({"id": item_id}));
+            }
+
+            if let Some(existing) = state.tool_calls.iter_mut().find(|t| t.id == call_id) {
+                existing.name.clone_from(&name);
+                existing.tool_type = "custom".to_string();
                 existing.arguments = tc.arguments.clone();
                 existing.raw_arguments.clone_from(&tc.raw_arguments);
                 existing.provider_metadata.clone_from(&tc.provider_metadata);
@@ -1205,7 +1337,7 @@ mod tests {
     use super::*;
     use crate::error::ProviderErrorKind;
     use crate::providers::common::LineReader;
-    use crate::types::{AudioData, DocumentData};
+    use crate::types::{AudioData, DocumentData, ToolResult};
 
     fn minimal_request() -> Request {
         Request {
@@ -1311,6 +1443,49 @@ mod tests {
             body["include"],
             serde_json::json!(["reasoning.encrypted_content"])
         );
+    }
+
+    #[tokio::test]
+    async fn build_request_body_emits_custom_apply_patch_tool() {
+        let mut request = minimal_request();
+        request.tools = Some(vec![
+            ToolDefinition::custom(
+                "apply_patch",
+                "Use the `apply_patch` tool to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON.",
+                serde_json::json!({
+                    "type": "grammar",
+                    "syntax": "lark",
+                    "definition": "start: begin_patch hunk+ end_patch",
+                }),
+            ),
+            ToolDefinition::function(
+                "read_file",
+                "Read file",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {"file_path": {"type": "string"}},
+                    "required": ["file_path"],
+                }),
+            ),
+        ]);
+
+        let body = build_request_body(&request, false, false).await;
+        let tools = body["tools"].as_array().expect("tools should be present");
+        let apply_patch = tools
+            .iter()
+            .find(|tool| tool["name"] == "apply_patch")
+            .expect("apply_patch tool should be present");
+        let read_file = tools
+            .iter()
+            .find(|tool| tool["name"] == "read_file")
+            .expect("read_file tool should be present");
+
+        assert_eq!(apply_patch["type"], "custom");
+        assert_eq!(apply_patch["format"]["type"], "grammar");
+        assert_eq!(apply_patch["format"]["syntax"], "lark");
+        assert!(apply_patch.get("parameters").is_none());
+        assert_eq!(read_file["type"], "function");
+        assert_eq!(read_file["parameters"]["type"], "object");
     }
 
     #[tokio::test]
@@ -1465,6 +1640,38 @@ mod tests {
                     .as_ref()
                     .expect("provider_metadata should be set");
                 assert_eq!(meta["id"], "fc_abc123");
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_output_preserves_custom_tool_call_raw_input() {
+        let patch = "*** Begin Patch\n*** Add File: hello.txt\n+hello\n*** End Patch\n";
+        let output = vec![serde_json::json!({
+            "type": "custom_tool_call",
+            "id": "ctc_abc123",
+            "call_id": "call_xyz789",
+            "name": "apply_patch",
+            "input": patch,
+        })];
+
+        let (parts, has_tool_calls) = parse_output(&output);
+
+        assert!(has_tool_calls);
+        assert_eq!(parts.len(), 1);
+        match &parts[0] {
+            ContentPart::ToolCall(tc) => {
+                assert_eq!(tc.id, "call_xyz789");
+                assert_eq!(tc.name, "apply_patch");
+                assert_eq!(tc.tool_type, "custom");
+                assert_eq!(tc.arguments, serde_json::json!(patch));
+                assert_eq!(tc.raw_arguments.as_deref(), Some(patch));
+                let meta = tc
+                    .provider_metadata
+                    .as_ref()
+                    .expect("provider metadata should preserve item id");
+                assert_eq!(meta["id"], "ctc_abc123");
             }
             other => panic!("expected ToolCall, got {other:?}"),
         }
@@ -1711,6 +1918,85 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn custom_tool_call_history_round_trips_through_translate_input() {
+        let patch = "*** Begin Patch\n*** Delete File: stale.txt\n*** End Patch\n";
+        let mut tc = ToolCall::new("call_001", "apply_patch", serde_json::json!(patch));
+        tc.tool_type = "custom".to_string();
+        tc.raw_arguments = Some(patch.to_string());
+        tc.provider_metadata = Some(serde_json::json!({"id": "ctc_def456"}));
+
+        let msg = Message {
+            role:         Role::Assistant,
+            content:      vec![ContentPart::ToolCall(tc)],
+            name:         None,
+            tool_call_id: None,
+        };
+
+        let (_, input) = translate_input(&[msg]).await;
+
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["type"], "custom_tool_call");
+        assert_eq!(input[0]["id"], "ctc_def456");
+        assert_eq!(input[0]["call_id"], "call_001");
+        assert_eq!(input[0]["name"], "apply_patch");
+        assert_eq!(input[0]["input"], patch);
+    }
+
+    #[tokio::test]
+    async fn custom_tool_result_history_round_trips_through_translate_input() {
+        let msg = Message {
+            role:         Role::Tool,
+            content:      vec![ContentPart::ToolResult(ToolResult::success(
+                "call_001",
+                serde_json::json!("Success. Updated the following files:\nA hello.txt\n"),
+            ))],
+            name:         Some("apply_patch".to_string()),
+            tool_call_id: Some("call_001".to_string()),
+        };
+
+        let (_, input) = translate_input(&[msg]).await;
+
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["type"], "custom_tool_call_output");
+        assert_eq!(input[0]["call_id"], "call_001");
+        assert_eq!(
+            input[0]["output"],
+            "Success. Updated the following files:\nA hello.txt\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn custom_tool_result_history_uses_prior_custom_call_without_tool_message_name() {
+        let patch = "*** Begin Patch\n*** Add File: hello.txt\n+hello\n*** End Patch\n";
+        let mut tc = ToolCall::new("call_001", "apply_patch", serde_json::json!(patch));
+        tc.tool_type = "custom".to_string();
+        tc.raw_arguments = Some(patch.to_string());
+        tc.provider_metadata = Some(serde_json::json!({"id": "ctc_def456"}));
+
+        let assistant_msg = Message {
+            role:         Role::Assistant,
+            content:      vec![ContentPart::ToolCall(tc)],
+            name:         None,
+            tool_call_id: None,
+        };
+        let tool_msg = Message::tool_result(
+            "call_001",
+            serde_json::json!("Success. Updated the following files:\nA hello.txt\n"),
+            false,
+        );
+
+        let (_, input) = translate_input(&[assistant_msg, tool_msg]).await;
+
+        assert_eq!(input.len(), 2);
+        assert_eq!(input[1]["type"], "custom_tool_call_output");
+        assert_eq!(input[1]["call_id"], "call_001");
+        assert_eq!(
+            input[1]["output"],
+            "Success. Updated the following files:\nA hello.txt\n"
+        );
+    }
+
+    #[tokio::test]
     async fn build_request_body_includes_stop_sequences() {
         let mut request = minimal_request();
         request.stop_sequences = Some(vec!["END".to_string(), "STOP".to_string()]);
@@ -1780,6 +2066,84 @@ mod tests {
         assert_eq!(state.usage.reasoning_tokens, 300);
         assert_eq!(state.usage.cache_write_tokens, 0);
         assert_eq!(state.usage.total_tokens(), 700);
+    }
+
+    #[test]
+    fn custom_tool_call_streaming_delta_accumulates_raw_input() {
+        let mut state = empty_sse_state();
+        let first = r#"{
+            "type": "response.custom_tool_call_input.delta",
+            "item_id": "ctc_abc",
+            "call_id": "call_001",
+            "delta": "*** Begin"
+        }"#;
+        let second = r#"{
+            "type": "response.custom_tool_call_input.delta",
+            "item_id": "ctc_abc",
+            "call_id": "call_001",
+            "delta": " Patch\n"
+        }"#;
+
+        let first_events = process_sse_event(
+            &mut state,
+            Some("response.custom_tool_call_input.delta"),
+            first,
+        )
+        .expect("first custom delta should parse");
+        let second_events = process_sse_event(
+            &mut state,
+            Some("response.custom_tool_call_input.delta"),
+            second,
+        )
+        .expect("second custom delta should parse");
+
+        assert!(matches!(
+            first_events.iter().find(|event| matches!(event, StreamEvent::ToolCallStart { .. })),
+            Some(StreamEvent::ToolCallStart { tool_call })
+                if tool_call.id == "call_001" && tool_call.tool_type == "custom"
+        ));
+        assert!(matches!(
+            second_events.last(),
+            Some(StreamEvent::ToolCallDelta { tool_call })
+                if tool_call.raw_arguments.as_deref() == Some(" Patch\n")
+                    && tool_call.tool_type == "custom"
+        ));
+        assert_eq!(
+            state.tool_calls[0].raw_arguments.as_deref(),
+            Some("*** Begin Patch\n")
+        );
+    }
+
+    #[test]
+    fn custom_tool_call_output_item_done_emits_tool_call_end() {
+        let mut state = empty_sse_state();
+        let patch = "*** Begin Patch\n*** Add File: hello.txt\n+hello\n*** End Patch\n";
+        let data = serde_json::json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "custom_tool_call",
+                "id": "ctc_abc",
+                "call_id": "call_001",
+                "name": "apply_patch",
+                "input": patch,
+            }
+        });
+
+        let events = process_sse_event(
+            &mut state,
+            Some("response.output_item.done"),
+            &data.to_string(),
+        )
+        .expect("custom output item should parse");
+
+        assert!(matches!(
+            events.last(),
+            Some(StreamEvent::ToolCallEnd { tool_call })
+                if tool_call.id == "call_001"
+                    && tool_call.name == "apply_patch"
+                    && tool_call.tool_type == "custom"
+                    && tool_call.raw_arguments.as_deref() == Some(patch)
+        ));
     }
 
     #[test]

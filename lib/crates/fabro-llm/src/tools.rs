@@ -211,26 +211,30 @@ pub async fn execute_all_tools_with_repair(
                     return ToolResult::error(call_id, format!("Unknown tool: {call_name}"));
                 };
 
-                let validated_args = match validate_tool_args(&args, &t.definition.parameters) {
-                    Ok(()) => args,
-                    Err(validation_error) => {
-                        debug!(tool = %call_name, "Tool call validation failed");
-                        if let Some(repair_fn) = repair {
-                            match repair_fn(call_clone, validation_error).await {
-                                Ok(repaired) => repaired,
-                                Err(repair_error) => {
-                                    warn!(tool = %call_name, "Tool call repair failed");
-                                    return ToolResult::error(
-                                        call_id,
-                                        format!("Tool call validation failed and repair failed: {repair_error}"),
-                                    );
+                let validated_args = if call_clone.tool_type == "custom" {
+                    args
+                } else {
+                    match validate_tool_args(&args, &t.definition.parameters) {
+                        Ok(()) => args,
+                        Err(validation_error) => {
+                            debug!(tool = %call_name, "Tool call validation failed");
+                            if let Some(repair_fn) = repair {
+                                match repair_fn(call_clone, validation_error).await {
+                                    Ok(repaired) => repaired,
+                                    Err(repair_error) => {
+                                        warn!(tool = %call_name, "Tool call repair failed");
+                                        return ToolResult::error(
+                                            call_id,
+                                            format!("Tool call validation failed and repair failed: {repair_error}"),
+                                        );
+                                    }
                                 }
+                            } else {
+                                return ToolResult::error(
+                                    call_id,
+                                    format!("Tool call validation failed: {validation_error}"),
+                                );
                             }
-                        } else {
-                            return ToolResult::error(
-                                call_id,
-                                format!("Tool call validation failed: {validation_error}"),
-                            );
                         }
                     }
                 };
