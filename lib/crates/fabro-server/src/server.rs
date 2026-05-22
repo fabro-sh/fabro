@@ -132,13 +132,14 @@ use crate::ip_allowlist::{IpAllowlistConfig, ip_allowlist_middleware};
 use crate::jwt_auth::{self, AuthMode};
 use crate::principal_middleware::{
     AuthContextSlot, RequestAuth, RequestAuthContext, RequireRunBlob, RequireRunScoped,
-    RequireRunStageScoped, RequireStageArtifact, RequiredUser, principal_middleware,
+    RequireRunScopedOrRunTools, RequireRunStageScoped, RequireStageArtifact, RequiredUser,
+    principal_middleware,
 };
 use crate::request_id::{self, RequestId};
 use crate::run_files::{FilesInFlight, new_files_in_flight};
 use crate::server_secrets::{LlmClientResult, ServerSecrets};
 use crate::spawn_env::{apply_render_graph_env, apply_worker_env};
-use crate::worker_token::{WorkerTokenKeys, issue_worker_token};
+use crate::worker_token::{WorkerScopeSet, WorkerTokenKeys, issue_worker_token_with_scopes};
 use crate::{
     canonical_host, demo, diagnostics, run_manifest, security_headers, static_files,
     vault_legacy_migration, web_auth,
@@ -2750,8 +2751,12 @@ fn worker_command(
         )
     })?;
     let server_target = daemon.bind.to_target();
-    let worker_token = issue_worker_token(state.worker_token_keys(), &run_id)
-        .map_err(|_| anyhow::anyhow!("failed to sign worker token"))?;
+    let worker_token = issue_worker_token_with_scopes(
+        state.worker_token_keys(),
+        &run_id,
+        WorkerScopeSet::run_worker_with_agent_run_tools(),
+    )
+    .map_err(|_| anyhow::anyhow!("failed to sign worker token"))?;
     let server_destination = resolved_log_destination(state)?;
     let worker_stdout = match server_destination {
         LogDestination::Stdout => Stdio::inherit(),
@@ -3215,6 +3220,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         catalog: state.catalog(),
         on_node: None,
         registry_override,
+        fabro_run_tools: None,
     };
 
     let execution = async {
@@ -3256,7 +3262,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
                 .expect("aggregate_billing lock poisoned");
             accumulate_billing_rollup(
                 &mut agg,
-                &fabro_workflow::billing_rollup_from_projection(projection),
+                &fabro_workflow::billing_rollup_from_projection(projection, None),
             );
         }
     }
@@ -3541,7 +3547,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             .expect("aggregate_billing lock poisoned");
         accumulate_billing_rollup(
             &mut agg,
-            &fabro_workflow::billing_rollup_from_projection(&final_state),
+            &fabro_workflow::billing_rollup_from_projection(&final_state, None),
         );
     }
 

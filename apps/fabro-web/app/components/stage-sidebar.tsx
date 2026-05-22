@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ComponentType } from "react";
+import { type ComponentType } from "react";
 import { Link } from "react-router";
 import type { StageHandler, StageState } from "@qltysh/fabro-api-client";
 import {
@@ -18,7 +18,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { formatDurationSecs } from "../lib/format";
 import { ACTIVE_STAGE_STATES, formatStageLabel } from "../lib/stage-sidebar";
-import { useTickingNow } from "../lib/time";
+import { elapsedSecsSince, useTickingNow } from "../lib/time";
 
 export interface Stage {
   id: string;
@@ -50,35 +50,14 @@ interface StageSidebarProps {
 }
 
 export function StageSidebar({ stages, runId, selectedStageId, activeLink }: StageSidebarProps) {
-  // Track when we first observed each running stage (for ticking timer)
-  const runningStartRef = useRef<Map<string, number>>(new Map());
-
-  // Track start times for running stages
-  useEffect(() => {
-    const running = new Set<string>(
-      stages.filter((s) => ACTIVE_STAGE_STATES.has(s.status)).map((s) => s.id),
-    );
-    for (const stageId of running) {
-      if (!runningStartRef.current.has(stageId)) {
-        runningStartRef.current.set(stageId, Date.now());
-      }
-    }
-    for (const stageId of runningStartRef.current.keys()) {
-      if (!running.has(stageId)) {
-        runningStartRef.current.delete(stageId);
-      }
-    }
-  }, [stages]);
-
-  // Tick every second while any stage is running
+  // Tick every second while any stage is running so the elapsed clock keeps up.
   const hasActive = stages.some((s) => ACTIVE_STAGE_STATES.has(s.status));
   const now = useTickingNow(hasActive);
 
   function stageDuration(stage: Stage): string {
     if (ACTIVE_STAGE_STATES.has(stage.status)) {
-      const start = runningStartRef.current.get(stage.id);
-      if (start) return formatDurationSecs(Math.floor((now - start) / 1000));
-      return "0s";
+      const secs = elapsedSecsSince(stage.startedAt, now);
+      if (secs !== null) return formatDurationSecs(secs);
     }
     return stage.duration;
   }

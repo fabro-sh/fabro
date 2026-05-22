@@ -38,6 +38,7 @@ fabro-llm = { path = "../fabro-llm" }
 fabro-manifest = { path = "../fabro-manifest" }
 fabro-model = { path = "../fabro-model" }
 fabro-proc = { path = "../fabro-proc" }
+fabro-tool = { path = "../fabro-tool" }
 fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 fabro-api = { path = "../fabro-api" }

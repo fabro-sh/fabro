@@ -16,6 +16,18 @@ export function useTickingNow(active: boolean, intervalMs = 1000): number {
   return now;
 }
 
+/**
+ * Whole seconds elapsed since an ISO 8601 timestamp, or `null` when the
+ * timestamp is missing or unparseable. Never negative. Pass the value from
+ * `useTickingNow` as `now` so the count advances on each tick.
+ */
+export function elapsedSecsSince(startedAt: string | null, now: number = Date.now()): number | null {
+  if (!startedAt) return null;
+  const startMs = Date.parse(startedAt);
+  if (Number.isNaN(startMs)) return null;
+  return Math.max(0, Math.floor((now - startMs) / 1000));
+}
+
 function relativeTime(seconds: number, past: boolean): string {
   if (seconds < 60) return past ? "just now" : "in <1m";
   const minutes = Math.floor(seconds / 60);

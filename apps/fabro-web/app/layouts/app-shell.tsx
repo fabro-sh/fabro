@@ -20,6 +20,7 @@ import {
 import { Link, Outlet, useLocation, useMatches } from "react-router";
 import { ErrorState } from "../components/state";
 import { ToastProvider } from "../components/toast";
+import { AskFabroLayoutProvider, useAskFabroLayout } from "../lib/ask-fabro-layout";
 import { DemoModeProvider } from "../lib/demo-mode";
 import { useToggleDemoMode } from "../lib/mutations";
 import { useAuthMe } from "../lib/queries";
@@ -94,6 +95,7 @@ export default function AppShell() {
   return (
     <DemoModeProvider value={demoMode}>
     <ToastProvider>
+    <AskFabroLayoutProvider>
     <div
       className={classNames(
         "isolate",
@@ -300,18 +302,43 @@ export default function AppShell() {
           </div>
         </header>
       )}
-      <main className={fullHeight ? "min-h-0 flex-1" : undefined}>
-        <div
-          className={classNames(
-            `mx-auto ${maxWidth} px-4 py-6 sm:px-6 lg:px-8`,
-            fullHeight && "box-border flex h-full min-h-0 flex-col",
-          )}
-        >
-          <Outlet />
-        </div>
-      </main>
+      <ShellMain fullHeight={fullHeight} maxWidth={maxWidth} />
     </div>
+    </AskFabroLayoutProvider>
     </ToastProvider>
     </DemoModeProvider>
+  );
+}
+
+/**
+ * The scrollable content region. Inset on the right by the docked Ask Fabro
+ * sidebar's width so opening the sidebar shifts the page content left rather
+ * than covering it.
+ */
+function ShellMain({
+  fullHeight,
+  maxWidth,
+}: {
+  fullHeight: boolean;
+  maxWidth: string;
+}) {
+  const { sidebarWidth } = useAskFabroLayout();
+  return (
+    <main
+      className={classNames(
+        "transition-[padding] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
+        fullHeight && "min-h-0 flex-1",
+      )}
+      style={{ paddingRight: sidebarWidth }}
+    >
+      <div
+        className={classNames(
+          `mx-auto ${maxWidth} px-4 py-6 sm:px-6 lg:px-8`,
+          fullHeight && "box-border flex h-full min-h-0 flex-col",
+        )}
+      >
+        <Outlet />
+      </div>
+    </main>
   );
 }

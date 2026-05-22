@@ -1,6 +1,32 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
-use fabro_types::{BilledTokenCounts, ModelRef, RunProjection, RunTiming, StageTiming};
+use fabro_model::Catalog;
+use fabro_types::{
+    BilledTokenCounts, ModelRef, RunProjection, RunTiming, StageProjection, StageTiming,
+};
+
+fn stage_usage_with_cost<'a>(
+    catalog: Option<&Catalog>,
+    stage: &'a StageProjection,
+) -> Cow<'a, BilledTokenCounts> {
+    let Some(catalog) = catalog else {
+        return Cow::Borrowed(&stage.usage);
+    };
+    let Some(model) = stage.model.as_ref() else {
+        return Cow::Borrowed(&stage.usage);
+    };
+    if stage.usage.total_usd_micros.is_some() {
+        return Cow::Borrowed(&stage.usage);
+    }
+
+    let Some(total_usd_micros) = catalog.price_tokens(model, &stage.usage.token_counts()) else {
+        return Cow::Borrowed(&stage.usage);
+    };
+    let mut usage = stage.usage.clone();
+    usage.total_usd_micros = Some(total_usd_micros);
+    Cow::Owned(usage)
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectionBillingStage {
@@ -39,7 +65,10 @@ impl ProjectionBillingRollup {
 }
 
 #[must_use]
-pub fn billing_rollup_from_projection(projection: &RunProjection) -> ProjectionBillingRollup {
+pub fn billing_rollup_from_projection(
+    projection: &RunProjection,
+    catalog: Option<&Catalog>,
+) -> ProjectionBillingRollup {
     let mut stage_indices = HashMap::<String, usize>::new();
     let mut stages = Vec::<ProjectionBillingStage>::new();
     let mut by_model = HashMap::<ModelRef, ProjectionBillingByModel>::new();
@@ -51,7 +80,9 @@ pub fn billing_rollup_from_projection(projection: &RunProjection) -> ProjectionB
         if is_boundary_stage(projection, stage_id.node_id()) {
             continue;
         }
-        if stage.completion.is_none() && stage.timing.is_none() && stage.usage.is_zero() {
+        let usage = stage_usage_with_cost(catalog, stage);
+        let usage = usage.as_ref();
+        if stage.completion.is_none() && stage.timing.is_none() && usage.is_zero() {
             continue;
         }
 
@@ -73,10 +104,10 @@ pub fn billing_rollup_from_projection(projection: &RunProjection) -> ProjectionB
             run_timing = run_timing.saturating_add(&RunTiming::from(timing));
         }
 
-        if !stage.usage.is_zero() {
+        if !usage.is_zero() {
             billed_visit_count += 1;
-            row.billing.add_counts(&stage.usage);
-            totals.add_counts(&stage.usage);
+            row.billing.add_counts(usage);
+            totals.add_counts(usage);
 
             if let Some(model) = &stage.model {
                 row.model = Some(model.clone());
@@ -89,7 +120,7 @@ pub fn billing_rollup_from_projection(projection: &RunProjection) -> ProjectionB
                             billing: BilledTokenCounts::default(),
                         });
                 model_entry.stages += 1;
-                model_entry.billing.add_counts(&stage.usage);
+                model_entry.billing.add_counts(usage);
             }
         }
     }
@@ -131,6 +162,7 @@ fn is_boundary_stage(projection: &RunProjection, node_id: &str) -> bool {
 mod tests {
     use std::collections::HashMap;
 
+    use fabro_model::{Catalog, ModelRef, ProviderId};
     use fabro_types::{
         AttrValue, BilledModelUsage, BilledTokenCounts, Graph, Node, RunProjection, RunSpec,
         StageCompletion, StageOutcome, WorkflowSettings, first_event_seq, fixtures,
@@ -195,7 +227,7 @@ mod tests {
             timestamp:      chrono::Utc::now(),
         });
 
-        let rollup = billing_rollup_from_projection(&projection);
+        let rollup = billing_rollup_from_projection(&projection, None);
 
         assert_eq!(rollup.stages.len(), 1);
         assert_eq!(rollup.stages[0].node_id, "verify");
@@ -238,7 +270,7 @@ mod tests {
             timestamp:      chrono::Utc::now(),
         });
 
-        let rollup = billing_rollup_from_projection(&projection);
+        let rollup = billing_rollup_from_projection(&projection, None);
 
         assert_eq!(rollup.stages.len(), 1);
         assert_eq!(rollup.stages[0].node_id, "build");
@@ -271,10 +303,46 @@ mod tests {
             timestamp:      chrono::Utc::now(),
         });
 
-        let rollup = billing_rollup_from_projection(&projection);
+        let rollup = billing_rollup_from_projection(&projection, None);
 
         assert_eq!(rollup.stages.len(), 0);
         assert_eq!(rollup.timing.wall_time_ms, 0);
+    }
+
+    #[test]
+    fn rollup_prices_in_flight_stage_usage_using_catalog() {
+        let mut projection = test_projection();
+        let model = ModelRef {
+            provider: ProviderId::openai(),
+            model_id: "gpt-5.4".to_string(),
+            speed:    None,
+        };
+        let stage = projection.stage_entry("agent", 1, first_event_seq(1));
+        stage.started_at = Some(chrono::Utc::now());
+        stage.usage = BilledTokenCounts {
+            input_tokens: 500_000,
+            output_tokens: 125_000,
+            total_tokens: 625_000,
+            ..BilledTokenCounts::default()
+        };
+        stage.model = Some(model.clone());
+
+        let priced = billing_rollup_from_projection(&projection, Some(Catalog::builtin()));
+        let unpriced = billing_rollup_from_projection(&projection, None);
+
+        assert_eq!(priced.stages.len(), 1);
+        assert_eq!(priced.stages[0].node_id, "agent");
+        let stage_cost = priced.stages[0].billing.total_usd_micros;
+        assert!(
+            stage_cost.is_some_and(|cost| cost > 0),
+            "expected priced stage cost, got {stage_cost:?}"
+        );
+        assert_eq!(priced.totals.total_usd_micros, stage_cost);
+        assert_eq!(priced.by_model.len(), 1);
+        assert_eq!(priced.by_model[0].billing.total_usd_micros, stage_cost);
+        assert_eq!(unpriced.stages.len(), 1);
+        assert_eq!(unpriced.stages[0].billing.total_usd_micros, None);
+        assert_eq!(unpriced.totals.total_usd_micros, None);
     }
 
     fn run_spec_with_boundary_nodes() -> RunSpec {

@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use super::super::{
     ApiError, AppState, FailureReason, ForkRequest, ForkResponse, IntoResponse, Json, Path,
-    Principal, RequiredUser, Response, RewindRequest, RewindResponse, Router, RunAnswerTransport,
-    RunControlAction, RunExecutionMode, RunId, RunStatus, StartRunRequest, State, StatusCode,
-    Storage, TimelineEntryResponse, WORKER_CANCEL_GRACE, WorkflowError, append_control_request,
-    durable_run_status, get, load_pending_control, managed_run, operations, parse_run_id_path,
-    persist_cancelled_run_status, post, reject_if_archived, sleep, update_live_run_from_event,
-    workflow_event,
+    Principal, RequireRunScopedOrRunTools, RequiredUser, Response, RewindRequest, RewindResponse,
+    Router, RunAnswerTransport, RunControlAction, RunExecutionMode, RunId, RunStatus,
+    StartRunRequest, State, StatusCode, Storage, TimelineEntryResponse, WORKER_CANCEL_GRACE,
+    WorkflowError, append_control_request, durable_run_status, get, load_pending_control,
+    managed_run, operations, parse_run_id_path, persist_cancelled_run_status, post,
+    reject_if_archived, sleep, update_live_run_from_event, workflow_event,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -34,15 +34,10 @@ async fn run_response(state: &AppState, id: RunId, status: StatusCode) -> Respon
 }
 
 async fn start_run(
-    _auth: RequiredUser,
+    RequireRunScopedOrRunTools(id, _actor): RequireRunScopedOrRunTools,
     State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
     body: Option<Json<StartRunRequest>>,
 ) -> Response {
-    let id = match parse_run_id_path(&id) {
-        Ok(id) => id,
-        Err(response) => return response,
-    };
     if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
         return response;
     }
@@ -153,14 +148,9 @@ fn schedule_worker_kill(state: Arc<AppState>, run_id: RunId, worker_pid: u32) {
 }
 
 async fn cancel_run(
-    subject: RequiredUser,
+    RequireRunScopedOrRunTools(id, actor): RequireRunScopedOrRunTools,
     State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
 ) -> Response {
-    let id = match parse_run_id_path(&id) {
-        Ok(id) => id,
-        Err(response) => return response,
-    };
     if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
         return response;
     }
@@ -217,13 +207,8 @@ async fn cancel_run(
     };
 
     if pending_control != Some(RunControlAction::Cancel) {
-        if let Err(err) = append_control_request(
-            state.as_ref(),
-            id,
-            RunControlAction::Cancel,
-            Some(Principal::User(subject.0.clone())),
-        )
-        .await
+        if let Err(err) =
+            append_control_request(state.as_ref(), id, RunControlAction::Cancel, Some(actor)).await
         {
             return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
                 .into_response();
@@ -456,19 +441,17 @@ async fn unpause_run(
 }
 
 async fn archive_run(
-    subject: RequiredUser,
+    RequireRunScopedOrRunTools(id, actor): RequireRunScopedOrRunTools,
     State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
 ) -> Response {
-    run_archive_action(state, subject, id, ArchiveAction::Archive).await
+    run_archive_action(state, actor, id, ArchiveAction::Archive).await
 }
 
 async fn unarchive_run(
-    subject: RequiredUser,
+    RequireRunScopedOrRunTools(id, actor): RequireRunScopedOrRunTools,
     State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
 ) -> Response {
-    run_archive_action(state, subject, id, ArchiveAction::Unarchive).await
+    run_archive_action(state, actor, id, ArchiveAction::Unarchive).await
 }
 
 async fn rewind_run(
@@ -635,15 +618,11 @@ enum ArchiveAction {
 
 async fn run_archive_action(
     state: Arc<AppState>,
-    subject: RequiredUser,
-    id: String,
+    actor: Principal,
+    id: RunId,
     action: ArchiveAction,
 ) -> Response {
-    let id = match parse_run_id_path(&id) {
-        Ok(id) => id,
-        Err(response) => return response,
-    };
-    let actor = Some(Principal::User(subject.0.clone()));
+    let actor = Some(actor);
     let result = match action {
         ArchiveAction::Archive => operations::archive(&state.store, &id, actor)
             .await

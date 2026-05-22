@@ -33,7 +33,9 @@ use crate::handler::{HandlerRegistry, default_registry};
 use crate::run_metadata::{RunMetadataRuntime, build_metadata_writer, metadata_branch_name};
 use crate::run_options::{GitCheckpointOptions, RunOptions};
 use crate::sandbox_git_runtime::SandboxGitRuntime;
-use crate::services::{EngineServices, RunLocations, RunServices, WorkflowToolEnvProvider};
+use crate::services::{
+    EngineServices, FabroRunToolServices, RunLocations, RunServices, WorkflowToolEnvProvider,
+};
 use crate::steering_hub::SteeringHub;
 
 type BuiltSandboxEnv = (HashMap<String, String>, Option<Arc<GitHubTokenSource>>);
@@ -123,6 +125,7 @@ async fn build_registry(
     graph: &graph::Graph,
     llm_source: Arc<dyn CredentialSource>,
     catalog: Arc<Catalog>,
+    fabro_run_tools: Option<FabroRunToolServices>,
 ) -> Result<(Arc<HandlerRegistry>, bool), Error> {
     let no_backend_interviewer = Arc::clone(&interviewer);
     let build_no_backend = move || {
@@ -155,9 +158,10 @@ async fn build_registry(
         let catalog_for_api = Arc::clone(&catalog);
         let steering_hub_for_api = Arc::clone(&steering_hub);
         let tool_env_provider_for_backend = Arc::clone(&tool_env_provider);
+        let fabro_run_tools_for_api = fabro_run_tools.clone();
         Arc::new(default_registry(interviewer, move || {
             let tool_env_provider = Arc::clone(&tool_env_provider_for_backend);
-            let api = AgentApiBackend::new_with_catalog(
+            let mut api = AgentApiBackend::new_with_catalog(
                 model.clone(),
                 provider_id.clone(),
                 fallback_chain.clone(),
@@ -168,6 +172,9 @@ async fn build_registry(
             .with_run_model_controls(model_controls.clone())
             .with_tool_env_provider(tool_env_provider.clone())
             .with_mcp_servers(mcp_servers.clone());
+            if let Some(services) = fabro_run_tools_for_api.clone() {
+                api = api.with_fabro_run_tools(services);
+            }
             let acp = AgentAcpBackend::new()
                 .with_tool_env_provider(tool_env_provider.clone(), github_token_refresh_managed)
                 .with_steering_hub(Arc::clone(&steering_hub));
@@ -502,6 +509,7 @@ pub async fn initialize(
             &graph,
             Arc::clone(&llm_source),
             Arc::clone(&catalog),
+            options.fabro_run_tools.clone(),
         )
         .await?
     };
@@ -899,6 +907,7 @@ mod tests {
             artifact_sink:     None,
             checkpoint:        None,
             seed_context:      None,
+            fabro_run_tools:   None,
         })
         .await;
         let events = seen.lock().unwrap().clone();
@@ -960,6 +969,7 @@ mod tests {
             artifact_sink:     None,
             checkpoint:        None,
             seed_context:      None,
+            fabro_run_tools:   None,
         })
         .await
         .unwrap();
@@ -1042,6 +1052,7 @@ mod tests {
             &graph,
             Arc::new(VaultCredentialSource::new(Arc::clone(&vault))),
             test_catalog(),
+            None,
         )
         .await
         .unwrap();
@@ -1158,6 +1169,7 @@ mod tests {
             artifact_sink:     None,
             checkpoint:        None,
             seed_context:      None,
+            fabro_run_tools:   None,
         })
         .await
         .unwrap();
@@ -1256,6 +1268,7 @@ mod tests {
             artifact_sink:     None,
             checkpoint:        None,
             seed_context:      None,
+            fabro_run_tools:   None,
         })
         .await
         .unwrap();
@@ -1372,6 +1385,7 @@ mod tests {
             artifact_sink: None,
             checkpoint: None,
             seed_context: None,
+            fabro_run_tools: None,
         })
         .await;
 
@@ -1439,6 +1453,7 @@ mod tests {
             artifact_sink: None,
             checkpoint: None,
             seed_context: None,
+            fabro_run_tools: None,
         })
         .await;
 

@@ -11,12 +11,16 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
+use fabro_api::types::RunManifest;
+use fabro_config::user::active_settings_path;
 use fabro_config::{ServerSettingsBuilder, Storage, load_llm_catalog_settings};
 use fabro_interview::{
     AnswerSubmission, ControlInterviewer, WorkerControlEnvelope, WorkerControlMessage,
 };
 use fabro_model::Catalog;
+use fabro_server::run_tool_manifest;
 use fabro_store::{EventEnvelope, RunProjection, RunProjectionReducer};
+use fabro_tool::fabro_client::ClientBackend;
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{RunMode, RunNamespace};
 use fabro_types::{
@@ -29,6 +33,7 @@ use fabro_workflow::event::{Emitter, RunEventSink};
 use fabro_workflow::operations::{self, StartServices};
 use fabro_workflow::run_control::RunControlState;
 use fabro_workflow::runtime_store::{RunStoreBackend, RunStoreHandle};
+use fabro_workflow::services::FabroRunToolServices;
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::{Mutex, RwLock as AsyncRwLock, mpsc};
@@ -77,11 +82,25 @@ pub(crate) async fn execute(
         .await
         .with_context(|| format!("failed to load run state for {run_id}"))?;
     let run_spec = &run_state.spec;
+    let llm_catalog_settings =
+        load_llm_catalog_settings(None).context("failed to load worker LLM catalog settings")?;
+    let catalog = Arc::new(
+        Catalog::from_builtin_with_overrides(&llm_catalog_settings)
+            .context("failed to build worker LLM catalog")?,
+    );
     let artifact_sink = Some(ArtifactSink::Uploader(build_artifact_uploader(
         run_id,
         client.clone_for_reuse(),
         worker_token.to_owned(),
     )));
+    let fabro_run_tools = build_fabro_run_tool_services(
+        worker_token,
+        client.clone_for_reuse(),
+        run_id,
+        run_spec.source_directory.as_deref(),
+        &run_dir,
+        Arc::clone(&catalog),
+    );
     let interviewer = Arc::new(ControlInterviewer::new());
     let cancel_token = CancellationToken::new();
     let emitter = Arc::new(Emitter::new(run_id));
@@ -94,12 +113,6 @@ pub(crate) async fn execute(
     let run_control = RunControlState::new();
     install_signal_handlers(Arc::clone(&run_control), cancel_token.clone())?;
     let vault = load_worker_vault(storage_dir.as_deref())?;
-    let llm_catalog_settings =
-        load_llm_catalog_settings(None).context("failed to load worker LLM catalog settings")?;
-    let catalog = Arc::new(
-        Catalog::from_builtin_with_overrides(&llm_catalog_settings)
-            .context("failed to build worker LLM catalog")?,
-    );
     let github_app = {
         let vault_guard = match &vault {
             Some(arc) => Some(arc.read().await),
@@ -137,6 +150,7 @@ pub(crate) async fn execute(
         catalog,
         on_node: None,
         registry_override: None,
+        fabro_run_tools,
     };
 
     match mode {
@@ -149,6 +163,47 @@ pub(crate) async fn execute(
     }
 
     Ok(())
+}
+
+fn build_fabro_run_tool_services(
+    worker_token: &str,
+    client: fabro_client::Client,
+    current_run_id: RunId,
+    source_directory: Option<&str>,
+    run_dir: &Path,
+    catalog: Arc<Catalog>,
+) -> Option<FabroRunToolServices> {
+    if worker_token.trim().is_empty() {
+        return None;
+    }
+    let backend = ClientBackend::new(Arc::new(client))
+        .with_manifest_builder(Arc::new(WorkerRunManifestBuilder { catalog }));
+    Some(FabroRunToolServices {
+        backend: Arc::new(backend),
+        current_run_id,
+        base_cwd: source_directory.map_or_else(|| run_dir.to_path_buf(), PathBuf::from),
+        user_settings_path: active_settings_path(None),
+    })
+}
+
+struct WorkerRunManifestBuilder {
+    catalog: Arc<Catalog>,
+}
+
+impl fabro_tool::RunManifestBuilder for WorkerRunManifestBuilder {
+    fn build_run_manifest(
+        &self,
+        spec: &fabro_tool::ValidatedCreateRunSpec,
+        cwd: &Path,
+        user_settings_path: &Path,
+    ) -> fabro_tool::ToolResult<RunManifest> {
+        run_tool_manifest::build_run_tool_manifest(
+            spec,
+            cwd,
+            user_settings_path,
+            Arc::clone(&self.catalog),
+        )
+    }
 }
 
 fn load_worker_vault(storage_dir: Option<&Path>) -> Result<Option<Arc<AsyncRwLock<Vault>>>> {

@@ -573,7 +573,18 @@ fn issue_test_user_jwt() -> String {
 fn issue_test_worker_token(run_id: &RunId) -> String {
     let keys = WorkerTokenKeys::from_master_secret(TEST_SESSION_SECRET.as_bytes())
         .expect("worker keys should derive");
-    issue_worker_token(&keys, run_id).expect("worker token should issue")
+    crate::worker_token::issue_worker_token(&keys, run_id).expect("worker token should issue")
+}
+
+fn issue_test_run_tools_worker_token(run_id: &RunId) -> String {
+    let keys = WorkerTokenKeys::from_master_secret(TEST_SESSION_SECRET.as_bytes())
+        .expect("worker keys should derive");
+    crate::worker_token::issue_worker_token_with_scopes(
+        &keys,
+        run_id,
+        crate::worker_token::WorkerScopeSet::run_worker_with_agent_run_tools(),
+    )
+    .expect("worker token should issue")
 }
 
 async fn create_run_with_bearer(app: &Router, bearer: &str) -> RunId {
@@ -600,6 +611,21 @@ fn bearer_request(method: Method, path: &str, bearer: &str, body: Body) -> Reque
         .uri(api(path))
         .header(header::AUTHORIZATION, format!("Bearer {bearer}"))
         .body(body)
+        .unwrap()
+}
+
+fn json_bearer_request(
+    method: Method,
+    path: &str,
+    bearer: &str,
+    body: &serde_json::Value,
+) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(api(path))
+        .header(header::AUTHORIZATION, format!("Bearer {bearer}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap()
 }
 
@@ -1535,6 +1561,10 @@ fn worker_command_always_sets_worker_token_env() {
     .expect("github worker token should decode")
     .claims;
     assert_eq!(github_claims.run_id, github_run_id.to_string());
+    assert_eq!(
+        github_claims.scope.split_whitespace().collect::<Vec<_>>(),
+        vec!["run:worker", "agent:run_tools"]
+    );
 
     let dev_token = tempfile::tempdir().unwrap();
     let dev_token_state =
@@ -1568,6 +1598,10 @@ fn worker_command_always_sets_worker_token_env() {
     .expect("dev-token worker token should decode")
     .claims;
     assert_eq!(dev_claims.run_id, dev_token_run_id.to_string());
+    assert_eq!(
+        dev_claims.scope.split_whitespace().collect::<Vec<_>>(),
+        vec!["run:worker", "agent:run_tools"]
+    );
 }
 
 #[cfg(unix)]
@@ -6945,6 +6979,23 @@ async fn worker_token_accepts_run_scoped_routes_and_falls_back_to_user_jwt() {
         .unwrap();
     assert_status!(response, StatusCode::OK).await;
 
+    for path in [
+        format!("/runs/{run_id}"),
+        format!("/runs/{run_id}/questions"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(bearer_request(
+                Method::GET,
+                &path,
+                &worker_token,
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_status!(response, StatusCode::OK).await;
+    }
+
     let append_body = serde_json::to_vec(&serde_json::json!({
         "id": "evt-run-notice",
         "ts": "2026-04-23T12:00:00Z",
@@ -7031,6 +7082,203 @@ async fn worker_token_accepts_run_scoped_routes_and_falls_back_to_user_jwt() {
         .await
         .unwrap();
     assert_status!(response, StatusCode::FORBIDDEN).await;
+}
+
+#[tokio::test]
+async fn run_tool_worker_token_can_use_client_backend_routes_across_runs() {
+    let (state, app) = jwt_auth_app();
+    let user_jwt = issue_test_user_jwt();
+    let parent_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let target_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let run_tool_worker_token = issue_test_run_tools_worker_token(&parent_run_id);
+
+    let response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/runs",
+            &run_tool_worker_token,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_status!(response, StatusCode::OK).await;
+
+    let response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            &format!("/runs/resolve?selector={target_run_id}"),
+            &run_tool_worker_token,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_status!(response, StatusCode::OK).await;
+
+    for path in [
+        format!("/runs/{target_run_id}"),
+        format!("/runs/{target_run_id}/state"),
+        format!("/runs/{target_run_id}/events"),
+        format!("/runs/{target_run_id}/questions"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(bearer_request(
+                Method::GET,
+                &path,
+                &run_tool_worker_token,
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_status!(response, StatusCode::OK).await;
+    }
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::POST,
+            &format!("/runs/{target_run_id}/start"),
+            &run_tool_worker_token,
+            &json!({ "resume": false }),
+        ))
+        .await
+        .unwrap();
+    assert_status!(response, StatusCode::OK).await;
+
+    let response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::POST,
+            &format!("/runs/{target_run_id}/cancel"),
+            &run_tool_worker_token,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_status!(response, StatusCode::OK).await;
+
+    for path in [
+        format!("/runs/{target_run_id}/archive"),
+        format!("/runs/{target_run_id}/unarchive"),
+        format!("/runs/{target_run_id}/interrupt"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(bearer_request(
+                Method::POST,
+                &path,
+                &run_tool_worker_token,
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_ne!(response.status(), StatusCode::UNAUTHORIZED, "{path}");
+        assert_ne!(response.status(), StatusCode::FORBIDDEN, "{path}");
+    }
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::POST,
+            &format!("/runs/{target_run_id}/steer"),
+            &run_tool_worker_token,
+            &json!({ "text": "continue", "interrupt": false }),
+        ))
+        .await
+        .unwrap();
+    assert_ne!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_ne!(response.status(), StatusCode::FORBIDDEN);
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::POST,
+            &format!("/runs/{target_run_id}/questions/q-1/answer"),
+            &run_tool_worker_token,
+            &json!({ "kind": "yes" }),
+        ))
+        .await
+        .unwrap();
+    assert_ne!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_ne!(response.status(), StatusCode::FORBIDDEN);
+
+    let created_child = create_run_with_bearer(&app, &run_tool_worker_token).await;
+    let cached = state
+        .store
+        .get_cached_run(&created_child)
+        .await
+        .unwrap()
+        .expect("created run should be cached");
+    assert_eq!(
+        cached
+            .projection
+            .spec
+            .provenance
+            .as_ref()
+            .and_then(|provenance| provenance.subject.as_ref()),
+        Some(&Principal::Worker {
+            run_id: parent_run_id,
+        }),
+    );
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::PUT,
+            &format!("/runs/{created_child}/parent"),
+            &run_tool_worker_token,
+            &json!({ "parent_id": target_run_id.to_string() }),
+        ))
+        .await
+        .unwrap();
+    assert_status!(response, StatusCode::OK).await;
+
+    let response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::DELETE,
+            &format!("/runs/{created_child}/parent"),
+            &run_tool_worker_token,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_status!(response, StatusCode::OK).await;
+}
+
+#[tokio::test]
+async fn base_worker_token_is_rejected_by_run_tool_only_routes() {
+    let (_state, app) = jwt_auth_app();
+    let user_jwt = issue_test_user_jwt();
+    let run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let worker_token = issue_test_worker_token(&run_id);
+
+    for (method, path) in [
+        (Method::GET, "/runs".to_string()),
+        (Method::POST, "/runs".to_string()),
+        (Method::GET, "/runs/resolve?selector=latest".to_string()),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(bearer_request(
+                method.clone(),
+                &path,
+                &worker_token,
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                response.status(),
+                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
+            ),
+            "{method} {path} unexpectedly accepted base worker token with status {}",
+            response.status()
+        );
+    }
 }
 
 #[tokio::test]
@@ -7200,18 +7448,11 @@ async fn worker_token_is_rejected_on_user_only_routes() {
         (Method::POST, "/graph/render".to_string()),
         (Method::GET, "/attach".to_string()),
         (Method::GET, "/boards/runs".to_string()),
-        (Method::GET, format!("/runs/{run_id}")),
         (Method::DELETE, format!("/runs/{run_id}")),
-        (Method::GET, format!("/runs/{run_id}/questions")),
-        (Method::POST, format!("/runs/{run_id}/questions/q-1/answer")),
         (Method::GET, format!("/runs/{run_id}/attach")),
         (Method::GET, format!("/runs/{run_id}/checkpoint")),
-        (Method::POST, format!("/runs/{run_id}/cancel")),
-        (Method::POST, format!("/runs/{run_id}/start")),
         (Method::POST, format!("/runs/{run_id}/pause")),
         (Method::POST, format!("/runs/{run_id}/unpause")),
-        (Method::POST, format!("/runs/{run_id}/archive")),
-        (Method::POST, format!("/runs/{run_id}/unarchive")),
         (Method::GET, format!("/runs/{run_id}/graph")),
         (Method::GET, format!("/runs/{run_id}/graph/source")),
         (Method::GET, format!("/runs/{run_id}/stages")),

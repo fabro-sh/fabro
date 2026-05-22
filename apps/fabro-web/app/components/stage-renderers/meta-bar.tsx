@@ -3,23 +3,9 @@ import { ClockIcon } from "@heroicons/react/20/solid";
 
 import type { Stage } from "../stage-sidebar";
 import { Tooltip } from "../ui";
-import { formatAbsoluteTs } from "../../lib/format";
+import { formatAbsoluteTs, formatDurationSecs } from "../../lib/format";
 import { ACTIVE_STAGE_STATES, stageStatusLabel, stageStatusTone } from "../../lib/stage-sidebar";
-import { useTickingNow } from "../../lib/time";
-
-function liveDuration(startedAt: string | null, fallback: string): string {
-  if (!startedAt) return fallback;
-  const startMs = Date.parse(startedAt);
-  if (Number.isNaN(startMs)) return fallback;
-  const secs = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
-  if (secs < 60) return `${secs}s`;
-  const minutes = Math.floor(secs / 60);
-  const remainSecs = secs % 60;
-  if (minutes < 60) return remainSecs > 0 ? `${minutes}m ${remainSecs}s` : `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remainMin = minutes % 60;
-  return remainMin > 0 ? `${hours}h ${remainMin}m` : `${hours}h`;
-}
+import { elapsedSecsSince, useTickingNow } from "../../lib/time";
 
 /**
  * Compact horizontal status strip used at the top of every specialized stage
@@ -37,8 +23,9 @@ export function StageMetaBar({
 }) {
   const isActive = ACTIVE_STAGE_STATES.has(stage.status);
   // Re-render every second while running so the elapsed clock keeps up.
-  useTickingNow(isActive);
-  const duration = isActive ? liveDuration(stage.startedAt, stage.duration) : stage.duration;
+  const now = useTickingNow(isActive);
+  const liveSecs = isActive ? elapsedSecsSince(stage.startedAt, now) : null;
+  const duration = liveSecs !== null ? formatDurationSecs(liveSecs) : stage.duration;
 
   const durationNode = (
     <span className="inline-flex items-center gap-1 font-mono tabular-nums text-fg-muted">

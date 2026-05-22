@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type {
+  ServerSettings,
   SystemCpuResources,
   SystemDiskResources,
+  SystemInfoResponse,
   SystemMemoryResources,
   SystemResourcesResponse,
 } from "@qltysh/fabro-api-client";
@@ -9,9 +11,13 @@ import TestRenderer, { act } from "react-test-renderer";
 import { setupReactTestEnv } from "../lib/test-utils";
 
 let systemResources: SystemResourcesResponse | undefined;
+let systemInfo: SystemInfoResponse | undefined;
+let serverSettings: ServerSettings | undefined;
 let teardownReactTestEnv: (() => void) | undefined;
 
 mock.module("../lib/queries", () => ({
+  useServerSettings: () => ({ data: serverSettings }),
+  useSystemInfo: () => ({ data: systemInfo }),
   useSystemResources: () => ({ data: systemResources }),
 }));
 
@@ -89,9 +95,20 @@ function sampleResources(overrides: ResourceOverrides = {}): SystemResourcesResp
   };
 }
 
+function sampleServerSettings(maxConcurrentRuns = 8): ServerSettings {
+  return {
+    server:   {
+      scheduler: { max_concurrent_runs: maxConcurrentRuns },
+    },
+    features: { session_sandboxes: false },
+  } as unknown as ServerSettings;
+}
+
 describe("SettingsResources route", () => {
   beforeEach(() => {
     teardownReactTestEnv = setupReactTestEnv();
+    systemInfo = { runs: { active: 3, total: 12 } };
+    serverSettings = sampleServerSettings();
   });
 
   afterEach(() => {
@@ -101,6 +118,8 @@ describe("SettingsResources route", () => {
       }
     });
     systemResources = undefined;
+    systemInfo = undefined;
+    serverSettings = undefined;
     teardownReactTestEnv?.();
     teardownReactTestEnv = undefined;
   });
@@ -115,6 +134,7 @@ describe("SettingsResources route", () => {
     expect(text).toContain("5s");
     expect(text).toContain("3 GiB");
     expect(text).toContain("8 GiB");
+    expect(text).toContain("3 / 8 active");
   });
 
   test("shows CPU warmup state while usage is null", () => {

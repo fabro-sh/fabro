@@ -82,7 +82,7 @@ pub(crate) async fn build_conclusion_from_store(
         .unwrap_or_default();
     let projection_billing = projection
         .as_ref()
-        .map(billing_rollup_from_projection)
+        .map(|projection| billing_rollup_from_projection(projection, None))
         .unwrap_or_default();
     let checkpoint = projection
         .as_ref()
@@ -439,7 +439,7 @@ async fn compute_final_patch(
 }
 
 pub(crate) fn billing_from_projection(projection: &RunProjection) -> Option<BilledTokenCounts> {
-    billing_rollup_from_projection(projection).billing_if_present()
+    billing_rollup_from_projection(projection, None).billing_if_present()
 }
 
 pub(crate) fn build_terminal_event(
@@ -555,7 +555,7 @@ pub async fn finalize(executed: Executed, options: &FinalizeOptions) -> Result<C
         .unwrap_or_default();
     let projection_billing = projection
         .as_ref()
-        .map(billing_rollup_from_projection)
+        .map(|projection| billing_rollup_from_projection(projection, None))
         .unwrap_or_default();
     let checkpoint = projection
         .as_ref()
@@ -980,7 +980,7 @@ mod tests {
         });
 
         let projection_order = stage_projection_order(&projection);
-        let projection_billing = billing_rollup_from_projection(&projection);
+        let projection_billing = billing_rollup_from_projection(&projection, None);
         let mut latest_outcome = Outcome::success();
         latest_outcome.usage = Some(success_usage);
         latest_outcome.timing = Some(fabro_types::StageTiming::wall_only(800));

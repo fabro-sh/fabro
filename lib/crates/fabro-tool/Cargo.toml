@@ -1,10 +1,10 @@
 [package]
-name = "fabro-mcp-server"
+name = "fabro-tool"
 edition.workspace = true
 version.workspace = true
 publish = false
 license.workspace = true
-description = "Fabro MCP stdio server"
+description = "Shared Fabro run-control tool behavior"
 
 [lib]
 doctest = false
@@ -14,18 +14,13 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-trait.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 fabro-api = { path = "../fabro-api" }
 fabro-client = { path = "../fabro-client" }
-fabro-manifest = { path = "../fabro-manifest" }
-fabro-config = { path = "../fabro-config" }
-fabro-model = { path = "../fabro-model" }
-fabro-server = { path = "../fabro-server" }
-fabro-tool = { path = "../fabro-tool" }
 fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 futures.workspace = true
-rmcp = { workspace = true, features = ["server", "macros", "schemars", "transport-io"] }
 schemars = "1.2.1"
 serde.workspace = true
 serde_json.workspace = true
@@ -33,5 +28,4 @@ tokio.workspace = true
 toml.workspace = true
 
 [dev-dependencies]
-httpmock = "0.8"
 tempfile = "3"

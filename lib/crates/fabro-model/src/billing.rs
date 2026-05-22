@@ -358,6 +358,19 @@ impl BilledTokenCounts {
         }
     }
 
+    /// Returns the five disjoint per-call token buckets, dropping the derived
+    /// `total_tokens` sum and the optional `total_usd_micros` cost.
+    #[must_use]
+    pub fn token_counts(&self) -> TokenCounts {
+        TokenCounts {
+            input_tokens:       self.input_tokens,
+            output_tokens:      self.output_tokens,
+            reasoning_tokens:   self.reasoning_tokens,
+            cache_read_tokens:  self.cache_read_tokens,
+            cache_write_tokens: self.cache_write_tokens,
+        }
+    }
+
     pub fn add_counts(&mut self, source: &Self) {
         self.input_tokens += source.input_tokens;
         self.output_tokens += source.output_tokens;
@@ -434,6 +447,27 @@ impl Catalog {
     ) -> Option<ModelBillingFacts> {
         self.provider(&model_ref.provider)
             .and_then(|provider| ModelBillingFacts::for_policy(provider.billing_policy, tokens))
+    }
+
+    /// Price a partial token sample for `model` using catalog pricing.
+    ///
+    /// Returns `None` when the provider has no billing policy, the model is
+    /// unknown, or the pricing algorithm cannot produce a result for the given
+    /// tokens. Used by read-side rollups so in-flight stages can show an
+    /// exact cost for the tokens consumed so far.
+    #[must_use]
+    pub fn price_tokens(&self, model: &ModelRef, tokens: &TokenCounts) -> Option<i64> {
+        let facts = self.billing_facts_for(model, tokens)?;
+        let input = ModelBillingInput {
+            usage: ModelUsage {
+                model:  model.clone(),
+                tokens: tokens.clone(),
+            },
+            facts,
+        };
+        self.pricing_for(model)
+            .and_then(|pricing| pricing.bill(&input))
+            .map(|amount| amount.0)
     }
 }
 

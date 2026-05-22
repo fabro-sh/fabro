@@ -89,11 +89,11 @@ export function useAuthSessions() {
   );
 }
 
-export function useSystemInfo() {
+export function useSystemInfo(refreshInterval?: number) {
   return useSWR<SystemInfoResponse>(
     queryKeys.system.info(),
     () => apiData(() => systemApi.getSystemInfo()),
-    immutableOptions,
+    refreshInterval ? { ...immutableOptions, refreshInterval } : immutableOptions,
   );
 }
 

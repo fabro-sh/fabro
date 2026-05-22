@@ -14,6 +14,7 @@ use crate::auth::{self, JwtError, KeyDeriveError};
 pub(crate) const WORKER_TOKEN_ISSUER: &str = "fabro-server-worker";
 pub(crate) const WORKER_TOKEN_KID: &str = "fabro-worker";
 pub(crate) const WORKER_TOKEN_SCOPE: &str = "run:worker";
+pub(crate) const WORKER_RUN_TOOLS_SCOPE: &str = "agent:run_tools";
 pub(crate) const WORKER_TOKEN_TTL_SECS: u64 = 72 * 60 * 60;
 
 #[derive(Clone)]
@@ -59,9 +60,59 @@ pub(crate) struct WorkerTokenClaims {
     pub(crate) jti:    String,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct WorkerScopeSet {
+    agent_run_tools: bool,
+}
+
+impl WorkerScopeSet {
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn run_worker() -> Self {
+        Self {
+            agent_run_tools: false,
+        }
+    }
+
+    #[must_use]
+    pub(crate) const fn run_worker_with_agent_run_tools() -> Self {
+        Self {
+            agent_run_tools: true,
+        }
+    }
+
+    #[must_use]
+    pub(crate) const fn has_agent_run_tools(self) -> bool {
+        self.agent_run_tools
+    }
+
+    fn claim(self) -> String {
+        if self.agent_run_tools {
+            [WORKER_TOKEN_SCOPE, WORKER_RUN_TOOLS_SCOPE].join(" ")
+        } else {
+            WORKER_TOKEN_SCOPE.to_string()
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DecodedWorkerToken {
+    pub(crate) run_id: RunId,
+    pub(crate) scopes: WorkerScopeSet,
+}
+
+#[cfg(test)]
 pub(crate) fn issue_worker_token(
     keys: &WorkerTokenKeys,
     run_id: &RunId,
+) -> Result<String, ApiError> {
+    issue_worker_token_with_scopes(keys, run_id, WorkerScopeSet::run_worker())
+}
+
+pub(crate) fn issue_worker_token_with_scopes(
+    keys: &WorkerTokenKeys,
+    run_id: &RunId,
+    scopes: WorkerScopeSet,
 ) -> Result<String, ApiError> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -71,7 +122,7 @@ pub(crate) fn issue_worker_token(
         iat:    now,
         exp:    now + WORKER_TOKEN_TTL_SECS,
         run_id: run_id.to_string(),
-        scope:  WORKER_TOKEN_SCOPE.to_string(),
+        scope:  scopes.claim(),
         jti:    Uuid::new_v4().simple().to_string(),
     };
     jsonwebtoken::encode(&worker_token_header(), &claims, &keys.encoding).map_err(|err| {
@@ -88,7 +139,10 @@ pub(crate) fn worker_token_header() -> Header {
     header
 }
 
-pub(crate) fn decode_worker_token(token: &str, keys: &WorkerTokenKeys) -> Result<RunId, JwtError> {
+pub(crate) fn decode_worker_token(
+    token: &str,
+    keys: &WorkerTokenKeys,
+) -> Result<DecodedWorkerToken, JwtError> {
     let claims = jsonwebtoken::decode::<WorkerTokenClaims>(token, &keys.decoding, &keys.validation)
         .map_err(|err| match err.kind() {
             ErrorKind::ExpiredSignature => JwtError::AccessTokenExpired,
@@ -96,20 +150,39 @@ pub(crate) fn decode_worker_token(token: &str, keys: &WorkerTokenKeys) -> Result
         })?
         .claims;
 
-    if claims.scope != WORKER_TOKEN_SCOPE {
+    let scopes = parse_worker_scopes(&claims.scope).map_err(|()| {
         warn!(
             target: "worker_auth",
             jti = %claims.jti,
             reason = "wrong_scope",
             "worker token rejected"
         );
-        return Err(JwtError::AccessTokenInvalid);
-    }
+        JwtError::AccessTokenInvalid
+    })?;
 
-    claims
+    let run_id = claims
         .run_id
         .parse()
-        .map_err(|_| JwtError::AccessTokenInvalid)
+        .map_err(|_| JwtError::AccessTokenInvalid)?;
+    Ok(DecodedWorkerToken { run_id, scopes })
+}
+
+fn parse_worker_scopes(scope: &str) -> Result<WorkerScopeSet, ()> {
+    let mut has_run_worker = false;
+    let mut has_agent_run_tools = false;
+    for scope in scope.split_whitespace() {
+        match scope {
+            WORKER_TOKEN_SCOPE => has_run_worker = true,
+            WORKER_RUN_TOOLS_SCOPE => has_agent_run_tools = true,
+            _ => return Err(()),
+        }
+    }
+    if !has_run_worker {
+        return Err(());
+    }
+    Ok(WorkerScopeSet {
+        agent_run_tools: has_agent_run_tools,
+    })
 }
 
 #[cfg(test)]
@@ -121,8 +194,9 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        WORKER_TOKEN_ISSUER, WORKER_TOKEN_KID, WORKER_TOKEN_SCOPE, WorkerTokenClaims,
-        WorkerTokenKeys, decode_worker_token, issue_worker_token, worker_token_header,
+        WORKER_RUN_TOOLS_SCOPE, WORKER_TOKEN_ISSUER, WORKER_TOKEN_KID, WORKER_TOKEN_SCOPE,
+        WorkerScopeSet, WorkerTokenClaims, WorkerTokenKeys, decode_worker_token,
+        issue_worker_token, issue_worker_token_with_scopes, worker_token_header,
     };
     use crate::auth::{self, JwtError};
 
@@ -138,12 +212,20 @@ mod tests {
     }
 
     fn wrong_scope_token(keys: &WorkerTokenKeys, run_id: &fabro_types::RunId) -> String {
+        worker_token_with_scope(keys, run_id, "wrong:scope")
+    }
+
+    fn worker_token_with_scope(
+        keys: &WorkerTokenKeys,
+        run_id: &fabro_types::RunId,
+        scope: &str,
+    ) -> String {
         let claims = WorkerTokenClaims {
             iss:    WORKER_TOKEN_ISSUER.to_string(),
             iat:    1,
             exp:    u64::MAX / 2,
             run_id: run_id.to_string(),
-            scope:  "wrong:scope".to_string(),
+            scope:  scope.to_string(),
             jti:    Uuid::new_v4().simple().to_string(),
         };
         jsonwebtoken::encode(&worker_token_header(), &claims, &keys.encoding)
@@ -249,8 +331,53 @@ mod tests {
         let run_id = run_id();
         let keys = keys(TEST_SECRET);
         let token = issue_worker_token(&keys, &run_id).expect("worker token should issue");
+        let decoded = decode_worker_token(&token, &keys).unwrap();
 
-        assert_eq!(decode_worker_token(&token, &keys).unwrap(), run_id);
+        assert_eq!(decoded.run_id, run_id);
+        assert!(!decoded.scopes.has_agent_run_tools());
+    }
+
+    #[test]
+    fn decode_worker_token_exposes_run_tool_scope() {
+        let run_id = run_id();
+        let keys = keys(TEST_SECRET);
+        let token = issue_worker_token_with_scopes(
+            &keys,
+            &run_id,
+            WorkerScopeSet::run_worker_with_agent_run_tools(),
+        )
+        .expect("worker token should issue");
+        let decoded = decode_worker_token(&token, &keys).unwrap();
+
+        assert_eq!(decoded.run_id, run_id);
+        assert!(decoded.scopes.has_agent_run_tools());
+    }
+
+    #[test]
+    fn decode_worker_token_accepts_space_delimited_run_tool_scope_claim() {
+        let run_id = run_id();
+        let keys = keys(TEST_SECRET);
+        let token = worker_token_with_scope(
+            &keys,
+            &run_id,
+            &format!("{WORKER_TOKEN_SCOPE} {WORKER_RUN_TOOLS_SCOPE}"),
+        );
+        let decoded = decode_worker_token(&token, &keys).unwrap();
+
+        assert_eq!(decoded.run_id, run_id);
+        assert!(decoded.scopes.has_agent_run_tools());
+    }
+
+    #[test]
+    fn decode_worker_token_rejects_missing_base_scope() {
+        let run_id = run_id();
+        let keys = keys(TEST_SECRET);
+        let token = worker_token_with_scope(&keys, &run_id, WORKER_RUN_TOOLS_SCOPE);
+
+        assert_eq!(
+            decode_worker_token(&token, &keys).expect_err("base worker scope should be required"),
+            JwtError::AccessTokenInvalid,
+        );
     }
 
     #[test]
