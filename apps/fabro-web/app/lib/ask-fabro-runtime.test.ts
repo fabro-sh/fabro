@@ -16,7 +16,6 @@ function event(name: string, properties: Record<string, unknown>): SessionStream
 describe("applyTurnEvent", () => {
   test("appends assistant deltas into a single streaming text part", () => {
     const acc = {
-      textParts: [],
       activeTextIndex: null,
       parts: [],
       toolCallIndex: new Map(),
@@ -34,7 +33,6 @@ describe("applyTurnEvent", () => {
 
   test("inserts a tool-call part and later attaches its result", () => {
     const acc = {
-      textParts: [],
       activeTextIndex: null,
       parts: [],
       toolCallIndex: new Map(),
@@ -79,7 +77,6 @@ describe("applyTurnEvent", () => {
 
   test("a text segment after a tool call starts a fresh text part", () => {
     const acc = {
-      textParts: [],
       activeTextIndex: null,
       parts: [],
       toolCallIndex: new Map(),

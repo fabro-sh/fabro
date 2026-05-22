@@ -5,7 +5,6 @@ import type {
 } from "@assistant-ui/react";
 
 import {
-  attachSessionEvents,
   streamSessionTurn,
   type SessionStreamEvent,
 } from "./session-stream";
@@ -59,8 +58,6 @@ export interface AskFabroAdapterOptions {
   persistedSession?: PersistedSessionState;
   /** Override stream impl for tests. */
   streamSessionTurnImpl?: typeof streamSessionTurn;
-  /** Override attach impl for tests. */
-  attachSessionEventsImpl?: typeof attachSessionEvents;
   /** Override session API for tests. */
   createSession?: (
     runId: string,
@@ -75,7 +72,6 @@ export interface AskFabroAdapterOptions {
  * streaming text and tool-call cards in real time.
  */
 interface TurnAccumulator {
-  textParts: Array<{ text: string }>;
   /** Active text part index, if the last delta added/extended text. */
   activeTextIndex: number | null;
   parts: ThreadAssistantMessagePart[];
@@ -85,7 +81,6 @@ interface TurnAccumulator {
 
 function emptyAccumulator(): TurnAccumulator {
   return {
-    textParts: [],
     activeTextIndex: null,
     parts: [],
     toolCallIndex: new Map(),
@@ -121,18 +116,12 @@ export function applyTurnEvent(
     const delta = typeof props.delta === "string" ? props.delta : "";
     if (!delta) return false;
     if (acc.activeTextIndex == null) {
-      const textPart = { text: delta };
-      acc.textParts.push(textPart);
       acc.parts.push({ type: "text", text: delta });
       acc.activeTextIndex = acc.parts.length - 1;
     } else {
       const part = acc.parts[acc.activeTextIndex];
       if (part && part.type === "text") {
-        const updated: ThreadAssistantMessagePart = {
-          ...part,
-          text: part.text + delta,
-        };
-        acc.parts[acc.activeTextIndex] = updated;
+        acc.parts[acc.activeTextIndex] = { ...part, text: part.text + delta };
       }
     }
     return true;
@@ -205,27 +194,27 @@ function defaultCreateSession(
     .then((response) => ({ id: response.data.id }));
 }
 
+interface UserContentPart {
+  type?: unknown;
+  text?: unknown;
+}
+
 function lastUserText(
-  messages: ReadonlyArray<{ role: string; content: ReadonlyArray<unknown> }>,
+  messages: ReadonlyArray<{
+    role: string;
+    content: ReadonlyArray<UserContentPart>;
+  }>,
 ): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
     if (!message || message.role !== "user") continue;
-    const text = message.content
-      .map((part) => {
-        if (
-          part &&
-          typeof part === "object" &&
-          (part as { type?: unknown }).type === "text" &&
-          typeof (part as { text?: unknown }).text === "string"
-        ) {
-          return (part as { text: string }).text;
-        }
-        return "";
-      })
-      .filter(Boolean)
-      .join("\n");
-    if (text) return text;
+    const segments: string[] = [];
+    for (const part of message.content) {
+      if (part.type === "text" && typeof part.text === "string") {
+        segments.push(part.text);
+      }
+    }
+    if (segments.length > 0) return segments.join("\n");
   }
   return "";
 }
@@ -265,40 +254,32 @@ export function createAskFabroAdapter(
       const queue: SessionStreamEvent[] = [];
       let resolveWaiter: (() => void) | null = null;
       let streamDone = false;
-      let streamError: unknown = null;
 
-      const streamPromise = streamImpl({
-        sessionId: id,
-        input,
-        signal: abortSignal,
-        onEvent: (event) => {
-          queue.push(event);
-          if (resolveWaiter) {
-            const r = resolveWaiter;
-            resolveWaiter = null;
-            r();
-          }
-        },
-      }).then(
-        () => {
-          streamDone = true;
-          if (resolveWaiter) {
-            const r = resolveWaiter;
-            resolveWaiter = null;
-            r();
-          }
-        },
-        (err) => {
-          streamError = err;
-          streamDone = true;
-          if (resolveWaiter) {
-            const r = resolveWaiter;
-            resolveWaiter = null;
-            r();
-          }
-        },
-      );
+      function wakeWaiter() {
+        if (!resolveWaiter) return;
+        const r = resolveWaiter;
+        resolveWaiter = null;
+        r();
+      }
 
+      const streamPromise = (async () => {
+        try {
+          await streamImpl({
+            sessionId: id,
+            input,
+            signal: abortSignal,
+            onEvent: (event) => {
+              queue.push(event);
+              wakeWaiter();
+            },
+          });
+        } finally {
+          streamDone = true;
+          wakeWaiter();
+        }
+      })();
+
+      let yielded = false;
       while (true) {
         if (queue.length === 0) {
           if (streamDone) break;
@@ -311,12 +292,14 @@ export function createAskFabroAdapter(
         if (!event) continue;
         if (applyTurnEvent(acc, event)) {
           yield snapshot(acc);
+          yielded = true;
         }
       }
 
+      // Propagate any error from the stream task.
       await streamPromise;
-      if (streamError) throw streamError;
-      yield snapshot(acc);
+      // Guarantee assistant-ui sees at least one result for an empty turn.
+      if (!yielded) yield snapshot(acc);
     },
   };
 }

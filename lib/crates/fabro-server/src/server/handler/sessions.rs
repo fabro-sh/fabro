@@ -35,7 +35,7 @@ use fabro_types::settings::{ModelRef as SettingsModelRef, ModelRegistry, Resolve
 use fabro_types::{
     EventBody, EventEnvelope, PermissionLevel, RunEvent, RunId, SessionDetail, SessionId, TurnId,
 };
-use fabro_workflow::handler::llm::api::register_fabro_run_tools_subset;
+use fabro_workflow::handler::llm::api::register_named_fabro_run_tools;
 use fabro_workflow::services::FabroRunToolServices;
 use serde_json::Value;
 use tokio::sync::broadcast::error::RecvError;
@@ -704,7 +704,7 @@ async fn build_agent_session(
         &run_id,
         WorkerScopeSet::run_worker_with_agent_run_tools(),
     )
-    .map_err(|err| AskFabroBuildError::Agent(anyhow::anyhow!("{err:?}")))?;
+    .map_err(|_| AskFabroBuildError::Agent(anyhow::anyhow!("failed to sign worker token")))?;
     let target = state
         .self_server_target()
         .map_err(AskFabroBuildError::Agent)?;
@@ -721,7 +721,7 @@ async fn build_agent_session(
         base_cwd:           PathBuf::new(),
         user_settings_path: PathBuf::new(),
     };
-    register_fabro_run_tools_subset(profile.tool_registry_mut(), &services, &[
+    register_named_fabro_run_tools(profile.tool_registry_mut(), &services, &[
         fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
         fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
     ]);

@@ -28,7 +28,10 @@ import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import AskFabroSidebar, {
   SIDEBAR_WIDTH,
 } from "../components/chats/ask-fabro-sidebar";
-import type { AskFabro } from "@qltysh/fabro-api-client";
+import {
+  AskFabroUnavailableReasonEnum,
+  type AskFabro,
+} from "@qltysh/fabro-api-client";
 import { EditableRunTitle } from "../components/editable-run-title";
 import { GitPullRequestIcon } from "../components/icons";
 import { InterviewDock } from "../components/interview-dock";
@@ -737,11 +740,14 @@ function isLifecycleActionFailure(
   return "ok" in value && value.ok === false;
 }
 
-const ASK_FABRO_UNAVAILABLE_TOOLTIPS: Record<string, string> = {
-  feature_disabled:  "Ask Fabro is disabled",
-  no_sandbox:        "Run sandbox isn't ready",
-  sandbox_not_ready: "Run sandbox isn't ready",
-  llm_unconfigured:  "No LLM configured",
+const ASK_FABRO_UNAVAILABLE_TOOLTIPS: Record<
+  AskFabroUnavailableReasonEnum,
+  string
+> = {
+  [AskFabroUnavailableReasonEnum.FEATURE_DISABLED]: "Ask Fabro is disabled",
+  [AskFabroUnavailableReasonEnum.NO_SANDBOX]:       "Run sandbox isn't ready",
+  [AskFabroUnavailableReasonEnum.SANDBOX_NOT_READY]:"Run sandbox isn't ready",
+  [AskFabroUnavailableReasonEnum.LLM_UNCONFIGURED]: "No LLM configured",
 };
 
 function AskFabroTriggerButton({

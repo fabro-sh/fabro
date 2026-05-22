@@ -192,18 +192,22 @@ fn build_profile(
 }
 
 pub fn register_fabro_run_tools(registry: &mut ToolRegistry, services: &FabroRunToolServices) {
-    register_fabro_run_tools_subset(registry, services, &[]);
+    for definition in fabro_tool::tool_definitions() {
+        registry.register(fabro_run_tool(definition, services.clone()));
+    }
 }
 
-/// Register a subset of Fabro run tools by tool name. Pass an empty `only`
-/// slice to register the full set (matches `register_fabro_run_tools`).
-pub fn register_fabro_run_tools_subset(
+/// Register only the Fabro run tools whose names appear in `names`.
+///
+/// Unknown names are silently ignored so callers can list every tool they
+/// care about without depending on the current `fabro_tool` catalog.
+pub fn register_named_fabro_run_tools(
     registry: &mut ToolRegistry,
     services: &FabroRunToolServices,
-    only: &[&str],
+    names: &[&str],
 ) {
     for definition in fabro_tool::tool_definitions() {
-        if only.is_empty() || only.contains(&definition.name) {
+        if names.contains(&definition.name) {
             registry.register(fabro_run_tool(definition, services.clone()));
         }
     }
@@ -1466,10 +1470,10 @@ mod tests {
     }
 
     #[test]
-    fn agent_run_tools_subset_registers_only_listed_tools() {
+    fn register_named_fabro_run_tools_registers_only_listed_tools() {
         let mut registry = ToolRegistry::new();
         let (services, _backend) = fabro_run_tool_services();
-        register_fabro_run_tools_subset(&mut registry, &services, &[
+        register_named_fabro_run_tools(&mut registry, &services, &[
             fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
             fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
         ]);
@@ -1487,18 +1491,20 @@ mod tests {
     }
 
     #[test]
-    fn agent_run_tools_subset_empty_only_registers_all() {
-        let mut registry_full = ToolRegistry::new();
-        let mut registry_subset = ToolRegistry::new();
+    fn register_named_fabro_run_tools_ignores_unknown_names() {
+        let mut registry = ToolRegistry::new();
         let (services, _backend) = fabro_run_tool_services();
-        register_fabro_run_tools(&mut registry_full, &services);
-        register_fabro_run_tools_subset(&mut registry_subset, &services, &[]);
+        register_named_fabro_run_tools(&mut registry, &services, &[
+            fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
+            "not_a_real_tool",
+        ]);
 
-        let mut full = registry_full.names();
-        let mut subset = registry_subset.names();
-        full.sort();
-        subset.sort();
-        assert_eq!(full, subset);
+        let registered = registry
+            .names()
+            .into_iter()
+            .filter(|name| name.starts_with("fabro_run_"))
+            .collect::<Vec<_>>();
+        assert_eq!(registered, vec![fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME]);
     }
 
     #[tokio::test]

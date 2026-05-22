@@ -960,12 +960,9 @@ impl AppState {
                 runtime_directory.record_path().display()
             )
         })?;
-        let target = daemon.bind.to_target();
-        if daemon.bind.tcp_port().is_some() {
-            fabro_client::ServerTarget::http_url(target)
-        } else {
-            fabro_client::ServerTarget::unix_socket_path(target)
-        }
+        // `Bind::to_target()` already produces the http(s)-URL-or-absolute-
+        // socket-path form that `ServerTarget`'s FromStr understands.
+        daemon.bind.to_target().parse()
     }
 
     pub(crate) fn resolve_interp(&self, value: &InterpString) -> anyhow::Result<String> {
