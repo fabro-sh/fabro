@@ -6,10 +6,8 @@
 //! parallel DTOs between layers. `fabro-llm::types` re-exports these so
 //! existing imports keep working.
 
-use std::collections::BTreeMap;
-
 use chrono::{DateTime, Utc};
-use fabro_model::ModelRef;
+use fabro_model::{ModelRef, TokenCounts};
 use serde::{Deserialize, Serialize, de};
 use strum::{Display, EnumString, IntoStaticStr};
 
@@ -325,22 +323,6 @@ pub struct PairMessageRef {
     pub client_message_id: Option<String>,
 }
 
-/// Optional usage attribution carried on a committed message.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct TranscriptUsage {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input_tokens:        Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_tokens:       Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cached_input_tokens: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning_tokens:    Option<u64>,
-    /// Additional provider-specific usage counters.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub extra:               BTreeMap<String, u64>,
-}
-
 /// Canonical durable transcript message.
 ///
 /// Named `TranscriptMessage` rather than `Message` to avoid import ambiguity
@@ -369,7 +351,7 @@ pub struct TranscriptMessage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage:       Option<TranscriptUsage>,
+    pub usage:       Option<TokenCounts>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at:  Option<DateTime<Utc>>,
 }
