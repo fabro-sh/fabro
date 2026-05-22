@@ -164,10 +164,15 @@ impl_combine_self!(
 
 impl Combine for RunCheckpointLayer {
     fn combine(self, other: Self) -> Self {
-        if self.exclude_globs.is_empty() {
-            other
+        let exclude_globs = if self.exclude_globs.is_empty() {
+            other.exclude_globs
         } else {
-            self
+            self.exclude_globs
+        };
+        let skip_git_hooks = self.skip_git_hooks.or(other.skip_git_hooks);
+        Self {
+            exclude_globs,
+            skip_git_hooks,
         }
     }
 }

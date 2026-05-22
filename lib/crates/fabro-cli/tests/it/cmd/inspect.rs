@@ -147,7 +147,8 @@ fn inspect_resolves_selector_via_server_endpoint() {
                 "approval": "prompt"
               },
               "checkpoint": {
-                "exclude_globs": []
+                "exclude_globs": [],
+                "skip_git_hooks": false
               },
               "clone": {
                 "enabled": true

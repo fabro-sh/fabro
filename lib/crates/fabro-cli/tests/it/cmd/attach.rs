@@ -925,7 +925,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
                 "include": []
               },
               "checkpoint": {
-                "exclude_globs": []
+                "exclude_globs": [],
+                "skip_git_hooks": false
               },
               "clone": {
                 "enabled": true

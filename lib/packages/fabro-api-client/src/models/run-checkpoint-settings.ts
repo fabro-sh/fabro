@@ -16,4 +16,10 @@
 
 export interface RunCheckpointSettings {
     'exclude_globs': Array<string>;
+    /**
+     * When true, Fabro-managed run-branch checkpoint commits bypass local Git commit hooks. Does not affect Fabro `[[run.hooks]]` or metadata-branch snapshots. Defaults to false. 
+     * @type {boolean}
+     * @memberof RunCheckpointSettings
+     */
+    'skip_git_hooks': boolean;
 }

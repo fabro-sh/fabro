@@ -609,3 +609,99 @@ fabro_tools = true
         assert!(!settings.agent.fabro_tools);
     }
 }
+
+mod run_checkpoint_skip_git_hooks {
+    //! Layer + resolver tests for `[run.checkpoint] skip_git_hooks`.
+
+    use crate::layers::Combine;
+    use crate::{SettingsLayer, WorkflowSettingsBuilder};
+
+    fn parse_settings(source: &str) -> SettingsLayer {
+        source
+            .parse::<SettingsLayer>()
+            .expect("fixture should parse via SettingsLayer")
+    }
+
+    #[test]
+    fn resolves_skip_git_hooks_true_when_set() {
+        let settings = WorkflowSettingsBuilder::from_toml(
+            r"
+_version = 1
+
+[run.checkpoint]
+skip_git_hooks = true
+",
+        )
+        .expect("settings should resolve")
+        .run;
+
+        assert!(settings.checkpoint.skip_git_hooks);
+    }
+
+    #[test]
+    fn resolves_skip_git_hooks_false_when_omitted() {
+        let settings = WorkflowSettingsBuilder::from_layer(&SettingsLayer::default())
+            .expect("empty settings should resolve")
+            .run;
+
+        assert!(!settings.checkpoint.skip_git_hooks);
+    }
+
+    #[test]
+    fn higher_layer_false_overrides_lower_layer_true() {
+        let workflow = parse_settings(
+            r"
+_version = 1
+
+[run.checkpoint]
+skip_git_hooks = false
+",
+        );
+        let user = parse_settings(
+            r"
+_version = 1
+
+[run.checkpoint]
+skip_git_hooks = true
+",
+        );
+        let merged = workflow.combine(user);
+
+        let settings = WorkflowSettingsBuilder::from_layer(&merged)
+            .expect("merged settings should resolve")
+            .run;
+
+        assert!(!settings.checkpoint.skip_git_hooks);
+    }
+
+    #[test]
+    fn exclude_globs_replace_behavior_preserved_when_skip_git_hooks_added() {
+        // Higher layer provides skip_git_hooks but no exclude_globs;
+        // exclude_globs should still inherit from the lower layer because the
+        // higher layer's list is empty.
+        let workflow = parse_settings(
+            r"
+_version = 1
+
+[run.checkpoint]
+skip_git_hooks = true
+",
+        );
+        let user = parse_settings(
+            r#"
+_version = 1
+
+[run.checkpoint]
+exclude_globs = ["**/lower/**"]
+"#,
+        );
+        let merged = workflow.combine(user);
+
+        let settings = WorkflowSettingsBuilder::from_layer(&merged)
+            .expect("merged settings should resolve")
+            .run;
+
+        assert_eq!(settings.checkpoint.exclude_globs, vec!["**/lower/**"]);
+        assert!(settings.checkpoint.skip_git_hooks);
+    }
+}

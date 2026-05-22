@@ -237,7 +237,13 @@ impl Default for RunExecutionSettings {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunCheckpointSettings {
-    pub exclude_globs: Vec<String>,
+    pub exclude_globs:  Vec<String>,
+    /// When `true`, Fabro-managed run-branch checkpoint commits bypass
+    /// local Git commit hooks (e.g. `pre-commit`, `commit-msg`). This does
+    /// not affect Fabro workflow `[[run.hooks]]` or metadata-branch
+    /// snapshots, which already bypass repository hooks.
+    #[serde(default)]
+    pub skip_git_hooks: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
