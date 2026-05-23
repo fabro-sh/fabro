@@ -29,8 +29,7 @@ use crate::redact::redact_auth_url;
 use crate::sandbox::{optional_timeout, resolve_path};
 use crate::{
     CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GrepOptions, Sandbox,
-    SandboxEvent, SandboxEventCallback, StdioProcess, format_lines_numbered, managed_labels,
-    shell_quote,
+    SandboxEvent, SandboxEventCallback, StdioProcess, managed_labels, shell_quote,
 };
 
 pub(crate) const WORKING_DIRECTORY: &str = "/home/daytona/workspace";
@@ -1271,12 +1270,7 @@ impl Sandbox for DaytonaSandbox {
             .map_err(|e| crate::Error::context("Failed to set autostop interval", e))
     }
 
-    async fn read_file(
-        &self,
-        path: &str,
-        offset: Option<usize>,
-        limit: Option<usize>,
-    ) -> crate::Result<String> {
+    async fn read_file_bytes(&self, path: &str) -> crate::Result<Vec<u8>> {
         let sandbox = self.sandbox()?;
         let resolved = self.resolve_path(path);
 
@@ -1290,10 +1284,7 @@ impl Sandbox for DaytonaSandbox {
             .await
             .map_err(|e| crate::Error::context(format!("Failed to read file {resolved}"), e))?;
 
-        let content = String::from_utf8(bytes)
-            .map_err(|e| crate::Error::context("File is not valid UTF-8", e))?;
-
-        Ok(format_lines_numbered(&content, offset, limit))
+        Ok(bytes)
     }
 
     async fn write_file(&self, path: &str, content: &str) -> crate::Result<()> {

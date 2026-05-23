@@ -130,6 +130,8 @@ The `Sandbox` trait abstracts where tools execute — local filesystem, Docker c
 ```rust
 #[async_trait]
 pub trait Sandbox: Send + Sync {
+    async fn read_file_bytes(&self, path: &str) -> Result<Vec<u8>, String>;
+    async fn read_file_text(&self, path: &str) -> Result<String, String>;
     async fn read_file(&self, path: &str, offset: Option<usize>, limit: Option<usize>) -> Result<String, String>;
     async fn write_file(&self, path: &str, content: &str) -> Result<(), String>;
     async fn delete_file(&self, path: &str) -> Result<(), String>;

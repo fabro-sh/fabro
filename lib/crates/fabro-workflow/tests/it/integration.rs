@@ -9224,12 +9224,7 @@ impl RemoteMockEnv {
 
 #[async_trait::async_trait]
 impl fabro_agent::Sandbox for RemoteMockEnv {
-    async fn read_file(
-        &self,
-        _path: &str,
-        _offset: Option<usize>,
-        _limit: Option<usize>,
-    ) -> fabro_sandbox::Result<String> {
+    async fn read_file_bytes(&self, _path: &str) -> fabro_sandbox::Result<Vec<u8>> {
         Err("not implemented".into())
     }
 

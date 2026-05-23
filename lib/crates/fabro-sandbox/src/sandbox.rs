@@ -61,7 +61,7 @@ pub enum GitSetupIntent {
 /// delegate_sandbox! {
 ///     MyDecorator => inner {
 ///         // Only provide methods with custom logic — the rest delegate automatically.
-///         async fn read_file(&self, path: &str, offset: Option<usize>, limit: Option<usize>) -> $crate::Result<String> {
+///         async fn read_file_bytes(&self, path: &str) -> $crate::Result<Vec<u8>> {
 ///             // custom logic...
 ///         }
 ///     }
@@ -232,6 +232,10 @@ macro_rules! delegate_sandbox {
 
             async fn get_preview_url(&self, port: u16) -> $crate::Result<Option<(String, std::collections::HashMap<String, String>)>> {
                 self.$field.get_preview_url(port).await
+            }
+
+            async fn read_file_bytes(&self, path: &str) -> $crate::Result<Vec<u8>> {
+                self.$field.read_file_bytes(path).await
             }
 
             async fn read_file(
@@ -489,12 +493,12 @@ pub type SandboxEventCallback = Arc<dyn Fn(SandboxEvent) + Send + Sync>;
 
 /// Formats file content with line numbers for display.
 ///
-/// Applies optional offset (0-based lines to skip) and limit (max lines to
-/// return). Line numbers are 1-based and right-aligned.
+/// Applies optional offset (1-based starting line number) and limit (max lines
+/// to return). Line numbers are 1-based and right-aligned.
 #[must_use]
 pub fn format_lines_numbered(content: &str, offset: Option<usize>, limit: Option<usize>) -> String {
     let all_lines: Vec<&str> = content.lines().collect();
-    let skip = offset.unwrap_or(0);
+    let skip = offset.unwrap_or(1).saturating_sub(1);
     let take = limit.unwrap_or(all_lines.len());
     let selected: Vec<&str> = all_lines.into_iter().skip(skip).take(take).collect();
     let width = (skip + selected.len()).to_string().len().max(1);
@@ -805,12 +809,26 @@ pub struct GrepOptions {
 
 #[async_trait]
 pub trait Sandbox: Send + Sync {
+    async fn read_file_bytes(&self, path: &str) -> crate::Result<Vec<u8>>;
+
+    async fn read_file_text(&self, path: &str) -> crate::Result<String> {
+        String::from_utf8(self.read_file_bytes(path).await?)
+            .map_err(|err| crate::Error::context("File is not valid UTF-8", err))
+    }
+
     async fn read_file(
         &self,
         path: &str,
         offset: Option<usize>,
         limit: Option<usize>,
-    ) -> crate::Result<String>;
+    ) -> crate::Result<String> {
+        Ok(format_lines_numbered(
+            &self.read_file_text(path).await?,
+            offset,
+            limit,
+        ))
+    }
+
     async fn write_file(&self, path: &str, content: &str) -> crate::Result<()>;
     async fn delete_file(&self, path: &str) -> crate::Result<()>;
     async fn file_exists(&self, path: &str) -> crate::Result<bool>;
@@ -1467,7 +1485,7 @@ mod tests {
 
     #[test]
     fn format_lines_numbered_with_offset_limit() {
-        let result = format_lines_numbered("a\nb\nc\nd\ne", Some(1), Some(2));
+        let result = format_lines_numbered("a\nb\nc\nd\ne", Some(2), Some(2));
         assert!(result.contains("2 | b"));
         assert!(result.contains("3 | c"));
         assert!(!result.contains("1 | a"));

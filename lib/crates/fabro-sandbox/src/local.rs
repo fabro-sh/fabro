@@ -16,7 +16,7 @@ use crate::sandbox::{StdioProcessControl, optional_timeout};
 use crate::{
     CommandOutputCallback, DEFAULT_EXEC_OUTPUT_TAIL_BYTES, DirEntry, ExecResult,
     ExecStreamingResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback, StderrCollector,
-    StdioProcess, StdioProcessHandle, StdioProcessTermination, format_lines_numbered,
+    StdioProcess, StdioProcessHandle, StdioProcessTermination,
 };
 
 pub struct LocalSandbox {
@@ -244,18 +244,11 @@ impl StdioProcessControl for LocalStdioProcessControl {
 
 #[async_trait]
 impl Sandbox for LocalSandbox {
-    async fn read_file(
-        &self,
-        path: &str,
-        offset: Option<usize>,
-        limit: Option<usize>,
-    ) -> crate::Result<String> {
+    async fn read_file_bytes(&self, path: &str) -> crate::Result<Vec<u8>> {
         let full_path = self.resolve_path(path);
-        let content = fs::read_to_string(&full_path).await.map_err(|e| {
+        fs::read(&full_path).await.map_err(|e| {
             crate::Error::context(format!("Failed to read {}", full_path.display()), e)
-        })?;
-
-        Ok(format_lines_numbered(&content, offset, limit))
+        })
     }
 
     async fn write_file(&self, path: &str, content: &str) -> crate::Result<()> {

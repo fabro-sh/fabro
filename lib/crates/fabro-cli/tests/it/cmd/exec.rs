@@ -4,10 +4,17 @@
 )]
 #![expect(
     clippy::disallowed_methods,
-    reason = "Integration tests stage fixtures with sync std::fs calls."
+    clippy::disallowed_types,
+    reason = "Integration tests stage fixtures with sync std::fs calls and a blocking TCP server."
 )]
 
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::process::Output;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::thread;
+use std::time::Duration;
 
 use chrono::{Duration as ChronoDuration, Utc};
 use fabro_test::{fabro_snapshot, preserve_coverage_env, test_context};
@@ -20,6 +27,211 @@ async fn run_success_output(mut cmd: assert_cmd::Command) -> Output {
     tokio::task::spawn_blocking(move || cmd.assert().success().get_output().clone())
         .await
         .expect("blocking command task should complete")
+}
+
+struct MidStreamDecodeErrorAnthropicServer {
+    addr:          SocketAddr,
+    request_count: Arc<AtomicUsize>,
+    shutdown:      Arc<AtomicBool>,
+    join_handle:   Option<thread::JoinHandle<()>>,
+}
+
+impl MidStreamDecodeErrorAnthropicServer {
+    fn start() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("test LLM server should bind");
+        let addr = listener
+            .local_addr()
+            .expect("test LLM server should expose local addr");
+        let request_count = Arc::new(AtomicUsize::new(0));
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let thread_request_count = Arc::clone(&request_count);
+        let thread_shutdown = Arc::clone(&shutdown);
+        let join_handle = thread::spawn(move || {
+            for stream in listener.incoming() {
+                if thread_shutdown.load(Ordering::SeqCst) {
+                    break;
+                }
+                let Ok(mut stream) = stream else { continue };
+                handle_anthropic_test_connection(&mut stream, &thread_request_count);
+            }
+        });
+
+        Self {
+            addr,
+            request_count,
+            shutdown,
+            join_handle: Some(join_handle),
+        }
+    }
+
+    fn base_url(&self) -> String {
+        format!("http://{}", self.addr)
+    }
+
+    fn request_count(&self) -> usize {
+        self.request_count.load(Ordering::SeqCst)
+    }
+}
+
+impl Drop for MidStreamDecodeErrorAnthropicServer {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::SeqCst);
+        let _ = TcpStream::connect(self.addr);
+        if let Some(join_handle) = self.join_handle.take() {
+            let _ = join_handle.join();
+        }
+    }
+}
+
+fn handle_anthropic_test_connection(stream: &mut TcpStream, request_count: &Arc<AtomicUsize>) {
+    let Some(request) = read_http_request(stream) else {
+        return;
+    };
+    if !request.starts_with("POST /v1/messages ") {
+        write_http_response(stream, "404 Not Found", "text/plain", "not found");
+        return;
+    }
+
+    let attempt = request_count.fetch_add(1, Ordering::SeqCst);
+    if attempt == 0 {
+        write_chunk_decode_error_response(stream, &partial_anthropic_stream("partial"));
+    } else {
+        write_http_response(
+            stream,
+            "200 OK",
+            "text/event-stream",
+            &complete_anthropic_stream("Recovered"),
+        );
+    }
+}
+
+fn read_http_request(stream: &mut TcpStream) -> Option<String> {
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let mut request = Vec::new();
+    let mut body_start_and_len = None;
+
+    loop {
+        let mut buffer = [0_u8; 4096];
+        let read = stream.read(&mut buffer).ok()?;
+        if read == 0 {
+            break;
+        }
+        request.extend_from_slice(&buffer[..read]);
+
+        if body_start_and_len.is_none() {
+            if let Some(header_end) = find_header_end(&request) {
+                body_start_and_len =
+                    Some((header_end + 4, parse_content_length(&request[..header_end])));
+            }
+        }
+
+        if let Some((body_start, body_len)) = body_start_and_len {
+            if request.len() >= body_start + body_len {
+                break;
+            }
+        }
+    }
+
+    Some(String::from_utf8_lossy(&request).into_owned())
+}
+
+fn find_header_end(request: &[u8]) -> Option<usize> {
+    request.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+fn parse_content_length(headers: &[u8]) -> usize {
+    String::from_utf8_lossy(headers)
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().ok())
+                .flatten()
+        })
+        .unwrap_or(0)
+}
+
+fn write_chunk_decode_error_response(stream: &mut TcpStream, body: &str) {
+    let _ = write!(
+        stream,
+        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n{:x}\r\n{body}\r\nnot-hex\r\n",
+        body.len()
+    );
+    let _ = stream.flush();
+}
+
+fn write_http_response(stream: &mut TcpStream, status: &str, content_type: &str, body: &str) {
+    let _ = write!(
+        stream,
+        "HTTP/1.1 {status}\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let _ = stream.flush();
+}
+
+fn partial_anthropic_stream(text: &str) -> String {
+    anthropic_event(
+        "message_start",
+        &serde_json::json!({
+            "type": "message_start",
+            "message": {
+                "id": "msg_stream",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-haiku-4-5",
+                "content": [],
+                "stop_reason": null,
+                "stop_sequence": null,
+                "usage": { "input_tokens": 1, "output_tokens": 0 }
+            }
+        }),
+    ) + &anthropic_event(
+        "content_block_start",
+        &serde_json::json!({
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": { "type": "text", "text": "" }
+        }),
+    ) + &anthropic_event(
+        "content_block_delta",
+        &serde_json::json!({
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": { "type": "text_delta", "text": text }
+        }),
+    )
+}
+
+fn complete_anthropic_stream(text: &str) -> String {
+    partial_anthropic_stream(text)
+        + &anthropic_event(
+            "content_block_stop",
+            &serde_json::json!({
+                "type": "content_block_stop",
+                "index": 0
+            }),
+        )
+        + &anthropic_event(
+            "message_delta",
+            &serde_json::json!({
+                "type": "message_delta",
+                "delta": {
+                    "stop_reason": "end_turn",
+                    "stop_sequence": null
+                },
+                "usage": { "output_tokens": 1 }
+            }),
+        )
+        + &anthropic_event(
+            "message_stop",
+            &serde_json::json!({
+                "type": "message_stop"
+            }),
+        )
+}
+
+fn anthropic_event(event: &str, data: &serde_json::Value) -> String {
+    format!("event: {event}\ndata: {data}\n\n")
 }
 
 #[test]
@@ -439,6 +651,51 @@ fn exec_direct_provider_auth_failure_stays_exit_1() {
     assert_eq!(
         fatal_error_line(&output.stderr),
         "LLM error: Authentication error for anthropic: bad key"
+    );
+}
+
+#[test]
+fn exec_retries_retryable_mid_stream_body_decode_error() {
+    let context = test_context!();
+    let llm_server = MidStreamDecodeErrorAnthropicServer::start();
+    context.write_home(
+        ".fabro/settings.toml",
+        format!(
+            "_version = 1\n\n[llm.providers.anthropic]\nbase_url = \"{}/v1\"\n",
+            llm_server.base_url()
+        ),
+    );
+
+    let mut cmd = context.exec_cmd();
+    cmd.env_clear();
+    preserve_coverage_env!(cmd);
+    cmd.env("HOME", &context.home_dir);
+    cmd.env("FABRO_STORAGE_DIR", &context.storage_dir);
+    cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled")
+        .env("ANTHROPIC_API_KEY", "test-key");
+    cmd.args([
+        "--provider",
+        "anthropic",
+        "--model",
+        "claude-haiku-4-5",
+        "--permissions",
+        "read-only",
+        "Say exactly: Recovered",
+    ]);
+
+    let output = cmd.output().expect("command should execute");
+    assert!(
+        output.status.success(),
+        "exec should retry the failed LLM stream and succeed after the second response; requests: {}\nstdout:\n{}\nstderr:\n{}",
+        llm_server.request_count(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        llm_server.request_count(),
+        2,
+        "exec should retry the retryable mid-stream body decode error"
     );
 }
 

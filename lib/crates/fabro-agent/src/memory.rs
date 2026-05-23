@@ -46,7 +46,7 @@ pub async fn discover_memory(
                 return Err(Error::Interrupted(InterruptReason::Cancelled));
             }
             let path = format!("{dir}/{filename}");
-            let read_result = env.read_file(&path, None, None).await;
+            let read_result = env.read_file_text(&path).await;
             if cancel_token.is_cancelled() {
                 return Err(Error::Interrupted(InterruptReason::Cancelled));
             }

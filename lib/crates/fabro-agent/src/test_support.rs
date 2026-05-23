@@ -359,33 +359,6 @@ impl ProviderAdapter for CapturingLlmProvider {
     }
 }
 
-// --- MockMidStreamErrorProvider ---
-
-/// A mock provider that yields some text deltas then an error mid-stream.
-pub struct MockMidStreamErrorProvider {
-    pub partial_text: String,
-    pub error:        LlmError,
-}
-
-#[async_trait]
-impl ProviderAdapter for MockMidStreamErrorProvider {
-    fn name(&self) -> &'static str {
-        "mock"
-    }
-
-    async fn complete(&self, _request: &Request) -> Result<Response, LlmError> {
-        Err(self.error.clone())
-    }
-
-    async fn stream(&self, _request: &Request) -> Result<StreamEventStream, LlmError> {
-        let events: Vec<Result<StreamEvent, LlmError>> = vec![
-            Ok(StreamEvent::text_delta(self.partial_text.clone(), None)),
-            Err(self.error.clone()),
-        ];
-        Ok(Box::pin(stream::iter(events)))
-    }
-}
-
 pub fn multi_tool_call_response(calls: Vec<(&str, &str, serde_json::Value)>) -> Response {
     use fabro_llm::types::{ContentPart, Role, ToolCall};
     let mut content = vec![ContentPart::text("Let me use multiple tools.")];

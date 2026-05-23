@@ -205,6 +205,64 @@ impl DockerSandbox {
         resolve_path(path, self.working_directory())
     }
 
+    async fn download_file_bytes(&self, remote_path: &str) -> crate::Result<Vec<u8>> {
+        let container_id = self.container_id()?;
+        let container_path = self.resolve_container_path(remote_path);
+        let opts = DownloadFromContainerOptions {
+            path: container_path.clone(),
+        };
+        let mut stream = self
+            .docker
+            .download_from_container(container_id, Some(opts));
+        let mut archive_bytes = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| {
+                crate::Error::context(
+                    format!("Failed to download {container_path} from container"),
+                    e,
+                )
+            })?;
+            archive_bytes.extend_from_slice(&chunk);
+        }
+
+        #[expect(
+            clippy::disallowed_types,
+            reason = "tar entries are synchronous in-memory readers; bytes are collected before any await"
+        )]
+        use std::io::Read as _;
+
+        let mut archive = tar::Archive::new(Cursor::new(archive_bytes));
+        let entries = archive.entries().map_err(|e| {
+            crate::Error::context(
+                format!("Failed to read Docker archive for {container_path}"),
+                e,
+            )
+        })?;
+        for entry in entries {
+            let mut entry = entry.map_err(|e| {
+                crate::Error::context(
+                    format!("Failed to read Docker archive entry for {container_path}"),
+                    e,
+                )
+            })?;
+            if !entry.header().entry_type().is_file() {
+                continue;
+            }
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes).map_err(|e| {
+                crate::Error::context(
+                    format!("Failed to read Docker archive file for {container_path}"),
+                    e,
+                )
+            })?;
+            return Ok(bytes);
+        }
+
+        Err(crate::Error::message(format!(
+            "Docker archive for {container_path} did not contain a file"
+        )))
+    }
+
     fn repo_cloned(&self) -> bool {
         self.repo_cloned.get().copied().unwrap_or(false)
     }
@@ -1161,67 +1219,7 @@ impl Sandbox for DockerSandbox {
         remote_path: &str,
         local_path: &std::path::Path,
     ) -> crate::Result<()> {
-        let container_id = self.container_id()?;
-        let container_path = self.resolve_container_path(remote_path);
-        let opts = DownloadFromContainerOptions {
-            path: container_path.clone(),
-        };
-        let mut stream = self
-            .docker
-            .download_from_container(container_id, Some(opts));
-        let mut archive_bytes = Vec::new();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| {
-                crate::Error::context(
-                    format!("Failed to download {container_path} from container"),
-                    e,
-                )
-            })?;
-            archive_bytes.extend_from_slice(&chunk);
-        }
-
-        let bytes = {
-            #[expect(
-                clippy::disallowed_types,
-                reason = "tar entries are synchronous in-memory readers; bytes are collected before any await"
-            )]
-            use std::io::Read as _;
-
-            let mut archive = tar::Archive::new(Cursor::new(archive_bytes));
-            let entries = archive.entries().map_err(|e| {
-                crate::Error::context(
-                    format!("Failed to read Docker archive for {container_path}"),
-                    e,
-                )
-            })?;
-            let mut file_bytes = None;
-            for entry in entries {
-                let mut entry = entry.map_err(|e| {
-                    crate::Error::context(
-                        format!("Failed to read Docker archive entry for {container_path}"),
-                        e,
-                    )
-                })?;
-                if !entry.header().entry_type().is_file() {
-                    continue;
-                }
-                let mut bytes = Vec::new();
-                entry.read_to_end(&mut bytes).map_err(|e| {
-                    crate::Error::context(
-                        format!("Failed to read Docker archive file for {container_path}"),
-                        e,
-                    )
-                })?;
-                file_bytes = Some(bytes);
-                break;
-            }
-            file_bytes.ok_or_else(|| {
-                crate::Error::message(format!(
-                    "Docker archive for {container_path} did not contain a file"
-                ))
-            })?
-        };
-
+        let bytes = self.download_file_bytes(remote_path).await?;
         if let Some(parent) = local_path.parent() {
             fs::create_dir_all(parent)
                 .await
@@ -1653,6 +1651,10 @@ impl Sandbox for DockerSandbox {
             stderr: stderr_collector,
             handle,
         })
+    }
+
+    async fn read_file_bytes(&self, path: &str) -> crate::Result<Vec<u8>> {
+        self.download_file_bytes(path).await
     }
 
     async fn read_file(

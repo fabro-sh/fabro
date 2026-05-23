@@ -1785,12 +1785,7 @@ diff --git a/src/live.rs b/src/live.rs
             })
         }
 
-        async fn read_file(
-            &self,
-            _path: &str,
-            _offset: Option<usize>,
-            _limit: Option<usize>,
-        ) -> fabro_sandbox::Result<String> {
+        async fn read_file_bytes(&self, _path: &str) -> fabro_sandbox::Result<Vec<u8>> {
             unimplemented!()
         }
         async fn write_file(&self, _: &str, _: &str) -> fabro_sandbox::Result<()> {
@@ -2970,12 +2965,7 @@ rename to .env.production
 
         // Unused by fetch_blob_table — panic loudly if anything tries to
         // use this sandbox beyond cat-file.
-        async fn read_file(
-            &self,
-            _path: &str,
-            _offset: Option<usize>,
-            _limit: Option<usize>,
-        ) -> SandboxResult<String> {
+        async fn read_file_bytes(&self, _path: &str) -> SandboxResult<Vec<u8>> {
             unimplemented!()
         }
         async fn write_file(&self, _: &str, _: &str) -> SandboxResult<()> {

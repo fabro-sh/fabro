@@ -81,7 +81,9 @@ Built-in profiles:
 
 ```rust
 pub trait Sandbox: Send + Sync {
-    async fn read_file(&self, path: &str, offset: Option<usize>, limit: Option<usize>) -> Result<String, String>;
+    async fn read_file_bytes(&self, path: &str) -> Result<Vec<u8>, String>;
+    async fn read_file_text(&self, path: &str) -> Result<String, String>;
+    async fn read_file(&self, path: &str, offset: Option<usize>, limit: Option<usize>) -> Result<String, String>; // line-numbered display
     async fn write_file(&self, path: &str, content: &str) -> Result<(), String>;
     async fn exec_command(&self, command: &str, timeout_ms: u64, ...) -> Result<ExecResult, String>;
     async fn grep(&self, pattern: &str, path: &str, options: &GrepOptions) -> Result<Vec<String>, String>;

@@ -5,7 +5,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use fabro_model::{Catalog, ReasoningEffortFeature};
 use futures::stream;
 
-use crate::error::{Error, error_from_status_code};
+use crate::error::{Error, ProviderErrorDetail, ProviderErrorKind, error_from_status_code};
 use crate::provider::{ProviderAdapter, StreamEventStream};
 use crate::providers::common::{
     self as common, extract_system_prompt, parse_error_body, parse_rate_limit_headers,
@@ -1032,6 +1032,57 @@ fn process_sse_event(
     }
 }
 
+fn process_sse_event_for_provider(
+    event_type: &str,
+    data: &serde_json::Value,
+    acc: &mut StreamAccumulator,
+    provider_name: &str,
+) -> Result<Vec<StreamEvent>, Error> {
+    if event_type == "error" {
+        Err(stream_error_event_to_provider_error(data, provider_name))
+    } else {
+        Ok(process_sse_event(event_type, data, acc))
+    }
+}
+
+fn stream_error_event_to_provider_error(data: &serde_json::Value, provider_name: &str) -> Error {
+    let error = data.get("error").unwrap_or(data);
+    let message = error
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| data.get("message").and_then(serde_json::Value::as_str))
+        .unwrap_or("Unknown Anthropic stream error")
+        .to_string();
+    let error_code = error
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .map(String::from);
+
+    let kind = match error_code.as_deref() {
+        Some("rate_limit_error") => ProviderErrorKind::RateLimit,
+        Some("authentication_error") => ProviderErrorKind::Authentication,
+        Some("permission_error") => ProviderErrorKind::AccessDenied,
+        Some("not_found_error") => ProviderErrorKind::NotFound,
+        Some("invalid_request_error") => ProviderErrorKind::InvalidRequest,
+        Some("request_too_large") => ProviderErrorKind::ContextLength,
+        // `overloaded_error`, `api_error`, and unknown stream errors are
+        // transient provider-side failures.
+        _ => ProviderErrorKind::Server,
+    };
+
+    Error::Provider {
+        kind,
+        detail: Box::new(ProviderErrorDetail {
+            message,
+            provider: provider_name.to_string(),
+            status_code: None,
+            error_code,
+            retry_after: None,
+            raw: Some(data.clone()),
+        }),
+    }
+}
+
 // --- SSE reader ---
 
 enum SseResult {
@@ -1050,6 +1101,7 @@ struct SseReaderState {
     /// When true, `tool_use` events for the synthetic tool are converted to
     /// text events.
     json_schema_mode: bool,
+    provider_name:    String,
 }
 
 impl SseReaderState {
@@ -1058,12 +1110,14 @@ impl SseReaderState {
         rate_limit: Option<RateLimitInfo>,
         json_schema_mode: bool,
         stream_read_timeout: Option<std::time::Duration>,
+        provider_name: String,
     ) -> Self {
         Self {
             line_reader: super::common::LineReader::new(http_resp, stream_read_timeout),
             accumulator: StreamAccumulator::new(rate_limit),
             pending_events: std::collections::VecDeque::new(),
             json_schema_mode,
+            provider_name,
         }
     }
 
@@ -1467,7 +1521,13 @@ impl ProviderAdapter for Adapter {
         let stream_read_timeout = self.http.stream_read_timeout;
 
         let stream = stream::unfold(
-            SseReaderState::new(http_resp, rate_limit, json_schema_mode, stream_read_timeout),
+            SseReaderState::new(
+                http_resp,
+                rate_limit,
+                json_schema_mode,
+                stream_read_timeout,
+                self.provider_name.clone(),
+            ),
             |mut state| async move {
                 loop {
                     // Drain any buffered events first.
@@ -1495,9 +1555,15 @@ impl ProviderAdapter for Adapter {
                                     ));
                                 }
                             };
-                            let events =
-                                process_sse_event(&event_type, &parsed, &mut state.accumulator);
-                            state.pending_events.extend(events);
+                            match process_sse_event_for_provider(
+                                &event_type,
+                                &parsed,
+                                &mut state.accumulator,
+                                &state.provider_name,
+                            ) {
+                                Ok(events) => state.pending_events.extend(events),
+                                Err(err) => return Some((Err(err), state)),
+                            }
                             // Loop to drain from pending_events.
                         }
                         SseResult::Done => return None,
@@ -1521,6 +1587,7 @@ mod tests {
     use httpmock::prelude::*;
 
     use super::*;
+    use crate::error::ProviderErrorKind;
     use crate::types::{AudioData, DocumentData, ReasoningEffort, ResponseFormat};
 
     #[test]
@@ -1676,6 +1743,72 @@ mod tests {
         assert_eq!(usage.reasoning_tokens, 0);
         assert_eq!(usage.total_tokens(), 11_250);
         assert_eq!(response.usage, *usage);
+    }
+
+    #[test]
+    fn stream_error_event_overloaded_becomes_retryable_server_error() {
+        let mut acc = StreamAccumulator::new(None);
+        let data = serde_json::json!({
+            "type": "error",
+            "error": {
+                "type": "overloaded_error",
+                "message": "Overloaded"
+            }
+        });
+
+        let err =
+            process_sse_event_for_provider("error", &data, &mut acc, "anthropic").unwrap_err();
+
+        assert!(err.retryable());
+        match err {
+            Error::Provider { kind, detail } => {
+                assert_eq!(kind, ProviderErrorKind::Server);
+                assert_eq!(detail.provider, "anthropic");
+                assert_eq!(detail.message, "Overloaded");
+                assert_eq!(detail.error_code.as_deref(), Some("overloaded_error"));
+                assert_eq!(detail.raw.as_ref(), Some(&data));
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stream_error_event_invalid_request_remains_non_retryable() {
+        let mut acc = StreamAccumulator::new(None);
+        let data = serde_json::json!({
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "message": "max_tokens is required"
+            }
+        });
+
+        let err =
+            process_sse_event_for_provider("error", &data, &mut acc, "anthropic").unwrap_err();
+
+        assert!(!err.retryable());
+        match err {
+            Error::Provider { kind, detail } => {
+                assert_eq!(kind, ProviderErrorKind::InvalidRequest);
+                assert_eq!(detail.error_code.as_deref(), Some("invalid_request_error"));
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_sse_events_remain_ignored() {
+        let mut acc = StreamAccumulator::new(None);
+        let data = serde_json::json!({
+            "type": "content_block_delta",
+            "delta": { "type": "text_delta", "text": "ignored" }
+        });
+
+        let events =
+            process_sse_event_for_provider("some_future_event", &data, &mut acc, "anthropic")
+                .unwrap();
+
+        assert!(events.is_empty());
     }
 
     #[test]

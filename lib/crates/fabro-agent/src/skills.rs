@@ -255,7 +255,7 @@ pub async fn discover_skills(
             if cancel_token.is_cancelled() {
                 return Err(Error::Interrupted(InterruptReason::Cancelled));
             }
-            let read_result = env.read_file(&path, None, None).await;
+            let read_result = env.read_file_text(&path).await;
             if cancel_token.is_cancelled() {
                 return Err(Error::Interrupted(InterruptReason::Cancelled));
             }

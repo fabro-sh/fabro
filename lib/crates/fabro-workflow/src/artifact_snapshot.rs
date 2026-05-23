@@ -395,12 +395,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Sandbox for AssetMockSandbox {
-        async fn read_file(
-            &self,
-            _: &str,
-            _: Option<usize>,
-            _: Option<usize>,
-        ) -> fabro_sandbox::Result<String> {
+        async fn read_file_bytes(&self, _: &str) -> fabro_sandbox::Result<Vec<u8>> {
             Err("not implemented".into())
         }
         async fn write_file(&self, _: &str, _: &str) -> fabro_sandbox::Result<()> {

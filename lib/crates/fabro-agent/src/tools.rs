@@ -6,13 +6,14 @@ use fabro_llm::client::Client;
 use fabro_llm::types::{Message, Request, ToolDefinition};
 use fabro_model::ModelHandle;
 use fabro_static::EnvVars;
-use futures::future::join_all;
+use futures::{StreamExt, stream};
 
 use crate::config::SessionOptions;
 use crate::sandbox::GrepOptions;
 use crate::tool_registry::{RegisteredTool, ToolRegistry};
 
 const MAX_WEB_FETCH_BYTES: usize = 100 * 1024;
+const MAX_READ_MANY_FILES_CONCURRENCY: usize = 8;
 
 /// Configuration for the optional LLM-based summarizer used by `web_fetch`.
 #[derive(Clone)]
@@ -84,7 +85,7 @@ pub fn make_read_file_tool() -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name:        "read_file".into(),
-            description: "Read the contents of a file".into(),
+            description: "Read files before editing them. Returns line-numbered text and supports offset/limit for large files. Use this instead of shell cat, head, tail, or sed when inspecting repository files.".into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -118,7 +119,7 @@ pub fn make_write_file_tool() -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name:        "write_file".into(),
-            description: "Write content to a file".into(),
+            description: "Create new files, or overwrite an existing file only when replacement is explicitly intended. Prefer edit_file for targeted changes to existing files because write_file overwrites the full file content.".into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -148,7 +149,7 @@ pub fn make_edit_file_tool() -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name:        "edit_file".into(),
-            description: "Edit a file by replacing a string".into(),
+            description: "Edit a file by replacing an exact string. The old_string must be an exact match and unique unless replace_all is true; include surrounding context when needed. Read the file first and preserve existing indentation.".into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -170,18 +171,11 @@ pub fn make_edit_file_tool() -> RegisteredTool {
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false);
 
-                let numbered_content = ctx
+                let raw_content = ctx
                     .env
-                    .read_file(file_path, None, None)
+                    .read_file_text(file_path)
                     .await
                     .map_err(|e| e.display_with_causes())?;
-
-                // Strip line numbers: each line looks like "  1 | content" or " 10 | content"
-                let raw_lines: Vec<&str> = numbered_content
-                    .lines()
-                    .map(|line| line.find(" | ").map_or(line, |idx| &line[idx + 3..]))
-                    .collect();
-                let raw_content = raw_lines.join("\n");
 
                 let count = raw_content.matches(old_string).count();
                 if count == 0 {
@@ -221,7 +215,7 @@ pub fn make_shell_tool_with_config(config: &SessionOptions) -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name:        "shell".into(),
-            description: "Execute a shell command".into(),
+            description: "Execute shell commands for terminal operations, package managers, tests and builds. Use dedicated tools for file reads, file edits, filename searches, and content searches. Provide timeout_ms for long-running commands.".into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -284,7 +278,7 @@ pub fn make_grep_tool() -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name:        "grep".into(),
-            description: "Search file contents with a regex pattern".into(),
+            description: "Search file contents with a regex pattern. Use path to choose the search root, glob_filter to limit matching files, case_insensitive for case folding, and max_results to cap output.".into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -348,7 +342,7 @@ pub fn make_glob_tool() -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name:        "glob".into(),
-            description: "Find files matching a glob pattern".into(),
+            description: "Find files by file names using a glob pattern. Use path to choose the search root. Prefer this over shell find or ls when locating repository files.".into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -394,27 +388,34 @@ pub(crate) fn make_read_many_files_tool() -> RegisteredTool {
         },
         executor:   Arc::new(|args, ctx| {
             Box::pin(async move {
-                let paths: Vec<&str> = args["paths"]
+                let paths: Vec<String> = args["paths"]
                     .as_array()
                     .ok_or_else(|| "paths must be an array".to_string())?
                     .iter()
                     .map(|p| {
                         p.as_str()
                             .ok_or_else(|| "each path must be a string".to_string())
+                            .map(str::to_string)
                     })
                     .collect::<Result<_, _>>()?;
 
-                let reads = paths.iter().map(|path| {
-                    let env = Arc::clone(&ctx.env);
-                    async move { (*path, env.read_file(path, None, None).await) }
-                });
-                let results = join_all(reads).await;
+                let results = stream::iter(paths)
+                    .map(|path| {
+                        let env = Arc::clone(&ctx.env);
+                        async move {
+                            let result = env.read_file(&path, None, None).await;
+                            (path, result)
+                        }
+                    })
+                    .buffered(MAX_READ_MANY_FILES_CONCURRENCY)
+                    .collect::<Vec<_>>()
+                    .await;
 
                 let mut output = String::new();
                 for (path, result) in results {
                     match result {
                         Ok(content) => {
-                            ctx.env.mark_agent_read(path);
+                            ctx.env.mark_agent_read(&path);
                             let _ = write!(output, "=== {path} ===\n{content}\n\n");
                         }
                         Err(err) => {
@@ -521,7 +522,7 @@ fn make_web_search_tool_with_api_key(api_key: Option<String>) -> RegisteredTool 
     RegisteredTool {
         definition: ToolDefinition {
             name:        "web_search".into(),
-            description: "Search the web using Brave Search".into(),
+            description: "Search the web using Brave Search when current external information is needed. Returns result titles, URLs, and descriptions; use web_fetch for a specific URL.".into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -585,7 +586,7 @@ pub(crate) fn make_web_fetch_tool(summarizer: Option<WebFetchSummarizer>) -> Reg
     RegisteredTool {
         definition: ToolDefinition {
             name: "web_fetch".into(),
-            description: "Fetch content from a URL and optionally summarize it. Pass a prompt to extract specific information instead of returning the full page.".into(),
+            description: "Fetch content from a URL that starts with http:// or https://. Pass a prompt to extract specific information or summarize the page; omit prompt to return the page content.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -695,14 +696,64 @@ mod tests {
     use crate::test_support::MockSandbox;
     use crate::tool_registry::ToolContext;
 
+    #[test]
+    fn core_tool_descriptions_include_actionable_guidance() {
+        let config = SessionOptions::default();
+        let tools = [
+            make_read_file_tool(),
+            make_write_file_tool(),
+            make_edit_file_tool(),
+            make_shell_tool_with_config(&config),
+            make_grep_tool(),
+            make_glob_tool(),
+            make_web_fetch_tool(None),
+        ];
+        let description = |name: &str| {
+            tools
+                .iter()
+                .find(|tool| tool.definition.name == name)
+                .unwrap_or_else(|| panic!("missing tool {name}"))
+                .definition
+                .description
+                .as_str()
+        };
+
+        assert!(description("read_file").contains("Read files before editing"));
+        assert!(description("read_file").contains("offset"));
+        assert!(description("write_file").contains("new files"));
+        assert!(description("write_file").contains("overwrites"));
+        assert!(description("edit_file").contains("exact match"));
+        assert!(description("edit_file").contains("unique"));
+        assert!(description("shell").contains("tests and builds"));
+        assert!(description("shell").contains("timeout_ms"));
+        assert!(description("grep").contains("regex"));
+        assert!(description("grep").contains("glob_filter"));
+        assert!(description("glob").contains("file names"));
+        assert!(description("web_fetch").contains("http:// or https://"));
+        assert!(description("web_fetch").contains("prompt"));
+
+        for tool in tools {
+            let text = &tool.definition.description;
+            assert!(
+                !text.contains("addComment"),
+                "unsupported comment API in {text}"
+            );
+            assert!(
+                !text.contains("background Bash"),
+                "unsupported background Bash guidance in {text}"
+            );
+            assert!(!text.contains("PDF"), "unsupported PDF reads in {text}");
+            assert!(!text.contains("image"), "unsupported image reads in {text}");
+        }
+    }
+
     #[tokio::test]
     async fn read_file_returns_content() {
         let tool = make_read_file_tool();
         let mut files = HashMap::new();
-        files.insert("/test.txt".into(), "  1 | hello\n  2 | world".into());
+        files.insert("/test.txt".into(), "hello\nworld".into());
         let env: Arc<dyn Sandbox> = Arc::new(MockSandbox {
             files,
-            apply_read_offset_limit: true,
             ..Default::default()
         });
         let result = (tool.executor)(serde_json::json!({"file_path": "/test.txt"}), ToolContext {
@@ -715,20 +766,16 @@ mod tests {
             agent_event_emitter: None,
         })
         .await;
-        assert_eq!(result.unwrap(), "  1 | hello\n  2 | world");
+        assert_eq!(result.unwrap(), "1 | hello\n2 | world\n");
     }
 
     #[tokio::test]
     async fn read_file_with_offset_and_limit() {
         let tool = make_read_file_tool();
         let mut files = HashMap::new();
-        files.insert(
-            "/test.txt".into(),
-            "  1 | line1\n  2 | line2\n  3 | line3\n  4 | line4".into(),
-        );
+        files.insert("/test.txt".into(), "line1\nline2\nline3\nline4".into());
         let env: Arc<dyn Sandbox> = Arc::new(MockSandbox {
             files,
-            apply_read_offset_limit: true,
             ..Default::default()
         });
         let result = (tool.executor)(
@@ -744,7 +791,7 @@ mod tests {
             },
         )
         .await;
-        assert_eq!(result.unwrap(), "  2 | line2\n  3 | line3");
+        assert_eq!(result.unwrap(), "2 | line2\n3 | line3\n");
     }
 
     #[tokio::test]
@@ -776,7 +823,7 @@ mod tests {
     async fn edit_file_replaces_match() {
         let tool = make_edit_file_tool();
         let mut files = HashMap::new();
-        files.insert("/f.txt".into(), "  1 | hello world".into());
+        files.insert("/f.txt".into(), "hello world".into());
         let env = Arc::new(MockSandbox {
             files,
             ..Default::default()
@@ -809,7 +856,7 @@ mod tests {
     async fn edit_file_not_found_error() {
         let tool = make_edit_file_tool();
         let mut files = HashMap::new();
-        files.insert("/f.txt".into(), "  1 | hello world".into());
+        files.insert("/f.txt".into(), "hello world".into());
         let env: Arc<dyn Sandbox> = Arc::new(MockSandbox {
             files,
             ..Default::default()
@@ -838,7 +885,7 @@ mod tests {
     async fn edit_file_not_unique_error() {
         let tool = make_edit_file_tool();
         let mut files = HashMap::new();
-        files.insert("/f.txt".into(), "  1 | aa bb aa".into());
+        files.insert("/f.txt".into(), "aa bb aa".into());
         let env: Arc<dyn Sandbox> = Arc::new(MockSandbox {
             files,
             ..Default::default()
@@ -869,7 +916,7 @@ mod tests {
     async fn edit_file_replace_all() {
         let tool = make_edit_file_tool();
         let mut files = HashMap::new();
-        files.insert("/f.txt".into(), "  1 | aa bb aa".into());
+        files.insert("/f.txt".into(), "aa bb aa".into());
         let env = Arc::new(MockSandbox {
             files,
             ..Default::default()
@@ -897,6 +944,39 @@ mod tests {
         let written = env.written_files.lock().unwrap();
         assert_eq!(written.len(), 1);
         assert_eq!(written[0].1, "cc bb cc");
+    }
+
+    #[tokio::test]
+    async fn edit_file_preserves_literal_line_number_prefixes() {
+        let tool = make_edit_file_tool();
+        let mut files = HashMap::new();
+        files.insert("/f.txt".into(), "1 | keep this literal\nhello".into());
+        let env = Arc::new(MockSandbox {
+            files,
+            ..Default::default()
+        });
+        let env_clone: Arc<dyn Sandbox> = env.clone();
+        let result = (tool.executor)(
+            serde_json::json!({
+                "file_path": "/f.txt",
+                "old_string": "hello",
+                "new_string": "goodbye"
+            }),
+            ToolContext {
+                env:                 env_clone,
+                cancel:              CancellationToken::new(),
+                tool_env_provider:   None,
+                session_id:          None,
+                root_session_id:     None,
+                tool_call_id:        None,
+                agent_event_emitter: None,
+            },
+        )
+        .await;
+        assert_eq!(result.unwrap(), "Successfully edited /f.txt");
+        let written = env.written_files.lock().unwrap();
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].1, "1 | keep this literal\ngoodbye");
     }
 
     #[tokio::test]
@@ -1131,10 +1211,9 @@ mod tests {
     async fn read_file_does_not_resolve_failing_tool_env_provider() {
         let tool = make_read_file_tool();
         let mut files = HashMap::new();
-        files.insert("/test.txt".into(), "  1 | hello".into());
+        files.insert("/test.txt".into(), "hello".into());
         let env: Arc<dyn Sandbox> = Arc::new(MockSandbox {
             files,
-            apply_read_offset_limit: true,
             ..Default::default()
         });
 
@@ -1149,7 +1228,7 @@ mod tests {
         })
         .await;
 
-        assert_eq!(result.unwrap(), "  1 | hello");
+        assert_eq!(result.unwrap(), "1 | hello\n");
     }
 
     #[tokio::test]

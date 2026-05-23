@@ -268,7 +268,7 @@ pub async fn apply_patch_operations(
                 new_path,
                 hunks,
             } => {
-                let original = env.read_file(path, None, None).await.map_err(|e| {
+                let original = env.read_file_text(path).await.map_err(|e| {
                     format!(
                         "Failed to read file to update {path}: {}",
                         e.display_with_causes()
@@ -507,6 +507,7 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::*;
+    use crate::LocalSandbox;
     use crate::test_support::MutableMockSandbox;
     use crate::tool_registry::ToolContext;
 
@@ -683,7 +684,7 @@ mod tests {
         let result = apply_patch_operations(&ops, &env).await.unwrap();
         assert!(result.contains("M src/game.py"));
 
-        let content = env.read_file("src/game.py", None, None).await.unwrap();
+        let content = env.read_file_text("src/game.py").await.unwrap();
         assert!(content.contains("from src.cards import Card, Suit"));
         assert!(!content.contains("from src.cards import Suit\n"));
         assert!(content.contains("stock: list[Card]"));
@@ -804,7 +805,7 @@ mod tests {
         let result = apply_patch_operations(&ops, &env).await.unwrap();
         assert!(result.contains("M src/lib.rs"));
 
-        let content = env.read_file("src/lib.rs", None, None).await.unwrap();
+        let content = env.read_file_text("src/lib.rs").await.unwrap();
         assert_eq!(content, "fn unchanged() {\n    new_line();\n}\n");
     }
 
@@ -843,7 +844,7 @@ mod tests {
         let result = apply_patch_operations(&ops, &env).await.unwrap();
         assert!(result.contains("M src/lib.rs"));
 
-        let content = env.read_file("src/lib.rs", None, None).await.unwrap();
+        let content = env.read_file_text("src/lib.rs").await.unwrap();
         assert!(content.contains("new_setup()"));
         assert!(content.contains("new_teardown()"));
         assert!(!content.contains("old_setup()"));
@@ -861,7 +862,7 @@ mod tests {
         let result = apply_patch_operations(&ops, &env).await.unwrap();
         assert!(result.contains("A src/new.rs"));
 
-        let content = env.read_file("src/new.rs", None, None).await.unwrap();
+        let content = env.read_file_text("src/new.rs").await.unwrap();
         assert_eq!(content, "fn new() {}");
     }
 
@@ -890,9 +891,37 @@ mod tests {
         let result = apply_patch_operations(&ops, &env).await.unwrap();
         assert!(result.contains("M src/lib.rs"));
 
-        let content = env.read_file("src/lib.rs", None, None).await.unwrap();
+        let content = env.read_file_text("src/lib.rs").await.unwrap();
         assert!(content.contains("println!(\"new\")"));
         assert!(!content.contains("println!(\"old\")"));
+    }
+
+    #[tokio::test]
+    async fn apply_patch_updates_raw_local_file_without_line_number_prefixes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("src/lib.rs");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "fn hello() {\n    println!(\"old\");\n}\n").unwrap();
+        let env = LocalSandbox::new(dir.path().to_path_buf());
+        let patch = "\
+*** Begin Patch
+*** Update File: src/lib.rs
+@@
+-    println!(\"old\");
++    println!(\"new\");
+*** End Patch";
+
+        let ops = parse_apply_patch(patch).unwrap();
+        let result = apply_patch_operations(&ops, &env).await.unwrap();
+
+        assert_eq!(
+            result,
+            "Success. Updated the following files:\nM src/lib.rs\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "fn hello() {\n    println!(\"new\");\n}\n"
+        );
     }
 
     #[test]
@@ -964,7 +993,7 @@ mod tests {
             "Success. Updated the following files:\nA duplicate.txt\n"
         );
         assert_eq!(
-            env.read_file("duplicate.txt", None, None).await.unwrap(),
+            env.read_file_text("duplicate.txt").await.unwrap(),
             "new content\n"
         );
     }
@@ -1001,7 +1030,33 @@ mod tests {
             "Success. Updated the following files:\nM insert_only.txt\n"
         );
         assert_eq!(
-            env.read_file("insert_only.txt", None, None).await.unwrap(),
+            env.read_file_text("insert_only.txt").await.unwrap(),
+            "alpha\nomega\ninserted\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn pure_addition_update_hunk_uses_raw_local_file_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("insert_only.txt");
+        std::fs::write(&path, "alpha\nomega\n").unwrap();
+        let env = LocalSandbox::new(dir.path().to_path_buf());
+        let patch = "\
+*** Begin Patch
+*** Update File: insert_only.txt
+@@
++inserted
+*** End Patch";
+
+        let ops = parse_apply_patch(patch).unwrap();
+        let result = apply_patch_operations(&ops, &env).await.unwrap();
+
+        assert_eq!(
+            result,
+            "Success. Updated the following files:\nM insert_only.txt\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
             "alpha\nomega\ninserted\n"
         );
     }
@@ -1026,7 +1081,7 @@ mod tests {
         apply_patch_operations(&ops, &env).await.unwrap();
 
         assert_eq!(
-            env.read_file("no_newline.txt", None, None).await.unwrap(),
+            env.read_file_text("no_newline.txt").await.unwrap(),
             "has newline now\n"
         );
     }
@@ -1278,11 +1333,11 @@ please apply this
         assert!(result.contains("M src/new.py"));
 
         // New path exists with updated content
-        let content = env.read_file("src/new.py", None, None).await.unwrap();
+        let content = env.read_file_text("src/new.py").await.unwrap();
         assert_eq!(content, "def hello():\n    return 1\n");
 
         // Old path is deleted
-        let old = env.read_file("src/old.py", None, None).await;
+        let old = env.read_file_text("src/old.py").await;
         assert!(old.is_err());
     }
 
@@ -1425,7 +1480,7 @@ class GameState:
         let ops = parse_apply_patch(patch).unwrap();
         apply_patch_operations(&ops, &env).await.unwrap();
 
-        let content = env.read_file("src/game.py", None, None).await.unwrap();
+        let content = env.read_file_text("src/game.py").await.unwrap();
         assert!(content.contains("from src.cards import Card, Suit"));
         assert!(content.contains("stock: list[Card]"));
         assert!(content.contains("waste: list[Card]"));
@@ -1482,12 +1537,12 @@ def main():
         assert!(result.contains("D src/old_util.py"));
         assert!(result.contains("M src/main.py"));
 
-        let new_util = env.read_file("src/new_util.py", None, None).await.unwrap();
+        let new_util = env.read_file_text("src/new_util.py").await.unwrap();
         assert_eq!(new_util, "def new_helper():\n    return 42\n");
 
-        assert!(env.read_file("src/old_util.py", None, None).await.is_err());
+        assert!(env.read_file_text("src/old_util.py").await.is_err());
 
-        let main = env.read_file("src/main.py", None, None).await.unwrap();
+        let main = env.read_file_text("src/main.py").await.unwrap();
         assert!(main.contains("from new_util import new_helper"));
         assert!(main.contains("result = new_helper()"));
         assert!(main.contains("print(\"done\")"));
@@ -1542,17 +1597,10 @@ EOF";
         assert!(result.contains("M src/models/account.py"));
 
         // Old path gone
-        assert!(
-            env.read_file("src/models/user.py", None, None)
-                .await
-                .is_err()
-        );
+        assert!(env.read_file_text("src/models/user.py").await.is_err());
 
         // New path has updated content
-        let content = env
-            .read_file("src/models/account.py", None, None)
-            .await
-            .unwrap();
+        let content = env.read_file_text("src/models/account.py").await.unwrap();
         assert!(content.contains("self.email = None"));
         assert!(content.contains("self.active = True"));
         assert!(content.contains("def greet(self):"));
@@ -1600,7 +1648,7 @@ def gamma():
         let ops = parse_apply_patch(patch).unwrap();
         apply_patch_operations(&ops, &env).await.unwrap();
 
-        let content = env.read_file("src/stubs.py", None, None).await.unwrap();
+        let content = env.read_file_text("src/stubs.py").await.unwrap();
         assert!(content.contains("return \"a\""));
         assert!(content.contains("return \"b\""));
         assert!(content.contains("return \"c\""));
@@ -1628,7 +1676,7 @@ def gamma():
         let ops = parse_apply_patch(patch).unwrap();
         apply_patch_operations(&ops, &env).await.unwrap();
 
-        let content = env.read_file("src/lib.rs", None, None).await.unwrap();
+        let content = env.read_file_text("src/lib.rs").await.unwrap();
         assert!(content.contains("println!(\"world\")"));
         assert!(!content.contains("println!(\"hello\")"));
     }
@@ -1718,15 +1766,15 @@ def farewell(name):
             .await
             .unwrap();
 
-        let content = env.read_file("src/app.py", None, None).await.unwrap();
+        let content = env.read_file_text("src/app.py").await.unwrap();
         assert!(content.contains("Hello, {name}!"));
         assert!(content.contains("Goodbye, {name}!"));
         assert!(!content.contains("Hi, {name}"));
         assert!(!content.contains("Bye, {name}"));
 
-        let created = env.read_file("src/created.py", None, None).await.unwrap();
+        let created = env.read_file_text("src/created.py").await.unwrap();
         assert!(created.contains("def created():"));
-        assert!(env.read_file("src/obsolete.py", None, None).await.is_err());
+        assert!(env.read_file_text("src/obsolete.py").await.is_err());
     }
 
     #[tokio::test]

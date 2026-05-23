@@ -277,13 +277,8 @@ mod tests {
 
     #[async_trait]
     impl Sandbox for TestSandbox {
-        async fn read_file(
-            &self,
-            _path: &str,
-            _offset: Option<usize>,
-            _limit: Option<usize>,
-        ) -> fabro_sandbox::Result<String> {
-            Ok(String::new())
+        async fn read_file_bytes(&self, _path: &str) -> fabro_sandbox::Result<Vec<u8>> {
+            Ok(Vec::new())
         }
         async fn write_file(&self, _path: &str, _content: &str) -> fabro_sandbox::Result<()> {
             Ok(())

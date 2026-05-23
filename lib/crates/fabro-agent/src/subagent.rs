@@ -307,7 +307,7 @@ pub fn make_spawn_agent_tool(
     RegisteredTool {
         definition: ToolDefinition {
             name:        "spawn_agent".into(),
-            description: "Spawn a subagent to work on a delegated task".into(),
+            description: "Spawn a subagent for independent work or context isolation. Use it for tasks that can proceed separately, and avoid duplicating the same work in the parent session.".into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -366,7 +366,7 @@ pub fn make_send_input_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> Regist
     RegisteredTool {
         definition: ToolDefinition {
             name:        "send_input".into(),
-            description: "Send a follow-up message to a running subagent".into(),
+            description: "Send a follow-up message to a running subagent when new information or corrected instructions are needed.".into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -401,7 +401,7 @@ pub fn make_wait_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> RegisteredTo
     RegisteredTool {
         definition: ToolDefinition {
             name:        "wait".into(),
-            description: "Wait for a subagent to complete and return its result".into(),
+            description: "Wait for a subagent to complete, then use the result to synthesize the outcome for the user.".into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -433,7 +433,7 @@ pub fn make_close_agent_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> Regis
     RegisteredTool {
         definition: ToolDefinition {
             name:        "close_agent".into(),
-            description: "Close a running subagent".into(),
+            description: "Close a running subagent that is no longer needed.".into(),
             parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -469,6 +469,31 @@ mod tests {
     use crate::test_support::*;
 
     // --- Tests ---
+
+    #[test]
+    fn subagent_tool_descriptions_explain_delegation_lifecycle() {
+        let manager = Arc::new(AsyncMutex::new(SubAgentManager::new(3)));
+        let factory: SessionFactory = Arc::new(|| {
+            panic!("should not construct subagent in description test");
+        });
+
+        let spawn = make_spawn_agent_tool(manager.clone(), factory, 0);
+        let send = make_send_input_tool(manager.clone());
+        let wait = make_wait_tool(manager.clone());
+        let close = make_close_agent_tool(manager);
+
+        assert!(spawn.definition.description.contains("independent work"));
+        assert!(spawn.definition.description.contains("context isolation"));
+        assert!(send.definition.description.contains("follow-up"));
+        assert!(wait.definition.description.contains("synthesize"));
+        assert!(close.definition.description.contains("no longer needed"));
+
+        for tool in [spawn, send, wait, close] {
+            let text = &tool.definition.description;
+            assert!(!text.contains("background Bash"));
+            assert!(!text.contains("addComment"));
+        }
+    }
 
     #[test]
     fn manager_creation() {

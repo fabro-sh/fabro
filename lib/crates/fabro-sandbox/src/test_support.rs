@@ -19,33 +19,31 @@ use crate::{
 // --- MockSandbox ---
 
 pub struct MockSandbox {
-    pub files:                   HashMap<String, String>,
-    pub exec_result:             ExecResult,
-    pub grep_results:            Vec<String>,
-    pub glob_results:            Vec<String>,
-    pub working_dir:             &'static str,
-    pub platform_str:            &'static str,
-    pub os_version_str:          String,
-    /// When true, `read_file` applies offset/limit by splitting on lines.
-    pub apply_read_offset_limit: bool,
+    pub files:                 HashMap<String, String>,
+    pub exec_result:           ExecResult,
+    pub grep_results:          Vec<String>,
+    pub glob_results:          Vec<String>,
+    pub working_dir:           &'static str,
+    pub platform_str:          &'static str,
+    pub os_version_str:        String,
     /// Captures (path, content) pairs from `write_file` calls.
-    pub written_files:           Mutex<Vec<(String, String)>>,
+    pub written_files:         Mutex<Vec<(String, String)>>,
     /// Captures the `timeout_ms` argument from `exec_command` calls.
-    pub captured_timeout:        Mutex<Option<u64>>,
+    pub captured_timeout:      Mutex<Option<u64>>,
     /// Captures the `command` argument from `exec_command` calls (last only).
-    pub captured_command:        Mutex<Option<String>>,
+    pub captured_command:      Mutex<Option<String>>,
     /// Captures all `command` arguments from `exec_command` calls in order.
-    pub captured_commands:       Mutex<Vec<String>>,
+    pub captured_commands:     Mutex<Vec<String>>,
     /// Captures all `working_dir` arguments from `exec_command` calls in order.
-    pub captured_working_dirs:   Mutex<Vec<Option<String>>>,
+    pub captured_working_dirs: Mutex<Vec<Option<String>>>,
     /// Captures the `env_vars` argument from `exec_command` calls.
-    pub captured_env_vars:       Mutex<Option<HashMap<String, String>>>,
-    pub start_calls:             Mutex<u32>,
-    pub stop_calls:              Mutex<u32>,
-    pub delete_calls:            Mutex<u32>,
-    pub event_callback:          Option<SandboxEventCallback>,
-    pub stdio_process_error:     Option<String>,
-    pub stdio_process:           Mutex<Option<MockStdioProcess>>,
+    pub captured_env_vars:     Mutex<Option<HashMap<String, String>>>,
+    pub start_calls:           Mutex<u32>,
+    pub stop_calls:            Mutex<u32>,
+    pub delete_calls:          Mutex<u32>,
+    pub event_callback:        Option<SandboxEventCallback>,
+    pub stdio_process_error:   Option<String>,
+    pub stdio_process:         Mutex<Option<MockStdioProcess>>,
 }
 
 impl MockSandbox {
@@ -93,32 +91,31 @@ impl MockSandbox {
 impl Default for MockSandbox {
     fn default() -> Self {
         Self {
-            files:                   HashMap::new(),
-            exec_result:             ExecResult {
+            files:                 HashMap::new(),
+            exec_result:           ExecResult {
                 stdout:      "mock output".into(),
                 stderr:      String::new(),
                 exit_code:   Some(0),
                 termination: CommandTermination::Exited,
                 duration_ms: 10,
             },
-            grep_results:            vec![],
-            glob_results:            vec![],
-            working_dir:             "/work",
-            platform_str:            "darwin",
-            os_version_str:          "Darwin 24.0.0".into(),
-            apply_read_offset_limit: false,
-            written_files:           Mutex::new(Vec::new()),
-            captured_timeout:        Mutex::new(None),
-            captured_command:        Mutex::new(None),
-            captured_commands:       Mutex::new(Vec::new()),
-            captured_working_dirs:   Mutex::new(Vec::new()),
-            captured_env_vars:       Mutex::new(None),
-            start_calls:             Mutex::new(0),
-            stop_calls:              Mutex::new(0),
-            delete_calls:            Mutex::new(0),
-            event_callback:          None,
-            stdio_process_error:     None,
-            stdio_process:           Mutex::new(None),
+            grep_results:          vec![],
+            glob_results:          vec![],
+            working_dir:           "/work",
+            platform_str:          "darwin",
+            os_version_str:        "Darwin 24.0.0".into(),
+            written_files:         Mutex::new(Vec::new()),
+            captured_timeout:      Mutex::new(None),
+            captured_command:      Mutex::new(None),
+            captured_commands:     Mutex::new(Vec::new()),
+            captured_working_dirs: Mutex::new(Vec::new()),
+            captured_env_vars:     Mutex::new(None),
+            start_calls:           Mutex::new(0),
+            stop_calls:            Mutex::new(0),
+            delete_calls:          Mutex::new(0),
+            event_callback:        None,
+            stdio_process_error:   None,
+            stdio_process:         Mutex::new(None),
         }
     }
 }
@@ -177,27 +174,11 @@ impl StdioProcessControl for MockStdioProcessControl {
 
 #[async_trait]
 impl Sandbox for MockSandbox {
-    async fn read_file(
-        &self,
-        path: &str,
-        offset: Option<usize>,
-        limit: Option<usize>,
-    ) -> crate::Result<String> {
-        let content = self
-            .files
+    async fn read_file_bytes(&self, path: &str) -> crate::Result<Vec<u8>> {
+        self.files
             .get(path)
-            .cloned()
-            .ok_or_else(|| crate::Error::message(format!("File not found: {path}")))?;
-
-        if self.apply_read_offset_limit {
-            let lines: Vec<&str> = content.lines().collect();
-            let start = offset.unwrap_or(1).saturating_sub(1);
-            let count = limit.unwrap_or(2000);
-            let selected: Vec<&str> = lines.into_iter().skip(start).take(count).collect();
-            Ok(selected.join("\n"))
-        } else {
-            Ok(content)
-        }
+            .map(|content| content.as_bytes().to_vec())
+            .ok_or_else(|| crate::Error::message(format!("File not found: {path}")))
     }
 
     async fn write_file(&self, path: &str, content: &str) -> crate::Result<()> {
@@ -442,17 +423,12 @@ impl MutableMockSandbox {
 
 #[async_trait]
 impl Sandbox for MutableMockSandbox {
-    async fn read_file(
-        &self,
-        path: &str,
-        _offset: Option<usize>,
-        _limit: Option<usize>,
-    ) -> crate::Result<String> {
+    async fn read_file_bytes(&self, path: &str) -> crate::Result<Vec<u8>> {
         self.files
             .lock()
             .expect("files lock poisoned")
             .get(path)
-            .cloned()
+            .map(|content| content.as_bytes().to_vec())
             .ok_or_else(|| crate::Error::message(format!("File not found: {path}")))
     }
 

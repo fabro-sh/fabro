@@ -915,12 +915,7 @@ mod tests {
 
     #[async_trait]
     impl Sandbox for ScriptedSandbox {
-        async fn read_file(
-            &self,
-            _path: &str,
-            _offset: Option<usize>,
-            _limit: Option<usize>,
-        ) -> fabro_sandbox::Result<String> {
+        async fn read_file_bytes(&self, _path: &str) -> fabro_sandbox::Result<Vec<u8>> {
             Err("read_file not implemented for ScriptedSandbox".into())
         }
 

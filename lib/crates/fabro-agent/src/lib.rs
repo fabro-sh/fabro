@@ -20,6 +20,7 @@ pub mod sandbox;
 pub mod session;
 pub mod skills;
 pub mod subagent;
+pub(crate) mod task_reminder;
 pub mod todo_runtime;
 pub mod todo_tools;
 pub mod tool_execution;
@@ -62,7 +63,8 @@ pub use subagent::{
 };
 pub use todo_runtime::TodoRuntime;
 pub use todo_tools::{
-    make_task_create_tool, make_task_list_tool, make_task_update_tool, make_update_plan_tool,
+    make_task_create_tool, make_task_get_tool, make_task_list_tool, make_task_update_tool,
+    make_update_plan_tool,
 };
 pub use tool_registry::{AgentEventEmitter, ToolRegistry};
 pub use tools::{

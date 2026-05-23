@@ -680,7 +680,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
               <Link
                 key={tab.name}
                 to={tabPath}
-                className={`border-b-2 pb-3 text-sm font-medium transition-colors ${
+                className={`border-b-2 pb-3.5 text-sm font-medium transition-colors ${
                   isActive
                     ? "border-teal-500 text-fg"
                     : "border-transparent text-fg-muted hover:border-line-strong hover:text-fg-3"
@@ -703,8 +703,8 @@ export default function RunDetail({ params }: { params: { id: string } }) {
       <div
         className={
           fullHeight
-            ? "pt-3 flex min-h-0 flex-1 flex-col"
-            : "pt-3 pb-[var(--fabro-interview-dock-clearance)]"
+            ? "pt-3.5 flex min-h-0 flex-1 flex-col"
+            : "pt-3.5 pb-[var(--fabro-interview-dock-clearance)]"
         }
       >
         <Outlet />

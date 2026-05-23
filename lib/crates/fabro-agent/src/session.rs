@@ -30,7 +30,6 @@ use crate::event::Emitter;
 use crate::file_tracker::FileTracker;
 use crate::history::History;
 use crate::loop_detection::detect_loop;
-use crate::mcp_integration;
 use crate::memory::{BUDGET_BYTES, MemoryDocument, discover_memory};
 use crate::profiles::EnvContext;
 use crate::sandbox::Sandbox;
@@ -43,6 +42,7 @@ use crate::types::{
     AgentEvent, McpToolSummary, MemoryFileSummary, Message, SessionEvent, SessionState,
     SkillActivationSource, SkillSummary,
 };
+use crate::{mcp_integration, task_reminder};
 
 /// One queued external control item for a live session.
 #[derive(Debug, Clone)]
@@ -1273,6 +1273,8 @@ impl Session {
             // Pre-turn compaction: trim context before building the request
             self.compact_if_needed().await;
 
+            self.inject_task_reminder_if_needed();
+
             // Build request
             let request = self.build_request();
 
@@ -1325,12 +1327,12 @@ impl Session {
             // Set true if a steer-interrupt cancelled the round mid-stream so
             // we can clear partial output and `continue` after the loop.
             let mut steer_interrupted = false;
-            let mut emitted_anything = false;
+            let mut visible_output_present = false;
 
             'streamattempts: for stream_attempt in 0..=STREAM_CONSUME_RETRIES {
                 let mut accumulator = StreamAccumulator::new();
-                let mut emitted_text = String::new();
-                let mut emitted_reasoning = String::new();
+                let mut attempt_emitted_output = false;
+                let mut stream_error = None;
 
                 loop {
                     let chunk = tokio::select! {
@@ -1351,7 +1353,8 @@ impl Session {
                         Ok(event) => {
                             match &event {
                                 StreamEvent::TextDelta { ref delta, .. } => {
-                                    emitted_text.push_str(delta);
+                                    attempt_emitted_output = true;
+                                    visible_output_present = true;
                                     self.event_emitter.emit(
                                         self.id.clone(),
                                         AgentEvent::TextDelta {
@@ -1360,7 +1363,8 @@ impl Session {
                                     );
                                 }
                                 StreamEvent::ReasoningDelta { ref delta } => {
-                                    emitted_reasoning.push_str(delta);
+                                    attempt_emitted_output = true;
+                                    visible_output_present = true;
                                     self.event_emitter.emit(
                                         self.id.clone(),
                                         AgentEvent::ReasoningDelta {
@@ -1373,14 +1377,10 @@ impl Session {
                             accumulator.process(&event);
                         }
                         Err(err) => {
-                            return Err(self.emit_llm_error(err));
+                            stream_error = Some(err);
+                            break;
                         }
                     }
-                }
-
-                // Track whether anything was rendered this attempt.
-                if !emitted_text.is_empty() || !emitted_reasoning.is_empty() {
-                    emitted_anything = true;
                 }
 
                 // If terminal cancel fired, drop the stream and bail out.
@@ -1403,14 +1403,65 @@ impl Session {
                     break;
                 }
 
-                // No Finish event — retry if we have attempts left
-                if stream_attempt < STREAM_CONSUME_RETRIES {
-                    tracing::warn!(
-                        attempt = stream_attempt + 1,
-                        max = STREAM_CONSUME_RETRIES,
-                        "Stream ended without Finish event, retrying turn"
-                    );
-                    if !emitted_text.is_empty() || !emitted_reasoning.is_empty() {
+                if let Some(err) = stream_error {
+                    let can_retry = err.retryable() && stream_attempt < STREAM_CONSUME_RETRIES;
+                    let retry_attempt = u32::try_from(stream_attempt).unwrap_or(u32::MAX);
+                    let retry_delay = can_retry
+                        .then(|| retry::retry_delay(&retry_policy, &err, retry_attempt))
+                        .flatten();
+
+                    if let Some(delay) = retry_delay {
+                        tracing::warn!(
+                            attempt = stream_attempt + 1,
+                            max = STREAM_CONSUME_RETRIES,
+                            error = %err,
+                            delay_secs = delay.as_secs_f64(),
+                            "LLM stream failed mid-turn, retrying turn"
+                        );
+                        if attempt_emitted_output {
+                            self.event_emitter.emit(
+                                self.id.clone(),
+                                AgentEvent::AssistantOutputReplace {
+                                    text:      String::new(),
+                                    reasoning: None,
+                                },
+                            );
+                            visible_output_present = false;
+                        }
+                        if let Some(ref on_retry) = retry_policy.on_retry {
+                            on_retry(&err, retry_attempt, delay);
+                        }
+
+                        let delay_outcome = tokio::select! {
+                            biased;
+                            () = round_token.cancelled() => None,
+                            () = self.cancel_token.cancelled() => None,
+                            () = time::sleep(delay) => Some(()),
+                        };
+                        if delay_outcome.is_none() {
+                            steer_interrupted =
+                                round_token.is_cancelled() && !self.cancel_token.is_cancelled();
+                            break 'streamattempts;
+                        }
+
+                        let cancel_token_for_select = self.cancel_token.clone();
+                        let retry_outcome: Option<Result<StreamEventStream, Error>> = tokio::select! {
+                            biased;
+                            () = round_token.cancelled() => None,
+                            () = cancel_token_for_select.cancelled() => None,
+                            stream = self.open_stream_with_retry(&client, &request, &retry_policy) => Some(stream),
+                        };
+                        event_stream = if let Some(stream) = retry_outcome {
+                            stream?
+                        } else {
+                            steer_interrupted =
+                                round_token.is_cancelled() && !self.cancel_token.is_cancelled();
+                            break 'streamattempts;
+                        };
+                        continue 'streamattempts;
+                    }
+
+                    if visible_output_present {
                         self.event_emitter.emit(
                             self.id.clone(),
                             AgentEvent::AssistantOutputReplace {
@@ -1418,6 +1469,26 @@ impl Session {
                                 reasoning: None,
                             },
                         );
+                    }
+                    return Err(self.emit_llm_error(err));
+                }
+
+                // No Finish event — retry if we have attempts left
+                if stream_attempt < STREAM_CONSUME_RETRIES {
+                    tracing::warn!(
+                        attempt = stream_attempt + 1,
+                        max = STREAM_CONSUME_RETRIES,
+                        "Stream ended without Finish event, retrying turn"
+                    );
+                    if attempt_emitted_output {
+                        self.event_emitter.emit(
+                            self.id.clone(),
+                            AgentEvent::AssistantOutputReplace {
+                                text:      String::new(),
+                                reasoning: None,
+                            },
+                        );
+                        visible_output_present = false;
                     }
                     let cancel_token_for_select = self.cancel_token.clone();
                     let retry_outcome: Option<Result<StreamEventStream, Error>> = tokio::select! {
@@ -1440,7 +1511,7 @@ impl Session {
             // partial visible output, and re-iterate. The next turn's
             // top-of-loop drain delivers the steer as the next user message.
             if steer_interrupted {
-                if emitted_anything {
+                if visible_output_present {
                     self.event_emitter
                         .emit(self.id.clone(), AgentEvent::AssistantOutputReplace {
                             text:      String::new(),
@@ -1451,6 +1522,13 @@ impl Session {
             }
 
             let Some(response) = response else {
+                if visible_output_present {
+                    self.event_emitter
+                        .emit(self.id.clone(), AgentEvent::AssistantOutputReplace {
+                            text:      String::new(),
+                            reasoning: None,
+                        });
+                }
                 return Err(self.emit_llm_error(LlmError::Stream {
                     message: "Stream ended without a Finish event (after retries)".into(),
                     source:  None,
@@ -1722,6 +1800,23 @@ impl Session {
             provider_options: None,
         }
     }
+
+    fn inject_task_reminder_if_needed(&mut self) {
+        let tools = self
+            .provider_profile
+            .tool_registry()
+            .definitions_for_policy(
+                self.config.tool_access_policy.as_deref(),
+                self.config.tool_exposure_mode,
+            );
+        let tool_names: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
+        if let Some(reminder) = task_reminder::maybe_reminder(&self.history, &tool_names) {
+            self.history.push(Message::System {
+                content:   reminder,
+                timestamp: SystemTime::now(),
+            });
+        }
+    }
 }
 
 const fn is_auth_error(err: &LlmError) -> bool {
@@ -1758,7 +1853,8 @@ mod tests {
     use fabro_llm::error::{ProviderErrorDetail, ProviderErrorKind};
     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
     use fabro_llm::types::{
-        ContentPart, ReasoningEffort, Request, Response, Role, StreamEvent, ToolDefinition,
+        ContentPart, ReasoningEffort, Request, Response, Role, StreamEvent, ToolCall,
+        ToolDefinition,
     };
     use futures::stream;
     use tokio::time::{sleep, timeout};
@@ -2894,6 +2990,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn request_injects_task_reminder_after_ten_unused_assistant_turns() {
+        let provider = Arc::new(CapturingLlmProvider::new());
+        let provider_ref = provider.clone();
+        let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
+        let mut registry = ToolRegistry::new();
+        registry.register(make_named_noop_tool("TaskCreate"));
+        registry.register(make_named_noop_tool("TaskUpdate"));
+        let profile = Arc::new(TestProfile::with_tools(registry));
+        let env = Arc::new(MockSandbox::default());
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
+
+        for index in 0..10 {
+            session
+                .process_input(&format!("turn {index}"))
+                .await
+                .unwrap();
+        }
+        session.process_input("turn 10").await.unwrap();
+
+        let captured = provider_ref.captured_request.lock().unwrap();
+        let request = captured
+            .as_ref()
+            .expect("request should have been captured");
+        assert!(
+            request.messages.iter().any(|message| {
+                message.role == Role::System
+                    && message.text().contains("<system-reminder>")
+                    && message.text().contains("TaskCreate")
+                    && message.text().contains("TaskUpdate")
+            }),
+            "request should include task reminder system message"
+        );
+    }
+
+    #[tokio::test]
     async fn request_omits_tools_denied_by_access_policy() {
         let provider = Arc::new(CapturingLlmProvider::new());
         let provider_ref = provider.clone();
@@ -3155,25 +3286,60 @@ mod tests {
         assert_eq!(deltas[0], "Hello there!");
     }
 
-    #[tokio::test]
-    async fn stream_mid_stream_error() {
-        let provider = Arc::new(MockMidStreamErrorProvider {
-            partial_text: "partial".into(),
-            error:        LlmError::Stream {
-                message: "connection reset".into(),
-                source:  None,
-            },
-        });
-        let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
-        let profile = Arc::new(TestProfile::new());
-        let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
+    #[tokio::test(start_paused = true)]
+    async fn stream_retries_retryable_mid_stream_error_and_records_recovered_response() {
+        let provider = Arc::new(ScriptedStreamProvider::new(vec![
+            ScriptedStreamCall::Events(vec![
+                Ok(StreamEvent::text_delta("partial", None)),
+                Err(LlmError::Stream {
+                    message: "connection reset".into(),
+                    source:  None,
+                }),
+            ]),
+            ScriptedStreamCall::Response(Box::new(text_response("Recovered"))),
+        ]));
+        let mut session = make_session_with_provider(provider.clone()).await;
+        let mut rx = session.subscribe();
 
-        let result = session.process_input("Hello").await;
-        assert!(matches!(result, Err(Error::Llm(LlmError::Stream { .. }))));
+        session.process_input("Hello").await.unwrap();
+
+        assert_eq!(provider.call_index.load(Ordering::SeqCst), 2);
+        assert_eq!(session.history().turns().len(), 2);
+        assert!(matches!(
+            session.history().turns().last(),
+            Some(Message::Assistant { content, .. }) if content == "Recovered"
+        ));
+
+        let mut observed = Vec::new();
+        let mut retry_count = 0;
+        while let Ok(event) = rx.try_recv() {
+            match event.event {
+                AgentEvent::TextDelta { delta } => observed.push(format!("delta:{delta}")),
+                AgentEvent::AssistantOutputReplace { text, reasoning } => {
+                    observed.push(format!("replace:{text}:{reasoning:?}"));
+                }
+                AgentEvent::LlmRetry { error, .. } => {
+                    retry_count += 1;
+                    assert!(error.retryable());
+                }
+                AgentEvent::AssistantMessage { text, .. } => {
+                    observed.push(format!("message:{text}"));
+                }
+                AgentEvent::Error { .. } => observed.push("error".to_string()),
+                _ => {}
+            }
+        }
+
+        assert_eq!(retry_count, 1);
+        assert_eq!(observed, vec![
+            "delta:partial".to_string(),
+            "replace::None".to_string(),
+            "delta:Recovered".to_string(),
+            "message:Recovered".to_string(),
+        ]);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn stream_quota_error_does_not_replay() {
         let quota_error = LlmError::Provider {
             kind:   ProviderErrorKind::QuotaExceeded,
@@ -3200,6 +3366,150 @@ mod tests {
             }))
         ));
         assert_eq!(provider.call_index.load(Ordering::SeqCst), 1);
+    }
+
+    async fn assert_non_retryable_mid_stream_provider_error_does_not_replay(
+        kind: ProviderErrorKind,
+    ) {
+        let llm_error = LlmError::Provider {
+            kind,
+            detail: Box::new(ProviderErrorDetail::new(
+                format!("deterministic provider error: {kind:?}"),
+                "mock",
+            )),
+        };
+        let provider = Arc::new(ScriptedStreamProvider::new(vec![
+            ScriptedStreamCall::Events(vec![
+                Ok(StreamEvent::text_delta("partial", None)),
+                Err(llm_error.clone()),
+            ]),
+            ScriptedStreamCall::Response(Box::new(text_response("should not replay"))),
+        ]));
+        let mut session = make_session_with_provider(provider.clone()).await;
+        let mut rx = session.subscribe();
+
+        let result = session.process_input("Hello").await;
+
+        assert!(matches!(
+            result,
+            Err(Error::Llm(LlmError::Provider {
+                kind: actual_kind,
+                ..
+            })) if actual_kind == kind
+        ));
+        assert_eq!(provider.call_index.load(Ordering::SeqCst), 1);
+        assert_eq!(session.history().turns().len(), 1);
+
+        let mut observed = Vec::new();
+        let mut retry_count = 0;
+        while let Ok(event) = rx.try_recv() {
+            match event.event {
+                AgentEvent::TextDelta { delta } => observed.push(format!("delta:{delta}")),
+                AgentEvent::AssistantOutputReplace { text, reasoning } => {
+                    observed.push(format!("replace:{text}:{reasoning:?}"));
+                }
+                AgentEvent::LlmRetry { .. } => retry_count += 1,
+                AgentEvent::Error { error } => {
+                    assert!(matches!(
+                        error,
+                        Error::Llm(LlmError::Provider {
+                            kind: actual_kind,
+                            ..
+                        }) if actual_kind == kind
+                    ));
+                    observed.push("error".to_string());
+                }
+                AgentEvent::AssistantMessage { .. } => observed.push("message".to_string()),
+                _ => {}
+            }
+        }
+
+        assert_eq!(retry_count, 0);
+        assert_eq!(observed, vec![
+            "delta:partial".to_string(),
+            "replace::None".to_string(),
+            "error".to_string(),
+        ]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stream_non_retryable_mid_stream_errors_do_not_replay() {
+        assert_non_retryable_mid_stream_provider_error_does_not_replay(
+            ProviderErrorKind::Authentication,
+        )
+        .await;
+        assert_non_retryable_mid_stream_provider_error_does_not_replay(
+            ProviderErrorKind::ContextLength,
+        )
+        .await;
+        assert_non_retryable_mid_stream_provider_error_does_not_replay(
+            ProviderErrorKind::QuotaExceeded,
+        )
+        .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stream_retry_exhaustion_emits_one_error_without_committing_assistant_or_tools() {
+        let retryable_error = LlmError::Stream {
+            message: "connection reset".into(),
+            source:  None,
+        };
+        let provider = Arc::new(ScriptedStreamProvider::new(vec![
+            ScriptedStreamCall::Events(vec![
+                Ok(StreamEvent::text_delta("partial", None)),
+                Ok(StreamEvent::ToolCallEnd {
+                    tool_call: ToolCall::new(
+                        "call_1",
+                        "echo",
+                        serde_json::json!({"text": "should not run"}),
+                    ),
+                }),
+                Err(retryable_error.clone()),
+            ]),
+        ]));
+        let mut session = make_session_with_provider(provider.clone()).await;
+        let mut rx = session.subscribe();
+
+        let result = session.process_input("Hello").await;
+
+        assert!(matches!(result, Err(Error::Llm(LlmError::Stream { .. }))));
+        assert_eq!(provider.call_index.load(Ordering::SeqCst), 4);
+        assert_eq!(session.history().turns().len(), 1);
+
+        let mut retry_count = 0;
+        let mut error_count = 0;
+        let mut replace_count = 0;
+        let mut assistant_message_count = 0;
+        let mut tool_started_count = 0;
+        let mut tool_completed_count = 0;
+        while let Ok(event) = rx.try_recv() {
+            match event.event {
+                AgentEvent::LlmRetry { error, .. } => {
+                    retry_count += 1;
+                    assert!(error.retryable());
+                }
+                AgentEvent::AssistantOutputReplace { text, reasoning } => {
+                    assert_eq!(text, "");
+                    assert!(reasoning.is_none());
+                    replace_count += 1;
+                }
+                AgentEvent::Error { error } => {
+                    assert!(matches!(error, Error::Llm(LlmError::Stream { .. })));
+                    error_count += 1;
+                }
+                AgentEvent::AssistantMessage { .. } => assistant_message_count += 1,
+                AgentEvent::ToolCallStarted { .. } => tool_started_count += 1,
+                AgentEvent::ToolCallCompleted { .. } => tool_completed_count += 1,
+                _ => {}
+            }
+        }
+
+        assert_eq!(retry_count, 3);
+        assert_eq!(replace_count, 4);
+        assert_eq!(error_count, 1);
+        assert_eq!(assistant_message_count, 0);
+        assert_eq!(tool_started_count, 0);
+        assert_eq!(tool_completed_count, 0);
     }
 
     #[tokio::test]

@@ -33,16 +33,8 @@ where
                     return Err(err);
                 }
 
-                // Check Retry-After
-                let delay = if let Some(retry_after) = err.retry_after() {
-                    let retry_after_dur = Duration::from_secs_f64(retry_after);
-                    if retry_after_dur > policy.backoff.max_delay {
-                        return Err(err);
-                    }
-                    retry_after_dur
-                } else {
-                    // Convert from 0-indexed (fabro-llm convention) to 1-indexed (BackoffPolicy)
-                    policy.backoff.delay_for_attempt(attempt + 1)
+                let Some(delay) = retry_delay(policy, &err, attempt) else {
+                    return Err(err);
                 };
 
                 warn!(
@@ -61,6 +53,22 @@ where
                 attempt += 1;
             }
         }
+    }
+}
+
+/// Return the delay for a retryable attempt, or `None` when `Retry-After`
+/// exceeds the configured maximum delay.
+#[must_use]
+pub fn retry_delay(policy: &RetryPolicy, err: &Error, attempt: u32) -> Option<Duration> {
+    if let Some(retry_after) = err.retry_after() {
+        let retry_after_dur = Duration::from_secs_f64(retry_after);
+        if retry_after_dur > policy.backoff.max_delay {
+            return None;
+        }
+        Some(retry_after_dur)
+    } else {
+        // Convert from 0-indexed (fabro-llm convention) to 1-indexed (BackoffPolicy).
+        Some(policy.backoff.delay_for_attempt(attempt + 1))
     }
 }
 
