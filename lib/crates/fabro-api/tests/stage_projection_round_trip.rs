@@ -110,6 +110,7 @@ fn stage_projection_round_trips_representative_json() {
         "mcp_servers": [
             {
                 "server_name": "filesystem",
+                "tool_count": 1,
                 "status": {
                     "kind": "ready",
                     "tools": [
@@ -235,6 +236,7 @@ fn nested_agent_state_types_match_openapi_json_shape() {
 
     let mcp_server = McpServerProjection {
         server_name: "filesystem".to_string(),
+        tool_count:  1,
         status:      McpServerStatus::Ready { tools: vec![tool] },
     };
     let mcp_json = serde_json::to_value(&mcp_server).unwrap();
@@ -242,6 +244,7 @@ fn nested_agent_state_types_match_openapi_json_shape() {
         mcp_json,
         json!({
             "server_name": "filesystem",
+            "tool_count": 1,
             "status": {
                 "kind": "ready",
                 "tools": [
@@ -255,7 +258,7 @@ fn nested_agent_state_types_match_openapi_json_shape() {
     );
     let api_mcp: ApiMcpServerProjection = serde_json::from_value(mcp_json).unwrap();
     assert_eq!(api_mcp, mcp_server);
-    assert_eq!(mcp_server.tool_count(), 1);
+    assert_eq!(mcp_server.tool_count, 1);
 }
 
 fn assert_same_type<T: 'static, U: 'static>() {

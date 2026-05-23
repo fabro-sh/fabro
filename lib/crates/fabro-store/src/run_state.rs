@@ -540,6 +540,7 @@ impl RunProjectionReducer for RunProjection {
                 };
                 upsert_mcp_server(stage, McpServerProjection {
                     server_name: props.server_name.clone(),
+                    tool_count:  props.tool_count,
                     status:      McpServerStatus::Ready {
                         tools: props.tools.clone(),
                     },
@@ -552,6 +553,7 @@ impl RunProjectionReducer for RunProjection {
                 };
                 upsert_mcp_server(stage, McpServerProjection {
                     server_name: props.server_name.clone(),
+                    tool_count:  0,
                     status:      McpServerStatus::Failed {
                         error: props.error.clone(),
                     },
@@ -3750,7 +3752,7 @@ mod tests {
             let stage = state.stage(&stage_id).unwrap();
             assert_eq!(stage.mcp_servers.len(), 2);
             assert_eq!(stage.mcp_servers[0].server_name, "filesystem");
-            assert_eq!(stage.mcp_servers[0].tool_count(), 1);
+            assert_eq!(stage.mcp_servers[0].tool_count, 1);
             assert_eq!(stage.mcp_servers[0].status, McpServerStatus::Ready {
                 tools: vec![AgentMcpToolSummary {
                     name:          "read_file".to_string(),
@@ -3758,7 +3760,7 @@ mod tests {
                 }],
             });
             assert_eq!(stage.mcp_servers[1].server_name, "github");
-            assert_eq!(stage.mcp_servers[1].tool_count(), 0);
+            assert_eq!(stage.mcp_servers[1].tool_count, 0);
             assert_eq!(stage.mcp_servers[1].status, McpServerStatus::Failed {
                 error: "missing token".to_string(),
             });

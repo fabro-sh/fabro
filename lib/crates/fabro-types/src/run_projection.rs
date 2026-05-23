@@ -133,19 +133,8 @@ pub struct ActivatedSkill {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct McpServerProjection {
     pub server_name: String,
+    pub tool_count:  usize,
     pub status:      McpServerStatus,
-}
-
-impl McpServerProjection {
-    /// Number of tools currently exposed by this server. Derived from `status`
-    /// so the projection never carries a stale count alongside the tool list.
-    #[must_use]
-    pub fn tool_count(&self) -> usize {
-        match &self.status {
-            McpServerStatus::Ready { tools } => tools.len(),
-            McpServerStatus::Failed { .. } => 0,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

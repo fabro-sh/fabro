@@ -22,5 +22,6 @@ import type { McpServerStatus } from './mcp-server-status';
  */
 export interface McpServerProjection {
     'server_name': string;
+    'tool_count': number;
     'status': McpServerStatus;
 }

@@ -7897,10 +7897,14 @@ components:
       type: object
       required:
         - server_name
+        - tool_count
         - status
       properties:
         server_name:
           type: string
+        tool_count:
+          type: integer
+          minimum: 0
         status:
           $ref: "#/components/schemas/McpServerStatus"
 
