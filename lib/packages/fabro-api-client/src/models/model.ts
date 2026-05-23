@@ -67,6 +67,10 @@ export interface Model {
      */
     'default': boolean;
     /**
+     * Whether this is the provider\'s small/default utility model.
+     */
+    'small_default': boolean;
+    /**
      * Whether credential material is present for this model\'s provider on the server (vault entry or environment variable). Does NOT imply the credential is valid or that requests will succeed; call `POST /models/{id}/test` to verify usability.
      */
     'configured': boolean;

@@ -230,11 +230,14 @@ graph = "workflow.fabro"
 [run]
 goal = "Test the login page"
 
-[run.sandbox]
+[run.environment]
+id = "cloud"
+
+[environments.cloud]
 provider = "daytona"
 
-[run.sandbox.daytona.snapshot]
-name = "daytona-medium"
+[environments.cloud.image]
+ref = "daytona-medium"
 
 [run.artifacts]
 include = ["screenshots/**"]

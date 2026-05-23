@@ -503,6 +503,7 @@ mod tests {
             estimated_output_tps: Some(100.0),
             aliases: vec!["tm".to_string()],
             default: false,
+            small_default: false,
             configured: false,
         })
         .unwrap()
@@ -535,6 +536,7 @@ mod tests {
             estimated_output_tps: Some(100.0),
             aliases:              vec![],
             default:              false,
+            small_default:        false,
             configured:           true,
         })
         .unwrap()

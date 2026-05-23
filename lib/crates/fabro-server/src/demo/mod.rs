@@ -1022,8 +1022,9 @@ mod runs {
 
     use fabro_api::types::*;
     use fabro_types::settings::run::{
-        DaytonaSettings, DaytonaSnapshotSettings, RunGoal, RunModelSettings, RunNamespace,
-        RunPrepareSettings, RunSandboxSettings,
+        EnvironmentImageSettings, EnvironmentLifecycleSettings, EnvironmentProvider,
+        EnvironmentResourcesSettings, EnvironmentSettings, RunEnvironmentSettings, RunGoal,
+        RunModelSettings, RunNamespace, RunPrepareSettings,
     };
     use fabro_types::settings::{InterpString, ProjectNamespace, WorkflowNamespace};
     use fabro_types::{
@@ -1136,6 +1137,7 @@ mod runs {
             pull_request: None,
             current_question: None,
             superseded_by: None,
+            retried_from: None,
             links: RunLinks { web: None },
         }
     }
@@ -1305,6 +1307,7 @@ mod runs {
                 Some(72_000),
                 None,
                 StageHandler::Command,
+                None,
             ),
             run_stage_from_stage_id(
                 &StageId::new("propose-changes", 1),
@@ -1313,6 +1316,7 @@ mod runs {
                 Some(154_000),
                 None,
                 StageHandler::Agent,
+                None,
             ),
             run_stage_from_stage_id(
                 &StageId::new("review-changes", 1),
@@ -1321,6 +1325,7 @@ mod runs {
                 Some(45_000),
                 None,
                 StageHandler::Agent,
+                None,
             ),
             run_stage_from_stage_id(
                 &StageId::new("apply-changes", 1),
@@ -1329,6 +1334,7 @@ mod runs {
                 Some(118_000),
                 None,
                 StageHandler::Command,
+                None,
             ),
             run_stage_from_stage_id(
                 &StageId::new("apply-changes", 2),
@@ -1337,6 +1343,7 @@ mod runs {
                 None,
                 None,
                 StageHandler::Command,
+                None,
             ),
         ]
     }
@@ -1383,6 +1390,8 @@ mod runs {
                     mode:     None,
                     provider: None,
                     model:    None,
+                    reasoning_effort: None,
+                    speed: None,
                 }),
             ),
             make_envelope(
@@ -1665,6 +1674,27 @@ mod runs {
     }
 
     pub(super) fn settings() -> serde_json::Value {
+        let environment = EnvironmentSettings {
+            provider: EnvironmentProvider::Daytona,
+            image: EnvironmentImageSettings {
+                reference:  Some("api-server-dev".into()),
+                dockerfile: None,
+            },
+            resources: EnvironmentResourcesSettings {
+                cpu:    Some(4),
+                memory: Some(fabro_types::settings::Size::from_gigabytes(8)),
+                disk:   Some(fabro_types::settings::Size::from_gigabytes(10)),
+            },
+            lifecycle: EnvironmentLifecycleSettings {
+                preserve:         false,
+                stop_on_terminal: true,
+                auto_stop:        Some(
+                    "60m".parse().expect("hardcoded demo duration should parse"),
+                ),
+            },
+            labels: HashMap::from([("project".to_string(), "api-server".to_string())]),
+            ..EnvironmentSettings::default()
+        };
         let settings = WorkflowSettings {
             project:  ProjectNamespace::default(),
             workflow: WorkflowNamespace {
@@ -1685,30 +1715,10 @@ mod runs {
                     commands:   vec!["bun install".into(), "bun run typecheck".into()],
                     timeout_ms: 120_000,
                 },
-                sandbox: RunSandboxSettings {
-                    provider:         "daytona".into(),
-                    preserve:         false,
-                    stop_on_terminal: true,
-                    devcontainer:     false,
-                    env:              HashMap::new(),
-                    docker:           None,
-                    daytona:          Some(DaytonaSettings {
-                        auto_stop_interval: Some(60),
-                        labels:             HashMap::from([(
-                            "project".to_string(),
-                            "api-server".to_string(),
-                        )]),
-                        volumes:            Vec::new(),
-                        snapshot:           Some(DaytonaSnapshotSettings {
-                            name:       "api-server-dev".into(),
-                            cpu:        Some(4),
-                            memory_gb:  Some(8),
-                            disk_gb:    Some(10),
-                            dockerfile: None,
-                        }),
-                        network:            None,
-                    }),
-                },
+                environment: RunEnvironmentSettings::from_environment(
+                    "api-server".to_string(),
+                    environment,
+                ),
                 ..RunNamespace::default()
             },
         };

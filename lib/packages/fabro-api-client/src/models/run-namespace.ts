@@ -39,6 +39,9 @@ import type { RunCheckpointSettings } from './run-checkpoint-settings';
 import type { RunCloneSettings } from './run-clone-settings';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { RunEnvironmentSettings } from './run-environment-settings';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { RunExecutionSettings } from './run-execution-settings';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -63,9 +66,6 @@ import type { RunModelSettings } from './run-model-settings';
 import type { RunPrepareSettings } from './run-prepare-settings';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { RunSandboxSettings } from './run-sandbox-settings';
-// May contain unused imports in some cases
-// @ts-ignore
 import type { RunScmSettings } from './run-scm-settings';
 
 export interface RunNamespace {
@@ -84,7 +84,7 @@ export interface RunNamespace {
     'clone': RunCloneSettings;
     'run_branch': RunBranchSettings;
     'meta_branch': RunMetaBranchSettings;
-    'sandbox': RunSandboxSettings;
+    'environment': RunEnvironmentSettings;
     'notifications': { [key: string]: NotificationRouteSettings; };
     'interviews': RunInterviewsSettings;
     'agent': RunAgentSettings;

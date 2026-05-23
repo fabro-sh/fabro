@@ -481,7 +481,7 @@ methods = ["dev-token"]
             run_id.as_str(),
             "--detach",
             "--auto-approve",
-            "--sandbox",
+            "--environment",
             "local",
             workflow_path
                 .to_str()
@@ -734,7 +734,7 @@ fn detached_run_answers_pending_question_without_interview_scratch_files() {
             "--detach",
             "--run-id",
             run_id.as_str(),
-            "--sandbox",
+            "--environment",
             "local",
             workflow_path.to_str().unwrap(),
         ])
@@ -807,7 +807,7 @@ fn worker_exits_after_sigterm_cancel_even_when_stdin_stays_open() {
         .args([
             "create",
             "--auto-approve",
-            "--sandbox",
+            "--environment",
             "local",
             "--run-id",
             run_id.as_str(),

@@ -29,20 +29,23 @@ fabro sandbox ssh <run-id> --ttl 120
 By default, Daytona sandboxes are destroyed when the workflow finishes. To keep the sandbox running after the workflow completes — so you can continue debugging — pass `--preserve-sandbox`:
 
 ```bash
-fabro run workflow.fabro --sandbox daytona --preserve-sandbox
+fabro run workflow.fabro --environment cloud --preserve-sandbox
 ```
 
 Without `--preserve-sandbox`, the SSH session is terminated when the run ends and the sandbox is cleaned up.
 
-You can also set `auto_stop_interval` in your run config to control how long an idle sandbox stays alive:
+You can also set `lifecycle.auto_stop` in your environment to control how long an idle sandbox stays alive:
 
 ```toml title="run.toml"
-[run.sandbox]
-provider = "daytona"
-preserve = true
+[run.environment]
+id = "cloud"
 
-[run.sandbox.daytona]
-auto_stop_interval = 60
+[environments.cloud]
+provider = "daytona"
+
+[environments.cloud.lifecycle]
+preserve = true
+auto_stop = "60m"
 ```
 
 ## What you can do over SSH

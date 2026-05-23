@@ -1,4 +1,5 @@
 mod cli;
+mod environment;
 mod error;
 mod project;
 mod run;
@@ -6,6 +7,7 @@ mod server;
 mod workflow;
 
 pub use cli::resolve_cli;
+pub(crate) use environment::resolve_run_environment;
 pub use error::ResolveError;
 use fabro_types::settings::InterpString;
 pub use project::resolve_project;

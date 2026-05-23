@@ -110,16 +110,17 @@ script = "echo cli"
 type = "stdio"
 command = ["echo", "cli"]
 
-[run.sandbox]
+[run.environment]
+id = "cli"
+
+[environments.cli]
 provider = "daytona"
 
-[run.sandbox.env]
+[environments.cli.env]
 CLI_ONLY = "1"
 SHARED = "cli"
 
-[run.sandbox.daytona]
-
-[run.sandbox.daytona.labels]
+[environments.cli.labels]
 cli_only = "1"
 shared = "cli"
 
@@ -193,13 +194,17 @@ command = ["echo", "run"]
 type = "stdio"
 command = ["echo", "run-only"]
 
-[run.sandbox.env]
+[run.environment]
+id = "run"
+
+[environments.run]
+provider = "daytona"
+
+[environments.run.env]
 RUN_ONLY = "1"
 SHARED = "run"
 
-[run.sandbox.daytona]
-
-[run.sandbox.daytona.labels]
+[environments.run.labels]
 run_only = "1"
 shared = "run"
 "#,
@@ -256,7 +261,7 @@ _version = 1
 [[run.prepare.steps]]
 script = "project-setup"
 
-[run.sandbox]
+[run.environment.lifecycle]
 preserve = true
 "#,
     )
@@ -352,7 +357,7 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
         Some("auto")
     );
     assert_eq!(
-        run_spec["settings"]["run"]["sandbox"]["preserve"].as_bool(),
+        run_spec["settings"]["run"]["environment"]["lifecycle"]["preserve"].as_bool(),
         Some(true)
     );
     assert_eq!(

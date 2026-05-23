@@ -6,10 +6,12 @@ import {
   archiveRun,
   canArchive,
   canCancel,
+  canRetry,
   canUnarchive,
   cancelRun,
   isTerminalCancelledRun,
   mapError,
+  retryRun,
   unarchiveRun,
 } from "./run-actions";
 import { generatedAxios } from "./api-client";
@@ -55,6 +57,7 @@ function makeRun(status: RunStatus, archived = false): Run {
     pull_request:     null,
     current_question: null,
     superseded_by:    null,
+    retried_from:     null,
     links:            { web: null },
   };
 }
@@ -135,6 +138,22 @@ describe("run lifecycle actions", () => {
     expect(result.lifecycle.archived).toBe(false);
   });
 
+  test("retryRun parses a 201 response", async () => {
+    stubGeneratedAxiosOnce({
+      status: 201,
+      body: {
+        ...makeRun({ kind: "queued" }),
+        id:           "run-2",
+        retried_from: "run-1",
+      },
+    });
+
+    const result = await retryRun("run-1");
+    expect(result.id).toBe("run-2");
+    expect(result.retried_from).toBe("run-1");
+    expect(result.lifecycle.status.kind).toBe("queued");
+  });
+
   test("404 and 409 preserve the parsed error envelope", async () => {
     stubGeneratedAxiosOnce({
       status: 404,
@@ -194,6 +213,15 @@ describe("run lifecycle actions", () => {
 
     expect(canUnarchive("archived")).toBe(true);
     expect(canUnarchive("failed")).toBe(false);
+  });
+
+  test("canRetry allows failed and dead runs except cancelled or archived runs", () => {
+    expect(canRetry(makeRun({ kind: "failed", reason: "workflow_error" }))).toBe(true);
+    expect(canRetry(makeRun({ kind: "dead" }))).toBe(true);
+    expect(canRetry(makeRun({ kind: "failed", reason: "cancelled" }))).toBe(false);
+    expect(canRetry(makeRun({ kind: "succeeded", reason: "completed" }))).toBe(false);
+    expect(canRetry(makeRun({ kind: "running" }))).toBe(false);
+    expect(canRetry(makeRun({ kind: "failed", reason: "workflow_error" }, true))).toBe(false);
   });
 
   test("isTerminalCancelledRun distinguishes immediate cancel success from in-flight cancellation", () => {

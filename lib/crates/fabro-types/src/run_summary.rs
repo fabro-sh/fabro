@@ -79,6 +79,8 @@ pub struct Run {
     pub current_question: Option<InterviewQuestionRecord>,
     #[serde(default)]
     pub superseded_by:    Option<RunId>,
+    #[serde(default)]
+    pub retried_from:     Option<RunId>,
     pub links:            RunLinks,
 }
 

@@ -69,6 +69,7 @@ import {
   useCancelRun,
   useInterruptRun,
   usePreviewRun,
+  useRetryRun,
   useUnarchiveRun,
   type LifecycleMutationResult,
   type PreviewMutationResult,
@@ -82,6 +83,7 @@ import {
   canArchive,
   canCancel,
   canDelete,
+  canRetry,
   canUnarchive,
   deleteErrorMessage,
   deleteRun,
@@ -158,7 +160,7 @@ type ToastApi = Pick<ReturnType<typeof useToast>, "push" | "dismiss">;
 
 const INITIAL_LIFECYCLE_TOAST_STATE: LifecycleToastState = {
   activeArchiveToastId: null,
-  lastProcessed: { cancel: null, archive: null, unarchive: null },
+  lastProcessed: { cancel: null, archive: null, unarchive: null, retry: null },
 };
 
 export function lifecycleActionVisibility(status: string | null | undefined) {
@@ -401,6 +403,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const cancelMutation = useCancelRun(params.id);
   const archiveMutation = useArchiveRun(params.id);
   const unarchiveMutation = useUnarchiveRun(params.id);
+  const retryMutation = useRetryRun(params.id);
   const interruptMutation = useInterruptRun(params.id);
   const navigate = useNavigate();
   const { mutate } = useSWRConfig();
@@ -467,6 +470,16 @@ export default function RunDetail({ params }: { params: { id: string } }) {
     );
   }, [dismiss, push, unarchiveMutation.data]);
 
+  useEffect(() => {
+    lifecycleToastStateRef.current = handleLifecycleToastResult(
+      "retry",
+      retryMutation.data,
+      lifecycleToastStateRef.current,
+      { push, dismiss },
+      navigate,
+    );
+  }, [dismiss, navigate, push, retryMutation.data]);
+
   if (runQuery.isLoading && !run) {
     return <div className="py-12" />;
   }
@@ -514,6 +527,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const cancelPending = cancelMutation.isMutating;
   const archivePending = archiveMutation.isMutating;
   const unarchivePending = unarchiveMutation.isMutating;
+  const retryPending = retryMutation.isMutating;
   const handleConfirmDelete = async () => {
     setDeletePending(true);
     try {
@@ -659,6 +673,9 @@ export default function RunDetail({ params }: { params: { id: string } }) {
           canArchive={visibility.showArchive}
           archivePending={archivePending}
           onArchive={() => void archiveMutation.trigger()}
+          canRetry={!demoMode && canRetry(summary)}
+          retryPending={retryPending}
+          onRetry={() => void retryMutation.trigger()}
           canUnarchive={visibility.showUnarchive}
           unarchivePending={unarchivePending}
           onUnarchive={() => void unarchiveMutation.trigger()}
@@ -732,8 +749,8 @@ export default function RunDetail({ params }: { params: { id: string } }) {
       <div
         className={
           fullHeight
-            ? "pt-3.5 flex min-h-0 flex-1 flex-col"
-            : "pt-3.5 pb-[var(--fabro-interview-dock-clearance)]"
+            ? "pt-3 flex min-h-0 flex-1 flex-col"
+            : "pt-3 pb-[var(--fabro-interview-dock-clearance)]"
         }
       >
         <Outlet />
@@ -826,6 +843,7 @@ export function handleLifecycleToastResult(
   result: RunDetailActionResult | undefined,
   state: LifecycleToastState,
   toastApi: ToastApi,
+  navigate?: (path: string) => void,
 ): LifecycleToastState {
   if (!result || result.intent !== intent) return state;
   if (state.lastProcessed[intent] === result) return state;
@@ -844,6 +862,12 @@ export function handleLifecycleToastResult(
     toastApi.push({
       message: isTerminalCancelledRun(result.run) ? "Run cancelled." : "Cancellation requested.",
     });
+    return nextState;
+  }
+
+  if (intent === "retry") {
+    toastApi.push({ message: "Retry started." });
+    navigate?.(`/runs/${result.run.id}`);
     return nextState;
   }
 
@@ -901,6 +925,9 @@ interface ActionsMenuProps {
   canArchive: boolean;
   archivePending: boolean;
   onArchive: () => void;
+  canRetry: boolean;
+  retryPending: boolean;
+  onRetry: () => void;
   canUnarchive: boolean;
   unarchivePending: boolean;
   onUnarchive: () => void;
@@ -918,6 +945,7 @@ function ActionsMenu(props: ActionsMenuProps) {
     canFocusSteer, onFocusSteer,
     canPreview, previewPending, onPreview,
     canArchive, archivePending, onArchive,
+    canRetry, retryPending, onRetry,
     canUnarchive, unarchivePending, onUnarchive,
     canDelete, deletePending, onDelete,
     canCancel, cancelPending, onCancel,
@@ -925,11 +953,11 @@ function ActionsMenu(props: ActionsMenuProps) {
 
   const hasOps =
     canPreview || canSendInterrupt || canFocusSteer;
-  const hasLifecycle = canArchive || canUnarchive;
+  const hasLifecycle = canRetry || canArchive || canUnarchive;
   const hasDestructive = canCancel || canDelete;
   const hasAny = hasOps || hasLifecycle || hasDestructive;
   const anyPending =
-    previewPending || archivePending || unarchivePending || deletePending || cancelPending || interruptPending;
+    previewPending || retryPending || archivePending || unarchivePending || deletePending || cancelPending || interruptPending;
   const separators = actionMenuSeparatorVisibility({ hasLifecycle, hasDestructive });
 
   if (!hasAny) return null;
@@ -980,6 +1008,18 @@ function ActionsMenu(props: ActionsMenuProps) {
         </MenuItem>
         {separators.afterOperations && (
           <div className="my-1 h-px bg-line" role="separator" />
+        )}
+        {canRetry && (
+          <MenuItem>
+            <button
+              type="button"
+              onClick={onRetry}
+              disabled={retryPending}
+              className={MENU_ITEM_CLASS}
+            >
+              {retryPending ? "Retrying…" : "Retry"}
+            </button>
+          </MenuItem>
         )}
         {canArchive && (
           <MenuItem>

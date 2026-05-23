@@ -1,5 +1,5 @@
 import useSWRMutation from "swr/mutation";
-import { useSWRConfig } from "swr";
+import { useSWRConfig, type ScopedMutator } from "swr";
 import type {
   PreviewUrlResponse,
   Run,
@@ -21,6 +21,7 @@ import {
   archiveRun,
   cancelRun,
   isLifecycleActionError,
+  retryRun,
   unarchiveRun,
 } from "./run-actions";
 
@@ -71,10 +72,20 @@ export function useUnarchiveRun(id: string | undefined) {
   return useLifecycleMutation(id, "unarchive", unarchiveRun);
 }
 
+export function useRetryRun(id: string | undefined) {
+  return useLifecycleMutation(id, "retry", retryRun, (run, mutate) => {
+    void mutate(queryKeys.runs.detail(run.id), run, { revalidate: false });
+    if (run.parent_id) {
+      void mutate(queryKeys.runs.children(run.parent_id));
+    }
+  });
+}
+
 function useLifecycleMutation(
   id: string | undefined,
   intent: LifecycleAction,
   action: (id: string) => Promise<Run>,
+  onSuccessExtra?: (run: Run, mutate: ScopedMutator) => void,
 ) {
   const { mutate } = useSWRConfig();
   const key = id ? queryKeys.runs[intent](id) : null;
@@ -97,9 +108,13 @@ function useLifecycleMutation(
     {
       onSuccess: (result) => {
         if (!id || !result.ok) return;
-        void mutate(queryKeys.runs.detail(id));
+        if (intent !== "retry") {
+          // Retry doesn't mutate the source run, so skip invalidating its detail/billing keys.
+          void mutate(queryKeys.runs.detail(id));
+          void mutate(queryKeys.runs.billing(id));
+        }
         mutateRunListCaches(mutate);
-        void mutate(queryKeys.runs.billing(id));
+        onSuccessExtra?.(result.run, mutate);
       },
     },
   );

@@ -82,6 +82,8 @@ pub struct ModelCatalogSettings {
     #[serde(default)]
     pub default:              Option<bool>,
     #[serde(default)]
+    pub small_default:        Option<bool>,
+    #[serde(default)]
     pub probe:                Option<bool>,
     #[serde(default)]
     pub enabled:              Option<bool>,
@@ -564,6 +566,11 @@ pub enum CatalogBuildError {
         provider: ProviderId,
         models:   Vec<String>,
     },
+    #[error("provider '{provider}' has multiple small default models: {models:?}")]
+    MultipleProviderSmallDefaults {
+        provider: ProviderId,
+        models:   Vec<String>,
+    },
     #[error("catalog must contain at least one enabled default model")]
     NoDefaultModel,
     #[error("model '{model}' has invalid reasoning_effort '{value}'")]
@@ -639,6 +646,7 @@ impl Catalog {
         let mut models_with_settings = Vec::new();
         let mut model_identifiers = BTreeMap::<String, String>::new();
         let mut defaults_by_provider = HashMap::<ProviderId, Vec<String>>::new();
+        let mut small_defaults_by_provider = HashMap::<ProviderId, Vec<String>>::new();
 
         let mut model_ids = settings.models.keys().cloned().collect::<Vec<_>>();
         model_ids.sort_unstable();
@@ -679,6 +687,12 @@ impl Catalog {
                     .or_default()
                     .push(model.id.clone());
             }
+            if model.small_default {
+                small_defaults_by_provider
+                    .entry(model.provider.clone())
+                    .or_default()
+                    .push(model.id.clone());
+            }
             models_with_settings.push((model, resolved_settings));
         }
 
@@ -687,6 +701,14 @@ impl Catalog {
                 return Err(CatalogBuildError::MultipleProviderDefaults {
                     provider,
                     models: defaults,
+                });
+            }
+        }
+        for (provider, small_defaults) in small_defaults_by_provider {
+            if small_defaults.len() > 1 {
+                return Err(CatalogBuildError::MultipleProviderSmallDefaults {
+                    provider,
+                    models: small_defaults,
                 });
             }
         }
@@ -890,6 +912,18 @@ impl Catalog {
             .find(|m| m.provider == provider_id && m.default)
     }
 
+    /// Small default model for a provider — the small/cheap utility model used
+    /// for metadata enrichment. Falls back to the provider's normal default
+    /// when no explicit small default is configured.
+    #[must_use]
+    pub fn small_default_for_provider(&self, p: &ProviderId) -> Option<&Model> {
+        let provider_id = self.provider(p).map_or(p, |provider| &provider.id);
+        self.models
+            .iter()
+            .find(|m| &m.provider == provider_id && m.small_default)
+            .or_else(|| self.default_for_provider(provider_id))
+    }
+
     /// Default model for the best-available provider (based on API keys),
     /// falling back to the global catalog default.
     #[must_use]
@@ -928,6 +962,24 @@ impl Catalog {
             .iter()
             .filter(|provider| configured.contains(&provider.id))
             .find_map(|provider| self.default_for_provider(&provider.id))
+            .unwrap_or_else(|| self.default_model())
+    }
+
+    /// Small default model for the best-available built-in provider IDs,
+    /// falling back to the global catalog default.
+    #[must_use]
+    pub fn small_default_for_configured_ids(&self, configured: &[ProviderId]) -> &Model {
+        if configured.is_empty() {
+            return self.default_model();
+        }
+        let configured = configured
+            .iter()
+            .filter_map(|id| self.provider(id).map(|provider| provider.id.clone()))
+            .collect::<HashSet<_>>();
+        self.providers
+            .iter()
+            .filter(|provider| configured.contains(&provider.id))
+            .find_map(|provider| self.small_default_for_provider(&provider.id))
             .unwrap_or_else(|| self.default_model())
     }
 
@@ -1077,6 +1129,7 @@ fn merge_model_settings(
         training:             higher.training.or(fallback.training),
         knowledge_cutoff:     higher.knowledge_cutoff.or(fallback.knowledge_cutoff),
         default:              higher.default.or(fallback.default),
+        small_default:        higher.small_default.or(fallback.small_default),
         probe:                higher.probe.or(fallback.probe),
         enabled:              higher.enabled.or(fallback.enabled),
         aliases:              higher.aliases.or(fallback.aliases),
@@ -1319,6 +1372,7 @@ fn build_model(
         estimated_output_tps: settings.estimated_output_tps,
         aliases: settings.aliases.clone().unwrap_or_default(),
         default: settings.default.unwrap_or_default(),
+        small_default: settings.small_default.unwrap_or_default(),
         configured: false,
     };
     let catalog_settings = CatalogModelSettings {
@@ -1844,6 +1898,41 @@ enabled = true
             .probe_for_provider(&ProviderId::gemini())
             .unwrap();
         assert_eq!(m.id, "gemini-3.1-pro-preview");
+    }
+
+    #[test]
+    fn builtin_small_defaults_are_marked_per_provider() {
+        let catalog = Catalog::builtin();
+
+        assert_eq!(
+            catalog
+                .small_default_for_provider(&ProviderId::anthropic())
+                .unwrap()
+                .id,
+            "claude-haiku-4-5"
+        );
+        assert_eq!(
+            catalog
+                .small_default_for_provider(&ProviderId::openai())
+                .unwrap()
+                .id,
+            "gpt-5.4-mini"
+        );
+        assert_eq!(
+            catalog
+                .small_default_for_provider(&ProviderId::gemini())
+                .unwrap()
+                .id,
+            "gemini-3.1-flash-lite-preview"
+        );
+        assert!(catalog.get("claude-haiku-4-5").unwrap().small_default);
+        assert!(catalog.get("gpt-5.4-mini").unwrap().small_default);
+        assert!(
+            catalog
+                .get("gemini-3.1-flash-lite-preview")
+                .unwrap()
+                .small_default
+        );
     }
 
     #[test]
@@ -2461,6 +2550,365 @@ reasoning = false
                 .unwrap()
                 .id,
             "probe_model"
+        );
+    }
+
+    #[test]
+    fn small_default_for_provider_prefers_enabled_small_default_model_over_provider_default() {
+        let layer = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[models.default_model]
+provider = "test"
+display_name = "Default Model"
+family = "test"
+default = true
+
+[models.default_model.limits]
+context_window = 1000
+
+[models.default_model.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.small_model]
+provider = "test"
+display_name = "Small Model"
+family = "test"
+small_default = true
+
+[models.small_model.limits]
+context_window = 1000
+
+[models.small_model.features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        );
+        let catalog = Catalog::from_settings(&layer).unwrap();
+
+        assert_eq!(
+            catalog
+                .small_default_for_provider(&ProviderId::new("test"))
+                .unwrap()
+                .id,
+            "small_model"
+        );
+    }
+
+    #[test]
+    fn small_default_for_provider_falls_back_to_provider_default_when_no_small_default_marked() {
+        let layer = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[models.default_model]
+provider = "test"
+display_name = "Default Model"
+family = "test"
+default = true
+
+[models.default_model.limits]
+context_window = 1000
+
+[models.default_model.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.other_model]
+provider = "test"
+display_name = "Other Model"
+family = "test"
+
+[models.other_model.limits]
+context_window = 1000
+
+[models.other_model.features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        );
+        let catalog = Catalog::from_settings(&layer).unwrap();
+
+        assert_eq!(
+            catalog
+                .small_default_for_provider(&ProviderId::new("test"))
+                .unwrap()
+                .id,
+            "default_model"
+        );
+    }
+
+    #[test]
+    fn small_default_for_provider_resolves_provider_alias() {
+        let layer = minimal_settings(
+            r#"
+[providers.canonical]
+display_name = "Canonical"
+adapter = "openai"
+agent_profile = "openai"
+aliases = ["alias"]
+
+[models.default_model]
+provider = "canonical"
+display_name = "Default Model"
+family = "test"
+default = true
+
+[models.default_model.limits]
+context_window = 1000
+
+[models.default_model.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.small_model]
+provider = "canonical"
+display_name = "Small Model"
+family = "test"
+small_default = true
+
+[models.small_model.limits]
+context_window = 1000
+
+[models.small_model.features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        );
+        let catalog = Catalog::from_settings(&layer).unwrap();
+
+        assert_eq!(
+            catalog
+                .small_default_for_provider(&ProviderId::new("alias"))
+                .unwrap()
+                .id,
+            "small_model"
+        );
+    }
+
+    #[test]
+    fn small_default_for_configured_ids_uses_highest_priority_configured_provider() {
+        let layer = minimal_settings(
+            r#"
+[providers.low]
+display_name = "Low"
+adapter = "openai"
+agent_profile = "openai"
+priority = 10
+
+[providers.high]
+display_name = "High"
+adapter = "openai"
+agent_profile = "openai"
+priority = 20
+
+[models.low_default]
+provider = "low"
+display_name = "Low Default"
+family = "test"
+default = true
+
+[models.low_default.limits]
+context_window = 1000
+
+[models.low_default.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.low_small]
+provider = "low"
+display_name = "Low Small"
+family = "test"
+small_default = true
+
+[models.low_small.limits]
+context_window = 1000
+
+[models.low_small.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.high_default]
+provider = "high"
+display_name = "High Default"
+family = "test"
+default = true
+
+[models.high_default.limits]
+context_window = 1000
+
+[models.high_default.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.high_small]
+provider = "high"
+display_name = "High Small"
+family = "test"
+small_default = true
+
+[models.high_small.limits]
+context_window = 1000
+
+[models.high_small.features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        );
+        let catalog = Catalog::from_settings(&layer).unwrap();
+
+        assert_eq!(
+            catalog
+                .small_default_for_configured_ids(&[
+                    ProviderId::new("low"),
+                    ProviderId::new("high")
+                ])
+                .id,
+            "high_small"
+        );
+        assert_eq!(
+            catalog
+                .small_default_for_configured_ids(&[ProviderId::new("low")])
+                .id,
+            "low_small"
+        );
+        assert_eq!(
+            catalog.small_default_for_configured_ids(&[]).id,
+            catalog.default_model().id
+        );
+    }
+
+    #[test]
+    fn small_default_for_configured_ids_falls_back_to_provider_default() {
+        let layer = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[models.default_model]
+provider = "test"
+display_name = "Default Model"
+family = "test"
+default = true
+
+[models.default_model.limits]
+context_window = 1000
+
+[models.default_model.features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        );
+        let catalog = Catalog::from_settings(&layer).unwrap();
+
+        assert_eq!(
+            catalog
+                .small_default_for_configured_ids(&[ProviderId::new("test")])
+                .id,
+            "default_model"
+        );
+    }
+
+    #[test]
+    fn multiple_small_default_models_for_provider_fail_catalog_build() {
+        let layer = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[models.default_model]
+provider = "test"
+display_name = "Default Model"
+family = "test"
+default = true
+
+[models.default_model.limits]
+context_window = 1000
+
+[models.default_model.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.first_small]
+provider = "test"
+display_name = "First Small"
+family = "test"
+small_default = true
+
+[models.first_small.limits]
+context_window = 1000
+
+[models.first_small.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.second_small]
+provider = "test"
+display_name = "Second Small"
+family = "test"
+small_default = true
+
+[models.second_small.limits]
+context_window = 1000
+
+[models.second_small.features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        );
+
+        let err = Catalog::from_settings(&layer).unwrap_err();
+
+        assert!(matches!(
+            err,
+            CatalogBuildError::MultipleProviderSmallDefaults { provider, models }
+                if provider == ProviderId::new("test")
+                    && models == vec!["first_small".to_string(), "second_small".to_string()]
+        ));
+    }
+
+    #[test]
+    fn small_default_false_override_clears_inherited_builtin_small_default_marker() {
+        let catalog = Catalog::from_builtin_with_overrides(&minimal_settings(
+            r#"
+[models."gpt-5.4-mini"]
+small_default = false
+"#,
+        ))
+        .expect("sparse built-in model override should build");
+
+        assert_eq!(
+            catalog
+                .small_default_for_provider(&ProviderId::openai())
+                .unwrap()
+                .id,
+            "gpt-5.4"
         );
     }
 
@@ -3215,6 +3663,7 @@ reasoning_effort = "levels"
             ),
             aliases: [],
             default: false,
+            small_default: false,
             configured: false,
         }
         "#);
@@ -3286,6 +3735,7 @@ reasoning_effort = "levels"
                 "gemini-flash-lite",
             ],
             default: false,
+            small_default: true,
             configured: false,
         }
         "#);
@@ -3343,6 +3793,7 @@ reasoning_effort = "levels"
                 "kimi",
             ],
             default: true,
+            small_default: false,
             configured: false,
         }
         "#);
@@ -3405,6 +3856,7 @@ reasoning_effort = "levels"
                 "mercury",
             ],
             default: true,
+            small_default: false,
             configured: false,
         }
         "#);
@@ -3462,6 +3914,7 @@ reasoning_effort = "levels"
                 "gpt-54",
             ],
             default: true,
+            small_default: false,
             configured: false,
         }
         "#);
@@ -3514,6 +3967,7 @@ reasoning_effort = "levels"
                 "gpt-54-pro",
             ],
             default: false,
+            small_default: false,
             configured: false,
         }
         "#);
@@ -3585,6 +4039,7 @@ reasoning_effort = "levels"
                 "codex-spark",
             ],
             default: false,
+            small_default: false,
             configured: false,
         }
         "#);

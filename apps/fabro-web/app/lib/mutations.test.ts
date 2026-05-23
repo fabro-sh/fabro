@@ -27,6 +27,7 @@ mock.module("./run-actions", () => ({
   archiveRun: mock(),
   cancelRun: mock(),
   isLifecycleActionError: () => false,
+  retryRun: mock(),
   unarchiveRun: mock(),
 }));
 

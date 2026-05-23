@@ -38,6 +38,7 @@ fn model_json_matches_openapi_shape() {
         estimated_output_tps: Some(25.0),
         aliases:              vec!["opus".to_string()],
         default:              false,
+        small_default:        true,
         configured:           true,
     };
 
@@ -48,6 +49,7 @@ fn model_json_matches_openapi_shape() {
     assert_eq!(json["features"]["reasoning_effort"], "levels");
     assert_eq!(json["features"]["prompt_cache"], true);
     assert_eq!(json["estimated_output_tps"], 25.0);
+    assert_eq!(json["small_default"], true);
     assert_eq!(json["configured"], true);
 
     let round_trip: ApiModel = serde_json::from_value(json).unwrap();

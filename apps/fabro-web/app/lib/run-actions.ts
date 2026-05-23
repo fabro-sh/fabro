@@ -9,7 +9,7 @@ import {
 } from "./api-client";
 import type { RunStatus } from "../data/runs";
 
-export type LifecycleAction = "cancel" | "archive" | "unarchive";
+export type LifecycleAction = "cancel" | "archive" | "unarchive" | "retry";
 
 export interface LifecycleActionError {
   status: number;
@@ -43,6 +43,10 @@ export async function unarchiveRun(id: string, request?: Request): Promise<Run> 
   return runLifecycleAction(id, "unarchive", request);
 }
 
+export async function retryRun(id: string, request?: Request): Promise<Run> {
+  return runLifecycleAction(id, "retry", request);
+}
+
 export async function deleteRun(id: string, request?: Request): Promise<void> {
   try {
     await apiResponse(() => runsApi.deleteRun(id, undefined, requestSignalOptions(request)));
@@ -62,6 +66,13 @@ export function canArchive(status: string | null | undefined): boolean {
 
 export function canUnarchive(status: string | null | undefined): boolean {
   return status === "archived";
+}
+
+export function canRetry(run: Pick<Run, "lifecycle"> | null | undefined): boolean {
+  if (!run || run.lifecycle.archived) return false;
+  const status = run.lifecycle.status;
+  if (status.kind === "dead") return true;
+  return status.kind === "failed" && status.reason !== "cancelled";
 }
 
 export function canDelete(status: string | null | undefined): boolean {
@@ -97,6 +108,8 @@ export function mapError(error: unknown, action: LifecycleAction): string {
           return "Only terminal runs can be archived.";
         case "unarchive":
           return "Active runs can't be unarchived.";
+        case "retry":
+          return "This run can no longer be retried.";
       }
     }
 
@@ -113,6 +126,8 @@ export function mapError(error: unknown, action: LifecycleAction): string {
       return "Couldn't archive the run right now. Try again.";
     case "unarchive":
       return "Couldn't unarchive the run right now. Try again.";
+    case "retry":
+      return "Couldn't retry the run right now. Try again.";
   }
 }
 
@@ -129,6 +144,8 @@ async function runLifecycleAction(
         return await apiData(() => runsApi.archiveRun(id, requestSignalOptions(request)));
       case "unarchive":
         return await apiData(() => runsApi.unarchiveRun(id, requestSignalOptions(request)));
+      case "retry":
+        return await apiData(() => runsApi.retryRun(id, requestSignalOptions(request)));
     }
   } catch (error) {
     throw lifecycleActionErrorFromError(error);

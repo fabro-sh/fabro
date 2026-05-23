@@ -40,6 +40,7 @@ fn run_created_props_round_trip_templated_settings() {
             source_run_id:  fixtures::RUN_2,
             checkpoint_sha: "def456".to_string(),
         }),
+        retried_from:     Some(fixtures::RUN_1),
         parent_id:        Some(fixtures::RUN_2),
         web_url:          Some("http://localhost:3000/runs/01JNQVR7M0EJ5GKAT2SC4ERS1Z".to_string()),
     };
@@ -59,6 +60,7 @@ fn run_created_props_round_trip_templated_settings() {
         json["web_url"],
         "http://localhost:3000/runs/01JNQVR7M0EJ5GKAT2SC4ERS1Z"
     );
+    assert_eq!(json["retried_from"], fixtures::RUN_1.to_string());
     assert_eq!(json["parent_id"], fixtures::RUN_2.to_string());
 
     let round_trip: RunCreatedProps =
@@ -91,6 +93,7 @@ fn run_created_props_omits_web_url_when_absent() {
         manifest_blob:    None,
         git:              None,
         fork_source_ref:  None,
+        retried_from:     None,
         parent_id:        None,
         web_url:          None,
     };
@@ -104,11 +107,31 @@ fn run_created_props_omits_web_url_when_absent() {
         json.get("parent_id").is_none(),
         "parent_id must be omitted when None, got {json}"
     );
+    assert!(
+        json.get("retried_from").is_none(),
+        "retried_from must be omitted when None, got {json}"
+    );
 
     let round_trip: RunCreatedProps =
         serde_json::from_value(json.clone()).expect("props should deserialize");
     assert_eq!(round_trip.web_url, None);
     assert_eq!(round_trip.parent_id, None);
+    assert_eq!(round_trip.retried_from, None);
+}
+
+#[test]
+fn run_created_props_defaults_retried_from_for_legacy_events() {
+    let json = serde_json::json!({
+        "title": null,
+        "settings": WorkflowSettings::default(),
+        "graph": Graph::new("ship"),
+        "labels": {},
+        "run_dir": "/tmp/run"
+    });
+
+    let props: RunCreatedProps =
+        serde_json::from_value(json).expect("legacy props should deserialize");
+    assert_eq!(props.retried_from, None);
 }
 
 #[test]

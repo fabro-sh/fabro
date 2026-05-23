@@ -2,7 +2,7 @@
 //!
 //! `[run]` is the shared execution domain. It may appear in all three config
 //! files and layer normally. Subdomains cover model selection, git author,
-//! prepare steps, execution posture, checkpoint policy, sandbox selection,
+//! prepare steps, execution posture, checkpoint policy, environment selection,
 //! notifications, interviews, agent knobs, hooks, SCM targeting, pull-request
 //! behavior, and artifact collection.
 
@@ -13,8 +13,10 @@ use std::time::Duration as StdDuration;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 
+use super::duration::Duration;
 use super::interp::InterpString;
 use super::model_ref::ModelRef;
+use super::size::Size;
 
 /// A structurally resolved `[run]` view for consumers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -31,7 +33,7 @@ pub struct RunNamespace {
     pub clone:         RunCloneSettings,
     pub run_branch:    RunBranchSettings,
     pub meta_branch:   RunMetaBranchSettings,
-    pub sandbox:       RunSandboxSettings,
+    pub environment:   RunEnvironmentSettings,
     pub notifications: HashMap<String, NotificationRouteSettings>,
     pub interviews:    RunInterviewsSettings,
     pub agent:         RunAgentSettings,
@@ -61,7 +63,7 @@ impl Default for RunNamespace {
             clone:         RunCloneSettings::default(),
             run_branch:    RunBranchSettings::default(),
             meta_branch:   RunMetaBranchSettings::default(),
-            sandbox:       RunSandboxSettings::default(),
+            environment:   RunEnvironmentSettings::default(),
             notifications: HashMap::new(),
             interviews:    RunInterviewsSettings::default(),
             agent:         RunAgentSettings::default(),
@@ -287,60 +289,253 @@ impl Default for RunMetaBranchSettings {
     }
 }
 
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr,
+)]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase", ascii_case_insensitive)]
+pub enum EnvironmentProvider {
+    #[default]
+    Local,
+    Docker,
+    Daytona,
+}
+
+impl EnvironmentProvider {
+    #[must_use]
+    pub fn is_local(self) -> bool {
+        matches!(self, Self::Local)
+    }
+
+    #[must_use]
+    pub fn is_clone_based(self) -> bool {
+        matches!(self, Self::Docker | Self::Daytona)
+    }
+}
+
+impl From<EnvironmentProvider> for crate::SandboxProvider {
+    fn from(value: EnvironmentProvider) -> Self {
+        match value {
+            EnvironmentProvider::Local => Self::Local,
+            EnvironmentProvider::Docker => Self::Docker,
+            EnvironmentProvider::Daytona => Self::Daytona,
+        }
+    }
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case", ascii_case_insensitive)]
+pub enum EnvironmentNetworkMode {
+    #[default]
+    AllowAll,
+    Block,
+    CidrAllowList,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct EnvironmentImageSettings {
+    #[serde(rename = "ref")]
+    pub reference:  Option<String>,
+    pub dockerfile: Option<DockerfileSource>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct EnvironmentResourcesSettings {
+    pub cpu:    Option<i32>,
+    pub memory: Option<Size>,
+    pub disk:   Option<Size>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RunSandboxSettings {
-    pub provider:         String,
+pub struct EnvironmentNetworkSettings {
+    pub mode:  EnvironmentNetworkMode,
+    pub allow: Vec<String>,
+}
+
+impl Default for EnvironmentNetworkSettings {
+    fn default() -> Self {
+        Self {
+            mode:  EnvironmentNetworkMode::AllowAll,
+            allow: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EnvironmentLifecycleSettings {
     pub preserve:         bool,
     #[serde(default = "default_stop_on_terminal")]
     pub stop_on_terminal: bool,
-    pub devcontainer:     bool,
-    pub env:              HashMap<String, InterpString>,
-    pub docker:           Option<DockerSettings>,
-    pub daytona:          Option<DaytonaSettings>,
+    pub auto_stop:        Option<Duration>,
 }
 
 fn default_stop_on_terminal() -> bool {
     true
 }
 
-impl Default for RunSandboxSettings {
+impl Default for EnvironmentLifecycleSettings {
     fn default() -> Self {
         Self {
-            provider:         "local".to_string(),
             preserve:         false,
             stop_on_terminal: true,
-            devcontainer:     false,
-            env:              HashMap::new(),
-            docker:           None,
-            daytona:          None,
+            auto_stop:        None,
         }
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct DockerSettings {
-    pub image:        String,
-    pub network_mode: Option<String>,
-    pub memory_limit: Option<i64>,
-    pub cpu_quota:    Option<i64>,
-    pub env_vars:     HashMap<String, InterpString>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct DaytonaSettings {
-    pub auto_stop_interval: Option<i32>,
-    pub labels:             HashMap<String, String>,
-    #[serde(default)]
-    pub volumes:            Vec<DaytonaVolumeSettings>,
-    pub snapshot:           Option<DaytonaSnapshotSettings>,
-    pub network:            Option<DaytonaNetworkLayer>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct DaytonaVolumeSettings {
-    pub volume_id:  String,
+pub struct EnvironmentVolumeSettings {
+    pub id:         String,
     pub mount_path: String,
     pub subpath:    Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EnvironmentSettings {
+    pub provider:  EnvironmentProvider,
+    pub image:     EnvironmentImageSettings,
+    pub resources: EnvironmentResourcesSettings,
+    pub network:   EnvironmentNetworkSettings,
+    pub lifecycle: EnvironmentLifecycleSettings,
+    pub labels:    HashMap<String, String>,
+    pub volumes:   Vec<EnvironmentVolumeSettings>,
+    pub env:       HashMap<String, InterpString>,
+}
+
+impl Default for EnvironmentSettings {
+    fn default() -> Self {
+        Self {
+            provider:  EnvironmentProvider::Local,
+            image:     EnvironmentImageSettings::default(),
+            resources: EnvironmentResourcesSettings::default(),
+            network:   EnvironmentNetworkSettings::default(),
+            lifecycle: EnvironmentLifecycleSettings::default(),
+            labels:    HashMap::new(),
+            volumes:   Vec::new(),
+            env:       HashMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunEnvironmentSettings {
+    pub id:        String,
+    pub provider:  EnvironmentProvider,
+    pub image:     EnvironmentImageSettings,
+    pub resources: EnvironmentResourcesSettings,
+    pub network:   EnvironmentNetworkSettings,
+    pub lifecycle: EnvironmentLifecycleSettings,
+    pub labels:    HashMap<String, String>,
+    pub volumes:   Vec<EnvironmentVolumeSettings>,
+    pub env:       HashMap<String, InterpString>,
+}
+
+impl RunEnvironmentSettings {
+    #[must_use]
+    pub fn from_environment(id: String, environment: EnvironmentSettings) -> Self {
+        Self {
+            id,
+            provider: environment.provider,
+            image: environment.image,
+            resources: environment.resources,
+            network: environment.network,
+            lifecycle: environment.lifecycle,
+            labels: environment.labels,
+            volumes: environment.volumes,
+            env: environment.env,
+        }
+    }
+
+    /// Resolve every environment value's `{{ env.* }}` tokens via `lookup`,
+    /// falling back to the original source string when resolution fails.
+    #[must_use]
+    pub fn resolve_env<F>(&self, mut lookup: F) -> HashMap<String, String>
+    where
+        F: FnMut(&str) -> Option<String>,
+    {
+        self.env
+            .iter()
+            .map(|(name, value)| {
+                let resolved = value
+                    .resolve(&mut lookup)
+                    .map_or_else(|_| value.as_source(), |resolved| resolved.value);
+                (name.clone(), resolved)
+            })
+            .collect()
+    }
+}
+
+impl Default for RunEnvironmentSettings {
+    fn default() -> Self {
+        Self::from_environment("default".to_string(), EnvironmentSettings::default())
+    }
+}
+
+#[cfg(test)]
+mod run_environment_settings_tests {
+    use super::{HashMap, InterpString, RunEnvironmentSettings};
+
+    fn settings(env: &[(&str, &str)]) -> RunEnvironmentSettings {
+        RunEnvironmentSettings {
+            env: env
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), InterpString::parse(v)))
+                .collect(),
+            ..RunEnvironmentSettings::default()
+        }
+    }
+
+    #[test]
+    fn resolve_env_substitutes_env_tokens_via_lookup() {
+        let s = settings(&[("NODE_ENV", "{{ env.NODE_ENV }}"), ("STATIC", "value")]);
+        let resolved = s.resolve_env(|name| match name {
+            "NODE_ENV" => Some("test".to_string()),
+            _ => None,
+        });
+
+        assert_eq!(resolved.get("NODE_ENV"), Some(&"test".to_string()));
+        assert_eq!(resolved.get("STATIC"), Some(&"value".to_string()));
+    }
+
+    #[test]
+    fn resolve_env_falls_back_to_source_when_lookup_fails() {
+        let s = settings(&[("NODE_ENV", "{{ env.MISSING_NODE_ENV }}")]);
+        let resolved = s.resolve_env(|_| None);
+
+        assert_eq!(
+            resolved.get("NODE_ENV"),
+            Some(&"{{ env.MISSING_NODE_ENV }}".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_env_is_empty_for_empty_settings() {
+        let s: HashMap<String, String> = settings(&[]).resolve_env(|_| None);
+        assert!(s.is_empty());
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -386,15 +581,6 @@ impl<'de> Deserialize<'de> for DockerfileSource {
             DockerfileSourceRepr::Path { path } => Ok(Self::Path { path }),
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DaytonaSnapshotSettings {
-    pub name:       String,
-    pub cpu:        Option<i32>,
-    pub memory_gb:  Option<i32>,
-    pub disk_gb:    Option<i32>,
-    pub dockerfile: Option<DockerfileSource>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -705,14 +891,6 @@ pub enum RunMode {
 pub enum ApprovalMode {
     Prompt,
     Auto,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum DaytonaNetworkLayer {
-    Block,
-    AllowAll,
-    AllowList { allow_list: Vec<String> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -901,7 +901,7 @@ mod tests {
     async fn apply_patch_updates_raw_local_file_without_line_number_prefixes() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("src/lib.rs");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::create_dir_all(path.parent().unwrap()).await.unwrap();
         fs::write(&path, "fn hello() {\n    println!(\"old\");\n}\n")
             .await
             .unwrap();

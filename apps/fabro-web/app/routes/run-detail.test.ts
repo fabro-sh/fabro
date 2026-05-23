@@ -48,6 +48,26 @@ mock.module("../hooks/use-run-toasts", () => ({
   useRunToasts: () => undefined,
 }));
 
+const mutationState = () => ({
+  data:       null,
+  error:      null,
+  isMutating: false,
+  reset:      mock(() => undefined),
+  trigger:    mock(() => Promise.resolve(undefined)),
+});
+
+mock.module("../lib/mutations", () => ({
+  useArchiveRun:           mutationState,
+  useCancelRun:            mutationState,
+  useInterruptRun:         mutationState,
+  usePreviewRun:           mutationState,
+  useRetryRun:             mutationState,
+  useSteerRun:             mutationState,
+  useSubmitInterviewAnswer: mutationState,
+  useUpdateRunTitle:       mutationState,
+  useUnarchiveRun:         mutationState,
+}));
+
 const {
   actionMenuSeparatorVisibility,
   default: RunDetail,
@@ -111,6 +131,7 @@ function makeRunSummary(
     pull_request:     pullRequest,
     current_question: null,
     superseded_by:    null,
+    retried_from:     null,
     links:            { web: null },
   };
 }
@@ -382,7 +403,7 @@ describe("RunDetail full-height child routes", () => {
     const outletWrappers = renderer.root.findAll(
       (node) =>
         node.type === "div" &&
-        hasClasses(node.props.className, ["pt-3.5", "min-h-0", "flex-1"]),
+        hasClasses(node.props.className, ["pt-3", "min-h-0", "flex-1", "flex-col"]),
     );
     expect(outletWrappers).toHaveLength(1);
   });
@@ -399,6 +420,56 @@ describe("RunDetail full-height child routes", () => {
 
     const badges = tabCountBadges(renderer);
     expect(badges.map((badge) => badge.children.join(""))).toContain("7");
+  });
+
+  test("successful retry result navigates to the new run once", () => {
+    const pushed: Array<{ message: string; tone?: string }> = [];
+    const navigated: string[] = [];
+    const result: RunDetailActionResult = {
+      intent: "retry",
+      ok:     true,
+      run:    {
+        ...makeRunSummary("queued"),
+        id:           "run_retry",
+        retried_from: "run_1",
+      },
+    };
+    const initialState: LifecycleToastState = {
+      activeArchiveToastId: null,
+      lastProcessed:        { cancel: null, archive: null, unarchive: null, retry: null },
+    };
+
+    const next = handleLifecycleToastResult(
+      "retry",
+      result,
+      initialState,
+      {
+        push:    (toast) => {
+          pushed.push(toast);
+          return "toast-1";
+        },
+        dismiss: () => undefined,
+      },
+      (path) => navigated.push(path),
+    );
+    const replay = handleLifecycleToastResult(
+      "retry",
+      result,
+      next,
+      {
+        push:    (toast) => {
+          pushed.push(toast);
+          return "toast-2";
+        },
+        dismiss: () => undefined,
+      },
+      (path) => navigated.push(path),
+    );
+
+    expect(next.lastProcessed.retry).toBe(result);
+    expect(replay).toBe(next);
+    expect(pushed).toEqual([{ message: "Retry started." }]);
+    expect(navigated).toEqual(["/runs/run_retry"]);
   });
 
   test("shows the Sandbox tab when the run has a sandbox", async () => {
@@ -541,7 +612,7 @@ describe("RunDetail full-height child routes", () => {
       (node) =>
         node.type === "div" &&
         hasClasses(node.props.className, [
-          "pt-3.5",
+          "pt-3",
           "pb-[var(--fabro-interview-dock-clearance)]",
         ]),
     );

@@ -94,6 +94,13 @@ export interface Run {
     'diff': DiffSummary | null;
     'pull_request': PullRequestLink | null;
     'current_question': RunQuestion | null;
+    /**
+     * Run ID that superseded this run via rewind, if any.
+     */
     'superseded_by': string | null;
+    /**
+     * Source run ID when this run was created by manual retry.
+     */
+    'retried_from': string | null;
     'links': RunLinks;
 }

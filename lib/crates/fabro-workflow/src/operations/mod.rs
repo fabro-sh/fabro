@@ -2,6 +2,7 @@ mod archive;
 mod create;
 mod fork;
 mod resume;
+mod retry;
 mod rewind;
 mod run_store;
 mod source;
@@ -16,6 +17,7 @@ pub use archive::{
 pub use create::{CreateRunInput, CreatedRun, create, make_run_dir};
 pub use fork::{ForkOutcome, ForkRunInput, ResolvedForkTarget, fork_run};
 pub use resume::resume;
+pub use retry::{RetryOutcome, RetryRunInput, retry_run};
 pub use rewind::{RewindInput, RewindOutcome, rewind};
 pub use source::WorkflowInput;
 pub use start::{StartServices, Started, start};
