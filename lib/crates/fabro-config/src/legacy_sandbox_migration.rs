@@ -1,9 +1,11 @@
 #![expect(
     clippy::disallowed_methods,
+    clippy::disallowed_types,
     reason = "temporary startup config migration uses synchronous file I/O before config is loaded"
 )]
 
 use std::fmt;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -54,13 +56,7 @@ pub(crate) fn migrate_settings_path(
         .parse::<SettingsLayer>()
         .map_err(|err| Error::parse_file("Migrated settings file is invalid", path, err))?;
 
-    let backup_path = next_backup_path(path);
-    std::fs::write(&backup_path, original_contents).map_err(|source| {
-        Error::other(format!(
-            "writing legacy sandbox migration backup {}: {source}",
-            backup_path.display()
-        ))
-    })?;
+    let backup_path = write_next_backup(path, original_contents)?;
     std::fs::write(path, &next_contents).map_err(|source| {
         Error::other(format!(
             "writing migrated settings file {}: {source}",
@@ -151,7 +147,14 @@ fn migrate_document(doc: &mut DocumentMut) -> std::result::Result<(), MigrationF
     }
 
     let provider_str = sandbox.get("provider").and_then(Item::as_str);
-    let active_provider = provider_str.and_then(|s| EnvironmentProvider::from_str(s).ok());
+    let active_provider = provider_str.and_then(|provider| {
+        if let Ok(provider) = EnvironmentProvider::from_str(provider) {
+            Some(provider)
+        } else {
+            unsupported.push("run.sandbox.provider".to_string());
+            None
+        }
+    });
     if provider_str.is_none() {
         unsupported.push("run.sandbox.provider".to_string());
     }
@@ -211,6 +214,8 @@ fn migrate_document(doc: &mut DocumentMut) -> std::result::Result<(), MigrationF
     }
 
     if !unsupported.is_empty() {
+        unsupported.sort();
+        unsupported.dedup();
         return Err(MigrationFailure {
             unsupported_keys: unsupported,
         });
@@ -418,24 +423,56 @@ fn remove_run_sandbox(doc: &mut DocumentMut) {
     }
 }
 
+#[cfg(test)]
 fn next_backup_path(path: &Path) -> PathBuf {
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .expect("settings path always has a UTF-8 file name");
-    let base = path.with_file_name(format!("{file_name}.legacy-sandbox-migration.bak"));
-    if !base.exists() {
-        return base;
-    }
-
-    for index in 1u32.. {
-        let candidate =
-            path.with_file_name(format!("{file_name}.legacy-sandbox-migration.{index}.bak"));
+    for index in 0u32.. {
+        let candidate = backup_path_for(path, index);
         if !candidate.exists() {
             return candidate;
         }
     }
     unreachable!("unbounded backup suffix search should return")
+}
+
+fn write_next_backup(path: &Path, contents: &str) -> Result<PathBuf> {
+    for index in 0u32.. {
+        let backup_path = backup_path_for(path, index);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&backup_path)
+        {
+            Ok(mut file) => {
+                file.write_all(contents.as_bytes()).map_err(|source| {
+                    Error::other(format!(
+                        "writing legacy sandbox migration backup {}: {source}",
+                        backup_path.display()
+                    ))
+                })?;
+                return Ok(backup_path);
+            }
+            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(source) => {
+                return Err(Error::other(format!(
+                    "writing legacy sandbox migration backup {}: {source}",
+                    backup_path.display()
+                )));
+            }
+        }
+    }
+    unreachable!("unbounded backup suffix search should return")
+}
+
+fn backup_path_for(path: &Path, index: u32) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("settings.toml");
+    if index == 0 {
+        path.with_file_name(format!("{file_name}.legacy-sandbox-migration.bak"))
+    } else {
+        path.with_file_name(format!("{file_name}.legacy-sandbox-migration.{index}.bak"))
+    }
 }
 
 #[cfg(test)]
@@ -716,6 +753,22 @@ cpu_quota = 250000
         .expect_err("non-divisible cpu quota should fail migration");
 
         assert!(err.to_string().contains("run.sandbox.docker.cpu_quota"));
+    }
+
+    #[test]
+    fn unsupported_provider_value_is_reported_before_rewriting() {
+        let err = migrate_contents(
+            r#"
+_version = 1
+
+[run.sandbox]
+provider = "unknown"
+"#,
+            Path::new("settings.toml"),
+        )
+        .expect_err("unknown provider should fail migration");
+
+        assert!(err.to_string().contains("run.sandbox.provider"));
     }
 
     #[test]
