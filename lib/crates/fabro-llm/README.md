@@ -208,6 +208,39 @@ let anthropic_models = list_models(Some("anthropic"));
 let best_reasoner = get_latest_model("anthropic", Some("reasoning"));
 ```
 
+### Input token counting
+
+Use `count_input_tokens` when you need the current model-visible context size
+without creating a completion:
+
+```rust
+use fabro_llm::{InputTokenCountPreference, Client};
+
+let count = client
+    .count_input_tokens(&request, InputTokenCountPreference::PreferProvider)
+    .await?;
+```
+
+`InputTokenCountPreference` controls precision and data exposure:
+
+- `PreferProvider` sends the provider-serialized request to the upstream
+  token-count endpoint when supported, then falls back to a local estimate only
+  for unsupported adapters, network/timeout failures, rate limits, and provider
+  server errors.
+- `RequireProvider` sends the provider-serialized request and returns either a
+  provider count or an error. It never returns a local estimate.
+- `EstimateOnly` validates and resolves the provider locally, does not call the
+  adapter count endpoint, and returns a deterministic local estimate.
+
+Provider-native counting sends model-visible request content to the provider's
+token-count endpoint. That can include messages, system/developer instructions,
+tools, schemas, structured content, and media metadata/content after provider
+serialization. Use `EstimateOnly` when that extra upstream exposure is not
+acceptable.
+
+`InputTokenCount` is for input/context sizing. It is not billing usage and does
+not include output, reasoning-output, cache-read, or cache-write token buckets.
+
 ## Key types
 
 | Type | Description |
@@ -222,7 +255,8 @@ let best_reasoner = get_latest_model("anthropic", Some("reasoning"));
 | `GenerateResult` | Result containing response, tool results, total usage, and step history |
 | `ToolDefinition` | Tool name, description, and JSON Schema parameters |
 | `ToolChoice` | Auto, None, Required, or Named tool selection |
-| `Usage` | Token counts including input, output, reasoning, and cache tokens |
+| `InputTokenCount` | Input/context token count from a provider count API or local estimate |
+| `TokenCounts` | Billing-oriented token counts including input, output, reasoning, and cache tokens |
 | `RetryPolicy` | Configurable retry with exponential backoff, jitter, and max delay |
 | `Model` | Metadata about a model (context window, capabilities, costs) |
 
