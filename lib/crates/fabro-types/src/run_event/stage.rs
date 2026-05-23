@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use fabro_model::{ReasoningEffort, Speed};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -73,14 +74,18 @@ pub struct StageRetryingProps {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StagePromptProps {
-    pub visit:    u32,
-    pub text:     String,
+    pub visit:            u32,
+    pub text:             String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mode:     Option<String>,
+    pub mode:             Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
+    pub provider:         Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model:    Option<String>,
+    pub model:            Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<ReasoningEffort>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed:            Option<Speed>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

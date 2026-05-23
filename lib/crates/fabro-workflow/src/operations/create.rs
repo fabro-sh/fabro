@@ -11,9 +11,7 @@ use std::sync::Arc;
 use fabro_config::Storage;
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, ProviderId};
-use fabro_sandbox::SandboxProvider;
 use fabro_store::Database;
-use fabro_types::settings::run::{RunMode, RunNamespace};
 use fabro_types::{
     ForkSourceRef, GitContext, ManifestPath, RunId, RunProvenance, WorkflowSettings,
 };
@@ -91,9 +89,6 @@ pub async fn create(
         cwd:      request.cwd,
     })
     .map_err(|err| Error::Parse(err.to_string()))?;
-    if resolved.settings.run.execution.mode != RunMode::DryRun {
-        validate_sandbox_provider(&resolved.settings.run)?;
-    }
     let labels = resolved.settings.combined_labels();
     let settings = resolved.settings.clone();
 
@@ -275,15 +270,6 @@ async fn persist_created_run(
 
 fn store_error(err: impl std::fmt::Display) -> Error {
     Error::engine(err.to_string())
-}
-
-fn validate_sandbox_provider(run: &RunNamespace) -> Result<(), Error> {
-    run.sandbox
-        .provider
-        .parse::<SandboxProvider>()
-        .map_err(|err| Error::Precondition(format!("Invalid sandbox provider: {err}")))?;
-
-    Ok(())
 }
 
 fn create_from_source(
@@ -1127,53 +1113,6 @@ mod tests {
                 assert!(!diagnostics.is_empty());
             }
             other => panic!("expected ValidationFailed, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn create_reports_workflow_settings_errors_with_rendered_message() {
-        let dir = tempfile::tempdir().unwrap();
-        let storage_root = dir.path().join("storage");
-        let store = memory_store();
-        let err = create(
-            &store,
-            CreateRunInput {
-                workflow: WorkflowInput::DotSource {
-                    source:   MINIMAL_DOT.to_string(),
-                    base_dir: None,
-                },
-                settings: {
-                    let mut settings = WorkflowSettings::default();
-                    settings.run.execution.mode = RunMode::Normal;
-                    settings.run.sandbox.provider = "not-a-provider".to_string();
-                    settings
-                },
-                cwd: dir.path().to_path_buf(),
-                workflow_slug: None,
-                workflow_path: None,
-                workflow_bundle: None,
-                submitted_manifest_bytes: None,
-                run_id: None,
-                title: None,
-                git: None,
-                fork_source_ref: None,
-                parent_id: None,
-                provenance: None,
-                configured_providers: Vec::new(),
-                web_url: None,
-            },
-            storage_root,
-            test_catalog(),
-        )
-        .await
-        .unwrap_err();
-
-        match err {
-            Error::Precondition(message) => {
-                assert!(message.contains("Invalid sandbox provider"));
-                assert!(!message.contains('\n'));
-            }
-            other => panic!("expected Precondition, got {other:?}"),
         }
     }
 

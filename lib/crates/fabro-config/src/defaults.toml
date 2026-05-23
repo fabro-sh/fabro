@@ -23,16 +23,42 @@ push = true
 enabled = true
 push = true
 
-[run.sandbox]
+[run.environment]
+id = "default"
+
+[environments.default]
 provider = "docker"
+
+[environments.default.image]
+ref = "buildpack-deps:noble"
+
+[environments.default.resources]
+cpu = 2
+memory = "4GB"
+
+[environments.default.lifecycle]
 preserve = false
 stop_on_terminal = true
-devcontainer = false
 
-[run.sandbox.docker]
-image = "buildpack-deps:noble"
-memory_limit = "4GB"
-cpu_quota = 200000
+[environments.local]
+provider = "local"
+
+[environments.docker]
+provider = "docker"
+
+[environments.docker.image]
+ref = "buildpack-deps:noble"
+
+[environments.docker.resources]
+cpu = 2
+memory = "4GB"
+
+[environments.docker.lifecycle]
+preserve = false
+stop_on_terminal = true
+
+[environments.daytona]
+provider = "daytona"
 
 [cli.output]
 format = "text"

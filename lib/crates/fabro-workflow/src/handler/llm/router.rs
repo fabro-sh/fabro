@@ -6,6 +6,7 @@ use fabro_types::AgentBackend;
 
 use super::super::agent::{CodergenBackend, CodergenResult, CodergenRunRequest, OneShotRequest};
 use super::acp::AgentAcpBackend;
+use super::api::EffectiveRequestControls;
 use super::routing;
 use crate::error::Error;
 use crate::event::Emitter;
@@ -57,6 +58,13 @@ impl CodergenBackend for BackendRouter {
         self.api.shutdown(emitter).await;
     }
 
+    fn effective_request_controls(&self, node: &Node) -> Result<EffectiveRequestControls, Error> {
+        match Self::select_backend(node)? {
+            AgentBackend::Api => self.api.effective_request_controls(node),
+            AgentBackend::Acp => self.acp.effective_request_controls(node),
+        }
+    }
+
     fn node_timeout_policy(&self, node: &Node) -> NodeTimeoutPolicy {
         match Self::select_backend(node) {
             Ok(AgentBackend::Api) => self.api.node_timeout_policy(node),
@@ -73,6 +81,7 @@ mod tests {
     use async_trait::async_trait;
     use fabro_agent::{LocalSandbox, Sandbox};
     use fabro_graphviz::graph::{AttrValue, Node};
+    use fabro_model::{ReasoningEffort, Speed};
     use tokio_util::sync::CancellationToken;
 
     use super::*;
@@ -132,6 +141,16 @@ mod tests {
         assert_eq!(text, "api one-shot");
     }
 
+    #[test]
+    fn router_delegates_effective_request_controls_to_api_backend() {
+        let node = Node::new("test");
+        let router = BackendRouter::new(Box::new(StubBackend), AgentAcpBackend::new());
+
+        let controls = router.effective_request_controls(&node).unwrap();
+        assert_eq!(controls.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(controls.speed, Some(Speed::Fast));
+    }
+
     struct StubBackend;
 
     #[async_trait]
@@ -151,6 +170,16 @@ mod tests {
                 usage:             None,
                 files_touched:     Vec::new(),
                 last_file_touched: None,
+            })
+        }
+
+        fn effective_request_controls(
+            &self,
+            _node: &Node,
+        ) -> Result<EffectiveRequestControls, Error> {
+            Ok(EffectiveRequestControls {
+                reasoning_effort: Some(ReasoningEffort::High),
+                speed:            Some(Speed::Fast),
             })
         }
     }

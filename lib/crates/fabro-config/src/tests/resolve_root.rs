@@ -35,7 +35,10 @@ methods = ["github"]
 [server.auth.github]
 allowed_usernames = []
 
-[run.sandbox]
+[run.environment]
+id = "bad"
+
+[environments.bad]
 provider = "not-a-provider"
 "#;
 
@@ -64,7 +67,7 @@ provider = "not-a-provider"
 
     assert!(rendered.contains("server.listen.address"));
     assert!(rendered.contains("server.auth.github.allowed_usernames"));
-    assert!(rendered.contains("run.sandbox.provider"));
+    assert!(rendered.contains("run.environment.provider"));
 }
 
 #[test]
@@ -165,12 +168,15 @@ shared = "run"
 }
 
 #[test]
-fn workflow_settings_report_invalid_run_sandbox_provider() {
+fn workflow_settings_report_invalid_environment_provider() {
     let errors = match fabro_config::WorkflowSettingsBuilder::from_toml(
         r#"
 _version = 1
 
-[run.sandbox]
+[run.environment]
+id = "bad"
+
+[environments.bad]
 provider = "not-a-provider"
 "#,
     )
@@ -183,7 +189,7 @@ provider = "not-a-provider"
     assert!(errors.iter().any(|error| {
         matches!(
             error,
-            fabro_config::ResolveError::Invalid { path, .. } if path == "run.sandbox.provider"
+            fabro_config::ResolveError::Invalid { path, .. } if path == "run.environment.provider"
         )
     }));
 }
@@ -194,7 +200,10 @@ fn workflow_settings_accumulate_multiple_run_errors() {
         r#"
 _version = 1
 
-[run.sandbox]
+[run.environment]
+id = "bad"
+
+[environments.bad]
 provider = "not-a-provider"
 
 [[run.prepare.steps]]
@@ -205,6 +214,6 @@ command = ["echo", "hi"]
     .expect_err("invalid workflow settings should fail")
     .to_string();
 
-    assert!(rendered.contains("run.sandbox.provider"));
+    assert!(rendered.contains("run.environment.provider"));
     assert!(rendered.contains("run.prepare.steps[0]"));
 }

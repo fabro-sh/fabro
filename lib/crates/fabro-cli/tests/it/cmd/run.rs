@@ -123,25 +123,25 @@ fn help() {
       <WORKFLOW>  Path to a .fabro workflow file or .toml task config
 
     Options:
-          --json                   Output as JSON [env: FABRO_JSON=]
-          --server <SERVER>        Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
-          --debug                  Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-      -I, --input <KEY=VALUE>      Override a workflow input value (repeatable, format: KEY=VALUE)
-          --dry-run                Execute with simulated LLM backend
-          --no-upgrade-check       Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --auto-approve           Auto-approve all human gates
-          --quiet                  Suppress non-essential output [env: FABRO_QUIET=]
-          --goal <GOAL>            Override the workflow goal (available as {{ goal }} in prompts)
-          --goal-file <GOAL_FILE>  Read the workflow goal from a file
-          --model <MODEL>          Override default LLM model
-          --provider <PROVIDER>    Override default LLM provider
-      -v, --verbose                Enable verbose output
-          --sandbox <SANDBOX>      Sandbox for agent tools [possible values: local, docker, daytona]
-          --label <KEY=VALUE>      Attach a label to this run (repeatable, format: KEY=VALUE)
-          --parent <RUN>           Link this run to an existing orchestration parent run
-          --preserve-sandbox       Keep the sandbox alive after the run finishes (for debugging)
-      -d, --detach                 Run the workflow in the background and print the run ID
-      -h, --help                   Print help
+          --json                       Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>            Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+      -I, --input <KEY=VALUE>          Override a workflow input value (repeatable, format: KEY=VALUE)
+          --dry-run                    Execute with simulated LLM backend
+          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --auto-approve               Auto-approve all human gates
+          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
+          --goal <GOAL>                Override the workflow goal (available as {{ goal }} in prompts)
+          --goal-file <GOAL_FILE>      Read the workflow goal from a file
+          --model <MODEL>              Override default LLM model
+          --provider <PROVIDER>        Override default LLM provider
+      -v, --verbose                    Enable verbose output
+          --environment <ENVIRONMENT>  Named environment for agent tools
+          --label <KEY=VALUE>          Attach a label to this run (repeatable, format: KEY=VALUE)
+          --parent <RUN>               Link this run to an existing orchestration parent run
+          --preserve-sandbox           Keep the sandbox alive after the run finishes (for debugging)
+      -d, --detach                     Run the workflow in the background and print the run ID
+      -h, --help                       Print help
     ----- stderr -----
     ");
 }
@@ -412,7 +412,7 @@ digraph VaultWorkerLlm {
             "--run-id",
             run_id.as_str(),
             "--auto-approve",
-            "--sandbox",
+            "--environment",
             "local",
             "--provider",
             "anthropic",
@@ -753,8 +753,13 @@ graph = "workflow.fabro"
 [run]
 goal = "Show stored artifacts"
 
-[run.sandbox]
+[run.environment]
+id = "local"
+
+[environments.local]
 provider = "local"
+
+[environments.local.lifecycle]
 preserve = true
 
 [run.artifacts]
@@ -770,7 +775,7 @@ include = ["assets/**"]
             "--run-id",
             run_id.as_str(),
             "--auto-approve",
-            "--sandbox",
+            "--environment",
             "local",
             "--provider",
             "openai",
@@ -899,7 +904,7 @@ fn dry_run_persists_event_history_in_store() {
             "run",
             "--dry-run",
             "--auto-approve",
-            "--sandbox",
+            "--environment",
             "local",
             "--run-id",
             run_id.as_str(),
@@ -1041,7 +1046,7 @@ fn json_run_requires_manual_input_for_human_gates_without_auto_approve() {
         .args([
             "--json",
             "run",
-            "--sandbox",
+            "--environment",
             "local",
             workflow.to_str().unwrap(),
         ])

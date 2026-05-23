@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use fabro_model::{ReasoningEffort, Speed};
 use fabro_types::{SessionCapability, StageId};
 
 use crate::error::Error;
@@ -16,14 +17,16 @@ pub struct ActivationLease {
 }
 
 pub struct ActivationLeaseOptions {
-    pub stage_id:     StageId,
-    pub session_id:   String,
-    pub thread_id:    Option<String>,
-    pub provider:     Option<String>,
-    pub model:        Option<String>,
-    pub capabilities: Vec<SessionCapability>,
-    pub hub:          Arc<SteeringHub>,
-    pub emitter:      Arc<Emitter>,
+    pub stage_id:         StageId,
+    pub session_id:       String,
+    pub thread_id:        Option<String>,
+    pub provider:         Option<String>,
+    pub model:            Option<String>,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub speed:            Option<Speed>,
+    pub capabilities:     Vec<SessionCapability>,
+    pub hub:              Arc<SteeringHub>,
+    pub emitter:          Arc<Emitter>,
 }
 
 impl ActivationLease {
@@ -48,13 +51,15 @@ impl ActivationLease {
         }
 
         options.emitter.emit(&Event::AgentSessionActivated {
-            node_id:      options.stage_id.node_id().to_string(),
-            visit:        options.stage_id.visit(),
-            session_id:   options.session_id.clone(),
-            thread_id:    options.thread_id,
-            provider:     options.provider,
-            model:        options.model,
-            capabilities: options.capabilities,
+            node_id:          options.stage_id.node_id().to_string(),
+            visit:            options.stage_id.visit(),
+            session_id:       options.session_id.clone(),
+            thread_id:        options.thread_id,
+            provider:         options.provider,
+            model:            options.model,
+            reasoning_effort: options.reasoning_effort,
+            speed:            options.speed,
+            capabilities:     options.capabilities,
         });
         options
             .hub
@@ -153,6 +158,8 @@ mod tests {
             thread_id: None,
             provider: Some("openai".to_string()),
             model: Some("gpt-5.4".to_string()),
+            reasoning_effort: None,
+            speed: None,
             capabilities: vec![SessionCapability::Steer],
             hub,
             emitter,

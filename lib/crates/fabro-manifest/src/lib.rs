@@ -12,8 +12,9 @@ use fabro_api::types;
 use fabro_config::project::{self, WorkflowLocation, discover_project_config};
 use fabro_config::run::{resolve_run_goal_from_layer, resolve_run_goal_from_namespace};
 use fabro_config::{
-    CliLayer, DaytonaDockerfileLayer, DockerSandboxLayer, ReplaceMap, RunExecutionLayer,
-    RunGoalLayer, RunLayer, RunModelLayer, RunSandboxLayer, WorkflowSettingsBuilder,
+    CliLayer, EnvironmentDockerfileLayer, EnvironmentImageLayer, EnvironmentLifecycleLayer,
+    ReplaceMap, RunEnvironmentLayer, RunExecutionLayer, RunGoalLayer, RunLayer, RunModelLayer,
+    SettingsLayer, WorkflowSettingsBuilder,
 };
 use fabro_graphviz::graph::AttrValue;
 use fabro_graphviz::parser;
@@ -58,7 +59,7 @@ pub struct RunOverrideInput<'a> {
     pub goal:             Option<&'a str>,
     pub model:            Option<&'a str>,
     pub provider:         Option<&'a str>,
-    pub sandbox:          Option<&'a str>,
+    pub environment:      Option<&'a str>,
     pub docker_image:     Option<&'a str>,
     pub preserve_sandbox: Option<bool>,
     pub dry_run:          Option<bool>,
@@ -77,17 +78,22 @@ pub fn build_run_overrides(input: RunOverrideInput<'_>) -> RunLayer {
         fallbacks: Vec::new(),
         controls:  None,
     });
-    let sandbox = (input.sandbox.is_some()
+    let environment = (input.environment.is_some()
         || input.docker_image.is_some()
         || input.preserve_sandbox.is_some())
-    .then(|| RunSandboxLayer {
-        provider: input.sandbox.map(ToOwned::to_owned),
-        docker: input.docker_image.map(|image| DockerSandboxLayer {
-            image: Some(image.to_string()),
-            ..DockerSandboxLayer::default()
+    .then(|| RunEnvironmentLayer {
+        id: input.environment.map(ToOwned::to_owned),
+        image: input.docker_image.map(|image| EnvironmentImageLayer {
+            reference: Some(image.to_string()),
+            ..EnvironmentImageLayer::default()
         }),
-        preserve: input.preserve_sandbox,
-        ..RunSandboxLayer::default()
+        lifecycle: input
+            .preserve_sandbox
+            .map(|preserve| EnvironmentLifecycleLayer {
+                preserve: Some(preserve),
+                ..EnvironmentLifecycleLayer::default()
+            }),
+        ..RunEnvironmentLayer::default()
     });
     let execution =
         (input.dry_run.is_some() || input.auto_approve.is_some()).then(|| RunExecutionLayer {
@@ -111,7 +117,7 @@ pub fn build_run_overrides(input: RunOverrideInput<'_>) -> RunLayer {
         goal,
         metadata: ReplaceMap::from(input.labels),
         model,
-        sandbox,
+        environment,
         execution,
         ..RunLayer::default()
     }
@@ -123,7 +129,7 @@ pub fn build_sparse_run_overrides(input: RunOverrideInput<'_>) -> Option<RunLaye
     (run.goal.is_some()
         || !run.metadata.is_empty()
         || run.model.is_some()
-        || run.sandbox.is_some()
+        || run.environment.is_some()
         || run.execution.is_some())
     .then_some(run)
 }
@@ -558,29 +564,49 @@ fn collect_config_dockerfile(
     source: &str,
     files: &mut HashMap<String, types::ManifestFileEntry>,
 ) -> Result<()> {
-    let mut document: toml::Table = source.parse().context("Failed to parse run config TOML")?;
-    let run = document
-        .remove("run")
-        .map(toml::Value::try_into::<RunLayer>)
-        .transpose()
-        .context("Failed to parse run config TOML")?
-        .unwrap_or_default();
-    let dockerfile = run
-        .sandbox
-        .as_ref()
-        .and_then(|sandbox| sandbox.daytona.as_ref())
-        .and_then(|daytona| daytona.snapshot.as_ref())
-        .and_then(|snapshot| snapshot.dockerfile.as_ref());
+    let layer = source
+        .parse::<SettingsLayer>()
+        .context("Failed to parse run config TOML")?;
+    let absolute_config_path = cwd.join(config_path.as_path());
+    let base_dir = absolute_config_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
 
-    let Some(DaytonaDockerfileLayer::Path { path }) = dockerfile else {
+    for environment in layer.environments.values() {
+        collect_environment_dockerfile(
+            files,
+            base_dir,
+            cwd,
+            config_path,
+            environment.image.as_ref(),
+        )?;
+    }
+    if let Some(run_environment) = layer.run.as_ref().and_then(|run| run.environment.as_ref()) {
+        collect_environment_dockerfile(
+            files,
+            base_dir,
+            cwd,
+            config_path,
+            run_environment.image.as_ref(),
+        )?;
+    }
+    Ok(())
+}
+
+fn collect_environment_dockerfile(
+    files: &mut HashMap<String, types::ManifestFileEntry>,
+    base_dir: &Path,
+    cwd: &Path,
+    config_path: &ManifestPath,
+    image: Option<&EnvironmentImageLayer>,
+) -> Result<()> {
+    let dockerfile = image.and_then(|image| image.dockerfile.as_ref());
+    let Some(EnvironmentDockerfileLayer::Path { path }) = dockerfile else {
         return Ok(());
     };
-    let absolute_config_path = cwd.join(config_path.as_path());
     collect_bundled_file(
         files,
-        absolute_config_path
-            .parent()
-            .unwrap_or_else(|| Path::new(".")),
+        base_dir,
         cwd,
         path,
         types::ManifestFileRefType::Dockerfile,
@@ -849,7 +875,7 @@ pub fn manifest_args_is_empty(args: &types::ManifestArgs) -> bool {
         && args.model.is_none()
         && args.preserve_sandbox.is_none()
         && args.provider.is_none()
-        && args.sandbox.is_none()
+        && args.environment.is_none()
         && args.docker_image.is_none()
         && args.input.is_empty()
         && args.verbose.is_none()
@@ -865,7 +891,7 @@ mod tests {
             goal:             Some("ship it"),
             model:            Some("gpt-5.4-mini"),
             provider:         Some("openai"),
-            sandbox:          Some("local"),
+            environment:      Some("local"),
             docker_image:     None,
             preserve_sandbox: Some(true),
             dry_run:          Some(true),
@@ -900,10 +926,20 @@ mod tests {
             "openai"
         );
         assert_eq!(
-            overrides.sandbox.as_ref().unwrap().provider.as_deref(),
+            overrides.environment.as_ref().unwrap().id.as_deref(),
             Some("local")
         );
-        assert_eq!(overrides.sandbox.as_ref().unwrap().preserve, Some(true));
+        assert_eq!(
+            overrides
+                .environment
+                .as_ref()
+                .unwrap()
+                .lifecycle
+                .as_ref()
+                .unwrap()
+                .preserve,
+            Some(true)
+        );
         assert_eq!(
             overrides.execution.as_ref().unwrap().mode,
             Some(RunMode::DryRun)
@@ -1172,8 +1208,14 @@ mod tests {
             project.join(".fabro/project.toml"),
             r#"_version = 1
 
-[run.sandbox.daytona.snapshot]
-name = "fabro-test"
+[run.environment]
+id = "daytona"
+
+[environments.daytona]
+provider = "daytona"
+
+[environments.daytona.image]
+ref = "fabro-test"
 dockerfile = { path = "Dockerfile" }
 "#,
         )

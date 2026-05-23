@@ -15,6 +15,9 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { EnvironmentSettings } from './environment-settings';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { ProjectNamespace } from './project-namespace';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -29,5 +32,6 @@ import type { WorkflowNamespace } from './workflow-namespace';
 export interface WorkflowSettings {
     'project': ProjectNamespace;
     'workflow': WorkflowNamespace;
+    'environments': { [key: string]: EnvironmentSettings; };
     'run': RunNamespace;
 }

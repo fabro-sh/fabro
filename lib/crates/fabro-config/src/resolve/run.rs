@@ -1,26 +1,29 @@
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
-    ArtifactsSettings, DaytonaSettings, DaytonaSnapshotSettings, DaytonaVolumeSettings,
-    DockerSettings, DockerfileSource, GitAuthorSettings, HookDefinition, HookType,
-    InterviewProviderSettings, McpServerSettings, McpTransport, MergeStrategy,
-    NotificationProviderSettings, NotificationRouteSettings, PullRequestSettings, RunAgentSettings,
-    RunBranchSettings, RunCheckpointSettings, RunCloneSettings, RunExecutionSettings,
-    RunGitSettings, RunGoal, RunIntegrationsGithubSettings, RunIntegrationsSettings,
-    RunInterviewsSettings, RunMetaBranchSettings, RunModelControls, RunModelSettings, RunNamespace,
-    RunPrepareSettings, RunSandboxSettings, RunScmSettings, ScmGitHubSettings, TlsMode,
+    ArtifactsSettings, GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings,
+    McpServerSettings, McpTransport, MergeStrategy, NotificationProviderSettings,
+    NotificationRouteSettings, PullRequestSettings, RunAgentSettings, RunBranchSettings,
+    RunCheckpointSettings, RunCloneSettings, RunExecutionSettings, RunGitSettings, RunGoal,
+    RunIntegrationsGithubSettings, RunIntegrationsSettings, RunInterviewsSettings,
+    RunMetaBranchSettings, RunModelControls, RunModelSettings, RunNamespace, RunPrepareSettings,
+    RunScmSettings, ScmGitHubSettings, TlsMode,
 };
 
-use super::ResolveError;
+use super::{ResolveError, resolve_run_environment};
 use crate::{
-    DaytonaDockerfileLayer, DaytonaSandboxLayer, HookAgentMarker, HookEntry, HookTlsMode,
-    InterviewProviderLayer, InterviewsLayer, McpEntryLayer, ModelRefOrSplice,
-    NotificationProviderLayer, NotificationRouteLayer, RunAgentLayer, RunArtifactsLayer,
-    RunCheckpointLayer, RunCloneLayer, RunExecutionLayer, RunGitLayer, RunGoalLayer,
-    RunIntegrationsLayer, RunLayer, RunMetaBranchLayer, RunModelLayer, RunPrepareLayer,
-    RunPullRequestLayer, RunRunBranchLayer, RunSandboxLayer, RunScmLayer, StringOrSplice,
+    EnvironmentLayer, HookAgentMarker, HookEntry, HookTlsMode, InterviewProviderLayer,
+    InterviewsLayer, McpEntryLayer, MergeMap, ModelRefOrSplice, NotificationProviderLayer,
+    NotificationRouteLayer, RunAgentLayer, RunArtifactsLayer, RunCheckpointLayer, RunCloneLayer,
+    RunExecutionLayer, RunGitLayer, RunGoalLayer, RunIntegrationsLayer, RunLayer,
+    RunMetaBranchLayer, RunModelLayer, RunPrepareLayer, RunPullRequestLayer, RunRunBranchLayer,
+    RunScmLayer, StringOrSplice,
 };
 
-pub fn resolve_run(layer: &RunLayer, errors: &mut Vec<ResolveError>) -> RunNamespace {
+pub fn resolve_run(
+    layer: &RunLayer,
+    environments: &MergeMap<EnvironmentLayer>,
+    errors: &mut Vec<ResolveError>,
+) -> RunNamespace {
     let clone = resolve_clone(layer.clone.as_ref());
     let run_branch = resolve_run_branch(layer.run_branch.as_ref());
     let mut meta_branch = resolve_meta_branch(layer.meta_branch.as_ref());
@@ -59,7 +62,7 @@ pub fn resolve_run(layer: &RunLayer, errors: &mut Vec<ResolveError>) -> RunNames
         clone,
         run_branch,
         meta_branch,
-        sandbox: resolve_sandbox(layer.sandbox.as_ref(), errors),
+        environment: resolve_run_environment(layer.environment.as_ref(), environments, errors),
         notifications: layer
             .notifications
             .iter()
@@ -218,91 +221,6 @@ fn resolve_meta_branch(meta_branch: Option<&RunMetaBranchLayer>) -> RunMetaBranc
         push:    meta_branch
             .and_then(|meta_branch| meta_branch.push)
             .unwrap_or(true),
-    }
-}
-
-fn resolve_sandbox(
-    sandbox: Option<&RunSandboxLayer>,
-    errors: &mut Vec<ResolveError>,
-) -> RunSandboxSettings {
-    let sandbox = sandbox.expect("defaults.toml should provide run.sandbox defaults");
-
-    let provider = sandbox
-        .provider
-        .clone()
-        .expect("defaults.toml should provide run.sandbox.provider");
-    match provider.as_str() {
-        "local" | "docker" | "daytona" => {}
-        other => errors.push(ResolveError::Invalid {
-            path:   "run.sandbox.provider".to_string(),
-            reason: format!("unknown sandbox provider: {other}"),
-        }),
-    }
-
-    RunSandboxSettings {
-        provider,
-        preserve: sandbox
-            .preserve
-            .expect("defaults.toml should provide run.sandbox.preserve"),
-        stop_on_terminal: sandbox
-            .stop_on_terminal
-            .expect("defaults.toml should provide run.sandbox.stop_on_terminal"),
-        devcontainer: sandbox
-            .devcontainer
-            .expect("defaults.toml should provide run.sandbox.devcontainer"),
-        env: sandbox.env.clone().into_inner(),
-        docker: sandbox.docker.as_ref().map(resolve_docker),
-        daytona: sandbox.daytona.as_ref().map(resolve_daytona),
-    }
-}
-
-fn resolve_docker(docker: &crate::DockerSandboxLayer) -> DockerSettings {
-    DockerSettings {
-        image:        docker.image.clone().unwrap_or_default(),
-        network_mode: docker.network_mode.clone(),
-        memory_limit: docker
-            .memory_limit
-            .and_then(|size| i64::try_from(size.as_bytes()).ok()),
-        cpu_quota:    docker.cpu_quota,
-        env_vars:     docker.env_vars.clone().into_inner(),
-    }
-}
-
-fn resolve_daytona(daytona: &DaytonaSandboxLayer) -> DaytonaSettings {
-    DaytonaSettings {
-        auto_stop_interval: daytona.auto_stop_interval,
-        labels:             daytona.labels.clone().into_inner(),
-        volumes:            daytona
-            .volumes
-            .as_deref()
-            .unwrap_or(&[])
-            .iter()
-            .map(|volume| DaytonaVolumeSettings {
-                volume_id:  volume.volume_id.clone(),
-                mount_path: volume.mount_path.clone(),
-                subpath:    volume.subpath.clone(),
-            })
-            .collect(),
-        snapshot:           daytona.snapshot.as_ref().and_then(|snapshot| {
-            snapshot.name.as_ref().map(|name| DaytonaSnapshotSettings {
-                name:       name.clone(),
-                cpu:        snapshot.cpu,
-                memory_gb:  snapshot.memory.map(|size| size_to_gb_i32(size.as_bytes())),
-                disk_gb:    snapshot.disk.map(|size| size_to_gb_i32(size.as_bytes())),
-                dockerfile: snapshot
-                    .dockerfile
-                    .as_ref()
-                    .map(|dockerfile| match dockerfile {
-                        DaytonaDockerfileLayer::Inline(text) => {
-                            DockerfileSource::Inline(text.clone())
-                        }
-                        DaytonaDockerfileLayer::Path { path } => {
-                            DockerfileSource::Path { path: path.clone() }
-                        }
-                    }),
-            })
-        }),
-        network:            daytona.network.clone(),
     }
 }
 
@@ -569,9 +487,4 @@ fn resolve_artifacts(artifacts: Option<&RunArtifactsLayer>) -> ArtifactsSettings
             .map(|artifacts| artifacts.include.clone())
             .unwrap_or_default(),
     }
-}
-
-fn size_to_gb_i32(bytes: u64) -> i32 {
-    let gb = bytes / 1_000_000_000;
-    i32::try_from(gb).unwrap_or(i32::MAX)
 }

@@ -100,10 +100,11 @@ impl RunDump {
                 push_json_entry_path(&mut entries, &base.join("status.json"), completion)?;
             }
             if let Some(provider_used) = stage.provider_used.as_ref() {
-                entries.push(RunDumpEntry::json_path(
+                push_json_entry_path(
+                    &mut entries,
                     &base.join("provider_used.json"),
-                    provider_used.clone(),
-                ));
+                    provider_used,
+                )?;
             }
             if let Some(diff) = stage.diff.as_ref() {
                 entries.push(RunDumpEntry::text_path(
@@ -473,8 +474,8 @@ mod tests {
     use fabro_types::run::RunSpec;
     use fabro_types::{
         Checkpoint, CheckpointRecord, Conclusion, RunDiff, RunSandbox, RunStatus, SandboxProvider,
-        StageCompletion, StageOutcome, StartRecord, SuccessReason, WorkflowSettings,
-        first_event_seq, fixtures,
+        StageCompletion, StageModelUsage, StageOutcome, StartRecord, SuccessReason,
+        WorkflowSettings, first_event_seq, fixtures,
     };
     use futures::executor;
 
@@ -585,7 +586,13 @@ mod tests {
                 .single()
                 .unwrap(),
         });
-        stage.provider_used = Some(serde_json::json!({ "provider": "openai" }));
+        stage.provider_used = Some(StageModelUsage {
+            mode:             StageModelUsage::MODE_PROMPT.to_string(),
+            provider:         Some("openai".to_string()),
+            model:            None,
+            reasoning_effort: None,
+            speed:            None,
+        });
         stage.diff = Some("diff --git a/a b/a".to_string());
         stage.script_invocation = Some(serde_json::json!({ "command": "cargo test" }));
         stage.script_timing = Some(serde_json::json!({ "duration_ms": 10 }));
@@ -638,8 +645,14 @@ mod tests {
         assert_eq!(node.diff, None);
         assert_eq!(node.output, None);
         assert_eq!(
-            node.provider_used,
-            Some(serde_json::json!({ "provider": "openai" }))
+            node.provider_used.as_ref().map(|usage| usage.mode.as_str()),
+            Some(StageModelUsage::MODE_PROMPT)
+        );
+        assert_eq!(
+            node.provider_used
+                .as_ref()
+                .and_then(|usage| usage.provider.as_deref()),
+            Some("openai")
         );
     }
 

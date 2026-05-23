@@ -3,8 +3,11 @@ use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroU32;
 
 use chrono::{DateTime, Utc};
+use fabro_model::{ReasoningEffort, Speed};
 
+use crate::run_event::{AgentSessionActivatedProps, StagePromptProps};
 use crate::{
+    AgentBackend, AgentMcpToolSummary, AgentSkillActivationSource, AgentSkillSummary,
     BilledTokenCounts, Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition,
     ModelRef, PullRequestLink, RunControlAction, RunDiff, RunId, RunSandbox, RunSpec, RunStatus,
     RunTiming, StageCompletion, StageHandler, StageId, StageState, StageTiming, StartRecord,
@@ -33,11 +36,6 @@ pub struct RunProjection {
     pub pull_request:       Option<PullRequestLink>,
     pub superseded_by:      Option<RunId>,
     pub pending_interviews: BTreeMap<String, PendingInterviewRecord>,
-    /// Projected todo / task lists, keyed by `list_id` (`openai_plan:<session>`
-    /// or `anthropic_tasks:<root_session>`). Maintained by replaying
-    /// `todo.created`, `todo.updated`, and `todo.deleted` events.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub todos_by_list:      BTreeMap<String, TodoListProjection>,
     stages:                 HashMap<StageId, StageProjection>,
 }
 
@@ -55,13 +53,73 @@ pub struct CheckpointRecord {
     pub diff:       RunDiff,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct StageModelUsage {
+    pub mode:             String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider:         Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model:            Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<ReasoningEffort>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed:            Option<Speed>,
+}
+
+impl StageModelUsage {
+    pub const MODE_PROMPT: &'static str = "prompt";
+    pub const MODE_AGENT: &'static str = "agent";
+    pub const MODE_ACP: &'static str = "acp";
+    pub const MODE_FAN_IN: &'static str = "fan_in";
+
+    /// Build the usage record from a `stage.prompt` event, returning `None`
+    /// when the event carried no model metadata.
+    #[must_use]
+    pub fn from_prompt_props(props: &StagePromptProps) -> Option<Self> {
+        let has_metadata = props.provider.is_some()
+            || props.model.is_some()
+            || props.reasoning_effort.is_some()
+            || props.speed.is_some();
+        has_metadata.then(|| Self {
+            mode:             props
+                .mode
+                .clone()
+                .unwrap_or_else(|| Self::MODE_PROMPT.to_string()),
+            provider:         props.provider.clone(),
+            model:            props.model.clone(),
+            reasoning_effort: props.reasoning_effort,
+            speed:            props.speed,
+        })
+    }
+
+    /// Build the usage record from an `agent.session.activated` event. The
+    /// mode is `Acp` when the activation came from an ACP control session and
+    /// `Agent` otherwise.
+    #[must_use]
+    pub fn from_agent_session_activated(props: &AgentSessionActivatedProps) -> Self {
+        let acp: &'static str = AgentBackend::Acp.into();
+        let mode = if props.provider.as_deref() == Some(acp) {
+            Self::MODE_ACP
+        } else {
+            Self::MODE_AGENT
+        };
+        Self {
+            mode:             mode.to_string(),
+            provider:         props.provider.clone(),
+            model:            props.model.clone(),
+            reasoning_effort: props.reasoning_effort,
+            speed:            props.speed,
+        }
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StageProjection {
     pub first_event_seq:   NonZeroU32,
     pub prompt:            Option<String>,
     pub response:          Option<String>,
     pub completion:        Option<StageCompletion>,
-    pub provider_used:     Option<serde_json::Value>,
+    pub provider_used:     Option<StageModelUsage>,
     pub diff:              Option<String>,
     pub script_invocation: Option<serde_json::Value>,
     pub script_timing:     Option<serde_json::Value>,
@@ -88,7 +146,65 @@ pub struct StageProjection {
     pub usage:             BilledTokenCounts,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model:             Option<ModelRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub todos:             Option<TodoListProjection>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subagents:         Vec<SubAgentProjection>,
+    #[serde(default, skip_serializing_if = "SkillsProjection::is_empty")]
+    pub skills:            SkillsProjection,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_servers:       Vec<McpServerProjection>,
     pub state:             StageState,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SubAgentProjection {
+    pub agent_id: String,
+    pub depth:    usize,
+    pub task:     String,
+    pub status:   SubAgentStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SubAgentStatus {
+    Running,
+    Completed { success: bool, turns_used: usize },
+    Failed { error: serde_json::Value },
+    Closed,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SkillsProjection {
+    pub available: Vec<AgentSkillSummary>,
+    pub activated: Vec<ActivatedSkill>,
+}
+
+impl SkillsProjection {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.available.is_empty() && self.activated.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ActivatedSkill {
+    pub name:   String,
+    pub source: AgentSkillActivationSource,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct McpServerProjection {
+    pub server_name: String,
+    pub tool_count:  usize,
+    pub status:      McpServerStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum McpServerStatus {
+    Ready { tools: Vec<AgentMcpToolSummary> },
+    Failed { error: String },
 }
 
 /// Convert a 1-based event sequence number into the `NonZeroU32` form used for
@@ -109,6 +225,10 @@ impl StageProjection {
             timing: None,
             usage: BilledTokenCounts::default(),
             model: None,
+            todos: None,
+            subagents: Vec::new(),
+            skills: SkillsProjection::default(),
+            mcp_servers: Vec::new(),
             provider_used: None,
             diff: None,
             script_invocation: None,
@@ -185,7 +305,6 @@ impl RunProjection {
             pull_request: None,
             superseded_by: None,
             pending_interviews: BTreeMap::new(),
-            todos_by_list: BTreeMap::new(),
             stages: HashMap::new(),
         }
     }
