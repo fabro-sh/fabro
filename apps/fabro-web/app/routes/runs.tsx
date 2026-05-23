@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Link, useSearchParams } from "react-router";
-import { AdjustmentsHorizontalIcon, ArchiveBoxIcon, CheckIcon, ChevronDoubleLeftIcon, ChevronDoubleRightIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, CommandLineIcon, MagnifyingGlassIcon, PlusCircleIcon } from "@heroicons/react/24/outline";
+import { AdjustmentsHorizontalIcon, ArchiveBoxIcon, CheckIcon, ChevronDoubleLeftIcon, ChevronDoubleRightIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpDownIcon, ChevronUpIcon, CommandLineIcon, MagnifyingGlassIcon, PlusCircleIcon } from "@heroicons/react/24/outline";
 import { EllipsisVerticalIcon } from "@heroicons/react/20/solid";
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions, Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { useSWRConfig } from "swr";
@@ -870,9 +870,15 @@ function SortHeader({
         className={`inline-flex items-center gap-1 transition-colors hover:text-fg-2 ${isActive ? "text-fg-2" : "text-fg-3"} ${align === "right" ? "ml-auto" : ""}`}
       >
         <span>{label}</span>
-        <span className="text-fg-muted" aria-hidden="true">
-          {isActive ? (direction === "asc" ? "↑" : "↓") : "↕"}
-        </span>
+        {isActive ? (
+          direction === "asc" ? (
+            <ChevronUpIcon className="size-3.5 text-fg-3" aria-hidden="true" />
+          ) : (
+            <ChevronDownIcon className="size-3.5 text-fg-3" aria-hidden="true" />
+          )
+        ) : (
+          <ChevronUpDownIcon className="size-3.5 text-fg-muted" aria-hidden="true" />
+        )}
       </button>
     </th>
   );
