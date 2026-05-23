@@ -12,7 +12,7 @@ use fabro_hooks::{HookContext, HookDecision, HookEvent, HookExecutionContext, Ho
 use fabro_model::Catalog;
 use fabro_sandbox::{
     GitSetupIntent, ReadBeforeWriteSandbox, SandboxEventCallback, SandboxSpec,
-    reconnect_for_run_with_callback,
+    reconnect_for_run_with_callback, shell_quote,
 };
 use fabro_static::EnvVars;
 use fabro_vault::Vault;
@@ -27,6 +27,7 @@ use super::types::{InitOptions, Initialized, LlmSpec, Persisted, SandboxEnvSpec}
 use crate::devcontainer_bridge::{devcontainer_to_snapshot_config, run_devcontainer_lifecycle};
 use crate::error::Error;
 use crate::event::{Event, RunNoticeCode, RunNoticeLevel};
+use crate::git::GitAuthor;
 use crate::github_token_source::{AppIatMinter, GitHubTokenSource};
 use crate::handler::llm::{AgentAcpBackend, AgentApiBackend, BackendRouter, routing};
 use crate::handler::{HandlerRegistry, default_registry};
@@ -64,6 +65,25 @@ fn git_setup_intent(run_options: &RunOptions) -> GitSetupIntent {
             run_id: run_options.run_id.to_string(),
         }
     }
+}
+
+async fn configure_sandbox_git_identity(
+    sandbox: &dyn Sandbox,
+    author: &GitAuthor,
+) -> Result<(), Error> {
+    let command = format!(
+        "git config --local user.name {} && git config --local user.email {}",
+        shell_quote(&author.name),
+        shell_quote(&author.email)
+    );
+    sandbox
+        .exec_command(&command, 10_000, None, None, None)
+        .await
+        .map_err(|err| Error::engine_with_source("Sandbox git identity setup failed", err))?
+        .into_result("git config user identity")
+        .map_err(|err| Error::engine_with_source("Sandbox git identity setup failed", err))?;
+
+    Ok(())
 }
 
 fn build_sandbox_env(
@@ -574,6 +594,10 @@ pub async fn initialize(
             }
         }
     }
+    if sandbox.origin_url().is_some() {
+        let git_author = options.run_options.git_author();
+        configure_sandbox_git_identity(sandbox.as_ref(), &git_author).await?;
+    }
 
     if !options.lifecycle.setup_commands.is_empty() {
         options.emitter.emit(&Event::SetupStarted {
@@ -913,6 +937,29 @@ mod tests {
         .await;
         let events = seen.lock().unwrap().clone();
         (result, events)
+    }
+
+    #[tokio::test]
+    async fn configure_sandbox_git_identity_uses_run_author() {
+        let sandbox = fabro_sandbox::test_support::MockSandbox::linux();
+        let author = GitAuthor::from_options(
+            Some("Fabro Bot".to_string()),
+            Some("fabro-bot@example.com".to_string()),
+        );
+
+        configure_sandbox_git_identity(&sandbox, &author)
+            .await
+            .expect("git identity should configure");
+
+        let commands = sandbox
+            .captured_commands
+            .lock()
+            .expect("captured_commands lock poisoned")
+            .clone();
+        assert_eq!(commands, vec![
+            "git config --local user.name 'Fabro Bot' && git config --local user.email \
+             fabro-bot@example.com"
+        ]);
     }
 
     #[tokio::test]

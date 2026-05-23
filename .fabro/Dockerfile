@@ -1,7 +1,7 @@
 FROM ubuntu:24.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 \
+        curl git ripgrep ca-certificates build-essential pkg-config libssl-dev unzip python3 \
         xvfb xfce4 xfce4-terminal x11vnc novnc dbus-x11 \
         libx11-6 libxrandr2 libxext6 libxrender1 libxfixes3 libxss1 libxtst6 libxi6 \
     && rm -rf /var/lib/apt/lists/*
