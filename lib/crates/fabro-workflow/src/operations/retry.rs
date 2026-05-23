@@ -123,8 +123,8 @@ mod tests {
     use fabro_store::{Database, RunProjectionReducer};
     use fabro_types::{
         AuthMethod, DirtyStatus, ForkSourceRef, GitContext, Graph, IdpIdentity, PreRunPushOutcome,
-        Principal, PullRequestLink, RunBlobId, RunServerProvenance, RunTiming, UserPrincipal,
-        WorkflowSettings, fixtures,
+        Principal, PullRequestLink, RunBlobId, RunRunnableSource, RunServerProvenance, RunTiming,
+        UserPrincipal, WorkflowSettings, fixtures,
     };
     use object_store::memory::InMemory;
 
@@ -204,13 +204,27 @@ mod tests {
         .unwrap();
     }
 
-    async fn append_failed(store: &fabro_store::RunDatabase, run_id: RunId, reason: FailureReason) {
+    async fn append_runnable(store: &fabro_store::RunDatabase, run_id: RunId) {
+        event::append_event(store, &run_id, &Event::RunRunnable {
+            source: RunRunnableSource::StartRequested,
+            actor:  None,
+        })
+        .await
+        .unwrap();
+    }
+
+    async fn append_started(store: &fabro_store::RunDatabase, run_id: RunId) {
+        append_runnable(store, run_id).await;
         event::append_event(store, &run_id, &Event::RunStarting)
             .await
             .unwrap();
         event::append_event(store, &run_id, &Event::RunRunning)
             .await
             .unwrap();
+    }
+
+    async fn append_failed(store: &fabro_store::RunDatabase, run_id: RunId, reason: FailureReason) {
+        append_started(store, run_id).await;
         let event = Event::workflow_run_failed_from_error(
             &Error::engine("boom"),
             RunTiming::wall_only(10),
@@ -416,12 +430,7 @@ mod tests {
         let succeeded = fixtures::RUN_1;
         let succeeded_store = store.create_run(&succeeded).await.unwrap();
         append_created(&succeeded_store, succeeded, None, None).await;
-        event::append_event(&succeeded_store, &succeeded, &Event::RunStarting)
-            .await
-            .unwrap();
-        event::append_event(&succeeded_store, &succeeded, &Event::RunRunning)
-            .await
-            .unwrap();
+        append_started(&succeeded_store, succeeded).await;
         event::append_event(&succeeded_store, &succeeded, &Event::WorkflowRunCompleted {
             timing:               RunTiming::wall_only(10),
             artifact_count:       0,
@@ -445,7 +454,7 @@ mod tests {
         .await
         .unwrap();
         event::append_event(&active_store, &active, &Event::RunRunnable {
-            source: fabro_types::RunRunnableSource::StartRequested,
+            source: RunRunnableSource::StartRequested,
             actor:  None,
         })
         .await
