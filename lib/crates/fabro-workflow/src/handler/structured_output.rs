@@ -18,6 +18,14 @@ pub(crate) const ROUTING_STATUS_FIELDS: &[&str] = &[
     "context_updates",
 ];
 
+const QUOTED_ROUTING_STATUS_FIELDS: &[&str] = &[
+    "\"preferred_next_label\"",
+    "\"outcome\"",
+    "\"failure_reason\"",
+    "\"suggested_next_ids\"",
+    "\"context_updates\"",
+];
+
 /// Parsed `output_schema` declaration with a precompiled validator so that
 /// repair turns don't recompile the schema on every iteration.
 #[derive(Debug, Clone)]
@@ -358,9 +366,9 @@ fn contains_routing_field(obj: &serde_json::Map<String, Value>) -> bool {
 }
 
 fn raw_mentions_routing_field(candidate: &str) -> bool {
-    ROUTING_STATUS_FIELDS
+    QUOTED_ROUTING_STATUS_FIELDS
         .iter()
-        .any(|field| candidate.contains(&format!("\"{field}\"")))
+        .any(|quoted_field| candidate.contains(quoted_field))
 }
 
 fn routing_validator() -> &'static Validator {
