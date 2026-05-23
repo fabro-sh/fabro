@@ -2428,7 +2428,7 @@ async fn create_run_with_explicit_title_skips_generated_title_work() {
     assert_eq!(
         state
             .store
-            .get_cached_summary(&run_id)
+            .get_cached_summary(&run_id, Utc::now())
             .await
             .unwrap()
             .unwrap()
@@ -2450,7 +2450,7 @@ async fn create_run_without_ready_llm_provider_skips_generated_title_work() {
     assert_eq!(
         state
             .store
-            .get_cached_summary(&run_id)
+            .get_cached_summary(&run_id, Utc::now())
             .await
             .unwrap()
             .unwrap()
@@ -2491,7 +2491,7 @@ async fn generated_title_failure_leaves_deterministic_title_unchanged() {
     assert_eq!(
         state
             .store
-            .get_cached_summary(&run_id)
+            .get_cached_summary(&run_id, Utc::now())
             .await
             .unwrap()
             .unwrap()
@@ -2539,7 +2539,7 @@ async fn generated_title_does_not_overwrite_user_title_edit() {
     assert_eq!(
         state
             .store
-            .get_cached_summary(&run_id)
+            .get_cached_summary(&run_id, Utc::now())
             .await
             .unwrap()
             .unwrap()
@@ -2591,7 +2591,7 @@ async fn wait_for_run_title(state: &AppState, run_id: RunId, expected: &str) {
     for _ in 0..50 {
         let title = state
             .store
-            .get_cached_summary(&run_id)
+            .get_cached_summary(&run_id, Utc::now())
             .await
             .unwrap()
             .unwrap()
