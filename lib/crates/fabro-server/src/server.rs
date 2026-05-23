@@ -45,7 +45,7 @@ use fabro_auth::{CredentialSource, VaultCredentialSource, auth_issue_message};
 #[cfg(test)]
 use fabro_config::RunSettingsBuilder;
 use fabro_config::daemon::ServerDaemon;
-use fabro_config::{RunLayer, Storage};
+use fabro_config::{EnvironmentLayer, MergeMap, RunLayer, Storage};
 use fabro_interview::{
     Answer, AnswerSubmission, ControlInterviewer, Interviewer, Question, WorkerControlEnvelope,
 };
@@ -75,7 +75,7 @@ use fabro_store::{
 };
 #[cfg(test)]
 use fabro_types::BlockedReason;
-use fabro_types::settings::run::RunMode;
+use fabro_types::settings::run::{NotificationRouteSettings, RunMode};
 use fabro_types::settings::server::{
     GithubIntegrationSettings, GithubIntegrationStrategy, LogDestination,
 };
@@ -83,7 +83,7 @@ use fabro_types::settings::{InterpString, RunNamespace};
 use fabro_types::{
     AgentBackend, AskFabro, AskFabroUnavailableReason, EventBody, InterviewQuestionRecord, PairId,
     PairMessageId, PairTarget, Principal, PullRequestLink, QuestionType, RunBlobId,
-    RunControlAction, RunEvent, RunId, ServerSettings, SessionCapability,
+    RunControlAction, RunEvent, RunId, ServerSettings, SessionCapability, StageModelUsage,
 };
 use fabro_util::error::{
     SharedError, collect_causes, render_compact_with_causes, render_with_causes,
@@ -102,6 +102,7 @@ use fabro_workflow::run_lookup::{
 };
 use fabro_workflow::run_status::{FailureReason, RunStatus, SuccessReason};
 use fabro_workflow::{Error as WorkflowError, operations, pull_request};
+use futures_util::future::join_all;
 use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 use tokio::fs;
@@ -458,17 +459,38 @@ struct LoadedPendingInterview {
     question: InterviewQuestionRecord,
 }
 
+#[derive(Debug, Clone)]
+struct SlackLifecycleDetails {
+    kind:               slack_blocks::RunLifecycleKind,
+    started_event_name: Option<String>,
+    result:             Option<String>,
+    duration_ms:        Option<u64>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct PriorSlackLifecycleEventDetails {
+    started_event_name: Option<String>,
+    pull_request:       Option<SlackLifecyclePullRequest>,
+}
+
+#[derive(Debug, Clone)]
+struct SlackLifecyclePullRequest {
+    number: u64,
+    title:  Option<String>,
+    url:    Option<String>,
+}
+
 #[derive(Clone)]
 struct SlackService {
     client:          SlackClient,
     app_token:       String,
-    default_channel: String,
+    default_channel: Option<String>,
     posted_messages: Arc<Mutex<HashMap<(RunId, String), SlackPostedMessage>>>,
     thread_registry: Arc<ThreadRegistry>,
 }
 
 impl SlackService {
-    fn new(bot_token: String, app_token: String, default_channel: String) -> Self {
+    fn new(bot_token: String, app_token: String, default_channel: Option<String>) -> Self {
         Self {
             client: SlackClient::new(bot_token),
             app_token,
@@ -478,12 +500,21 @@ impl SlackService {
         }
     }
 
-    async fn handle_event(&self, event: &RunEvent, run_web_url: Option<&str>) {
+    async fn handle_event(
+        &self,
+        state: &AppState,
+        envelope: &EventEnvelope,
+        run_web_url: Option<&str>,
+    ) {
+        let event = &envelope.event;
         match &event.body {
             EventBody::InterviewStarted(props) => {
                 if props.question_id.is_empty() {
                     return;
                 }
+                let Some(default_channel) = self.default_channel.as_deref() else {
+                    return;
+                };
                 let key = (event.run_id, props.question_id.clone());
                 if self
                     .posted_messages
@@ -513,7 +544,7 @@ impl SlackService {
 
                 if let Ok(posted) = self
                     .client
-                    .post_message(&self.default_channel, &blocks, None)
+                    .post_message(default_channel, &blocks, None)
                     .await
                 {
                     if question.allow_freeform || question.question_type == QuestionType::Freeform {
@@ -556,8 +587,127 @@ impl SlackService {
                 )
                 .await;
             }
+            EventBody::RunStarted(_) | EventBody::RunCompleted(_) | EventBody::RunFailed(_) => {
+                self.handle_lifecycle_event(state, envelope, run_web_url)
+                    .await;
+            }
             _ => {}
         }
+    }
+
+    async fn handle_lifecycle_event(
+        &self,
+        state: &AppState,
+        envelope: &EventEnvelope,
+        run_web_url: Option<&str>,
+    ) {
+        let event = &envelope.event;
+        let Some(details) = slack_lifecycle_details(event) else {
+            return;
+        };
+        let event_name = event.body.event_name();
+        let projection = match state.store.get_cached_run(&event.run_id).await {
+            Ok(Some(cached)) => cached.projection,
+            Ok(None) => {
+                warn!(
+                    run_id = %event.run_id,
+                    event = event_name,
+                    "Skipping Slack lifecycle notification because run projection is missing"
+                );
+                return;
+            }
+            Err(err) => {
+                warn!(
+                    run_id = %event.run_id,
+                    event = event_name,
+                    error = %err,
+                    "Skipping Slack lifecycle notification because run projection could not be loaded"
+                );
+                return;
+            }
+        };
+
+        // Filter routes first; bail out before any further work if none match.
+        let mut routes: Vec<_> = projection
+            .spec
+            .settings
+            .run
+            .notifications
+            .iter()
+            .filter(|(_, route)| {
+                route.enabled
+                    && route.provider.as_deref() == Some("slack")
+                    && route.events.iter().any(|event| event == event_name)
+            })
+            .collect();
+        if routes.is_empty() {
+            return;
+        }
+        routes.sort_by_key(|(route_name, _)| *route_name);
+
+        // Only completed/failed events need to recover prior PR details (a
+        // run.started event cannot have a prior PullRequestCreated).
+        let prior = if matches!(details.kind, slack_blocks::RunLifecycleKind::Started) {
+            PriorSlackLifecycleEventDetails::default()
+        } else {
+            load_prior_slack_lifecycle_event_details(state, event.run_id, envelope.seq).await
+        };
+        let workflow_label = slack_lifecycle_workflow_label(
+            projection.as_ref(),
+            details
+                .started_event_name
+                .as_deref()
+                .or(prior.started_event_name.as_deref()),
+            event_name,
+        );
+        let pull_request = prior.pull_request.or_else(|| {
+            projection
+                .pull_request
+                .as_ref()
+                .map(slack_lifecycle_pull_request_from_link)
+        });
+        let run_id = event.run_id.to_string();
+        let run_url = run_web_url.or(projection.web_url.as_deref());
+        let pull_request_blocks =
+            pull_request
+                .as_ref()
+                .map(|pull_request| slack_blocks::RunLifecyclePullRequest {
+                    number: pull_request.number,
+                    title:  pull_request.title.as_deref(),
+                    url:    pull_request.url.as_deref(),
+                });
+        let blocks =
+            slack_blocks::run_lifecycle_blocks(details.kind, &slack_blocks::RunLifecycleBlocks {
+                run_id: &run_id,
+                run_url,
+                workflow_label: &workflow_label,
+                result: details.result.as_deref(),
+                duration_ms: details.duration_ms,
+                pull_request: pull_request_blocks,
+            });
+
+        let blocks = &blocks;
+        let posts = routes.into_iter().filter_map(|(route_name, route)| {
+            let channel = resolve_slack_lifecycle_route_channel(
+                state,
+                event.run_id,
+                route_name,
+                route,
+                event_name,
+            )?;
+            Some(async move {
+                if let Err(err) = self.client.post_message(&channel, blocks, None).await {
+                    warn!(
+                        run_id = %event.run_id,
+                        event = event_name,
+                        notification_route = route_name.as_str(),
+                        error = %err,
+                        "Failed to post Slack lifecycle notification"
+                    );
+                }
+            })
+        });
+        join_all(posts).await;
     }
 
     async fn finish_interview(
@@ -599,6 +749,176 @@ impl SlackService {
     }
 }
 
+fn slack_lifecycle_details(event: &RunEvent) -> Option<SlackLifecycleDetails> {
+    match &event.body {
+        EventBody::RunStarted(props) => Some(SlackLifecycleDetails {
+            kind:               slack_blocks::RunLifecycleKind::Started,
+            started_event_name: Some(props.name.clone()),
+            result:             None,
+            duration_ms:        None,
+        }),
+        EventBody::RunCompleted(props) => Some(SlackLifecycleDetails {
+            kind:               slack_blocks::RunLifecycleKind::Completed,
+            started_event_name: None,
+            result:             Some(slack_lifecycle_completed_result(
+                &props.status,
+                props.reason,
+            )),
+            duration_ms:        Some(props.timing.wall_time_ms),
+        }),
+        EventBody::RunFailed(props) => Some(SlackLifecycleDetails {
+            kind:               slack_blocks::RunLifecycleKind::Failed,
+            started_event_name: None,
+            result:             Some(slack_lifecycle_failed_result(&props.failure)),
+            duration_ms:        Some(props.timing.wall_time_ms),
+        }),
+        _ => None,
+    }
+}
+
+fn slack_lifecycle_completed_result(status: &str, reason: SuccessReason) -> String {
+    let status = status.trim();
+    let reason = reason.to_string();
+    if status.is_empty() || status == reason {
+        reason
+    } else {
+        format!("{status} — {reason}")
+    }
+}
+
+fn slack_lifecycle_failed_result(failure: &fabro_types::RunFailure) -> String {
+    let reason = failure.reason.to_string();
+    let message = failure.detail.message.trim();
+    if message.is_empty() {
+        reason
+    } else {
+        format!("{reason} — {message}")
+    }
+}
+
+async fn load_prior_slack_lifecycle_event_details(
+    state: &AppState,
+    run_id: RunId,
+    before_seq: u32,
+) -> PriorSlackLifecycleEventDetails {
+    let run_store = match state.store.open_run_reader(&run_id).await {
+        Ok(run_store) => run_store,
+        Err(err) => {
+            warn!(
+                run_id = %run_id,
+                error = %err,
+                "Unable to inspect prior run events for Slack lifecycle notification"
+            );
+            return PriorSlackLifecycleEventDetails::default();
+        }
+    };
+    let events = match run_store.list_events().await {
+        Ok(events) => events,
+        Err(err) => {
+            warn!(
+                run_id = %run_id,
+                error = %err,
+                "Unable to load prior run events for Slack lifecycle notification"
+            );
+            return PriorSlackLifecycleEventDetails::default();
+        }
+    };
+
+    let mut details = PriorSlackLifecycleEventDetails::default();
+    for envelope in events {
+        if envelope.seq >= before_seq {
+            break;
+        }
+        match envelope.event.body {
+            EventBody::RunStarted(props) if !props.name.trim().is_empty() => {
+                details.started_event_name = Some(props.name);
+            }
+            EventBody::PullRequestCreated(props) => {
+                details.pull_request = Some(SlackLifecyclePullRequest {
+                    number: props.pr_number,
+                    title:  Some(props.title),
+                    url:    Some(props.pr_url),
+                });
+            }
+            _ => {}
+        }
+    }
+    details
+}
+
+fn slack_lifecycle_workflow_label(
+    projection: &fabro_store::RunProjection,
+    started_event_name: Option<&str>,
+    event_name: &str,
+) -> String {
+    [
+        projection.spec.workflow_name(),
+        projection.spec.workflow_slug(),
+        projection.spec.graph_name(),
+        started_event_name,
+    ]
+    .into_iter()
+    .flatten()
+    .map(str::trim)
+    .find(|value| !value.is_empty())
+    .unwrap_or(event_name)
+    .to_string()
+}
+
+fn slack_lifecycle_pull_request_from_link(link: &PullRequestLink) -> SlackLifecyclePullRequest {
+    SlackLifecyclePullRequest {
+        number: link.number,
+        title:  None,
+        url:    Some(link.html_url()),
+    }
+}
+
+fn resolve_slack_lifecycle_route_channel(
+    state: &AppState,
+    run_id: RunId,
+    route_name: &str,
+    route: &NotificationRouteSettings,
+    event_name: &str,
+) -> Option<String> {
+    let Some(channel) = route
+        .slack
+        .as_ref()
+        .and_then(|slack| slack.channel.as_ref())
+    else {
+        warn!(
+            run_id = %run_id,
+            notification_route = route_name,
+            event = event_name,
+            "Skipping Slack lifecycle notification route without channel"
+        );
+        return None;
+    };
+
+    let resolved = match channel.resolve(|name| (state.env_lookup)(name)) {
+        Ok(resolved) => resolved.value,
+        Err(err) => {
+            warn!(
+                run_id = %run_id,
+                notification_route = route_name,
+                event = event_name,
+                error = %err,
+                "Skipping Slack lifecycle notification route with unresolved channel"
+            );
+            return None;
+        }
+    };
+    if resolved.trim().is_empty() {
+        warn!(
+            run_id = %run_id,
+            notification_route = route_name,
+            event = event_name,
+            "Skipping Slack lifecycle notification route with empty channel"
+        );
+        return None;
+    }
+    Some(resolved)
+}
+
 /// Shared application state for the server.
 pub struct AppState {
     runs: Mutex<HashMap<RunId, ManagedRun>>,
@@ -623,6 +943,7 @@ pub struct AppState {
     pub(super) server_secrets: ServerSecrets,
     pub(crate) llm_source: Arc<dyn CredentialSource>,
     manifest_run_defaults: RwLock<Arc<RunLayer>>,
+    manifest_environment_defaults: RwLock<Arc<MergeMap<EnvironmentLayer>>>,
     manifest_run_settings: RwLock<std::result::Result<RunNamespace, SharedError>>,
     pub(crate) server_settings: RwLock<Arc<ServerSettings>>,
     catalog: RwLock<Arc<Catalog>>,
@@ -734,10 +1055,11 @@ pub(crate) struct AppStateConfig {
 
 #[derive(Clone)]
 pub(crate) struct ResolvedAppStateSettings {
-    pub(crate) server_settings:       ServerSettings,
-    pub(crate) manifest_run_defaults: RunLayer,
-    pub(crate) manifest_run_settings: std::result::Result<RunNamespace, SharedError>,
-    pub(crate) llm_catalog_settings:  LlmCatalogSettings,
+    pub(crate) server_settings:               ServerSettings,
+    pub(crate) manifest_run_defaults:         RunLayer,
+    pub(crate) manifest_environment_defaults: MergeMap<EnvironmentLayer>,
+    pub(crate) manifest_run_settings:         std::result::Result<RunNamespace, SharedError>,
+    pub(crate) llm_catalog_settings:          LlmCatalogSettings,
 }
 
 fn accumulate_billing_rollup(
@@ -760,6 +1082,7 @@ pub(crate) fn run_stage_from_stage_id(
     wall_time_ms: Option<u64>,
     started_at: Option<chrono::DateTime<chrono::Utc>>,
     handler: StageHandler,
+    provider_used: Option<StageModelUsage>,
 ) -> RunStage {
     RunStage {
         id: stage_id.to_string(),
@@ -770,6 +1093,7 @@ pub(crate) fn run_stage_from_stage_id(
         node_id: stage_id.node_id().to_string(),
         visit: std::num::NonZeroU32::new(stage_id.visit())
             .expect("StageId stores a non-zero visit"),
+        provider_used,
         started_at,
     }
 }
@@ -781,6 +1105,15 @@ impl AppState {
                 .manifest_run_defaults
                 .read()
                 .expect("manifest run defaults lock poisoned"),
+        )
+    }
+
+    pub(crate) fn manifest_environment_defaults(&self) -> Arc<MergeMap<EnvironmentLayer>> {
+        Arc::clone(
+            &self
+                .manifest_environment_defaults
+                .read()
+                .expect("manifest environment defaults lock poisoned"),
         )
     }
 
@@ -1031,11 +1364,13 @@ impl AppState {
         let ResolvedAppStateSettings {
             server_settings,
             manifest_run_defaults,
+            manifest_environment_defaults,
             manifest_run_settings,
             llm_catalog_settings,
         } = resolved_settings;
         let server_settings = Arc::new(server_settings);
         let manifest_run_defaults = Arc::new(manifest_run_defaults);
+        let manifest_environment_defaults = Arc::new(manifest_environment_defaults);
         let catalog = Arc::new(
             Catalog::from_builtin_with_overrides(&llm_catalog_settings)
                 .context("building LLM model catalog")?,
@@ -1047,6 +1382,10 @@ impl AppState {
             .manifest_run_defaults
             .write()
             .expect("manifest run defaults lock poisoned") = manifest_run_defaults;
+        *self
+            .manifest_environment_defaults
+            .write()
+            .expect("manifest environment defaults lock poisoned") = manifest_environment_defaults;
         *self
             .manifest_run_settings
             .write()
@@ -1124,7 +1463,7 @@ fn start_optional_slack_service(state: &Arc<AppState>) {
                     // which case `question_to_blocks` simply omits the link.
                     let run_web_url = event_state.run_web_url(&envelope.event.run_id);
                     event_service
-                        .handle_event(&envelope.event, run_web_url.as_deref())
+                        .handle_event(event_state.as_ref(), &envelope, run_web_url.as_deref())
                         .await;
                 }
                 Err(RecvError::Lagged(_)) => {}
@@ -1663,12 +2002,8 @@ fn system_sandbox_provider(
 ) -> String {
     manifest_run_settings.as_ref().map_or_else(
         |_| SandboxProvider::default().to_string(),
-        |settings| settings.sandbox.provider.clone(),
+        |settings| settings.environment.provider.to_string(),
     )
-}
-
-fn clone_sandbox_can_use_github_credentials(provider: &str) -> bool {
-    matches!(provider, "docker" | "daytona")
 }
 
 fn parse_system_duration(raw: &str) -> anyhow::Result<chrono::Duration> {
@@ -1766,13 +2101,15 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
     let (global_event_tx, _) = broadcast::channel(4096);
     let current_server_settings = Arc::new(resolved_settings.server_settings);
     let current_manifest_run_defaults = Arc::new(resolved_settings.manifest_run_defaults);
+    let current_manifest_environment_defaults =
+        Arc::new(resolved_settings.manifest_environment_defaults);
     let current_manifest_run_settings = resolved_settings.manifest_run_settings;
     let current_catalog = Arc::new(
         Catalog::from_builtin_with_overrides(&resolved_settings.llm_catalog_settings)
             .context("building LLM model catalog")?,
     );
     let slack_service = {
-        current_server_settings
+        let default_channel = current_server_settings
             .server
             .integrations
             .slack
@@ -1784,16 +2121,14 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
                     .map(|resolved| resolved.value)
                     .map_err(anyhow::Error::from)
             })
-            .transpose()?
-            .and_then(|default_channel| {
-                resolve_slack_credentials().map(|credentials| {
-                    Arc::new(SlackService::new(
-                        credentials.bot_token,
-                        credentials.app_token,
-                        default_channel,
-                    ))
-                })
-            })
+            .transpose()?;
+        resolve_slack_credentials().map(|credentials| {
+            Arc::new(SlackService::new(
+                credentials.bot_token,
+                credentials.app_token,
+                default_channel,
+            ))
+        })
     };
     let worker_tokens = worker_token_keys_from_server_secrets(&server_secrets)?;
     let github_api_base_url = github_api_base_url.unwrap_or_else(fabro_github::github_api_base_url);
@@ -1816,6 +2151,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         server_secrets,
         llm_source,
         manifest_run_defaults: RwLock::new(current_manifest_run_defaults),
+        manifest_environment_defaults: RwLock::new(current_manifest_environment_defaults),
         manifest_run_settings: RwLock::new(current_manifest_run_settings),
         server_settings: RwLock::new(current_server_settings),
         catalog: RwLock::new(current_catalog),
@@ -1956,7 +2292,13 @@ async fn delete_run_sandbox_resource(
             })?;
     }
 
-    let preserve = projection.spec().settings.run.sandbox.preserve;
+    let preserve = projection
+        .spec()
+        .settings
+        .run
+        .environment
+        .lifecycle
+        .preserve;
     let Some(record) = projection.sandbox else {
         return Ok(DeleteRunOutcome::NoContent);
     };
@@ -2300,7 +2642,7 @@ pub(crate) async fn reconcile_incomplete_runs_on_startup(
 ) -> anyhow::Result<usize> {
     let summaries = state
         .store
-        .list_runs(&fabro_store::ListRunsQuery::default())
+        .list_runs(&fabro_store::ListRunsQuery::default(), chrono::Utc::now())
         .await?;
     let mut reconciled = 0usize;
 
@@ -3214,7 +3556,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         let run_spec = persisted.run_spec();
         let settings = &run_spec.settings.run;
         let clone_can_use_github_credentials = settings.execution.mode != RunMode::DryRun
-            && clone_sandbox_can_use_github_credentials(&settings.sandbox.provider)
+            && settings.environment.provider.is_clone_based()
             && run_spec
                 .repo_origin_url()
                 .is_some_and(|origin| !origin.trim().is_empty());

@@ -6,7 +6,6 @@ use fabro_config::{
     CliLayer, CliOutputLayer, RunGoalLayer, RunLayer, parse_input_overrides, parse_labels,
 };
 use fabro_manifest::{RunOverrideInput, build_run_overrides};
-use fabro_sandbox::SandboxProvider;
 use fabro_types::settings::cli::OutputVerbosity;
 use fabro_types::settings::interp::InterpString;
 
@@ -71,13 +70,11 @@ fn current_dir_or_dot() -> PathBuf {
 pub(crate) fn run_args_overrides(args: &RunArgs) -> Result<ManifestSettingsOverrides> {
     let cwd = current_dir_or_dot();
     let goal = goal_layer_from_args(args.goal.as_deref(), args.goal_file.as_deref(), &cwd)?;
-    let sandbox = args.sandbox.map(SandboxProvider::from);
-    let sandbox_provider = sandbox.as_ref().map(ToString::to_string);
     let mut run = build_run_overrides(RunOverrideInput {
         goal:             None,
         model:            args.model.as_deref(),
         provider:         args.provider.as_deref(),
-        sandbox:          sandbox_provider.as_deref(),
+        environment:      args.environment.as_deref(),
         docker_image:     None,
         preserve_sandbox: sparse_flag(args.preserve_sandbox),
         dry_run:          sparse_flag(args.dry_run),
@@ -96,14 +93,11 @@ pub(crate) fn run_args_overrides(args: &RunArgs) -> Result<ManifestSettingsOverr
 pub(crate) fn preflight_args_overrides(args: &PreflightArgs) -> Result<ManifestSettingsOverrides> {
     let cwd = current_dir_or_dot();
     let goal = goal_layer_from_args(args.goal.as_deref(), args.goal_file.as_deref(), &cwd)?;
-    let sandbox_provider = args
-        .sandbox
-        .map(|sandbox| SandboxProvider::from(sandbox).to_string());
     let mut run = build_run_overrides(RunOverrideInput {
         goal:             None,
         model:            args.model.as_deref(),
         provider:         args.provider.as_deref(),
-        sandbox:          sandbox_provider.as_deref(),
+        environment:      args.environment.as_deref(),
         docker_image:     None,
         preserve_sandbox: None,
         dry_run:          None,

@@ -3,8 +3,11 @@ _version = 1
 [workflow]
 graph = "workflow.fabro"
 
-[run.sandbox]
+[run.environment]
+id = "daytona-medium"
+
+[environments.daytona-medium]
 provider = "daytona"
 
-[run.sandbox.daytona.snapshot]
-name = "daytona-medium"
+[environments.daytona-medium.image]
+ref = "daytona-medium"

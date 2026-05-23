@@ -14,6 +14,7 @@ function makeStage(nodeId: string, visit: number, status: StageState): Stage {
     status,
     duration: "--",
     startedAt: null,
+    providerUsed: null,
   };
 }
 
@@ -29,6 +30,12 @@ describe("mapRunStagesToSidebarStages", () => {
           wall_time_ms: 12500,
           node_id: "apply",
           visit: 1,
+          provider_used: {
+            mode: "prompt",
+            provider: "openai",
+            model: "gpt-5.5",
+            reasoning_effort: "high",
+          },
         },
         {
           id: "apply-changes@2",
@@ -49,6 +56,12 @@ describe("mapRunStagesToSidebarStages", () => {
     expect(result[0].handler).toBe("command");
     expect(result[0].nodeId).toBe("apply");
     expect(result[0].visit).toBe(1);
+    expect(result[0].providerUsed).toEqual({
+      mode: "prompt",
+      provider: "openai",
+      model: "gpt-5.5",
+      reasoning_effort: "high",
+    });
     expect(formatStageLabel(result[0])).toBe("Apply Changes");
 
     expect(result[1].id).toBe("apply-changes@2");

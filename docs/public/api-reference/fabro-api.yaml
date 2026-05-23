@@ -5806,6 +5806,16 @@ components:
         - levels
         - none
 
+    ReasoningEffort:
+      description: Native reasoning-effort level requested for an LLM call.
+      type: string
+      enum:
+        - low
+        - medium
+        - high
+        - xhigh
+        - max
+
     ModelFeatures:
       description: Capability flags for a model.
       type: object
@@ -6572,11 +6582,12 @@ components:
           type: string
         provider:
           type: string
-        sandbox:
+        environment:
           type: string
+          description: Named environment slug to select for the run.
         docker_image:
           type: string
-          description: Per-run Docker sandbox image override.
+          description: Per-run environment image override.
         verbose:
           type: boolean
         dry_run:
@@ -7686,7 +7697,9 @@ components:
             - $ref: "#/components/schemas/StageCompletion"
             - type: "null"
         provider_used:
-          type: ["object", "null"]
+          oneOf:
+            - $ref: "#/components/schemas/StageModelUsage"
+            - type: "null"
           description: Provider and model metadata recorded for the stage attempt.
         diff:
           type: ["string", "null"]
@@ -7729,9 +7742,242 @@ components:
           oneOf:
             - $ref: "#/components/schemas/BillingModelRef"
             - type: "null"
+        todos:
+          oneOf:
+            - $ref: "#/components/schemas/TodoListProjection"
+            - type: "null"
+          description: Projected todo / task list for this stage.
+        subagents:
+          type: array
+          description: Subagents spawned by this stage, in replay/insertion order.
+          items:
+            $ref: "#/components/schemas/SubAgentProjection"
+        skills:
+          $ref: "#/components/schemas/SkillsProjection"
+          description: Agent skills discovered and activated during this stage.
+        mcp_servers:
+          type: array
+          description: MCP servers observed by this stage.
+          items:
+            $ref: "#/components/schemas/McpServerProjection"
         state:
           $ref: "#/components/schemas/StageState"
           description: Lifecycle state of the stage projection.
+
+    SubAgentProjection:
+      description: Current projected state for one subagent spawned by an agent stage.
+      type: object
+      required:
+        - agent_id
+        - depth
+        - task
+        - status
+      properties:
+        agent_id:
+          type: string
+        depth:
+          type: integer
+          minimum: 0
+        task:
+          type: string
+        status:
+          $ref: "#/components/schemas/SubAgentStatus"
+
+    SubAgentStatus:
+      description: Projected lifecycle status for a subagent.
+      oneOf:
+        - $ref: "#/components/schemas/SubAgentStatusRunning"
+        - $ref: "#/components/schemas/SubAgentStatusCompleted"
+        - $ref: "#/components/schemas/SubAgentStatusFailed"
+        - $ref: "#/components/schemas/SubAgentStatusClosed"
+      discriminator:
+        propertyName: kind
+        mapping:
+          running: "#/components/schemas/SubAgentStatusRunning"
+          completed: "#/components/schemas/SubAgentStatusCompleted"
+          failed: "#/components/schemas/SubAgentStatusFailed"
+          closed: "#/components/schemas/SubAgentStatusClosed"
+
+    SubAgentStatusRunning:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum: [running]
+
+    SubAgentStatusCompleted:
+      type: object
+      required:
+        - kind
+        - success
+        - turns_used
+      properties:
+        kind:
+          type: string
+          enum: [completed]
+        success:
+          type: boolean
+        turns_used:
+          type: integer
+          minimum: 0
+
+    SubAgentStatusFailed:
+      type: object
+      required:
+        - kind
+        - error
+      properties:
+        kind:
+          type: string
+          enum: [failed]
+        error:
+          description: Provider/tool error payload captured by the subagent event.
+
+    SubAgentStatusClosed:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum: [closed]
+
+    SkillsProjection:
+      description: Agent skills discovered and activated during a stage.
+      type: object
+      required:
+        - available
+        - activated
+      properties:
+        available:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentSkillSummary"
+        activated:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivatedSkill"
+
+    AgentSkillSummary:
+      description: Summary of an available agent skill.
+      type: object
+      required:
+        - name
+        - description
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+
+    ActivatedSkill:
+      description: One observed agent skill activation.
+      type: object
+      required:
+        - name
+        - source
+      properties:
+        name:
+          type: string
+        source:
+          $ref: "#/components/schemas/AgentSkillActivationSource"
+
+    AgentSkillActivationSource:
+      description: Source that activated an agent skill.
+      type: string
+      enum: [slash, tool]
+
+    McpServerProjection:
+      description: Projected state for one MCP server observed by an agent stage.
+      type: object
+      required:
+        - server_name
+        - tool_count
+        - status
+      properties:
+        server_name:
+          type: string
+        tool_count:
+          type: integer
+          minimum: 0
+        status:
+          $ref: "#/components/schemas/McpServerStatus"
+
+    McpServerStatus:
+      description: Projected MCP server readiness status.
+      oneOf:
+        - $ref: "#/components/schemas/McpServerStatusReady"
+        - $ref: "#/components/schemas/McpServerStatusFailed"
+      discriminator:
+        propertyName: kind
+        mapping:
+          ready: "#/components/schemas/McpServerStatusReady"
+          failed: "#/components/schemas/McpServerStatusFailed"
+
+    McpServerStatusReady:
+      type: object
+      required:
+        - kind
+        - tools
+      properties:
+        kind:
+          type: string
+          enum: [ready]
+        tools:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentMcpToolSummary"
+
+    McpServerStatusFailed:
+      type: object
+      required:
+        - kind
+        - error
+      properties:
+        kind:
+          type: string
+          enum: [failed]
+        error:
+          type: string
+
+    AgentMcpToolSummary:
+      description: Summary of one tool exposed by an MCP server.
+      type: object
+      required:
+        - name
+        - original_name
+      properties:
+        name:
+          type: string
+        original_name:
+          type: string
+
+    StageModelUsage:
+      description: Provider, model, and request-control metadata recorded for a stage attempt.
+      type: object
+      required:
+        - mode
+      properties:
+        mode:
+          type: string
+          description: Source of the stage's model usage metadata.
+          example: agent
+        provider:
+          type: ["string", "null"]
+          example: openai
+        model:
+          type: ["string", "null"]
+          example: gpt-5.5
+        reasoning_effort:
+          oneOf:
+            - $ref: "#/components/schemas/ReasoningEffort"
+            - type: "null"
+        speed:
+          oneOf:
+            - $ref: "#/components/schemas/BillingSpeed"
+            - type: "null"
 
     InterviewOption:
       description: Option stored with an interview question in the event log.
@@ -8023,15 +8269,6 @@ components:
           type: object
           additionalProperties:
             $ref: "#/components/schemas/PendingInterviewRecord"
-        todos_by_list:
-          type: object
-          description: |-
-            Projected todo / task lists, keyed by `list_id`
-            (`openai_plan:<session_id>` or
-            `anthropic_tasks:<root_session_id>`). Built by replaying
-            `todo.created`, `todo.updated`, and `todo.deleted` events.
-          additionalProperties:
-            $ref: "#/components/schemas/TodoListProjection"
         stages:
           type: object
           description: Map from StageId (`node_id@visit`) to stage projection data.
@@ -9181,6 +9418,11 @@ components:
           minimum: 1
           description: 1-based visit count; bumped each time the workflow re-enters this node.
           example: 2
+        provider_used:
+          oneOf:
+            - $ref: "#/components/schemas/StageModelUsage"
+            - type: "null"
+          description: Provider, model, and request controls recorded for the latest stage attempt.
         started_at:
           type: ["string", "null"]
           format: date-time
@@ -10392,12 +10634,17 @@ components:
       required:
         - project
         - workflow
+        - environments
         - run
       properties:
         project:
           $ref: "#/components/schemas/ProjectNamespace"
         workflow:
           $ref: "#/components/schemas/WorkflowNamespace"
+        environments:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/EnvironmentSettings"
         run:
           $ref: "#/components/schemas/RunNamespace"
 
@@ -10452,7 +10699,7 @@ components:
         - clone
         - run_branch
         - meta_branch
-        - sandbox
+        - environment
         - notifications
         - interviews
         - agent
@@ -10492,8 +10739,8 @@ components:
           $ref: "#/components/schemas/RunBranchSettings"
         meta_branch:
           $ref: "#/components/schemas/RunMetaBranchSettings"
-        sandbox:
-          $ref: "#/components/schemas/RunSandboxSettings"
+        environment:
+          $ref: "#/components/schemas/RunEnvironmentSettings"
         notifications:
           type: object
           additionalProperties:
@@ -10662,87 +10909,122 @@ components:
         push:
           type: boolean
 
-    RunSandboxSettings:
+    RunEnvironmentSettings:
       type: object
-      required: [provider, preserve, stop_on_terminal, devcontainer, env, docker, daytona]
+      required: [id, provider, image, resources, network, lifecycle, labels, volumes, env]
       properties:
+        id:
+          type: string
         provider:
-          $ref: "#/components/schemas/SandboxProvider"
-        preserve:
-          type: boolean
-        stop_on_terminal:
-          type: boolean
-        devcontainer:
-          type: boolean
+          $ref: "#/components/schemas/EnvironmentProvider"
+        image:
+          $ref: "#/components/schemas/EnvironmentImageSettings"
+        resources:
+          $ref: "#/components/schemas/EnvironmentResourcesSettings"
+        network:
+          $ref: "#/components/schemas/EnvironmentNetworkSettings"
+        lifecycle:
+          $ref: "#/components/schemas/EnvironmentLifecycleSettings"
+        labels:
+          $ref: "#/components/schemas/StringMap"
+        volumes:
+          type: array
+          items:
+            $ref: "#/components/schemas/EnvironmentVolumeSettings"
         env:
           type: object
           additionalProperties:
             $ref: "#/components/schemas/InterpString"
-        docker:
-          oneOf:
-            - $ref: "#/components/schemas/DockerSettings"
-            - type: "null"
-        daytona:
-          oneOf:
-            - $ref: "#/components/schemas/DaytonaSettings"
-            - type: "null"
 
-    DockerSettings:
+    EnvironmentSettings:
       type: object
-      required: [image, network_mode, memory_limit, cpu_quota, env_vars]
+      required: [provider, image, resources, network, lifecycle, labels, volumes, env]
       properties:
+        provider:
+          $ref: "#/components/schemas/EnvironmentProvider"
         image:
-          type: string
-        network_mode:
-          type: ["string", "null"]
-        memory_limit:
-          type: ["integer", "null"]
-          format: int64
-        cpu_quota:
-          type: ["integer", "null"]
-          format: int64
-        env_vars:
+          $ref: "#/components/schemas/EnvironmentImageSettings"
+        resources:
+          $ref: "#/components/schemas/EnvironmentResourcesSettings"
+        network:
+          $ref: "#/components/schemas/EnvironmentNetworkSettings"
+        lifecycle:
+          $ref: "#/components/schemas/EnvironmentLifecycleSettings"
+        labels:
+          $ref: "#/components/schemas/StringMap"
+        volumes:
+          type: array
+          items:
+            $ref: "#/components/schemas/EnvironmentVolumeSettings"
+        env:
           type: object
           additionalProperties:
             $ref: "#/components/schemas/InterpString"
 
-    DaytonaSettings:
-      type: object
-      required: [auto_stop_interval, labels, snapshot, network]
-      properties:
-        auto_stop_interval:
-          type: ["integer", "null"]
-          format: int32
-        labels:
-          $ref: "#/components/schemas/StringMap"
-        snapshot:
-          oneOf:
-            - $ref: "#/components/schemas/DaytonaSnapshotSettings"
-            - type: "null"
-        network:
-          oneOf:
-            - $ref: "#/components/schemas/DaytonaNetworkLayer"
-            - type: "null"
+    EnvironmentProvider:
+      description: Desired environment provider.
+      type: string
+      enum: [local, docker, daytona]
 
-    DaytonaSnapshotSettings:
+    EnvironmentImageSettings:
       type: object
-      required: [name, cpu, memory_gb, disk_gb, dockerfile]
+      required: [ref, dockerfile]
       properties:
-        name:
-          type: string
-        cpu:
-          type: ["integer", "null"]
-          format: int32
-        memory_gb:
-          type: ["integer", "null"]
-          format: int32
-        disk_gb:
-          type: ["integer", "null"]
-          format: int32
+        ref:
+          type: ["string", "null"]
         dockerfile:
           oneOf:
             - $ref: "#/components/schemas/DockerfileSource"
             - type: "null"
+
+    EnvironmentResourcesSettings:
+      type: object
+      required: [cpu, memory, disk]
+      properties:
+        cpu:
+          type: ["integer", "null"]
+          format: int32
+        memory:
+          type: ["string", "null"]
+        disk:
+          type: ["string", "null"]
+
+    EnvironmentNetworkSettings:
+      type: object
+      required: [mode, allow]
+      properties:
+        mode:
+          $ref: "#/components/schemas/EnvironmentNetworkMode"
+        allow:
+          type: array
+          items:
+            type: string
+
+    EnvironmentNetworkMode:
+      type: string
+      enum: [allow_all, block, cidr_allow_list]
+
+    EnvironmentLifecycleSettings:
+      type: object
+      required: [preserve, stop_on_terminal, auto_stop]
+      properties:
+        preserve:
+          type: boolean
+        stop_on_terminal:
+          type: boolean
+        auto_stop:
+          type: ["string", "null"]
+
+    EnvironmentVolumeSettings:
+      type: object
+      required: [id, mount_path, subpath]
+      properties:
+        id:
+          type: string
+        mount_path:
+          type: string
+        subpath:
+          type: ["string", "null"]
 
     DockerfileSource:
       oneOf:
@@ -10768,23 +11050,6 @@ components:
           enum: [path]
         path:
           type: string
-
-    DaytonaNetworkLayer:
-      description: Daytona network access policy.
-      oneOf:
-        - type: string
-          enum: [block, allow_all]
-        - type: object
-          required: [allow_list]
-          properties:
-            allow_list:
-              type: object
-              required: [allow_list]
-              properties:
-                allow_list:
-                  type: array
-                  items:
-                    type: string
 
     NotificationRouteSettings:
       type: object

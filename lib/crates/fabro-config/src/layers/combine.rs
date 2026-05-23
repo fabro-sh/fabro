@@ -3,7 +3,8 @@ use std::collections::{BTreeMap, HashMap};
 use fabro_model::{AgentProfileKind, BillingPolicy, ProviderAuthConfig};
 use fabro_types::settings::cli::{CliAuthStrategy, OutputFormat, OutputVerbosity};
 use fabro_types::settings::run::{
-    AgentPermissions, ApprovalMode, DaytonaNetworkLayer, MergeStrategy, RunMode,
+    AgentPermissions, ApprovalMode, EnvironmentNetworkMode, EnvironmentProvider, MergeStrategy,
+    RunMode,
 };
 use fabro_types::settings::server::{
     GithubIntegrationStrategy, LogDestination, ObjectStoreProvider, ServerAuthMethod,
@@ -13,11 +14,12 @@ use fabro_types::settings::{Duration, InterpString, Size};
 
 use super::LogFilter;
 use super::cli::{CliAuthLayer, CliLoggingLayer, CliTargetLayer};
+use super::environment::{EnvironmentDockerfileLayer, EnvironmentVolumeLayer};
 use super::llm::{CostRates, CredentialRef, HeaderValueRef, ReasoningEffortFeature};
 use super::run::{
-    DaytonaSnapshotLayer, DaytonaVolumeLayer, HookAgentMarker, HookEntry, HookTlsMode,
-    InterviewProviderLayer, ModelRefOrSplice, NotificationProviderLayer, RunArtifactsLayer,
-    RunCheckpointLayer, RunGoalLayer, RunPrepareLayer, ScmGitHubLayer, StringOrSplice,
+    HookAgentMarker, HookEntry, HookTlsMode, InterviewProviderLayer, ModelRefOrSplice,
+    NotificationProviderLayer, RunArtifactsLayer, RunCheckpointLayer, RunGoalLayer,
+    RunPrepareLayer, ScmGitHubLayer, StringOrSplice,
 };
 use super::server::{
     ObjectStoreLocalLayer, ObjectStoreS3Layer, ServerApiLayer, ServerAuthGithubLayer,
@@ -43,7 +45,7 @@ impl<T: Combine> Combine for Option<T> {
     }
 }
 
-impl Combine for Option<Vec<DaytonaVolumeLayer>> {
+impl Combine for Option<Vec<EnvironmentVolumeLayer>> {
     fn combine(self, other: Self) -> Self {
         self.or(other)
     }
@@ -147,8 +149,9 @@ impl_combine_self!(
     CliAuthLayer,
     CliLoggingLayer,
     CliTargetLayer,
-    DaytonaNetworkLayer,
-    DaytonaSnapshotLayer,
+    EnvironmentNetworkMode,
+    EnvironmentProvider,
+    EnvironmentDockerfileLayer,
     InterviewProviderLayer,
     NotificationProviderLayer,
     RunArtifactsLayer,

@@ -1,5 +1,7 @@
 pub mod config;
 pub mod error;
+#[cfg(any(feature = "docker", feature = "daytona"))]
+pub mod from_environment;
 pub mod sandbox;
 pub mod sandbox_spec;
 

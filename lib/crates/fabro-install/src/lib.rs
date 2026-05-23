@@ -452,8 +452,12 @@ pub fn write_sandbox_settings(
     };
     let root = root_table_mut(doc)?;
     let run = ensure_table(root, "run")?;
-    let sandbox = ensure_table(run, "sandbox")?;
-    sandbox.insert(
+    let environment = ensure_table(run, "environment")?;
+    environment.insert("id".to_string(), toml::Value::String("default".to_string()));
+
+    let environments = ensure_table(root, "environments")?;
+    let default = ensure_table(environments, "default")?;
+    default.insert(
         "provider".to_string(),
         toml::Value::String(provider.to_string()),
     );
@@ -1388,9 +1392,18 @@ stale = "remove-me"
         assert_eq!(
             doc.get("run")
                 .and_then(toml::Value::as_table)
-                .and_then(|run| run.get("sandbox"))
+                .and_then(|run| run.get("environment"))
                 .and_then(toml::Value::as_table)
-                .and_then(|sandbox| sandbox.get("provider"))
+                .and_then(|env| env.get("id"))
+                .and_then(toml::Value::as_str),
+            Some("default")
+        );
+        assert_eq!(
+            doc.get("environments")
+                .and_then(toml::Value::as_table)
+                .and_then(|envs| envs.get("default"))
+                .and_then(toml::Value::as_table)
+                .and_then(|env| env.get("provider"))
                 .and_then(toml::Value::as_str),
             Some("docker")
         );
@@ -1405,9 +1418,18 @@ stale = "remove-me"
         assert_eq!(
             doc.get("run")
                 .and_then(toml::Value::as_table)
-                .and_then(|run| run.get("sandbox"))
+                .and_then(|run| run.get("environment"))
                 .and_then(toml::Value::as_table)
-                .and_then(|sandbox| sandbox.get("provider"))
+                .and_then(|env| env.get("id"))
+                .and_then(toml::Value::as_str),
+            Some("default")
+        );
+        assert_eq!(
+            doc.get("environments")
+                .and_then(toml::Value::as_table)
+                .and_then(|envs| envs.get("default"))
+                .and_then(toml::Value::as_table)
+                .and_then(|env| env.get("provider"))
                 .and_then(toml::Value::as_str),
             Some("daytona")
         );

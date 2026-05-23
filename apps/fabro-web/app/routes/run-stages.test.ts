@@ -5,9 +5,10 @@ import {
   buildThreadDnaItems,
   eventsTabLabel,
   eventsToActivity,
-  extractStageModel,
+  formatStageModelUsageLabel,
   groupConsecutiveTools,
   selectStageRenderer,
+  stageModelUsageTitle,
 } from "./run-stages";
 
 function envelope(seq: number, partial: Partial<EventEnvelope>): EventEnvelope {
@@ -381,60 +382,37 @@ describe("eventsToActivity", () => {
     ]);
   });
 
-  test("extractStageModel pulls model from agent.session.activated, ignoring other stages", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "agent.session.activated",
-        stage_id: "simplify@1",
-        node_id: "simplify",
-        properties: { provider: "anthropic", model: "claude-sonnet-4-5" },
+  test("formatStageModelUsageLabel includes reasoning effort when present", () => {
+    expect(
+      formatStageModelUsageLabel({
+        mode: "agent",
+        provider: "openai",
+        model: "gpt-5.5",
+        reasoning_effort: "high",
+        speed: "fast",
       }),
-      envelope(2, {
-        event: "agent.session.activated",
-        stage_id: "verify@1",
-        node_id: "verify",
-        properties: { provider: "openai", model: "gpt-5" },
-      }),
-    ];
-
-    expect(extractStageModel(events, "simplify@1")).toBe("claude-sonnet-4-5");
-    expect(extractStageModel(events, "verify@1")).toBe("gpt-5");
-    expect(extractStageModel(events, "fmt@1")).toBe(null);
+    ).toBe("gpt-5.5 · high");
   });
 
-  test("extractStageModel uses latest stage event with a model", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "stage.prompt",
-        stage_id: "agent@1",
-        node_id: "agent",
-        properties: { model: "claude-opus-4-5" },
+  test("stageModelUsageTitle includes provider and speed details", () => {
+    expect(
+      stageModelUsageTitle({
+        mode: "prompt",
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        speed: "standard",
       }),
-      envelope(2, {
-        event: "agent.session.activated",
-        stage_id: "agent@1",
-        node_id: "agent",
-        properties: {
-          provider: "anthropic",
-          model: "claude-sonnet-4-6",
-        },
-      }),
-    ];
-
-    expect(extractStageModel(events, "agent@1")).toBe("claude-sonnet-4-6");
+    ).toBe("Provider: anthropic\nModel: claude-sonnet-4-6\nSpeed: standard");
   });
 
-  test("extractStageModel ignores model from unrelated event types", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "agent.message",
-        stage_id: "agent@1",
-        node_id: "agent",
-        properties: { text: "hi", model: "should-be-ignored" },
+  test("formatStageModelUsageLabel returns null when the projection has no model", () => {
+    expect(
+      formatStageModelUsageLabel({
+        mode: "acp",
+        provider: null,
+        model: null,
       }),
-    ];
-
-    expect(extractStageModel(events, "agent@1")).toBe(null);
+    ).toBe(null);
   });
 
   test("ignores unknown event types and events for other stages", () => {

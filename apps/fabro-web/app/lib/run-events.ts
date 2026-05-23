@@ -96,8 +96,8 @@ const STEERING_EVENTS = new Set([
   "agent.steer.buffered",
   "agent.steer.dropped",
 ]);
-// Todo / task mutation events refresh `getRunState` consumers (so the
-// projected `todos_by_list` map updates live) and the run events list.
+// Todo / task mutation events refresh `getRunState` consumers (so per-stage
+// todo projections update live) and the run events list.
 const TODO_EVENTS = new Set([
   "todo.created",
   "todo.updated",

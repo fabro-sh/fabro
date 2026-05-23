@@ -1,265 +1,197 @@
 ---
 title: "Environments"
-description: "Sandbox providers for workflow execution"
+description: "Reusable named execution environments for workflow runs"
 ---
 
-When an agent runs a shell command, edits a file, or searches code, it does so inside a **sandbox**. The sandbox is the execution environment for all tool operations — it controls where commands run, which files are visible, and how much isolation exists between the agent and the host.
+Fabro separates **environments** from **sandboxes**:
 
-Fabro supports three sandbox providers. Each one implements the same interface (file I/O, command execution, grep, glob), so workflows run identically regardless of which provider you choose. The difference is in where and how the tools execute.
+- An **environment** is reusable desired configuration: provider, image, resources, network, lifecycle, labels, volumes, and environment variables.
+- A **sandbox** is the concrete runtime instance Fabro creates for a run from the selected environment.
 
-| Provider | Runs on | Use case | Status |
-|---|---|---|---|
-| `local` | Host machine | Development, trusted workflows | Available |
-| `docker` | Docker container | Reproducible environments, untrusted code | Available |
-| `daytona` | Cloud VM | CI/CD, team-shared runs, SSH debugging | Available |
+Runs select environments by slug:
 
-## Choosing a provider
-
-Set the sandbox provider via CLI flag, [run config TOML](/execution/run-configuration), or server defaults:
-
-```bash
-# CLI flag
-fabro run workflow.fabro --sandbox local
-fabro run workflow.fabro --sandbox docker
-fabro run workflow.fabro --sandbox daytona
+```toml title="workflow.toml"
+[run.environment]
+id = "fabro-dev"
 ```
 
-```toml title="run.toml"
-# Run config TOML
-[run.sandbox]
-provider = "daytona"
+Environment catalogs can live in `settings.toml`, `.fabro/project.toml`, or `workflow.toml`, and merge through the normal settings precedence. The built-in default is `default`, a Docker environment using `buildpack-deps:noble`.
+
+## Defining environments
+
+```toml title="workflow.toml"
+[run.environment]
+id = "fabro-dev"
+
+[environments.fabro-dev]
+provider = "daytona" # local | docker | daytona
+
+[environments.fabro-dev.image]
+ref = "fabro-v11"              # Docker image or Daytona snapshot name
+dockerfile = { path = "Dockerfile" }
+
+[environments.fabro-dev.resources]
+cpu = 8
+memory = "16GB"
+disk = "20GB"
+
+[environments.fabro-dev.network]
+mode = "cidr_allow_list"       # allow_all | block | cidr_allow_list
+allow = ["10.0.0.0/8"]
+
+[environments.fabro-dev.lifecycle]
+preserve = false
+stop_on_terminal = true
+auto_stop = "30m"
+
+[environments.fabro-dev.labels]
+repo = "fabro-sh/fabro"
+
+[[environments.fabro-dev.volumes]]
+id = "vol-agent-state"
+mount_path = "/home/daytona/agent-state"
+subpath = "auth"
+
+[environments.fabro-dev.env]
+NODE_ENV = "development"
 ```
 
-The precedence order is: CLI flag > run config TOML > server defaults > built-in default (`docker`).
+Run-level overrides are sparse and apply only to the selected environment:
 
-## Local
+```toml title="workflow.toml"
+[run.environment]
+id = "fabro-dev"
 
-The local sandbox runs all tool operations directly on the host machine. Use it for trusted workflows, local development, or runs that must operate directly on the current working tree.
+[run.environment.resources]
+memory = "32GB"
 
-### How it works
-
-- **Working directory** — Set to the current directory (or `directory` from the run config). Fabro creates it if it doesn't exist.
-- **Commands** — Executed via `/bin/bash -c` in the working directory.
-- **File operations** — Read and write directly to the host filesystem. Relative paths resolve against the working directory.
-- **Cleanup** — No-op. Local sandbox doesn't create or destroy anything on cleanup.
-
-### Environment variable filtering
-
-The local sandbox filters sensitive environment variables before passing them to commands. Variables ending in `_API_KEY`, `_SECRET`, `_TOKEN`, `_PASSWORD`, or `_CREDENTIAL` are stripped. A safelist of common variables (`PATH`, `HOME`, `USER`, `SHELL`, `LANG`, `TERM`, `TMPDIR`, `GOPATH`, `CARGO_HOME`, `NVM_DIR`) is always passed through.
-
-<Note>
-The local sandbox offers no isolation. Agents can read and modify any file on the host. Use `docker` or `daytona` when running untrusted workflows or when you need a reproducible environment.
-</Note>
-
-## Docker
-
-The Docker sandbox runs all tool operations inside a Docker container. Docker is the built-in default runtime provider. Docker runs use a provider-owned workspace in the container; when the run has a GitHub origin, Fabro clones that repository into the workspace.
-
-### Prerequisites
-
-- Docker Engine running on the host
-- The configured image available locally, or a Docker client that can pull it
-- GitHub credentials configured when cloning private repositories
-
-### How it works
-
-- **Container lifecycle** — On `initialize()`, Fabro pulls the image (if needed), creates a container with `sleep infinity`, and starts it. On `cleanup()`, Fabro stops and removes the container.
-- **Working directory** — Docker runs use a provider-owned workspace inside the container. When a run has a GitHub origin, Fabro clones that repository into the workspace instead of bind-mounting the host source tree.
-- **Git clone** — Docker and Daytona accept GitHub origins for automatic cloning. If the run has a present non-GitHub origin, set `[run.clone] enabled = false` or switch to `local`.
-- **Commands** — Executed via `docker exec` with `/bin/bash -c` inside the container. Timeout and cancellation are supported.
-- **File writes** — Use the Docker API's tar upload to avoid shell escaping issues with special characters.
-- **Platform detection** — The container's `uname -r` is cached at startup.
-
-### Configuration
-
-Configure Docker through `[run.sandbox.docker]`:
-
-```toml title="run.toml"
-[run.sandbox]
-provider = "docker"
-
-[run.sandbox.docker]
-image = "buildpack-deps:noble"
-network_mode = "bridge"
-memory_limit = "4GB"
-cpu_quota = 200000
-```
-
-| Setting | Default | Description |
-|---|---|---|
-| `image` | `buildpack-deps:noble` | Docker image to use |
-| `network_mode` | `bridge` | Docker network mode |
-| `memory_limit` | `4GB` | Memory limit |
-| `cpu_quota` | `200000` | CPU quota (microseconds per 100ms period) |
-
-Set `[run.clone] enabled = false` to start with an empty provider workspace instead of cloning the run's GitHub origin. Use [prepare steps](/execution/run-configuration#runprepare) to clone or create any files the workflow needs.
-
-### Preserving the container
-
-By default, the container is destroyed when the run finishes. To keep it alive for debugging:
-
-```bash
-fabro run workflow.fabro --sandbox docker --preserve-sandbox
-```
-
-Or in the run config:
-
-```toml title="run.toml"
-[run.sandbox]
-provider = "docker"
+[run.environment.lifecycle]
 preserve = true
 ```
 
-When preserved, Fabro prints the container ID so you can reconnect with `docker exec -it <id> bash`.
+`env` and `labels` merge by key. `volumes` replace as a whole list when set at a higher-precedence layer.
+
+## Selecting an environment from the CLI
+
+Use `--environment` with an environment slug:
+
+```bash
+fabro run workflow.fabro --environment fabro-dev
+fabro preflight workflow.fabro --environment ci
+fabro server start --environment default
+```
+
+`--preserve-sandbox` still controls the concrete runtime instance lifecycle for a run. Runtime commands such as `fabro sandbox ssh` keep the word "sandbox" because they operate on an already-created runtime instance.
+
+## Built-in default
+
+```toml
+[run.environment]
+id = "default"
+
+[environments.default]
+provider = "docker"
+
+[environments.default.image]
+ref = "buildpack-deps:noble"
+
+[environments.default.resources]
+cpu = 2
+memory = "4GB"
+
+[environments.default.lifecycle]
+preserve = false
+stop_on_terminal = true
+```
+
+## Provider mappings
+
+| Environment field | Local | Docker | Daytona |
+|---|---|---|---|
+| `image.ref` | Ignored | Docker image | Snapshot name |
+| `image.dockerfile` | Ignored | Warning; ignored | Snapshot Dockerfile; requires `image.ref` |
+| `resources.cpu` | Warning; ignored | `cpu_quota = cpu * 100000` | Snapshot CPU |
+| `resources.memory` | Warning; ignored | Container memory limit | Snapshot memory |
+| `resources.disk` | Warning; ignored | Warning; ignored | Snapshot disk |
+| `network.mode = "allow_all"` | Host network | Docker default bridge | Daytona allow-all |
+| `network.mode = "block"` | Error | Docker `none` network | Daytona block |
+| `network.mode = "cidr_allow_list"` | Error | Error | Daytona CIDR allow-list |
+| `labels` | Warning; ignored | Warning; ignored | Daytona labels |
+| `volumes` | Warning; ignored | Warning; ignored | Daytona volume mounts |
+| `lifecycle.auto_stop` | Warning; ignored | Warning; ignored | Daytona auto-stop |
+| `env` | Process environment overlay | Container environment | Sandbox environment |
+
+## Local
+
+`local` runs tools directly in the resolved working directory. It offers no filesystem or network isolation, so use it only for trusted workflows.
+
+```toml
+[run.environment]
+id = "host"
+
+[environments.host]
+provider = "local"
+```
+
+Fabro hard-errors if a local environment asks for blocked or CIDR-restricted networking because the provider cannot enforce it.
+
+## Docker
+
+Docker runs tools inside a container created from `image.ref`. Docker is the built-in default provider.
+
+```toml
+[run.environment]
+id = "ci"
+
+[environments.ci]
+provider = "docker"
+
+[environments.ci.image]
+ref = "buildpack-deps:noble"
+
+[environments.ci.resources]
+cpu = 2
+memory = "4GB"
+
+[environments.ci.network]
+mode = "block"
+```
+
+Docker and Daytona are clone-based providers. When a run has a GitHub origin, Fabro clones it into the provider workspace. Set `[run.clone] enabled = false` to start with an empty workspace.
 
 ## Daytona
 
-The Daytona sandbox runs all tool operations inside a cloud-hosted VM managed by [Daytona](https://daytona.io). It provides full machine-level isolation, automatic git cloning, and SSH access for debugging.
+Daytona runs tools in a cloud sandbox. `image.ref` is the snapshot name. If `image.dockerfile` is set and the snapshot does not exist, Fabro creates the snapshot; `image.ref` is required so the snapshot has a name.
 
-### Prerequisites
+```toml
+[run.environment]
+id = "cloud"
 
-- A `DAYTONA_API_KEY` environment variable
-- GitHub access configured via `fabro install` or `gh auth login` (for private repository cloning)
-
-The Daytona API key must include `write:snapshots`, `delete:snapshots`, `write:sandboxes`, and `delete:sandboxes`. `fabro install`, `fabro secret set DAYTONA_API_KEY`, and `fabro doctor` validate these scopes before the first run reaches sandbox creation.
-
-### How it works
-
-- **Sandbox lifecycle** — On `initialize()`, Fabro creates a Daytona sandbox (from an image or a snapshot), clones the run's GitHub origin into it when one is available, and waits until it's ready. On `cleanup()`, the sandbox is deleted.
-- **Working directory** — Fixed at `/home/daytona/workspace`. GitHub-origin runs clone the repository there automatically.
-- **Git clone** — Fabro detects the run manifest's GitHub origin URL and branch, converts SSH URLs to HTTPS, and clones into the sandbox. For private repositories, Fabro uses a GitHub App Installation Access Token scoped to the specific repository. Public repositories are cloned without credentials. Set `[run.clone] enabled = false` to create an empty workspace instead.
-- **Commands** — Executed via the Daytona process API. Commands are base64-encoded and piped through `sh` to support pipes, environment variables, and other shell features.
-- **Ephemeral** — Sandboxes are created with `ephemeral: true` and a unique timestamped name (e.g. `fabro-20260305-142301-a3f2`).
-
-### Snapshots
-
-Snapshots let you pre-build an environment image so each run starts with dependencies already installed. If the named snapshot doesn't exist and a `dockerfile` is provided, Fabro creates it automatically and polls until it's ready (up to 10 minutes).
-
-```toml title="run.toml"
-[run.sandbox]
+[environments.cloud]
 provider = "daytona"
 
-[run.sandbox.daytona]
-auto_stop_interval = 60
+[environments.cloud.image]
+ref = "rust-dev"
+dockerfile = { path = "Dockerfile" }
 
-[run.sandbox.daytona.snapshot]
-name = "rust-dev"
+[environments.cloud.resources]
 cpu = 4
 memory = "8GB"
 disk = "20GB"
-dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update && apt-get install -y git ripgrep"
-# Or reference a Dockerfile beside this TOML file:
-# dockerfile = { path = "./Dockerfile" }
+
+[environments.cloud.lifecycle]
+auto_stop = "30m"
+
+[environments.cloud.network]
+mode = "cidr_allow_list"
+allow = ["208.80.154.232/32", "10.0.0.0/8"]
 ```
 
-| Field | Description |
-|---|---|
-| `name` | Snapshot identifier. Reused across runs if it already exists. |
-| `cpu` | CPU cores for the snapshot VM. |
-| `memory` | Memory in GB. |
-| `disk` | Disk in GB. |
-| `dockerfile` | Dockerfile content or `{ path = "..." }` reference for building the snapshot. Required when creating a new snapshot. Paths resolve relative to the TOML file that declares them. |
+Daytona volumes reference existing provider-managed volumes:
 
-If the snapshot already exists and is in `Active` state, Fabro uses it directly. If it's in `Building` or `Pending` state, Fabro polls with exponential backoff until it's ready.
-
-### Volumes
-
-Mount existing Daytona volumes into each sandbox at creation time:
-
-```toml title="run.toml"
-[run.sandbox]
-provider = "daytona"
-
-[[run.sandbox.daytona.volumes]]
-volume_id = "vol-agent-state"
+```toml
+[[environments.cloud.volumes]]
+id = "vol-agent-state"
 mount_path = "/home/daytona/agent-state"
 subpath = "agent-auth"
 ```
-
-Fabro does not create or manage Daytona volumes. Create the volume in Daytona first, then reference its `volume_id` from the run config. Use `subpath` when a shared volume should expose only one prefix to the sandbox.
-
-### Labels
-
-Attach key-value labels to sandboxes for filtering and identification in the Daytona dashboard:
-
-```toml title="run.toml"
-[run.sandbox.daytona.labels]
-project = "fabro"
-env = "ci"
-team = "platform"
-```
-
-When using server defaults, labels are merged — run config labels override default labels on key collisions.
-
-### SSH access
-
-Connect to a running Daytona sandbox via SSH for live debugging:
-
-```bash
-fabro sandbox ssh <run-id>
-```
-
-This creates temporary SSH credentials (valid for 60 minutes) and connects directly.
-
-### Preserving the sandbox
-
-Like Docker, Daytona sandboxes are destroyed on cleanup by default. Use `--preserve-sandbox` to keep them alive:
-
-```bash
-fabro run workflow.fabro --sandbox daytona --preserve-sandbox
-```
-
-Fabro prints the sandbox name so you can find it in the [Daytona dashboard](https://app.daytona.io/dashboard/sandboxes).
-
-### Auto-stop
-
-The `auto_stop_interval` setting (in minutes) tells Daytona to stop the sandbox after a period of inactivity. This saves costs for long-running sandboxes that may sit idle:
-
-```toml title="run.toml"
-[run.sandbox.daytona]
-auto_stop_interval = 30
-```
-
-## Sandboxing
-
-Sandboxes isolate agent execution from the host machine. When an agent runs a shell command, edits a file, or searches code, it does so inside a sandbox — preventing unintended side effects and providing a reproducible environment for each run.
-
-### Filesystem
-
-Each provider offers a different level of filesystem isolation:
-
-| Provider | Isolation | What agents can access |
-|---|---|---|
-| `local` | None | The entire host filesystem. Agents can read and modify any file. |
-| `docker` | Container-level | The provider-owned workspace (`/workspace` by default) and whatever is in the container image. Host files are not bind-mounted into the container. |
-| `daytona` | Full machine | A cloud VM with the repository cloned into `/home/daytona/workspace`. The host filesystem is completely inaccessible. |
-
-For `local`, Fabro filters sensitive environment variables (those ending in `_API_KEY`, `_SECRET`, `_TOKEN`, `_PASSWORD`, or `_CREDENTIAL`) but does not restrict file access. Use `docker` or `daytona` when running untrusted workflows.
-
-### Network
-
-Each provider handles outbound network access differently:
-
-| Provider | Default | Controls |
-|---|---|---|
-| `local` | Full access | No network isolation. Agents have the same network access as the host. |
-| `docker` | Bridge network | Set via the `network_mode` config option. Supports all Docker network modes (`bridge`, `none`, `host`, etc.). |
-| `daytona` | Full access | Configurable via the `network` setting with three modes: `"allow_all"`, `"block"`, or CIDR-based allow lists. |
-
-For Daytona, network access is configured in the `[run.sandbox.daytona]` section:
-
-```toml title="run.toml"
-# Block all egress
-[run.sandbox.daytona]
-network = "block"
-
-# Allow only specific CIDRs
-[run.sandbox.daytona]
-network = { allow_list = ["208.80.154.232/32", "10.0.0.0/8"] }
-```
-
-When using server defaults, the run config `network` overrides the server default. If neither specifies `network`, Daytona's own default (full access) applies.
-
-## Safety guardrails
-
-Regardless of which provider you use, Fabro applies a **read-before-write** guardrail. Agents must read a file (via `read_file` or `grep`) before they can modify it with `write_file` or `delete_file`. Writing to new files that don't yet exist is always allowed. This prevents agents from blindly overwriting files they haven't inspected.
