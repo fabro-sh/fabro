@@ -28,11 +28,11 @@ import { EmptyState } from "../components/state";
 import { InlineMarkdown } from "../components/inline-markdown";
 import { PullRequestChip } from "../components/pull-request-chip";
 import { useToast } from "../components/toast";
-import { mutateBoardRunCaches } from "../lib/board-cache";
+import { mutateRunListCaches } from "../lib/board-cache";
 import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
-import { useAuthConfig, useBoardsRuns, useSystemInfo } from "../lib/queries";
+import { useAllRuns, useAuthConfig, useSystemInfo } from "../lib/queries";
 import { archiveRun, canArchive } from "../lib/run-actions";
-import type { BoardColumn, PaginatedBoardRunList } from "@qltysh/fabro-api-client";
+import type { BoardColumn, Run } from "@qltysh/fabro-api-client";
 
 export { shouldRefreshBoardForEvent };
 
@@ -52,15 +52,14 @@ const columnStyles: Record<BoardColumn, ColumnStyle> = {
   succeeded:    { actions: [] },
   failed:       { actions: [] },
   archived:     { actions: [] },
+  removing:     { actions: [] },
 };
 
 const defaultColumnStyle: ColumnStyle = { actions: [] };
-const defaultColumnColors = { dot: "bg-fg-muted", text: "text-fg-muted" };
+const defaultColumnColors = { label: "", dot: "bg-fg-muted", text: "text-fg-muted" };
 
 interface BoardRunsResponse {
-  columns: PaginatedBoardRunList["columns"];
-  data: PaginatedBoardRunList["data"];
-  meta: PaginatedBoardRunList["meta"];
+  data: Run[];
 }
 
 type Column = {
@@ -72,26 +71,34 @@ type Column = {
   items: RunItem[];
 };
 
-function buildSkeletonColumns(includeArchived: boolean): Column[] {
-  return columnStatuses
-    .filter((id) => includeArchived || id !== "archived")
-    .map((id) => {
-      const colors = columnStatusDisplay[id];
-      return {
-        id,
-        name: colors.label,
-        dot: colors.dot,
-        text: colors.text,
-        ...(columnStyles[id] ?? defaultColumnStyle),
-        items: [],
-      };
-    });
+function visibleBoardColumnIds(includeArchived: boolean): readonly BoardColumn[] {
+  return columnStatuses.filter(
+    (id) => id !== "removing" && (includeArchived || id !== "archived"),
+  );
 }
 
-export function buildBoardColumns(response: BoardRunsResponse): Column[] {
-  const grouped = new Map<string, RunItem[]>();
-  for (const col of response.columns) {
-    grouped.set(col.id, []);
+function buildSkeletonColumns(includeArchived: boolean): Column[] {
+  return visibleBoardColumnIds(includeArchived).map((id) => {
+    const colors = columnStatusDisplay[id];
+    return {
+      id,
+      name: colors.label,
+      dot: colors.dot,
+      text: colors.text,
+      ...(columnStyles[id] ?? defaultColumnStyle),
+      items: [],
+    };
+  });
+}
+
+export function buildBoardColumns(
+  response: BoardRunsResponse,
+  includeArchived: boolean,
+): Column[] {
+  const columnIds = visibleBoardColumnIds(includeArchived);
+  const grouped = new Map<BoardColumn, RunItem[]>();
+  for (const id of columnIds) {
+    grouped.set(id, []);
   }
   for (const apiRun of response.data) {
     const column = columnForRun(apiRun);
@@ -100,16 +107,15 @@ export function buildBoardColumns(response: BoardRunsResponse): Column[] {
     }
   }
 
-  return response.columns.map((col) => {
-    const id = col.id;
+  return columnIds.map((id) => {
     const colors = columnStatusDisplay[id] ?? defaultColumnColors;
     return {
       id,
-      name: col.name,
+      name: colors.label,
       dot: colors.dot,
       text: colors.text,
       ...(columnStyles[id] ?? defaultColumnStyle),
-      items: grouped.get(col.id) ?? [],
+      items: grouped.get(id) ?? [],
     };
   });
 }
@@ -466,7 +472,7 @@ function ColumnActionsMenu({ column }: { column: Column }) {
       }
     } finally {
       setPending(false);
-      mutateBoardRunCaches(mutate);
+      mutateRunListCaches(mutate);
     }
   }
 
@@ -869,7 +875,7 @@ export default function Runs() {
   const setIncludeArchived = (value: boolean) => updateParam("archived", value ? "1" : null);
   const setView = (value: ViewMode) => updateParam("view", value === "columns" ? null : value);
 
-  const boardRuns = useBoardsRuns(includeArchived);
+  const boardRuns = useAllRuns({ includeArchived });
   const authConfig = useAuthConfig();
   const systemInfo = useSystemInfo();
   const isLandingReady =
@@ -879,7 +885,7 @@ export default function Runs() {
   const initialColumns = useMemo(
     () =>
       boardRuns.data
-        ? buildBoardColumns(boardRuns.data)
+        ? buildBoardColumns(boardRuns.data, includeArchived)
         : buildSkeletonColumns(includeArchived),
     [boardRuns.data, includeArchived],
   );

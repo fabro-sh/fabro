@@ -7401,7 +7401,6 @@ async fn worker_token_is_rejected_on_user_only_routes() {
         (Method::POST, "/validate".to_string()),
         (Method::POST, "/graph/render".to_string()),
         (Method::GET, "/attach".to_string()),
-        (Method::GET, "/boards/runs".to_string()),
         (Method::DELETE, format!("/runs/{run_id}")),
         (Method::GET, format!("/runs/{run_id}/attach")),
         (Method::GET, format!("/runs/{run_id}/checkpoint")),
@@ -9614,26 +9613,26 @@ async fn cancel_queued_run_succeeds() {
     assert_eq!(run_json_status(&body)["kind"], "failed");
     assert_eq!(run_json_status(&body)["reason"], "cancelled");
 
-    // Cancelled runs appear on the board in the "failed" column
+    // Cancelled runs appear in the runs list with a "failed" status
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs"))
+        .uri(api("/runs"))
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
     let body = body_json(response.into_body()).await;
     let run_id_str = run_id.to_string();
-    let board_item = body["data"]
+    let list_item = body["data"]
         .as_array()
         .unwrap()
         .iter()
         .find(|item| run_json_id(item) == Some(run_id_str.as_str()));
     assert!(
-        board_item.is_some(),
-        "cancelled run should appear on the board"
+        list_item.is_some(),
+        "cancelled run should appear in the list"
     );
     assert_eq!(
-        run_json_status(board_item.unwrap())["kind"].as_str(),
+        run_json_status(list_item.unwrap())["kind"].as_str(),
         Some("failed"),
         "cancelled run should preserve the failed lifecycle status"
     );
@@ -9744,11 +9743,10 @@ async fn pause_run_sets_pending_control_on_board_response() {
     let body = body_json(response.into_body()).await;
     assert_eq!(run_json_pending_control(&body).as_str(), Some("pause"));
 
-    // Verify the run appears on the board (store has Submitted status →
-    // "queued" column)
+    // Verify the run appears in the runs list (store has Submitted status)
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs"))
+        .uri(api("/runs"))
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
@@ -10263,12 +10261,10 @@ async fn concurrency_limit_respected() {
     // Give scheduler time to pick up the first run
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    // The board only shows runs with a visible board column. With
-    // max_concurrent_runs=1, at most one run should land in the live
-    // "running" column.
+    // With max_concurrent_runs=1, at most one run should be live "running".
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs"))
+        .uri(api("/runs"))
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
@@ -10276,11 +10272,11 @@ async fn concurrency_limit_respected() {
     let items = body["data"].as_array().unwrap();
     let active_count = items
         .iter()
-        .filter(|item| item["column"].as_str() == Some("running"))
+        .filter(|item| run_json_status(item)["kind"].as_str() == Some("running"))
         .count();
     assert!(
         active_count <= 1,
-        "expected at most 1 active run on the board, got {active_count}"
+        "expected at most 1 active run, got {active_count}"
     );
 }
 
@@ -10426,12 +10422,12 @@ reasoning = false
 }
 
 #[tokio::test]
-async fn demo_boards_runs_returns_run_list_items() {
+async fn demo_list_runs_returns_run_list_items() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(state);
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs"))
+        .uri(api("/runs"))
         .header("X-Fabro-Demo", "1")
         .body(Body::empty())
         .unwrap();
@@ -10551,12 +10547,11 @@ async fn demo_workflows_return_list_detail_and_runs() {
 }
 
 #[tokio::test]
-async fn boards_runs_returns_run_list_items_with_board_columns() {
+async fn list_runs_returns_run_list_items() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = create_and_start_run(&app, MINIMAL_DOT).await;
 
-    // Set run to running so it appears on the board
     {
         let id = run_id.parse::<RunId>().unwrap();
         let mut runs = state.runs.lock().expect("runs lock poisoned");
@@ -10566,7 +10561,7 @@ async fn boards_runs_returns_run_list_items_with_board_columns() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs"))
+        .uri(api("/runs"))
         .body(Body::empty())
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
@@ -10575,7 +10570,7 @@ async fn boards_runs_returns_run_list_items_with_board_columns() {
     let item = data
         .iter()
         .find(|i| run_json_id(i) == Some(&run_id))
-        .expect("run should be in board");
+        .expect("run should be in list");
     assert!(item["goal"].is_string());
     assert!(item["title"].is_string());
     assert!(item["repository"].is_object());
@@ -10590,12 +10585,12 @@ async fn boards_runs_returns_run_list_items_with_board_columns() {
 }
 
 #[tokio::test]
-async fn boards_runs_excludes_removing_status() {
+async fn list_runs_excludes_removing_status_by_default() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
 
-    // A run in Removing status should not appear on the board
+    // A run in Removing status should not appear by default
     create_durable_run_with_events(&state, run_id, &[
         workflow_event::Event::RunSubmitted {
             definition_blob: None,
@@ -10608,20 +10603,37 @@ async fn boards_runs_excludes_removing_status() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs"))
+        .uri(api("/runs"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let data = body["data"].as_array().expect("data should be array");
+    assert!(
+        !data
+            .iter()
+            .any(|i| run_json_id(i) == Some(&run_id.to_string())),
+        "removing run should not appear by default"
+    );
+
+    // ?status=removing opts the bucket in.
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/runs?status=removing"))
         .body(Body::empty())
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
     let body = response_json!(response, StatusCode::OK).await;
     let data = body["data"].as_array().expect("data should be array");
-    let found = data
-        .iter()
-        .any(|i| i["run_id"].as_str() == Some(&run_id.to_string()));
-    assert!(!found, "removing run should not appear on the board");
+    assert!(
+        data.iter()
+            .any(|i| run_json_id(i) == Some(&run_id.to_string())),
+        "?status=removing should opt removing runs in"
+    );
 }
 
 #[tokio::test]
-async fn boards_runs_excludes_archived_by_default() {
+async fn list_runs_excludes_archived_by_default() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
@@ -10649,7 +10661,7 @@ async fn boards_runs_excludes_archived_by_default() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs"))
+        .uri(api("/runs"))
         .body(Body::empty())
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
@@ -10658,18 +10670,13 @@ async fn boards_runs_excludes_archived_by_default() {
     assert!(
         !data
             .iter()
-            .any(|i| i["run_id"].as_str() == Some(&run_id.to_string())),
+            .any(|i| run_json_id(i) == Some(&run_id.to_string())),
         "archived run should be hidden when include_archived is unset",
-    );
-    let columns = body["columns"].as_array().expect("columns should be array");
-    assert!(
-        !columns.iter().any(|c| c["id"].as_str() == Some("archived")),
-        "archived column should not appear in default response",
     );
 }
 
 #[tokio::test]
-async fn boards_runs_includes_archived_when_flag_set() {
+async fn list_runs_includes_archived_when_flag_set() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let archived_id = fixtures::RUN_1;
@@ -10717,7 +10724,7 @@ async fn boards_runs_includes_archived_when_flag_set() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs?include_archived=true"))
+        .uri(api("/runs?include_archived=true"))
         .body(Body::empty())
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
@@ -10742,21 +10749,6 @@ async fn boards_runs_includes_archived_when_flag_set() {
         run_json_status(succeeded_item)["kind"].as_str().unwrap(),
         "succeeded"
     );
-
-    let columns = body["columns"].as_array().expect("columns should be array");
-    let column_ids: Vec<_> = columns
-        .iter()
-        .map(|c| c["id"].as_str().unwrap().to_string())
-        .collect();
-    assert_eq!(column_ids, vec![
-        "queued",
-        "initializing",
-        "running",
-        "blocked",
-        "succeeded",
-        "failed",
-        "archived",
-    ],);
 }
 
 #[tokio::test]
@@ -10836,7 +10828,7 @@ async fn get_run_exposes_canonical_operator_statuses() {
 }
 
 #[tokio::test]
-async fn boards_runs_maps_statuses_to_columns() {
+async fn list_runs_preserves_underlying_run_status_payloads() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
 
@@ -10931,7 +10923,7 @@ async fn boards_runs_maps_statuses_to_columns() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs"))
+        .uri(api("/runs"))
         .body(Body::empty())
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
@@ -10977,23 +10969,12 @@ async fn boards_runs_maps_statuses_to_columns() {
     );
     assert!(
         blocked_item["current_question"].is_object(),
-        "blocked board item should include the current question"
-    );
-
-    // Verify columns are included in the response
-    let columns = body["columns"].as_array().expect("columns should be array");
-    assert!(!columns.is_empty());
-    assert!(columns.iter().any(|c| c["id"].as_str() == Some("running")));
-    assert!(columns.iter().any(|c| c["id"].as_str() == Some("blocked")));
-    assert!(
-        columns
-            .iter()
-            .any(|c| c["id"].as_str() == Some("succeeded"))
+        "blocked item should include the current question"
     );
 }
 
 #[tokio::test]
-async fn boards_runs_includes_live_board_metadata_from_run_state() {
+async fn list_runs_includes_live_metadata_from_run_state() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = create_and_start_run(&app, MINIMAL_DOT)
@@ -11044,7 +11025,7 @@ async fn boards_runs_includes_live_board_metadata_from_run_state() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs"))
+        .uri(api("/runs"))
         .body(Body::empty())
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
@@ -11065,7 +11046,7 @@ async fn boards_runs_includes_live_board_metadata_from_run_state() {
 }
 
 #[tokio::test]
-async fn boards_runs_page_limit_preserves_metadata_for_paged_items() {
+async fn list_runs_page_limit_preserves_metadata_for_paged_items() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
 
@@ -11104,7 +11085,7 @@ async fn boards_runs_page_limit_preserves_metadata_for_paged_items() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs?page[limit]=1"))
+        .uri(api("/runs?page[limit]=1"))
         .body(Body::empty())
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
@@ -11119,6 +11100,212 @@ async fn boards_runs_page_limit_preserves_metadata_for_paged_items() {
         .as_str()
         .expect("paged item should still include sandbox metadata");
     assert!(matches!(sandbox_id, "sb-first" | "sb-second"));
+}
+
+#[tokio::test]
+async fn list_runs_status_filter_accepts_repeated_values() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+
+    // Running run (will map to BoardColumn::Running)
+    let running_id = fixtures::RUN_1;
+    create_durable_run_with_events(&state, running_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+    ])
+    .await;
+
+    // Succeeded run (BoardColumn::Succeeded)
+    let succeeded_id = fixtures::RUN_2;
+    create_durable_run_with_events(&state, succeeded_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+        workflow_event::Event::WorkflowRunCompleted {
+            timing:               fabro_types::RunTiming::wall_only(1000),
+            artifact_count:       0,
+            status:               "succeeded".to_string(),
+            reason:               SuccessReason::Completed,
+            total_usd_micros:     None,
+            final_git_commit_sha: None,
+            final_patch:          None,
+            diff_summary:         None,
+            billing:              None,
+        },
+    ])
+    .await;
+
+    // Queued run (BoardColumn::Queued via Submitted)
+    let queued_id = fixtures::RUN_3;
+    create_durable_run_with_events(&state, queued_id, &[workflow_event::Event::RunSubmitted {
+        definition_blob: None,
+    }])
+    .await;
+
+    // Single value: only running.
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/runs?status=running"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let ids: Vec<&str> = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(run_json_id)
+        .collect();
+    assert!(ids.contains(&running_id.to_string().as_str()));
+    assert!(!ids.contains(&succeeded_id.to_string().as_str()));
+    assert!(!ids.contains(&queued_id.to_string().as_str()));
+
+    // Repeated values: running + succeeded.
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/runs?status=running&status=succeeded"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let ids: Vec<&str> = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(run_json_id)
+        .collect();
+    assert!(ids.contains(&running_id.to_string().as_str()));
+    assert!(ids.contains(&succeeded_id.to_string().as_str()));
+    assert!(!ids.contains(&queued_id.to_string().as_str()));
+}
+
+#[tokio::test]
+async fn list_runs_sort_direction_reverses_order_with_stable_tiebreak() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+
+    // All fixtures share timestamp=0; the id-desc tiebreak controls order.
+    let ids = [fixtures::RUN_1, fixtures::RUN_2, fixtures::RUN_3];
+    for id in &ids {
+        create_durable_run_with_events(&state, *id, &[
+            workflow_event::Event::RunSubmitted {
+                definition_blob: None,
+            },
+            workflow_event::Event::RunStarting,
+            workflow_event::Event::RunRunning,
+        ])
+        .await;
+    }
+
+    // Default (sort=created_at desc): tiebreak puts higher ids first.
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/runs"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let observed: Vec<String> = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(run_json_id)
+        .map(str::to_string)
+        .collect();
+    let mut expected: Vec<String> = ids.iter().map(|id| id.to_string()).collect();
+    expected.sort_by(|a, b| b.cmp(a)); // desc by id
+    assert_eq!(observed, expected, "default desc order with id tiebreak");
+
+    // Ascending: timestamps still tie, then id desc tiebreak still applies.
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/runs?sort=created_at&direction=asc"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let observed: Vec<String> = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(run_json_id)
+        .map(str::to_string)
+        .collect();
+    assert_eq!(
+        observed, expected,
+        "asc still uses id-desc tiebreak for tied keys"
+    );
+}
+
+#[tokio::test]
+async fn list_runs_sort_by_status_groups_by_bucket() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+
+    // BoardColumn enum order: queued < initializing < running < blocked <
+    // succeeded < failed < archived < removing. Use three distinct buckets.
+    let queued_id = fixtures::RUN_1;
+    create_durable_run_with_events(&state, queued_id, &[workflow_event::Event::RunSubmitted {
+        definition_blob: None,
+    }])
+    .await;
+
+    let succeeded_id = fixtures::RUN_2;
+    create_durable_run_with_events(&state, succeeded_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+        workflow_event::Event::WorkflowRunCompleted {
+            timing:               fabro_types::RunTiming::wall_only(1000),
+            artifact_count:       0,
+            status:               "succeeded".to_string(),
+            reason:               SuccessReason::Completed,
+            total_usd_micros:     None,
+            final_git_commit_sha: None,
+            final_patch:          None,
+            diff_summary:         None,
+            billing:              None,
+        },
+    ])
+    .await;
+
+    let running_id = fixtures::RUN_3;
+    create_durable_run_with_events(&state, running_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+    ])
+    .await;
+
+    // sort=status asc: queued < running < succeeded.
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/runs?sort=status&direction=asc"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let observed: Vec<String> = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(run_json_id)
+        .map(str::to_string)
+        .collect();
+    assert_eq!(observed, vec![
+        queued_id.to_string(),
+        running_id.to_string(),
+        succeeded_id.to_string(),
+    ]);
 }
 
 #[tokio::test]

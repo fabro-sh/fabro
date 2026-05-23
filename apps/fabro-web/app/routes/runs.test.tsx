@@ -59,44 +59,31 @@ function boardRun(id: string, column: BoardColumn, questionText?: string): Run {
 
 describe("runs route board mapping", () => {
   test("keeps blocked runs in the blocked lane and preserves question text", () => {
-    const columns = buildBoardColumns({
-      columns: [
-        { id: "queued", name: "Queued" },
-        { id: "initializing", name: "Initializing" },
-        { id: "running", name: "Running" },
-        { id: "blocked", name: "Blocked" },
-        { id: "succeeded", name: "Succeeded" },
-        { id: "failed", name: "Failed" },
-      ],
-      data: [
-        boardRun("paused-run", "running"),
-        boardRun("blocked-run", "blocked", "Older unresolved question?"),
-      ],
-      meta: { has_more: false },
-    });
+    const columns = buildBoardColumns(
+      {
+        data: [
+          boardRun("paused-run", "running"),
+          boardRun("blocked-run", "blocked", "Older unresolved question?"),
+        ],
+      },
+      false,
+    );
 
     expect(columns.find((column) => column.id === "running")?.items.map((item) => item.id)).toContain("paused-run");
     expect(columns.find((column) => column.id === "blocked")?.items.map((item) => item.id)).toContain("blocked-run");
     expect(columns.find((column) => column.id === "blocked")?.items[0]?.question).toBe("Older unresolved question?");
   });
 
-  test("renders an archived column when the response includes one", () => {
-    const columns = buildBoardColumns({
-      columns: [
-        { id: "queued", name: "Queued" },
-        { id: "initializing", name: "Initializing" },
-        { id: "running", name: "Running" },
-        { id: "blocked", name: "Blocked" },
-        { id: "succeeded", name: "Succeeded" },
-        { id: "failed", name: "Failed" },
-        { id: "archived", name: "Archived" },
-      ],
-      data: [
-        boardRun("succeeded-run", "succeeded"),
-        boardRun("archived-run", "archived"),
-      ],
-      meta: { has_more: false },
-    });
+  test("renders an archived column when includeArchived is true", () => {
+    const columns = buildBoardColumns(
+      {
+        data: [
+          boardRun("succeeded-run", "succeeded"),
+          boardRun("archived-run", "archived"),
+        ],
+      },
+      true,
+    );
 
     expect(columns.map((column) => column.id)).toEqual([
       "queued",
@@ -115,52 +102,28 @@ describe("runs route board mapping", () => {
     ).toEqual(["succeeded-run"]);
   });
 
-  test("omits the archived column when the response does not include it", () => {
-    const columns = buildBoardColumns({
-      columns: [
-        { id: "queued", name: "Queued" },
-        { id: "initializing", name: "Initializing" },
-        { id: "running", name: "Running" },
-        { id: "blocked", name: "Blocked" },
-        { id: "succeeded", name: "Succeeded" },
-        { id: "failed", name: "Failed" },
-      ],
-      data: [boardRun("succeeded-run", "succeeded")],
-      meta: { has_more: false },
-    });
+  test("omits the archived column when includeArchived is false", () => {
+    const columns = buildBoardColumns(
+      { data: [boardRun("succeeded-run", "succeeded")] },
+      false,
+    );
 
     expect(columns.some((column) => column.id === "archived")).toBe(false);
   });
 
-  test("puts archived last when the archived view is active", () => {
-    const columns = buildBoardColumns({
-      columns: [
-        { id: "queued", name: "Queued" },
-        { id: "initializing", name: "Initializing" },
-        { id: "running", name: "Running" },
-        { id: "blocked", name: "Blocked" },
-        { id: "succeeded", name: "Succeeded" },
-        { id: "failed", name: "Failed" },
-        { id: "archived", name: "Archived" },
-      ],
-      data: [
-        boardRun("running-run", "running"),
-        boardRun("succeeded-run", "succeeded"),
-        boardRun("archived-run", "archived"),
-      ],
-      meta: { has_more: false },
-    });
+  test("places the archived column last when active", () => {
+    const columns = buildBoardColumns(
+      {
+        data: [
+          boardRun("running-run", "running"),
+          boardRun("succeeded-run", "succeeded"),
+          boardRun("archived-run", "archived"),
+        ],
+      },
+      true,
+    );
 
     expect(placeArchivedColumnLast(columns, true).map((column) => column.id)).toEqual([
-      "queued",
-      "initializing",
-      "running",
-      "blocked",
-      "succeeded",
-      "failed",
-      "archived",
-    ]);
-    expect(placeArchivedColumnLast(columns, false).map((column) => column.id)).toEqual([
       "queued",
       "initializing",
       "running",

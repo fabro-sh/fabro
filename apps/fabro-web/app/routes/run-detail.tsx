@@ -61,6 +61,7 @@ import type {
   WorkflowRef,
 } from "@qltysh/fabro-api-client";
 import { useAskFabroLayout } from "../lib/ask-fabro-layout";
+import { mutateRunListCaches } from "../lib/board-cache";
 import { useDemoMode } from "../lib/demo-mode";
 import { useSWRConfig } from "swr";
 import {
@@ -517,8 +518,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
     setDeletePending(true);
     try {
       await deleteRun(params.id);
-      void mutate(queryKeys.boards.runs());
-      void mutate(queryKeys.boards.runs(true));
+      mutateRunListCaches(mutate);
       push({ message: "Run deleted." });
       navigate("/runs");
     } catch (error) {

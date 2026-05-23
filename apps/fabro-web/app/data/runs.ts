@@ -48,6 +48,7 @@ export const columnStatuses = [
   BoardColumn.SUCCEEDED,
   BoardColumn.FAILED,
   BoardColumn.ARCHIVED,
+  BoardColumn.REMOVING,
 ] as const satisfies readonly BoardColumn[];
 
 export const columnStatusDisplay: Record<BoardColumn, { label: string; dot: string; text: string }> = {
@@ -58,6 +59,7 @@ export const columnStatusDisplay: Record<BoardColumn, { label: string; dot: stri
   succeeded:    { label: "Succeeded",    dot: "bg-teal-300",  text: "text-teal-300" },
   failed:       { label: "Failed",       dot: "bg-coral",     text: "text-coral" },
   archived:     { label: "Archived",     dot: "bg-fg-muted",  text: "text-fg-muted" },
+  removing:     { label: "Removing",     dot: "bg-fg-muted",  text: "text-fg-muted" },
 };
 
 export interface RunWithStatus extends RunItem {
@@ -126,6 +128,7 @@ export function columnForStatus(status: ApiRunStatus | null | undefined): BoardC
     case "dead":
       return "failed";
     case "removing":
+      return "removing";
     default:
       return null;
   }

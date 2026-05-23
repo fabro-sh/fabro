@@ -38,10 +38,11 @@ export const queryKeys = {
     resources: () => ["system", "resources"] as const,
     attachUrl: () => "/api/v1/attach",
   },
-  boards: {
-    runs: (includeArchived = false) => ["boards", "runs", includeArchived] as const,
-  },
   runs: {
+    all: (filters: object = {}) =>
+      ["runs", "all", filters] as const,
+    page: (opts: object = {}) =>
+      ["runs", "page", opts] as const,
     detail: (id: string) => ["runs", "detail", id] as const,
     state: (id: string) => ["runs", "state", id] as const,
     files: (id: string, selection: RunFileSelection = runFileScopeSelection()) =>

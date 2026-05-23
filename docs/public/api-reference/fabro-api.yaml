@@ -1093,12 +1093,21 @@ paths:
       operationId: listRuns
       tags: [Runs]
       summary: List Runs
-      description: Returns durable run summaries from the backing store, including runs persisted before the current server boot. Archived runs are hidden by default; pass `include_archived=true` to include them in the response.
+      description: |
+        Returns durable run summaries from the backing store, including runs
+        persisted before the current server boot. Supports per-status filtering
+        and sorting for both list and kanban renderings. Archived runs are
+        hidden by default; pass `include_archived=true` (or `status=archived`)
+        to include them. Runs in the `removing` bucket are hidden unless
+        explicitly requested via `status=removing`.
       parameters:
         - $ref: "#/components/parameters/PageLimit"
         - $ref: "#/components/parameters/PageOffset"
         - $ref: "#/components/parameters/IncludeArchived"
         - $ref: "#/components/parameters/ParentRunId"
+        - $ref: "#/components/parameters/RunStatusFilter"
+        - $ref: "#/components/parameters/RunsSort"
+        - $ref: "#/components/parameters/RunsSortDirection"
       responses:
         "200":
           description: Paginated durable run summaries
@@ -2251,24 +2260,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-
-  /api/v1/boards/runs:
-    get:
-      operationId: listBoardRuns
-      tags: [Runs]
-      summary: List Board Runs
-      description: Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves. Archived runs are hidden by default; pass `include_archived=true` to include them under the `archived` column.
-      parameters:
-        - $ref: "#/components/parameters/PageLimit"
-        - $ref: "#/components/parameters/PageOffset"
-        - $ref: "#/components/parameters/IncludeArchived"
-      responses:
-        "200":
-          description: Paginated list of runs for the board view
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PaginatedBoardRunList"
 
   /api/v1/runs/{id}/state:
     get:
@@ -4451,6 +4442,45 @@ components:
         type: string
       example: 01JNQVR7M0EJ5GKAT2SC4ERS1Z
 
+    RunStatusFilter:
+      name: status
+      in: query
+      required: false
+      style: form
+      explode: true
+      description: |
+        Filter runs by status bucket. Repeatable. When omitted, runs in the
+        `removing` bucket are hidden; pass `status=removing` to include them.
+        Archived runs are hidden unless `include_archived=true` or
+        `status=archived` is passed.
+      schema:
+        type: array
+        items:
+          $ref: "#/components/schemas/BoardColumn"
+      example: [running, blocked]
+
+    RunsSort:
+      name: sort
+      in: query
+      required: false
+      description: Field to sort by. Defaults to `created_at`.
+      schema:
+        type: string
+        enum: [created_at, updated_at, status, elapsed]
+        default: created_at
+      example: created_at
+
+    RunsSortDirection:
+      name: direction
+      in: query
+      required: false
+      description: Sort direction. Defaults to `desc`.
+      schema:
+        type: string
+        enum: [asc, desc]
+        default: desc
+      example: desc
+
     ForceRunDelete:
       name: force
       in: query
@@ -5597,25 +5627,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SessionSummary"
-        meta:
-          $ref: "#/components/schemas/PaginationMeta"
-
-    PaginatedBoardRunList:
-      description: Paginated list of board runs with shared canonical fields plus board metadata.
-      type: object
-      required:
-        - columns
-        - data
-        - meta
-      properties:
-        columns:
-          type: array
-          items:
-            $ref: "#/components/schemas/BoardColumnDefinition"
-        data:
-          type: array
-          items:
-            $ref: "#/components/schemas/Run"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
 
@@ -8417,7 +8428,11 @@ components:
     # ── Run Board Schemas ────────────────────────────────────────────────
 
     BoardColumn:
-      description: Board column status for a run in the list view.
+      description: |
+        Status bucket for a run, shared by list and kanban renderings and by
+        the `status` query parameter on `GET /api/v1/runs`. The `archived`
+        bucket is orthogonal to the `include_archived` flag — passing
+        `status=archived` is equivalent to opting archived runs in.
       type: string
       enum:
         - queued
@@ -8427,17 +8442,7 @@ components:
         - succeeded
         - failed
         - archived
-
-    BoardColumnDefinition:
-      type: object
-      required:
-        - id
-        - name
-      properties:
-        id:
-          $ref: "#/components/schemas/BoardColumn"
-        name:
-          type: string
+        - removing
 
     CheckRunStatus:
       description: Status of a CI check run.

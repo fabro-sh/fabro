@@ -57,28 +57,6 @@ pub(crate) async fn list_runs(
     paginated_response(runs::summaries(), &pagination)
 }
 
-pub(crate) async fn list_board_runs(
-    _auth: RequiredUser,
-    State(_state): State<Arc<AppState>>,
-    Query(pagination): Query<PaginationParams>,
-) -> Response {
-    let items = runs::summaries();
-    let limit = pagination.limit.clamp(1, 100) as usize;
-    let offset = pagination.offset as usize;
-    let mut data: Vec<_> = items.into_iter().skip(offset).take(limit + 1).collect();
-    let has_more = data.len() > limit;
-    data.truncate(limit);
-    (
-        StatusCode::OK,
-        Json(json!({
-            "columns": runs::columns(),
-            "data": data,
-            "meta": { "has_more": has_more }
-        })),
-    )
-        .into_response()
-}
-
 pub(crate) async fn create_run_stub(
     _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
@@ -1210,35 +1188,6 @@ mod runs {
     fn duration_ms_from_secs(secs: f64) -> Option<u64> {
         let duration = Duration::try_from_secs_f64(secs).ok()?;
         duration.as_millis().try_into().ok()
-    }
-
-    pub(super) fn columns() -> Vec<BoardColumnDefinition> {
-        vec![
-            BoardColumnDefinition {
-                id:   BoardColumn::Queued,
-                name: "Queued".into(),
-            },
-            BoardColumnDefinition {
-                id:   BoardColumn::Initializing,
-                name: "Initializing".into(),
-            },
-            BoardColumnDefinition {
-                id:   BoardColumn::Running,
-                name: "Running".into(),
-            },
-            BoardColumnDefinition {
-                id:   BoardColumn::Blocked,
-                name: "Blocked".into(),
-            },
-            BoardColumnDefinition {
-                id:   BoardColumn::Succeeded,
-                name: "Succeeded".into(),
-            },
-            BoardColumnDefinition {
-                id:   BoardColumn::Failed,
-                name: "Failed".into(),
-            },
-        ]
     }
 
     pub(super) fn summaries() -> Vec<Run> {

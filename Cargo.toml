@@ -13,7 +13,7 @@ agent-client-protocol = { version = "0.11.1", features = ["unstable_session_usag
 agent-client-protocol-tokio = "0.11.1"
 anyhow = "1"
 axum = { version = "0.8" }
-axum-extra = { version = "0.10", features = ["cookie-private"] }
+axum-extra = { version = "0.10", features = ["cookie-private", "query"] }
 cookie = { version = "0.18", features = ["percent-encode", "private", "signed", "key-expansion"] }
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
