@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Link, useSearchParams } from "react-router";
-import { ArchiveBoxIcon, ChevronDoubleLeftIcon, ChevronDoubleRightIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, CommandLineIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { AdjustmentsHorizontalIcon, ArchiveBoxIcon, CheckIcon, ChevronDoubleLeftIcon, ChevronDoubleRightIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, CommandLineIcon, MagnifyingGlassIcon, PlusCircleIcon } from "@heroicons/react/24/outline";
 import { EllipsisVerticalIcon } from "@heroicons/react/20/solid";
-import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
+import { Listbox, ListboxButton, ListboxOption, ListboxOptions, Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { useSWRConfig } from "swr";
 import {
   DndContext,
@@ -596,6 +596,36 @@ function parsePage(raw: string | null): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
 }
 
+const TOGGLEABLE_COLUMNS = ["elapsed", "repo", "workflow", "created", "updated", "changes", "pr"] as const;
+type ToggleableColumn = typeof TOGGLEABLE_COLUMNS[number];
+
+const toggleableColumnLabels: Record<ToggleableColumn, string> = {
+  elapsed:  "Elapsed",
+  repo:     "Repo",
+  workflow: "Workflow",
+  created:  "Created",
+  updated:  "Updated",
+  changes:  "Changes",
+  pr:       "PR",
+};
+
+function parseHiddenColumns(raw: string | null): Set<ToggleableColumn> {
+  const hidden = new Set<ToggleableColumn>();
+  if (!raw) return hidden;
+  for (const value of raw.split(",")) {
+    const trimmed = value.trim();
+    if ((TOGGLEABLE_COLUMNS as readonly string[]).includes(trimmed)) {
+      hidden.add(trimmed as ToggleableColumn);
+    }
+  }
+  return hidden;
+}
+
+function serializeHiddenColumns(hidden: Set<ToggleableColumn>): string | null {
+  if (hidden.size === 0) return null;
+  return TOGGLEABLE_COLUMNS.filter((col) => hidden.has(col)).join(",");
+}
+
 const LIST_PAGE_SIZES = [10, 25, 50, 100] as const;
 const DEFAULT_LIST_PAGE_SIZE = 25;
 
@@ -695,9 +725,16 @@ export function RunRow({ run }: { run: RunWithStatus }) {
   );
 }
 
-function RunTableRow({ run }: { run: RunWithStatus }) {
+function RunTableRow({
+  run,
+  hiddenColumns,
+}: {
+  run:           RunWithStatus;
+  hiddenColumns: Set<ToggleableColumn>;
+}) {
   const lifecycleLabel = listLifecycleStatusLabel(run);
   const statusDisplay = columnStatusDisplay[run.status];
+  const show = (col: ToggleableColumn) => !hiddenColumns.has(col);
 
   return (
     <tr className="group relative border-b border-line transition-colors last:border-b-0 hover:bg-overlay/40">
@@ -707,12 +744,16 @@ function RunTableRow({ run }: { run: RunWithStatus }) {
           <span className={`font-mono text-xs ${statusDisplay.text}`}>{run.statusLabel}</span>
         </span>
       </td>
-      <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-fg-muted">
-        {run.elapsed}
-      </td>
-      <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs font-medium text-teal-500">
-        {run.repo}
-      </td>
+      {show("elapsed") && (
+        <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-fg-muted">
+          {run.elapsed}
+        </td>
+      )}
+      {show("repo") && (
+        <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs font-medium text-teal-500">
+          {run.repo}
+        </td>
+      )}
       <td className="w-full max-w-0 px-3 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           <Link
@@ -736,27 +777,43 @@ function RunTableRow({ run }: { run: RunWithStatus }) {
           )}
         </div>
       </td>
-      <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-fg-3">{run.workflow}</td>
-      <td
-        className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-fg-muted"
-        title={run.createdAt ?? undefined}
-      >
-        {run.createdAt != null ? formatRelativeTime(run.createdAt) : ""}
-      </td>
-      <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono text-xs tabular-nums">
-        {run.additions != null && <span className="text-mint">+{run.additions.toLocaleString()}</span>}
-        {run.additions != null && run.deletions != null && " "}
-        {run.deletions != null && <span className="text-coral">-{run.deletions.toLocaleString()}</span>}
-      </td>
-      <td className="whitespace-nowrap px-3 py-2.5 text-right">
-        {run.pullRequestUrl && run.number != null && (
-          <span className="relative z-10 inline-flex items-center justify-end gap-1.5">
-            <PullRequestChip number={run.number} url={run.pullRequestUrl}>
-              {run.checks != null && <span className={`size-1.5 rounded-full ${ciConfig[deriveCiStatus(run.checks)].dot}`} />}
-            </PullRequestChip>
-          </span>
-        )}
-      </td>
+      {show("workflow") && (
+        <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-fg-3">{run.workflow}</td>
+      )}
+      {show("created") && (
+        <td
+          className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-fg-muted"
+          title={run.createdAt ?? undefined}
+        >
+          {run.createdAt != null ? formatRelativeTime(run.createdAt) : ""}
+        </td>
+      )}
+      {show("updated") && (
+        <td
+          className="whitespace-nowrap px-3 py-2.5 text-right font-mono text-xs text-fg-muted"
+          title={run.lastEventAt ?? undefined}
+        >
+          {run.lastEventAt != null ? formatRelativeTime(run.lastEventAt) : ""}
+        </td>
+      )}
+      {show("changes") && (
+        <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono text-xs tabular-nums">
+          {run.additions != null && <span className="text-mint">+{run.additions.toLocaleString()}</span>}
+          {run.additions != null && run.deletions != null && " "}
+          {run.deletions != null && <span className="text-coral">-{run.deletions.toLocaleString()}</span>}
+        </td>
+      )}
+      {show("pr") && (
+        <td className="whitespace-nowrap px-3 py-2.5 text-right">
+          {run.pullRequestUrl && run.number != null && (
+            <span className="relative z-10 inline-flex items-center justify-end gap-1.5">
+              <PullRequestChip number={run.number} url={run.pullRequestUrl}>
+                {run.checks != null && <span className={`size-1.5 rounded-full ${ciConfig[deriveCiStatus(run.checks)].dot}`} />}
+              </PullRequestChip>
+            </span>
+          )}
+        </td>
+      )}
     </tr>
   );
 }
@@ -770,6 +827,7 @@ type RunsListViewProps = {
   direction:        ListRunsDirectionEnum;
   page:             number;
   pageSize:         number;
+  hiddenColumns:    Set<ToggleableColumn>;
   onSortClick:      (key: ListRunsSortEnum) => void;
   onPageChange:     (page: number) => void;
   onPageSizeChange: (size: number) => void;
@@ -829,6 +887,7 @@ function RunsListView({
   direction,
   page,
   pageSize,
+  hiddenColumns,
   onSortClick,
   onPageChange,
   onPageSizeChange,
@@ -837,6 +896,7 @@ function RunsListView({
   workflowFilter,
   createdCutoffMs,
 }: RunsListViewProps) {
+  const show = (col: ToggleableColumn) => !hiddenColumns.has(col);
   const rows: RunWithStatus[] = useMemo(() => {
     const apiRuns = data?.data ?? [];
     return apiRuns
@@ -876,18 +936,33 @@ function RunsListView({
             <thead>
               <tr className="border-b border-line text-xs font-medium text-fg-3">
                 <SortHeader label="Status" sortKey="status" activeSort={sort} direction={direction} onClick={onSortClick} />
-                <SortHeader label="Elapsed" sortKey="elapsed" activeSort={sort} direction={direction} onClick={onSortClick} />
-                <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-left font-medium">Repo</th>
+                {show("elapsed") && (
+                  <SortHeader label="Elapsed" sortKey="elapsed" activeSort={sort} direction={direction} onClick={onSortClick} />
+                )}
+                {show("repo") && (
+                  <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-left font-medium">Repo</th>
+                )}
                 <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-left font-medium">Title</th>
-                <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-left font-medium">Workflow</th>
-                <SortHeader label="Created" sortKey="created_at" activeSort={sort} direction={direction} onClick={onSortClick} />
-                <SortHeader label="Updated" sortKey="updated_at" activeSort={sort} direction={direction} align="right" onClick={onSortClick} />
-                <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-right font-medium">PR</th>
+                {show("workflow") && (
+                  <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-left font-medium">Workflow</th>
+                )}
+                {show("created") && (
+                  <SortHeader label="Created" sortKey="created_at" activeSort={sort} direction={direction} onClick={onSortClick} />
+                )}
+                {show("updated") && (
+                  <SortHeader label="Updated" sortKey="updated_at" activeSort={sort} direction={direction} align="right" onClick={onSortClick} />
+                )}
+                {show("changes") && (
+                  <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-right font-medium">Changes</th>
+                )}
+                {show("pr") && (
+                  <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-right font-medium">PR</th>
+                )}
               </tr>
             </thead>
             <tbody>
               {rows.map((run) => (
-                <RunTableRow key={run.id} run={run} />
+                <RunTableRow key={run.id} run={run} hiddenColumns={hiddenColumns} />
               ))}
             </tbody>
           </table>
@@ -1026,6 +1101,113 @@ function PagerButton({
   );
 }
 
+type FilterOption<T extends string> = { value: T; label: string };
+
+function FilterButton<T extends string>({
+  label,
+  value,
+  allValue,
+  options,
+  onChange,
+}: {
+  label:    string;
+  value:    T;
+  allValue: T;
+  options:  FilterOption<T>[];
+  onChange: (next: T) => void;
+}) {
+  const active = value !== allValue;
+  const activeLabel = options.find((opt) => opt.value === value)?.label;
+  return (
+    <Menu as="div" className="relative">
+      <MenuButton
+        className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${
+          active
+            ? "border-line-strong bg-panel text-fg-2"
+            : "border-line bg-panel/80 text-fg-muted hover:text-fg-3"
+        }`}
+      >
+        <PlusCircleIcon className="size-4" aria-hidden="true" />
+        <span>{active ? `${label}: ${activeLabel}` : label}</span>
+      </MenuButton>
+      <MenuItems
+        anchor="bottom start"
+        className="z-20 mt-1 max-h-72 min-w-[12rem] overflow-y-auto rounded-md border border-line bg-panel py-1 text-xs shadow-lg focus:outline-none"
+      >
+        {options.map((option) => (
+          <MenuItem key={option.value}>
+            {({ focus }) => (
+              <button
+                type="button"
+                onClick={() => onChange(option.value)}
+                className={`flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left ${
+                  focus ? "bg-overlay" : ""
+                } ${option.value === value ? "text-teal-500" : "text-fg-2"}`}
+              >
+                <span className="truncate">{option.label}</span>
+                {option.value === value && (
+                  <CheckIcon className="size-4 shrink-0" aria-hidden="true" />
+                )}
+              </button>
+            )}
+          </MenuItem>
+        ))}
+      </MenuItems>
+    </Menu>
+  );
+}
+
+function ColumnPickerButton({
+  hidden,
+  onChange,
+}: {
+  hidden:   Set<ToggleableColumn>;
+  onChange: (next: Set<ToggleableColumn>) => void;
+}) {
+  const visible = TOGGLEABLE_COLUMNS.filter((col) => !hidden.has(col));
+  return (
+    <Listbox
+      value={visible}
+      onChange={(next: ToggleableColumn[]) => {
+        const nextHidden = new Set<ToggleableColumn>(TOGGLEABLE_COLUMNS);
+        for (const col of next) nextHidden.delete(col);
+        onChange(nextHidden);
+      }}
+      multiple
+    >
+      <ListboxButton className="inline-flex items-center gap-1.5 rounded-md border border-line bg-panel/80 px-3 py-2 text-xs font-medium text-fg-muted transition-colors hover:text-fg-3">
+        <AdjustmentsHorizontalIcon className="size-4" aria-hidden="true" />
+        <span>View</span>
+      </ListboxButton>
+      <ListboxOptions
+        anchor="bottom end"
+        className="z-20 mt-1 min-w-[10rem] rounded-md border border-line bg-panel py-1 text-xs shadow-lg focus:outline-none"
+      >
+        {TOGGLEABLE_COLUMNS.map((col) => (
+          <ListboxOption
+            key={col}
+            value={col}
+            className={({ focus }) =>
+              `flex cursor-pointer items-center justify-between gap-3 px-3 py-1.5 text-fg-2 ${focus ? "bg-overlay" : ""}`
+            }
+          >
+            {({ selected }) => (
+              <>
+                <span>{toggleableColumnLabels[col]}</span>
+                {selected ? (
+                  <CheckIcon className="size-4 shrink-0 text-teal-500" aria-hidden="true" />
+                ) : (
+                  <span className="size-4 shrink-0" aria-hidden="true" />
+                )}
+              </>
+            )}
+          </ListboxOption>
+        ))}
+      </ListboxOptions>
+    </Listbox>
+  );
+}
+
 function TerminalLine({ prompt, command }: { prompt: string; command: string }) {
   return (
     <div className="flex items-center gap-2 font-mono text-sm">
@@ -1156,6 +1338,10 @@ export default function Runs() {
   const direction = parseDirection(searchParams.get("direction"));
   const page = parsePage(searchParams.get("page"));
   const pageSize = parsePageSize(searchParams.get("size"));
+  const hiddenColumns = useMemo(
+    () => parseHiddenColumns(searchParams.get("hide")),
+    [searchParams],
+  );
 
   const updateParam = useCallback(
     (key: string, value: string | null) => {
@@ -1190,6 +1376,10 @@ export default function Runs() {
       updateParam("size", next === DEFAULT_LIST_PAGE_SIZE ? null : String(next));
       updateParam("page", null);
     },
+    [updateParam],
+  );
+  const setHiddenColumns = useCallback(
+    (next: Set<ToggleableColumn>) => updateParam("hide", serializeHiddenColumns(next)),
     [updateParam],
   );
   const handleSortClick = useCallback(
@@ -1297,8 +1487,8 @@ export default function Runs() {
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <div className="space-y-4">
-        <div className="flex gap-3">
-          <div className="relative flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative w-64">
             <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
             <input
               type="text"
@@ -1310,50 +1500,35 @@ export default function Runs() {
               className="w-full rounded-md border border-line bg-panel/80 py-2 pl-9 pr-3 text-sm text-fg-2 placeholder-fg-muted outline-none transition-colors focus:border-focus focus:ring-0"
             />
           </div>
-          <div className="relative">
-            <select
-              name="created"
-              aria-label="Filter by created time"
-              value={createdFilter}
-              onChange={(e) => setCreatedFilter(e.target.value as CreatedFilter)}
-              className="appearance-none rounded-md border border-line bg-panel/80 py-2 pl-3 pr-8 text-sm text-fg-2 outline-none transition-colors focus:border-focus focus:ring-0"
-            >
-              {createdFilterOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-            <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
-          </div>
-          <div className="relative">
-            <select
-              name="repo"
-              aria-label="Filter by repository"
-              value={repoFilter}
-              onChange={(e) => setRepoFilter(e.target.value)}
-              className="appearance-none rounded-md border border-line bg-panel/80 py-2 pl-3 pr-8 text-sm text-fg-2 outline-none transition-colors focus:border-focus focus:ring-0"
-            >
-              <option value="all">All repos</option>
-              {allRepos.map((repo: string) => (
-                <option key={repo} value={repo}>{repo}</option>
-              ))}
-            </select>
-            <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
-          </div>
-          <div className="relative">
-            <select
-              name="workflow"
-              aria-label="Filter by workflow"
-              value={workflowFilter}
-              onChange={(e) => setWorkflowFilter(e.target.value)}
-              className="appearance-none rounded-md border border-line bg-panel/80 py-2 pl-3 pr-8 text-sm text-fg-2 outline-none transition-colors focus:border-focus focus:ring-0"
-            >
-              <option value="all">All workflows</option>
-              {allWorkflows.map((workflow: string) => (
-                <option key={workflow} value={workflow}>{workflow}</option>
-              ))}
-            </select>
-            <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
-          </div>
+
+          <FilterButton
+            label="Time"
+            value={createdFilter}
+            allValue="all"
+            options={createdFilterOptions}
+            onChange={setCreatedFilter}
+          />
+          <FilterButton
+            label="Repo"
+            value={repoFilter}
+            allValue="all"
+            options={[
+              { value: "all", label: "All repos" },
+              ...allRepos.map((repo) => ({ value: repo, label: repo })),
+            ]}
+            onChange={setRepoFilter}
+          />
+          <FilterButton
+            label="Workflow"
+            value={workflowFilter}
+            allValue="all"
+            options={[
+              { value: "all", label: "All workflows" },
+              ...allWorkflows.map((workflow) => ({ value: workflow, label: workflow })),
+            ]}
+            onChange={setWorkflowFilter}
+          />
+
           <button
             type="button"
             onClick={() => setIncludeArchived(!includeArchived)}
@@ -1364,6 +1539,11 @@ export default function Runs() {
             <ArchiveBoxIcon className="size-4" aria-hidden="true" />
             <span>Show archived</span>
           </button>
+
+          <div className="ml-auto flex items-center gap-2">
+          {view === "list" && (
+            <ColumnPickerButton hidden={hiddenColumns} onChange={setHiddenColumns} />
+          )}
           <div role="group" aria-label="Run list view" className="flex rounded-md border border-line bg-panel/80 p-0.5">
             <button
               type="button"
@@ -1387,6 +1567,7 @@ export default function Runs() {
                 <path fillRule="evenodd" d="M2 4.75A.75.75 0 0 1 2.75 4h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 4.75Zm0 5A.75.75 0 0 1 2.75 9h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 9.75Zm0 5a.75.75 0 0 1 .75-.75h14.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75Z" clipRule="evenodd" />
               </svg>
             </button>
+          </div>
           </div>
         </div>
 
@@ -1423,6 +1604,7 @@ export default function Runs() {
             direction={direction}
             page={page}
             pageSize={pageSize}
+            hiddenColumns={hiddenColumns}
             onSortClick={handleSortClick}
             onPageChange={setPage}
             onPageSizeChange={setPageSize}
