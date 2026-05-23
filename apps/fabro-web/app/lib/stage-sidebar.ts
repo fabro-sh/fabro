@@ -50,12 +50,12 @@ export function stageStatusLabel(status: StageState): string {
 }
 
 /**
- * Display label for a stage. Suffixes `(N)` for visits > 1 so a looped node
- * (e.g. `verify`) renders as `verify`, `verify (2)`, `verify (3)` in the
- * sidebar and stage header.
+ * Display label for a stage. Suffixes `@N` for visits > 1 so a looped node
+ * (e.g. `verify`) renders as `verify`, `verify@2`, `verify@3` in the
+ * sidebar and stage header, matching Fabro's stage-reference syntax.
  */
 export function formatStageLabel(stage: { name: string; visit: number }): string {
-  return stage.visit > 1 ? `${stage.name} (${stage.visit})` : stage.name;
+  return stage.visit > 1 ? `${stage.name}@${stage.visit}` : stage.name;
 }
 
 export function mapRunStagesToSidebarStages(
