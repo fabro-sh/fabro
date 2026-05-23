@@ -116,9 +116,9 @@ export function useSystemResources() {
   );
 }
 
-export function useAllRuns(filters: RunsListFilters = {}) {
+export function useAllRuns(filters: RunsListFilters = {}, enabled = true) {
   return useSWR<PaginatedEnvelope<Run>>(
-    queryKeys.runs.all(filters),
+    enabled ? queryKeys.runs.all(filters) : null,
     () =>
       fetchAllPages("runs", (limit, offset) =>
         apiData(() =>
@@ -136,9 +136,9 @@ export function useAllRuns(filters: RunsListFilters = {}) {
   );
 }
 
-export function useRunsPage(opts: RunsPageOptions = {}) {
+export function useRunsPage(opts: RunsPageOptions = {}, enabled = true) {
   return useSWR<PaginatedRunList>(
-    queryKeys.runs.page(opts),
+    enabled ? queryKeys.runs.page(opts) : null,
     () =>
       apiData(() =>
         runsApi.listRuns(

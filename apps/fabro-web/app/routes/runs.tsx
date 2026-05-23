@@ -21,7 +21,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ciConfig, columnForRun, columnStatusDisplay, columnStatuses, deriveCiStatus, mapRunListItem } from "../data/runs";
+import { ciConfig, columnForRun, columnStatusDisplay, columnStatuses, deriveCiStatus, mapRunListItem, toRunWithStatus } from "../data/runs";
 import type { CiStatus, CheckRun, CheckStatus, RunItem, RunWithStatus } from "../data/runs";
 import { formatRelativeTime } from "../lib/format";
 import { EmptyState } from "../components/state";
@@ -30,9 +30,15 @@ import { PullRequestChip } from "../components/pull-request-chip";
 import { useToast } from "../components/toast";
 import { mutateRunListCaches } from "../lib/board-cache";
 import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
-import { useAllRuns, useAuthConfig, useSystemInfo } from "../lib/queries";
+import { useAllRuns, useAuthConfig, useRunsPage, useSystemInfo } from "../lib/queries";
 import { archiveRun, canArchive } from "../lib/run-actions";
-import type { BoardColumn, Run } from "@qltysh/fabro-api-client";
+import type {
+  BoardColumn,
+  ListRunsDirectionEnum,
+  ListRunsSortEnum,
+  PaginatedRunList,
+  Run,
+} from "@qltysh/fabro-api-client";
 
 export { shouldRefreshBoardForEvent };
 
@@ -573,6 +579,32 @@ function parseView(raw: string | null): ViewMode {
   return raw === "list" ? "list" : "columns";
 }
 
+const SORT_KEYS = ["created_at", "updated_at", "status", "elapsed"] as const satisfies readonly ListRunsSortEnum[];
+
+function parseSort(raw: string | null): ListRunsSortEnum {
+  return (SORT_KEYS as readonly string[]).includes(raw ?? "")
+    ? (raw as ListRunsSortEnum)
+    : "created_at";
+}
+
+function parseDirection(raw: string | null): ListRunsDirectionEnum {
+  return raw === "asc" ? "asc" : "desc";
+}
+
+function parsePage(raw: string | null): number {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
+}
+
+const LIST_PAGE_SIZE = 20;
+
+const sortColumnLabels: Record<ListRunsSortEnum, string> = {
+  created_at: "Created",
+  updated_at: "Updated",
+  status:     "Status",
+  elapsed:    "Elapsed",
+};
+
 function createdCutoffMsFor(filter: CreatedFilter): number | null {
   const now = Date.now();
   switch (filter) {
@@ -723,6 +755,188 @@ function RunTableRow({ run }: { run: RunWithStatus }) {
   );
 }
 
+type RunsListViewProps = {
+  data:            PaginatedRunList | undefined;
+  isLoading:       boolean;
+  hasGitHubAuth:   boolean;
+  serverUrl:       string | undefined;
+  sort:            ListRunsSortEnum;
+  direction:       ListRunsDirectionEnum;
+  page:            number;
+  onSortClick:     (key: ListRunsSortEnum) => void;
+  onPageChange:    (page: number) => void;
+  query:           string;
+  repoFilter:      string;
+  workflowFilter:  string;
+  createdCutoffMs: number | null;
+};
+
+function SortHeader({
+  label,
+  sortKey,
+  activeSort,
+  direction,
+  align = "left",
+  onClick,
+}: {
+  label:      string;
+  sortKey:    ListRunsSortEnum;
+  activeSort: ListRunsSortEnum;
+  direction:  ListRunsDirectionEnum;
+  align?:     "left" | "right";
+  onClick:    (key: ListRunsSortEnum) => void;
+}) {
+  const isActive = activeSort === sortKey;
+  const ariaSort: "ascending" | "descending" | "none" = isActive
+    ? direction === "asc"
+      ? "ascending"
+      : "descending"
+    : "none";
+  return (
+    <th
+      scope="col"
+      aria-sort={ariaSort}
+      className={`whitespace-nowrap px-3 py-2.5 font-medium ${align === "right" ? "text-right" : "text-left"}`}
+    >
+      <button
+        type="button"
+        onClick={() => onClick(sortKey)}
+        className={`inline-flex items-center gap-1 transition-colors hover:text-fg-2 ${isActive ? "text-fg-2" : "text-fg-3"} ${align === "right" ? "ml-auto" : ""}`}
+      >
+        <span>{label}</span>
+        <span className="text-fg-muted" aria-hidden="true">
+          {isActive ? (direction === "asc" ? "↑" : "↓") : "↕"}
+        </span>
+      </button>
+    </th>
+  );
+}
+
+function RunsListView({
+  data,
+  isLoading,
+  hasGitHubAuth,
+  serverUrl,
+  sort,
+  direction,
+  page,
+  onSortClick,
+  onPageChange,
+  query,
+  repoFilter,
+  workflowFilter,
+  createdCutoffMs,
+}: RunsListViewProps) {
+  const rows: RunWithStatus[] = useMemo(() => {
+    const apiRuns = data?.data ?? [];
+    return apiRuns
+      .map(toRunWithStatus)
+      .filter(
+        (item) =>
+          (repoFilter === "all" || item.repo === repoFilter) &&
+          (workflowFilter === "all" || item.workflow === workflowFilter) &&
+          (createdCutoffMs == null ||
+            (item.createdAt != null && Date.parse(item.createdAt) >= createdCutoffMs)) &&
+          (!query ||
+            item.title.toLowerCase().includes(query) ||
+            item.repo.toLowerCase().includes(query) ||
+            item.lifecycleStatusLabel?.toLowerCase().includes(query) ||
+            (item.number != null && `#${item.number}`.includes(query))),
+      );
+  }, [data, repoFilter, workflowFilter, createdCutoffMs, query]);
+
+  const hasMore = data?.meta.has_more ?? false;
+  const hasRows = rows.length > 0;
+  const apiRunCount = data?.data.length ?? 0;
+  const isEmptyServerSide = data !== undefined && apiRunCount === 0 && page === 1;
+
+  if (isEmptyServerSide && !isLoading) {
+    return (
+      <RunsLandingEmpty hasGitHubAuth={hasGitHubAuth} serverUrl={serverUrl} />
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="-mx-4 -my-2 overflow-x-auto whitespace-nowrap sm:-mx-6 lg:-mx-8">
+        <div className="inline-block min-w-full px-4 py-2 align-middle sm:px-6 lg:px-8">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-line text-xs font-medium text-fg-3">
+                <SortHeader label="Status" sortKey="status" activeSort={sort} direction={direction} onClick={onSortClick} />
+                <SortHeader label="Elapsed" sortKey="elapsed" activeSort={sort} direction={direction} onClick={onSortClick} />
+                <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-left font-medium">Repo</th>
+                <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-left font-medium">Title</th>
+                <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-left font-medium">Workflow</th>
+                <SortHeader label="Created" sortKey="created_at" activeSort={sort} direction={direction} onClick={onSortClick} />
+                <SortHeader label="Updated" sortKey="updated_at" activeSort={sort} direction={direction} align="right" onClick={onSortClick} />
+                <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-right font-medium">PR</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((run) => (
+                <RunTableRow key={run.id} run={run} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {!hasRows && !isLoading && (
+        <div className="py-8">
+          <EmptyState
+            title="No matching runs"
+            description={
+              apiRunCount === 0
+                ? "Try a different page, sort, or filter combination."
+                : "Try clearing the search, repo, or workflow filter."
+            }
+          />
+        </div>
+      )}
+      <ListPager page={page} hasMore={hasMore} disabled={isLoading} onPageChange={onPageChange} />
+    </div>
+  );
+}
+
+function ListPager({
+  page,
+  hasMore,
+  disabled,
+  onPageChange,
+}: {
+  page:         number;
+  hasMore:      boolean;
+  disabled:     boolean;
+  onPageChange: (page: number) => void;
+}) {
+  const prevDisabled = disabled || page <= 1;
+  const nextDisabled = disabled || !hasMore;
+  return (
+    <nav
+      aria-label="Pagination"
+      className="flex items-center justify-end gap-2 pt-1 text-xs"
+    >
+      <button
+        type="button"
+        onClick={() => onPageChange(Math.max(1, page - 1))}
+        disabled={prevDisabled}
+        className="inline-flex items-center gap-1 rounded-md border border-line bg-panel/80 px-3 py-1.5 font-medium text-fg-3 transition-colors enabled:hover:text-fg-2 disabled:cursor-default disabled:opacity-50"
+      >
+        ← Prev
+      </button>
+      <span className="font-mono text-fg-muted">Page {page}</span>
+      <button
+        type="button"
+        onClick={() => onPageChange(page + 1)}
+        disabled={nextDisabled}
+        className="inline-flex items-center gap-1 rounded-md border border-line bg-panel/80 px-3 py-1.5 font-medium text-fg-3 transition-colors enabled:hover:text-fg-2 disabled:cursor-default disabled:opacity-50"
+      >
+        Next →
+      </button>
+    </nav>
+  );
+}
+
 function TerminalLine({ prompt, command }: { prompt: string; command: string }) {
   return (
     <div className="flex items-center gap-2 font-mono text-sm">
@@ -849,6 +1063,9 @@ export default function Runs() {
   const createdFilter = parseCreatedFilter(searchParams.get("created"));
   const includeArchived = searchParams.get("archived") === "1";
   const view = parseView(searchParams.get("view"));
+  const sort = parseSort(searchParams.get("sort"));
+  const direction = parseDirection(searchParams.get("direction"));
+  const page = parsePage(searchParams.get("page"));
 
   const updateParam = useCallback(
     (key: string, value: string | null) => {
@@ -874,8 +1091,34 @@ export default function Runs() {
   const setCreatedFilter = (value: CreatedFilter) => updateParam("created", value === "all" ? null : value);
   const setIncludeArchived = (value: boolean) => updateParam("archived", value ? "1" : null);
   const setView = (value: ViewMode) => updateParam("view", value === "columns" ? null : value);
+  const setPage = useCallback(
+    (next: number) => updateParam("page", next > 1 ? String(next) : null),
+    [updateParam],
+  );
+  const handleSortClick = useCallback(
+    (key: ListRunsSortEnum) => {
+      if (sort === key) {
+        updateParam("direction", direction === "asc" ? null : "asc");
+      } else {
+        updateParam("sort", key === "created_at" ? null : key);
+        updateParam("direction", null);
+      }
+      updateParam("page", null);
+    },
+    [sort, direction, updateParam],
+  );
 
-  const boardRuns = useAllRuns({ includeArchived });
+  const boardRuns = useAllRuns({ includeArchived }, view === "columns");
+  const listRunsPage = useRunsPage(
+    {
+      includeArchived,
+      sort,
+      direction,
+      limit:  LIST_PAGE_SIZE,
+      offset: (page - 1) * LIST_PAGE_SIZE,
+    },
+    view === "list",
+  );
   const authConfig = useAuthConfig();
   const systemInfo = useSystemInfo();
   const isLandingReady =
@@ -1074,48 +1317,21 @@ export default function Runs() {
             ) : null}
           </>
         ) : (
-          <>
-            {filteredRuns > 0 && (
-              <div className="-mx-4 -my-2 overflow-x-auto whitespace-nowrap sm:-mx-6 lg:-mx-8">
-                <div className="inline-block min-w-full px-4 py-2 align-middle sm:px-6 lg:px-8">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-line text-left text-xs font-medium text-fg-3">
-                        <th scope="col" className="whitespace-nowrap px-3 py-2.5 font-medium">Status</th>
-                        <th scope="col" className="whitespace-nowrap px-3 py-2.5 font-medium">Elapsed</th>
-                        <th scope="col" className="whitespace-nowrap px-3 py-2.5 font-medium">Repo</th>
-                        <th scope="col" className="whitespace-nowrap px-3 py-2.5 font-medium">Title</th>
-                        <th scope="col" className="whitespace-nowrap px-3 py-2.5 font-medium">Workflow</th>
-                        <th scope="col" className="whitespace-nowrap px-3 py-2.5 font-medium">Created</th>
-                        <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-right font-medium">Changes</th>
-                        <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-right font-medium">PR</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visibleColumns.flatMap((col) =>
-                        col.items.map((item) => (
-                          <RunTableRow key={item.id} run={{ ...item, status: col.id, statusLabel: col.name }} />
-                        )),
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-            {isLandingReady && totalRuns === 0 ? (
-              <RunsLandingEmpty
-                hasGitHubAuth={hasGitHubAuth}
-                serverUrl={serverUrl}
-              />
-            ) : totalRuns > 0 && filteredRuns === 0 ? (
-              <div className="py-8">
-                <EmptyState
-                  title="No matching runs"
-                  description="Try clearing the search or repo filter."
-                />
-              </div>
-            ) : null}
-          </>
+          <RunsListView
+            data={listRunsPage.data}
+            isLoading={listRunsPage.data === undefined && listRunsPage.isLoading}
+            hasGitHubAuth={hasGitHubAuth}
+            serverUrl={serverUrl}
+            sort={sort}
+            direction={direction}
+            page={page}
+            onSortClick={handleSortClick}
+            onPageChange={setPage}
+            query={lowerQuery}
+            repoFilter={repoFilter}
+            workflowFilter={workflowFilter}
+            createdCutoffMs={createdCutoffMs}
+          />
         )}
       </div>
     </DndContext>
