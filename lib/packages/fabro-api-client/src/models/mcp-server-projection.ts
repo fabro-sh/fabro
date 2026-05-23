@@ -13,11 +13,15 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { McpServerStatus } from './mcp-server-status';
 
-export interface RunCheckpointSettings {
-    'exclude_globs': Array<string>;
-    /**
-     * When true, Fabro-managed run-branch checkpoint commits bypass local Git commit hooks. Does not affect Fabro `[[run.hooks]]` or metadata-branch snapshots. Defaults to false.
-     */
-    'skip_git_hooks': boolean;
+/**
+ * Projected state for one MCP server observed by an agent stage.
+ */
+export interface McpServerProjection {
+    'server_name': string;
+    'status': McpServerStatus;
+    'tool_count': number;
 }

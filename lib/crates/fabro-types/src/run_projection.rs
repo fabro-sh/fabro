@@ -5,10 +5,10 @@ use std::num::NonZeroU32;
 use chrono::{DateTime, Utc};
 
 use crate::{
-    BilledTokenCounts, Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition,
-    ModelRef, PullRequestLink, RunControlAction, RunDiff, RunId, RunSandbox, RunSpec, RunStatus,
-    StageCompletion, StageHandler, StageId, StageState, StageTiming, StartRecord,
-    TodoListProjection,
+    AgentMcpToolSummary, AgentSkillActivationSource, AgentSkillSummary, BilledTokenCounts,
+    Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition, ModelRef, PullRequestLink,
+    RunControlAction, RunDiff, RunId, RunSandbox, RunSpec, RunStatus, StageCompletion,
+    StageHandler, StageId, StageState, StageTiming, StartRecord, TodoListProjection,
 };
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -33,11 +33,6 @@ pub struct RunProjection {
     pub pull_request:       Option<PullRequestLink>,
     pub superseded_by:      Option<RunId>,
     pub pending_interviews: BTreeMap<String, PendingInterviewRecord>,
-    /// Projected todo / task lists, keyed by `list_id` (`openai_plan:<session>`
-    /// or `anthropic_tasks:<root_session>`). Maintained by replaying
-    /// `todo.created`, `todo.updated`, and `todo.deleted` events.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub todos_by_list:      BTreeMap<String, TodoListProjection>,
     stages:                 HashMap<StageId, StageProjection>,
 }
 
@@ -88,7 +83,65 @@ pub struct StageProjection {
     pub usage:             BilledTokenCounts,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model:             Option<ModelRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub todos:             Option<TodoListProjection>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subagents:         Vec<SubAgentProjection>,
+    #[serde(default, skip_serializing_if = "SkillsProjection::is_empty")]
+    pub skills:            SkillsProjection,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_servers:       Vec<McpServerProjection>,
     pub state:             StageState,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SubAgentProjection {
+    pub agent_id: String,
+    pub depth:    usize,
+    pub task:     String,
+    pub status:   SubAgentStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SubAgentStatus {
+    Running,
+    Completed { success: bool, turns_used: usize },
+    Failed { error: serde_json::Value },
+    Closed,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SkillsProjection {
+    pub available: Vec<AgentSkillSummary>,
+    pub activated: Vec<ActivatedSkill>,
+}
+
+impl SkillsProjection {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.available.is_empty() && self.activated.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ActivatedSkill {
+    pub name:   String,
+    pub source: AgentSkillActivationSource,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct McpServerProjection {
+    pub server_name: String,
+    pub status:      McpServerStatus,
+    pub tool_count:  usize,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum McpServerStatus {
+    Ready { tools: Vec<AgentMcpToolSummary> },
+    Failed { error: String },
 }
 
 /// Convert a 1-based event sequence number into the `NonZeroU32` form used for
@@ -109,6 +162,10 @@ impl StageProjection {
             timing: None,
             usage: BilledTokenCounts::default(),
             model: None,
+            todos: None,
+            subagents: Vec::new(),
+            skills: SkillsProjection::default(),
+            mcp_servers: Vec::new(),
             provider_used: None,
             diff: None,
             script_invocation: None,
@@ -185,7 +242,6 @@ impl RunProjection {
             pull_request: None,
             superseded_by: None,
             pending_interviews: BTreeMap::new(),
-            todos_by_list: BTreeMap::new(),
             stages: HashMap::new(),
         }
     }

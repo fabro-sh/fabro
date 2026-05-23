@@ -14,10 +14,10 @@
 
 
 
-export interface RunCheckpointSettings {
-    'exclude_globs': Array<string>;
-    /**
-     * When true, Fabro-managed run-branch checkpoint commits bypass local Git commit hooks. Does not affect Fabro `[[run.hooks]]` or metadata-branch snapshots. Defaults to false.
-     */
-    'skip_git_hooks': boolean;
+/**
+ * Summary of an available agent skill.
+ */
+export interface AgentSkillSummary {
+    'name': string;
+    'description': string;
 }

@@ -102,7 +102,9 @@ pub use run_event::{
 pub use run_failure::RunFailure;
 pub use run_id::{RunId, fixtures};
 pub use run_projection::{
-    CheckpointRecord, PendingInterviewRecord, RunProjection, StageProjection, first_event_seq,
+    ActivatedSkill, CheckpointRecord, McpServerProjection, McpServerStatus, PendingInterviewRecord,
+    RunProjection, SkillsProjection, StageProjection, SubAgentProjection, SubAgentStatus,
+    first_event_seq,
 };
 pub use run_sandbox::{RunSandbox, RunSandboxRuntime};
 pub use run_summary::{

@@ -21,7 +21,11 @@ base.ts
 common.ts
 configuration.ts
 index.ts
+models/activated-skill.ts
+models/agent-mcp-tool-summary.ts
 models/agent-permissions.ts
+models/agent-skill-activation-source.ts
+models/agent-skill-summary.ts
 models/aggregate-billing-totals.ts
 models/aggregate-billing.ts
 models/api-question-option.ts
@@ -160,7 +164,11 @@ models/manifest-goal.ts
 models/manifest-target.ts
 models/manifest-workflow-config.ts
 models/manifest-workflow.ts
+models/mcp-server-projection.ts
 models/mcp-server-settings.ts
+models/mcp-server-status-failed.ts
+models/mcp-server-status-ready.ts
+models/mcp-server-status.ts
 models/mcp-transport-http.ts
 models/mcp-transport-sandbox.ts
 models/mcp-transport-stdio.ts
@@ -375,6 +383,7 @@ models/session-record.ts
 models/session-status.ts
 models/session-summary.ts
 models/session-turn.ts
+models/skills-projection.ts
 models/slack-integration-settings.ts
 models/ssh-access-request.ts
 models/ssh-access-response.ts
@@ -388,6 +397,12 @@ models/stage-timing.ts
 models/start-record.ts
 models/start-run-request.ts
 models/steer-run-request.ts
+models/sub-agent-projection.ts
+models/sub-agent-status-closed.ts
+models/sub-agent-status-completed.ts
+models/sub-agent-status-failed.ts
+models/sub-agent-status-running.ts
+models/sub-agent-status.ts
 models/submit-answer-multi-selected-request.ts
 models/submit-answer-no-request.ts
 models/submit-answer-request.ts
@@ -410,6 +425,10 @@ models/system-resources-response.ts
 models/system-run-counts.ts
 models/timeline-entry-response.ts
 models/tls-mode.ts
+models/todo-list-kind.ts
+models/todo-list-projection.ts
+models/todo-projection.ts
+models/todo-status.ts
 models/update-run-parent-request.ts
 models/update-run-request.ts
 models/user-response.ts

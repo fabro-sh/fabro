@@ -7745,9 +7745,217 @@ components:
           oneOf:
             - $ref: "#/components/schemas/BillingModelRef"
             - type: "null"
+        todos:
+          oneOf:
+            - $ref: "#/components/schemas/TodoListProjection"
+            - type: "null"
+          description: Projected todo / task list for this stage.
+        subagents:
+          type: array
+          description: Subagents spawned by this stage, in replay/insertion order.
+          items:
+            $ref: "#/components/schemas/SubAgentProjection"
+        skills:
+          $ref: "#/components/schemas/SkillsProjection"
+          description: Agent skills discovered and activated during this stage.
+        mcp_servers:
+          type: array
+          description: MCP servers observed by this stage.
+          items:
+            $ref: "#/components/schemas/McpServerProjection"
         state:
           $ref: "#/components/schemas/StageState"
           description: Lifecycle state of the stage projection.
+
+    SubAgentProjection:
+      description: Current projected state for one subagent spawned by an agent stage.
+      type: object
+      required:
+        - agent_id
+        - depth
+        - task
+        - status
+      properties:
+        agent_id:
+          type: string
+        depth:
+          type: integer
+          minimum: 0
+        task:
+          type: string
+        status:
+          $ref: "#/components/schemas/SubAgentStatus"
+
+    SubAgentStatus:
+      description: Projected lifecycle status for a subagent.
+      oneOf:
+        - $ref: "#/components/schemas/SubAgentStatusRunning"
+        - $ref: "#/components/schemas/SubAgentStatusCompleted"
+        - $ref: "#/components/schemas/SubAgentStatusFailed"
+        - $ref: "#/components/schemas/SubAgentStatusClosed"
+      discriminator:
+        propertyName: kind
+        mapping:
+          running: "#/components/schemas/SubAgentStatusRunning"
+          completed: "#/components/schemas/SubAgentStatusCompleted"
+          failed: "#/components/schemas/SubAgentStatusFailed"
+          closed: "#/components/schemas/SubAgentStatusClosed"
+
+    SubAgentStatusRunning:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum: [running]
+
+    SubAgentStatusCompleted:
+      type: object
+      required:
+        - kind
+        - success
+        - turns_used
+      properties:
+        kind:
+          type: string
+          enum: [completed]
+        success:
+          type: boolean
+        turns_used:
+          type: integer
+          minimum: 0
+
+    SubAgentStatusFailed:
+      type: object
+      required:
+        - kind
+        - error
+      properties:
+        kind:
+          type: string
+          enum: [failed]
+        error:
+          description: Provider/tool error payload captured by the subagent event.
+
+    SubAgentStatusClosed:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum: [closed]
+
+    SkillsProjection:
+      description: Agent skills discovered and activated during a stage.
+      type: object
+      required:
+        - available
+        - activated
+      properties:
+        available:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentSkillSummary"
+        activated:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivatedSkill"
+
+    AgentSkillSummary:
+      description: Summary of an available agent skill.
+      type: object
+      required:
+        - name
+        - description
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+
+    ActivatedSkill:
+      description: One observed agent skill activation.
+      type: object
+      required:
+        - name
+        - source
+      properties:
+        name:
+          type: string
+        source:
+          $ref: "#/components/schemas/AgentSkillActivationSource"
+
+    AgentSkillActivationSource:
+      description: Source that activated an agent skill.
+      type: string
+      enum: [slash, tool]
+
+    McpServerProjection:
+      description: Projected state for one MCP server observed by an agent stage.
+      type: object
+      required:
+        - server_name
+        - status
+        - tool_count
+      properties:
+        server_name:
+          type: string
+        status:
+          $ref: "#/components/schemas/McpServerStatus"
+        tool_count:
+          type: integer
+          minimum: 0
+
+    McpServerStatus:
+      description: Projected MCP server readiness status.
+      oneOf:
+        - $ref: "#/components/schemas/McpServerStatusReady"
+        - $ref: "#/components/schemas/McpServerStatusFailed"
+      discriminator:
+        propertyName: kind
+        mapping:
+          ready: "#/components/schemas/McpServerStatusReady"
+          failed: "#/components/schemas/McpServerStatusFailed"
+
+    McpServerStatusReady:
+      type: object
+      required:
+        - kind
+        - tools
+      properties:
+        kind:
+          type: string
+          enum: [ready]
+        tools:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentMcpToolSummary"
+
+    McpServerStatusFailed:
+      type: object
+      required:
+        - kind
+        - error
+      properties:
+        kind:
+          type: string
+          enum: [failed]
+        error:
+          type: string
+
+    AgentMcpToolSummary:
+      description: Summary of one tool exposed by an MCP server.
+      type: object
+      required:
+        - name
+        - original_name
+      properties:
+        name:
+          type: string
+        original_name:
+          type: string
 
     InterviewOption:
       description: Option stored with an interview question in the event log.
@@ -8031,15 +8239,6 @@ components:
           type: object
           additionalProperties:
             $ref: "#/components/schemas/PendingInterviewRecord"
-        todos_by_list:
-          type: object
-          description: |-
-            Projected todo / task lists, keyed by `list_id`
-            (`openai_plan:<session_id>` or
-            `anthropic_tasks:<root_session_id>`). Built by replaying
-            `todo.created`, `todo.updated`, and `todo.deleted` events.
-          additionalProperties:
-            $ref: "#/components/schemas/TodoListProjection"
         stages:
           type: object
           description: Map from StageId (`node_id@visit`) to stage projection data.

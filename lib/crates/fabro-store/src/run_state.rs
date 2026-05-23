@@ -9,13 +9,14 @@ use fabro_types::run_event::{
 };
 use fabro_types::settings::run::RunSandboxSettings;
 use fabro_types::{
-    AgentBackend, AskFabro, BilledModelUsage, Checkpoint, CheckpointRecord, CommandTermination,
-    Conclusion, EventBody, FailureSignature, InterviewQuestionRecord, Outcome,
-    PendingInterviewRecord, PullRequestLink, RepositoryRef, Run, RunBillingSummary,
-    RunControlAction, RunDiff, RunEvent, RunId, RunLifecycle, RunLinks, RunModel, RunOrigin,
-    RunProjection, RunSandbox, RunSandboxRuntime, RunSpec, RunStatus, RunTimestamps,
-    SandboxProvider, StageCompletion, StageHandler, StageId, StageOutcome, StageProjection,
-    StageState, StartRecord, TodoListProjection, TodoProjection, WorkflowRef, first_event_seq,
+    ActivatedSkill, AgentBackend, AskFabro, BilledModelUsage, Checkpoint, CheckpointRecord,
+    CommandTermination, Conclusion, EventBody, FailureSignature, InterviewQuestionRecord,
+    McpServerProjection, McpServerStatus, Outcome, PendingInterviewRecord, PullRequestLink,
+    RepositoryRef, Run, RunBillingSummary, RunControlAction, RunDiff, RunEvent, RunId,
+    RunLifecycle, RunLinks, RunModel, RunOrigin, RunProjection, RunSandbox, RunSandboxRuntime,
+    RunSpec, RunStatus, RunTimestamps, SandboxProvider, StageCompletion, StageHandler, StageId,
+    StageOutcome, StageProjection, StageState, StartRecord, SubAgentProjection, SubAgentStatus,
+    TodoListProjection, TodoProjection, WorkflowRef, first_event_seq,
 };
 use fabro_util::error::render_compact_with_causes;
 use serde_json::Value;
@@ -454,13 +455,121 @@ impl RunProjectionReducer for RunProjection {
                 stage.parallel_results = Some(parallel_results);
             }
             EventBody::TodoCreated(props) => {
-                apply_todo_created(self, props);
+                let Some(stage) = stage_at_stored_or_current_visit(self, stored, event.seq) else {
+                    return Ok(());
+                };
+                apply_todo_created(stage, props);
             }
             EventBody::TodoUpdated(props) => {
-                apply_todo_updated(self, props);
+                let Some(stage) = stage_at_stored_or_current_visit(self, stored, event.seq) else {
+                    return Ok(());
+                };
+                apply_todo_updated(stage, props);
             }
             EventBody::TodoDeleted(props) => {
-                apply_todo_deleted(self, props);
+                let Some(stage) = stage_at_stored_or_current_visit(self, stored, event.seq) else {
+                    return Ok(());
+                };
+                apply_todo_deleted(stage, props);
+            }
+            EventBody::AgentSubSpawned(props) => {
+                let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
+                else {
+                    return Ok(());
+                };
+                stage.subagents.push(SubAgentProjection {
+                    agent_id: props.agent_id.clone(),
+                    depth:    props.depth,
+                    task:     props.task.clone(),
+                    status:   SubAgentStatus::Running,
+                });
+            }
+            EventBody::AgentSubCompleted(props) => {
+                let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
+                else {
+                    return Ok(());
+                };
+                if let Some(subagent) = stage
+                    .subagents
+                    .iter_mut()
+                    .find(|subagent| subagent.agent_id == props.agent_id)
+                {
+                    subagent.status = SubAgentStatus::Completed {
+                        success:    props.success,
+                        turns_used: props.turns_used,
+                    };
+                }
+            }
+            EventBody::AgentSubFailed(props) => {
+                let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
+                else {
+                    return Ok(());
+                };
+                if let Some(subagent) = stage
+                    .subagents
+                    .iter_mut()
+                    .find(|subagent| subagent.agent_id == props.agent_id)
+                {
+                    subagent.status = SubAgentStatus::Failed {
+                        error: props.error.clone(),
+                    };
+                }
+            }
+            EventBody::AgentSubClosed(props) => {
+                let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
+                else {
+                    return Ok(());
+                };
+                if let Some(subagent) = stage
+                    .subagents
+                    .iter_mut()
+                    .find(|subagent| subagent.agent_id == props.agent_id)
+                {
+                    subagent.status = SubAgentStatus::Closed;
+                }
+            }
+            EventBody::AgentSkillsDiscovered(props) => {
+                let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
+                else {
+                    return Ok(());
+                };
+                stage.skills.available.clone_from(&props.skills);
+            }
+            EventBody::AgentSkillActivated(props) => {
+                let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
+                else {
+                    return Ok(());
+                };
+                stage.skills.activated.push(ActivatedSkill {
+                    name:   props.skill_name.clone(),
+                    source: props.source,
+                });
+            }
+            EventBody::AgentMcpReady(props) => {
+                let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
+                else {
+                    return Ok(());
+                };
+                upsert_mcp_server(stage, McpServerProjection {
+                    server_name: props.server_name.clone(),
+                    status:      McpServerStatus::Ready {
+                        tools: props.tools.clone(),
+                    },
+                    tool_count:  props.tool_count,
+                });
+            }
+            EventBody::AgentMcpFailed(props) => {
+                let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
+                else {
+                    return Ok(());
+                };
+                upsert_mcp_server(stage, McpServerProjection {
+                    server_name: props.server_name.clone(),
+                    status:      McpServerStatus::Failed {
+                        error: props.error.clone(),
+                    },
+                    tool_count:  0,
+                });
             }
             _ => {}
         }
@@ -469,11 +578,18 @@ impl RunProjectionReducer for RunProjection {
     }
 }
 
-fn apply_todo_created(state: &mut RunProjection, props: &TodoCreatedProps) {
-    let list = state
-        .todos_by_list
-        .entry(props.list_id.clone())
-        .or_insert_with(|| TodoListProjection::new(props.list_kind, props.list_id.clone()));
+fn apply_todo_created(stage: &mut StageProjection, props: &TodoCreatedProps) {
+    if stage
+        .todos
+        .as_ref()
+        .is_none_or(|list| list.list_id != props.list_id || list.kind != props.list_kind)
+    {
+        stage.todos = Some(TodoListProjection::new(
+            props.list_kind,
+            props.list_id.clone(),
+        ));
+    }
+    let list = stage.todos.as_mut().expect("todo list was just inserted");
     list.upsert(TodoProjection {
         id:          props.todo_id.clone(),
         status:      props.status,
@@ -488,18 +604,41 @@ fn apply_todo_created(state: &mut RunProjection, props: &TodoCreatedProps) {
     });
 }
 
-fn apply_todo_updated(state: &mut RunProjection, props: &TodoUpdatedProps) {
-    if let Some(list) = state.todos_by_list.get_mut(&props.list_id) {
+fn apply_todo_updated(stage: &mut StageProjection, props: &TodoUpdatedProps) {
+    if let Some(list) = stage
+        .todos
+        .as_mut()
+        .filter(|list| list.list_id == props.list_id)
+    {
         list.apply_patch(&props.todo_id, &fabro_types::TodoPatch::from_props(props));
     }
 }
 
-fn apply_todo_deleted(state: &mut RunProjection, props: &TodoDeletedProps) {
-    if let Some(list) = state.todos_by_list.get_mut(&props.list_id) {
+fn apply_todo_deleted(stage: &mut StageProjection, props: &TodoDeletedProps) {
+    let should_clear = if let Some(list) = stage
+        .todos
+        .as_mut()
+        .filter(|list| list.list_id == props.list_id)
+    {
         list.remove(&props.todo_id);
-        if list.items.is_empty() {
-            state.todos_by_list.remove(&props.list_id);
-        }
+        list.items.is_empty()
+    } else {
+        false
+    };
+    if should_clear {
+        stage.todos = None;
+    }
+}
+
+fn upsert_mcp_server(stage: &mut StageProjection, server: McpServerProjection) {
+    if let Some(existing) = stage
+        .mcp_servers
+        .iter_mut()
+        .find(|existing| existing.server_name == server.server_name)
+    {
+        *existing = server;
+    } else {
+        stage.mcp_servers.push(server);
     }
 }
 
@@ -947,8 +1086,11 @@ mod tests {
     use fabro_types::run_event::run::RunFailedProps;
     use fabro_types::run_event::{
         AgentAcpCancelledProps, AgentAcpCompletedProps, AgentAcpStartedProps,
-        AgentAcpTimedOutProps, AgentMessageProps, AgentSessionActivatedProps,
-        AgentSessionEndedProps, AgentSessionStartedProps, CheckpointCompletedProps,
+        AgentAcpTimedOutProps, AgentMcpFailedProps, AgentMcpReadyProps, AgentMcpToolSummary,
+        AgentMessageProps, AgentSessionActivatedProps, AgentSessionEndedProps,
+        AgentSessionStartedProps, AgentSkillActivatedProps, AgentSkillActivationSource,
+        AgentSkillSummary, AgentSkillsDiscoveredProps, AgentSubClosedProps, AgentSubCompletedProps,
+        AgentSubFailedProps, AgentSubSpawnedProps, CheckpointCompletedProps,
         InterviewCompletedProps, InterviewOption, InterviewStartedProps, RunControlEffectProps,
         StageCompletedProps, StageFailedProps, StagePromptProps, StageRetryingProps,
         StageStartedProps,
@@ -956,9 +1098,9 @@ mod tests {
     use fabro_types::{
         AgentBackend, BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint,
         CheckpointRecord, CommandTermination, EventBody, FailureCategory, FailureDetail,
-        FailureReason, Graph, Outcome, PullRequestLink, QuestionType, RunBlobId, RunControlAction,
-        RunDiff, RunEvent, RunSpec, RunStatus, StageOutcome, StageState, SuccessReason,
-        WorkflowSettings, first_event_seq, fixtures,
+        FailureReason, Graph, McpServerStatus, Outcome, PullRequestLink, QuestionType, RunBlobId,
+        RunControlAction, RunDiff, RunEvent, RunSpec, RunStatus, StageOutcome, StageState,
+        SubAgentStatus, SuccessReason, WorkflowSettings, first_event_seq, fixtures,
     };
     use serde_json::json;
 
@@ -3162,9 +3304,20 @@ mod tests {
 
     mod todo_reducer {
         use fabro_types::run_event::{TodoCreatedProps, TodoDeletedProps, TodoUpdatedProps};
-        use fabro_types::{TodoListKind, TodoStatus};
+        use fabro_types::{TodoListKind, TodoListProjection, TodoStatus};
 
         use super::*;
+
+        fn stage_id() -> StageId {
+            StageId::new("code", 1)
+        }
+
+        fn stage_todos<'a>(state: &'a RunProjection, stage_id: &StageId) -> &'a TodoListProjection {
+            state
+                .stage(stage_id)
+                .and_then(|stage| stage.todos.as_ref())
+                .expect("stage todos present")
+        }
 
         fn created(
             list: &str,
@@ -3222,30 +3375,32 @@ mod tests {
         #[test]
         fn replay_reconstructs_current_list() {
             let mut state = initialized_projection();
+            let stage_id = stage_id();
             let list = "openai_plan:ses_a";
             state
-                .apply_event(&test_event(
+                .apply_event(&test_stage_event(
                     1,
                     created(list, TodoListKind::OpenAiPlan, "a", 0, "first"),
-                    None,
+                    stage_id.clone(),
                 ))
                 .unwrap();
             state
-                .apply_event(&test_event(
+                .apply_event(&test_stage_event(
                     2,
                     created(list, TodoListKind::OpenAiPlan, "b", 1, "second"),
-                    None,
+                    stage_id.clone(),
                 ))
                 .unwrap();
             state
-                .apply_event(&test_event(
+                .apply_event(&test_stage_event(
                     3,
                     updated_status(list, TodoListKind::OpenAiPlan, "a", TodoStatus::InProgress),
-                    None,
+                    stage_id.clone(),
                 ))
                 .unwrap();
 
-            let projection = state.todos_by_list.get(list).expect("list present");
+            let projection = stage_todos(&state, &stage_id);
+            assert_eq!(projection.list_id, list);
             assert_eq!(projection.items.len(), 2);
             assert_eq!(projection.items[0].id, "a");
             assert_eq!(projection.items[0].status, TodoStatus::InProgress);
@@ -3255,53 +3410,57 @@ mod tests {
         #[test]
         fn deleted_todos_are_absent() {
             let mut state = initialized_projection();
+            let stage_id = stage_id();
             let list = "openai_plan:ses_a";
             state
-                .apply_event(&test_event(
+                .apply_event(&test_stage_event(
                     1,
                     created(list, TodoListKind::OpenAiPlan, "a", 0, "first"),
-                    None,
+                    stage_id.clone(),
                 ))
                 .unwrap();
             state
-                .apply_event(&test_event(
+                .apply_event(&test_stage_event(
                     2,
                     created(list, TodoListKind::OpenAiPlan, "b", 1, "second"),
-                    None,
+                    stage_id.clone(),
                 ))
                 .unwrap();
             state
-                .apply_event(&test_event(
+                .apply_event(&test_stage_event(
                     3,
                     deleted(list, TodoListKind::OpenAiPlan, "a"),
-                    None,
+                    stage_id.clone(),
                 ))
                 .unwrap();
 
-            let projection = state.todos_by_list.get(list).expect("list present");
+            let projection = stage_todos(&state, &stage_id);
             assert_eq!(projection.items.len(), 1);
             assert_eq!(projection.items[0].id, "b");
         }
 
         #[test]
-        fn multiple_lists_stay_isolated() {
+        fn stage_todo_lists_stay_isolated() {
             let mut state = initialized_projection();
+            let plan_one = StageId::new("plan_one", 1);
+            let plan_two = StageId::new("plan_two", 1);
+            let claude = StageId::new("claude", 1);
             state
-                .apply_event(&test_event(
+                .apply_event(&test_stage_event(
                     1,
                     created("openai_plan:s1", TodoListKind::OpenAiPlan, "a", 0, "p1"),
-                    None,
+                    plan_one.clone(),
                 ))
                 .unwrap();
             state
-                .apply_event(&test_event(
+                .apply_event(&test_stage_event(
                     2,
                     created("openai_plan:s2", TodoListKind::OpenAiPlan, "a", 0, "p2"),
-                    None,
+                    plan_two.clone(),
                 ))
                 .unwrap();
             state
-                .apply_event(&test_event(
+                .apply_event(&test_stage_event(
                     3,
                     created(
                         "anthropic_tasks:s_root",
@@ -3310,35 +3469,32 @@ mod tests {
                         0,
                         "claude task",
                     ),
-                    None,
+                    claude.clone(),
                 ))
                 .unwrap();
 
-            assert_eq!(state.todos_by_list.len(), 3);
-            assert_eq!(state.todos_by_list["openai_plan:s1"].items[0].subject, "p1");
-            assert_eq!(state.todos_by_list["openai_plan:s2"].items[0].subject, "p2");
-            assert_eq!(
-                state.todos_by_list["anthropic_tasks:s_root"].items[0].subject,
-                "claude task"
-            );
+            assert_eq!(stage_todos(&state, &plan_one).items[0].subject, "p1");
+            assert_eq!(stage_todos(&state, &plan_two).items[0].subject, "p2");
+            assert_eq!(stage_todos(&state, &claude).items[0].subject, "claude task");
         }
 
         #[test]
         fn metadata_patch_merges_and_null_deletes() {
             let mut state = initialized_projection();
+            let stage_id = stage_id();
             let list = "anthropic_tasks:r";
             state
-                .apply_event(&test_event(
+                .apply_event(&test_stage_event(
                     1,
                     created(list, TodoListKind::AnthropicTasks, "1", 0, "t"),
-                    None,
+                    stage_id.clone(),
                 ))
                 .unwrap();
             let mut meta = BTreeMap::new();
             meta.insert("k1".to_string(), serde_json::json!("v1"));
             meta.insert("k2".to_string(), serde_json::json!("v2"));
             state
-                .apply_event(&test_event(
+                .apply_event(&test_stage_event(
                     2,
                     EventBody::TodoUpdated(TodoUpdatedProps {
                         list_id:        list.to_string(),
@@ -3354,13 +3510,13 @@ mod tests {
                         add_blocked_by: None,
                         metadata_patch: meta,
                     }),
-                    None,
+                    stage_id.clone(),
                 ))
                 .unwrap();
             let mut delete = BTreeMap::new();
             delete.insert("k1".to_string(), serde_json::Value::Null);
             state
-                .apply_event(&test_event(
+                .apply_event(&test_stage_event(
                     3,
                     EventBody::TodoUpdated(TodoUpdatedProps {
                         list_id:        list.to_string(),
@@ -3376,13 +3532,242 @@ mod tests {
                         add_blocked_by: None,
                         metadata_patch: delete,
                     }),
-                    None,
+                    stage_id.clone(),
                 ))
                 .unwrap();
 
-            let todo = &state.todos_by_list[list].items[0];
+            let todo = &stage_todos(&state, &stage_id).items[0];
             assert!(!todo.metadata.contains_key("k1"));
             assert_eq!(todo.metadata.get("k2"), Some(&serde_json::json!("v2")));
+        }
+    }
+
+    mod agent_state_reducer {
+        use super::*;
+
+        fn stage_id() -> StageId {
+            StageId::new("code", 1)
+        }
+
+        #[test]
+        fn subagent_events_update_stage_projection() {
+            let mut state = initialized_projection();
+            let stage_id = stage_id();
+
+            state
+                .apply_event(&test_stage_event(
+                    1,
+                    EventBody::AgentSubSpawned(AgentSubSpawnedProps {
+                        agent_id: "sub-1".to_string(),
+                        depth:    1,
+                        task:     "write tests".to_string(),
+                        visit:    1,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            let stage = state.stage(&stage_id).unwrap();
+            assert_eq!(stage.subagents.len(), 1);
+            assert_eq!(stage.subagents[0].agent_id, "sub-1");
+            assert_eq!(stage.subagents[0].depth, 1);
+            assert_eq!(stage.subagents[0].task, "write tests");
+            assert_eq!(stage.subagents[0].status, SubAgentStatus::Running);
+
+            state
+                .apply_event(&test_stage_event(
+                    2,
+                    EventBody::AgentSubCompleted(AgentSubCompletedProps {
+                        agent_id:   "sub-1".to_string(),
+                        depth:      1,
+                        success:    true,
+                        turns_used: 3,
+                        visit:      1,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            let stage = state.stage(&stage_id).unwrap();
+            assert_eq!(stage.subagents[0].status, SubAgentStatus::Completed {
+                success:    true,
+                turns_used: 3,
+            });
+
+            state
+                .apply_event(&test_stage_event(
+                    3,
+                    EventBody::AgentSubSpawned(AgentSubSpawnedProps {
+                        agent_id: "sub-2".to_string(),
+                        depth:    2,
+                        task:     "debug failure".to_string(),
+                        visit:    1,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_stage_event(
+                    4,
+                    EventBody::AgentSubFailed(AgentSubFailedProps {
+                        agent_id: "sub-2".to_string(),
+                        depth:    2,
+                        error:    json!({ "message": "boom" }),
+                        visit:    1,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            let stage = state.stage(&stage_id).unwrap();
+            assert_eq!(stage.subagents[1].status, SubAgentStatus::Failed {
+                error: json!({ "message": "boom" }),
+            });
+
+            state
+                .apply_event(&test_stage_event(
+                    5,
+                    EventBody::AgentSubClosed(AgentSubClosedProps {
+                        agent_id: "sub-2".to_string(),
+                        depth:    2,
+                        visit:    1,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            let stage = state.stage(&stage_id).unwrap();
+            assert_eq!(stage.subagents[1].status, SubAgentStatus::Closed);
+        }
+
+        #[test]
+        fn skill_events_update_stage_projection() {
+            let mut state = initialized_projection();
+            let stage_id = stage_id();
+
+            state
+                .apply_event(&test_stage_event(
+                    1,
+                    EventBody::AgentSkillsDiscovered(AgentSkillsDiscoveredProps {
+                        provider_profile: "claude".to_string(),
+                        source_dirs:      vec![".claude/skills".to_string()],
+                        skills:           vec![
+                            AgentSkillSummary {
+                                name:        "rust".to_string(),
+                                description: "Rust help".to_string(),
+                            },
+                            AgentSkillSummary {
+                                name:        "docs".to_string(),
+                                description: "Docs help".to_string(),
+                            },
+                        ],
+                        visit:            1,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_stage_event(
+                    2,
+                    EventBody::AgentSkillActivated(AgentSkillActivatedProps {
+                        skill_name: "rust".to_string(),
+                        source:     AgentSkillActivationSource::Slash,
+                        visit:      1,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_stage_event(
+                    3,
+                    EventBody::AgentSkillActivated(AgentSkillActivatedProps {
+                        skill_name: "rust".to_string(),
+                        source:     AgentSkillActivationSource::Tool,
+                        visit:      1,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+
+            let stage = state.stage(&stage_id).unwrap();
+            assert_eq!(stage.skills.available.len(), 2);
+            assert_eq!(stage.skills.available[0].name, "rust");
+            assert_eq!(stage.skills.activated.len(), 2);
+            assert_eq!(stage.skills.activated[0].name, "rust");
+            assert_eq!(
+                stage.skills.activated[0].source,
+                AgentSkillActivationSource::Slash
+            );
+            assert_eq!(
+                stage.skills.activated[1].source,
+                AgentSkillActivationSource::Tool
+            );
+        }
+
+        #[test]
+        fn mcp_server_events_update_stage_projection() {
+            let mut state = initialized_projection();
+            let stage_id = stage_id();
+
+            state
+                .apply_event(&test_stage_event(
+                    1,
+                    EventBody::AgentMcpReady(AgentMcpReadyProps {
+                        server_name: "filesystem".to_string(),
+                        tool_count:  2,
+                        tools:       vec![
+                            AgentMcpToolSummary {
+                                name:          "read_file".to_string(),
+                                original_name: "read_file".to_string(),
+                            },
+                            AgentMcpToolSummary {
+                                name:          "write_file".to_string(),
+                                original_name: "write_file".to_string(),
+                            },
+                        ],
+                        visit:       1,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_stage_event(
+                    2,
+                    EventBody::AgentMcpFailed(AgentMcpFailedProps {
+                        server_name: "github".to_string(),
+                        error:       "missing token".to_string(),
+                        visit:       1,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_stage_event(
+                    3,
+                    EventBody::AgentMcpReady(AgentMcpReadyProps {
+                        server_name: "filesystem".to_string(),
+                        tool_count:  1,
+                        tools:       vec![AgentMcpToolSummary {
+                            name:          "read_file".to_string(),
+                            original_name: "read_file".to_string(),
+                        }],
+                        visit:       1,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+
+            let stage = state.stage(&stage_id).unwrap();
+            assert_eq!(stage.mcp_servers.len(), 2);
+            assert_eq!(stage.mcp_servers[0].server_name, "filesystem");
+            assert_eq!(stage.mcp_servers[0].tool_count, 1);
+            assert_eq!(stage.mcp_servers[0].status, McpServerStatus::Ready {
+                tools: vec![AgentMcpToolSummary {
+                    name:          "read_file".to_string(),
+                    original_name: "read_file".to_string(),
+                }],
+            });
+            assert_eq!(stage.mcp_servers[1].server_name, "github");
+            assert_eq!(stage.mcp_servers[1].tool_count, 0);
+            assert_eq!(stage.mcp_servers[1].status, McpServerStatus::Failed {
+                error: "missing token".to_string(),
+            });
         }
     }
 }

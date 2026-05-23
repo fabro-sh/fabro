@@ -13,11 +13,14 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { AgentSkillActivationSource } from './agent-skill-activation-source';
 
-export interface RunCheckpointSettings {
-    'exclude_globs': Array<string>;
-    /**
-     * When true, Fabro-managed run-branch checkpoint commits bypass local Git commit hooks. Does not affect Fabro `[[run.hooks]]` or metadata-branch snapshots. Defaults to false.
-     */
-    'skip_git_hooks': boolean;
+/**
+ * One observed agent skill activation.
+ */
+export interface ActivatedSkill {
+    'name': string;
+    'source': AgentSkillActivationSource;
 }

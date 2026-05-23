@@ -14,10 +14,13 @@
 
 
 
-export interface RunCheckpointSettings {
-    'exclude_globs': Array<string>;
-    /**
-     * When true, Fabro-managed run-branch checkpoint commits bypass local Git commit hooks. Does not affect Fabro `[[run.hooks]]` or metadata-branch snapshots. Defaults to false.
-     */
-    'skip_git_hooks': boolean;
+export interface McpServerStatusFailed {
+    'kind': McpServerStatusFailedKindEnum;
+    'error': string;
 }
+
+export const McpServerStatusFailedKindEnum = {
+    FAILED: 'failed'
+} as const;
+
+export type McpServerStatusFailedKindEnum = typeof McpServerStatusFailedKindEnum[keyof typeof McpServerStatusFailedKindEnum];
