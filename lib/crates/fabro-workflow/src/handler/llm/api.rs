@@ -474,6 +474,10 @@ fn file_tracking_snapshot(
     (files, state.last.clone())
 }
 
+fn last_touched_file(file_tracking: &Arc<Mutex<FileTracking>>) -> Option<String> {
+    file_tracking.lock().unwrap().last.clone()
+}
+
 fn last_assistant_response(session: &Session) -> String {
     session
         .history()
@@ -553,10 +557,8 @@ pub struct AgentApiBackend {
 }
 
 struct OneShotCompletion {
-    response:        Response,
-    actual_model:    String,
-    actual_provider: String,
-    actual_speed:    Option<Speed>,
+    response: Response,
+    model:    ModelRef,
 }
 
 impl AgentApiBackend {
@@ -864,16 +866,17 @@ impl AgentApiBackend {
         let result = client.complete(request).await;
         let default_provider = self.provider_id.to_string();
 
-        let (response, actual_model, actual_provider, actual_speed) = match result {
-            Ok(resp) => (
-                resp,
-                request.model.clone(),
-                request
-                    .provider
-                    .clone()
-                    .unwrap_or_else(|| default_provider.clone()),
-                controls.speed,
-            ),
+        let (response, model) = match result {
+            Ok(resp) => (resp, ModelRef {
+                provider: ProviderId::from(
+                    request
+                        .provider
+                        .clone()
+                        .unwrap_or_else(|| default_provider.clone()),
+                ),
+                model_id: request.model.clone(),
+                speed:    controls.speed,
+            }),
             Err(sdk_err) if sdk_err.failover_eligible() && !fallback_chain.is_empty() => {
                 let error_msg = sdk_err.to_string();
                 let from_provider = request
@@ -916,10 +919,12 @@ impl AgentApiBackend {
                     match client.complete(&fallback_request).await {
                         Ok(resp) => {
                             found = Some(OneShotCompletion {
-                                response:        resp,
-                                actual_model:    target.model.clone(),
-                                actual_provider: target.provider.clone(),
-                                actual_speed:    controls.speed,
+                                response: resp,
+                                model:    ModelRef {
+                                    provider: ProviderId::from(target.provider.clone()),
+                                    model_id: target.model.clone(),
+                                    speed:    controls.speed,
+                                },
                             });
                             break;
                         }
@@ -938,12 +943,7 @@ impl AgentApiBackend {
             Err(sdk_err) => return Err(Error::Llm(sdk_err)),
         };
 
-        Ok(OneShotCompletion {
-            response,
-            actual_model,
-            actual_provider,
-            actual_speed,
-        })
+        Ok(OneShotCompletion { response, model })
     }
 }
 
@@ -1053,11 +1053,7 @@ impl CodergenBackend for AgentApiBackend {
 
             let stage_usage = billed_model_usage_from_llm(
                 self.catalog.as_ref(),
-                &ModelRef {
-                    provider: ProviderId::from(completion.actual_provider),
-                    model_id: completion.actual_model,
-                    speed:    completion.actual_speed,
-                },
+                &completion.model,
                 &total_usage,
             )?;
 
@@ -1362,7 +1358,7 @@ impl CodergenBackend for AgentApiBackend {
         if let Some(schema) = &output_schema {
             let mut repair_attempts = 0_i64;
             loop {
-                let (_, last_file_touched) = file_tracking_snapshot(&file_tracking);
+                let last_file_touched = last_touched_file(&file_tracking);
                 match validate_agent_output_sources(
                     schema,
                     &response,

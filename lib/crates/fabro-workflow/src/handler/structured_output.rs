@@ -1,9 +1,14 @@
+use std::sync::{Arc, LazyLock};
+
 use fabro_graphviz::graph::Node;
 use fabro_llm::types::{ResponseFormat, ResponseFormatType};
+use jsonschema::Validator;
 use serde_json::Value;
 
 use crate::error::Error;
 use crate::outcome::{FailureCategory, FailureDetail, Outcome, StageOutcome};
+
+pub(crate) const ROUTING_KEYWORD: &str = "routing";
 
 pub(crate) const ROUTING_STATUS_FIELDS: &[&str] = &[
     "preferred_next_label",
@@ -13,10 +18,15 @@ pub(crate) const ROUTING_STATUS_FIELDS: &[&str] = &[
     "context_updates",
 ];
 
-#[derive(Debug, Clone, PartialEq)]
+/// Parsed `output_schema` declaration with a precompiled validator so that
+/// repair turns don't recompile the schema on every iteration.
+#[derive(Debug, Clone)]
 pub(crate) enum OutputSchemaKind {
     Routing,
-    JsonSchema { schema: Value },
+    JsonSchema {
+        schema:    Value,
+        validator: Arc<Validator>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,7 +145,7 @@ pub(crate) fn parse_node_output_schema(node: &Node) -> Result<Option<OutputSchem
             node.id
         )));
     }
-    if value == "routing" {
+    if value == ROUTING_KEYWORD {
         return Ok(Some(OutputSchemaKind::Routing));
     }
     if value.starts_with('@') {
@@ -151,13 +161,16 @@ pub(crate) fn parse_node_output_schema(node: &Node) -> Result<Option<OutputSchem
             node.id
         ))
     })?;
-    compile_schema(&schema).map_err(|err| {
+    let validator = jsonschema::validator_for(&schema).map_err(|err| {
         Error::Validation(format!(
             "Invalid output_schema for node \"{}\": {err}",
             node.id
         ))
     })?;
-    Ok(Some(OutputSchemaKind::JsonSchema { schema }))
+    Ok(Some(OutputSchemaKind::JsonSchema {
+        schema,
+        validator: Arc::new(validator),
+    }))
 }
 
 #[must_use]
@@ -168,7 +181,7 @@ pub(crate) fn prompt_response_format(schema: &OutputSchemaKind) -> ResponseForma
             json_schema: None,
             strict:      false,
         },
-        OutputSchemaKind::JsonSchema { schema } => ResponseFormat {
+        OutputSchemaKind::JsonSchema { schema, .. } => ResponseFormat {
             kind:        ResponseFormatType::JsonSchema,
             json_schema: Some(schema.clone()),
             strict:      true,
@@ -182,7 +195,9 @@ pub(crate) fn validate_response_text(
 ) -> Result<ValidatedStructuredOutput, StructuredOutputError> {
     match schema {
         OutputSchemaKind::Routing => validate_routing_response_text(text),
-        OutputSchemaKind::JsonSchema { schema } => validate_custom_response_text(schema, text),
+        OutputSchemaKind::JsonSchema { validator, .. } => {
+            validate_custom_response_text(validator, text)
+        }
     }
 }
 
@@ -203,7 +218,7 @@ pub(crate) fn apply_validated_output(
 }
 
 /// Find all balanced `{...}` JSON object substrings in the text.
-pub(crate) fn find_json_objects(text: &str) -> Vec<&str> {
+fn find_json_objects(text: &str) -> Vec<&str> {
     let mut results = Vec::new();
     let bytes = text.as_bytes();
     let mut i = 0;
@@ -241,7 +256,7 @@ pub(crate) fn find_json_objects(text: &str) -> Vec<&str> {
     results
 }
 
-pub(crate) fn extract_status_fields_loose(text: &str, outcome: &mut Outcome) -> bool {
+pub(crate) fn extract_status_fields(text: &str, outcome: &mut Outcome) -> bool {
     let candidates = find_json_objects(text);
 
     let parsed = candidates.iter().rev().find_map(|candidate| {
@@ -286,7 +301,7 @@ fn validate_routing_response_text(
         if !contains_routing_field(obj) {
             continue;
         }
-        validate_value_against_schema(&routing_schema(), &parsed)?;
+        validate_value_against_validator(routing_validator(), &parsed)?;
         return Ok(ValidatedStructuredOutput { value: parsed });
     }
 
@@ -300,7 +315,7 @@ fn validate_routing_response_text(
 }
 
 fn validate_custom_response_text(
-    schema: &Value,
+    validator: &Validator,
     text: &str,
 ) -> Result<ValidatedStructuredOutput, StructuredOutputError> {
     let candidates = find_json_objects(text);
@@ -316,20 +331,14 @@ fn validate_custom_response_text(
             format!("invalid JSON object: {err}"),
         )
     })?;
-    validate_value_against_schema(schema, &parsed)?;
+    validate_value_against_validator(validator, &parsed)?;
     Ok(ValidatedStructuredOutput { value: parsed })
 }
 
-fn validate_value_against_schema(
-    schema: &Value,
+fn validate_value_against_validator(
+    validator: &Validator,
     value: &Value,
 ) -> Result<(), StructuredOutputError> {
-    let validator = compile_schema(schema).map_err(|err| {
-        StructuredOutputError::new(
-            StructuredOutputErrorKind::SchemaValidation,
-            format!("invalid JSON Schema: {err}"),
-        )
-    })?;
     let errors = validator
         .iter_errors(value)
         .map(|error| error.to_string())
@@ -340,12 +349,6 @@ fn validate_value_against_schema(
     } else {
         Err(StructuredOutputError::validation(errors))
     }
-}
-
-fn compile_schema(
-    schema: &Value,
-) -> Result<jsonschema::Validator, jsonschema::ValidationError<'static>> {
-    jsonschema::validator_for(schema)
 }
 
 fn contains_routing_field(obj: &serde_json::Map<String, Value>) -> bool {
@@ -360,28 +363,32 @@ fn raw_mentions_routing_field(candidate: &str) -> bool {
         .any(|field| candidate.contains(&format!("\"{field}\"")))
 }
 
-fn routing_schema() -> Value {
-    serde_json::json!({
-        "type": "object",
-        "additionalProperties": true,
-        "properties": {
-            "preferred_next_label": { "type": "string" },
-            "outcome": {
-                "type": "string",
-                "enum": ["succeeded", "partially_succeeded", "failed", "skipped"]
+fn routing_validator() -> &'static Validator {
+    static ROUTING_VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
+        let schema = serde_json::json!({
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+                "preferred_next_label": { "type": "string" },
+                "outcome": {
+                    "type": "string",
+                    "enum": ["succeeded", "partially_succeeded", "failed", "skipped"]
+                },
+                "failure_reason": { "type": "string" },
+                "suggested_next_ids": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                },
+                "context_updates": { "type": "object" }
             },
-            "failure_reason": { "type": "string" },
-            "suggested_next_ids": {
-                "type": "array",
-                "items": { "type": "string" }
-            },
-            "context_updates": { "type": "object" }
-        },
-        "anyOf": ROUTING_STATUS_FIELDS
-            .iter()
-            .map(|field| serde_json::json!({ "required": [field] }))
-            .collect::<Vec<_>>()
-    })
+            "anyOf": ROUTING_STATUS_FIELDS
+                .iter()
+                .map(|field| serde_json::json!({ "required": [field] }))
+                .collect::<Vec<_>>()
+        });
+        jsonschema::validator_for(&schema).expect("built-in routing schema must compile")
+    });
+    &ROUTING_VALIDATOR
 }
 
 fn apply_routing_fields(value: &Value, outcome: &mut Outcome) {
@@ -433,7 +440,12 @@ mod tests {
     }
 
     fn schema(value: Value) -> OutputSchemaKind {
-        OutputSchemaKind::JsonSchema { schema: value }
+        let validator =
+            jsonschema::validator_for(&value).expect("test schema should be a valid JSON Schema");
+        OutputSchemaKind::JsonSchema {
+            schema:    value,
+            validator: Arc::new(validator),
+        }
     }
 
     #[test]
@@ -572,7 +584,7 @@ mod tests {
 
         let parsed = parse_node_output_schema(&node).unwrap();
 
-        assert_eq!(parsed, Some(OutputSchemaKind::Routing));
+        assert!(matches!(parsed, Some(OutputSchemaKind::Routing)));
     }
 
     #[test]

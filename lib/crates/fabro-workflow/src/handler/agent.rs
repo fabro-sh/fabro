@@ -2,9 +2,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use fabro_agent::{Sandbox, shell_quote};
+use fabro_agent::Sandbox;
 use fabro_graphviz::graph::{Graph, Node};
 use fabro_types::{RunId, StageModelUsage};
+pub(crate) use structured_output::extract_status_fields;
 use tokio_util::sync::CancellationToken;
 
 use super::llm::api::EffectiveRequestControls;
@@ -133,15 +134,6 @@ impl AgentHandler {
     }
 }
 
-/// Extract routing directives from LLM response text.
-///
-/// Searches for the last JSON object in the response that contains at least
-/// one status field (`preferred_next_label`, `outcome`, `suggested_next_ids`,
-/// `context_updates`). Merges extracted fields into the outcome.
-pub(crate) fn extract_status_fields(text: &str, outcome: &mut Outcome) -> bool {
-    structured_output::extract_status_fields_loose(text, outcome)
-}
-
 pub(crate) async fn validate_agent_output_sources(
     schema: &OutputSchemaKind,
     response_text: &str,
@@ -152,18 +144,18 @@ pub(crate) async fn validate_agent_output_sources(
         return structured_output::validate_response_text(schema, response_text);
     }
 
-    match structured_output::validate_response_text(schema, response_text) {
+    let initial_error = match structured_output::validate_response_text(schema, response_text) {
         Ok(validated) => return Ok(validated),
-        Err(error) if error.allows_routing_fallback() => {}
+        Err(error) if error.allows_routing_fallback() => error,
         Err(error) => return Err(error),
-    }
+    };
 
-    let mut fallback_error = None;
+    let mut fallback_error = initial_error;
     if let Some(status_json) = read_sandbox_file(sandbox, "status.json").await {
         match structured_output::validate_response_text(schema, &status_json) {
             Ok(validated) => return Ok(validated),
             Err(error) if error.allows_routing_fallback() => {
-                fallback_error = Some(error);
+                fallback_error = error;
             }
             Err(error) => return Err(error),
         }
@@ -175,23 +167,11 @@ pub(crate) async fn validate_agent_output_sources(
         }
     }
 
-    Err(fallback_error.unwrap_or_else(|| {
-        structured_output::validate_response_text(schema, response_text)
-            .expect_err("response text should have failed routing validation")
-    }))
+    Err(fallback_error)
 }
 
 async fn read_sandbox_file(sandbox: &Arc<dyn Sandbox>, path: &str) -> Option<String> {
-    let cmd = format!("cat {}", shell_quote(path));
-    let result = sandbox
-        .exec_command(&cmd, 5_000, None, None, None)
-        .await
-        .ok()?;
-    if result.is_success() {
-        Some(result.stdout)
-    } else {
-        None
-    }
+    sandbox.read_file_text(path).await.ok()
 }
 
 /// Truncate a string to at most `max_chars` characters (char-boundary safe).
