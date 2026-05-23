@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use fabro_llm::Error as LlmError;
 use fabro_llm::types::{ContentPart, ThinkingData, TokenCounts, ToolCall, ToolResult};
 use fabro_model::ModelRef;
-use fabro_types::SessionMessage;
+use fabro_types::{SessionMessage, StageContextWindowProjection};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -304,6 +304,7 @@ pub enum AgentEvent {
         delay_secs: f64,
         error:      LlmError,
     },
+    ContextWindowSnapshot(StageContextWindowProjection),
     SubAgentSpawned {
         agent_id: String,
         depth:    usize,
@@ -501,6 +502,17 @@ impl AgentEvent {
                     delay_secs,
                     error = %error,
                     "LLM request failed, retrying"
+                );
+            }
+            Self::ContextWindowSnapshot(snapshot) => {
+                debug!(
+                    session_id,
+                    provider = snapshot.provider.as_str(),
+                    model = snapshot.model.as_str(),
+                    input_tokens = snapshot.input_tokens,
+                    context_window_tokens = snapshot.context_window_tokens,
+                    count_method = %snapshot.count_method,
+                    "Context window snapshot"
                 );
             }
             Self::SubAgentSpawned {

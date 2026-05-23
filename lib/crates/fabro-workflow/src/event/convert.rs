@@ -590,7 +590,12 @@ fn event_body_from_event(event: &Event) -> EventBody {
             provider: provider.clone(),
             billing:  billing.clone(),
         }),
-        Event::Agent { visit, event, .. } => match event {
+        Event::Agent {
+            stage,
+            visit,
+            event,
+            ..
+        } => match event {
             AgentEvent::ProcessingEnd => {
                 EventBody::AgentProcessingEnd(fabro_types::AgentProcessingEndProps {
                     visit: *visit,
@@ -706,6 +711,13 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 error:      serde_json::to_value(error).expect("serializable sdk error"),
                 visit:      *visit,
             }),
+            AgentEvent::ContextWindowSnapshot(snapshot) => EventBody::AgentContextWindowSnapshot(
+                fabro_types::AgentContextWindowSnapshotProps {
+                    stage_id: ::fabro_types::StageId::new(stage.clone(), *visit),
+                    visit:    *visit,
+                    snapshot: snapshot.clone(),
+                },
+            ),
             AgentEvent::SubAgentSpawned {
                 agent_id,
                 depth,

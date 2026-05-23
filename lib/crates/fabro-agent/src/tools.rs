@@ -10,7 +10,7 @@ use futures::{StreamExt, stream};
 
 use crate::config::SessionOptions;
 use crate::sandbox::GrepOptions;
-use crate::tool_registry::{RegisteredTool, ToolRegistry};
+use crate::tool_registry::{RegisteredTool, ToolRegistry, ToolSource};
 
 const MAX_WEB_FETCH_BYTES: usize = 100 * 1024;
 const MAX_READ_MANY_FILES_CONCURRENCY: usize = 8;
@@ -111,6 +111,7 @@ pub fn make_read_file_tool() -> RegisteredTool {
                 Ok(content)
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 
@@ -141,6 +142,7 @@ pub fn make_write_file_tool() -> RegisteredTool {
                 Ok(format!("Successfully wrote to {file_path}"))
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 
@@ -200,6 +202,7 @@ pub fn make_edit_file_tool() -> RegisteredTool {
                 Ok(format!("Successfully edited {file_path}"))
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 
@@ -270,6 +273,7 @@ pub fn make_shell_tool_with_config(config: &SessionOptions) -> RegisteredTool {
                 Ok(output)
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 
@@ -334,6 +338,7 @@ pub fn make_grep_tool() -> RegisteredTool {
                 Ok(results.join("\n"))
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 
@@ -365,6 +370,7 @@ pub fn make_glob_tool() -> RegisteredTool {
                 Ok(results.join("\n"))
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 
@@ -426,6 +432,7 @@ pub(crate) fn make_read_many_files_tool() -> RegisteredTool {
                 Ok(output)
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 
@@ -467,6 +474,7 @@ pub(crate) fn make_list_dir_tool() -> RegisteredTool {
                 Ok(lines.join("\n"))
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 
@@ -578,6 +586,7 @@ fn make_web_search_tool_with_api_key(api_key: Option<String>) -> RegisteredTool 
                 Ok(format_brave_results(&body))
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 
@@ -679,6 +688,7 @@ pub(crate) fn make_web_fetch_tool(summarizer: Option<WebFetchSummarizer>) -> Reg
                 }
             })
         }),
+        source: ToolSource::Native,
     }
 }
 

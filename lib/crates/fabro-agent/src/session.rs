@@ -1,4 +1,5 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::SystemTime;
 
@@ -7,9 +8,10 @@ use fabro_llm::client::Client;
 use fabro_llm::error::ProviderErrorKind;
 use fabro_llm::generate::StreamAccumulator;
 use fabro_llm::provider::StreamEventStream;
+use fabro_llm::token_count::{InputTokenCountMethod, InputTokenCountPreference};
 use fabro_llm::types::{
     ContentPart, Message as LlmMessage, ReasoningEffort, Request, RetryPolicy, StreamEvent,
-    ToolChoice,
+    TokenCounts, ToolChoice,
 };
 use fabro_llm::{Error as LlmError, retry};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
@@ -25,6 +27,9 @@ use tracing::{debug, info, warn};
 use crate::agent_profile::AgentProfile;
 use crate::compaction::{check_context_usage, compact_context};
 use crate::config::SessionOptions;
+use crate::context_window::{
+    ContextWindowSnapshotInput, build_local_snapshot, scaled_snapshot, warning, warnings_from_llm,
+};
 use crate::error::{Error, InterruptReason};
 use crate::event::Emitter;
 use crate::file_tracker::FileTracker;
@@ -39,6 +44,7 @@ use crate::skills::{
 };
 use crate::subagent::{SubAgentCallbackEvent, SubAgentEventCallback, SubAgentManager};
 use crate::tool_execution::execute_tool_calls;
+use crate::tool_registry::ToolDefinitionWithSource;
 use crate::types::{
     AgentEvent, McpToolSummary, MemoryFileSummary, Message, SessionEvent, SessionState,
     SkillActivationSource, SkillSummary,
@@ -295,33 +301,41 @@ impl ToolEnvProvider for StaticEnvProvider {
     }
 }
 
+struct BuiltRequest {
+    request: Request,
+    tools:   Vec<ToolDefinitionWithSource>,
+}
+
 pub struct Session {
-    id:                     String,
+    id: String,
     /// Root agent session ID for this session's agent tree. A root session
     /// uses its own `id`; a subagent session inherits its parent's
     /// `root_session_id` so todo tools that scope by root (Anthropic tasks)
     /// share one list across all subagents.
-    root_session_id:        String,
-    config:                 SessionOptions,
-    history:                History,
-    event_emitter:          Emitter,
-    state:                  SessionState,
-    llm_client:             Client,
-    provider_profile:       Arc<dyn AgentProfile>,
-    sandbox:                Arc<dyn Sandbox>,
-    control_state:          Arc<Mutex<ControlState>>,
-    control_notify:         Arc<Notify>,
-    followup_queue:         Arc<Mutex<VecDeque<String>>>,
-    cancel_token:           CancellationToken,
-    round_token:            Arc<RwLock<CancellationToken>>,
-    interrupt_reason:       Arc<Mutex<Option<InterruptReason>>>,
-    memory:                 Vec<MemoryDocument>,
-    env_context:            EnvContext,
-    skills:                 Vec<Skill>,
-    system_prompt:          String,
-    file_tracker:           FileTracker,
-    tool_env_provider:      Option<Arc<dyn ToolEnvProvider>>,
-    subagent_manager:       Option<Arc<AsyncMutex<SubAgentManager>>>,
+    root_session_id: String,
+    config: SessionOptions,
+    history: History,
+    event_emitter: Emitter,
+    state: SessionState,
+    llm_client: Client,
+    provider_profile: Arc<dyn AgentProfile>,
+    sandbox: Arc<dyn Sandbox>,
+    control_state: Arc<Mutex<ControlState>>,
+    control_notify: Arc<Notify>,
+    followup_queue: Arc<Mutex<VecDeque<String>>>,
+    cancel_token: CancellationToken,
+    close_token: CancellationToken,
+    round_token: Arc<RwLock<CancellationToken>>,
+    interrupt_reason: Arc<Mutex<Option<InterruptReason>>>,
+    memory: Vec<MemoryDocument>,
+    env_context: EnvContext,
+    skills: Vec<Skill>,
+    system_prompt: String,
+    activated_skill_context_observed: bool,
+    context_window_counted_fingerprints: HashSet<u64>,
+    file_tracker: FileTracker,
+    tool_env_provider: Option<Arc<dyn ToolEnvProvider>>,
+    subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
     completion_coordinator: Option<Arc<dyn CompletionCoordinator>>,
 }
 
@@ -349,12 +363,15 @@ impl Session {
             control_notify: Arc::new(Notify::new()),
             followup_queue: Arc::new(Mutex::new(VecDeque::new())),
             cancel_token: CancellationToken::new(),
+            close_token: CancellationToken::new(),
             round_token: Arc::new(RwLock::new(CancellationToken::new())),
             interrupt_reason: Arc::new(Mutex::new(None)),
             memory: Vec::new(),
             env_context: EnvContext::default(),
             skills: Vec::new(),
             system_prompt: String::new(),
+            activated_skill_context_observed: false,
+            context_window_counted_fingerprints: HashSet::new(),
             file_tracker: FileTracker::default(),
             tool_env_provider: None,
             subagent_manager,
@@ -1103,6 +1120,7 @@ impl Session {
 
     pub fn close(&mut self) -> bool {
         let was_open = self.state != SessionState::Closed;
+        self.close_token.cancel();
         self.transition(SessionState::Closed);
         was_open
     }
@@ -1215,6 +1233,7 @@ impl Session {
             expand_skill(&self.skills, input).map_err(Error::InvalidState)?
         };
         if let Some(ref name) = expanded.skill_name {
+            self.activated_skill_context_observed = true;
             self.event_emitter
                 .emit(self.id.clone(), AgentEvent::SkillActivated {
                     skill_name: name.clone(),
@@ -1300,7 +1319,9 @@ impl Session {
             self.inject_task_reminder_if_needed();
 
             // Build request
-            let request = self.build_request();
+            let built_request = self.build_request();
+            let context_window_snapshot = self.emit_context_window_snapshots(&built_request);
+            let request = built_request.request;
 
             // Emit AssistantTextStart before LLM call
             self.event_emitter
@@ -1570,6 +1591,9 @@ impl Session {
                 .cloned()
                 .collect();
             let usage = response.usage.clone();
+            if let Some(local_snapshot) = context_window_snapshot.as_ref() {
+                self.emit_response_usage_context_window_snapshot(local_snapshot, &usage);
+            }
 
             self.history.push(Message::Assistant {
                 content: text.clone(),
@@ -1651,6 +1675,12 @@ impl Session {
             )
             .await;
             composite_watcher.abort();
+            if tool_calls
+                .iter()
+                .any(|tool_call| tool_call.name == "use_skill")
+            {
+                self.activated_skill_context_observed = true;
+            }
 
             // Track file operations from tool calls
             self.file_tracker
@@ -1692,6 +1722,108 @@ impl Session {
         }
 
         Ok(())
+    }
+
+    fn emit_context_window_snapshots(
+        &mut self,
+        built_request: &BuiltRequest,
+    ) -> Option<fabro_types::StageContextWindowProjection> {
+        let provider = self.provider_profile.provider_id().to_string();
+        let model = self.provider_profile.model().to_string();
+        let local_snapshot = build_local_snapshot(ContextWindowSnapshotInput {
+            request: &built_request.request,
+            tools: &built_request.tools,
+            system_prompt: &self.system_prompt,
+            memory: &self.memory,
+            skills: &self.skills,
+            activated_skill_context_observed: self.activated_skill_context_observed,
+            provider: &provider,
+            model: &model,
+            context_window_tokens: self.provider_profile.context_window_size(),
+        });
+        self.event_emitter.emit(
+            self.id.clone(),
+            AgentEvent::ContextWindowSnapshot(local_snapshot.clone()),
+        );
+
+        let fingerprint = request_fingerprint(&built_request.request)?;
+        if !self.context_window_counted_fingerprints.insert(fingerprint) {
+            return Some(local_snapshot);
+        }
+
+        let client = self.llm_client.clone();
+        let request = built_request.request.clone();
+        let session_id = self.id.clone();
+        let emitter = self.event_emitter.clone();
+        let local_for_count = local_snapshot.clone();
+        let close_token = self.close_token.clone();
+        tokio::spawn(async move {
+            let count_result = tokio::select! {
+                biased;
+                () = close_token.cancelled() => return,
+                result = client.count_input_tokens(&request, InputTokenCountPreference::PreferProvider) => result,
+            };
+            if close_token.is_cancelled() {
+                return;
+            }
+            let snapshot = match count_result {
+                Ok(count) if count.method == InputTokenCountMethod::ProviderApi => {
+                    let input_tokens = u64::try_from(count.input_tokens.max(0)).unwrap_or(u64::MAX);
+                    scaled_snapshot(
+                        &local_for_count,
+                        input_tokens,
+                        fabro_types::StageContextWindowCountMethod::ProviderApiScaledBreakdown,
+                        warnings_from_llm(&count.warnings),
+                    )
+                }
+                Ok(count) => {
+                    let mut warnings = local_for_count.warnings.clone();
+                    warnings.extend(warnings_from_llm(&count.warnings));
+                    let input_tokens = u64::try_from(count.input_tokens.max(0)).unwrap_or(u64::MAX);
+                    scaled_snapshot(
+                        &local_for_count,
+                        input_tokens,
+                        fabro_types::StageContextWindowCountMethod::LocalEstimate,
+                        warnings,
+                    )
+                }
+                Err(_) => {
+                    let mut warnings = local_for_count.warnings.clone();
+                    warnings.push(warning(
+                        "provider_token_count_unavailable",
+                        "provider input token counting was unavailable; retained local estimate",
+                    ));
+                    let mut snapshot = local_for_count.clone();
+                    snapshot.warnings = warnings;
+                    snapshot
+                }
+            };
+            emitter.emit(session_id, AgentEvent::ContextWindowSnapshot(snapshot));
+        });
+
+        Some(local_snapshot)
+    }
+
+    fn emit_response_usage_context_window_snapshot(
+        &self,
+        local_snapshot: &fabro_types::StageContextWindowProjection,
+        usage: &TokenCounts,
+    ) {
+        let input_tokens = usage
+            .input_tokens
+            .saturating_add(usage.cache_read_tokens)
+            .saturating_add(usage.cache_write_tokens);
+        if input_tokens <= 0 {
+            return;
+        }
+        let snapshot = scaled_snapshot(
+            local_snapshot,
+            u64::try_from(input_tokens).unwrap_or(u64::MAX),
+            fabro_types::StageContextWindowCountMethod::ResponseUsageScaledBreakdown,
+            local_snapshot.warnings.clone(),
+        );
+        self.event_emitter
+            .emit(self.id.clone(), AgentEvent::ContextWindowSnapshot(snapshot));
     }
 
     async fn compact_if_needed(&mut self) {
@@ -1788,23 +1920,27 @@ impl Session {
         }
     }
 
-    fn build_request(&self) -> Request {
+    fn build_request(&self) -> BuiltRequest {
         let mut messages = Vec::new();
         if !self.system_prompt.trim().is_empty() {
             messages.push(LlmMessage::system(self.system_prompt.clone()));
         }
         messages.extend(self.history.convert_to_messages());
 
-        let tools = self
+        let tools_with_source = self
             .provider_profile
             .tool_registry()
-            .definitions_for_policy(
+            .definitions_with_source_for_policy(
                 self.config.tool_access_policy.as_deref(),
                 self.config.tool_exposure_mode,
             );
+        let tools: Vec<_> = tools_with_source
+            .iter()
+            .map(|tool| tool.definition.clone())
+            .collect();
         let has_tools = !tools.is_empty();
 
-        Request {
+        let request = Request {
             model: self.provider_profile.model().to_string(),
             messages,
             provider: Some(self.provider_profile.provider_id().to_string()),
@@ -1826,6 +1962,10 @@ impl Session {
             speed: self.config.speed,
             metadata: None,
             provider_options: None,
+        };
+        BuiltRequest {
+            request,
+            tools: tools_with_source,
         }
     }
 
@@ -1852,6 +1992,13 @@ const fn is_auth_error(err: &LlmError) -> bool {
         err.provider_kind(),
         Some(ProviderErrorKind::Authentication | ProviderErrorKind::AccessDenied)
     )
+}
+
+fn request_fingerprint(request: &Request) -> Option<u64> {
+    let bytes = serde_json::to_vec(request).ok()?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    Some(hasher.finish())
 }
 
 /// Best-effort kill of a sandbox MCP server process group. Used when
@@ -1892,7 +2039,7 @@ mod tests {
     use crate::skills::{Skill, make_use_skill_tool};
     use crate::subagent::SubAgentStatus;
     use crate::test_support::*;
-    use crate::tool_registry::{RegisteredTool, ToolContext, ToolRegistry};
+    use crate::tool_registry::{RegisteredTool, ToolContext, ToolRegistry, ToolSource};
 
     struct NamedToolAccessPolicy {
         decisions: Vec<(&'static str, ToolAccess)>,
@@ -1921,6 +2068,7 @@ mod tests {
                 parameters:  serde_json::json!({"type": "object"}),
             },
             executor:   Arc::new(|_args, _ctx| Box::pin(async { Ok("ok".to_string()) })),
+            source:     ToolSource::Native,
         }
     }
 
@@ -2118,6 +2266,7 @@ mod tests {
                     Ok("recorded".to_string())
                 })
             }),
+            source:     ToolSource::Native,
         };
 
         let mut registry = ToolRegistry::new();
@@ -2568,6 +2717,7 @@ mod tests {
                     Ok("done".to_string())
                 })
             }),
+            source:     ToolSource::Native,
         };
 
         let mut registry = ToolRegistry::new();
@@ -2844,6 +2994,7 @@ mod tests {
             executor:   Arc::new(|_args, _ctx| {
                 Box::pin(async move { Ok("should not reach".to_string()) })
             }),
+            source:     ToolSource::Native,
         });
 
         let responses = vec![
@@ -2885,6 +3036,7 @@ mod tests {
             executor:   Arc::new(|_args, _ctx| {
                 Box::pin(async move { Ok("tool executed".to_string()) })
             }),
+            source:     ToolSource::Native,
         });
 
         let responses = vec![
@@ -4001,7 +4153,7 @@ mod tests {
     async fn compaction_includes_structured_prompt_and_file_tracking() {
         use fabro_llm::types::ToolDefinition;
 
-        use crate::tool_registry::RegisteredTool;
+        use crate::tool_registry::{RegisteredTool, ToolSource};
 
         // Provider that captures complete() requests (compaction) while returning
         // canned responses for stream() calls.
@@ -4043,6 +4195,7 @@ mod tests {
             executor:   Arc::new(|_args, _ctx| {
                 Box::pin(async move { Ok("file contents".to_string()) })
             }),
+            source:     ToolSource::Native,
         };
 
         let mut registry = ToolRegistry::new();
@@ -4277,6 +4430,7 @@ mod tests {
                     Ok("cancelled".to_string())
                 })
             }),
+            source:     ToolSource::Native,
         };
         let mut registry = ToolRegistry::new();
         registry.register(slow_tool);

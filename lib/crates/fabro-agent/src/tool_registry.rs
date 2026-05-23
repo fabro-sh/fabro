@@ -65,6 +65,23 @@ pub type ToolExecutor = Arc<
 pub struct RegisteredTool {
     pub definition: ToolDefinition,
     pub executor:   ToolExecutor,
+    pub source:     ToolSource,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ToolSource {
+    #[default]
+    Native,
+    Mcp {
+        server_name: String,
+    },
+    Skill,
+}
+
+#[derive(Clone)]
+pub struct ToolDefinitionWithSource {
+    pub definition: ToolDefinition,
+    pub source:     ToolSource,
 }
 
 pub struct ToolRegistry {
@@ -98,6 +115,17 @@ impl ToolRegistry {
     }
 
     #[must_use]
+    pub fn definitions_with_source(&self) -> Vec<ToolDefinitionWithSource> {
+        self.tools
+            .values()
+            .map(|tool| ToolDefinitionWithSource {
+                definition: tool.definition.clone(),
+                source:     tool.source.clone(),
+            })
+            .collect()
+    }
+
+    #[must_use]
     pub fn definitions_for_policy(
         &self,
         policy: Option<&dyn ToolAccessPolicy>,
@@ -115,6 +143,30 @@ impl ToolRegistry {
                     .is_exposed(exposure_mode)
             })
             .map(|tool| tool.definition.clone())
+            .collect()
+    }
+
+    #[must_use]
+    pub fn definitions_with_source_for_policy(
+        &self,
+        policy: Option<&dyn ToolAccessPolicy>,
+        exposure_mode: ToolExposureMode,
+    ) -> Vec<ToolDefinitionWithSource> {
+        let Some(policy) = policy else {
+            return self.definitions_with_source();
+        };
+
+        self.tools
+            .values()
+            .filter(|tool| {
+                policy
+                    .access_for_tool(&tool.definition.name)
+                    .is_exposed(exposure_mode)
+            })
+            .map(|tool| ToolDefinitionWithSource {
+                definition: tool.definition.clone(),
+                source:     tool.source.clone(),
+            })
             .collect()
     }
 
@@ -169,6 +221,7 @@ mod tests {
                 parameters:  serde_json::json!({"type": "object"}),
             },
             executor:   Arc::new(|_args, _ctx| Box::pin(async { Ok("ok".into()) })),
+            source:     ToolSource::Native,
         }
     }
 
@@ -213,6 +266,7 @@ mod tests {
                 parameters:  serde_json::json!({}),
             },
             executor:   Arc::new(|_args, _ctx| Box::pin(async { Ok("v1".into()) })),
+            source:     ToolSource::Native,
         });
         registry.register(RegisteredTool {
             definition: ToolDefinition {
@@ -221,6 +275,7 @@ mod tests {
                 parameters:  serde_json::json!({}),
             },
             executor:   Arc::new(|_args, _ctx| Box::pin(async { Ok("v2".into()) })),
+            source:     ToolSource::Native,
         });
 
         let tool = registry.get("tool_a").unwrap();

@@ -44,6 +44,8 @@ import type { RunEventDetailResponse } from '../models';
 // @ts-ignore
 import type { RunProjection } from '../models';
 // @ts-ignore
+import type { StageContextWindow } from '../models';
+// @ts-ignore
 import type { WorkflowSettings } from '../models';
 // @ts-ignore
 import type { WriteBlobResponse } from '../models';
@@ -275,6 +277,50 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             if (limit !== undefined) {
                 localVarQueryParameter['limit'] = limit;
             }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns the latest best-effort model-visible context-window usage snapshot for an agent stage.
+         * @summary Get Stage Context Window
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getRunStageContextWindow: async (id: string, stageId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('getRunStageContextWindow', 'id', id)
+            // verify required parameter 'stageId' is not null or undefined
+            assertParamExists('getRunStageContextWindow', 'stageId', stageId)
+            const localVarPath = `/api/v1/runs/{id}/stages/{stageId}/context-window`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)))
+                .replace(`{${"stageId"}}`, encodeURIComponent(String(stageId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
 
             localVarHeaderParameter['Accept'] = 'application/json';
 
@@ -935,6 +981,20 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Returns the latest best-effort model-visible context-window usage snapshot for an agent stage.
+         * @summary Get Stage Context Window
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getRunStageContextWindow(id: string, stageId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<StageContextWindow>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getRunStageContextWindow(id, stageId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.getRunStageContextWindow']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Returns the internal event-sourced run projection. This is not a stable public contract.
          * @summary Get Run State
          * @param {string} id Unique run identifier (ULID).
@@ -1174,6 +1234,17 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
             return localVarFp.getRunStageCommandLog(id, stageId, offset, limit, options).then((request) => request(axios, basePath));
         },
         /**
+         * Returns the latest best-effort model-visible context-window usage snapshot for an agent stage.
+         * @summary Get Stage Context Window
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getRunStageContextWindow(id: string, stageId: string, options?: RawAxiosRequestConfig): AxiosPromise<StageContextWindow> {
+            return localVarFp.getRunStageContextWindow(id, stageId, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Returns the internal event-sourced run projection. This is not a stable public contract.
          * @summary Get Run State
          * @param {string} id Unique run identifier (ULID).
@@ -1377,6 +1448,18 @@ export class RunInternalsApi extends BaseAPI {
      */
     public getRunStageCommandLog(id: string, stageId: string, offset?: number, limit?: number, options?: RawAxiosRequestConfig) {
         return RunInternalsApiFp(this.configuration).getRunStageCommandLog(id, stageId, offset, limit, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns the latest best-effort model-visible context-window usage snapshot for an agent stage.
+     * @summary Get Stage Context Window
+     * @param {string} id Unique run identifier (ULID).
+     * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getRunStageContextWindow(id: string, stageId: string, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).getRunStageContextWindow(id, stageId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

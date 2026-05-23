@@ -25,6 +25,7 @@ import type {
   SandboxFileListResponse,
   SandboxServiceListResponse,
   ServerSettings,
+  StageContextWindow,
   SystemInfoResponse,
   SystemResourcesResponse,
   VncPreviewResponse,
@@ -347,6 +348,16 @@ export function useRunStageEvents(id: string | undefined, stageId: string | unde
       fetchAllStageEvents(`run ${id} stage ${stageId}`, (sinceSeq, limit) =>
         apiData(() => runInternalsApi.listStageEvents(id!, stageId!, sinceSeq, limit)),
       ),
+  );
+}
+
+export function useRunStageContextWindow(
+  id: string | undefined,
+  stageId: string | undefined,
+) {
+  return useSWR<StageContextWindow | null>(
+    id && stageId ? queryKeys.runs.stageContextWindow(id, stageId) : null,
+    () => apiNullableData(() => runInternalsApi.getRunStageContextWindow(id!, stageId!)),
   );
 }
 

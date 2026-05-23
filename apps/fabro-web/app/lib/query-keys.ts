@@ -66,6 +66,8 @@ export const queryKeys = {
     events: (id: string, limit = 1000) => ["runs", "events", id, limit] as const,
     stageEvents: (id: string, stageId: string) =>
       ["runs", "stage-events", id, stageId] as const,
+    stageContextWindow: (id: string, stageId: string) =>
+      ["runs", "stage-context-window", id, stageId] as const,
     stageLog: (id: string, stageId: string, offset = 0, limit = 65_536) =>
       ["runs", "stage-log", id, stageId, offset, limit] as const,
     sandbox: (id: string) => ["runs", "sandbox", id] as const,

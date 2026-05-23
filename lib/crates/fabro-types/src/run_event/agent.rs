@@ -4,7 +4,10 @@ use serde_json::Value;
 
 use super::BilledTokenCounts;
 use crate::transcript::{ToolCall, ToolResult, TranscriptMessage};
-use crate::{MessageId, ModelRef, PairId, PairMessageId, PairSystemMessageKind, TurnId};
+use crate::{
+    MessageId, ModelRef, PairId, PairMessageId, PairSystemMessageKind,
+    StageContextWindowProjection, StageId, TurnId,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentSessionStartedProps {
@@ -211,6 +214,14 @@ pub struct AgentLlmRetryProps {
     pub delay_secs: f64,
     pub error:      Value,
     pub visit:      u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentContextWindowSnapshotProps {
+    pub stage_id: StageId,
+    pub visit:    u32,
+    #[serde(flatten)]
+    pub snapshot: StageContextWindowProjection,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

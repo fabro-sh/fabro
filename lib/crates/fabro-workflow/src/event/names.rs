@@ -86,6 +86,7 @@ pub fn event_name(event: &Event) -> &'static str {
             AgentEvent::CompactionStarted { .. } => "agent.compaction.started",
             AgentEvent::CompactionCompleted { .. } => "agent.compaction.completed",
             AgentEvent::LlmRetry { .. } => "agent.llm.retry",
+            AgentEvent::ContextWindowSnapshot(_) => "agent.context_window.snapshot",
             AgentEvent::SubAgentSpawned { .. } => "agent.sub.spawned",
             AgentEvent::SubAgentCompleted { .. } => "agent.sub.completed",
             AgentEvent::SubAgentFailed { .. } => "agent.sub.failed",

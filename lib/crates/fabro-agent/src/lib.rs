@@ -6,6 +6,7 @@ pub mod apply_patch;
 pub mod cli;
 pub mod compaction;
 pub mod config;
+pub(crate) mod context_window;
 pub mod error;
 pub mod event;
 pub mod file_tracker;

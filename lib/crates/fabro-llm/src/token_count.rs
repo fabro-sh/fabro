@@ -37,52 +37,26 @@ pub struct InputTokenCount {
     pub warnings:     Vec<Warning>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LocalTokenEstimate {
+    pub tokens:   usize,
+    pub warnings: Vec<Warning>,
+}
+
 #[must_use]
 pub fn estimate_input_tokens(request: &Request, provider: impl Into<String>) -> InputTokenCount {
     let mut estimator = Estimator::default();
     let mut tokens = 0usize;
 
     for message in &request.messages {
-        tokens += 4;
-        tokens += estimate_text_tokens(message.role_name());
-        if let Some(name) = &message.name {
-            tokens += estimate_text_tokens(name);
-        }
-        if let Some(tool_call_id) = &message.tool_call_id {
-            tokens += estimate_text_tokens(tool_call_id);
-        }
-        for part in &message.content {
-            tokens += 1 + estimator.estimate_content_part(part);
-        }
+        tokens += estimator.estimate_message(message);
     }
 
     if let Some(tools) = &request.tools {
         tokens += tools.iter().map(estimate_tool).sum::<usize>();
     }
 
-    if let Some(tool_choice) = &request.tool_choice {
-        if let Ok(value) = serde_json::to_value(tool_choice) {
-            tokens += estimate_json_tokens(&value);
-        }
-    }
-
-    if let Some(response_format) = &request.response_format {
-        if let Ok(value) = serde_json::to_value(response_format) {
-            tokens += estimate_json_tokens(&value);
-        }
-    }
-
-    if let Some(reasoning_effort) = request.reasoning_effort {
-        tokens += estimate_text_tokens(reasoning_effort.to_string().as_str());
-    }
-
-    if let Some(provider_options) = &request.provider_options {
-        tokens += estimate_json_tokens(provider_options);
-        estimator.warn(
-            PROVIDER_OPTIONS_ESTIMATE_WARNING,
-            "provider options estimated from JSON",
-        );
-    }
+    tokens += estimator.estimate_request_controls(request);
 
     estimator.warn(
         LOCAL_ESTIMATE_WARNING,
@@ -108,6 +82,41 @@ pub fn estimate_json_tokens(value: &serde_json::Value) -> usize {
     serde_json::to_string(value).map_or(0, |json| json.len().div_ceil(4))
 }
 
+#[must_use]
+pub fn estimate_message_tokens(message: &Message) -> LocalTokenEstimate {
+    let mut estimator = Estimator::default();
+    let tokens = estimator.estimate_message(message);
+    LocalTokenEstimate {
+        tokens,
+        warnings: estimator.warnings,
+    }
+}
+
+#[must_use]
+pub fn estimate_content_part_tokens(part: &ContentPart) -> LocalTokenEstimate {
+    let mut estimator = Estimator::default();
+    let tokens = estimator.estimate_content_part(part);
+    LocalTokenEstimate {
+        tokens,
+        warnings: estimator.warnings,
+    }
+}
+
+#[must_use]
+pub fn estimate_tool_definition_tokens(tool: &ToolDefinition) -> usize {
+    estimate_tool(tool)
+}
+
+#[must_use]
+pub fn estimate_request_control_tokens(request: &Request) -> LocalTokenEstimate {
+    let mut estimator = Estimator::default();
+    let tokens = estimator.estimate_request_controls(request);
+    LocalTokenEstimate {
+        tokens,
+        warnings: estimator.warnings,
+    }
+}
+
 #[derive(Default)]
 struct Estimator {
     warnings:   Vec<Warning>,
@@ -115,6 +124,48 @@ struct Estimator {
 }
 
 impl Estimator {
+    fn estimate_message(&mut self, message: &Message) -> usize {
+        let mut tokens = 4 + estimate_text_tokens(message.role_name());
+        if let Some(name) = &message.name {
+            tokens += estimate_text_tokens(name);
+        }
+        if let Some(tool_call_id) = &message.tool_call_id {
+            tokens += estimate_text_tokens(tool_call_id);
+        }
+        for part in &message.content {
+            tokens += 1 + self.estimate_content_part(part);
+        }
+        tokens
+    }
+
+    fn estimate_request_controls(&mut self, request: &Request) -> usize {
+        let mut tokens = 0;
+        if let Some(tool_choice) = &request.tool_choice {
+            if let Ok(value) = serde_json::to_value(tool_choice) {
+                tokens += estimate_json_tokens(&value);
+            }
+        }
+
+        if let Some(response_format) = &request.response_format {
+            if let Ok(value) = serde_json::to_value(response_format) {
+                tokens += estimate_json_tokens(&value);
+            }
+        }
+
+        if let Some(reasoning_effort) = request.reasoning_effort {
+            tokens += estimate_text_tokens(reasoning_effort.to_string().as_str());
+        }
+
+        if let Some(provider_options) = &request.provider_options {
+            tokens += estimate_json_tokens(provider_options);
+            self.warn(
+                PROVIDER_OPTIONS_ESTIMATE_WARNING,
+                "provider options estimated from JSON",
+            );
+        }
+        tokens
+    }
+
     fn estimate_content_part(&mut self, part: &ContentPart) -> usize {
         match part {
             ContentPart::Text(text) => estimate_text_tokens(text),

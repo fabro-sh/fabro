@@ -8,7 +8,7 @@ use std::sync::Arc;
 use fabro_llm::types::ToolDefinition;
 
 use crate::sandbox::Sandbox;
-use crate::tool_registry::RegisteredTool;
+use crate::tool_registry::{RegisteredTool, ToolSource};
 
 const APPLY_PATCH_LARK_GRAMMAR: &str = include_str!("apply_patch.lark");
 
@@ -494,6 +494,7 @@ pub fn make_apply_patch_tool() -> RegisteredTool {
                 apply_patch_operations(&ops, ctx.env.as_ref()).await
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 

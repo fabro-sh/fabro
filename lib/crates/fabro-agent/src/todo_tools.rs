@@ -17,7 +17,7 @@ use fabro_types::{TodoListKind, TodoProjection, TodoStatus, TodoUpdatedProps};
 use serde_json::Value;
 
 use crate::todo_runtime::TodoRuntime;
-use crate::tool_registry::{RegisteredTool, ToolContext};
+use crate::tool_registry::{RegisteredTool, ToolContext, ToolSource};
 
 /// Compute the OpenAI plan scope (`openai_plan:<session_id>`). Returns an
 /// error string the model can see if no session ID is bound to the call.
@@ -207,6 +207,7 @@ pub fn make_update_plan_tool(runtime: Arc<TodoRuntime>) -> RegisteredTool {
                 Ok("Plan updated".to_string())
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 
@@ -331,6 +332,7 @@ pub fn make_task_create_tool(runtime: Arc<TodoRuntime>) -> RegisteredTool {
                 Ok(format!("Task #{task_id} created successfully: {subject}"))
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 
@@ -399,6 +401,7 @@ pub fn make_task_update_tool(runtime: Arc<TodoRuntime>) -> RegisteredTool {
                 }
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 
@@ -435,6 +438,7 @@ pub fn make_task_get_tool(runtime: Arc<TodoRuntime>) -> RegisteredTool {
                 Ok(format_task_details(todo))
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 
@@ -489,6 +493,7 @@ pub fn make_task_list_tool(runtime: Arc<TodoRuntime>) -> RegisteredTool {
                 Ok(out.trim_end().to_string())
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 

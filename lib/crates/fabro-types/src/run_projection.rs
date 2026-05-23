@@ -4,6 +4,7 @@ use std::num::NonZeroU32;
 
 use chrono::{DateTime, Utc};
 use fabro_model::{ReasoningEffort, Speed};
+use strum::{Display, EnumString, IntoStaticStr};
 
 use crate::run_event::{AgentSessionActivatedProps, StagePromptProps};
 use crate::{
@@ -117,6 +118,210 @@ impl StageModelUsage {
     }
 }
 
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    Display,
+    EnumString,
+    IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum StageContextWindowCategory {
+    SystemPrompt,
+    Tools,
+    McpTools,
+    Skills,
+    Memory,
+    Conversation,
+    Other,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    Display,
+    EnumString,
+    IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum StageContextWindowCountMethod {
+    ProviderApiScaledBreakdown,
+    ResponseUsageScaledBreakdown,
+    LocalEstimate,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    Display,
+    EnumString,
+    IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum StageContextWindowStaleness {
+    Live,
+    Stored,
+    Unavailable,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    Display,
+    EnumString,
+    IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum StageContextWindowUnavailableReason {
+    NotAgentStage,
+    NotObserved,
+    ProviderUnconfigured,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct StageContextWindowWarning {
+    pub code:    String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct StageContextWindowBreakdownProjection {
+    pub category:      StageContextWindowCategory,
+    pub label:         String,
+    pub tokens:        u64,
+    pub usage_percent: f64,
+    pub source:        String,
+}
+
+pub type StageContextWindowBreakdownItem = StageContextWindowBreakdownProjection;
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct StageContextWindowProjection {
+    pub provider:              String,
+    pub model:                 String,
+    pub context_window_tokens: u64,
+    pub input_tokens:          u64,
+    pub usage_percent:         f64,
+    pub count_method:          StageContextWindowCountMethod,
+    pub staleness:             StageContextWindowStaleness,
+    pub generated_at:          DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_seq:             Option<u32>,
+    #[serde(default)]
+    pub breakdown:             Vec<StageContextWindowBreakdownProjection>,
+    #[serde(default)]
+    pub warnings:              Vec<StageContextWindowWarning>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct StageContextWindow {
+    pub stage_id:              StageId,
+    pub available:             bool,
+    #[serde(default)]
+    pub unavailable_reason:    Option<StageContextWindowUnavailableReason>,
+    #[serde(default)]
+    pub provider:              Option<String>,
+    #[serde(default)]
+    pub model:                 Option<String>,
+    #[serde(default)]
+    pub context_window_tokens: Option<u64>,
+    #[serde(default)]
+    pub input_tokens:          Option<u64>,
+    #[serde(default)]
+    pub usage_percent:         Option<f64>,
+    #[serde(default)]
+    pub count_method:          Option<StageContextWindowCountMethod>,
+    pub staleness:             StageContextWindowStaleness,
+    #[serde(default)]
+    pub generated_at:          Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub event_seq:             Option<u32>,
+    #[serde(default)]
+    pub breakdown:             Vec<StageContextWindowBreakdownProjection>,
+    #[serde(default)]
+    pub warnings:              Vec<StageContextWindowWarning>,
+}
+
+impl StageContextWindow {
+    #[must_use]
+    pub fn available(stage_id: StageId, snapshot: &StageContextWindowProjection) -> Self {
+        Self {
+            stage_id,
+            available: true,
+            unavailable_reason: None,
+            provider: Some(snapshot.provider.clone()),
+            model: Some(snapshot.model.clone()),
+            context_window_tokens: Some(snapshot.context_window_tokens),
+            input_tokens: Some(snapshot.input_tokens),
+            usage_percent: Some(snapshot.usage_percent),
+            count_method: Some(snapshot.count_method),
+            staleness: snapshot.staleness,
+            generated_at: Some(snapshot.generated_at),
+            event_seq: snapshot.event_seq,
+            breakdown: snapshot.breakdown.clone(),
+            warnings: snapshot.warnings.clone(),
+        }
+    }
+
+    #[must_use]
+    pub fn unavailable(
+        stage_id: StageId,
+        reason: StageContextWindowUnavailableReason,
+        warning: impl Into<String>,
+    ) -> Self {
+        let message = warning.into();
+        Self {
+            stage_id,
+            available: false,
+            unavailable_reason: Some(reason),
+            provider: None,
+            model: None,
+            context_window_tokens: None,
+            input_tokens: None,
+            usage_percent: None,
+            count_method: None,
+            staleness: StageContextWindowStaleness::Unavailable,
+            generated_at: None,
+            event_seq: None,
+            breakdown: Vec::new(),
+            warnings: vec![StageContextWindowWarning {
+                code: reason.to_string(),
+                message,
+            }],
+        }
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StageProjection {
     pub first_event_seq:   NonZeroU32,
@@ -158,6 +363,8 @@ pub struct StageProjection {
     pub skills:            SkillsProjection,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_servers:       Vec<McpServerProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window:    Option<StageContextWindowProjection>,
     pub state:             StageState,
 }
 
@@ -233,6 +440,7 @@ impl StageProjection {
             subagents: Vec::new(),
             skills: SkillsProjection::default(),
             mcp_servers: Vec::new(),
+            context_window: None,
             provider_used: None,
             diff: None,
             script_invocation: None,

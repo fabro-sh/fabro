@@ -585,6 +585,15 @@ impl RunProjectionReducer for RunProjection {
                     },
                 });
             }
+            EventBody::AgentContextWindowSnapshot(props) => {
+                let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
+                else {
+                    return Ok(());
+                };
+                let mut snapshot = props.snapshot.clone();
+                snapshot.event_seq = Some(event.seq);
+                stage.context_window = Some(snapshot);
+            }
             _ => {}
         }
 
@@ -1093,22 +1102,24 @@ mod tests {
     use fabro_types::run_event::run::RunFailedProps;
     use fabro_types::run_event::{
         AgentAcpCancelledProps, AgentAcpCompletedProps, AgentAcpStartedProps,
-        AgentAcpTimedOutProps, AgentMcpFailedProps, AgentMcpReadyProps, AgentMcpToolSummary,
-        AgentMessageProps, AgentSessionActivatedProps, AgentSessionEndedProps,
-        AgentSessionStartedProps, AgentSkillActivatedProps, AgentSkillActivationSource,
-        AgentSkillSummary, AgentSkillsDiscoveredProps, AgentSubClosedProps, AgentSubCompletedProps,
-        AgentSubFailedProps, AgentSubSpawnedProps, CheckpointCompletedProps,
-        InterviewCompletedProps, InterviewOption, InterviewStartedProps, RunCompletedProps,
-        RunControlEffectProps, StageCompletedProps, StageFailedProps, StagePromptProps,
-        StageRetryingProps, StageStartedProps,
+        AgentAcpTimedOutProps, AgentContextWindowSnapshotProps, AgentMcpFailedProps,
+        AgentMcpReadyProps, AgentMcpToolSummary, AgentMessageProps, AgentSessionActivatedProps,
+        AgentSessionEndedProps, AgentSessionStartedProps, AgentSkillActivatedProps,
+        AgentSkillActivationSource, AgentSkillSummary, AgentSkillsDiscoveredProps,
+        AgentSubClosedProps, AgentSubCompletedProps, AgentSubFailedProps, AgentSubSpawnedProps,
+        CheckpointCompletedProps, InterviewCompletedProps, InterviewOption, InterviewStartedProps,
+        RunCompletedProps, RunControlEffectProps, StageCompletedProps, StageFailedProps,
+        StagePromptProps, StageRetryingProps, StageStartedProps,
     };
     use fabro_types::{
         AgentBackend, BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint,
         CheckpointRecord, CommandTermination, EventBody, FailureCategory, FailureDetail,
         FailureReason, Graph, McpServerStatus, Outcome, PendingReason, PullRequestLink,
         QuestionType, ReasoningEffort, RunApprovalState, RunBlobId, RunControlAction, RunDiff,
-        RunEvent, RunSize, RunSpec, RunStatus, Speed, StageModelUsage, StageOutcome, StageState,
-        SubAgentStatus, SuccessReason, WorkflowSettings, first_event_seq, fixtures,
+        RunEvent, RunSize, RunSpec, RunStatus, Speed, StageContextWindowBreakdownProjection,
+        StageContextWindowCategory, StageContextWindowCountMethod, StageContextWindowProjection,
+        StageContextWindowStaleness, StageContextWindowWarning, StageModelUsage, StageOutcome,
+        StageState, SubAgentStatus, SuccessReason, WorkflowSettings, first_event_seq, fixtures,
     };
     use serde_json::json;
 
@@ -4107,6 +4118,89 @@ mod tests {
             assert_eq!(stage.mcp_servers[1].status, McpServerStatus::Failed {
                 error: "missing token".to_string(),
             });
+        }
+
+        #[test]
+        fn context_window_snapshots_replace_latest_for_matching_stage() {
+            let mut state = initialized_projection();
+            let stage_id = stage_id();
+            let first = context_window_snapshot(10);
+            let second = context_window_snapshot(20);
+
+            state
+                .apply_event(&test_stage_event(
+                    7,
+                    EventBody::AgentContextWindowSnapshot(AgentContextWindowSnapshotProps {
+                        stage_id: stage_id.clone(),
+                        visit:    1,
+                        snapshot: first,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_stage_event(
+                    8,
+                    EventBody::AgentContextWindowSnapshot(AgentContextWindowSnapshotProps {
+                        stage_id: stage_id.clone(),
+                        visit:    1,
+                        snapshot: second,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+
+            let stage = state.stage(&stage_id).unwrap();
+            let snapshot = stage.context_window.as_ref().unwrap();
+            assert_eq!(snapshot.input_tokens, 20);
+            assert_eq!(snapshot.event_seq, Some(8));
+        }
+
+        #[test]
+        fn context_window_snapshot_does_not_update_other_stage() {
+            let mut state = initialized_projection();
+            let target = stage_id();
+            let other = StageId::new("review", 1);
+
+            state
+                .apply_event(&test_stage_event(
+                    7,
+                    EventBody::AgentContextWindowSnapshot(AgentContextWindowSnapshotProps {
+                        stage_id: target.clone(),
+                        visit:    1,
+                        snapshot: context_window_snapshot(10),
+                    }),
+                    target.clone(),
+                ))
+                .unwrap();
+
+            assert!(state.stage(&target).unwrap().context_window.is_some());
+            assert!(state.stage(&other).is_none());
+        }
+
+        fn context_window_snapshot(input_tokens: u64) -> StageContextWindowProjection {
+            StageContextWindowProjection {
+                provider: "openai".to_string(),
+                model: "gpt-5.4".to_string(),
+                context_window_tokens: 400_000,
+                input_tokens,
+                usage_percent: input_tokens as f64 * 100.0 / 400_000.0,
+                count_method: StageContextWindowCountMethod::LocalEstimate,
+                staleness: StageContextWindowStaleness::Live,
+                generated_at: Utc::now(),
+                event_seq: None,
+                breakdown: vec![StageContextWindowBreakdownProjection {
+                    category:      StageContextWindowCategory::Conversation,
+                    label:         "Conversation".to_string(),
+                    tokens:        input_tokens,
+                    usage_percent: input_tokens as f64 * 100.0 / 400_000.0,
+                    source:        "local_estimate".to_string(),
+                }],
+                warnings: vec![StageContextWindowWarning {
+                    code:    "local_token_estimate".to_string(),
+                    message: "input token count is a local estimate".to_string(),
+                }],
+            }
         }
     }
 }

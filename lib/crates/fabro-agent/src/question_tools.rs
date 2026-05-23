@@ -12,7 +12,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
-use crate::tool_registry::{RegisteredTool, ToolContext, ToolRegistry};
+use crate::tool_registry::{RegisteredTool, ToolContext, ToolRegistry, ToolSource};
 
 tokio::task_local! {
     static CURRENT_AGENT_TOOL_RUNTIME: AgentToolRuntime;
@@ -209,6 +209,7 @@ fn make_openai_question_tool() -> RegisteredTool {
                 format_openai_answers(&answers)
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 
@@ -257,6 +258,7 @@ fn make_anthropic_question_tool() -> RegisteredTool {
                 format_anthropic_answers(&answers)
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 

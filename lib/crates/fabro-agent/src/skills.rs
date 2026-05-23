@@ -5,7 +5,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::{Error, InterruptReason};
 use crate::sandbox::Sandbox;
-use crate::tool_registry::RegisteredTool;
+use crate::tool_registry::{RegisteredTool, ToolSource};
 use crate::tools::required_str;
 use crate::types::{AgentEvent, SkillActivationSource};
 
@@ -192,6 +192,7 @@ pub fn make_use_skill_tool(skills: Arc<Vec<Skill>>) -> RegisteredTool {
                 Ok(skill.template.clone())
             })
         }),
+        source:     ToolSource::Skill,
     }
 }
 

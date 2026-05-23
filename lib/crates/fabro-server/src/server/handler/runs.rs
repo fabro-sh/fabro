@@ -20,8 +20,9 @@ use fabro_config::Storage;
 use fabro_interview::AnswerSubmission;
 use fabro_llm::client::Client as LlmClient;
 use fabro_types::{
-    Principal, RunClientProvenance, RunId, RunProvenance, RunServerProvenance, SystemActorKind,
-    parse_blob_ref,
+    Principal, RunClientProvenance, RunId, RunProvenance, RunServerProvenance, StageContextWindow,
+    StageContextWindowStaleness, StageContextWindowUnavailableReason, StageHandler,
+    StageModelUsage, StageProjection, StageState, SystemActorKind, parse_blob_ref,
 };
 use fabro_util::version::FABRO_VERSION;
 use fabro_workflow::command_log::{command_log_path, read_json_string_blob, read_log_slice};
@@ -33,13 +34,13 @@ use tracing::info;
 use super::super::{
     AppState, ListResponse, PaginationParams, RunExecutionMode, answer_from_request,
     api_question_from_pending_interview, default_page_limit, delete_run_internal,
-    load_pending_interview, managed_run, paginate_items, parse_run_id_path, reject_if_archived,
-    resolve_interp_string, submit_pending_interview_answer, workflow_event,
+    load_pending_interview, managed_run, paginate_items, parse_run_id_path, parse_stage_id_path,
+    reject_if_archived, resolve_interp_string, submit_pending_interview_answer, workflow_event,
 };
 use crate::error::ApiError;
 use crate::principal_middleware::{
-    RequireCommandLog, RequireRunScoped, RequireRunScopedOrRunTools, RequiredRunToolActor,
-    RequiredUser,
+    RequireCommandLog, RequireRunScoped, RequireRunScopedOrRunTools, RequireRunStageScoped,
+    RequiredRunToolActor, RequiredUser,
 };
 use crate::run_files::{list_run_commits, list_run_files};
 use crate::run_manifest;
@@ -72,6 +73,10 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route(
             "/runs/{id}/stages/{stageId}/logs/output",
             get(get_run_stage_command_log),
+        )
+        .route(
+            "/runs/{id}/stages/{stageId}/context-window",
+            get(get_run_stage_context_window),
         )
         .route("/runs/{id}/settings", get(get_run_settings))
         .route("/runs/{id}/files", get(list_run_files))
@@ -1013,6 +1018,70 @@ async fn get_run_logs(
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
     }
+}
+
+async fn get_run_stage_context_window(
+    RequireRunStageScoped(id, raw_stage_id): RequireRunStageScoped,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let stage_id = match parse_stage_id_path(&raw_stage_id) {
+        Ok(stage_id) => stage_id,
+        Err(response) => return response,
+    };
+    let cached = match state.store.get_cached_run(&id).await {
+        Ok(Some(cached)) => cached,
+        Ok(None) => return ApiError::not_found("Run not found.").into_response(),
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+    let Some(stage) = cached.projection.stage(&stage_id) else {
+        return ApiError::not_found("Stage not found.").into_response();
+    };
+
+    if !is_agent_context_window_stage(stage) {
+        return Json(StageContextWindow::unavailable(
+            stage_id,
+            StageContextWindowUnavailableReason::NotAgentStage,
+            "Context-window data is only available for agent stages.",
+        ))
+        .into_response();
+    }
+
+    let Some(snapshot) = stage.context_window.as_ref() else {
+        return Json(StageContextWindow::unavailable(
+            stage_id,
+            StageContextWindowUnavailableReason::NotObserved,
+            "No context-window snapshot has been observed for this stage.",
+        ))
+        .into_response();
+    };
+
+    let mut response = StageContextWindow::available(stage_id, snapshot);
+    if !is_live_stage(stage.state) {
+        response.staleness = StageContextWindowStaleness::Stored;
+    }
+    Json(response).into_response()
+}
+
+fn is_agent_context_window_stage(stage: &StageProjection) -> bool {
+    if stage.context_window.is_some() {
+        return true;
+    }
+    if stage.handler == Some(StageHandler::Agent) {
+        return true;
+    }
+    stage.provider_used.as_ref().is_some_and(|usage| {
+        usage.mode == StageModelUsage::MODE_AGENT || usage.mode == StageModelUsage::MODE_ACP
+    })
+}
+
+fn is_live_stage(state: StageState) -> bool {
+    matches!(
+        state,
+        StageState::Pending | StageState::Running | StageState::Retrying
+    )
 }
 
 async fn get_run_stage_command_log(

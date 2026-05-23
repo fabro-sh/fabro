@@ -107,6 +107,7 @@ const TODO_EVENTS = new Set([
   "todo.updated",
   "todo.deleted",
 ]);
+const CONTEXT_WINDOW_SNAPSHOT_EVENT = "agent.context_window.snapshot";
 
 export function queryKeysForRunEvent(
   runId: string,
@@ -154,6 +155,7 @@ export function queryKeysForRunEvent(
     ];
     if (stageId) {
       keys.push(queryKeys.runs.stageEvents(runId, stageId));
+      keys.push(queryKeys.runs.stageContextWindow(runId, stageId));
     }
     return keys;
   }
@@ -162,12 +164,27 @@ export function queryKeysForRunEvent(
     const keys: Key[] = [queryKeys.runs.events(runId, 1000)];
     if (stageId) {
       keys.push(queryKeys.runs.stageEvents(runId, stageId));
+      keys.push(queryKeys.runs.stageContextWindow(runId, stageId));
+    }
+    return keys;
+  }
+
+  if (event === CONTEXT_WINDOW_SNAPSHOT_EVENT) {
+    const keys: Key[] = [queryKeys.runs.events(runId, 1000)];
+    if (stageId) {
+      keys.push(queryKeys.runs.stageEvents(runId, stageId));
+      keys.push(queryKeys.runs.stageContextWindow(runId, stageId));
     }
     return keys;
   }
 
   if (STAGE_ACTIVITY_EVENTS.has(event)) {
-    return stageId ? [queryKeys.runs.stageEvents(runId, stageId)] : [];
+    return stageId
+      ? [
+          queryKeys.runs.stageEvents(runId, stageId),
+          queryKeys.runs.stageContextWindow(runId, stageId),
+        ]
+      : [];
   }
 
   if (TODO_EVENTS.has(event)) {
@@ -177,6 +194,7 @@ export function queryKeysForRunEvent(
     ];
     if (stageId) {
       keys.push(queryKeys.runs.stageEvents(runId, stageId));
+      keys.push(queryKeys.runs.stageContextWindow(runId, stageId));
     }
     return keys;
   }

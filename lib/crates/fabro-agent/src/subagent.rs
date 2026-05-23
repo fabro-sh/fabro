@@ -8,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::Error;
 use crate::session::Session;
-use crate::tool_registry::RegisteredTool;
+use crate::tool_registry::{RegisteredTool, ToolSource};
 use crate::tools::required_str;
 use crate::types::{AgentEvent, Message, SessionEvent};
 
@@ -359,6 +359,7 @@ pub fn make_spawn_agent_tool(
                     .map_err(|e| e.to_string())
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 
@@ -394,6 +395,7 @@ pub fn make_send_input_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> Regist
                 Ok(format!("Message sent to agent {agent_id}"))
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 
@@ -426,6 +428,7 @@ pub fn make_wait_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> RegisteredTo
                 ))
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 
@@ -455,6 +458,7 @@ pub fn make_close_agent_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> Regis
                 Ok(format!("Agent {agent_id} closed"))
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 

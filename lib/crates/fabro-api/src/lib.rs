@@ -49,9 +49,13 @@ pub mod types {
         SandboxService, SandboxServiceListResponse, SandboxState, SandboxTimestamps,
         SecretMetadata, SecretType, ServerSettings, SessionDetail, SessionId, SessionMessage,
         SessionRecord, SessionStatus, SessionSummary, SessionTurn, SkillsProjection,
-        StageCompletion, StageHandler, StageModelUsage, StageOutcome, StageProjection, StageState,
-        SubAgentProjection, SubAgentStatus, SystemActorKind, TodoListProjection, TurnId,
-        UserPrincipal, WorkflowSettings,
+        StageCompletion, StageContextWindow, StageContextWindowBreakdownItem,
+        StageContextWindowBreakdownProjection, StageContextWindowCategory,
+        StageContextWindowCountMethod, StageContextWindowProjection, StageContextWindowStaleness,
+        StageContextWindowUnavailableReason, StageContextWindowWarning, StageHandler,
+        StageModelUsage, StageOutcome, StageProjection, StageState, SubAgentProjection,
+        SubAgentStatus, SystemActorKind, TodoListProjection, TurnId, UserPrincipal,
+        WorkflowSettings,
     };
 
     pub use crate::generated::types::*;

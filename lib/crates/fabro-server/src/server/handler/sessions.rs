@@ -1502,7 +1502,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use fabro_agent::config::ToolAccess;
-    use fabro_agent::tool_registry::{RegisteredTool, ToolContext, ToolRegistry};
+    use fabro_agent::tool_registry::{RegisteredTool, ToolContext, ToolRegistry, ToolSource};
     use fabro_llm::types::{ToolCall, ToolDefinition};
 
     use super::*;
@@ -1517,6 +1517,7 @@ mod tests {
             executor:   Arc::new(|_args, _ctx: ToolContext| {
                 Box::pin(async { Ok("ok".to_string()) })
             }),
+            source:     ToolSource::Native,
         }
     }
 
@@ -1785,6 +1786,7 @@ mod tests {
                         Ok("executed".to_string())
                     })
                 }),
+                source:     ToolSource::Native,
             });
         }
         let config = SessionOptions {

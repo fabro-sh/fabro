@@ -571,7 +571,7 @@ mod tests {
     };
     use crate::read_before_write_sandbox::ReadBeforeWriteSandbox;
     use crate::test_support::MutableMockSandbox;
-    use crate::tool_registry::{RegisteredTool, ToolContext, ToolRegistry};
+    use crate::tool_registry::{RegisteredTool, ToolContext, ToolRegistry, ToolSource};
     use crate::tools::{
         make_edit_file_tool, make_grep_tool, make_read_file_tool, make_write_file_tool,
     };
@@ -619,6 +619,7 @@ mod tests {
                     Ok(format!("echo: {text}"))
                 })
             }),
+            source:     ToolSource::Native,
         }
     }
 
@@ -632,6 +633,7 @@ mod tests {
             executor:   Arc::new(|_args: serde_json::Value, _ctx: ToolContext| {
                 Box::pin(async move { Err("tool failed".to_string()) })
             }),
+            source:     ToolSource::Native,
         }
     }
 
@@ -994,6 +996,7 @@ mod tests {
                     Ok("wrote".to_string())
                 })
             }),
+            source:     ToolSource::Native,
         });
         let config = SessionOptions {
             tool_access_policy: Some(Arc::new(NamedPolicy::new([(
@@ -1048,6 +1051,7 @@ mod tests {
                     Ok("ran".to_string())
                 })
             }),
+            source:     ToolSource::Native,
         });
         let config = SessionOptions {
             tool_access_policy: Some(Arc::new(NamedPolicy::new([(

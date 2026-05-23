@@ -66,6 +66,10 @@ pub(super) fn demo_routes() -> Router<Arc<AppState>> {
             get(demo::get_stage_events),
         )
         .route(
+            "/runs/{id}/stages/{stageId}/context-window",
+            get(not_implemented),
+        )
+        .route(
             "/runs/{id}/stages/{stageId}/artifacts",
             get(not_implemented).post(not_implemented),
         )

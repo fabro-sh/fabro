@@ -21,7 +21,10 @@ use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{
     AgentBackend, AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
     InterviewQuestionRecord, Node, Outcome, QuestionType, RunBlobId, RunId, RunSpec,
-    SandboxProvider, StageModelUsage, SuccessReason, SystemActorKind, WorkflowSettings, fixtures,
+    SandboxProvider, StageContextWindowBreakdownProjection, StageContextWindowCategory,
+    StageContextWindowCountMethod, StageContextWindowProjection, StageContextWindowStaleness,
+    StageContextWindowWarning, StageModelUsage, StageTiming, SuccessReason, SystemActorKind,
+    WorkflowSettings, fixtures,
 };
 use fabro_util::check_report::CheckStatus;
 use httpmock::Method::{GET, POST};
@@ -2944,6 +2947,106 @@ async fn create_durable_run_with_events(
         workflow_event::append_event(&run_store, &run_id, event)
             .await
             .unwrap();
+    }
+}
+
+fn stage_started_event(node_id: &str, handler_type: &str) -> workflow_event::Event {
+    workflow_event::Event::StageStarted {
+        node_id:      node_id.to_string(),
+        name:         node_id.to_string(),
+        index:        1,
+        handler_type: handler_type.to_string(),
+        attempt:      1,
+        max_attempts: 1,
+    }
+}
+
+fn command_started_event(node_id: &str) -> workflow_event::Event {
+    workflow_event::Event::CommandStarted {
+        node_id:    node_id.to_string(),
+        script:     "echo ok".to_string(),
+        command:    "echo ok".to_string(),
+        language:   "shell".to_string(),
+        timeout_ms: None,
+    }
+}
+
+fn agent_session_activated_event(node_id: &str, visit: u32) -> workflow_event::Event {
+    workflow_event::Event::AgentSessionActivated {
+        node_id: node_id.to_string(),
+        visit,
+        session_id: "session-1".to_string(),
+        thread_id: None,
+        provider: Some("openai".to_string()),
+        model: Some("gpt-5.4".to_string()),
+        reasoning_effort: None,
+        speed: None,
+        capabilities: Vec::new(),
+    }
+}
+
+fn stage_completed_event(node_id: &str) -> workflow_event::Event {
+    workflow_event::Event::StageCompleted {
+        node_id: node_id.to_string(),
+        name: node_id.to_string(),
+        index: 1,
+        timing: StageTiming::wall_only(42),
+        status: "succeeded".to_string(),
+        preferred_label: None,
+        suggested_next_ids: Vec::new(),
+        billing: None,
+        failure: None,
+        notes: None,
+        files_touched: Vec::new(),
+        context_updates: None,
+        jump_to_node: None,
+        context_values: None,
+        node_visits: None,
+        loop_failure_signatures: None,
+        restart_failure_signatures: None,
+        response: None,
+        attempt: 1,
+        max_attempts: 1,
+    }
+}
+
+fn context_window_event(
+    stage: &str,
+    visit: u32,
+    snapshot: StageContextWindowProjection,
+) -> workflow_event::Event {
+    workflow_event::Event::Agent {
+        stage: stage.to_string(),
+        visit,
+        event: fabro_agent::AgentEvent::ContextWindowSnapshot(snapshot),
+        session_id: Some("session-1".to_string()),
+        parent_session_id: None,
+        tool_call_id: None,
+    }
+}
+
+fn context_window_snapshot(
+    input_tokens: u64,
+    warnings: Vec<StageContextWindowWarning>,
+) -> StageContextWindowProjection {
+    StageContextWindowProjection {
+        provider: "openai".to_string(),
+        model: "gpt-5.4".to_string(),
+        context_window_tokens: 400_000,
+        input_tokens,
+        usage_percent: input_tokens as f64 * 100.0 / 400_000.0,
+        count_method: StageContextWindowCountMethod::ProviderApiScaledBreakdown,
+        staleness: StageContextWindowStaleness::Live,
+        generated_at: Utc::now(),
+        event_seq: None,
+        breakdown: vec![StageContextWindowBreakdownProjection {
+            category:      StageContextWindowCategory::Conversation,
+            label:         "Conversation".to_string(),
+            tokens:        input_tokens,
+            usage_percent: input_tokens as f64 * 100.0 / 400_000.0,
+            source:        "scaled_local_estimate".to_string(),
+        }],
+        warnings,
     }
 }
 
@@ -6271,6 +6374,244 @@ async fn get_run_stage_command_log_returns_not_found_for_missing_stage() {
 
     let response = app.oneshot(req).await.unwrap();
     assert_status!(response, StatusCode::NOT_FOUND).await;
+}
+
+#[tokio::test]
+async fn get_run_stage_context_window_returns_not_found_for_missing_run() {
+    let app = crate::test_support::build_test_router(test_app_state_with_isolated_storage());
+    let run_id = RunId::new();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!(
+                    "/runs/{run_id}/stages/agent@1/context-window"
+                )))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_status!(response, StatusCode::NOT_FOUND).await;
+}
+
+#[tokio::test]
+async fn get_run_stage_context_window_returns_not_found_for_missing_stage() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+    create_durable_run_with_events(&state, run_id, &[workflow_event::Event::RunSubmitted {
+        definition_blob: None,
+    }])
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!(
+                    "/runs/{run_id}/stages/missing@1/context-window"
+                )))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_status!(response, StatusCode::NOT_FOUND).await;
+}
+
+#[tokio::test]
+async fn get_run_stage_context_window_returns_unavailable_for_non_agent_stage() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        stage_started_event("script_node", "command"),
+        command_started_event("script_node"),
+    ])
+    .await;
+
+    let body = response_json!(
+        app.oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!(
+                    "/runs/{run_id}/stages/script_node@1/context-window"
+                )))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap(),
+        StatusCode::OK
+    )
+    .await;
+
+    assert_eq!(body["available"], false);
+    assert_eq!(body["unavailable_reason"], "not_agent_stage");
+    assert_eq!(body["breakdown"], json!([]));
+    assert_eq!(body["staleness"], "unavailable");
+}
+
+#[tokio::test]
+async fn get_run_stage_context_window_returns_not_observed_for_agent_stage_without_snapshot() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        agent_session_activated_event("agent_node", 1),
+    ])
+    .await;
+
+    let body = response_json!(
+        app.oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!(
+                    "/runs/{run_id}/stages/agent_node@1/context-window"
+                )))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap(),
+        StatusCode::OK
+    )
+    .await;
+
+    assert_eq!(body["available"], false);
+    assert_eq!(body["unavailable_reason"], "not_observed");
+    assert_eq!(body["input_tokens"], serde_json::Value::Null);
+    assert!(!body["warnings"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn get_run_stage_context_window_returns_live_projected_snapshot() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        stage_started_event("agent_node", "agent"),
+        context_window_event(
+            "agent_node",
+            1,
+            context_window_snapshot(123_456, Vec::new()),
+        ),
+    ])
+    .await;
+
+    let body = response_json!(
+        app.oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!(
+                    "/runs/{run_id}/stages/agent_node@1/context-window"
+                )))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap(),
+        StatusCode::OK
+    )
+    .await;
+
+    assert_eq!(body["stage_id"], "agent_node@1");
+    assert_eq!(body["available"], true);
+    assert_eq!(body["provider"], "openai");
+    assert_eq!(body["count_method"], "provider_api_scaled_breakdown");
+    assert_eq!(body["staleness"], "live");
+    assert_eq!(body["input_tokens"], 123_456);
+    assert_eq!(body["breakdown"][0]["category"], "conversation");
+}
+
+#[tokio::test]
+async fn get_run_stage_context_window_marks_completed_stage_snapshot_stored() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        stage_started_event("agent_node", "agent"),
+        context_window_event("agent_node", 1, context_window_snapshot(100, Vec::new())),
+        stage_completed_event("agent_node"),
+    ])
+    .await;
+
+    let body = response_json!(
+        app.oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!(
+                    "/runs/{run_id}/stages/agent_node@1/context-window"
+                )))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap(),
+        StatusCode::OK
+    )
+    .await;
+
+    assert_eq!(body["available"], true);
+    assert_eq!(body["staleness"], "stored");
+    assert_eq!(body["input_tokens"], 100);
+}
+
+#[tokio::test]
+async fn get_run_stage_context_window_returns_projected_warnings() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        stage_started_event("agent_node", "agent"),
+        context_window_event(
+            "agent_node",
+            1,
+            context_window_snapshot(100, vec![StageContextWindowWarning {
+                code:    "provider_token_count_failed".to_string(),
+                message: "provider input token counting failed; returned local estimate"
+                    .to_string(),
+            }]),
+        ),
+    ])
+    .await;
+
+    let body = response_json!(
+        app.oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!(
+                    "/runs/{run_id}/stages/agent_node@1/context-window"
+                )))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap(),
+        StatusCode::OK
+    )
+    .await;
+
+    assert_eq!(body["warnings"][0]["code"], "provider_token_count_failed");
 }
 
 #[tokio::test]

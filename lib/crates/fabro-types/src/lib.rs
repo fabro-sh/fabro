@@ -104,8 +104,11 @@ pub use run_failure::RunFailure;
 pub use run_id::{RunId, fixtures};
 pub use run_projection::{
     ActivatedSkill, CheckpointRecord, McpServerProjection, McpServerStatus, PendingInterviewRecord,
-    RunProjection, SkillsProjection, StageModelUsage, StageProjection, SubAgentProjection,
-    SubAgentStatus, first_event_seq,
+    RunProjection, SkillsProjection, StageContextWindow, StageContextWindowBreakdownItem,
+    StageContextWindowBreakdownProjection, StageContextWindowCategory,
+    StageContextWindowCountMethod, StageContextWindowProjection, StageContextWindowStaleness,
+    StageContextWindowUnavailableReason, StageContextWindowWarning, StageModelUsage,
+    StageProjection, SubAgentProjection, SubAgentStatus, first_event_seq,
 };
 pub use run_sandbox::{RunSandbox, RunSandboxRuntime};
 pub use run_summary::{

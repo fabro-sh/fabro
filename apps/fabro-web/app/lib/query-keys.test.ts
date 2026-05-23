@@ -43,6 +43,12 @@ describe("queryKeys", () => {
       "run 1",
       "build step",
     ]);
+    expect(queryKeys.runs.stageContextWindow("run 1", "build step@2")).toEqual([
+      "runs",
+      "stage-context-window",
+      "run 1",
+      "build step@2",
+    ]);
     expect(queryKeys.runs.sandbox("run 1")).toEqual(["runs", "sandbox", "run 1"]);
     expect(queryKeys.system.attachUrl()).toBe("/api/v1/attach");
     expect(queryKeys.runs.attachUrl("run 1")).toBe("/api/v1/runs/run%201/attach");
@@ -63,6 +69,7 @@ describe("queryKeys", () => {
       queryKeys.runs.graph("run-1", "TB"),
       queryKeys.runs.detail("run-1"),
       queryKeys.runs.stageEvents("run-1", "stage-1"),
+      queryKeys.runs.stageContextWindow("run-1", "stage-1"),
     ]);
     expect(queryKeysForRunEvent("run-1", "run.title.updated")).toEqual([
       queryKeys.runs.detail("run-1"),
@@ -80,8 +87,19 @@ describe("queryKeys", () => {
     ]) {
       expect(queryKeysForRunEvent("run-1", event, "stage-1")).toEqual([
         queryKeys.runs.stageEvents("run-1", "stage-1"),
+        queryKeys.runs.stageContextWindow("run-1", "stage-1"),
       ]);
     }
+  });
+
+  test("context-window snapshot invalidates context window, run events, and stage events", () => {
+    expect(
+      queryKeysForRunEvent("run-1", "agent.context_window.snapshot", "stage-1"),
+    ).toEqual([
+      queryKeys.runs.events("run-1", 1000),
+      queryKeys.runs.stageEvents("run-1", "stage-1"),
+      queryKeys.runs.stageContextWindow("run-1", "stage-1"),
+    ]);
   });
 
   test("agent activity events without a node_id invalidate nothing", () => {

@@ -371,6 +371,42 @@ fn main() {
             "fabro_types::AgentMcpToolSummary",
             &[],
         ),
+        ("StageContextWindow", "fabro_types::StageContextWindow", &[]),
+        (
+            "StageContextWindowProjection",
+            "fabro_types::StageContextWindowProjection",
+            &[],
+        ),
+        (
+            "StageContextWindowBreakdownItem",
+            "fabro_types::StageContextWindowBreakdownItem",
+            &[],
+        ),
+        (
+            "StageContextWindowCategory",
+            "fabro_types::StageContextWindowCategory",
+            &[],
+        ),
+        (
+            "StageContextWindowCountMethod",
+            "fabro_types::StageContextWindowCountMethod",
+            &[],
+        ),
+        (
+            "StageContextWindowStaleness",
+            "fabro_types::StageContextWindowStaleness",
+            &[],
+        ),
+        (
+            "StageContextWindowUnavailableReason",
+            "fabro_types::StageContextWindowUnavailableReason",
+            &[],
+        ),
+        (
+            "StageContextWindowWarning",
+            "fabro_types::StageContextWindowWarning",
+            &[],
+        ),
         ("SecretMetadata", "fabro_types::SecretMetadata", &[]),
         ("InterviewOption", "fabro_types::InterviewOption", &[]),
         (

@@ -19,7 +19,7 @@ use crate::profiles::EnvContext;
 use crate::sandbox::*;
 use crate::session::Session;
 use crate::skills::{Skill, format_skills_prompt_section};
-use crate::tool_registry::{RegisteredTool, ToolRegistry};
+use crate::tool_registry::{RegisteredTool, ToolRegistry, ToolSource};
 
 // --- TestProfile ---
 
@@ -283,6 +283,7 @@ pub fn make_echo_tool() -> RegisteredTool {
                 Ok(format!("echo: {text}"))
             })
         }),
+        source:     ToolSource::Native,
     }
 }
 
@@ -297,6 +298,7 @@ pub fn make_error_tool() -> RegisteredTool {
         executor:   Arc::new(|_args, _ctx| {
             Box::pin(async move { Err("tool execution failed".to_string()) })
         }),
+        source:     ToolSource::Native,
     }
 }
 

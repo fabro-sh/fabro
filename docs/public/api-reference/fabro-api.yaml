@@ -3067,6 +3067,34 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/runs/{id}/stages/{stageId}/context-window:
+    get:
+      operationId: getRunStageContextWindow
+      tags: [Run Internals]
+      summary: Get Stage Context Window
+      description: |
+        Returns the latest best-effort model-visible context-window usage snapshot for an agent stage.
+        Known stages without applicable or observed data return `available: false`; missing runs or stages return 404.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/StageId"
+      responses:
+        "200":
+          description: Latest context-window snapshot or a typed unavailable state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StageContextWindow"
+        "404":
+          description: Run or stage not found.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/runs/{id}/artifacts:
     get:
       operationId: listRunArtifacts
@@ -7850,6 +7878,221 @@ components:
           type: string
           format: date-time
 
+    StageContextWindowCategory:
+      description: Category of model-visible input/context tokens.
+      type: string
+      enum:
+        - system_prompt
+        - tools
+        - mcp_tools
+        - skills
+        - memory
+        - conversation
+        - other
+
+    StageContextWindowCountMethod:
+      description: Method used to produce the context-window token total and breakdown.
+      type: string
+      enum:
+        - provider_api_scaled_breakdown
+        - response_usage_scaled_breakdown
+        - local_estimate
+
+    StageContextWindowStaleness:
+      description: Freshness of the returned context-window data.
+      type: string
+      enum:
+        - live
+        - stored
+        - unavailable
+
+    StageContextWindowUnavailableReason:
+      description: Why context-window data is unavailable for a known run stage.
+      type: string
+      enum:
+        - not_agent_stage
+        - not_observed
+        - provider_unconfigured
+
+    StageContextWindowWarning:
+      description: Content-free warning about context-window count quality or attribution.
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Stable warning code.
+          example: provider_token_count_failed
+        message:
+          type: string
+          description: Human-readable warning that must not include prompt, memory, message, or tool-argument content.
+          example: provider input token counting failed; returned local estimate
+
+    StageContextWindowBreakdownItem:
+      description: Token usage for one content category.
+      type: object
+      required:
+        - category
+        - label
+        - tokens
+        - usage_percent
+        - source
+      properties:
+        category:
+          $ref: "#/components/schemas/StageContextWindowCategory"
+        label:
+          type: string
+          example: System prompt
+        tokens:
+          type: integer
+          format: uint64
+          minimum: 0
+          example: 30000
+        usage_percent:
+          type: number
+          format: double
+          minimum: 0
+          example: 7.5
+        source:
+          type: string
+          description: Content-free source label for the category count.
+          example: scaled_local_estimate
+
+    StageContextWindowProjection:
+      description: Durable content-free context-window snapshot projected onto an agent stage.
+      type: object
+      required:
+        - provider
+        - model
+        - context_window_tokens
+        - input_tokens
+        - usage_percent
+        - count_method
+        - staleness
+        - generated_at
+        - breakdown
+        - warnings
+      properties:
+        provider:
+          type: string
+          example: openai
+        model:
+          type: string
+          example: gpt-5.4
+        context_window_tokens:
+          type: integer
+          format: uint64
+          minimum: 0
+          example: 400000
+        input_tokens:
+          type: integer
+          format: uint64
+          minimum: 0
+          example: 123456
+        usage_percent:
+          type: number
+          format: double
+          minimum: 0
+          example: 30.86
+        count_method:
+          $ref: "#/components/schemas/StageContextWindowCountMethod"
+        staleness:
+          $ref: "#/components/schemas/StageContextWindowStaleness"
+        generated_at:
+          type: string
+          format: date-time
+          example: "2026-05-23T12:34:56Z"
+        event_seq:
+          type: ["integer", "null"]
+          format: uint32
+          minimum: 1
+          example: 42
+        breakdown:
+          type: array
+          items:
+            $ref: "#/components/schemas/StageContextWindowBreakdownItem"
+        warnings:
+          type: array
+          items:
+            $ref: "#/components/schemas/StageContextWindowWarning"
+
+    StageContextWindow:
+      description: Best-effort context-window usage for one agent stage.
+      type: object
+      required:
+        - stage_id
+        - available
+        - unavailable_reason
+        - provider
+        - model
+        - context_window_tokens
+        - input_tokens
+        - usage_percent
+        - count_method
+        - staleness
+        - generated_at
+        - event_seq
+        - breakdown
+        - warnings
+      properties:
+        stage_id:
+          type: string
+          description: Stage ID in `node@visit` form.
+          example: implement@1
+        available:
+          type: boolean
+          description: Whether context-window data is available for this known stage.
+        unavailable_reason:
+          oneOf:
+            - $ref: "#/components/schemas/StageContextWindowUnavailableReason"
+            - type: "null"
+        provider:
+          type: ["string", "null"]
+          example: openai
+        model:
+          type: ["string", "null"]
+          example: gpt-5.4
+        context_window_tokens:
+          type: ["integer", "null"]
+          format: uint64
+          minimum: 0
+          example: 400000
+        input_tokens:
+          type: ["integer", "null"]
+          format: uint64
+          minimum: 0
+          example: 123456
+        usage_percent:
+          type: ["number", "null"]
+          format: double
+          minimum: 0
+          example: 30.86
+        count_method:
+          oneOf:
+            - $ref: "#/components/schemas/StageContextWindowCountMethod"
+            - type: "null"
+        staleness:
+          $ref: "#/components/schemas/StageContextWindowStaleness"
+        generated_at:
+          type: ["string", "null"]
+          format: date-time
+          example: "2026-05-23T12:34:56Z"
+        event_seq:
+          type: ["integer", "null"]
+          format: uint32
+          minimum: 1
+          example: 42
+        breakdown:
+          type: array
+          items:
+            $ref: "#/components/schemas/StageContextWindowBreakdownItem"
+        warnings:
+          type: array
+          items:
+            $ref: "#/components/schemas/StageContextWindowWarning"
+
     StageProjection:
       description: Observable projection data for one workflow stage execution.
       type: object
@@ -7934,6 +8177,11 @@ components:
           description: MCP servers observed by this stage.
           items:
             $ref: "#/components/schemas/McpServerProjection"
+        context_window:
+          oneOf:
+            - $ref: "#/components/schemas/StageContextWindowProjection"
+            - type: "null"
+          description: Latest content-free context-window snapshot for this agent stage.
         state:
           $ref: "#/components/schemas/StageState"
           description: Lifecycle state of the stage projection.
