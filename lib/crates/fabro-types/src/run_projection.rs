@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use crate::{
     BilledTokenCounts, Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition,
     ModelRef, PullRequestLink, RunControlAction, RunDiff, RunId, RunSandbox, RunSpec, RunStatus,
-    StageCompletion, StageHandler, StageId, StageState, StageTiming, StartRecord,
+    RunTiming, StageCompletion, StageHandler, StageId, StageState, StageTiming, StartRecord,
     TodoListProjection,
 };
 
@@ -265,6 +265,41 @@ impl RunProjection {
 
     pub fn is_archived(&self) -> bool {
         self.archived_at.is_some()
+    }
+
+    /// Best-effort run timing for a run that has started but has not reached a
+    /// terminal conclusion yet.
+    ///
+    /// Run-level wall time ticks from `run.started` to `now`. Active time sums
+    /// inference and tool timing from stages that have already emitted a
+    /// terminal stage event. Stage projections do not currently track live
+    /// inference/tool time while a stage is still running, so active time steps
+    /// forward when each stage completes while wall time advances continuously.
+    #[must_use]
+    pub fn live_run_timing(&self, now: DateTime<Utc>) -> Option<RunTiming> {
+        let start = self.start.as_ref()?;
+        let wall_time_ms = u64::try_from(
+            now.signed_duration_since(start.start_time)
+                .num_milliseconds()
+                .max(0),
+        )
+        .unwrap_or(0);
+        let (inference_time_ms, tool_time_ms) = self
+            .stages
+            .values()
+            .filter_map(|stage| stage.timing)
+            .fold((0u64, 0u64), |(inference, tool), timing| {
+                (
+                    inference.saturating_add(timing.inference_time_ms),
+                    tool.saturating_add(timing.tool_time_ms),
+                )
+            });
+
+        Some(RunTiming::new(
+            wall_time_ms,
+            inference_time_ms,
+            tool_time_ms,
+        ))
     }
 
     pub fn current_checkpoint(&self) -> Option<&Checkpoint> {

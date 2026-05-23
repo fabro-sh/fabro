@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use fabro_types::{Run, RunId, RunProjection};
 use tokio::sync::Mutex;
 
@@ -86,8 +87,15 @@ impl RunProjectionCacheState {
             .map_or(0, |children| children.len() as u64)
     }
 
-    fn with_children_count(&self, mut entry: CachedRunProjection) -> CachedRunProjection {
+    fn with_read_overlays(
+        &self,
+        mut entry: CachedRunProjection,
+        now: DateTime<Utc>,
+    ) -> CachedRunProjection {
         entry.summary.children_count = self.count_children(&entry.run_id);
+        if entry.summary.timing.is_none() {
+            entry.summary.timing = entry.projection.live_run_timing(now);
+        }
         entry
     }
 }
@@ -101,7 +109,11 @@ impl RunProjectionCache {
         self.state.lock().await.insert(entry);
     }
 
-    pub(crate) async fn list(&self, query: &ListRunsQuery) -> Vec<CachedRunProjection> {
+    pub(crate) async fn list(
+        &self,
+        query: &ListRunsQuery,
+        now: DateTime<Utc>,
+    ) -> Vec<CachedRunProjection> {
         let entries = {
             let state = self.state.lock().await;
             let raw = match query.parent_id {
@@ -115,7 +127,7 @@ impl RunProjectionCache {
                 None => state.entries.values().cloned().collect::<Vec<_>>(),
             };
             raw.into_iter()
-                .map(|entry| state.with_children_count(entry))
+                .map(|entry| state.with_read_overlays(entry, now))
                 .collect::<Vec<_>>()
         };
         let mut entries = entries
@@ -143,18 +155,20 @@ impl RunProjectionCache {
 
     pub(crate) async fn get(&self, run_id: &RunId) -> Option<CachedRunProjection> {
         let state = self.state.lock().await;
-        state
-            .entries
-            .get(run_id)
-            .cloned()
-            .map(|entry| state.with_children_count(entry))
+        state.entries.get(run_id).cloned().map(|mut entry| {
+            entry.summary.children_count = state.count_children(run_id);
+            entry
+        })
     }
 
-    pub(crate) async fn get_summary(&self, run_id: &RunId) -> Option<Run> {
+    pub(crate) async fn get_summary(&self, run_id: &RunId, now: DateTime<Utc>) -> Option<Run> {
         let state = self.state.lock().await;
         state.entries.get(run_id).map(|entry| {
             let mut summary = entry.summary.clone();
             summary.children_count = state.count_children(run_id);
+            if summary.timing.is_none() {
+                summary.timing = entry.projection.live_run_timing(now);
+            }
             summary
         })
     }
