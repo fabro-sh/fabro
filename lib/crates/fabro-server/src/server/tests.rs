@@ -2981,6 +2981,7 @@ fn agent_session_activated_event(node_id: &str, visit: u32) -> workflow_event::E
         model: Some("gpt-5.4".to_string()),
         reasoning_effort: None,
         speed: None,
+        permission_level: None,
         capabilities: Vec::new(),
     }
 }
