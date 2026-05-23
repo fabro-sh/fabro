@@ -265,21 +265,14 @@ pub struct RunLifecycleBlocks<'a> {
     pub pull_request:   Option<RunLifecyclePullRequest<'a>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
 pub enum RunLifecycleKind {
+    #[strum(serialize = "Fabro run started")]
     Started,
+    #[strum(serialize = "Fabro run completed")]
     Completed,
+    #[strum(serialize = "Fabro run failed")]
     Failed,
-}
-
-impl RunLifecycleKind {
-    fn title(self) -> &'static str {
-        match self {
-            Self::Started => "Fabro run started",
-            Self::Completed => "Fabro run completed",
-            Self::Failed => "Fabro run failed",
-        }
-    }
 }
 
 const LIFECYCLE_FIELD_TEXT_LIMIT: usize = 800;
@@ -297,7 +290,8 @@ pub fn run_lifecycle_blocks(
 }
 
 fn run_lifecycle_text(kind: RunLifecycleKind, details: &RunLifecycleBlocks<'_>) -> String {
-    let mut text = format!("*{}*", kind.title());
+    let title: &'static str = kind.into();
+    let mut text = format!("*{title}*");
     let _ = write!(
         text,
         "\nWorkflow: {}",
