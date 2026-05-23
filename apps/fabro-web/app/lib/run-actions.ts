@@ -40,13 +40,8 @@ export async function approveRun(id: string, request?: Request): Promise<Run> {
   return runLifecycleAction(id, "approve", request);
 }
 
-export async function denyRun(id: string, reason?: string, request?: Request): Promise<Run> {
-  try {
-    const body = reason?.trim() ? { reason: reason.trim() } : undefined;
-    return await apiData(() => runsApi.denyRun(id, body, requestSignalOptions(request)));
-  } catch (error) {
-    throw lifecycleActionErrorFromError(error);
-  }
+export async function denyRun(id: string, request?: Request): Promise<Run> {
+  return runLifecycleAction(id, "deny", request);
 }
 
 export async function archiveRun(id: string, request?: Request): Promise<Run> {

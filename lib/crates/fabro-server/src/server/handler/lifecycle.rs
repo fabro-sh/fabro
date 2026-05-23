@@ -113,41 +113,35 @@ async fn start_run(
         .root()
         .to_path_buf();
     let dot_source = run_state.spec.graph_source.clone().unwrap_or_default();
-    let actor_for_event = Some(actor.clone());
-    if let Err(err) =
-        workflow_event::append_event(&run_store, &id, &workflow_event::Event::RunStartRequested {
-            resume,
-            actor: actor_for_event.clone(),
-        })
-        .await
-    {
-        return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
-    }
     let approval_required = !resume
         && matches!(
             actor,
             Principal::Worker { run_id } if run_state.parent_id == Some(run_id)
         );
-    let (next_status, next_event, notify_scheduler) = if approval_required {
+    if let Err(err) =
+        workflow_event::append_event(&run_store, &id, &workflow_event::Event::RunStartRequested {
+            resume,
+            actor: Some(actor.clone()),
+        })
+        .await
+    {
+        return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
+    let (next_status, next_event) = if approval_required {
         (
             RunStatus::Pending {
                 reason: PendingReason::ApprovalRequired,
             },
             workflow_event::Event::RunPending {
                 reason: PendingReason::ApprovalRequired,
-                actor:  actor_for_event,
+                actor:  Some(actor),
             },
-            false,
         )
     } else {
-        (
-            RunStatus::Runnable,
-            workflow_event::Event::RunRunnable {
-                source: RunRunnableSource::StartRequested,
-                actor:  actor_for_event,
-            },
-            true,
-        )
+        (RunStatus::Runnable, workflow_event::Event::RunRunnable {
+            source: RunRunnableSource::StartRequested,
+            actor:  Some(actor),
+        })
     };
     if let Err(err) = workflow_event::append_event(&run_store, &id, &next_event).await {
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
@@ -171,7 +165,7 @@ async fn start_run(
         );
     }
 
-    if notify_scheduler {
+    if !approval_required {
         state.scheduler_notify.notify_one();
     }
     run_response(state.as_ref(), id, StatusCode::OK).await
@@ -224,17 +218,16 @@ async fn approve_run(
         }
     }
 
-    let run_dir = Storage::new(state.server_storage_dir())
-        .run_scratch(&id)
-        .root()
-        .to_path_buf();
-    let dot_source = run_state.spec.graph_source.clone().unwrap_or_default();
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         if let Some(managed_run) = runs.get_mut(&id) {
             managed_run.status = RunStatus::Runnable;
-            managed_run.run_dir = Some(run_dir);
         } else {
+            let run_dir = Storage::new(state.server_storage_dir())
+                .run_scratch(&id)
+                .root()
+                .to_path_buf();
+            let dot_source = run_state.spec.graph_source.clone().unwrap_or_default();
             runs.insert(
                 id,
                 managed_run(
@@ -323,7 +316,6 @@ async fn deny_run(
         }
     }
 
-    state.scheduler_notify.notify_one();
     run_response(state.as_ref(), id, StatusCode::OK).await
 }
 

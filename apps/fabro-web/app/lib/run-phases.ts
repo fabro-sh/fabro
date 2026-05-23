@@ -28,19 +28,45 @@ export function deriveRunPhases(
   const createdMs = Date.parse(createdAtIso);
   if (Number.isNaN(createdMs)) return [];
 
-  const firstTs = (name: string): number | null => {
-    if (!events) return null;
-    const event = events.find((e) => e.event === name);
-    if (!event) return null;
-    const ms = Date.parse(event.ts);
-    return Number.isNaN(ms) ? null : ms;
-  };
+  let startRequestedMs: number | null = null;
+  let pendingMs: number | null = null;
+  let runnableMs: number | null = null;
+  let startingMs: number | null = null;
+  let runningMs: number | null = null;
+  let remaining = 5;
 
-  const startRequestedMs = firstTs("run.start_requested");
-  const pendingMs = firstTs("run.pending");
-  const runnableMs = firstTs("run.runnable");
-  const startingMs = firstTs("run.starting");
-  const runningMs = firstTs("run.running");
+  for (const event of events ?? []) {
+    if (remaining === 0) break;
+    let target: "startRequested" | "pending" | "runnable" | "starting" | "running" | null = null;
+    switch (event.event) {
+      case "run.start_requested":
+        if (startRequestedMs == null) target = "startRequested";
+        break;
+      case "run.pending":
+        if (pendingMs == null) target = "pending";
+        break;
+      case "run.runnable":
+        if (runnableMs == null) target = "runnable";
+        break;
+      case "run.starting":
+        if (startingMs == null) target = "starting";
+        break;
+      case "run.running":
+        if (runningMs == null) target = "running";
+        break;
+    }
+    if (target == null) continue;
+    const ms = Date.parse(event.ts);
+    if (Number.isNaN(ms)) continue;
+    switch (target) {
+      case "startRequested": startRequestedMs = ms; break;
+      case "pending": pendingMs = ms; break;
+      case "runnable": runnableMs = ms; break;
+      case "starting": startingMs = ms; break;
+      case "running": runningMs = ms; break;
+    }
+    remaining -= 1;
+  }
 
   const phases: RunPhase[] = [];
 

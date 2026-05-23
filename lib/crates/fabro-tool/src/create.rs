@@ -464,7 +464,7 @@ pub async fn create_runs_with_options(
             children_count: summary.children_count,
             workflow: spec.workflow,
             start_requested,
-            status: common::run_status_kind(summary.lifecycle.status).to_string(),
+            status: summary.lifecycle.status.kind().to_string(),
         });
     }
     Ok(CreateRunsResult { runs: created })

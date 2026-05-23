@@ -1,5 +1,4 @@
 use std::fmt;
-use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString, IntoStaticStr};
@@ -252,47 +251,21 @@ pub enum PendingReason {
     ApprovalRequired,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString, IntoStaticStr,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum SuccessReason {
     Completed,
     PartialSuccess,
 }
 
-impl fmt::Display for SuccessReason {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Completed => "completed",
-            Self::PartialSuccess => "partial_success",
-        })
-    }
-}
-
-impl FromStr for SuccessReason {
-    type Err = ParseSuccessReasonError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "completed" => Ok(Self::Completed),
-            "partial_success" => Ok(Self::PartialSuccess),
-            _ => Err(ParseSuccessReasonError(s.to_string())),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ParseSuccessReasonError(String);
-
-impl fmt::Display for ParseSuccessReasonError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid success reason: {:?}", self.0)
-    }
-}
-
-impl std::error::Error for ParseSuccessReasonError {}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString, IntoStaticStr,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum FailureReason {
     WorkflowError,
     Cancelled,
@@ -304,52 +277,6 @@ pub enum FailureReason {
     BootstrapFailed,
     SandboxInitFailed,
 }
-
-impl fmt::Display for FailureReason {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::WorkflowError => "workflow_error",
-            Self::Cancelled => "cancelled",
-            Self::ApprovalDenied => "approval_denied",
-            Self::Terminated => "terminated",
-            Self::TransientInfra => "transient_infra",
-            Self::BudgetExhausted => "budget_exhausted",
-            Self::LaunchFailed => "launch_failed",
-            Self::BootstrapFailed => "bootstrap_failed",
-            Self::SandboxInitFailed => "sandbox_init_failed",
-        })
-    }
-}
-
-impl FromStr for FailureReason {
-    type Err = ParseFailureReasonError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "workflow_error" => Ok(Self::WorkflowError),
-            "cancelled" => Ok(Self::Cancelled),
-            "approval_denied" => Ok(Self::ApprovalDenied),
-            "terminated" => Ok(Self::Terminated),
-            "transient_infra" => Ok(Self::TransientInfra),
-            "budget_exhausted" => Ok(Self::BudgetExhausted),
-            "launch_failed" => Ok(Self::LaunchFailed),
-            "bootstrap_failed" => Ok(Self::BootstrapFailed),
-            "sandbox_init_failed" => Ok(Self::SandboxInitFailed),
-            _ => Err(ParseFailureReasonError(s.to_string())),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ParseFailureReasonError(String);
-
-impl fmt::Display for ParseFailureReasonError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid failure reason: {:?}", self.0)
-    }
-}
-
-impl std::error::Error for ParseFailureReasonError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -378,18 +305,13 @@ impl From<TerminalStatus> for RunStatus {
         }
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString, IntoStaticStr,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum BlockedReason {
     HumanInputRequired,
-}
-
-impl fmt::Display for BlockedReason {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::HumanInputRequired => "human_input_required",
-        })
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

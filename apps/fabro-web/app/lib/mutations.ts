@@ -70,7 +70,7 @@ export function useApproveRun(id: string | undefined) {
 }
 
 export function useDenyRun(id: string | undefined) {
-  return useLifecycleMutation(id, "deny", (runId) => denyRun(runId));
+  return useLifecycleMutation(id, "deny", denyRun);
 }
 
 export function useArchiveRun(id: string | undefined) {
