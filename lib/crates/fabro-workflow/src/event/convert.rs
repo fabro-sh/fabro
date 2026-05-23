@@ -556,7 +556,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
         } => EventBody::StagePrompt(fabro_types::StagePromptProps {
             visit:            *visit,
             text:             text.clone(),
-            mode:             mode.clone(),
+            mode:             *mode,
             provider:         provider.clone(),
             model:            model.clone(),
             reasoning_effort: *reasoning_effort,

@@ -78,11 +78,12 @@ fn acp_backend_workflow() {
     assert!(
         stages.values().any(|stage| {
             stage["provider_used"]["mode"] == "acp"
-                && stage["provider_used"].get("provider").is_none()
+                && stage["provider_used"]["provider"] == "acp"
+                && stage["provider_used"]["model"] == "fake"
                 && stage["provider_used"].get("reasoning_effort").is_none()
                 && stage["provider_used"].get("speed").is_none()
         }),
-        "run projection should include ACP model usage metadata without provider: {stages:?}"
+        "run projection should include ACP model usage metadata: {stages:?}"
     );
 }
 

@@ -357,6 +357,7 @@ export * from './ssh-access-request';
 export * from './ssh-access-response';
 export * from './stage-completion';
 export * from './stage-handler';
+export * from './stage-model-mode';
 export * from './stage-model-usage';
 export * from './stage-outcome';
 export * from './stage-projection';

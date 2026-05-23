@@ -3,16 +3,17 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
+use fabro_types::StageModelMode;
 
 use super::agent::{
-    CodergenBackend, CodergenResult, OneShotRequest, extract_status_fields, truncate,
+    CodergenBackend, CodergenResult, OneShotRequest, emit_stage_prompt, extract_status_fields,
+    truncate,
 };
-use super::llm::api::EffectiveRequestControls;
 use super::llm::routing;
 use super::{EngineServices, Handler};
 use crate::context::{Context, WorkflowContext, keys};
 use crate::error::Error;
-use crate::event::{Emitter, Event, StageScope};
+use crate::event::{Emitter, Event};
 use crate::outcome::Outcome;
 
 /// Handler for single-shot LLM calls (no tools, no agent loop).
@@ -106,33 +107,14 @@ impl Handler for PromptHandler {
             None
         };
 
-        let prompt_provider = node
-            .provider()
-            .map(String::from)
-            .or_else(|| Some(services.run.provider_id.to_string()));
-        let prompt_model = node
-            .model()
-            .map(String::from)
-            .or_else(|| Some(services.run.model.clone()));
-        let stage_scope = StageScope::for_handler(context, &node.id);
-        let request_controls = if let Some(backend) = &self.backend {
-            backend.effective_request_controls(node)?
-        } else {
-            EffectiveRequestControls::default()
-        };
-        services.run.emitter.emit_scoped(
-            &Event::Prompt {
-                stage:            node.id.clone(),
-                visit:            stage_scope.visit,
-                text:             prompt.clone(),
-                mode:             Some("prompt".to_string()),
-                provider:         prompt_provider.clone(),
-                model:            prompt_model.clone(),
-                reasoning_effort: request_controls.reasoning_effort,
-                speed:            request_controls.speed,
-            },
-            &stage_scope,
-        );
+        let stage_scope = emit_stage_prompt(
+            services,
+            context,
+            node,
+            &prompt,
+            StageModelMode::Prompt,
+            self.backend.as_deref(),
+        )?;
 
         // 3. Call LLM backend (one_shot)
         let (response_text, stage_usage, backend_files_touched) =
@@ -438,7 +420,7 @@ mod tests {
         let state = run_store.state().await.unwrap();
         let node_state = state.stage(&StageId::new("classify", 1)).unwrap();
         let provider_used = node_state.provider_used.as_ref().unwrap();
-        assert_eq!(provider_used.mode, "prompt");
+        assert_eq!(provider_used.mode, StageModelMode::Prompt);
         assert_eq!(provider_used.reasoning_effort, Some(ReasoningEffort::High));
         assert_eq!(provider_used.speed, Some(Speed::Fast));
     }

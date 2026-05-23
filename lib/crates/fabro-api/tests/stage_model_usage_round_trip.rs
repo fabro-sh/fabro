@@ -1,10 +1,11 @@
 use std::any::{TypeId, type_name};
 
 use fabro_api::types::{
-    ReasoningEffort as ApiReasoningEffort, StageModelUsage as ApiStageModelUsage,
+    ReasoningEffort as ApiReasoningEffort, StageModelMode as ApiStageModelMode,
+    StageModelUsage as ApiStageModelUsage,
 };
 use fabro_model::{ReasoningEffort, Speed};
-use fabro_types::StageModelUsage;
+use fabro_types::{StageModelMode, StageModelUsage};
 use serde_json::json;
 
 #[test]
@@ -35,6 +36,27 @@ fn stage_model_usage_reuses_canonical_type() {
 }
 
 #[test]
+fn stage_model_mode_reuses_canonical_type() {
+    assert_same_type::<ApiStageModelMode, StageModelMode>();
+}
+
+#[test]
+fn stage_model_mode_round_trips_openapi_values() {
+    for (value, mode) in [
+        ("prompt", StageModelMode::Prompt),
+        ("agent", StageModelMode::Agent),
+        ("acp", StageModelMode::Acp),
+        ("fan_in", StageModelMode::FanIn),
+    ] {
+        assert_eq!(
+            serde_json::from_value::<StageModelMode>(json!(value)).unwrap(),
+            mode
+        );
+        assert_eq!(serde_json::to_value(mode).unwrap(), json!(value));
+    }
+}
+
+#[test]
 fn stage_model_usage_round_trips_representative_json() {
     let value = json!({
         "mode": "agent",
@@ -45,6 +67,7 @@ fn stage_model_usage_round_trips_representative_json() {
     });
 
     let usage: StageModelUsage = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(usage.mode, StageModelMode::Agent);
     assert_eq!(usage.reasoning_effort, Some(ReasoningEffort::High));
     assert_eq!(usage.speed, Some(Speed::Fast));
     assert_eq!(serde_json::to_value(usage).unwrap(), value);

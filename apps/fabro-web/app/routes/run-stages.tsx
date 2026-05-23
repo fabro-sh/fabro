@@ -551,13 +551,14 @@ export function formatStageModelUsageLabel(
 export function stageModelUsageTitle(
   providerUsed: StageModelUsage | null | undefined,
 ): string {
+  if (!providerUsed) return "LLM model used for this stage";
   const parts: string[] = [];
-  if (providerUsed?.provider) parts.push(`Provider: ${providerUsed.provider}`);
-  if (providerUsed?.model) parts.push(`Model: ${providerUsed.model}`);
-  if (providerUsed?.reasoning_effort) {
+  if (providerUsed.provider) parts.push(`Provider: ${providerUsed.provider}`);
+  if (providerUsed.model) parts.push(`Model: ${providerUsed.model}`);
+  if (providerUsed.reasoning_effort) {
     parts.push(`Reasoning effort: ${providerUsed.reasoning_effort}`);
   }
-  if (providerUsed?.speed) parts.push(`Speed: ${providerUsed.speed}`);
+  if (providerUsed.speed) parts.push(`Speed: ${providerUsed.speed}`);
   return parts.length ? parts.join("\n") : "LLM model used for this stage";
 }
 
@@ -1267,8 +1268,10 @@ function EventsToolbar({
     onSearchChange("");
   }
 
-  const modelUsageLabel = formatStageModelUsageLabel(providerUsed);
-  const modelUsageTitle = stageModelUsageTitle(providerUsed);
+  const modelUsage = useMemo(() => {
+    const label = formatStageModelUsageLabel(providerUsed);
+    return label ? { label, title: stageModelUsageTitle(providerUsed) } : null;
+  }, [providerUsed]);
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-3">
@@ -1315,15 +1318,15 @@ function EventsToolbar({
             : `${totalCount.toLocaleString()} events`}
         </span>
       )}
-      {modelUsageLabel && (
+      {modelUsage && (
         <span
           className={`inline-flex items-center gap-1.5 text-xs text-fg-muted ${
             showFilters ? "" : "ml-auto"
           }`}
-          title={modelUsageTitle}
+          title={modelUsage.title}
         >
           <CpuChipIcon className="size-3.5" aria-hidden="true" />
-          <span className="font-mono">{modelUsageLabel}</span>
+          <span className="font-mono">{modelUsage.label}</span>
         </span>
       )}
       {tab === "primary" && renderer === "command" && commandTurn && (

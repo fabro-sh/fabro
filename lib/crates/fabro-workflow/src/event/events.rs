@@ -5,7 +5,7 @@ use ::fabro_types::{
     ForkSourceRef, GitContext, PairId, PairMessageId, PairSystemMessageKind, PairTarget,
     ParallelBranchId, Principal, PullRequestLink, RunBlobId, RunFailure, RunId, RunNoticeLevel,
     RunPairEndedReason, RunPairFailedReason, RunProvenance, RunTiming, SandboxProvider, StageId,
-    StageTiming, SuccessReason, run_event as fabro_types,
+    StageModelMode, StageTiming, SuccessReason, run_event as fabro_types,
 };
 use fabro_agent::{AgentEvent, SandboxEvent};
 use fabro_model::{ReasoningEffort, Speed};
@@ -432,7 +432,7 @@ pub enum Event {
         visit:            u32,
         text:             String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        mode:             Option<String>,
+        mode:             Option<StageModelMode>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provider:         Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1262,7 +1262,7 @@ impl Event {
                 debug!(
                     stage,
                     text_len = text.len(),
-                    mode = mode.as_deref().unwrap_or(""),
+                    mode = mode.map_or("", <&'static str>::from),
                     provider = provider.as_deref().unwrap_or(""),
                     model = model.as_deref().unwrap_or(""),
                     "Prompt sent"

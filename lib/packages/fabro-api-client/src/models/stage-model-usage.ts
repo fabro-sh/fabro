@@ -19,15 +19,15 @@ import type { BillingSpeed } from './billing-speed';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { ReasoningEffort } from './reasoning-effort';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { StageModelMode } from './stage-model-mode';
 
 /**
  * Provider, model, and request-control metadata recorded for a stage attempt.
  */
 export interface StageModelUsage {
-    /**
-     * Stage model usage source, such as agent, prompt, or acp.
-     */
-    'mode': string;
+    'mode': StageModelMode;
     'provider'?: string | null;
     'model'?: string | null;
     'reasoning_effort'?: ReasoningEffort | null;

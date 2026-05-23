@@ -5,11 +5,12 @@ use std::num::NonZeroU32;
 use chrono::{DateTime, Utc};
 use fabro_model::{ReasoningEffort, Speed};
 
+use crate::run_event::{AgentSessionActivatedProps, StagePromptProps};
 use crate::{
-    BilledTokenCounts, Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition,
-    ModelRef, PullRequestLink, RunControlAction, RunDiff, RunId, RunSandbox, RunSpec, RunStatus,
-    StageCompletion, StageHandler, StageId, StageState, StageTiming, StartRecord,
-    TodoListProjection,
+    AgentBackend, BilledTokenCounts, Checkpoint, Conclusion, InterviewQuestionRecord,
+    InvalidTransition, ModelRef, PullRequestLink, RunControlAction, RunDiff, RunId, RunSandbox,
+    RunSpec, RunStatus, StageCompletion, StageHandler, StageId, StageModelMode, StageState,
+    StageTiming, StartRecord, TodoListProjection,
 };
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -58,8 +59,7 @@ pub struct CheckpointRecord {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StageModelUsage {
-    #[serde(default)]
-    pub mode:             String,
+    pub mode:             StageModelMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider:         Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -68,6 +68,46 @@ pub struct StageModelUsage {
     pub reasoning_effort: Option<ReasoningEffort>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed:            Option<Speed>,
+}
+
+impl StageModelUsage {
+    /// Build the usage record from a `stage.prompt` event, returning `None`
+    /// when the event carried no model metadata.
+    #[must_use]
+    pub fn from_prompt_props(props: &StagePromptProps) -> Option<Self> {
+        let has_metadata = props.mode.is_some()
+            || props.provider.is_some()
+            || props.model.is_some()
+            || props.reasoning_effort.is_some()
+            || props.speed.is_some();
+        has_metadata.then(|| Self {
+            mode:             props.mode.unwrap_or(StageModelMode::Prompt),
+            provider:         props.provider.clone(),
+            model:            props.model.clone(),
+            reasoning_effort: props.reasoning_effort,
+            speed:            props.speed,
+        })
+    }
+
+    /// Build the usage record from an `agent.session.activated` event. The
+    /// mode is `Acp` when the activation came from an ACP control session and
+    /// `Agent` otherwise.
+    #[must_use]
+    pub fn from_agent_session_activated(props: &AgentSessionActivatedProps) -> Self {
+        let acp: &'static str = AgentBackend::Acp.into();
+        let mode = if props.provider.as_deref() == Some(acp) {
+            StageModelMode::Acp
+        } else {
+            StageModelMode::Agent
+        };
+        Self {
+            mode,
+            provider: props.provider.clone(),
+            model: props.model.clone(),
+            reasoning_effort: props.reasoning_effort,
+            speed: props.speed,
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

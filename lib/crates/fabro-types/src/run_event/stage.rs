@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::ExecOutputTail;
-use crate::{BilledModelUsage, DiffSummary, FailureDetail, Outcome, StageOutcome, StageTiming};
+use crate::{
+    BilledModelUsage, DiffSummary, FailureDetail, Outcome, StageModelMode, StageOutcome,
+    StageTiming,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StageStartedProps {
@@ -77,7 +80,7 @@ pub struct StagePromptProps {
     pub visit:            u32,
     pub text:             String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mode:             Option<String>,
+    pub mode:             Option<StageModelMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider:         Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

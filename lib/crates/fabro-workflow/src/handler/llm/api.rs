@@ -917,14 +917,13 @@ impl CodergenBackend for AgentApiBackend {
                             .get(&target.model)
                             .and_then(|m| m.limits.max_output)
                     });
-                    let fallback_controls = self.resolve_effective_request_controls(node)?;
 
                     let fallback_request = Request {
                         model: target.model.clone(),
                         provider: Some(target.provider.clone()),
                         max_tokens,
-                        reasoning_effort: fallback_controls.reasoning_effort,
-                        speed: fallback_controls.speed,
+                        reasoning_effort: controls.reasoning_effort,
+                        speed: controls.speed,
                         ..request.clone()
                     };
 
@@ -934,7 +933,7 @@ impl CodergenBackend for AgentApiBackend {
                                 resp,
                                 target.model.clone(),
                                 target.provider.clone(),
-                                fallback_controls.speed,
+                                controls.speed,
                             ));
                             break;
                         }

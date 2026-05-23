@@ -7768,9 +7768,7 @@ components:
         - mode
       properties:
         mode:
-          type: string
-          description: Stage model usage source, such as agent, prompt, or acp.
-          example: agent
+          $ref: "#/components/schemas/StageModelMode"
         provider:
           type: ["string", "null"]
           example: openai
@@ -7785,6 +7783,16 @@ components:
           oneOf:
             - $ref: "#/components/schemas/BillingSpeed"
             - type: "null"
+
+    StageModelMode:
+      description: Source of a stage's model usage metadata.
+      type: string
+      enum:
+        - prompt
+        - agent
+        - acp
+        - fan_in
+      example: agent
 
     InterviewOption:
       description: Option stored with an interview question in the event log.

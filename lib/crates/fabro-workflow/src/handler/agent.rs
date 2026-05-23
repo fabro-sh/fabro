@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::{Graph, Node};
-use fabro_types::RunId;
+use fabro_types::{RunId, StageModelMode};
 use tokio_util::sync::CancellationToken;
 
 use super::llm::api::EffectiveRequestControls;
@@ -46,6 +46,52 @@ pub struct OneShotRequest<'a> {
     pub stage_scope:   &'a StageScope,
     pub sandbox:       &'a Arc<dyn Sandbox>,
     pub cancel_token:  CancellationToken,
+}
+
+/// Emit the canonical `Event::Prompt` for a stage prompt and return the
+/// resolved [`StageScope`] so the caller can keep building events scoped to
+/// the same stage.
+///
+/// Both `AgentHandler` and `PromptHandler` build the same payload (the only
+/// difference is `mode`), so the per-emit fallback rules — node-provided
+/// `provider`/`model` overrides over run-level defaults, and the backend's
+/// `EffectiveRequestControls` (or `Default::default()` when no backend is
+/// attached) — live in one place.
+pub(crate) fn emit_stage_prompt(
+    services: &EngineServices,
+    context: &Context,
+    node: &Node,
+    prompt: &str,
+    mode: StageModelMode,
+    backend: Option<&dyn CodergenBackend>,
+) -> Result<StageScope, Error> {
+    let prompt_provider = node
+        .provider()
+        .map(String::from)
+        .or_else(|| Some(services.run.provider_id.to_string()));
+    let prompt_model = node
+        .model()
+        .map(String::from)
+        .or_else(|| Some(services.run.model.clone()));
+    let stage_scope = StageScope::for_handler(context, &node.id);
+    let request_controls = backend
+        .map(|b| b.effective_request_controls(node))
+        .transpose()?
+        .unwrap_or_default();
+    services.run.emitter.emit_scoped(
+        &Event::Prompt {
+            stage:            node.id.clone(),
+            visit:            stage_scope.visit,
+            text:             prompt.to_string(),
+            mode:             Some(mode),
+            provider:         prompt_provider,
+            model:            prompt_model,
+            reasoning_effort: request_controls.reasoning_effort,
+            speed:            request_controls.speed,
+        },
+        &stage_scope,
+    );
+    Ok(stage_scope)
 }
 
 /// Backend interface for LLM execution in codergen nodes.
@@ -257,33 +303,14 @@ impl Handler for AgentHandler {
             format!("{preamble}\n\n{raw_prompt}")
         };
 
-        let prompt_provider = node
-            .provider()
-            .map(String::from)
-            .or_else(|| Some(services.run.provider_id.to_string()));
-        let prompt_model = node
-            .model()
-            .map(String::from)
-            .or_else(|| Some(services.run.model.clone()));
-        let stage_scope = StageScope::for_handler(context, &node.id);
-        let request_controls = if let Some(backend) = &self.backend {
-            backend.effective_request_controls(node)?
-        } else {
-            EffectiveRequestControls::default()
-        };
-        services.run.emitter.emit_scoped(
-            &Event::Prompt {
-                stage:            node.id.clone(),
-                visit:            stage_scope.visit,
-                text:             prompt.clone(),
-                mode:             Some("agent".to_string()),
-                provider:         prompt_provider,
-                model:            prompt_model,
-                reasoning_effort: request_controls.reasoning_effort,
-                speed:            request_controls.speed,
-            },
-            &stage_scope,
-        );
+        let stage_scope = emit_stage_prompt(
+            services,
+            context,
+            node,
+            &prompt,
+            StageModelMode::Agent,
+            self.backend.as_deref(),
+        )?;
 
         // 3. Call LLM backend (agent loop)
         let thread_id = context.thread_id();

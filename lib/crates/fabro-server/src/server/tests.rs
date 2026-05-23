@@ -21,7 +21,7 @@ use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{
     AgentBackend, AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
     InterviewQuestionRecord, Node, Outcome, QuestionType, RunBlobId, RunId, RunSpec,
-    SandboxProvider, SuccessReason, SystemActorKind, WorkflowSettings, fixtures,
+    SandboxProvider, StageModelMode, SuccessReason, SystemActorKind, WorkflowSettings, fixtures,
 };
 use fabro_util::check_report::CheckStatus;
 use httpmock::Method::{GET, POST};
@@ -3017,7 +3017,7 @@ async fn list_run_stages_includes_stage_model_usage() {
             stage:            "prompt".to_string(),
             visit:            1,
             text:             "Summarize".to_string(),
-            mode:             Some("prompt".to_string()),
+            mode:             Some(StageModelMode::Prompt),
             provider:         Some("openai".to_string()),
             model:            Some("gpt-5.5".to_string()),
             reasoning_effort: Some(ReasoningEffort::High),
