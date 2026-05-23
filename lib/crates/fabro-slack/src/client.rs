@@ -32,14 +32,6 @@ impl SlackClient {
         }
     }
 
-    pub fn with_api_base(bot_token: String, api_base: String) -> Self {
-        Self {
-            bot_token,
-            api_base,
-            http: fabro_http::http_client().expect("Slack HTTP client should build"),
-        }
-    }
-
     pub fn with_api_base_and_http(
         bot_token: String,
         api_base: String,

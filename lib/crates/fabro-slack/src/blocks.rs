@@ -265,8 +265,8 @@ pub struct RunLifecycleBlocks<'a> {
     pub pull_request:   Option<RunLifecyclePullRequest<'a>>,
 }
 
-#[derive(Debug, Clone, Copy)]
-enum RunLifecycleKind {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunLifecycleKind {
     Started,
     Completed,
     Failed,
@@ -284,19 +284,10 @@ impl RunLifecycleKind {
 
 const LIFECYCLE_FIELD_TEXT_LIMIT: usize = 800;
 
-pub fn run_started_blocks(details: &RunLifecycleBlocks<'_>) -> Vec<Value> {
-    run_lifecycle_blocks(RunLifecycleKind::Started, details)
-}
-
-pub fn run_completed_blocks(details: &RunLifecycleBlocks<'_>) -> Vec<Value> {
-    run_lifecycle_blocks(RunLifecycleKind::Completed, details)
-}
-
-pub fn run_failed_blocks(details: &RunLifecycleBlocks<'_>) -> Vec<Value> {
-    run_lifecycle_blocks(RunLifecycleKind::Failed, details)
-}
-
-fn run_lifecycle_blocks(kind: RunLifecycleKind, details: &RunLifecycleBlocks<'_>) -> Vec<Value> {
+pub fn run_lifecycle_blocks(
+    kind: RunLifecycleKind,
+    details: &RunLifecycleBlocks<'_>,
+) -> Vec<Value> {
     let text = run_lifecycle_text(kind, details);
     vec![text_block(&truncate_to_limit(
         &text,
@@ -763,7 +754,7 @@ mod tests {
 
     #[test]
     fn run_started_blocks_include_run_link_workflow_and_run_id_without_actions() {
-        let blocks = run_started_blocks(&RunLifecycleBlocks {
+        let blocks = run_lifecycle_blocks(RunLifecycleKind::Started, &RunLifecycleBlocks {
             run_id:         "01HSTART",
             run_url:        Some("https://fabro.example/runs/01HSTART"),
             workflow_label: "deploy",
@@ -782,7 +773,7 @@ mod tests {
 
     #[test]
     fn run_completed_blocks_include_result_duration_and_pull_request_title() {
-        let blocks = run_completed_blocks(&RunLifecycleBlocks {
+        let blocks = run_lifecycle_blocks(RunLifecycleKind::Completed, &RunLifecycleBlocks {
             run_id:         "01HDONE",
             run_url:        None,
             workflow_label: "release",
@@ -805,7 +796,7 @@ mod tests {
 
     #[test]
     fn run_failed_blocks_include_failure_result_message_and_duration() {
-        let blocks = run_failed_blocks(&RunLifecycleBlocks {
+        let blocks = run_lifecycle_blocks(RunLifecycleKind::Failed, &RunLifecycleBlocks {
             run_id:         "01HFAIL",
             run_url:        None,
             workflow_label: "deploy",
@@ -822,7 +813,7 @@ mod tests {
 
     #[test]
     fn run_lifecycle_blocks_escape_and_truncate_untrusted_text() {
-        let blocks = run_completed_blocks(&RunLifecycleBlocks {
+        let blocks = run_lifecycle_blocks(RunLifecycleKind::Completed, &RunLifecycleBlocks {
             run_id:         "01H<&>",
             run_url:        None,
             workflow_label: &format!("deploy <!here> {}", "x".repeat(4_000)),
@@ -846,7 +837,7 @@ mod tests {
 
     #[test]
     fn run_lifecycle_pull_request_without_title_uses_number_and_link_only() {
-        let blocks = run_completed_blocks(&RunLifecycleBlocks {
+        let blocks = run_lifecycle_blocks(RunLifecycleKind::Completed, &RunLifecycleBlocks {
             run_id:         "01HDONE",
             run_url:        None,
             workflow_label: "release",

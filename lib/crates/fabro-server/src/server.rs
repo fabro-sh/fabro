@@ -102,6 +102,7 @@ use fabro_workflow::run_lookup::{
 };
 use fabro_workflow::run_status::{FailureReason, RunStatus, SuccessReason};
 use fabro_workflow::{Error as WorkflowError, operations, pull_request};
+use futures_util::future::join_all;
 use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 use tokio::fs;
@@ -458,17 +459,9 @@ struct LoadedPendingInterview {
     question: InterviewQuestionRecord,
 }
 
-#[derive(Debug, Clone, Copy)]
-enum SlackLifecycleKind {
-    Started,
-    Completed,
-    Failed,
-}
-
 #[derive(Debug, Clone)]
 struct SlackLifecycleDetails {
-    kind:               SlackLifecycleKind,
-    event_name:         &'static str,
+    kind:               slack_blocks::RunLifecycleKind,
     started_event_name: Option<String>,
     result:             Option<String>,
     duration_ms:        Option<u64>,
@@ -612,12 +605,13 @@ impl SlackService {
         let Some(details) = slack_lifecycle_details(event) else {
             return;
         };
+        let event_name = event.body.event_name();
         let projection = match state.store.get_cached_run(&event.run_id).await {
             Ok(Some(cached)) => cached.projection,
             Ok(None) => {
                 warn!(
                     run_id = %event.run_id,
-                    event = details.event_name,
+                    event = event_name,
                     "Skipping Slack lifecycle notification because run projection is missing"
                 );
                 return;
@@ -625,22 +619,46 @@ impl SlackService {
             Err(err) => {
                 warn!(
                     run_id = %event.run_id,
-                    event = details.event_name,
+                    event = event_name,
                     error = %err,
                     "Skipping Slack lifecycle notification because run projection could not be loaded"
                 );
                 return;
             }
         };
-        let prior =
-            load_prior_slack_lifecycle_event_details(state, event.run_id, envelope.seq).await;
+
+        // Filter routes first; bail out before any further work if none match.
+        let mut routes: Vec<_> = projection
+            .spec
+            .settings
+            .run
+            .notifications
+            .iter()
+            .filter(|(_, route)| {
+                route.enabled
+                    && route.provider.as_deref() == Some("slack")
+                    && route.events.iter().any(|event| event == event_name)
+            })
+            .collect();
+        if routes.is_empty() {
+            return;
+        }
+        routes.sort_by_key(|(route_name, _)| *route_name);
+
+        // Only completed/failed events need to recover prior PR details (a
+        // run.started event cannot have a prior PullRequestCreated).
+        let prior = if matches!(details.kind, slack_blocks::RunLifecycleKind::Started) {
+            PriorSlackLifecycleEventDetails::default()
+        } else {
+            load_prior_slack_lifecycle_event_details(state, event.run_id, envelope.seq).await
+        };
         let workflow_label = slack_lifecycle_workflow_label(
             projection.as_ref(),
             details
                 .started_event_name
                 .as_deref()
                 .or(prior.started_event_name.as_deref()),
-            details.event_name,
+            event_name,
         );
         let pull_request = prior.pull_request.or_else(|| {
             projection
@@ -658,54 +676,38 @@ impl SlackService {
                     title:  pull_request.title.as_deref(),
                     url:    pull_request.url.as_deref(),
                 });
-        let blocks_details = slack_blocks::RunLifecycleBlocks {
-            run_id: &run_id,
-            run_url,
-            workflow_label: &workflow_label,
-            result: details.result.as_deref(),
-            duration_ms: details.duration_ms,
-            pull_request: pull_request_blocks,
-        };
-        let blocks = match details.kind {
-            SlackLifecycleKind::Started => slack_blocks::run_started_blocks(&blocks_details),
-            SlackLifecycleKind::Completed => slack_blocks::run_completed_blocks(&blocks_details),
-            SlackLifecycleKind::Failed => slack_blocks::run_failed_blocks(&blocks_details),
-        };
+        let blocks =
+            slack_blocks::run_lifecycle_blocks(details.kind, &slack_blocks::RunLifecycleBlocks {
+                run_id: &run_id,
+                run_url,
+                workflow_label: &workflow_label,
+                result: details.result.as_deref(),
+                duration_ms: details.duration_ms,
+                pull_request: pull_request_blocks,
+            });
 
-        let mut routes: Vec<_> = projection
-            .spec
-            .settings
-            .run
-            .notifications
-            .iter()
-            .filter(|(_, route)| {
-                route.enabled
-                    && route.provider.as_deref() == Some("slack")
-                    && route.events.iter().any(|event| event == details.event_name)
-            })
-            .collect();
-        routes.sort_by_key(|(route_name, _)| *route_name);
-
-        for (route_name, route) in routes {
-            let Some(channel) = resolve_slack_lifecycle_route_channel(
+        let blocks = &blocks;
+        let posts = routes.into_iter().filter_map(|(route_name, route)| {
+            let channel = resolve_slack_lifecycle_route_channel(
                 state,
                 event.run_id,
                 route_name,
                 route,
-                details.event_name,
-            ) else {
-                continue;
-            };
-            if let Err(err) = self.client.post_message(&channel, &blocks, None).await {
-                warn!(
-                    run_id = %event.run_id,
-                    event = details.event_name,
-                    notification_route = route_name.as_str(),
-                    error = %err,
-                    "Failed to post Slack lifecycle notification"
-                );
-            }
-        }
+                event_name,
+            )?;
+            Some(async move {
+                if let Err(err) = self.client.post_message(&channel, blocks, None).await {
+                    warn!(
+                        run_id = %event.run_id,
+                        event = event_name,
+                        notification_route = route_name.as_str(),
+                        error = %err,
+                        "Failed to post Slack lifecycle notification"
+                    );
+                }
+            })
+        });
+        join_all(posts).await;
     }
 
     async fn finish_interview(
@@ -750,15 +752,13 @@ impl SlackService {
 fn slack_lifecycle_details(event: &RunEvent) -> Option<SlackLifecycleDetails> {
     match &event.body {
         EventBody::RunStarted(props) => Some(SlackLifecycleDetails {
-            kind:               SlackLifecycleKind::Started,
-            event_name:         "run.started",
+            kind:               slack_blocks::RunLifecycleKind::Started,
             started_event_name: Some(props.name.clone()),
             result:             None,
             duration_ms:        None,
         }),
         EventBody::RunCompleted(props) => Some(SlackLifecycleDetails {
-            kind:               SlackLifecycleKind::Completed,
-            event_name:         "run.completed",
+            kind:               slack_blocks::RunLifecycleKind::Completed,
             started_event_name: None,
             result:             Some(slack_lifecycle_completed_result(
                 &props.status,
@@ -767,8 +767,7 @@ fn slack_lifecycle_details(event: &RunEvent) -> Option<SlackLifecycleDetails> {
             duration_ms:        Some(props.timing.wall_time_ms),
         }),
         EventBody::RunFailed(props) => Some(SlackLifecycleDetails {
-            kind:               SlackLifecycleKind::Failed,
-            event_name:         "run.failed",
+            kind:               slack_blocks::RunLifecycleKind::Failed,
             started_event_name: None,
             result:             Some(slack_lifecycle_failed_result(&props.failure)),
             duration_ms:        Some(props.timing.wall_time_ms),
@@ -857,7 +856,6 @@ fn slack_lifecycle_workflow_label(
         projection.spec.workflow_slug(),
         projection.spec.graph_name(),
         started_event_name,
-        Some(event_name),
     ]
     .into_iter()
     .flatten()
