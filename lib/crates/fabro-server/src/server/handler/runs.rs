@@ -648,26 +648,28 @@ async fn create_run(
         );
     }
 
-    if let (false, Some(llm_result)) = (explicit_title_supplied, llm_client_for_title) {
-        let run_spec = created.persisted.run_spec();
-        let workflow = run_title_generation::workflow_summary(&run_spec.graph);
-        let run_inputs = run_spec.settings.run.inputs.clone();
-        let workflow_target = prepared.target_path.to_string();
-        let title_catalog = state.catalog();
-        let title_model = title_catalog.small_default_for_configured_ids(&ready_provider_ids);
-        let title_model_id = title_model.id.clone();
-        let title_provider_id = title_model.provider.clone();
-        spawn_generated_title_task(GeneratedTitleTask {
-            state: Arc::clone(&state),
-            run_id: created.run_id,
-            deterministic_title,
-            workflow_target,
-            workflow,
-            run_inputs,
-            client: llm_result.client,
-            model_id: title_model_id,
-            provider_id: title_provider_id,
-        });
+    if !explicit_title_supplied && !ready_provider_ids.is_empty() {
+        if let Some(llm_result) = llm_client_for_title {
+            let run_spec = created.persisted.run_spec();
+            let workflow = run_title_generation::workflow_summary(&run_spec.graph);
+            let run_inputs = run_spec.settings.run.inputs.clone();
+            let workflow_target = prepared.target_path.to_string();
+            let title_catalog = state.catalog();
+            let title_model = title_catalog.small_default_for_configured_ids(&ready_provider_ids);
+            let title_model_id = title_model.id.clone();
+            let title_provider_id = title_model.provider.clone();
+            spawn_generated_title_task(GeneratedTitleTask {
+                state: Arc::clone(&state),
+                run_id: created.run_id,
+                deterministic_title,
+                workflow_target,
+                workflow,
+                run_inputs,
+                client: llm_result.client,
+                model_id: title_model_id,
+                provider_id: title_provider_id,
+            });
+        }
     }
 
     (

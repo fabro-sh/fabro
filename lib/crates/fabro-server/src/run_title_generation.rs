@@ -5,11 +5,10 @@ use fabro_llm::client::Client;
 use fabro_llm::generate::{self, GenerateParams};
 use fabro_llm::types::TimeoutOptions;
 use fabro_model::ProviderId;
-use fabro_types::{Graph, RunId};
+use fabro_types::{Graph, MAX_RUN_TITLE_CHARS, RunId};
 use serde::Serialize;
 use toml::Value as TomlValue;
 
-const MAX_GENERATED_TITLE_CHARS: usize = 100;
 const TRUNCATED_MARKER: &str = "...[truncated]";
 const MAX_PROMPT_SECTION_CHARS: usize = 4_000;
 
@@ -75,7 +74,7 @@ fn build_title_prompt(input: &TitlePromptInput<'_>) -> String {
 Base the title on the workflow identity, workflow goal, and run input values.
 Preserve meaningful proper nouns, ticket IDs, repositories, branches, environments, and explicit user goals.
 Return only structured JSON with one field: {{"title":"..."}}.
-The title must be a single line, not blank, and no more than {MAX_GENERATED_TITLE_CHARS} characters.
+The title must be a single line, not blank, and no more than {MAX_RUN_TITLE_CHARS} characters.
 
 Workflow identity:
 ```json
@@ -103,7 +102,7 @@ fn normalize_generated_title(title: &str) -> Option<String> {
     if trimmed.is_empty() || trimmed.chars().any(char::is_control) {
         return None;
     }
-    Some(trimmed.chars().take(MAX_GENERATED_TITLE_CHARS).collect())
+    Some(trimmed.chars().take(MAX_RUN_TITLE_CHARS).collect())
 }
 
 fn title_response_schema() -> serde_json::Value {
@@ -280,8 +279,7 @@ mod tests {
 
     #[tokio::test]
     async fn generation_uses_supplied_small_default_model_id() {
-        let (title, captured) =
-            title_with_mocked_response(r#"{"title":"Generated title"}"#).await;
+        let (title, captured) = title_with_mocked_response(r#"{"title":"Generated title"}"#).await;
 
         assert_eq!(title, "Generated title");
         let captured = captured.lock().unwrap();
@@ -292,18 +290,14 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_or_failed_generation_returns_current_title() {
-        let (invalid, _) =
-            title_with_mocked_response(r#"{"title":"first\nsecond"}"#).await;
+        let (invalid, _) = title_with_mocked_response(r#"{"title":"first\nsecond"}"#).await;
         assert_eq!(invalid, "Current");
 
-        let (invalid_shape, _) =
-            title_with_mocked_response(r#"{"name":"missing"}"#).await;
+        let (invalid_shape, _) = title_with_mocked_response(r#"{"name":"missing"}"#).await;
         assert_eq!(invalid_shape, "Current");
     }
 
-    async fn title_with_mocked_response(
-        response_text: &str,
-    ) -> (String, Arc<Mutex<Vec<Request>>>) {
+    async fn title_with_mocked_response(response_text: &str) -> (String, Arc<Mutex<Vec<Request>>>) {
         let captured = Arc::new(Mutex::new(Vec::new()));
         let provider = Arc::new(CapturingProvider {
             captured:      Arc::clone(&captured),
