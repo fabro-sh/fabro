@@ -52,7 +52,7 @@ describe("queryKeysForRunEvent", () => {
     ]);
   });
 
-  test("stage.retrying invalidates stages, billing, events, graph, detail, and stage events", () => {
+  test("stage.retrying invalidates stage-scoped and run-scoped resources", () => {
     expect(queryKeysForRunEvent("run-1", "stage.retrying", "verify@2")).toEqual([
       queryKeys.runs.stages("run-1"),
       queryKeys.runs.billing("run-1"),
@@ -61,29 +61,34 @@ describe("queryKeysForRunEvent", () => {
       queryKeys.runs.graph("run-1", "TB"),
       queryKeys.runs.detail("run-1"),
       queryKeys.runs.stageEvents("run-1", "verify@2"),
+      queryKeys.runs.stageContextWindow("run-1", "verify@2"),
     ]);
   });
 
-  test("stage-scoped steering events invalidate run events and stage events", () => {
+  test("stage-scoped steering events invalidate run events and stage-scoped resources", () => {
     expect(queryKeysForRunEvent("run-1", "agent.session.activated", "agent@1")).toEqual([
       queryKeys.runs.events("run-1", 1000),
       queryKeys.runs.stageEvents("run-1", "agent@1"),
+      queryKeys.runs.stageContextWindow("run-1", "agent@1"),
     ]);
   });
 
-  test("stage-scoped interrupt injection invalidates run events and stage events", () => {
+  test("stage-scoped interrupt injection invalidates run events and stage-scoped resources", () => {
     expect(queryKeysForRunEvent("run-1", "agent.interrupt.injected", "nap@1")).toEqual([
       queryKeys.runs.events("run-1", 1000),
       queryKeys.runs.stageEvents("run-1", "nap@1"),
+      queryKeys.runs.stageContextWindow("run-1", "nap@1"),
     ]);
   });
 
-  test("pair messages invalidate the stage events query", () => {
+  test("pair messages invalidate stage-scoped resources", () => {
     expect(queryKeysForRunEvent("run-1", "agent.pair.user_message", "nap@1")).toEqual([
       queryKeys.runs.stageEvents("run-1", "nap@1"),
+      queryKeys.runs.stageContextWindow("run-1", "nap@1"),
     ]);
     expect(queryKeysForRunEvent("run-1", "agent.pair.system_message", "nap@1")).toEqual([
       queryKeys.runs.stageEvents("run-1", "nap@1"),
+      queryKeys.runs.stageContextWindow("run-1", "nap@1"),
     ]);
   });
 

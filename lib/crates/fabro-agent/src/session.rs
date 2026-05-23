@@ -17,7 +17,9 @@ use fabro_llm::{Error as LlmError, retry};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_mcp::connection_manager::McpConnectionManager;
 use fabro_model::{AgentProfileKind, Catalog, ModelRef, Speed};
-use fabro_types::{Principal, SessionMessage, SessionRecord, SteeringMessage};
+use fabro_types::{
+    Principal, SessionMessage, SessionRecord, StageContextWindowProjection, SteeringMessage,
+};
 use futures::StreamExt;
 use tokio::sync::{Mutex as AsyncMutex, Notify, broadcast};
 use tokio::time;
@@ -306,6 +308,11 @@ struct BuiltRequest {
     tools:   Vec<ToolDefinitionWithSource>,
 }
 
+struct EmittedContextWindowSnapshot {
+    local_snapshot: StageContextWindowProjection,
+    fingerprint:    Option<u64>,
+}
+
 pub struct Session {
     id: String,
     /// Root agent session ID for this session's agent tree. A root session
@@ -333,6 +340,7 @@ pub struct Session {
     system_prompt: String,
     activated_skill_context_observed: bool,
     context_window_counted_fingerprints: HashSet<u64>,
+    context_window_response_usage_fingerprints: Arc<Mutex<HashSet<u64>>>,
     file_tracker: FileTracker,
     tool_env_provider: Option<Arc<dyn ToolEnvProvider>>,
     subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
@@ -372,6 +380,7 @@ impl Session {
             system_prompt: String::new(),
             activated_skill_context_observed: false,
             context_window_counted_fingerprints: HashSet::new(),
+            context_window_response_usage_fingerprints: Arc::new(Mutex::new(HashSet::new())),
             file_tracker: FileTracker::default(),
             tool_env_provider: None,
             subagent_manager,
@@ -1591,9 +1600,7 @@ impl Session {
                 .cloned()
                 .collect();
             let usage = response.usage.clone();
-            if let Some(local_snapshot) = context_window_snapshot.as_ref() {
-                self.emit_response_usage_context_window_snapshot(local_snapshot, &usage);
-            }
+            self.emit_response_usage_context_window_snapshot(&context_window_snapshot, &usage);
 
             self.history.push(Message::Assistant {
                 content: text.clone(),
@@ -1727,7 +1734,7 @@ impl Session {
     fn emit_context_window_snapshots(
         &mut self,
         built_request: &BuiltRequest,
-    ) -> Option<fabro_types::StageContextWindowProjection> {
+    ) -> EmittedContextWindowSnapshot {
         let provider = self.provider_profile.provider_id().to_string();
         let model = self.provider_profile.model().to_string();
         let local_snapshot = build_local_snapshot(ContextWindowSnapshotInput {
@@ -1746,9 +1753,17 @@ impl Session {
             AgentEvent::ContextWindowSnapshot(local_snapshot.clone()),
         );
 
-        let fingerprint = request_fingerprint(&built_request.request)?;
+        let Some(fingerprint) = request_fingerprint(&built_request.request) else {
+            return EmittedContextWindowSnapshot {
+                local_snapshot,
+                fingerprint: None,
+            };
+        };
         if !self.context_window_counted_fingerprints.insert(fingerprint) {
-            return Some(local_snapshot);
+            return EmittedContextWindowSnapshot {
+                local_snapshot,
+                fingerprint: Some(fingerprint),
+            };
         }
 
         let client = self.llm_client.clone();
@@ -1757,6 +1772,8 @@ impl Session {
         let emitter = self.event_emitter.clone();
         let local_for_count = local_snapshot.clone();
         let close_token = self.close_token.clone();
+        let response_usage_fingerprints =
+            Arc::clone(&self.context_window_response_usage_fingerprints);
         tokio::spawn(async move {
             let count_result = tokio::select! {
                 biased;
@@ -1764,6 +1781,13 @@ impl Session {
                 result = client.count_input_tokens(&request, InputTokenCountPreference::PreferProvider) => result,
             };
             if close_token.is_cancelled() {
+                return;
+            }
+            if response_usage_fingerprints
+                .lock()
+                .expect("context window response-usage fingerprint lock poisoned")
+                .contains(&fingerprint)
+            {
                 return;
             }
             let snapshot = match count_result {
@@ -1801,12 +1825,15 @@ impl Session {
             emitter.emit(session_id, AgentEvent::ContextWindowSnapshot(snapshot));
         });
 
-        Some(local_snapshot)
+        EmittedContextWindowSnapshot {
+            local_snapshot,
+            fingerprint: Some(fingerprint),
+        }
     }
 
     fn emit_response_usage_context_window_snapshot(
         &self,
-        local_snapshot: &fabro_types::StageContextWindowProjection,
+        context_window_snapshot: &EmittedContextWindowSnapshot,
         usage: &TokenCounts,
     ) {
         let input_tokens = usage
@@ -1816,11 +1843,17 @@ impl Session {
         if input_tokens <= 0 {
             return;
         }
+        if let Some(fingerprint) = context_window_snapshot.fingerprint {
+            self.context_window_response_usage_fingerprints
+                .lock()
+                .expect("context window response-usage fingerprint lock poisoned")
+                .insert(fingerprint);
+        }
         let snapshot = scaled_snapshot(
-            local_snapshot,
+            &context_window_snapshot.local_snapshot,
             u64::try_from(input_tokens).unwrap_or(u64::MAX),
             fabro_types::StageContextWindowCountMethod::ResponseUsageScaledBreakdown,
-            local_snapshot.warnings.clone(),
+            context_window_snapshot.local_snapshot.warnings.clone(),
         );
         self.event_emitter
             .emit(self.id.clone(), AgentEvent::ContextWindowSnapshot(snapshot));

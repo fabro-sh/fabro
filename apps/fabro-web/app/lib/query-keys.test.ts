@@ -69,13 +69,14 @@ describe("queryKeys", () => {
       queryKeys.runs.graph("run-1", "TB"),
       queryKeys.runs.detail("run-1"),
       queryKeys.runs.stageEvents("run-1", "stage-1"),
+      queryKeys.runs.stageContextWindow("run-1", "stage-1"),
     ]);
     expect(queryKeysForRunEvent("run-1", "run.title.updated")).toEqual([
       queryKeys.runs.detail("run-1"),
     ]);
   });
 
-  test("agent activity events invalidate the per-stage events key", () => {
+  test("agent activity events invalidate per-stage resources", () => {
     for (const event of [
       "stage.prompt",
       "agent.message",
@@ -86,6 +87,7 @@ describe("queryKeys", () => {
     ]) {
       expect(queryKeysForRunEvent("run-1", event, "stage-1")).toEqual([
         queryKeys.runs.stageEvents("run-1", "stage-1"),
+        queryKeys.runs.stageContextWindow("run-1", "stage-1"),
       ]);
     }
   });
