@@ -390,8 +390,13 @@ graph = "sandbox_run.fabro"
 [run]
 goal = "Exercise sandbox commands"
 
-[run.sandbox]
+[run.environment]
+id = "local"
+
+[environments.local]
 provider = "local"
+
+[environments.local.lifecycle]
 preserve = true
 
 "#,

@@ -1208,8 +1208,14 @@ mod tests {
             project.join(".fabro/project.toml"),
             r#"_version = 1
 
-[run.sandbox.daytona.snapshot]
-name = "fabro-test"
+[run.environment]
+id = "daytona"
+
+[environments.daytona]
+provider = "daytona"
+
+[environments.daytona.image]
+ref = "fabro-test"
 dockerfile = { path = "Dockerfile" }
 "#,
         )

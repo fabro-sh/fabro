@@ -95,7 +95,7 @@ pub(crate) fn test_settings() -> TestAppSettings {
     TestAppSettings {
         manifest_run_defaults: RunLayer {
             environment: Some(RunEnvironmentLayer {
-                id: Some("default".to_string()),
+                id: Some("local".to_string()),
                 ..RunEnvironmentLayer::default()
             }),
             ..RunLayer::default()

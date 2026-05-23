@@ -753,8 +753,13 @@ graph = "workflow.fabro"
 [run]
 goal = "Show stored artifacts"
 
-[run.sandbox]
+[run.environment]
+id = "local"
+
+[environments.local]
 provider = "local"
+
+[environments.local.lifecycle]
 preserve = true
 
 [run.artifacts]
