@@ -388,6 +388,8 @@ Fabro resolves these from `process env -> server.env`.
 
 ### Slack integration (optional)
 
+Slack credentials are server-level secrets. They enable one Slack connection that is shared by human interview prompts and run lifecycle notifications. `server.integrations.slack.default_channel` is optional and is used only as the default destination for interview prompts; lifecycle notifications use `[run.notifications.<name>.slack].channel` in run or workflow configuration.
+
 | Variable | Description |
 |---|---|
 | `FABRO_SLACK_APP_TOKEN` | Slack App-level token |

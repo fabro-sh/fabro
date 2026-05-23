@@ -82,6 +82,14 @@ NODE_ENV = "production"
 contents = "write"
 pull_requests = "write"
 
+[run.notifications.deploys]
+enabled = true
+provider = "slack"
+events = ["run.started", "run.completed", "run.failed"]
+
+[run.notifications.deploys.slack]
+channel = "#deploys"
+
 [run.checkpoint]
 exclude_globs = ["**/node_modules/**", "**/.cache/**"]
 
@@ -337,6 +345,31 @@ issues = "read"
 Only requested permissions are included. The upper bound is the permission set granted to the installed GitHub App, and Fabro logs a warning and continues without `GITHUB_TOKEN` if the app is not configured or is not installed on the repository.
 
 This table follows the normal settings precedence order. A higher-precedence layer can set `permissions = {}` to clear inherited permissions and run without a GitHub token.
+
+### `[run.notifications]`
+
+Define named notification routes for run events. Slack lifecycle notifications are configured here, not in server config.
+
+```toml title="run.toml"
+[run.notifications.deploys]
+enabled = true
+provider = "slack"
+events = ["run.started", "run.completed", "run.failed"]
+
+[run.notifications.deploys.slack]
+channel = "#deploys"
+```
+
+| Field | Description |
+|---|---|
+| `enabled` | Enables this route. Defaults to `false`. |
+| `provider` | Notification provider. Use `"slack"` for Slack lifecycle notifications. Other provider names may be parsed but are not delivered by the server yet. |
+| `events` | Raw Fabro event names that trigger this route, such as `run.started`, `run.completed`, and `run.failed`. |
+| `[run.notifications.<name>.slack].channel` | Required for Slack lifecycle notifications. Literal channel names and `{{ env.VAR }}` interpolation are supported. |
+
+Each enabled Slack route posts once for each matching lifecycle event. Messages include the run ID, an Open in Fabro link when available, workflow label, terminal result, duration, and pull request details when those are already present in the run event stream.
+
+If a Slack route's channel is missing, empty, or references an unresolved environment variable, Fabro logs a warning and skips that route. Delivery failures are logged and never fail or alter the run.
 
 ### `[run.checkpoint]`
 
