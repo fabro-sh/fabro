@@ -4,7 +4,9 @@ use serde_json::Value;
 
 use super::BilledTokenCounts;
 use crate::transcript::{ToolCall, ToolResult, TranscriptMessage};
-use crate::{MessageId, ModelRef, PairId, PairMessageId, PairSystemMessageKind, TurnId};
+use crate::{
+    MessageId, ModelRef, PairId, PairMessageId, PairSystemMessageKind, PermissionLevel, TurnId,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentSessionStartedProps {
@@ -39,6 +41,8 @@ pub struct AgentSessionActivatedProps {
     pub reasoning_effort: Option<ReasoningEffort>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed:            Option<Speed>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_level: Option<PermissionLevel>,
     pub capabilities:     Vec<SessionCapability>,
     pub visit:            u32,
 }

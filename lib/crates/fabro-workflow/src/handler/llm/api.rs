@@ -747,6 +747,7 @@ impl AgentApiBackend {
         let factory_env = Arc::clone(sandbox);
         let factory_tool_env = tool_env.cloned();
         let factory_fabro_run_tools = fabro_run_tools.clone();
+        let factory_permission_level = config.permission_level;
         let factory: SessionFactory = Arc::new(move || {
             let mut child_profile = build_profile(
                 &factory_model,
@@ -765,6 +766,7 @@ impl AgentApiBackend {
                 SessionOptions {
                     reasoning_effort: controls.reasoning_effort,
                     speed: controls.speed,
+                    permission_level: factory_permission_level,
                     ..SessionOptions::default()
                 },
                 None,
@@ -821,6 +823,7 @@ impl AgentApiBackend {
                 model:            Some(session.model().to_string()),
                 reasoning_effort: session.reasoning_effort(),
                 speed:            session.speed(),
+                permission_level: session.permission_level(),
                 capabilities:     vec![SessionCapability::Steer],
                 hub:              Arc::clone(&self.steering_hub),
                 emitter:          Arc::clone(emitter),

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Link, useSearchParams } from "react-router";
-import { AdjustmentsHorizontalIcon, ArchiveBoxIcon, CheckIcon, ChevronDoubleLeftIcon, ChevronDoubleRightIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpDownIcon, ChevronUpIcon, CommandLineIcon, MagnifyingGlassIcon, PlusCircleIcon } from "@heroicons/react/24/outline";
+import { AdjustmentsHorizontalIcon, ArchiveBoxIcon, ArrowUturnLeftIcon, CheckIcon, ChevronDoubleLeftIcon, ChevronDoubleRightIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpDownIcon, ChevronUpIcon, CommandLineIcon, MagnifyingGlassIcon, PlusCircleIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { EllipsisVerticalIcon } from "@heroicons/react/20/solid";
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions, Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { useSWRConfig } from "swr";
@@ -31,7 +31,7 @@ import { useToast } from "../components/toast";
 import { mutateRunListCaches } from "../lib/board-cache";
 import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
 import { useAllRuns, useAuthConfig, useRunsPage, useSystemInfo } from "../lib/queries";
-import { archiveRun, canArchive } from "../lib/run-actions";
+import { archiveRun, canArchive, canUnarchive, unarchiveRun } from "../lib/run-actions";
 import type {
   BoardColumn,
   ListRunsDirectionEnum,
@@ -640,6 +640,164 @@ function parsePageSize(raw: string | null): number {
   return (LIST_PAGE_SIZES as readonly number[]).includes(n) ? n : DEFAULT_LIST_PAGE_SIZE;
 }
 
+const RUNS_PREFERENCES_VERSION = 1;
+export const RUNS_PREFERENCES_STORAGE_KEY = "fabro:runs-preferences:v1";
+const RUNS_WORKSPACE_PARAM_KEYS = [
+  "view",
+  "search",
+  "repo",
+  "workflow",
+  "created",
+  "archived",
+  "sort",
+  "direction",
+  "size",
+  "hide",
+] as const;
+
+type RunsPreferencesStorage = Pick<Storage, "getItem" | "setItem">;
+
+interface RunsWorkspacePreferences {
+  version: typeof RUNS_PREFERENCES_VERSION;
+  view: ViewMode;
+  search: string;
+  repo: string;
+  workflow: string;
+  created: CreatedFilter;
+  archived: boolean;
+  sort: ListRunsSortEnum;
+  direction: ListRunsDirectionEnum;
+  size: number;
+  hide: string;
+}
+
+function defaultRunsWorkspacePreferences(): RunsWorkspacePreferences {
+  return {
+    version:   RUNS_PREFERENCES_VERSION,
+    view:      "columns",
+    search:    "",
+    repo:      "all",
+    workflow:  "all",
+    created:   "all",
+    archived:  false,
+    sort:      "created_at",
+    direction: "desc",
+    size:      DEFAULT_LIST_PAGE_SIZE,
+    hide:      "",
+  };
+}
+
+function runsPreferencesStorage(): RunsPreferencesStorage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function filterPreference(raw: string | null): string {
+  return raw == null || raw === "" ? "all" : raw;
+}
+
+function storageRecord(value: unknown): Record<string, unknown> | null {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function normalizeStoredRunsWorkspacePreferences(value: unknown): RunsWorkspacePreferences {
+  const record = storageRecord(value);
+  if (record == null || record.version !== RUNS_PREFERENCES_VERSION) {
+    return defaultRunsWorkspacePreferences();
+  }
+
+  const hiddenColumns = parseHiddenColumns(stringValue(record.hide));
+  const size = record.size;
+
+  return {
+    version:   RUNS_PREFERENCES_VERSION,
+    view:      parseView(stringValue(record.view)),
+    search:    stringValue(record.search) ?? "",
+    repo:      filterPreference(stringValue(record.repo)),
+    workflow:  filterPreference(stringValue(record.workflow)),
+    created:   parseCreatedFilter(stringValue(record.created)),
+    archived:  record.archived === true || record.archived === "1",
+    sort:      parseSort(stringValue(record.sort)),
+    direction: parseDirection(stringValue(record.direction)),
+    size:      parsePageSize(typeof size === "number" || typeof size === "string" ? String(size) : null),
+    hide:      serializeHiddenColumns(hiddenColumns) ?? "",
+  };
+}
+
+function runsWorkspacePreferencesFromSearchParams(searchParams: URLSearchParams): RunsWorkspacePreferences {
+  return {
+    version:   RUNS_PREFERENCES_VERSION,
+    view:      parseView(searchParams.get("view")),
+    search:    searchParams.get("search") ?? "",
+    repo:      filterPreference(searchParams.get("repo")),
+    workflow:  filterPreference(searchParams.get("workflow")),
+    created:   parseCreatedFilter(searchParams.get("created")),
+    archived:  searchParams.get("archived") === "1",
+    sort:      parseSort(searchParams.get("sort")),
+    direction: parseDirection(searchParams.get("direction")),
+    size:      parsePageSize(searchParams.get("size")),
+    hide:      serializeHiddenColumns(parseHiddenColumns(searchParams.get("hide"))) ?? "",
+  };
+}
+
+function runsWorkspacePreferencesToSearchParams(preferences: RunsWorkspacePreferences): URLSearchParams {
+  const params = new URLSearchParams();
+  if (preferences.view === "list") params.set("view", "list");
+  if (preferences.search !== "") params.set("search", preferences.search);
+  if (preferences.repo !== "all") params.set("repo", preferences.repo);
+  if (preferences.workflow !== "all") params.set("workflow", preferences.workflow);
+  if (preferences.created !== "all") params.set("created", preferences.created);
+  if (preferences.archived) params.set("archived", "1");
+  if (preferences.sort !== "created_at") params.set("sort", preferences.sort);
+  if (preferences.direction === "asc") params.set("direction", "asc");
+  if (preferences.size !== DEFAULT_LIST_PAGE_SIZE) params.set("size", String(preferences.size));
+  if (preferences.hide !== "") params.set("hide", preferences.hide);
+  return params;
+}
+
+function hasRunsWorkspaceParams(searchParams: URLSearchParams): boolean {
+  return RUNS_WORKSPACE_PARAM_KEYS.some((key) => searchParams.has(key));
+}
+
+export function loadStoredRunsWorkspaceSearchParams(
+  storage: Pick<Storage, "getItem"> | null = runsPreferencesStorage(),
+): URLSearchParams {
+  if (storage == null) return new URLSearchParams();
+  try {
+    const raw = storage.getItem(RUNS_PREFERENCES_STORAGE_KEY);
+    if (raw == null) return new URLSearchParams();
+    return runsWorkspacePreferencesToSearchParams(
+      normalizeStoredRunsWorkspacePreferences(JSON.parse(raw)),
+    );
+  } catch {
+    return new URLSearchParams();
+  }
+}
+
+export function persistRunsWorkspaceSearchParams(
+  searchParams: URLSearchParams,
+  storage: Pick<Storage, "setItem"> | null = runsPreferencesStorage(),
+) {
+  if (storage == null) return;
+  try {
+    storage.setItem(
+      RUNS_PREFERENCES_STORAGE_KEY,
+      JSON.stringify(runsWorkspacePreferencesFromSearchParams(searchParams)),
+    );
+  } catch {
+    // localStorage persistence is best effort only.
+  }
+}
+
 const sortColumnLabels: Record<ListRunsSortEnum, string> = {
   created_at: "Created",
   updated_at: "Updated",
@@ -738,16 +896,27 @@ export function RunRow({ run }: { run: RunWithStatus }) {
 function RunTableRow({
   run,
   hiddenColumns,
+  selected,
+  onToggleSelected,
 }: {
-  run:           RunWithStatus;
-  hiddenColumns: Set<ToggleableColumn>;
+  run:               RunWithStatus;
+  hiddenColumns:     Set<ToggleableColumn>;
+  selected:          boolean;
+  onToggleSelected:  (id: string) => void;
 }) {
   const lifecycleLabel = listLifecycleStatusLabel(run);
   const statusDisplay = columnStatusDisplay[run.status];
   const show = (col: ToggleableColumn) => !hiddenColumns.has(col);
 
   return (
-    <tr className="group relative border-b border-line transition-colors last:border-b-0 hover:bg-overlay/40">
+    <tr className={`group relative border-b border-line transition-colors last:border-b-0 ${selected ? "bg-overlay/30" : "hover:bg-overlay/40"}`}>
+      <td className="relative z-10 w-8 whitespace-nowrap px-3 py-2.5">
+        <SelectionCheckbox
+          checked={selected}
+          onChange={() => onToggleSelected(run.id)}
+          ariaLabel={selected ? `Deselect run ${run.title}` : `Select run ${run.title}`}
+        />
+      </td>
       <td className="whitespace-nowrap px-3 py-2.5">
         <span className="inline-flex items-center gap-2">
           <span className={`size-1.5 shrink-0 rounded-full ${statusDisplay.dot}`} aria-hidden="true" />
@@ -938,6 +1107,42 @@ function RunsListView({
   const apiRunCount = data?.data.length ?? 0;
   const isEmptyServerSide = data !== undefined && apiRunCount === 0 && page === 1;
 
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [page, sort, direction, query, repoFilter, workflowFilter, createdCutoffMs]);
+  const visibleIds = useMemo(() => rows.map((r) => r.id), [rows]);
+  const selectedVisibleCount = visibleIds.reduce(
+    (n, id) => (selectedIds.has(id) ? n + 1 : n),
+    0,
+  );
+  const allOnPageSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
+  const someOnPageSelected = selectedVisibleCount > 0 && !allOnPageSelected;
+  const toggleAllOnPage = useCallback(() => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allOnPageSelected) {
+        for (const id of visibleIds) next.delete(id);
+      } else {
+        for (const id of visibleIds) next.add(id);
+      }
+      return next;
+    });
+  }, [allOnPageSelected, visibleIds]);
+  const toggleOne = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+  const selectedRuns = useMemo(
+    () => rows.filter((r) => selectedIds.has(r.id)),
+    [rows, selectedIds],
+  );
+
   if (isEmptyServerSide && !isLoading) {
     return (
       <RunsLandingEmpty hasGitHubAuth={hasGitHubAuth} serverUrl={serverUrl} />
@@ -951,6 +1156,15 @@ function RunsListView({
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-line text-xs font-medium text-fg-3">
+                <th scope="col" className="w-8 whitespace-nowrap px-3 py-2.5">
+                  <SelectionCheckbox
+                    checked={allOnPageSelected}
+                    indeterminate={someOnPageSelected}
+                    onChange={toggleAllOnPage}
+                    ariaLabel={allOnPageSelected ? "Deselect all runs on this page" : "Select all runs on this page"}
+                    disabled={visibleIds.length === 0}
+                  />
+                </th>
                 <SortHeader label="Status" sortKey="status" activeSort={sort} direction={direction} onClick={onSortClick} />
                 {show("elapsed") && (
                   <SortHeader label="Elapsed" sortKey="elapsed" activeSort={sort} direction={direction} onClick={onSortClick} />
@@ -978,7 +1192,13 @@ function RunsListView({
             </thead>
             <tbody>
               {rows.map((run) => (
-                <RunTableRow key={run.id} run={run} hiddenColumns={hiddenColumns} />
+                <RunTableRow
+                  key={run.id}
+                  run={run}
+                  hiddenColumns={hiddenColumns}
+                  selected={selectedIds.has(run.id)}
+                  onToggleSelected={toggleOne}
+                />
               ))}
             </tbody>
           </table>
@@ -1007,6 +1227,7 @@ function RunsListView({
           onPageSizeChange={onPageSizeChange}
         />
       )}
+      <BulkActionToolbar selectedRuns={selectedRuns} onClear={clearSelection} />
     </div>
   );
 }
@@ -1115,6 +1336,159 @@ function PagerButton({
       className="inline-flex size-8 items-center justify-center rounded-md border border-line bg-panel/80 text-fg-3 transition-colors enabled:hover:bg-panel enabled:hover:text-fg-2 disabled:cursor-default disabled:opacity-40"
     >
       {children}
+    </button>
+  );
+}
+
+function SelectionCheckbox({
+  checked,
+  indeterminate = false,
+  disabled = false,
+  onChange,
+  ariaLabel,
+}: {
+  checked:        boolean;
+  indeterminate?: boolean;
+  disabled?:      boolean;
+  onChange:       () => void;
+  ariaLabel:      string;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      aria-label={ariaLabel}
+      checked={checked}
+      disabled={disabled}
+      onChange={onChange}
+      onClick={(e) => e.stopPropagation()}
+      className="size-4 cursor-pointer rounded border border-line-strong bg-panel/80 text-focus outline-none focus:ring-1 focus:ring-focus disabled:cursor-default disabled:opacity-40"
+    />
+  );
+}
+
+function BulkActionToolbar({
+  selectedRuns,
+  onClear,
+}: {
+  selectedRuns: RunWithStatus[];
+  onClear:      () => void;
+}) {
+  const [pending, setPending] = useState(false);
+  const { mutate } = useSWRConfig();
+  const { push } = useToast();
+
+  const count = selectedRuns.length;
+  const archivable = useMemo(
+    () => selectedRuns.filter((r) => canArchive(r.lifecycleStatus)),
+    [selectedRuns],
+  );
+  const unarchivable = useMemo(
+    () => selectedRuns.filter((r) => canUnarchive(r.lifecycleStatus)),
+    [selectedRuns],
+  );
+
+  if (count === 0) return null;
+
+  const runWord = (n: number) => (n === 1 ? "run" : "runs");
+
+  async function runBulk(
+    label: "Archive" | "Unarchive",
+    eligible: RunWithStatus[],
+    action: (id: string) => Promise<unknown>,
+  ) {
+    if (pending) return;
+    if (eligible.length === 0) {
+      push({ message: `No selected ${runWord(count)} can be ${label.toLowerCase()}d.`, tone: "error" });
+      return;
+    }
+    setPending(true);
+    try {
+      const results = await Promise.allSettled(eligible.map((r) => action(r.id)));
+      const succeeded = results.filter((r) => r.status === "fulfilled").length;
+      const failed = eligible.length - succeeded;
+      if (failed === 0) {
+        push({ message: `${label}d ${succeeded} ${runWord(succeeded)}.` });
+        onClear();
+      } else if (succeeded === 0) {
+        push({
+          message: `Couldn't ${label.toLowerCase()} ${eligible.length} ${runWord(eligible.length)}. Try again.`,
+          tone: "error",
+        });
+      } else {
+        push({
+          message: `${label}d ${succeeded} of ${eligible.length} ${runWord(eligible.length)}. ${failed} failed.`,
+          tone: "error",
+        });
+      }
+    } finally {
+      setPending(false);
+      mutateRunListCaches(mutate);
+    }
+  }
+
+  return (
+    <div
+      role="region"
+      aria-label="Bulk actions"
+      className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4"
+    >
+      <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-line-strong bg-panel py-2 pl-4 pr-2 text-sm text-fg-2 shadow-lg shadow-black/40">
+        <span className="font-medium">
+          {count} {runWord(count)} selected
+        </span>
+        <span className="h-5 w-px bg-line" aria-hidden="true" />
+        <BulkActionButton
+          label="Archive"
+          icon={<ArchiveBoxIcon className="size-4" aria-hidden="true" />}
+          disabled={pending || archivable.length === 0}
+          onClick={() => runBulk("Archive", archivable, archiveRun)}
+        />
+        <BulkActionButton
+          label="Unarchive"
+          icon={<ArrowUturnLeftIcon className="size-4" aria-hidden="true" />}
+          disabled={pending || unarchivable.length === 0}
+          onClick={() => runBulk("Unarchive", unarchivable, unarchiveRun)}
+        />
+        <button
+          type="button"
+          onClick={onClear}
+          disabled={pending}
+          aria-label="Clear selection"
+          title="Clear selection"
+          className="inline-flex size-8 items-center justify-center rounded-full text-fg-3 transition-colors enabled:hover:bg-overlay enabled:hover:text-fg-2 disabled:cursor-default disabled:opacity-40"
+        >
+          <XMarkIcon className="size-4" aria-hidden="true" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function BulkActionButton({
+  label,
+  icon,
+  disabled,
+  onClick,
+}: {
+  label:    string;
+  icon:     React.ReactNode;
+  disabled: boolean;
+  onClick:  () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm text-fg-2 transition-colors enabled:hover:bg-overlay disabled:cursor-default disabled:opacity-40"
+    >
+      {icon}
+      <span>{label}</span>
     </button>
   );
 }
@@ -1371,6 +1745,7 @@ export default function Runs() {
           } else {
             next.set(key, value);
           }
+          persistRunsWorkspaceSearchParams(next);
           return next;
         },
         { replace: true },
@@ -1412,6 +1787,15 @@ export default function Runs() {
     },
     [sort, direction, updateParam],
   );
+
+  useEffect(() => {
+    if (hasRunsWorkspaceParams(searchParams)) return;
+
+    const storedParams = loadStoredRunsWorkspaceSearchParams();
+    if (storedParams.toString() === "") return;
+
+    setSearchParams(storedParams, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const boardRuns = useAllRuns({ includeArchived }, view === "columns");
   const listRunsPage = useRunsPage(

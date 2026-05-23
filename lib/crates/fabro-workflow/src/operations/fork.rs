@@ -305,6 +305,7 @@ mod tests {
                 model:            Some("gpt-5.4".to_string()),
                 reasoning_effort: None,
                 speed:            None,
+                permission_level: None,
                 capabilities:     vec![fabro_types::SessionCapability::Steer],
                 visit:            1,
             })

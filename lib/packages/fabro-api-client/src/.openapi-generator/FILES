@@ -24,6 +24,7 @@ index.ts
 models/activated-skill.ts
 models/agent-mcp-tool-summary.ts
 models/agent-permissions.ts
+models/agent-session-activated-props.ts
 models/agent-skill-activation-source.ts
 models/agent-skill-summary.ts
 models/aggregate-billing-totals.ts
@@ -219,6 +220,7 @@ models/pair-transcript-user-message.ts
 models/pair-transcript-warning.ts
 models/pending-interview-record.ts
 models/pending-reason.ts
+models/permission-level.ts
 models/pre-run-push-outcome-failed.ts
 models/pre-run-push-outcome-not-attempted.ts
 models/pre-run-push-outcome-skipped-no-remote.ts

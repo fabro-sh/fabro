@@ -406,6 +406,7 @@ impl RunProjectionReducer for RunProjection {
                     return Ok(());
                 };
                 stage.provider_used = Some(StageModelUsage::from_agent_session_activated(props));
+                stage.permission_level = props.permission_level;
             }
             // `AgentAcpStarted` is the start-of-process signal for an external
             // ACP agent. `provider_used` is intentionally sourced from the
@@ -1105,10 +1106,11 @@ mod tests {
     use fabro_types::{
         AgentBackend, BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint,
         CheckpointRecord, CommandTermination, EventBody, FailureCategory, FailureDetail,
-        FailureReason, Graph, McpServerStatus, Outcome, PendingReason, PullRequestLink,
-        QuestionType, ReasoningEffort, RunApprovalState, RunBlobId, RunControlAction, RunDiff,
-        RunEvent, RunSize, RunSpec, RunStatus, Speed, StageModelUsage, StageOutcome, StageState,
-        SubAgentStatus, SuccessReason, WorkflowSettings, first_event_seq, fixtures,
+        FailureReason, Graph, McpServerStatus, Outcome, PendingReason, PermissionLevel,
+        PullRequestLink, QuestionType, ReasoningEffort, RunApprovalState, RunBlobId,
+        RunControlAction, RunDiff, RunEvent, RunSize, RunSpec, RunStatus, Speed, StageModelUsage,
+        StageOutcome, StageState, SubAgentStatus, SuccessReason, WorkflowSettings, first_event_seq,
+        fixtures,
     };
     use serde_json::json;
 
@@ -1618,6 +1620,7 @@ mod tests {
                     model:            Some("gpt-5.4".to_string()),
                     reasoning_effort: Some(ReasoningEffort::High),
                     speed:            Some(Speed::Fast),
+                    permission_level: None,
                     capabilities:     vec![fabro_types::SessionCapability::Steer],
                     visit:            1,
                 }),
@@ -1714,6 +1717,7 @@ mod tests {
                     model:            Some("fake".to_string()),
                     reasoning_effort: None,
                     speed:            None,
+                    permission_level: None,
                     capabilities:     vec![fabro_types::SessionCapability::Steer],
                     visit:            1,
                 }),
@@ -4037,6 +4041,52 @@ mod tests {
                 stage.skills.activated[1].source,
                 AgentSkillActivationSource::Tool
             );
+        }
+
+        #[test]
+        fn agent_session_activation_updates_stage_permission_level_projection() {
+            fn activated_props(
+                permission_level: Option<PermissionLevel>,
+            ) -> AgentSessionActivatedProps {
+                AgentSessionActivatedProps {
+                    thread_id: None,
+                    provider: Some("openai".to_string()),
+                    model: Some("gpt-5.4".to_string()),
+                    reasoning_effort: None,
+                    speed: None,
+                    permission_level,
+                    capabilities: vec![],
+                    visit: 1,
+                }
+            }
+
+            let mut state = initialized_projection();
+            let stage_id = stage_id();
+
+            state
+                .apply_event(&test_stage_event(
+                    1,
+                    EventBody::AgentSessionActivated(activated_props(Some(
+                        PermissionLevel::ReadOnly,
+                    ))),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+
+            let stage = state.stage(&stage_id).unwrap();
+            assert_eq!(stage.permission_level, Some(PermissionLevel::ReadOnly));
+
+            let mut legacy_state = initialized_projection();
+            legacy_state
+                .apply_event(&test_stage_event(
+                    1,
+                    EventBody::AgentSessionActivated(activated_props(None)),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+
+            let legacy_stage = legacy_state.stage(&stage_id).unwrap();
+            assert_eq!(legacy_stage.permission_level, None);
         }
 
         #[test]

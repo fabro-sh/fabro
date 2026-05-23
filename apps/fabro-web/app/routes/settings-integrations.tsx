@@ -1,3 +1,5 @@
+import { useState } from "react";
+import type { ReactNode } from "react";
 import type { ServerSettings } from "@qltysh/fabro-api-client";
 import { useServerSettings } from "../lib/queries";
 import {
@@ -46,12 +48,20 @@ export default function SettingsIntegrations() {
 function ProjectManagementPanel() {
   return (
     <Panel title="Project Management">
-      <Row title="Linear" help="Sync runs with Linear issues and projects.">
+      <IntegrationRow
+        slug="linear"
+        name="Linear"
+        help="Sync runs with Linear issues and projects."
+      >
         <span className="text-sm text-fg-muted">Coming Soon</span>
-      </Row>
-      <Row title="Jira" help="Sync runs with Jira issues and projects.">
+      </IntegrationRow>
+      <IntegrationRow
+        slug="jira"
+        name="Jira"
+        help="Sync runs with Jira issues and projects."
+      >
         <span className="text-sm text-fg-muted">Coming Soon</span>
-      </Row>
+      </IntegrationRow>
     </Panel>
   );
 }
@@ -60,7 +70,11 @@ function GithubPanel({ settings }: { settings: ServerSettings }) {
   const { github } = settings.server.integrations;
   return (
     <Panel title="Version Control">
-      <Row title="GitHub" help="App for repo access, checks, and PR automation.">
+      <IntegrationRow
+        slug="github"
+        name="GitHub"
+        help="App for repo access, checks, and PR automation."
+      >
         <IntegrationValue
           enabled={github.enabled}
           detail={
@@ -71,7 +85,7 @@ function GithubPanel({ settings }: { settings: ServerSettings }) {
                 : undefined
           }
         />
-      </Row>
+      </IntegrationRow>
     </Panel>
   );
 }
@@ -80,8 +94,9 @@ function SlackPanel({ settings }: { settings: ServerSettings }) {
   const { slack } = settings.server.integrations;
   return (
     <Panel title="Communication">
-      <Row
-        title="Slack"
+      <IntegrationRow
+        slug="slack"
+        name="Slack"
         help="Workspace app for run notifications and approvals."
       >
         <IntegrationValue
@@ -92,20 +107,76 @@ function SlackPanel({ settings }: { settings: ServerSettings }) {
               : undefined
           }
         />
-      </Row>
-      <Row
-        title="Microsoft Teams"
+      </IntegrationRow>
+      <IntegrationRow
+        slug="microsoft-teams"
+        name="Microsoft Teams"
         help="Channel app for run notifications and approvals."
       >
         <span className="text-sm text-fg-muted">Coming Soon</span>
-      </Row>
-      <Row
-        title="Discord"
+      </IntegrationRow>
+      <IntegrationRow
+        slug="discord"
+        name="Discord"
         help="Server app for run notifications and approvals."
       >
         <span className="text-sm text-fg-muted">Coming Soon</span>
-      </Row>
+      </IntegrationRow>
     </Panel>
+  );
+}
+
+function IntegrationRow({
+  slug,
+  name,
+  help,
+  children,
+}: {
+  slug: string;
+  name: string;
+  help: string;
+  children: ReactNode;
+}) {
+  return (
+    <Row
+      title={
+        <span className="flex items-center gap-4">
+          <IntegrationLogo slug={slug} name={name} />
+          <span className="flex min-w-0 flex-col">
+            <span className="text-sm text-fg-2">{name}</span>
+            <span className="text-xs/5 text-fg-3">{help}</span>
+          </span>
+        </span>
+      }
+    >
+      {children}
+    </Row>
+  );
+}
+
+function IntegrationLogo({ slug, name }: { slug: string; name: string }) {
+  const [failed, setFailed] = useState(false);
+  const chip =
+    "grid size-10 shrink-0 place-items-center rounded-md bg-ice-50 ring-1 ring-line-strong";
+
+  if (failed) {
+    const initial = name.charAt(0).toUpperCase() || "?";
+    return (
+      <span className={`${chip} text-base font-medium text-page`}>
+        {initial}
+      </span>
+    );
+  }
+
+  return (
+    <span className={chip}>
+      <img
+        alt=""
+        src={`/images/integrations/${slug}.svg`}
+        onError={() => setFailed(true)}
+        className="size-7"
+      />
+    </span>
   );
 }
 

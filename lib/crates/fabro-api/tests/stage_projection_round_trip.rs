@@ -4,14 +4,15 @@ use fabro_api::types::{
     ActivatedSkill as ApiActivatedSkill, AgentMcpToolSummary as ApiAgentMcpToolSummary,
     AgentSkillActivationSource as ApiAgentSkillActivationSource,
     AgentSkillSummary as ApiAgentSkillSummary, McpServerProjection as ApiMcpServerProjection,
-    McpServerStatus as ApiMcpServerStatus, SkillsProjection as ApiSkillsProjection,
-    StageProjection as ApiStageProjection, SubAgentProjection as ApiSubAgentProjection,
-    SubAgentStatus as ApiSubAgentStatus, TodoListProjection as ApiTodoListProjection,
+    McpServerStatus as ApiMcpServerStatus, PermissionLevel as ApiPermissionLevel,
+    SkillsProjection as ApiSkillsProjection, StageProjection as ApiStageProjection,
+    SubAgentProjection as ApiSubAgentProjection, SubAgentStatus as ApiSubAgentStatus,
+    TodoListProjection as ApiTodoListProjection,
 };
 use fabro_types::{
     ActivatedSkill, AgentMcpToolSummary, AgentSkillActivationSource, AgentSkillSummary,
-    McpServerProjection, McpServerStatus, SkillsProjection, StageProjection, SubAgentProjection,
-    SubAgentStatus, TodoListKind, TodoListProjection,
+    McpServerProjection, McpServerStatus, PermissionLevel, SkillsProjection, StageProjection,
+    SubAgentProjection, SubAgentStatus, TodoListKind, TodoListProjection,
 };
 use serde_json::json;
 
@@ -32,6 +33,7 @@ fn stage_projection_reuses_nested_agent_state_types() {
     assert_same_type::<ApiMcpServerProjection, McpServerProjection>();
     assert_same_type::<ApiMcpServerStatus, McpServerStatus>();
     assert_same_type::<ApiAgentMcpToolSummary, AgentMcpToolSummary>();
+    assert_same_type::<ApiPermissionLevel, PermissionLevel>();
 }
 
 #[test]
@@ -113,6 +115,7 @@ fn stage_projection_round_trips_representative_json() {
                 }
             ]
         },
+        "permission_level": "read-only",
         "mcp_servers": [
             {
                 "server_name": "filesystem",
@@ -133,6 +136,14 @@ fn stage_projection_round_trips_representative_json() {
 
     let state: StageProjection = serde_json::from_value(value.clone()).unwrap();
     assert_eq!(serde_json::to_value(state).unwrap(), value);
+}
+
+#[test]
+fn permission_level_matches_openapi_json_shape() {
+    let permission_json = serde_json::to_value(PermissionLevel::ReadOnly).unwrap();
+    assert_eq!(permission_json, json!("read-only"));
+    let api_permission: ApiPermissionLevel = serde_json::from_value(permission_json).unwrap();
+    assert_eq!(api_permission, PermissionLevel::ReadOnly);
 }
 
 #[test]

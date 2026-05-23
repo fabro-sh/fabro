@@ -3,9 +3,10 @@ use std::collections::BTreeMap;
 use ::fabro_types::{
     BilledTokenCounts, BlockedReason, CommandTermination, DiffSummary, FailureReason,
     ForkSourceRef, GitContext, PairId, PairMessageId, PairSystemMessageKind, PairTarget,
-    ParallelBranchId, PendingReason, Principal, PullRequestLink, RunBlobId, RunFailure, RunId,
-    RunNoticeLevel, RunPairEndedReason, RunPairFailedReason, RunProvenance, RunRunnableSource,
-    RunTiming, SandboxProvider, StageId, StageTiming, SuccessReason, run_event as fabro_types,
+    ParallelBranchId, PendingReason, PermissionLevel, Principal, PullRequestLink, RunBlobId,
+    RunFailure, RunId, RunNoticeLevel, RunPairEndedReason, RunPairFailedReason, RunProvenance,
+    RunRunnableSource, RunTiming, SandboxProvider, StageId, StageTiming, SuccessReason,
+    run_event as fabro_types,
 };
 use fabro_agent::{AgentEvent, SandboxEvent};
 use fabro_model::{ReasoningEffort, Speed};
@@ -614,6 +615,8 @@ pub enum Event {
         reasoning_effort: Option<ReasoningEffort>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         speed:            Option<Speed>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        permission_level: Option<PermissionLevel>,
         capabilities:     Vec<fabro_types::SessionCapability>,
     },
     /// A stage's steerable live session binding ended.

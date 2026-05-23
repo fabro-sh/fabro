@@ -68,7 +68,7 @@ describe("mapRunStagesToSidebarStages", () => {
     expect(result[1].handler).toBe("agent");
     expect(result[1].nodeId).toBe("apply");
     expect(result[1].visit).toBe(2);
-    expect(formatStageLabel(result[1])).toBe("Apply Changes (2)");
+    expect(formatStageLabel(result[1])).toBe("Apply Changes@2");
   });
 
   test("filters by node_id (suffixed start@1 / exit@1 are still hidden)", () => {

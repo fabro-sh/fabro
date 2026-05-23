@@ -276,6 +276,7 @@ impl AgentAcpBackend {
                 model:            config_name.map(str::to_string),
                 reasoning_effort: None,
                 speed:            None,
+                permission_level: None,
                 capabilities:     vec![SessionCapability::Steer],
                 hub:              Arc::clone(steering_hub),
                 emitter:          Arc::clone(emitter),
