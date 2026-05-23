@@ -24,28 +24,34 @@ The Daytona key must include the snapshot and sandbox scopes Fabro uses to creat
 
 ## Configuration
 
-Set the sandbox provider in your run config TOML or via CLI flag:
+Select a Daytona environment in your run config TOML or via CLI flag:
 
 ```bash
-fabro run workflow.fabro --sandbox daytona
+fabro run workflow.fabro --environment cloud
 ```
 
 ```toml title="run.toml"
-[run.sandbox]
+[run.environment]
+id = "cloud"
+
+[environments.cloud]
 provider = "daytona"
 ```
 
 A full configuration example with all Daytona-specific options:
 
 ```toml title="run.toml"
-[run.sandbox]
+[run.environment]
+id = "cloud"
+
+[environments.cloud]
 provider = "daytona"
+
+[environments.cloud.lifecycle]
 preserve = false
+auto_stop = "60m"
 
-[run.sandbox.daytona]
-auto_stop_interval = 60
-
-[run.sandbox.daytona.labels]
+[environments.cloud.labels]
 project = "fabro"
 env = "staging"
 team = "platform"
@@ -58,17 +64,19 @@ back to Fabro-managed runs. User-provided values for these reserved keys are
 overwritten.
 </Note>
 
-[run.sandbox.daytona.snapshot]
-name = "rust-dev"
-cpu = 4
-memory = "8GB"
-disk = "20GB"
+[environments.cloud.image]
+ref = "rust-dev"
 dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update && apt-get install -y git ripgrep"
 # Or keep the Dockerfile next to this TOML file:
 # dockerfile = { path = "./Dockerfile" }
+
+[environments.cloud.resources]
+cpu = 4
+memory = "8GB"
+disk = "20GB"
 ```
 
-See [Server Configuration](/administration/server-configuration) for the full reference on all sandbox fields and server defaults.
+See [Environments](/execution/environments) for the full reference on all environment fields and server defaults.
 
 ### Network access control
 
@@ -76,16 +84,17 @@ Control outbound network access with the `network` field. Three modes are availa
 
 ```toml title="run.toml"
 # Full access (default)
-[run.sandbox.daytona]
-network = "allow_all"
+[environments.cloud.network]
+mode = "allow_all"
 
 # Block all egress
-[run.sandbox.daytona]
-network = "block"
+[environments.cloud.network]
+mode = "block"
 
 # CIDR-based allow list
-[run.sandbox.daytona]
-network = { allow_list = ["208.80.154.232/32", "10.0.0.0/8"] }
+[environments.cloud.network]
+mode = "cidr_allow_list"
+allow = ["208.80.154.232/32", "10.0.0.0/8"]
 ```
 
 Use `"block"` or a CIDR allow list when running untrusted or generated code to prevent agents from making arbitrary network requests.
@@ -95,12 +104,14 @@ Use `"block"` or a CIDR allow list when running untrusted or generated code to p
 Snapshots let you pre-build an environment image so each run starts with dependencies already installed rather than installing them in setup commands every time.
 
 ```toml title="run.toml"
-[run.sandbox.daytona.snapshot]
-name = "my-snapshot"
+[environments.cloud.image]
+ref = "my-snapshot"
+dockerfile = "FROM node:20-slim\nRUN apt-get update && apt-get install -y git"
+
+[environments.cloud.resources]
 cpu = 4
 memory = 8
 disk = 20
-dockerfile = "FROM node:20-slim\nRUN apt-get update && apt-get install -y git"
 ```
 
 When a run starts with a snapshot configured, Fabro looks up the snapshot by name. If it doesn't exist and a `dockerfile` is provided, Fabro creates it automatically and polls until it reaches `Active` state (up to 10 minutes). `dockerfile` can be inline content or `{ path = "..." }`; paths are resolved relative to the TOML file that declares them and are bundled into run manifests. If the snapshot already exists, it's reused immediately.
@@ -116,7 +127,10 @@ Fabro automatically clones the run's GitHub origin into the sandbox at `/home/da
 Set `[run.clone] enabled = false` when a workflow should start with an empty Daytona workspace instead of cloning the run origin:
 
 ```toml title="run.toml"
-[run.sandbox]
+[run.environment]
+id = "cloud"
+
+[environments.cloud]
 provider = "daytona"
 
 [run.clone]
@@ -153,14 +167,19 @@ Each sandbox gets a unique timestamped name (e.g. `fabro-20260307-143022-a3f2`) 
 To keep a sandbox alive for debugging:
 
 ```bash
-fabro run workflow.fabro --sandbox daytona --preserve-sandbox
+fabro run workflow.fabro --environment cloud --preserve-sandbox
 ```
 
 Or in the run config:
 
 ```toml title="run.toml"
-[run.sandbox]
+[run.environment]
+id = "cloud"
+
+[environments.cloud]
 provider = "daytona"
+
+[environments.cloud.lifecycle]
 preserve = true
 ```
 
@@ -168,11 +187,11 @@ When preserved, Fabro prints the sandbox name so you can find it in the [Daytona
 
 ### Auto-stop
 
-The `auto_stop_interval` setting tells Daytona to stop the sandbox after a period of inactivity, saving costs for preserved or long-running sandboxes:
+The `lifecycle.auto_stop` setting tells Daytona to stop the sandbox after a period of inactivity, saving costs for preserved or long-running sandboxes:
 
 ```toml title="run.toml"
-[run.sandbox.daytona]
-auto_stop_interval = 30
+[environments.cloud.lifecycle]
+auto_stop = "30m"
 ```
 
 ## Server defaults
@@ -191,7 +210,7 @@ If doctor reports missing scopes, regenerate the Daytona key with `write:snapsho
 
 ### "Snapshot does not exist and no dockerfile provided"
 
-The run config references a snapshot name that doesn't exist on Daytona, and no `dockerfile` is provided to create it. Either create the snapshot manually in the Daytona dashboard or add a `dockerfile` field to `[run.sandbox.daytona.snapshot]`.
+The run config references a snapshot name that doesn't exist on Daytona, and no `dockerfile` is provided to create it. Either create the snapshot manually in the Daytona dashboard or add `image.dockerfile` under the selected `[environments.<slug>.image]`.
 
 ### "Timed out waiting for snapshot to become active"
 

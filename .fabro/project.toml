@@ -4,18 +4,26 @@ _version = 1
 enabled = true
 draft = false
 
-[run.sandbox.daytona]
-auto_stop_interval = 30
+[run.environment]
+id = "fabro-dev"
 
-[run.sandbox.daytona.labels]
+[environments.fabro-dev]
+provider = "daytona"
+
+[environments.fabro-dev.lifecycle]
+auto_stop = "30m"
+
+[environments.fabro-dev.labels]
 repo = "fabro-sh/fabro"
 
-[run.sandbox.daytona.snapshot]
-name = "fabro-v11"
+[environments.fabro-dev.image]
+ref = "fabro-v11"
+dockerfile = { path = "Dockerfile" }
+
+[environments.fabro-dev.resources]
 cpu = 8
 memory = "16GB"
 disk = "20GB"
-dockerfile = { path = "Dockerfile" }
 
 # [[run.hooks]]
 # id = "cargo-fmt"

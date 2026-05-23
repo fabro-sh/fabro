@@ -19,7 +19,7 @@ fn scenario_full_stack(sandbox: &str) {
         .run_cmd()
         .args([
             "--auto-approve",
-            "--sandbox",
+            "--environment",
             sandbox,
             "--model",
             "claude-haiku-4-5",

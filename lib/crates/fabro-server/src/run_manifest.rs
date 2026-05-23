@@ -7,29 +7,25 @@ use std::time::Duration;
 use anyhow::{Context as _, Result, anyhow, bail};
 use fabro_api::types;
 use fabro_auth::auth_issue_message;
-use fabro_config::run::parse_run_layer_from_settings_toml;
 use fabro_config::{
-    CliLayer, CliOutputLayer, DaytonaDockerfileLayer, RunLayer, WorkflowSettingsBuilder,
-    parse_input_overrides, parse_labels,
+    CliLayer, CliOutputLayer, EnvironmentDockerfileLayer, EnvironmentImageLayer, EnvironmentLayer,
+    MergeMap, RunLayer, SettingsLayer, WorkflowSettingsBuilder, parse_input_overrides,
+    parse_labels,
 };
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_graphviz::render::apply_direction;
 use fabro_llm::model_test::{ModelTestStatus, run_basic_model_probe};
 use fabro_model::{Catalog, ProviderId};
-use fabro_sandbox::config::{
-    DaytonaNetwork, DaytonaSnapshotSettings, DaytonaVolumeMount,
-    DockerfileSource as SandboxDockerfileSource,
-};
 use fabro_sandbox::daytona::DaytonaConfig;
+use fabro_sandbox::from_environment::{
+    daytona_config_from_environment, docker_config_from_environment,
+};
 use fabro_sandbox::redact::redact_auth_url;
 use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec};
 use fabro_static::EnvVars;
 use fabro_types::settings::cli::OutputVerbosity;
 use fabro_types::settings::interp::InterpString;
-use fabro_types::settings::run::{
-    DaytonaNetworkLayer, DaytonaSettings, DockerSettings, DockerfileSource, RunGoal, RunMode,
-    RunNamespace,
-};
+use fabro_types::settings::run::{EnvironmentProvider, RunGoal, RunMode, RunNamespace};
 use fabro_types::{ManifestPath, RunId, WorkflowSettings};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_validate::Severity;
@@ -77,6 +73,18 @@ pub(crate) fn prepare_manifest(
     manifest_run_defaults: &RunLayer,
     manifest: &types::RunManifest,
 ) -> Result<PreparedManifest> {
+    prepare_manifest_with_environment_defaults(
+        manifest_run_defaults,
+        &MergeMap::default(),
+        manifest,
+    )
+}
+
+pub(crate) fn prepare_manifest_with_environment_defaults(
+    manifest_run_defaults: &RunLayer,
+    manifest_environment_defaults: &MergeMap<EnvironmentLayer>,
+    manifest: &types::RunManifest,
+) -> Result<PreparedManifest> {
     if manifest.version != 1 {
         bail!("unsupported manifest version {}", manifest.version);
     }
@@ -93,8 +101,10 @@ pub(crate) fn prepare_manifest(
 
     let args_overrides =
         manifest_args_overrides(manifest.args.as_ref()).context("failed to parse manifest args")?;
-    let mut workflow_settings_builder =
-        WorkflowSettingsBuilder::new().server_run_defaults(manifest_run_defaults.clone());
+    let mut workflow_settings_builder = WorkflowSettingsBuilder::new().server_manifest_defaults(
+        manifest_run_defaults.clone(),
+        manifest_environment_defaults.clone(),
+    );
     if let Some(run) = args_overrides.run {
         workflow_settings_builder = workflow_settings_builder.run_overrides(run);
     }
@@ -102,9 +112,12 @@ pub(crate) fn prepare_manifest(
         workflow_settings_builder = workflow_settings_builder.cli_overrides(cli);
     }
     if let Some(config) = workflow_input.config.as_ref() {
-        let workflow_run_layer = workflow_run_layer_with_resolved_dockerfile(&workflow_input)?;
-        workflow_settings_builder = workflow_settings_builder
-            .workflow_toml_with_run_layer(&config.source, workflow_run_layer)?;
+        let layer = settings_layer_with_resolved_dockerfiles(
+            &config.source,
+            &config.path,
+            &workflow_input.files,
+        )?;
+        workflow_settings_builder = workflow_settings_builder.workflow_layer(layer);
     }
     for config in manifest
         .configs
@@ -112,16 +125,13 @@ pub(crate) fn prepare_manifest(
         .filter(|config| config.type_ == types::ManifestConfigType::Project)
     {
         if let Some(source) = config.source.as_deref() {
-            let mut run = parse_run_layer_from_settings_toml(source)
-                .context("Failed to parse project config TOML")?;
-            if run_has_path_dockerfile(&run) {
-                let config_path = manifest_project_config_path(config, &cwd)?;
-                resolve_manifest_dockerfile(&mut run, &config_path, &workflow_input.files)?;
-                workflow_settings_builder =
-                    workflow_settings_builder.project_toml_with_run_layer(source, run)?;
-            } else {
-                workflow_settings_builder = workflow_settings_builder.project_toml(source)?;
-            }
+            let config_path = manifest_project_config_path(config, &cwd)?;
+            let layer = settings_layer_with_resolved_dockerfiles(
+                source,
+                &config_path,
+                &workflow_input.files,
+            )?;
+            workflow_settings_builder = workflow_settings_builder.project_layer(layer);
         }
     }
     for config in manifest
@@ -316,21 +326,19 @@ fn workflow_files_from_manifest(
     Ok(bundled)
 }
 
-fn workflow_run_layer_with_resolved_dockerfile(workflow: &BundledWorkflow) -> Result<RunLayer> {
-    let config = workflow
-        .config
-        .as_ref()
-        .expect("workflow config should exist before resolving its run layer");
+fn settings_layer_with_resolved_dockerfiles(
+    source: &str,
+    config_path: &ManifestPath,
+    files: &HashMap<ManifestPath, String>,
+) -> Result<SettingsLayer> {
     // Parse via `SettingsLayer` so unknown nested keys (like a stale
     // `[server.integrations.github.permissions]` after the move to
-    // `[run.integrations.github.permissions]`) trip
-    // `deny_unknown_fields`. Other valid top-level domains
-    // (`_version`, `[workflow]`, `[server.*]`) parse cleanly and the
-    // builder ignores everything outside `[run]` for this code path.
-    let mut run = parse_run_layer_from_settings_toml(&config.source)
+    // `[run.integrations.github.permissions]`) trip `deny_unknown_fields`.
+    let mut layer = source
+        .parse::<SettingsLayer>()
         .context("Failed to parse run config TOML")?;
-    resolve_manifest_dockerfile(&mut run, &config.path, &workflow.files)?;
-    Ok(run)
+    resolve_manifest_dockerfiles(&mut layer, config_path, files)?;
+    Ok(layer)
 }
 
 fn manifest_args_overrides(
@@ -344,7 +352,7 @@ fn manifest_args_overrides(
         goal:             None,
         model:            args.model.as_deref(),
         provider:         args.provider.as_deref(),
-        sandbox:          args.sandbox.as_deref(),
+        environment:      args.environment.as_deref(),
         docker_image:     args.docker_image.as_deref(),
         preserve_sandbox: args.preserve_sandbox,
         dry_run:          args.dry_run,
@@ -387,12 +395,6 @@ fn resolve_working_directory(settings: &WorkflowSettings, caller_cwd: &Path) -> 
     }
 }
 
-fn resolve_interp(value: &InterpString) -> String {
-    value
-        .resolve(process_env_var)
-        .map_or_else(|_| value.as_source(), |resolved| resolved.value)
-}
-
 #[expect(
     clippy::disallowed_methods,
     reason = "Manifest preflight interpolation owns a process-env lookup facade for {{ env.* }} values."
@@ -401,21 +403,37 @@ fn process_env_var(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
-fn resolve_manifest_dockerfile(
-    run: &mut RunLayer,
+fn resolve_manifest_dockerfiles(
+    layer: &mut SettingsLayer,
     config_path: &ManifestPath,
     files: &HashMap<ManifestPath, String>,
 ) -> Result<()> {
-    let source = run
-        .sandbox
+    if let Some(image) = layer
+        .run
         .as_mut()
-        .and_then(|sandbox| sandbox.daytona.as_mut())
-        .and_then(|daytona| daytona.snapshot.as_mut())
-        .and_then(|snapshot| snapshot.dockerfile.as_mut());
+        .and_then(|run| run.environment.as_mut())
+        .and_then(|environment| environment.image.as_mut())
+    {
+        resolve_manifest_dockerfile(image, config_path, files)?;
+    }
+    for environment in layer.environments.values_mut() {
+        if let Some(image) = environment.image.as_mut() {
+            resolve_manifest_dockerfile(image, config_path, files)?;
+        }
+    }
+    Ok(())
+}
+
+fn resolve_manifest_dockerfile(
+    image: &mut EnvironmentImageLayer,
+    config_path: &ManifestPath,
+    files: &HashMap<ManifestPath, String>,
+) -> Result<()> {
+    let source = image.dockerfile.as_mut();
     let Some(source) = source else {
         return Ok(());
     };
-    let DaytonaDockerfileLayer::Path { path } = &*source else {
+    let EnvironmentDockerfileLayer::Path { path } = &*source else {
         return Ok(());
     };
     let path_owned = path.clone();
@@ -425,19 +443,8 @@ fn resolve_manifest_dockerfile(
         .get(&manifest_path)
         .cloned()
         .ok_or_else(|| anyhow!("missing bundled dockerfile: {manifest_path}"))?;
-    *source = DaytonaDockerfileLayer::Inline(content);
+    *source = EnvironmentDockerfileLayer::Inline(content);
     Ok(())
-}
-
-fn run_has_path_dockerfile(run: &RunLayer) -> bool {
-    matches!(
-        run.sandbox
-            .as_ref()
-            .and_then(|sandbox| sandbox.daytona.as_ref())
-            .and_then(|daytona| daytona.snapshot.as_ref())
-            .and_then(|snapshot| snapshot.dockerfile.as_ref()),
-        Some(DaytonaDockerfileLayer::Path { .. })
-    )
 }
 
 fn manifest_project_config_path(
@@ -495,13 +502,14 @@ async fn build_preflight_report(
     let resolved_run = materialized.run;
     let server_settings = state.server_settings();
     let github_integration = &server_settings.server.integrations.github;
-    let sandbox_provider = resolve_sandbox_provider(&resolved_run)?;
+    let sandbox_provider = resolve_sandbox_provider(&resolved_run);
     let sandbox_provider =
         if resolved_run.execution.mode == RunMode::DryRun && !sandbox_provider.is_local() {
             SandboxProvider::Local
         } else {
             sandbox_provider
         };
+    run_environment_capability_check(&mut checks, &resolved_run);
     let needs_github_credentials =
         sandbox_provider.is_clone_based() || resolved_run.integrations.github.is_token_requested();
     let github_app = if needs_github_credentials {
@@ -609,35 +617,16 @@ fn base_preflight_checks(prepared: &PreparedManifest, graph: &Graph) -> Vec<Chec
     ]
 }
 
-fn resolve_sandbox_provider(settings: &RunNamespace) -> Result<SandboxProvider> {
-    Ok(Some(str::parse::<SandboxProvider>(
-        settings.sandbox.provider.as_str(),
-    ))
-    .transpose()
-    .context("Invalid sandbox provider")?
-    .unwrap_or_default())
+fn resolve_sandbox_provider(settings: &RunNamespace) -> SandboxProvider {
+    SandboxProvider::from(settings.environment.provider)
 }
 
 fn resolve_daytona_config(settings: &RunNamespace) -> DaytonaConfig {
-    let mut config = settings
-        .sandbox
-        .daytona
-        .as_ref()
-        .map(|daytona| runtime_daytona_config(daytona, !settings.clone.enabled))
-        .unwrap_or_default();
-    config.skip_clone = !settings.clone.enabled;
-    config
+    daytona_config_from_environment(&settings.environment, !settings.clone.enabled)
 }
 
 fn resolve_docker_config(settings: &RunNamespace) -> DockerSandboxOptions {
-    let mut config = settings
-        .sandbox
-        .docker
-        .as_ref()
-        .map(|docker| runtime_docker_config(docker, !settings.clone.enabled))
-        .unwrap_or_default();
-    config.skip_clone = !settings.clone.enabled;
-    config
+    docker_config_from_environment(&settings.environment, !settings.clone.enabled)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -651,6 +640,66 @@ fn clone_disabled_for_provider(provider: SandboxProvider, resolved_run: &RunName
         SandboxProvider::Docker | SandboxProvider::Daytona => !resolved_run.clone.enabled,
         SandboxProvider::Local => false,
     }
+}
+
+fn run_environment_capability_check(checks: &mut Vec<CheckResult>, resolved_run: &RunNamespace) {
+    let warnings = environment_capability_warnings(resolved_run);
+    if warnings.is_empty() {
+        return;
+    }
+    checks.push(CheckResult {
+        name:        "Environment Capabilities".into(),
+        status:      CheckStatus::Warning,
+        summary:     format!("{} unsupported hint(s) ignored", warnings.len()),
+        details:     warnings
+            .into_iter()
+            .map(|text| CheckDetail { text, warn: true })
+            .collect(),
+        remediation: None,
+    });
+}
+
+fn environment_capability_warnings(resolved_run: &RunNamespace) -> Vec<String> {
+    let environment = &resolved_run.environment;
+    let mut warnings = Vec::new();
+    match environment.provider {
+        EnvironmentProvider::Local => {
+            if environment.resources.cpu.is_some()
+                || environment.resources.memory.is_some()
+                || environment.resources.disk.is_some()
+            {
+                warnings.push("local provider ignores resource limits".to_string());
+            }
+            if !environment.volumes.is_empty() {
+                warnings.push("local provider ignores volume mounts".to_string());
+            }
+            if !environment.labels.is_empty() {
+                warnings.push("local provider ignores labels".to_string());
+            }
+            if environment.lifecycle.auto_stop.is_some() {
+                warnings.push("local provider ignores lifecycle.auto_stop".to_string());
+            }
+        }
+        EnvironmentProvider::Docker => {
+            if environment.resources.disk.is_some() {
+                warnings.push("docker provider ignores disk resource limits".to_string());
+            }
+            if !environment.volumes.is_empty() {
+                warnings.push("docker provider ignores volume mounts".to_string());
+            }
+            if !environment.labels.is_empty() {
+                warnings.push("docker provider ignores labels".to_string());
+            }
+            if environment.lifecycle.auto_stop.is_some() {
+                warnings.push("docker provider ignores lifecycle.auto_stop".to_string());
+            }
+            if environment.image.dockerfile.is_some() {
+                warnings.push("docker provider ignores image.dockerfile".to_string());
+            }
+        }
+        EnvironmentProvider::Daytona => {}
+    }
+    warnings
 }
 
 fn repository_access_details(request: &GitRemoteRefCheck) -> Vec<CheckDetail> {
@@ -1121,69 +1170,6 @@ fn resolve_model_provider(
     }
 }
 
-fn runtime_daytona_config(settings: &DaytonaSettings, skip_clone: bool) -> DaytonaConfig {
-    DaytonaConfig {
-        auto_stop_interval: settings.auto_stop_interval,
-        labels: (!settings.labels.is_empty()).then_some(settings.labels.clone()),
-        volumes: settings
-            .volumes
-            .iter()
-            .map(|volume| DaytonaVolumeMount {
-                volume_id:  volume.volume_id.clone(),
-                mount_path: volume.mount_path.clone(),
-                subpath:    volume.subpath.clone(),
-            })
-            .collect(),
-        snapshot: settings
-            .snapshot
-            .as_ref()
-            .map(|snapshot| DaytonaSnapshotSettings {
-                name:       snapshot.name.clone(),
-                cpu:        snapshot.cpu,
-                memory:     snapshot.memory_gb,
-                disk:       snapshot.disk_gb,
-                dockerfile: snapshot
-                    .dockerfile
-                    .as_ref()
-                    .map(|dockerfile| match dockerfile {
-                        DockerfileSource::Inline(text) => {
-                            SandboxDockerfileSource::Inline(text.clone())
-                        }
-                        DockerfileSource::Path { path } => {
-                            SandboxDockerfileSource::Path { path: path.clone() }
-                        }
-                    }),
-            }),
-        network: settings.network.as_ref().map(|network| match network {
-            DaytonaNetworkLayer::Block => DaytonaNetwork::Block,
-            DaytonaNetworkLayer::AllowAll => DaytonaNetwork::AllowAll,
-            DaytonaNetworkLayer::AllowList { allow_list } => {
-                DaytonaNetwork::AllowList(allow_list.clone())
-            }
-        }),
-        skip_clone,
-    }
-}
-
-fn runtime_docker_config(settings: &DockerSettings, skip_clone: bool) -> DockerSandboxOptions {
-    let mut env_vars = settings
-        .env_vars
-        .iter()
-        .map(|(key, value)| format!("{key}={}", resolve_interp(value)))
-        .collect::<Vec<_>>();
-    env_vars.sort();
-
-    DockerSandboxOptions {
-        image: settings.image.clone(),
-        network_mode: settings.network_mode.clone(),
-        memory_limit: settings.memory_limit,
-        cpu_quota: settings.cpu_quota,
-        env_vars,
-        skip_clone,
-        ..DockerSandboxOptions::default()
-    }
-}
-
 async fn run_github_token_check(
     checks: &mut Vec<CheckResult>,
     prepared: &PreparedManifest,
@@ -1464,7 +1450,10 @@ mod tests {
                 r#"
 _version = 1
 
-[run.sandbox]
+[run.environment]
+id = "selected"
+
+[environments.selected]
 provider = "{provider}"
 
 [run.clone]
@@ -1493,23 +1482,25 @@ enabled = {clone_enabled}
 
     #[test]
     fn runtime_daytona_config_preserves_volume_mounts() {
-        let settings = DaytonaSettings {
-            volumes: vec![fabro_types::settings::run::DaytonaVolumeSettings {
-                volume_id:  "vol_auth".to_string(),
-                mount_path: "/home/daytona/.config".to_string(),
-                subpath:    Some("agents".to_string()),
-            }],
-            ..DaytonaSettings::default()
-        };
+        let settings = fabro_types::settings::run::RunEnvironmentSettings::from_environment(
+            "cloud".to_string(),
+            fabro_types::settings::run::EnvironmentSettings {
+                volumes: vec![fabro_types::settings::run::EnvironmentVolumeSettings {
+                    id:         "vol_auth".to_string(),
+                    mount_path: "/home/daytona/.config".to_string(),
+                    subpath:    Some("agents".to_string()),
+                }],
+                ..fabro_types::settings::run::EnvironmentSettings::default()
+            },
+        );
 
-        let config = runtime_daytona_config(&settings, false);
+        let config = daytona_config_from_environment(&settings, false);
 
         assert_eq!(config.volumes.len(), 1);
         assert_eq!(config.volumes[0].volume_id, "vol_auth");
         assert_eq!(config.volumes[0].mount_path, "/home/daytona/.config");
         assert_eq!(config.volumes[0].subpath.as_deref(), Some("agents"));
     }
-
     #[test]
     fn prepare_manifest_inlines_project_config_daytona_dockerfile_from_bundle() {
         let mut manifest = minimal_manifest();
@@ -1518,11 +1509,14 @@ enabled = {clone_enabled}
             source: Some(
                 r#"_version = 1
 
-[run.sandbox]
+[run.environment]
+id = "cloud"
+
+[environments.cloud]
 provider = "daytona"
 
-[run.sandbox.daytona.snapshot]
-name = "fabro-test"
+[environments.cloud.image]
+ref = "fabro-test"
 dockerfile = { path = "Dockerfile" }
 "#
                 .to_string(),
@@ -1552,15 +1546,16 @@ dockerfile = { path = "Dockerfile" }
         let dockerfile = prepared
             .settings
             .run
-            .sandbox
-            .daytona
+            .environment
+            .image
+            .dockerfile
             .as_ref()
-            .and_then(|daytona| daytona.snapshot.as_ref())
-            .and_then(|snapshot| snapshot.dockerfile.as_ref())
             .expect("project Dockerfile should resolve");
         match dockerfile {
-            DockerfileSource::Inline(value) => assert_eq!(value, "FROM ubuntu:24.04\n"),
-            DockerfileSource::Path { path } => {
+            fabro_types::settings::run::DockerfileSource::Inline(value) => {
+                assert_eq!(value, "FROM ubuntu:24.04\n");
+            }
+            fabro_types::settings::run::DockerfileSource::Path { path } => {
                 panic!("project Dockerfile should be inline, got path {path}")
             }
         }
@@ -1574,8 +1569,14 @@ dockerfile = { path = "Dockerfile" }
             source: Some(
                 r#"_version = 1
 
-[run.sandbox.daytona.snapshot]
-name = "fabro-test"
+[run.environment]
+id = "cloud"
+
+[environments.cloud]
+provider = "daytona"
+
+[environments.cloud.image]
+ref = "fabro-test"
 dockerfile = { path = "Dockerfile" }
 "#
                 .to_string(),
@@ -1844,7 +1845,7 @@ root = "/srv/fabro"
             model:            None,
             preserve_sandbox: None,
             provider:         None,
-            sandbox:          None,
+            environment:      None,
             docker_image:     None,
             input:            Vec::new(),
             verbose:          None,
@@ -1877,7 +1878,7 @@ override = "server"
             model:            None,
             preserve_sandbox: None,
             provider:         None,
-            sandbox:          None,
+            environment:      None,
             docker_image:     None,
             input:            vec!["override=cli".to_string()],
             verbose:          None,
@@ -1972,8 +1973,8 @@ description = "Move the feature through review"
 team = "platform"
 priority = "high"
 
-[run.sandbox]
-provider = "local"
+[run.environment]
+id = "local"
 "#
                 .to_string(),
             });
@@ -2114,8 +2115,8 @@ name = "Control Plane"
                 path:   "workflow.toml".to_string(),
                 source: r#"_version = 1
 
-[run.sandbox]
-provider = "local"
+[run.environment]
+id = "local"
 
 [run.integrations.github.permissions]
 issues = "read"
@@ -2163,8 +2164,8 @@ _version = 1
 [run.pull_request]
 enabled = true
 
-[run.sandbox]
-provider = "local"
+[run.environment]
+id = "local"
 "#
                 .to_string(),
             ),
@@ -2272,8 +2273,8 @@ name = "Project Config Name"
                 r#"
 _version = 1
 
-[run.sandbox]
-provider = "daytona"
+[run.environment]
+id = "daytona"
 "#
                 .to_string(),
             ),
@@ -2492,8 +2493,8 @@ digraph Demo {
         );
     }
 
-    mod workflow_run_layer_with_resolved_dockerfile_tests {
-        //! `workflow_run_layer_with_resolved_dockerfile` parses bundled
+    mod settings_layer_with_resolved_dockerfiles_tests {
+        //! `settings_layer_with_resolved_dockerfiles` parses bundled
         //! workflow.toml through the strict `SettingsLayer` schema, so
         //! unknown fields anywhere in the document trip
         //! `deny_unknown_fields`.
@@ -2501,7 +2502,7 @@ digraph Demo {
         use fabro_types::ManifestPath;
         use fabro_workflow::workflow_bundle::{BundledWorkflow, ParsedWorkflowConfig};
 
-        use super::super::workflow_run_layer_with_resolved_dockerfile;
+        use super::super::settings_layer_with_resolved_dockerfiles;
 
         fn workflow_with_config(source: &str) -> BundledWorkflow {
             BundledWorkflow {
@@ -2526,8 +2527,13 @@ issues = "read"
 "#,
             );
 
-            let run = workflow_run_layer_with_resolved_dockerfile(&workflow)
-                .expect("workflow.toml should parse");
+            let layer = settings_layer_with_resolved_dockerfiles(
+                &workflow.config.as_ref().unwrap().source,
+                &workflow.config.as_ref().unwrap().path,
+                &workflow.files,
+            )
+            .expect("workflow.toml should parse");
+            let run = layer.run.expect("run layer should be present");
             let github = run
                 .integrations
                 .as_ref()
@@ -2551,8 +2557,12 @@ issues = "read"
 "#,
             );
 
-            let err = workflow_run_layer_with_resolved_dockerfile(&workflow)
-                .expect_err("stale [server.integrations.github.permissions] should be rejected");
+            let err = settings_layer_with_resolved_dockerfiles(
+                &workflow.config.as_ref().unwrap().source,
+                &workflow.config.as_ref().unwrap().path,
+                &workflow.files,
+            )
+            .expect_err("stale [server.integrations.github.permissions] should be rejected");
             let message = format!("{err:#}");
             assert!(
                 message.contains("permissions") || message.contains("unknown field"),
@@ -2573,8 +2583,13 @@ contents = "read"
 "#,
             );
 
-            let run = workflow_run_layer_with_resolved_dockerfile(&workflow)
-                .expect("workflow + run blocks should parse");
+            let layer = settings_layer_with_resolved_dockerfiles(
+                &workflow.config.as_ref().unwrap().source,
+                &workflow.config.as_ref().unwrap().path,
+                &workflow.files,
+            )
+            .expect("workflow + run blocks should parse");
+            let run = layer.run.expect("run layer should be present");
             assert!(run.integrations.is_some());
         }
     }

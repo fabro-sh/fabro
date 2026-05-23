@@ -45,25 +45,25 @@ fn help() {
       <WORKFLOW>  Path to a .fabro workflow file or .toml task config
 
     Options:
-          --json                   Output as JSON [env: FABRO_JSON=]
-          --server <SERVER>        Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
-          --debug                  Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-      -I, --input <KEY=VALUE>      Override a workflow input value (repeatable, format: KEY=VALUE)
-          --dry-run                Execute with simulated LLM backend
-          --no-upgrade-check       Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --auto-approve           Auto-approve all human gates
-          --quiet                  Suppress non-essential output [env: FABRO_QUIET=]
-          --goal <GOAL>            Override the workflow goal (available as {{ goal }} in prompts)
-          --goal-file <GOAL_FILE>  Read the workflow goal from a file
-          --model <MODEL>          Override default LLM model
-          --provider <PROVIDER>    Override default LLM provider
-      -v, --verbose                Enable verbose output
-          --sandbox <SANDBOX>      Sandbox for agent tools [possible values: local, docker, daytona]
-          --label <KEY=VALUE>      Attach a label to this run (repeatable, format: KEY=VALUE)
-          --parent <RUN>           Link this run to an existing orchestration parent run
-          --preserve-sandbox       Keep the sandbox alive after the run finishes (for debugging)
-      -d, --detach                 Run the workflow in the background and print the run ID
-      -h, --help                   Print help
+          --json                       Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>            Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+      -I, --input <KEY=VALUE>          Override a workflow input value (repeatable, format: KEY=VALUE)
+          --dry-run                    Execute with simulated LLM backend
+          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --auto-approve               Auto-approve all human gates
+          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
+          --goal <GOAL>                Override the workflow goal (available as {{ goal }} in prompts)
+          --goal-file <GOAL_FILE>      Read the workflow goal from a file
+          --model <MODEL>              Override default LLM model
+          --provider <PROVIDER>        Override default LLM provider
+      -v, --verbose                    Enable verbose output
+          --environment <ENVIRONMENT>  Named environment for agent tools
+          --label <KEY=VALUE>          Attach a label to this run (repeatable, format: KEY=VALUE)
+          --parent <RUN>               Link this run to an existing orchestration parent run
+          --preserve-sandbox           Keep the sandbox alive after the run finishes (for debugging)
+      -d, --detach                     Run the workflow in the background and print the run ID
+      -h, --help                       Print help
     ----- stderr -----
     ");
 }
@@ -363,8 +363,8 @@ fn create_persists_requested_overrides_into_store() {
         "gpt-5",
         "--provider",
         "openai",
-        "--sandbox",
-        "local",
+        "--environment",
+        "default",
         "--label",
         "env=dev",
         "--label",
@@ -410,9 +410,10 @@ fn create_persists_requested_overrides_into_store() {
                 "model": resolved_run.model.name.as_ref().map(fabro_types::settings::InterpString::as_source),
                 "provider": resolved_run.model.provider.as_ref().map(fabro_types::settings::InterpString::as_source),
             },
-            "sandbox": {
-                "provider": resolved_run.sandbox.provider,
-                "preserve": resolved_run.sandbox.preserve,
+            "environment": {
+                "id": resolved_run.environment.id,
+                "provider": resolved_run.environment.provider.to_string(),
+                "preserve": resolved_run.environment.lifecycle.preserve,
             },
         },
         "labels": labels,
@@ -429,8 +430,9 @@ fn create_persists_requested_overrides_into_store() {
           "model": "gpt-5",
           "provider": "openai"
         },
-        "sandbox": {
-          "provider": "local",
+        "environment": {
+          "id": "default",
+          "provider": "docker",
           "preserve": true
         }
       },

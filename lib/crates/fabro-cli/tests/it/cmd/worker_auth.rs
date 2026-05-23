@@ -302,7 +302,7 @@ async fn github_only_server_dispatched_worker_succeeds_without_worker_auth_store
             "--detach",
             "--dry-run",
             "--auto-approve",
-            "--sandbox",
+            "--environment",
             "local",
             workflow.to_str().unwrap(),
         ])
@@ -358,7 +358,7 @@ fn runner_rejects_bogus_worker_token_against_github_only_server() {
                 &run_id,
                 "--dry-run",
                 "--auto-approve",
-                "--sandbox",
+                "--environment",
                 "local",
                 workflow.to_str().unwrap(),
             ])

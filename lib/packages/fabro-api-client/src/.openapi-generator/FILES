@@ -67,11 +67,6 @@ models/create-completion-request.ts
 models/create-run-pull-request-request.ts
 models/create-run-session-request.ts
 models/create-secret-request.ts
-models/daytona-network-layer-one-of-allow-list.ts
-models/daytona-network-layer-one-of.ts
-models/daytona-network-layer.ts
-models/daytona-settings.ts
-models/daytona-snapshot-settings.ts
 models/delete-run-response.ts
 models/delete-run-sandbox.ts
 models/delete-secret-request.ts
@@ -90,10 +85,17 @@ models/dirty-status.ts
 models/disk-usage-response.ts
 models/disk-usage-run-row.ts
 models/disk-usage-summary-row.ts
-models/docker-settings.ts
 models/dockerfile-source-inline.ts
 models/dockerfile-source-path.ts
 models/dockerfile-source.ts
+models/environment-image-settings.ts
+models/environment-lifecycle-settings.ts
+models/environment-network-mode.ts
+models/environment-network-settings.ts
+models/environment-provider.ts
+models/environment-resources-settings.ts
+models/environment-settings.ts
+models/environment-volume-settings.ts
 models/error-response-entry.ts
 models/error-response.ts
 models/event-envelope.ts
@@ -280,6 +282,7 @@ models/run-commit.ts
 models/run-commits-meta.ts
 models/run-control-action.ts
 models/run-diff.ts
+models/run-environment-settings.ts
 models/run-error.ts
 models/run-event-detail-response-content.ts
 models/run-event-detail-response-event.ts
@@ -311,7 +314,6 @@ models/run-provenance.ts
 models/run-question.ts
 models/run-reference.ts
 models/run-sandbox-runtime.ts
-models/run-sandbox-settings.ts
 models/run-sandbox.ts
 models/run-scm-settings.ts
 models/run-server-provenance.ts
@@ -410,6 +412,10 @@ models/system-resources-response.ts
 models/system-run-counts.ts
 models/timeline-entry-response.ts
 models/tls-mode.ts
+models/todo-list-kind.ts
+models/todo-list-projection.ts
+models/todo-projection.ts
+models/todo-status.ts
 models/update-run-parent-request.ts
 models/update-run-request.ts
 models/user-response.ts
