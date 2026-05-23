@@ -281,7 +281,8 @@ function ChecksStatus({ checks }: { checks: CheckRun[] }) {
 }
 
 export const handle = {
-  wide: true,
+  wide:       true,
+  hideHeader: true,
 };
 
 function PrCard({
