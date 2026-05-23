@@ -219,7 +219,6 @@ agent_profile = "anthropic"
 display_name = "Team Code Large"
 family = "team-code"
 default = true
-small_default = true
 probe = true
 enabled = true
 aliases = ["team-code"]
@@ -261,7 +260,6 @@ cache_input_cost_per_mtok = 0.60
 | `training` | string | None | Training data cutoff label. |
 | `knowledge_cutoff` | string or TOML date | None | Public knowledge cutoff label; TOML dates normalize to `YYYY-MM-DD`. |
 | `default` | boolean | `false` | Whether this is the provider default model. |
-| `small_default` | boolean | `false` | Whether this model should be preferred for small/cheap utility tasks such as generated run titles. If no model is marked, Fabro falls back to the provider default. Set `false` in a higher-precedence layer to clear an inherited marker. |
 | `probe` | boolean | `false` | Whether this model should be preferred for provider connectivity probes. Set `false` in a higher-precedence layer to clear an inherited probe marker. |
 | `enabled` | boolean | `true` | Set `false` to disable a model after lower-precedence layers define it. |
 | `aliases` | array<string> | `[]` | Additional model names accepted by routing and fallback config. |
