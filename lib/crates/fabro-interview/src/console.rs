@@ -296,12 +296,16 @@ mod tests {
     fn find_matching_option_by_key() {
         let options = vec![
             InterviewOption {
-                key:   "A".to_string(),
-                label: "Approve".to_string(),
+                key:         "A".to_string(),
+                label:       "Approve".to_string(),
+                description: None,
+                preview:     None,
             },
             InterviewOption {
-                key:   "R".to_string(),
-                label: "Reject".to_string(),
+                key:         "R".to_string(),
+                label:       "Reject".to_string(),
+                description: None,
+                preview:     None,
             },
         ];
         let result = find_matching_option("A", &options);
@@ -313,8 +317,10 @@ mod tests {
     #[test]
     fn find_matching_option_by_key_case_insensitive() {
         let options = vec![InterviewOption {
-            key:   "Y".to_string(),
-            label: "Yes".to_string(),
+            key:         "Y".to_string(),
+            label:       "Yes".to_string(),
+            description: None,
+            preview:     None,
         }];
         let result = find_matching_option("y", &options);
         assert!(result.is_some());
@@ -324,12 +330,16 @@ mod tests {
     fn find_matching_option_by_index() {
         let options = vec![
             InterviewOption {
-                key:   "A".to_string(),
-                label: "Alpha".to_string(),
+                key:         "A".to_string(),
+                label:       "Alpha".to_string(),
+                description: None,
+                preview:     None,
             },
             InterviewOption {
-                key:   "B".to_string(),
-                label: "Beta".to_string(),
+                key:         "B".to_string(),
+                label:       "Beta".to_string(),
+                description: None,
+                preview:     None,
             },
         ];
         let result = find_matching_option("2", &options);
@@ -341,8 +351,10 @@ mod tests {
     #[test]
     fn find_matching_option_no_match() {
         let options = vec![InterviewOption {
-            key:   "A".to_string(),
-            label: "Alpha".to_string(),
+            key:         "A".to_string(),
+            label:       "Alpha".to_string(),
+            description: None,
+            preview:     None,
         }];
         let result = find_matching_option("zzz", &options);
         assert!(result.is_none());
@@ -351,8 +363,10 @@ mod tests {
     #[test]
     fn find_matching_option_index_out_of_range() {
         let options = vec![InterviewOption {
-            key:   "A".to_string(),
-            label: "Alpha".to_string(),
+            key:         "A".to_string(),
+            label:       "Alpha".to_string(),
+            description: None,
+            preview:     None,
         }];
         let result = find_matching_option("5", &options);
         assert!(result.is_none());
@@ -362,8 +376,10 @@ mod tests {
     fn non_tty_multiple_choice_eof_returns_interrupted() {
         let mut question = Question::new("Approve?", QuestionType::MultipleChoice);
         question.options = vec![InterviewOption {
-            key:   "A".to_string(),
-            label: "Approve".to_string(),
+            key:         "A".to_string(),
+            label:       "Approve".to_string(),
+            description: None,
+            preview:     None,
         }];
 
         let answer = parse_non_tty_choice_response(&question, PromptRead::Eof);

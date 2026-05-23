@@ -301,8 +301,10 @@ mod tests {
     #[test]
     fn answer_selected() {
         let opt = InterviewOption {
-            key:   "A".to_string(),
-            label: "Approve".to_string(),
+            key:         "A".to_string(),
+            label:       "Approve".to_string(),
+            description: None,
+            preview:     None,
         };
         let a = Answer::selected("A", opt.clone());
         assert_eq!(a.value, AnswerValue::Selected("A".to_string()));
@@ -319,12 +321,16 @@ mod tests {
     #[test]
     fn question_option_eq() {
         let a = InterviewOption {
-            key:   "Y".to_string(),
-            label: "Yes".to_string(),
+            key:         "Y".to_string(),
+            label:       "Yes".to_string(),
+            description: None,
+            preview:     None,
         };
         let b = InterviewOption {
-            key:   "Y".to_string(),
-            label: "Yes".to_string(),
+            key:         "Y".to_string(),
+            label:       "Yes".to_string(),
+            description: None,
+            preview:     None,
         };
         assert_eq!(a, b);
     }

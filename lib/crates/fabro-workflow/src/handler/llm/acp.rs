@@ -449,14 +449,15 @@ mod tests {
         let context = Context::new();
         let result = backend
             .run(CodergenRunRequest {
-                node:         &node,
-                prompt:       "write hello",
-                context:      &context,
-                thread_id:    None,
-                emitter:      &emitter,
-                sandbox:      &sandbox,
-                tool_hooks:   None,
-                cancel_token: CancellationToken::new(),
+                node:               &node,
+                prompt:             "write hello",
+                context:            &context,
+                thread_id:          None,
+                emitter:            &emitter,
+                sandbox:            &sandbox,
+                tool_hooks:         None,
+                cancel_token:       CancellationToken::new(),
+                agent_tool_runtime: fabro_agent::AgentToolRuntime::default(),
             })
             .await
             .unwrap();
@@ -516,14 +517,15 @@ mod tests {
         let context = Context::new();
         let result = backend
             .run(CodergenRunRequest {
-                node:         &node,
-                prompt:       "write hello",
-                context:      &context,
-                thread_id:    None,
-                emitter:      &emitter,
-                sandbox:      &sandbox,
-                tool_hooks:   None,
-                cancel_token: CancellationToken::new(),
+                node:               &node,
+                prompt:             "write hello",
+                context:            &context,
+                thread_id:          None,
+                emitter:            &emitter,
+                sandbox:            &sandbox,
+                tool_hooks:         None,
+                cancel_token:       CancellationToken::new(),
+                agent_tool_runtime: fabro_agent::AgentToolRuntime::default(),
             })
             .await
             .unwrap();
@@ -563,14 +565,15 @@ mod tests {
         let context = Context::new();
         let result = backend
             .run(CodergenRunRequest {
-                node:         &node,
-                prompt:       "write hello",
-                context:      &context,
-                thread_id:    None,
-                emitter:      &emitter,
-                sandbox:      &sandbox,
-                tool_hooks:   None,
-                cancel_token: CancellationToken::new(),
+                node:               &node,
+                prompt:             "write hello",
+                context:            &context,
+                thread_id:          None,
+                emitter:            &emitter,
+                sandbox:            &sandbox,
+                tool_hooks:         None,
+                cancel_token:       CancellationToken::new(),
+                agent_tool_runtime: fabro_agent::AgentToolRuntime::default(),
             })
             .await
             .unwrap();
@@ -601,14 +604,15 @@ mod tests {
         let context = Context::new();
         let result = backend
             .run(CodergenRunRequest {
-                node:         &node,
-                prompt:       "write hello",
-                context:      &context,
-                thread_id:    None,
-                emitter:      &emitter,
-                sandbox:      &sandbox_dyn,
-                tool_hooks:   None,
-                cancel_token: CancellationToken::new(),
+                node:               &node,
+                prompt:             "write hello",
+                context:            &context,
+                thread_id:          None,
+                emitter:            &emitter,
+                sandbox:            &sandbox_dyn,
+                tool_hooks:         None,
+                cancel_token:       CancellationToken::new(),
+                agent_tool_runtime: fabro_agent::AgentToolRuntime::default(),
             })
             .await;
         assert!(result.is_err());
@@ -650,14 +654,15 @@ mod tests {
         let context = Context::new();
         let result = backend
             .run(CodergenRunRequest {
-                node:         &node,
-                prompt:       "cancel",
-                context:      &context,
-                thread_id:    None,
-                emitter:      &emitter,
-                sandbox:      &sandbox,
-                tool_hooks:   None,
-                cancel_token: CancellationToken::new(),
+                node:               &node,
+                prompt:             "cancel",
+                context:            &context,
+                thread_id:          None,
+                emitter:            &emitter,
+                sandbox:            &sandbox,
+                tool_hooks:         None,
+                cancel_token:       CancellationToken::new(),
+                agent_tool_runtime: fabro_agent::AgentToolRuntime::default(),
             })
             .await;
         let Err(err) = result else {
@@ -703,14 +708,15 @@ mod tests {
         let context = Context::new();
         backend
             .run(CodergenRunRequest {
-                node:         &node,
-                prompt:       "write hello",
-                context:      &context,
-                thread_id:    None,
-                emitter:      &emitter,
-                sandbox:      &sandbox,
-                tool_hooks:   None,
-                cancel_token: CancellationToken::new(),
+                node:               &node,
+                prompt:             "write hello",
+                context:            &context,
+                thread_id:          None,
+                emitter:            &emitter,
+                sandbox:            &sandbox,
+                tool_hooks:         None,
+                cancel_token:       CancellationToken::new(),
+                agent_tool_runtime: fabro_agent::AgentToolRuntime::default(),
             })
             .await
             .unwrap();
@@ -744,14 +750,15 @@ mod tests {
         let context = Context::new();
         let result = backend
             .run(CodergenRunRequest {
-                node:         &node,
-                prompt:       "write hello",
-                context:      &context,
-                thread_id:    None,
-                emitter:      &emitter,
-                sandbox:      &sandbox_dyn,
-                tool_hooks:   None,
-                cancel_token: CancellationToken::new(),
+                node:               &node,
+                prompt:             "write hello",
+                context:            &context,
+                thread_id:          None,
+                emitter:            &emitter,
+                sandbox:            &sandbox_dyn,
+                tool_hooks:         None,
+                cancel_token:       CancellationToken::new(),
+                agent_tool_runtime: fabro_agent::AgentToolRuntime::default(),
             })
             .await;
         let Err(err) = result else {
@@ -796,14 +803,15 @@ mod tests {
         let context = Context::new();
         let result = backend
             .run(CodergenRunRequest {
-                node:         &node,
-                prompt:       "write hello",
-                context:      &context,
-                thread_id:    None,
-                emitter:      &emitter,
-                sandbox:      &sandbox_dyn,
-                tool_hooks:   None,
-                cancel_token: CancellationToken::new(),
+                node:               &node,
+                prompt:             "write hello",
+                context:            &context,
+                thread_id:          None,
+                emitter:            &emitter,
+                sandbox:            &sandbox_dyn,
+                tool_hooks:         None,
+                cancel_token:       CancellationToken::new(),
+                agent_tool_runtime: fabro_agent::AgentToolRuntime::default(),
             })
             .await;
         let Err(err) = result else {

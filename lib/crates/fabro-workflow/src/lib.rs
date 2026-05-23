@@ -298,6 +298,7 @@ pub mod github_token_source;
 pub(crate) mod graph;
 pub mod handler;
 mod hook_context;
+mod interview_runtime;
 #[allow(
     dead_code,
     reason = "The lifecycle module remains crate-visible for tests and pending integrations."

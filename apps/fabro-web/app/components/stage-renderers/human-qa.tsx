@@ -184,7 +184,14 @@ function QuestionBlock({
                 <span className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-overlay-strong font-mono text-[11px] text-fg-2">
                   {option.key}
                 </span>
-                <span className="text-sm text-fg-3">{option.label}</span>
+                <span className="min-w-0 text-sm text-fg-3">
+                  <span>{option.label}</span>
+                  {option.description && (
+                    <span className="mt-0.5 block text-xs/5 text-fg-muted">
+                      {option.description}
+                    </span>
+                  )}
+                </span>
               </li>
             ))}
             {question.allowFreeform && (

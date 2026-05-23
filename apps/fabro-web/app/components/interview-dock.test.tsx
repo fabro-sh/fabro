@@ -133,6 +133,27 @@ describe("InterviewDock", () => {
     expect(buttons.Revise).toBeDefined();
   });
 
+  test("multiple choice renders option descriptions as display text", () => {
+    const question = makeQuestion({
+      question_type: QuestionType.MULTIPLE_CHOICE,
+      options: [
+        {
+          key: "A",
+          label: "[A] Approve",
+          description: "Deploy the current patch",
+          preview: "<b>not rendered specially</b>",
+        },
+      ],
+    });
+    const tree = render(
+      <InterviewDock runId="run-1" questions={[question]} />,
+    );
+    const text = textContent(tree.toJSON());
+    expect(text).toContain("Approve");
+    expect(text).toContain("Deploy the current patch");
+    expect(text).not.toContain("<b>not rendered specially</b>");
+  });
+
   test("freeform question renders a textarea and disables send when empty", () => {
     const question = makeQuestion({
       question_type: QuestionType.FREEFORM,

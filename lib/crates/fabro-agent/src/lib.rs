@@ -15,6 +15,7 @@ pub mod loop_detection;
 pub mod mcp_integration;
 pub mod memory;
 pub mod profiles;
+pub mod question_tools;
 pub mod read_before_write_sandbox;
 pub mod sandbox;
 pub mod session;
@@ -46,6 +47,11 @@ pub use local_sandbox::LocalSandbox;
 pub use loop_detection::detect_loop;
 pub use memory::{MemoryDocument, discover_memory};
 pub use profiles::{AnthropicProfile, EnvContext, GeminiProfile, OpenAiProfile};
+pub use question_tools::{
+    ANTHROPIC_ASK_USER_QUESTION_TOOL, AgentQuestion, AgentQuestionAnswer,
+    AgentQuestionAnswerStatus, AgentQuestionRuntime, AgentToolRuntime,
+    OPENAI_REQUEST_USER_INPUT_TOOL, register_question_tools,
+};
 pub use read_before_write_sandbox::ReadBeforeWriteSandbox;
 pub use sandbox::{
     CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GrepOptions, Sandbox,

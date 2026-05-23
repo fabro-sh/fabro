@@ -15,7 +15,7 @@ import {
 import { QuestionType } from "@qltysh/fabro-api-client";
 import type {
   ApiQuestion,
-  ApiQuestionOption,
+  InterviewOption,
 } from "@qltysh/fabro-api-client";
 
 import {
@@ -270,7 +270,7 @@ function ChoiceBody({
   submitting,
   onSubmit,
 }: {
-  options: ApiQuestionOption[];
+  options: InterviewOption[];
   allowFreeform: boolean;
   submitting: boolean;
   onSubmit: (answer: SubmitInterviewAnswer) => Promise<void>;
@@ -287,7 +287,7 @@ function ChoiceBody({
               onClick={() => void onSubmit({ kind: "selected", option_key: option.key })}
               className={CHOICE_BUTTON}
             >
-              {displayLabel(option.label)}
+              <OptionLabel option={option} />
             </button>
           ))}
         </div>
@@ -314,7 +314,7 @@ function MultiSelectBody({
   submitting,
   onSubmit,
 }: {
-  options: ApiQuestionOption[];
+  options: InterviewOption[];
   submitting: boolean;
   onSubmit: (answer: SubmitInterviewAnswer) => Promise<void>;
 }) {
@@ -346,7 +346,7 @@ function MultiSelectBody({
               className={isSelected ? CHOICE_BUTTON_SELECTED : CHOICE_BUTTON}
             >
               {isSelected && <CheckIcon className="size-3.5" aria-hidden="true" />}
-              {displayLabel(option.label)}
+              <OptionLabel option={option} />
             </button>
           );
         })}
@@ -452,6 +452,19 @@ function FreeformBody({
         <kbd className="rounded bg-overlay px-1 font-mono text-[0.6875rem]">Enter</kbd> for a new line
       </p>
     </form>
+  );
+}
+
+function OptionLabel({ option }: { option: InterviewOption }) {
+  return (
+    <span className="text-left">
+      <span className="block">{displayLabel(option.label)}</span>
+      {option.description && (
+        <span className="mt-0.5 block text-xs/5 font-normal text-fg-muted">
+          {option.description}
+        </span>
+      )}
+    </span>
   );
 }
 

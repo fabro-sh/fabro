@@ -72,12 +72,16 @@ mod tests {
         let mut q = Question::new("Choose:", QuestionType::MultipleChoice);
         q.options = vec![
             InterviewOption {
-                key:   "A".to_string(),
-                label: "Alpha".to_string(),
+                key:         "A".to_string(),
+                label:       "Alpha".to_string(),
+                description: None,
+                preview:     None,
             },
             InterviewOption {
-                key:   "B".to_string(),
-                label: "Beta".to_string(),
+                key:         "B".to_string(),
+                label:       "Beta".to_string(),
+                description: None,
+                preview:     None,
             },
         ];
         let answer = interviewer.ask(q).await.answer;
@@ -85,8 +89,10 @@ mod tests {
         assert_eq!(
             answer.selected_option,
             Some(InterviewOption {
-                key:   "A".to_string(),
-                label: "Alpha".to_string(),
+                key:         "A".to_string(),
+                label:       "Alpha".to_string(),
+                description: None,
+                preview:     None,
             })
         );
     }

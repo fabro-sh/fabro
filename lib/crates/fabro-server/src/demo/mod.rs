@@ -1677,13 +1677,17 @@ mod runs {
                 stage:           "review".into(),
                 question_type:   QuestionType::YesNo,
                 options:         vec![
-                    ApiQuestionOption {
-                        key:   "yes".into(),
-                        label: "Yes".into(),
+                    InterviewOption {
+                        key:         "yes".into(),
+                        label:       "Yes".into(),
+                        description: None,
+                        preview:     None,
                     },
-                    ApiQuestionOption {
-                        key:   "no".into(),
-                        label: "No".into(),
+                    InterviewOption {
+                        key:         "no".into(),
+                        label:       "No".into(),
+                        description: None,
+                        preview:     None,
                     },
                 ],
                 allow_freeform:  false,
@@ -1696,13 +1700,17 @@ mod runs {
                 stage:           "migration".into(),
                 question_type:   QuestionType::MultipleChoice,
                 options:         vec![
-                    ApiQuestionOption {
-                        key:   "incremental".into(),
-                        label: "Incremental migration".into(),
+                    InterviewOption {
+                        key:         "incremental".into(),
+                        label:       "Incremental migration".into(),
+                        description: None,
+                        preview:     None,
                     },
-                    ApiQuestionOption {
-                        key:   "big_bang".into(),
-                        label: "Big-bang rewrite".into(),
+                    InterviewOption {
+                        key:         "big_bang".into(),
+                        label:       "Big-bang rewrite".into(),
+                        description: None,
+                        preview:     None,
                     },
                 ],
                 allow_freeform:  true,

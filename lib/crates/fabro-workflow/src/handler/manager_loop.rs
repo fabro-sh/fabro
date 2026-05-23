@@ -231,6 +231,7 @@ impl Handler for SubWorkflowHandler {
 
         let parent_run = Arc::clone(&services.run);
         let registry = Arc::clone(&services.registry);
+        let interviewer = Arc::clone(&services.interviewer);
         let base_env = services.base_env.clone();
         let github_token = services.github_token.clone();
         let inputs = services.inputs.clone();
@@ -269,6 +270,7 @@ impl Handler for SubWorkflowHandler {
                 engine:        Arc::new(EngineServices {
                     run: child_run,
                     registry,
+                    interviewer,
                     git_state: std::sync::RwLock::new(None),
                     base_env,
                     github_token,

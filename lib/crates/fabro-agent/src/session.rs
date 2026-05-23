@@ -32,6 +32,7 @@ use crate::history::History;
 use crate::loop_detection::detect_loop;
 use crate::memory::{BUDGET_BYTES, MemoryDocument, discover_memory};
 use crate::profiles::EnvContext;
+use crate::question_tools::AgentToolRuntime;
 use crate::sandbox::Sandbox;
 use crate::skills::{
     ExpandedInput, Skill, default_skill_dirs, discover_skills, expand_skill, make_use_skill_tool,
@@ -1119,6 +1120,15 @@ impl Session {
     }
 
     pub async fn process_input(&mut self, input: &str) -> Result<(), Error> {
+        self.process_input_with_runtime(input, AgentToolRuntime::default())
+            .await
+    }
+
+    pub async fn process_input_with_runtime(
+        &mut self,
+        input: &str,
+        agent_tool_runtime: AgentToolRuntime,
+    ) -> Result<(), Error> {
         if self.state == SessionState::Closed {
             return Err(Error::SessionClosed);
         }
@@ -1142,7 +1152,7 @@ impl Session {
         });
 
         // Process the initial input, then drain any followups
-        let mut result = self.run_single_input(input).await;
+        let mut result = self.run_single_input(input, &agent_tool_runtime).await;
 
         if result.is_ok() {
             loop {
@@ -1152,7 +1162,7 @@ impl Session {
                     .expect("followup queue lock poisoned")
                     .pop_front();
                 let Some(followup) = followup else { break };
-                result = self.run_single_input(&followup).await;
+                result = self.run_single_input(&followup, &agent_tool_runtime).await;
                 if result.is_err() {
                     break;
                 }
@@ -1172,7 +1182,11 @@ impl Session {
         result
     }
 
-    async fn run_single_input(&mut self, input: &str) -> Result<(), Error> {
+    async fn run_single_input(
+        &mut self,
+        input: &str,
+        agent_tool_runtime: &AgentToolRuntime,
+    ) -> Result<(), Error> {
         const STREAM_CONSUME_RETRIES: usize = 3;
 
         if self.state == SessionState::Closed {
@@ -1623,6 +1637,7 @@ impl Session {
                 &self.id,
                 &self.root_session_id,
                 self.tool_env_provider.as_ref(),
+                agent_tool_runtime,
             )
             .await;
             composite_watcher.abort();

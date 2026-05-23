@@ -24,7 +24,6 @@ index.ts
 models/agent-permissions.ts
 models/aggregate-billing-totals.ts
 models/aggregate-billing.ts
-models/api-question-option.ts
 models/api-question.ts
 models/append-event-response.ts
 models/approval-mode.ts
@@ -410,6 +409,10 @@ models/system-resources-response.ts
 models/system-run-counts.ts
 models/timeline-entry-response.ts
 models/tls-mode.ts
+models/todo-list-kind.ts
+models/todo-list-projection.ts
+models/todo-projection.ts
+models/todo-status.ts
 models/update-run-parent-request.ts
 models/update-run-request.ts
 models/user-response.ts

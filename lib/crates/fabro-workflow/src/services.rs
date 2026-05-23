@@ -9,6 +9,7 @@ use fabro_auth::CredentialSource;
 #[cfg(test)]
 use fabro_auth::ResolvedCredentials;
 use fabro_hooks::{HookContext, HookDecision, HookExecutionContext, HookRunner};
+use fabro_interview::Interviewer;
 use fabro_model::{Catalog, ProviderId};
 use fabro_types::{ManifestPath, RunId};
 use tokio_util::sync::CancellationToken;
@@ -16,6 +17,7 @@ use tokio_util::sync::CancellationToken;
 use crate::event::Emitter;
 use crate::github_token_source::GitHubTokenSource;
 use crate::handler::HandlerRegistry;
+use crate::interview_runtime::RunInterviewBlocker;
 use crate::run_metadata::{RunMetadataRuntime, RunMetadataWriterHandle};
 use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git::GitState;
@@ -91,19 +93,20 @@ pub struct FabroRunToolServices {
 /// does NOT count as cancellation.
 #[derive(Clone)]
 pub struct RunServices {
-    pub run_store:               RunStoreHandle,
-    pub emitter:                 Arc<Emitter>,
-    pub sandbox:                 Arc<dyn Sandbox>,
-    pub hook_runner:             Option<Arc<HookRunner>>,
-    pub locations:               RunLocations,
-    pub(crate) cancel_token:     CancellationToken,
-    pub provider_id:             ProviderId,
-    pub model:                   String,
-    pub llm_source:              Arc<dyn CredentialSource>,
-    pub catalog:                 Arc<Catalog>,
-    pub(crate) sandbox_git:      Arc<SandboxGitRuntime>,
-    pub(crate) metadata_runtime: Arc<RunMetadataRuntime>,
-    pub(crate) metadata_writer:  Option<RunMetadataWriterHandle>,
+    pub run_store:                RunStoreHandle,
+    pub emitter:                  Arc<Emitter>,
+    pub sandbox:                  Arc<dyn Sandbox>,
+    pub hook_runner:              Option<Arc<HookRunner>>,
+    pub locations:                RunLocations,
+    pub(crate) cancel_token:      CancellationToken,
+    pub provider_id:              ProviderId,
+    pub model:                    String,
+    pub llm_source:               Arc<dyn CredentialSource>,
+    pub catalog:                  Arc<Catalog>,
+    pub(crate) sandbox_git:       Arc<SandboxGitRuntime>,
+    pub(crate) metadata_runtime:  Arc<RunMetadataRuntime>,
+    pub(crate) metadata_writer:   Option<RunMetadataWriterHandle>,
+    pub(crate) interview_blocker: Arc<RunInterviewBlocker>,
 }
 
 impl RunServices {
@@ -137,6 +140,7 @@ impl RunServices {
             sandbox_git,
             metadata_runtime,
             metadata_writer,
+            interview_blocker: Arc::new(RunInterviewBlocker::new()),
         })
     }
 
@@ -224,6 +228,7 @@ impl RunServices {
 pub struct EngineServices {
     pub run:              Arc<RunServices>,
     pub registry:         Arc<HandlerRegistry>,
+    pub interviewer:      Arc<dyn Interviewer>,
     /// Git state for the current run. Set via `set_git_state` at the start of
     /// `execute` and read by parallel/fan-in handlers.
     pub(crate) git_state: std::sync::RwLock<Option<Arc<GitState>>>,
@@ -330,6 +335,7 @@ impl EngineServices {
                 None,
             ),
             registry:        Arc::new(HandlerRegistry::new(Box::new(start::StartHandler))),
+            interviewer:     Arc::new(fabro_interview::AutoApproveInterviewer::engine()),
             git_state:       std::sync::RwLock::new(None),
             base_env:        HashMap::new(),
             github_token:    None,

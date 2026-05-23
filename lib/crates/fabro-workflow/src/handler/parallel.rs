@@ -304,6 +304,7 @@ impl Handler for ParallelHandler {
         for setup in branch_setups {
             let parent_run = Arc::clone(&services.run);
             let registry = Arc::clone(&services.registry);
+            let interviewer = Arc::clone(&services.interviewer);
             let base_env = services.base_env.clone();
             let github_token = services.github_token.clone();
             let inputs = services.inputs.clone();
@@ -375,6 +376,7 @@ impl Handler for ParallelHandler {
                 let branch_services = EngineServices {
                     run: parent_run.with_sandbox(Arc::clone(&setup.sandbox)),
                     registry: Arc::clone(&registry),
+                    interviewer,
                     git_state: std::sync::RwLock::new(None),
                     base_env: base_env.clone(),
                     github_token: github_token.clone(),

@@ -153,6 +153,32 @@ fn lead_blocks(question: &Question, run_web_url: Option<&str>) -> Vec<Value> {
     blocks
 }
 
+fn option_descriptions_section(question: &Question) -> Option<Value> {
+    let rows = question
+        .options
+        .iter()
+        .filter_map(|option| {
+            let description = option.description.as_deref()?.trim();
+            if description.is_empty() {
+                return None;
+            }
+            Some(format!(
+                "• *{}* — {}",
+                escape_slack_controls(&option.label),
+                escape_slack_controls(description)
+            ))
+        })
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        return None;
+    }
+    Some(text_block(&truncate_to_limit(
+        &rows.join("\n"),
+        SLACK_SECTION_TEXT_LIMIT,
+        HEADER_TRUNCATION_SUFFIX,
+    )))
+}
+
 pub fn answered_blocks(question_text: &str, answer_text: &str) -> Vec<Value> {
     vec![text_block(&format!(
         "~{}~\n*Answer:* {}",
@@ -168,6 +194,9 @@ pub fn question_to_blocks(
     run_web_url: Option<&str>,
 ) -> Vec<Value> {
     let mut blocks = lead_blocks(question, run_web_url);
+    if let Some(descriptions) = option_descriptions_section(question) {
+        blocks.push(descriptions);
+    }
 
     match question.question_type {
         QuestionType::YesNo | QuestionType::Confirmation => {
@@ -212,10 +241,26 @@ pub fn question_to_blocks(
                 .options
                 .iter()
                 .map(|opt| {
-                    json!({
+                    let mut option = json!({
                         "text": { "type": "plain_text", "text": opt.label },
                         "value": opt.key
-                    })
+                    });
+                    if let Some(description) = opt
+                        .description
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                    {
+                        option["description"] = json!({
+                            "type": "plain_text",
+                            "text": truncate_to_limit(
+                                description,
+                                75,
+                                HEADER_TRUNCATION_SUFFIX
+                            )
+                        });
+                    }
+                    option
                 })
                 .collect();
             blocks.push(json!({
@@ -293,16 +338,22 @@ mod tests {
         let mut q = Question::new("Pick a language:", QuestionType::MultipleChoice);
         q.options = vec![
             InterviewOption {
-                key:   "rs".to_string(),
-                label: "Rust".to_string(),
+                key:         "rs".to_string(),
+                label:       "Rust".to_string(),
+                description: None,
+                preview:     None,
             },
             InterviewOption {
-                key:   "ts".to_string(),
-                label: "TypeScript".to_string(),
+                key:         "ts".to_string(),
+                label:       "TypeScript".to_string(),
+                description: None,
+                preview:     None,
             },
             InterviewOption {
-                key:   "py".to_string(),
-                label: "Python".to_string(),
+                key:         "py".to_string(),
+                label:       "Python".to_string(),
+                description: None,
+                preview:     None,
             },
         ];
         let blocks = question_to_blocks("run-1", "q-3", &q, None);
@@ -566,12 +617,16 @@ mod tests {
         let mut q = Question::new("Select features:", QuestionType::MultiSelect);
         q.options = vec![
             InterviewOption {
-                key:   "a".to_string(),
-                label: "Auth".to_string(),
+                key:         "a".to_string(),
+                label:       "Auth".to_string(),
+                description: None,
+                preview:     None,
             },
             InterviewOption {
-                key:   "b".to_string(),
-                label: "Billing".to_string(),
+                key:         "b".to_string(),
+                label:       "Billing".to_string(),
+                description: None,
+                preview:     None,
             },
         ];
         let blocks = question_to_blocks("run-1", "q-5", &q, None);
@@ -601,5 +656,23 @@ mod tests {
                 .unwrap()
                 .contains("\"qid\":\"q-5\"")
         );
+    }
+
+    #[test]
+    fn option_descriptions_are_rendered_and_preview_is_not_special_cased() {
+        let mut q = Question::new("Pick one:", QuestionType::MultipleChoice);
+        q.options = vec![InterviewOption {
+            key:         "ship".to_string(),
+            label:       "Ship".to_string(),
+            description: Some("Deploy <now>".to_string()),
+            preview:     Some("preview should not render".to_string()),
+        }];
+
+        let blocks_value: Value =
+            serde_json::to_value(question_to_blocks("run-1", "q-6", &q, None)).unwrap();
+        let text = blocks_value.to_string();
+
+        assert!(text.contains("Deploy &lt;now&gt;"));
+        assert!(!text.contains("preview should not render"));
     }
 }

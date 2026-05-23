@@ -426,8 +426,10 @@ fn api_question_to_question(question: &types::ApiQuestion) -> Question {
         .options
         .iter()
         .map(|option| InterviewOption {
-            key:   option.key.clone(),
-            label: option.label.clone(),
+            key:         option.key.clone(),
+            label:       option.label.clone(),
+            description: option.description.clone(),
+            preview:     option.preview.clone(),
         })
         .collect();
     converted.allow_freeform = question.allow_freeform;
@@ -966,8 +968,10 @@ mod tests {
     fn invalid_multiple_choice_without_freeform_is_user_correctable() {
         let mut question = Question::new("Pick one.", QuestionType::MultipleChoice);
         question.options = vec![InterviewOption {
-            key:   "A".to_string(),
-            label: "Approve".to_string(),
+            key:         "A".to_string(),
+            label:       "Approve".to_string(),
+            description: None,
+            preview:     None,
         }];
 
         let response = parse_choice_response(&question, PromptRead::Line("bogus".to_string()));
@@ -979,8 +983,10 @@ mod tests {
     fn unmatched_multiple_choice_with_freeform_remains_text() {
         let mut question = Question::new("Pick one.", QuestionType::MultipleChoice);
         question.options = vec![InterviewOption {
-            key:   "A".to_string(),
-            label: "Approve".to_string(),
+            key:         "A".to_string(),
+            label:       "Approve".to_string(),
+            description: None,
+            preview:     None,
         }];
         question.allow_freeform = true;
 
@@ -1000,12 +1006,16 @@ mod tests {
         let mut question = Question::new("Pick many.", QuestionType::MultiSelect);
         question.options = vec![
             InterviewOption {
-                key:   "A".to_string(),
-                label: "Approve".to_string(),
+                key:         "A".to_string(),
+                label:       "Approve".to_string(),
+                description: None,
+                preview:     None,
             },
             InterviewOption {
-                key:   "N".to_string(),
-                label: "Notify".to_string(),
+                key:         "N".to_string(),
+                label:       "Notify".to_string(),
+                description: None,
+                preview:     None,
             },
         ];
 

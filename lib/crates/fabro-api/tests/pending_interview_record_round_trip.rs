@@ -18,7 +18,12 @@ fn pending_interview_record_round_trips_populated_question() {
             "stage": "gate",
             "question_type": "multiple_choice",
             "options": [
-                { "key": "approve", "label": "Approve" },
+                {
+                    "key": "approve",
+                    "label": "Approve",
+                    "description": "Deploy now",
+                    "preview": "deploy --prod"
+                },
                 { "key": "reject", "label": "Reject" }
             ],
             "allow_freeform": true,

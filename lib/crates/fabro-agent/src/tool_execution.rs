@@ -7,6 +7,7 @@ use tracing::debug;
 
 use crate::config::{SessionOptions, ToolHookCallback, ToolHookDecision};
 use crate::event::{Emitter, SessionBoundEmitter};
+use crate::question_tools::{self, AgentToolRuntime, is_question_tool};
 use crate::sandbox::Sandbox;
 use crate::session::ToolEnvProvider;
 use crate::tool_registry::{AgentEventEmitter, RegisteredTool, ToolContext, ToolRegistry};
@@ -31,7 +32,25 @@ pub async fn execute_tool_calls(
     session_id: &str,
     root_session_id: &str,
     tool_env_provider: Option<&Arc<dyn ToolEnvProvider>>,
+    agent_tool_runtime: &AgentToolRuntime,
 ) -> Vec<ToolResult> {
+    if tool_calls.iter().any(|tc| is_question_tool(&tc.name)) {
+        return execute_question_tool_round(
+            tool_calls,
+            registry,
+            env,
+            tool_hooks,
+            cancel_token,
+            config,
+            emitter,
+            session_id,
+            root_session_id,
+            tool_env_provider,
+            agent_tool_runtime,
+        )
+        .await;
+    }
+
     if parallel && tool_calls.len() > 1 {
         execute_tool_calls_parallel(
             tool_calls,
@@ -44,6 +63,7 @@ pub async fn execute_tool_calls(
             session_id,
             root_session_id,
             tool_env_provider,
+            agent_tool_runtime,
         )
         .await
     } else {
@@ -58,6 +78,7 @@ pub async fn execute_tool_calls(
             session_id,
             root_session_id,
             tool_env_provider,
+            agent_tool_runtime,
         )
         .await
     }
@@ -78,6 +99,7 @@ async fn execute_tool_calls_sequential(
     session_id: &str,
     root_session_id: &str,
     tool_env_provider: Option<&Arc<dyn ToolEnvProvider>>,
+    agent_tool_runtime: &AgentToolRuntime,
 ) -> Vec<ToolResult> {
     let mut results = Vec::new();
     for tc in tool_calls {
@@ -86,7 +108,7 @@ async fn execute_tool_calls_sequential(
             continue;
         }
 
-        let result = execute_and_emit_one_tool(
+        let result = execute_and_emit_one_tool_with_runtime(
             tc,
             registry,
             env.clone(),
@@ -97,6 +119,7 @@ async fn execute_tool_calls_sequential(
             session_id,
             root_session_id,
             tool_env_provider,
+            agent_tool_runtime,
         )
         .await;
         results.push(result);
@@ -119,8 +142,10 @@ async fn execute_tool_calls_parallel(
     session_id: &str,
     root_session_id: &str,
     tool_env_provider: Option<&Arc<dyn ToolEnvProvider>>,
+    agent_tool_runtime: &AgentToolRuntime,
 ) -> Vec<ToolResult> {
     let tool_env_provider = tool_env_provider.cloned();
+    let agent_tool_runtime = agent_tool_runtime.clone();
     let futures: Vec<_> = tool_calls
         .iter()
         .map(|tc| {
@@ -133,6 +158,7 @@ async fn execute_tool_calls_parallel(
             let root_session_id = root_session_id.to_owned();
             let tool_hooks = tool_hooks.cloned();
             let tool_env_provider = tool_env_provider.clone();
+            let agent_tool_runtime = agent_tool_runtime.clone();
             let access_denial = config.tool_access_denial_reason(&tc.name);
             // Look up the tool before spawning since ToolRegistry is not Send.
             let registered_tool = if access_denial.is_none() {
@@ -153,6 +179,7 @@ async fn execute_tool_calls_parallel(
                     &session_id,
                     &root_session_id,
                     tool_env_provider.as_ref(),
+                    &agent_tool_runtime,
                 )
                 .await
             }
@@ -160,6 +187,99 @@ async fn execute_tool_calls_parallel(
         .collect();
 
     future::join_all(futures).await
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Question-tool round handling needs the same execution context as normal tool dispatch."
+)]
+async fn execute_question_tool_round(
+    tool_calls: &[ToolCall],
+    registry: &ToolRegistry,
+    env: Arc<dyn Sandbox>,
+    tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
+    cancel_token: &CancellationToken,
+    config: &SessionOptions,
+    emitter: &Emitter,
+    session_id: &str,
+    root_session_id: &str,
+    tool_env_provider: Option<&Arc<dyn ToolEnvProvider>>,
+    agent_tool_runtime: &AgentToolRuntime,
+) -> Vec<ToolResult> {
+    let first_question_index = tool_calls
+        .iter()
+        .position(|tc| is_question_tool(&tc.name))
+        .expect("question-tool round should contain a question tool");
+    let mut results = Vec::with_capacity(tool_calls.len());
+
+    for (index, tc) in tool_calls.iter().enumerate() {
+        if cancel_token.is_cancelled() {
+            results.push(ToolResult::error(tc.id.clone(), "Cancelled"));
+            continue;
+        }
+
+        if index == first_question_index {
+            results.push(
+                execute_and_emit_one_tool_with_runtime(
+                    tc,
+                    registry,
+                    env.clone(),
+                    tool_hooks,
+                    cancel_token.child_token(),
+                    config,
+                    emitter,
+                    session_id,
+                    root_session_id,
+                    tool_env_provider,
+                    agent_tool_runtime,
+                )
+                .await,
+            );
+        } else if is_question_tool(&tc.name) {
+            results.push(error_tool_result_with_events(
+                tc,
+                emitter,
+                session_id,
+                config,
+                "Only one human-question tool call may be used in a tool round. Combine all questions into a single questions[] batch and call the question tool once.",
+            ));
+        } else {
+            results.push(error_tool_result_with_events(
+                tc,
+                emitter,
+                session_id,
+                config,
+                "This tool call was not executed because human-question tools must run alone in a tool round. Retry non-question tools in a later round after the user answers.",
+            ));
+        }
+    }
+
+    results
+}
+
+fn error_tool_result_with_events(
+    tc: &ToolCall,
+    emitter: &Emitter,
+    session_id: &str,
+    config: &SessionOptions,
+    message: &str,
+) -> ToolResult {
+    emitter.emit(session_id.to_owned(), AgentEvent::ToolCallStarted {
+        tool_name:    tc.name.clone(),
+        tool_call_id: tc.id.clone(),
+        arguments:    tc.arguments.clone(),
+    });
+    let result = ToolResult::error(&tc.id, message);
+    emitter.emit(session_id.to_owned(), AgentEvent::ToolCallOutputDelta {
+        delta: result.content.to_string(),
+    });
+    emitter.emit(session_id.to_owned(), AgentEvent::ToolCallCompleted {
+        tool_name:    tc.name.clone(),
+        tool_call_id: tc.id.clone(),
+        output:       result.content.clone(),
+        is_error:     true,
+    });
+    truncate_tool_result(&result, &tc.name, config)
 }
 
 /// Execute a single tool call with event emission and output truncation.
@@ -179,6 +299,39 @@ pub async fn execute_and_emit_one_tool(
     root_session_id: &str,
     tool_env_provider: Option<&Arc<dyn ToolEnvProvider>>,
 ) -> ToolResult {
+    execute_and_emit_one_tool_with_runtime(
+        tc,
+        registry,
+        env,
+        tool_hooks,
+        cancel_token,
+        config,
+        emitter,
+        session_id,
+        root_session_id,
+        tool_env_provider,
+        &AgentToolRuntime::default(),
+    )
+    .await
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Single-tool execution needs the tool, runtime handles, and emission context."
+)]
+async fn execute_and_emit_one_tool_with_runtime(
+    tc: &ToolCall,
+    registry: &ToolRegistry,
+    env: Arc<dyn Sandbox>,
+    tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
+    cancel_token: CancellationToken,
+    config: &SessionOptions,
+    emitter: &Emitter,
+    session_id: &str,
+    root_session_id: &str,
+    tool_env_provider: Option<&Arc<dyn ToolEnvProvider>>,
+    agent_tool_runtime: &AgentToolRuntime,
+) -> ToolResult {
     let access_denial = config.tool_access_denial_reason(&tc.name);
     let registered_tool = if access_denial.is_none() {
         registry.get(&tc.name)
@@ -197,6 +350,7 @@ pub async fn execute_and_emit_one_tool(
         session_id,
         root_session_id,
         tool_env_provider,
+        agent_tool_runtime,
     )
     .await
 }
@@ -219,6 +373,7 @@ async fn execute_and_emit_one_tool_with_lookup(
     session_id: &str,
     root_session_id: &str,
     tool_env_provider: Option<&Arc<dyn ToolEnvProvider>>,
+    agent_tool_runtime: &AgentToolRuntime,
 ) -> ToolResult {
     emitter.emit(session_id.to_owned(), AgentEvent::ToolCallStarted {
         tool_name:    tc.name.clone(),
@@ -276,6 +431,7 @@ async fn execute_and_emit_one_tool_with_lookup(
         session_id,
         root_session_id,
         tool_env_provider,
+        agent_tool_runtime,
     )
     .await;
 
@@ -329,6 +485,7 @@ async fn execute_one_tool(
     session_id: &str,
     root_session_id: &str,
     tool_env_provider: Option<&Arc<dyn ToolEnvProvider>>,
+    agent_tool_runtime: &AgentToolRuntime,
 ) -> ToolResult {
     match registered_tool {
         Some(tool) => {
@@ -355,7 +512,10 @@ async fn execute_one_tool(
                 tool_call_id: Some(tc.id.clone()),
                 agent_event_emitter,
             };
-            match (tool.executor)(tc.arguments.clone(), ctx).await {
+            let execution = (tool.executor)(tc.arguments.clone(), ctx);
+            match question_tools::scope_agent_tool_runtime(agent_tool_runtime.clone(), execution)
+                .await
+            {
                 Ok(output) => ToolResult::success(&tc.id, serde_json::json!(output)),
                 Err(err) => ToolResult::error(&tc.id, err),
             }
@@ -418,9 +578,11 @@ pub fn validate_tool_args(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
+    use async_trait::async_trait;
     use fabro_llm::types::{ToolCall, ToolDefinition};
+    use fabro_model::AgentProfileKind;
 
     use super::*;
     use crate::config::{
@@ -428,6 +590,10 @@ mod tests {
     };
     use crate::event::Emitter;
     use crate::local_sandbox::LocalSandbox;
+    use crate::question_tools::{
+        AgentQuestion, AgentQuestionAnswer, AgentQuestionAnswerStatus, AgentQuestionRuntime,
+        AgentToolRuntime, register_question_tools,
+    };
     use crate::read_before_write_sandbox::ReadBeforeWriteSandbox;
     use crate::test_support::MutableMockSandbox;
     use crate::tool_registry::{RegisteredTool, ToolContext, ToolRegistry};
@@ -503,6 +669,125 @@ mod tests {
             raw_arguments:     None,
             provider_metadata: None,
         }
+    }
+
+    struct StubQuestionRuntime;
+
+    #[async_trait]
+    impl AgentQuestionRuntime for StubQuestionRuntime {
+        async fn ask_questions(
+            &self,
+            _tool_call_id: &str,
+            questions: Vec<AgentQuestion>,
+            _cancel_token: CancellationToken,
+        ) -> Result<Vec<AgentQuestionAnswer>, String> {
+            Ok(questions
+                .into_iter()
+                .map(|question| AgentQuestionAnswer {
+                    original_id:       question.original_id,
+                    original_question: question.original_question,
+                    answers:           vec!["Ship".to_string()],
+                    status:            AgentQuestionAnswerStatus::Answered,
+                })
+                .collect())
+        }
+    }
+
+    #[tokio::test]
+    async fn question_tool_round_rejects_non_question_peers_and_preserves_order() {
+        let mut registry = ToolRegistry::new();
+        register_question_tools(AgentProfileKind::OpenAi, &mut registry);
+        registry.register(make_echo_tool());
+        let tool_calls = vec![
+            make_tool_call(
+                "request_user_input",
+                "call_question",
+                serde_json::json!({
+                    "questions": [{
+                        "id": "q1",
+                        "header": "Decision",
+                        "question": "Ship it?",
+                        "options": [{ "label": "Ship" }]
+                    }]
+                }),
+            ),
+            make_tool_call("echo", "call_echo", serde_json::json!({"text": "hello"})),
+        ];
+        let runtime = AgentToolRuntime::with_question_runtime(Arc::new(StubQuestionRuntime));
+
+        let results = execute_tool_calls(
+            &tool_calls,
+            true,
+            &registry,
+            Arc::new(LocalSandbox::new(std::env::current_dir().unwrap())),
+            None,
+            &CancellationToken::new(),
+            &SessionOptions::default(),
+            &Emitter::new(),
+            "root",
+            "root",
+            None,
+            &runtime,
+        )
+        .await;
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].tool_call_id, "call_question");
+        assert!(!results[0].is_error);
+        assert_eq!(results[1].tool_call_id, "call_echo");
+        assert!(results[1].is_error);
+        assert!(
+            results[1]
+                .content
+                .as_str()
+                .unwrap()
+                .contains("human-question tools must run alone")
+        );
+    }
+
+    #[tokio::test]
+    async fn multiple_question_tool_calls_execute_only_first() {
+        let mut registry = ToolRegistry::new();
+        register_question_tools(AgentProfileKind::OpenAi, &mut registry);
+        let question_args = serde_json::json!({
+            "questions": [{
+                "id": "q1",
+                "header": "Decision",
+                "question": "Ship it?",
+                "options": [{ "label": "Ship" }]
+            }]
+        });
+        let tool_calls = vec![
+            make_tool_call("request_user_input", "call_first", question_args.clone()),
+            make_tool_call("request_user_input", "call_second", question_args),
+        ];
+        let runtime = AgentToolRuntime::with_question_runtime(Arc::new(StubQuestionRuntime));
+
+        let results = execute_tool_calls(
+            &tool_calls,
+            true,
+            &registry,
+            Arc::new(LocalSandbox::new(std::env::current_dir().unwrap())),
+            None,
+            &CancellationToken::new(),
+            &SessionOptions::default(),
+            &Emitter::new(),
+            "root",
+            "root",
+            None,
+            &runtime,
+        )
+        .await;
+
+        assert!(!results[0].is_error);
+        assert!(results[1].is_error);
+        assert!(
+            results[1]
+                .content
+                .as_str()
+                .unwrap()
+                .contains("Combine all questions into a single questions[] batch")
+        );
     }
 
     struct MockHookCallback {

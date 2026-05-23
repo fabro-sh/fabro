@@ -1,13 +1,12 @@
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
 use fabro_interview::{Answer, AnswerValue, Interviewer, Question, ask_with_timeout};
-use fabro_types::{BlockedReason, InterviewOption, Principal, QuestionType, SystemActorKind};
+use fabro_types::{InterviewOption, Principal, QuestionType, SystemActorKind};
 use ulid::Ulid;
 
 use super::{EngineServices, Handler, NodeTimeoutPolicy};
@@ -112,8 +111,10 @@ fn build_human_gate_question(
     question.options = choices
         .iter()
         .map(|choice| InterviewOption {
-            key:   choice.key.clone(),
-            label: choice.label.clone(),
+            key:         choice.key.clone(),
+            label:       choice.label.clone(),
+            description: None,
+            preview:     None,
         })
         .collect();
     question.allow_freeform = freeform_target.is_some();
@@ -138,61 +139,10 @@ fn build_human_gate_question(
     })
 }
 
-/// Refcount of open interviews for this handler's run. Emits `run.blocked`
-/// exactly once when the count transitions 0→1, and `run.unblocked` exactly
-/// once when it transitions back to 0. Internal to `HumanHandler`; shared
-/// across concurrent `execute` calls fanned out by `ParallelHandler`.
-struct BlockedStateTracker {
-    unresolved_interviews: AtomicUsize,
-}
-
-impl BlockedStateTracker {
-    fn new() -> Self {
-        Self {
-            unresolved_interviews: AtomicUsize::new(0),
-        }
-    }
-
-    fn interview_started(&self, emitter: &Emitter) {
-        if self.unresolved_interviews.fetch_add(1, Ordering::AcqRel) == 0 {
-            emitter.emit(&Event::RunBlocked {
-                blocked_reason: BlockedReason::HumanInputRequired,
-            });
-        }
-    }
-
-    fn interview_resolved(&self, emitter: &Emitter) {
-        // Guard against unmatched resolves (e.g., tests that over-resolve) so
-        // the counter cannot underflow. `compare_exchange_weak` loops until we
-        // either observe zero (and bail) or successfully decrement.
-        let mut current = self.unresolved_interviews.load(Ordering::Acquire);
-        loop {
-            if current == 0 {
-                return;
-            }
-            match self.unresolved_interviews.compare_exchange_weak(
-                current,
-                current - 1,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => {
-                    if current == 1 {
-                        emitter.emit(&Event::RunUnblocked);
-                    }
-                    return;
-                }
-                Err(observed) => current = observed,
-            }
-        }
-    }
-}
-
 /// Blocks until a human selects an option derived from outgoing edges.
 pub struct HumanHandler {
     interviewer: Arc<dyn Interviewer>,
     emitter:     Option<Arc<Emitter>>,
-    tracker:     BlockedStateTracker,
 }
 
 impl HumanHandler {
@@ -200,7 +150,6 @@ impl HumanHandler {
         Self {
             interviewer,
             emitter: None,
-            tracker: BlockedStateTracker::new(),
         }
     }
 
@@ -295,8 +244,10 @@ impl Handler for HumanHandler {
                     .options
                     .iter()
                     .map(|option| InterviewOption {
-                        key:   option.key.clone(),
-                        label: option.label.clone(),
+                        key:         option.key.clone(),
+                        label:       option.label.clone(),
+                        description: option.description.clone(),
+                        preview:     option.preview.clone(),
                     })
                     .collect(),
                 allow_freeform:  question.allow_freeform,
@@ -305,8 +256,10 @@ impl Handler for HumanHandler {
             },
             &stage_scope,
         );
-        self.tracker
-            .interview_started(services.run.emitter.as_ref());
+        let interview_guard = services
+            .run
+            .interview_blocker
+            .block(Arc::clone(&services.run.emitter));
         let interview_start = Instant::now();
         let answer_submission = ask_with_timeout(self.interviewer.as_ref(), question).await;
         let answer_actor = answer_submission.actor.clone();
@@ -327,8 +280,7 @@ impl Handler for HumanHandler {
                 },
                 &stage_scope,
             );
-            self.tracker
-                .interview_resolved(services.run.emitter.as_ref());
+            interview_guard.resolve();
             let default_choice = node
                 .attrs
                 .get("human.default_choice")
@@ -371,8 +323,7 @@ impl Handler for HumanHandler {
                 },
                 &stage_scope,
             );
-            self.tracker
-                .interview_resolved(services.run.emitter.as_ref());
+            interview_guard.resolve();
             return Ok(unanswered_human_gate(
                 "human interaction interrupted before an answer was provided",
             ));
@@ -389,8 +340,7 @@ impl Handler for HumanHandler {
                 },
                 &stage_scope,
             );
-            self.tracker
-                .interview_resolved(services.run.emitter.as_ref());
+            interview_guard.resolve();
             return Ok(unanswered_human_gate("human skipped interaction"));
         }
 
@@ -406,8 +356,7 @@ impl Handler for HumanHandler {
             },
             &stage_scope,
         );
-        self.tracker
-            .interview_resolved(services.run.emitter.as_ref());
+        interview_guard.resolve();
 
         // Try fixed-choice match
         if let Some(selected) = find_choice_match(&answer, &choices) {
@@ -894,8 +843,10 @@ mod tests {
     async fn wait_human_emits_blocked_then_unblocked_around_interview() {
         let interviewer = Arc::new(CallbackInterviewer::new(|_| {
             Answer::selected("A", InterviewOption {
-                key:   "A".to_string(),
-                label: "Approve".to_string(),
+                key:         "A".to_string(),
+                label:       "Approve".to_string(),
+                description: None,
+                preview:     None,
             })
         }));
         let handler = HumanHandler::new(interviewer);
@@ -1128,9 +1079,10 @@ mod tests {
 
     #[test]
     fn blocked_state_tracker_emits_once_across_parallel_interview_races() {
-        let tracker = BlockedStateTracker::new();
+        let blocker = Arc::new(crate::interview_runtime::RunInterviewBlocker::new());
         let emitter = Arc::new(Emitter::new(fabro_types::fixtures::RUN_1));
         let event_names = Arc::new(Mutex::new(Vec::new()));
+        let guards = Arc::new(Mutex::new(Vec::new()));
 
         emitter.on_event({
             let event_names = Arc::clone(&event_names);
@@ -1148,21 +1100,24 @@ mod tests {
 
         std::thread::scope(|scope| {
             for _ in 0..8 {
-                let tracker = &tracker;
+                let blocker = Arc::clone(&blocker);
                 let emitter = Arc::clone(&emitter);
-                scope.spawn(move || tracker.interview_started(emitter.as_ref()));
+                let guards = Arc::clone(&guards);
+                scope.spawn(move || {
+                    guards.lock().unwrap().push(blocker.block(emitter));
+                });
             }
         });
 
         std::thread::scope(|scope| {
             for _ in 0..8 {
-                let tracker = &tracker;
-                let emitter = Arc::clone(&emitter);
-                scope.spawn(move || tracker.interview_resolved(emitter.as_ref()));
+                let guards = Arc::clone(&guards);
+                scope.spawn(move || {
+                    let guard = guards.lock().unwrap().pop().unwrap();
+                    guard.resolve();
+                });
             }
         });
-
-        tracker.interview_resolved(emitter.as_ref());
 
         assert_eq!(event_names.lock().unwrap().as_slice(), [
             "run.blocked",

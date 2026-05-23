@@ -54,7 +54,12 @@ fn run_projection_round_trips_populated_projection() {
                     "stage": "gate",
                     "question_type": "multiple_choice",
                     "options": [
-                        { "key": "approve", "label": "Approve" },
+                        {
+                            "key": "approve",
+                            "label": "Approve",
+                            "description": "Deploy now",
+                            "preview": "deploy --prod"
+                        },
                         { "key": "reject", "label": "Reject" }
                     ],
                     "allow_freeform": true,

@@ -4,10 +4,14 @@ use serde_json::Value;
 use super::ExecOutputTail;
 use crate::{CommandTermination, PullRequestLink};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct InterviewOption {
-    pub key:   String,
-    pub label: String,
+    pub key:         String,
+    pub label:       String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview:     Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

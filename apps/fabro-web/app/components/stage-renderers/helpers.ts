@@ -5,6 +5,8 @@ import { getArray, getNumber, getObject, getString, type UnknownRecord } from ".
 export interface InterviewOption {
   key: string;
   label: string;
+  description?: string | null;
+  preview?: string | null;
 }
 
 export interface HumanQuestion {
@@ -54,7 +56,14 @@ function parseInterviewOptions(value: unknown): InterviewOption[] {
     const record = item as UnknownRecord;
     const key = getString(record, "key");
     const label = getString(record, "label");
-    if (key && label) out.push({ key, label });
+    if (key && label) {
+      const option: InterviewOption = { key, label };
+      const description = getString(record, "description");
+      const preview = getString(record, "preview");
+      if (description !== null) option.description = description;
+      if (preview !== null) option.preview = preview;
+      out.push(option);
+    }
   }
   return out;
 }

@@ -18,6 +18,20 @@
  * Option stored with an interview question in the event log.
  */
 export interface InterviewOption {
+    /**
+     * Machine-readable option key used when submitting an answer.
+     */
     'key': string;
+    /**
+     * Human-readable label displayed to the user.
+     */
     'label': string;
+    /**
+     * Optional untrusted model-authored option description for display.
+     */
+    'description'?: string | null;
+    /**
+     * Optional untrusted model-authored option preview captured for clients.
+     */
+    'preview'?: string | null;
 }

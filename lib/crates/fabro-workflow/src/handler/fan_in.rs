@@ -269,6 +269,7 @@ async fn llm_evaluate(
             sandbox,
             tool_hooks: None,
             cancel_token,
+            agent_tool_runtime: fabro_agent::AgentToolRuntime::default(),
         })
         .await
     {

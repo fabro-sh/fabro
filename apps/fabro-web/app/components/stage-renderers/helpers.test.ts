@@ -79,6 +79,36 @@ describe("parseHumanInterviewPairs", () => {
     expect(pairs[0].resolution).toBeNull();
   });
 
+  test("preserves option description and preview metadata from started events", () => {
+    const events: EventEnvelope[] = [
+      envelope(1, {
+        event: "interview.started",
+        properties: {
+          question_id: "q-1",
+          question: "Pick a path",
+          question_type: "multiple_choice",
+          options: [
+            {
+              key: "ship",
+              label: "Ship",
+              description: "Deploy the current patch",
+              preview: "diff preview",
+            },
+          ],
+        },
+      }),
+    ];
+
+    const pairs = parseHumanInterviewPairs(events);
+
+    expect(pairs[0].question.options[0]).toEqual({
+      key: "ship",
+      label: "Ship",
+      description: "Deploy the current patch",
+      preview: "diff preview",
+    });
+  });
+
   test("captures timeout and interrupted resolutions", () => {
     const events: EventEnvelope[] = [
       envelope(1, {

@@ -1757,12 +1757,16 @@ mod tests {
                     question_type:   "multiple_choice".to_string(),
                     options:         vec![
                         InterviewOption {
-                            key:   "approve".to_string(),
-                            label: "Approve".to_string(),
+                            key:         "approve".to_string(),
+                            label:       "Approve".to_string(),
+                            description: Some("Ship it".to_string()),
+                            preview:     Some("deploy --prod".to_string()),
                         },
                         InterviewOption {
-                            key:   "revise".to_string(),
-                            label: "Revise".to_string(),
+                            key:         "revise".to_string(),
+                            label:       "Revise".to_string(),
+                            description: None,
+                            preview:     None,
                         },
                     ],
                     allow_freeform:  true,
@@ -1781,6 +1785,14 @@ mod tests {
         assert_eq!(pending.question.stage, "gate");
         assert_eq!(pending.question.question_type, QuestionType::MultipleChoice);
         assert_eq!(pending.question.options.len(), 2);
+        assert_eq!(
+            pending.question.options[0].description.as_deref(),
+            Some("Ship it")
+        );
+        assert_eq!(
+            pending.question.options[0].preview.as_deref(),
+            Some("deploy --prod")
+        );
         assert!(pending.question.allow_freeform);
         assert_eq!(pending.question.timeout_seconds, Some(30.0));
         assert_eq!(

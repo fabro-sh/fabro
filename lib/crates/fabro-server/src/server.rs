@@ -22,10 +22,10 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use bytes::Bytes;
 pub use fabro_api::types::{
-    AggregateBilling, AggregateBillingTotals, ApiQuestion, ApiQuestionOption, AppendEventResponse,
-    ArtifactEntry, ArtifactListResponse, BillingByModel, BillingStageRef,
-    CloseRunPullRequestResponse, CompletionContentPart, CompletionMessage, CompletionMessageRole,
-    CompletionResponse, CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
+    AggregateBilling, AggregateBillingTotals, ApiQuestion, AppendEventResponse, ArtifactEntry,
+    ArtifactListResponse, BillingByModel, BillingStageRef, CloseRunPullRequestResponse,
+    CompletionContentPart, CompletionMessage, CompletionMessageRole, CompletionResponse,
+    CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
     CreateRunPullRequestRequest, CreateSecretRequest, DeleteRunResponse, DeleteRunSandbox,
     DeleteSecretRequest, DiskUsageResponse, DiskUsageRunRow, DiskUsageSummaryRow, ForkRequest,
     ForkResponse, LinkRunPullRequestRequest, MergeRunPullRequestRequest,
@@ -2894,14 +2894,7 @@ fn api_question_from_interview_record(question: &InterviewQuestionRecord) -> Api
         text:            question.text.clone(),
         stage:           question.stage.clone(),
         question_type:   question.question_type,
-        options:         question
-            .options
-            .iter()
-            .map(|option| ApiQuestionOption {
-                key:   option.key.clone(),
-                label: option.label.clone(),
-            })
-            .collect(),
+        options:         question.options.clone(),
         allow_freeform:  question.allow_freeform,
         timeout_seconds: question.timeout_seconds,
         context_display: question.context_display.clone(),

@@ -13,7 +13,9 @@ fn interview_option_reuses_canonical_type() {
 fn interview_option_round_trips_representative_json() {
     let value = json!({
         "key": "approve",
-        "label": "Approve"
+        "label": "Approve",
+        "description": "Approve the proposed changes.",
+        "preview": "diff --stat output"
     });
 
     let option: InterviewOption = serde_json::from_value(value.clone()).unwrap();

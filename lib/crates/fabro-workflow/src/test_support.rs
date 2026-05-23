@@ -7,6 +7,7 @@ use std::time::Duration;
 use fabro_agent::Sandbox;
 use fabro_auth::{CredentialSource, EnvCredentialSource};
 use fabro_graphviz::graph::Graph as GvGraph;
+use fabro_interview::AutoApproveInterviewer;
 use fabro_model::Catalog;
 use fabro_store::{ArtifactStore, Database, RunProjection};
 use object_store::local::LocalFileSystem;
@@ -175,6 +176,7 @@ async fn initialized(
                     None,
                 ),
                 registry:        Arc::new(registry),
+                interviewer:     Arc::new(AutoApproveInterviewer::engine()),
                 git_state:       std::sync::RwLock::new(None),
                 base_env:        options.env,
                 github_token:    None,

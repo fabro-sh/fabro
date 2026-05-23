@@ -7,7 +7,7 @@ use fabro_agent::tool_registry::{RegisteredTool, ToolContext, ToolRegistry};
 use fabro_agent::{
     AgentEvent, AgentProfile, AnthropicProfile, CompletionCoordinator, GeminiProfile,
     Message as AgentMessage, OpenAiProfile, Sandbox, Session, SessionOptions, StaticEnvProvider,
-    ToolEnvProvider,
+    ToolEnvProvider, register_question_tools,
 };
 use fabro_auth::{CredentialSource, EnvCredentialSource};
 use fabro_graphviz::graph::{AttrValue, Node};
@@ -733,6 +733,7 @@ impl AgentApiBackend {
         });
 
         profile.register_subagent_tools(manager, factory, 0);
+        register_question_tools(provider.profile_kind, profile.tool_registry_mut());
         if let Some(services) = fabro_run_tools {
             register_fabro_run_tools(profile.tool_registry_mut(), &services);
         }
@@ -971,6 +972,7 @@ impl CodergenBackend for AgentApiBackend {
         let sandbox = request.sandbox;
         let tool_hooks = request.tool_hooks;
         let cancel_token = request.cancel_token;
+        let agent_tool_runtime = request.agent_tool_runtime;
 
         let fidelity = context.fidelity();
         let reuse_key = if fidelity == Fidelity::Full {
@@ -1081,7 +1083,9 @@ impl CodergenBackend for AgentApiBackend {
                         return Err(err);
                     }
                 }
-                session.process_input(prompt).await
+                session
+                    .process_input_with_runtime(prompt, agent_tool_runtime.clone())
+                    .await
             }
             Err(err) => Err(err),
         };
@@ -1205,7 +1209,10 @@ impl CodergenBackend for AgentApiBackend {
                                 return Err(err);
                             }
                         }
-                        match session.process_input(prompt).await {
+                        match session
+                            .process_input_with_runtime(prompt, agent_tool_runtime.clone())
+                            .await
+                        {
                             Ok(()) => {
                                 succeeded = true;
                                 break;

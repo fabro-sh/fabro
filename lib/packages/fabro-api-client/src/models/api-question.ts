@@ -15,7 +15,7 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { ApiQuestionOption } from './api-question-option';
+import type { InterviewOption } from './interview-option';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { QuestionType } from './question-type';
@@ -40,7 +40,7 @@ export interface ApiQuestion {
     /**
      * Available options for selection-based questions. Empty for freeform questions.
      */
-    'options': Array<ApiQuestionOption>;
+    'options': Array<InterviewOption>;
     /**
      * Whether the user may provide freeform text in addition to selecting options.
      */
