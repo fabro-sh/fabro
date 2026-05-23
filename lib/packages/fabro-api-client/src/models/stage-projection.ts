@@ -27,6 +27,9 @@ import type { CommandTermination } from './command-termination';
 import type { StageCompletion } from './stage-completion';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { StageModelUsage } from './stage-model-usage';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { StageState } from './stage-state';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -43,7 +46,7 @@ export interface StageProjection {
     /**
      * Provider and model metadata recorded for the stage attempt.
      */
-    'provider_used'?: object | null;
+    'provider_used'?: StageModelUsage | null;
     'diff'?: string | null;
     /**
      * Command and environment recorded when the stage script ran.

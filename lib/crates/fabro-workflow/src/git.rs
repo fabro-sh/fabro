@@ -478,12 +478,14 @@ mod tests {
         .await
         .unwrap();
         append_event(&run, &fixtures::RUN_1, &Event::Prompt {
-            stage:    "work".into(),
-            visit:    2,
-            text:     "hello".into(),
-            mode:     Some("prompt".into()),
-            provider: Some("openai".into()),
-            model:    Some("gpt-5.4".into()),
+            stage:            "work".into(),
+            visit:            2,
+            text:             "hello".into(),
+            mode:             Some("prompt".into()),
+            provider:         Some("openai".into()),
+            model:            Some("gpt-5.4".into()),
+            reasoning_effort: None,
+            speed:            None,
         })
         .await
         .unwrap();

@@ -7,6 +7,7 @@ use fabro_graphviz::graph::{Graph, Node};
 use super::agent::{
     CodergenBackend, CodergenResult, OneShotRequest, extract_status_fields, truncate,
 };
+use super::llm::api::EffectiveRequestControls;
 use super::llm::routing;
 use super::{EngineServices, Handler};
 use crate::context::{Context, WorkflowContext, keys};
@@ -109,16 +110,26 @@ impl Handler for PromptHandler {
             .provider()
             .map(String::from)
             .or_else(|| Some(services.run.provider_id.to_string()));
-        let prompt_model = node.model().map(String::from);
+        let prompt_model = node
+            .model()
+            .map(String::from)
+            .or_else(|| Some(services.run.model.clone()));
         let stage_scope = StageScope::for_handler(context, &node.id);
+        let request_controls = if let Some(backend) = &self.backend {
+            backend.effective_request_controls(node)?
+        } else {
+            EffectiveRequestControls::default()
+        };
         services.run.emitter.emit_scoped(
             &Event::Prompt {
-                stage:    node.id.clone(),
-                visit:    stage_scope.visit,
-                text:     prompt.clone(),
-                mode:     Some("prompt".to_string()),
-                provider: prompt_provider.clone(),
-                model:    prompt_model.clone(),
+                stage:            node.id.clone(),
+                visit:            stage_scope.visit,
+                text:             prompt.clone(),
+                mode:             Some("prompt".to_string()),
+                provider:         prompt_provider.clone(),
+                model:            prompt_model.clone(),
+                reasoning_effort: request_controls.reasoning_effort,
+                speed:            request_controls.speed,
             },
             &stage_scope,
         );
@@ -212,6 +223,7 @@ mod tests {
     use std::time::Duration;
 
     use fabro_graphviz::graph::AttrValue;
+    use fabro_model::{ReasoningEffort, Speed};
     use fabro_store::{Database, RunDatabase, StageId};
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
@@ -337,6 +349,16 @@ mod tests {
                     last_file_touched: None,
                 })
             }
+
+            fn effective_request_controls(
+                &self,
+                _node: &Node,
+            ) -> Result<crate::handler::llm::api::EffectiveRequestControls, Error> {
+                Ok(crate::handler::llm::api::EffectiveRequestControls {
+                    reasoning_effort: Some(ReasoningEffort::High),
+                    speed:            Some(Speed::Fast),
+                })
+            }
         }
 
         let handler = PromptHandler::new(Some(Box::new(OneShotBackend)));
@@ -384,6 +406,16 @@ mod tests {
                     last_file_touched: None,
                 })
             }
+
+            fn effective_request_controls(
+                &self,
+                _node: &Node,
+            ) -> Result<crate::handler::llm::api::EffectiveRequestControls, Error> {
+                Ok(crate::handler::llm::api::EffectiveRequestControls {
+                    reasoning_effort: Some(ReasoningEffort::High),
+                    speed:            Some(Speed::Fast),
+                })
+            }
         }
 
         let handler = PromptHandler::new(Some(Box::new(ProviderOneShotBackend)));
@@ -405,7 +437,10 @@ mod tests {
 
         let state = run_store.state().await.unwrap();
         let node_state = state.stage(&StageId::new("classify", 1)).unwrap();
-        assert_eq!(node_state.provider_used.as_ref().unwrap()["mode"], "prompt");
+        let provider_used = node_state.provider_used.as_ref().unwrap();
+        assert_eq!(provider_used.mode, "prompt");
+        assert_eq!(provider_used.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(provider_used.speed, Some(Speed::Fast));
     }
 
     struct OneShotCapturingBackend {

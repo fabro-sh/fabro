@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroU32;
 
 use chrono::{DateTime, Utc};
+use fabro_model::{ReasoningEffort, Speed};
 
 use crate::{
     BilledTokenCounts, Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition,
@@ -55,13 +56,27 @@ pub struct CheckpointRecord {
     pub diff:       RunDiff,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct StageModelUsage {
+    #[serde(default)]
+    pub mode:             String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider:         Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model:            Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<ReasoningEffort>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed:            Option<Speed>,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StageProjection {
     pub first_event_seq:   NonZeroU32,
     pub prompt:            Option<String>,
     pub response:          Option<String>,
     pub completion:        Option<StageCompletion>,
-    pub provider_used:     Option<serde_json::Value>,
+    pub provider_used:     Option<StageModelUsage>,
     pub diff:              Option<String>,
     pub script_invocation: Option<serde_json::Value>,
     pub script_timing:     Option<serde_json::Value>,

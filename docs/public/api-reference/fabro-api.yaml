@@ -5806,6 +5806,16 @@ components:
         - levels
         - none
 
+    ReasoningEffort:
+      description: Native reasoning-effort level requested for an LLM call.
+      type: string
+      enum:
+        - low
+        - medium
+        - high
+        - xhigh
+        - max
+
     ModelFeatures:
       description: Capability flags for a model.
       type: object
@@ -7702,7 +7712,9 @@ components:
             - $ref: "#/components/schemas/StageCompletion"
             - type: "null"
         provider_used:
-          type: ["object", "null"]
+          oneOf:
+            - $ref: "#/components/schemas/StageModelUsage"
+            - type: "null"
           description: Provider and model metadata recorded for the stage attempt.
         diff:
           type: ["string", "null"]
@@ -7748,6 +7760,31 @@ components:
         state:
           $ref: "#/components/schemas/StageState"
           description: Lifecycle state of the stage projection.
+
+    StageModelUsage:
+      description: Provider, model, and request-control metadata recorded for a stage attempt.
+      type: object
+      required:
+        - mode
+      properties:
+        mode:
+          type: string
+          description: Stage model usage source, such as agent, prompt, or acp.
+          example: agent
+        provider:
+          type: ["string", "null"]
+          example: openai
+        model:
+          type: ["string", "null"]
+          example: gpt-5.5
+        reasoning_effort:
+          oneOf:
+            - $ref: "#/components/schemas/ReasoningEffort"
+            - type: "null"
+        speed:
+          oneOf:
+            - $ref: "#/components/schemas/BillingSpeed"
+            - type: "null"
 
     InterviewOption:
       description: Option stored with an interview question in the event log.
@@ -9189,6 +9226,11 @@ components:
           minimum: 1
           description: 1-based visit count; bumped each time the workflow re-enters this node.
           example: 2
+        provider_used:
+          oneOf:
+            - $ref: "#/components/schemas/StageModelUsage"
+            - type: "null"
+          description: Provider, model, and request controls recorded for the latest stage attempt.
         started_at:
           type: ["string", "null"]
           format: date-time

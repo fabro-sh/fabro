@@ -16,7 +16,7 @@ mod generated {
 pub mod types {
     pub use fabro_model::{
         Model, ModelCosts, ModelFeatures, ModelLimits, ModelRef as BillingModelRef, ModelTestMode,
-        Provider, ReasoningEffortFeature, Speed as BillingSpeed,
+        Provider, ReasoningEffort, ReasoningEffortFeature, Speed as BillingSpeed,
     };
     pub use fabro_types::settings::ServerNamespace;
     pub use fabro_types::settings::server::{
@@ -47,8 +47,8 @@ pub mod types {
         SandboxService, SandboxServiceListResponse, SandboxState, SandboxTimestamps,
         SecretMetadata, SecretType, ServerSettings, SessionDetail, SessionId, SessionMessage,
         SessionRecord, SessionStatus, SessionSummary, SessionTurn, StageCompletion, StageHandler,
-        StageOutcome, StageProjection, StageState, SystemActorKind, TurnId, UserPrincipal,
-        WorkflowSettings,
+        StageModelUsage, StageOutcome, StageProjection, StageState, SystemActorKind, TurnId,
+        UserPrincipal, WorkflowSettings,
     };
 
     pub use crate::generated::types::*;

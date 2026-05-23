@@ -21,7 +21,13 @@ fn stage_projection_round_trips_representative_json() {
             "failure_reason": null,
             "timestamp": "2026-04-29T12:34:56Z"
         },
-        "provider_used": { "provider": "openai", "model": "gpt-5.2" },
+        "provider_used": {
+            "mode": "prompt",
+            "provider": "openai",
+            "model": "gpt-5.2",
+            "reasoning_effort": "high",
+            "speed": "fast"
+        },
         "diff": "diff --git a/file b/file",
         "script_invocation": { "command": "cargo test" },
         "script_timing": { "duration_ms": 42 },

@@ -458,6 +458,16 @@ impl Session {
         self.provider_profile.model()
     }
 
+    #[must_use]
+    pub fn reasoning_effort(&self) -> Option<ReasoningEffort> {
+        self.config.reasoning_effort
+    }
+
+    #[must_use]
+    pub fn speed(&self) -> Option<Speed> {
+        self.config.speed
+    }
+
     /// Initialize session by discovering project docs and capturing environment
     /// context. Call before `process_input`.
     ///

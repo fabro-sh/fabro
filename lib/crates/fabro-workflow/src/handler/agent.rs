@@ -7,6 +7,7 @@ use fabro_graphviz::graph::{Graph, Node};
 use fabro_types::RunId;
 use tokio_util::sync::CancellationToken;
 
+use super::llm::api::EffectiveRequestControls;
 use super::{EngineServices, Handler, NodeTimeoutPolicy};
 use crate::context::{Context, WorkflowContext, keys};
 use crate::error::Error;
@@ -61,6 +62,10 @@ pub trait CodergenBackend: Send + Sync {
     }
 
     async fn shutdown(&self, _emitter: &Arc<Emitter>) {}
+
+    fn effective_request_controls(&self, _node: &Node) -> Result<EffectiveRequestControls, Error> {
+        Ok(EffectiveRequestControls::default())
+    }
 
     fn node_timeout_policy(&self, _node: &Node) -> NodeTimeoutPolicy {
         NodeTimeoutPolicy::ExecutorEnforced
@@ -256,16 +261,26 @@ impl Handler for AgentHandler {
             .provider()
             .map(String::from)
             .or_else(|| Some(services.run.provider_id.to_string()));
-        let prompt_model = node.model().map(String::from);
+        let prompt_model = node
+            .model()
+            .map(String::from)
+            .or_else(|| Some(services.run.model.clone()));
         let stage_scope = StageScope::for_handler(context, &node.id);
+        let request_controls = if let Some(backend) = &self.backend {
+            backend.effective_request_controls(node)?
+        } else {
+            EffectiveRequestControls::default()
+        };
         services.run.emitter.emit_scoped(
             &Event::Prompt {
-                stage:    node.id.clone(),
-                visit:    stage_scope.visit,
-                text:     prompt.clone(),
-                mode:     Some("agent".to_string()),
-                provider: prompt_provider,
-                model:    prompt_model,
+                stage:            node.id.clone(),
+                visit:            stage_scope.visit,
+                text:             prompt.clone(),
+                mode:             Some("agent".to_string()),
+                provider:         prompt_provider,
+                model:            prompt_model,
+                reasoning_effort: request_controls.reasoning_effort,
+                speed:            request_controls.speed,
             },
             &stage_scope,
         );
@@ -420,6 +435,7 @@ mod tests {
     use std::time::Duration;
 
     use fabro_graphviz::graph::AttrValue;
+    use fabro_model::{ReasoningEffort, Speed};
     use fabro_store::{Database, RunDatabase, StageId};
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
@@ -749,13 +765,15 @@ mod tests {
                 let scope = StageScope::for_handler(request.context, &request.node.id);
                 request.emitter.emit_scoped(
                     &crate::event::Event::AgentSessionActivated {
-                        node_id:      request.node.id.clone(),
-                        visit:        scope.visit,
-                        session_id:   "session_123".to_string(),
-                        thread_id:    None,
-                        provider:     Some("openai".to_string()),
-                        model:        Some("gpt-5.4".to_string()),
-                        capabilities: vec![fabro_types::SessionCapability::Steer],
+                        node_id:          request.node.id.clone(),
+                        visit:            scope.visit,
+                        session_id:       "session_123".to_string(),
+                        thread_id:        None,
+                        provider:         Some("openai".to_string()),
+                        model:            Some("gpt-5.4".to_string()),
+                        reasoning_effort: Some(ReasoningEffort::High),
+                        speed:            Some(Speed::Fast),
+                        capabilities:     vec![fabro_types::SessionCapability::Steer],
                     },
                     &scope,
                 );
@@ -783,10 +801,10 @@ mod tests {
 
         let state = run_store.state().await.unwrap();
         let node_state = state.stage(&StageId::new("step", 1)).unwrap();
-        assert_eq!(
-            node_state.provider_used.as_ref().unwrap()["provider"],
-            "openai"
-        );
+        let provider_used = node_state.provider_used.as_ref().unwrap();
+        assert_eq!(provider_used.provider.as_deref(), Some("openai"));
+        assert_eq!(provider_used.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(provider_used.speed, Some(Speed::Fast));
     }
 
     #[test]

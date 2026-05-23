@@ -11818,12 +11818,14 @@ impl Handler for KeepaliveHandler {
         while start.elapsed() < std::time::Duration::from_millis(self.total_ms) {
             tokio::time::sleep(std::time::Duration::from_millis(self.interval_ms)).await;
             services.run.emitter.emit(&Event::Prompt {
-                stage:    node.id.clone(),
-                visit:    1,
-                text:     "keepalive".to_string(),
-                mode:     None,
-                provider: None,
-                model:    None,
+                stage:            node.id.clone(),
+                visit:            1,
+                text:             "keepalive".to_string(),
+                mode:             None,
+                provider:         None,
+                model:            None,
+                reasoning_effort: None,
+                speed:            None,
             });
         }
         Ok(Outcome::success())

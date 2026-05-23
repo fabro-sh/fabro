@@ -83,7 +83,7 @@ use fabro_types::settings::{InterpString, RunNamespace};
 use fabro_types::{
     AgentBackend, AskFabro, AskFabroUnavailableReason, EventBody, InterviewQuestionRecord, PairId,
     PairMessageId, PairTarget, Principal, PullRequestLink, QuestionType, RunBlobId,
-    RunControlAction, RunEvent, RunId, ServerSettings, SessionCapability,
+    RunControlAction, RunEvent, RunId, ServerSettings, SessionCapability, StageModelUsage,
 };
 use fabro_util::error::{
     SharedError, collect_causes, render_compact_with_causes, render_with_causes,
@@ -760,6 +760,7 @@ pub(crate) fn run_stage_from_stage_id(
     wall_time_ms: Option<u64>,
     started_at: Option<chrono::DateTime<chrono::Utc>>,
     handler: StageHandler,
+    provider_used: Option<StageModelUsage>,
 ) -> RunStage {
     RunStage {
         id: stage_id.to_string(),
@@ -770,6 +771,7 @@ pub(crate) fn run_stage_from_stage_id(
         node_id: stage_id.node_id().to_string(),
         visit: std::num::NonZeroU32::new(stage_id.visit())
             .expect("StageId stores a non-zero visit"),
+        provider_used,
         started_at,
     }
 }

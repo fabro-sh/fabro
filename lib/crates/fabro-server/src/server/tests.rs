@@ -16,7 +16,7 @@ use fabro_interview::{
 };
 use fabro_llm::types::{Message as LlmMessage, Request as LlmRequest};
 use fabro_model::catalog::LlmCatalogSettings;
-use fabro_model::{Catalog, ModelRef, ProviderId, Speed};
+use fabro_model::{Catalog, ModelRef, ProviderId, ReasoningEffort, Speed};
 use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{
     AgentBackend, AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
@@ -2977,6 +2977,76 @@ fn stage_entry<'a>(body: &'a serde_json::Value, id: &str) -> &'a serde_json::Val
         .iter()
         .find(|stage| stage["id"] == id)
         .unwrap_or_else(|| panic!("stage {id} not found in {body:#?}"))
+}
+
+#[tokio::test]
+async fn list_run_stages_includes_stage_model_usage() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+    ])
+    .await;
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "prompt",
+        1,
+        &workflow_event::Event::StageStarted {
+            node_id:      "prompt".to_string(),
+            name:         "Prompt".to_string(),
+            index:        0,
+            handler_type: "prompt".to_string(),
+            attempt:      1,
+            max_attempts: 1,
+        },
+    )
+    .await;
+    append_scoped_stage_event(
+        &state,
+        run_id,
+        "prompt",
+        1,
+        &workflow_event::Event::Prompt {
+            stage:            "prompt".to_string(),
+            visit:            1,
+            text:             "Summarize".to_string(),
+            mode:             Some("prompt".to_string()),
+            provider:         Some("openai".to_string()),
+            model:            Some("gpt-5.5".to_string()),
+            reasoning_effort: Some(ReasoningEffort::High),
+            speed:            Some(Speed::Fast),
+        },
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}/stages")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(
+        stage_entry(&body, "prompt@1")["provider_used"],
+        json!({
+            "mode": "prompt",
+            "provider": "openai",
+            "model": "gpt-5.5",
+            "reasoning_effort": "high",
+            "speed": "fast"
+        })
+    );
 }
 
 fn test_billed_usage(
@@ -8233,13 +8303,15 @@ fn active_steerable_stage_projection_ignores_stale_deactivation() {
     let stage_id = StageId::new("agent", 1);
     let activated_a =
         workflow_event::to_run_event(&run_id, &workflow_event::Event::AgentSessionActivated {
-            node_id:      "agent".to_string(),
-            visit:        1,
-            session_id:   "session-a".to_string(),
-            thread_id:    None,
-            provider:     Some("openai".to_string()),
-            model:        Some("gpt-5.4".to_string()),
-            capabilities: vec![SessionCapability::Steer],
+            node_id:          "agent".to_string(),
+            visit:            1,
+            session_id:       "session-a".to_string(),
+            thread_id:        None,
+            provider:         Some("openai".to_string()),
+            model:            Some("gpt-5.4".to_string()),
+            reasoning_effort: None,
+            speed:            None,
+            capabilities:     vec![SessionCapability::Steer],
         });
     update_live_run_from_event(&state, run_id, &activated_a);
 
@@ -8253,13 +8325,15 @@ fn active_steerable_stage_projection_ignores_stale_deactivation() {
 
     let activated_b =
         workflow_event::to_run_event(&run_id, &workflow_event::Event::AgentSessionActivated {
-            node_id:      "agent".to_string(),
-            visit:        1,
-            session_id:   "session-b".to_string(),
-            thread_id:    None,
-            provider:     Some("openai".to_string()),
-            model:        Some("gpt-5.4".to_string()),
-            capabilities: vec![SessionCapability::Steer],
+            node_id:          "agent".to_string(),
+            visit:            1,
+            session_id:       "session-b".to_string(),
+            thread_id:        None,
+            provider:         Some("openai".to_string()),
+            model:            Some("gpt-5.4".to_string()),
+            reasoning_effort: None,
+            speed:            None,
+            capabilities:     vec![SessionCapability::Steer],
         });
     update_live_run_from_event(&state, run_id, &activated_b);
     update_live_run_from_event(&state, run_id, &deactivated_a);
@@ -8309,13 +8383,15 @@ async fn steer_with_active_acp_session_forwards_to_worker() {
     update_live_run_from_event(&state, run_id, &started);
     let activated =
         workflow_event::to_run_event(&run_id, &workflow_event::Event::AgentSessionActivated {
-            node_id:      "agent".to_string(),
-            visit:        1,
-            session_id:   "acp-session".to_string(),
-            thread_id:    None,
-            provider:     Some(AgentBackend::Acp.to_string()),
-            model:        None,
-            capabilities: vec![SessionCapability::Steer],
+            node_id:          "agent".to_string(),
+            visit:            1,
+            session_id:       "acp-session".to_string(),
+            thread_id:        None,
+            provider:         Some(AgentBackend::Acp.to_string()),
+            model:            None,
+            reasoning_effort: None,
+            speed:            None,
+            capabilities:     vec![SessionCapability::Steer],
         });
     update_live_run_from_event(&state, run_id, &activated);
 
@@ -8410,13 +8486,15 @@ async fn active_acp_steerable_marker_clears_on_terminal_paths() {
         update_live_run_from_event(&state, run_id, &started);
         let activated =
             workflow_event::to_run_event(&run_id, &workflow_event::Event::AgentSessionActivated {
-                node_id:      "agent".to_string(),
-                visit:        1,
-                session_id:   "acp-session".to_string(),
-                thread_id:    None,
-                provider:     Some(AgentBackend::Acp.to_string()),
-                model:        None,
-                capabilities: vec![SessionCapability::Steer],
+                node_id:          "agent".to_string(),
+                visit:            1,
+                session_id:       "acp-session".to_string(),
+                thread_id:        None,
+                provider:         Some(AgentBackend::Acp.to_string()),
+                model:            None,
+                reasoning_effort: None,
+                speed:            None,
+                capabilities:     vec![SessionCapability::Steer],
             });
         update_live_run_from_event(&state, run_id, &activated);
         let terminal = acp_event_for_stage(&run_id, &terminal_event);
