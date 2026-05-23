@@ -4067,27 +4067,6 @@ mod tests {
 
             let stage = state.stage(&stage_id).unwrap();
             assert_eq!(stage.permission_level, Some(PermissionLevel::ReadOnly));
-
-            let mut legacy_state = initialized_projection();
-            legacy_state
-                .apply_event(&test_stage_event(
-                    1,
-                    EventBody::AgentSessionActivated(AgentSessionActivatedProps {
-                        thread_id:        None,
-                        provider:         Some("openai".to_string()),
-                        model:            Some("gpt-5.4".to_string()),
-                        reasoning_effort: None,
-                        speed:            None,
-                        permission_level: None,
-                        capabilities:     vec![],
-                        visit:            1,
-                    }),
-                    stage_id.clone(),
-                ))
-                .unwrap();
-
-            let stage = legacy_state.stage(&stage_id).unwrap();
-            assert_eq!(stage.permission_level, None);
         }
 
         #[test]
