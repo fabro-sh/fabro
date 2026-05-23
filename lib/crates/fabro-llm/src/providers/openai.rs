@@ -14,6 +14,7 @@ use crate::providers::common::{
     self as common, parse_error_body, parse_rate_limit_headers, parse_retry_after,
     send_and_read_response,
 };
+use crate::token_count::{InputTokenCount, InputTokenCountMethod};
 use crate::types::{
     AdapterTimeout, ContentPart, FinishReason, Message, RateLimitInfo, Request, Response,
     ResponseFormat, ResponseFormatType, Role, StreamEvent, TokenCounts, ToolCall, ToolChoice,
@@ -188,6 +189,12 @@ struct ApiResponse {
     output: Vec<serde_json::Value>,
     status: Option<String>,
     usage:  Option<ApiUsage>,
+}
+
+#[derive(serde::Deserialize)]
+struct InputTokensResponse {
+    input_tokens: i64,
+    object:       String,
 }
 
 #[derive(serde::Deserialize)]
@@ -628,6 +635,34 @@ async fn build_request_body_with_catalog(
     }
 
     body
+}
+
+fn filter_input_tokens_request_body(body: &serde_json::Value) -> serde_json::Value {
+    const ALLOWED_FIELDS: &[&str] = &[
+        "conversation",
+        "input",
+        "instructions",
+        "model",
+        "parallel_tool_calls",
+        "previous_response_id",
+        "reasoning",
+        "text",
+        "tool_choice",
+        "tools",
+        "truncation",
+    ];
+
+    let Some(source) = body.as_object() else {
+        return serde_json::json!({});
+    };
+
+    let mut filtered = serde_json::Map::new();
+    for field in ALLOWED_FIELDS {
+        if let Some(value) = source.get(*field) {
+            filtered.insert((*field).to_string(), value.clone());
+        }
+    }
+    serde_json::Value::Object(filtered)
 }
 
 /// Parse output items from the Responses API into content parts.
@@ -1211,6 +1246,51 @@ impl ProviderAdapter for Adapter {
         Ok(())
     }
 
+    async fn count_input_tokens(
+        &self,
+        request: &Request,
+    ) -> Result<Option<InputTokenCount>, Error> {
+        self.validate_request(request)?;
+        let request_body = build_request_body_with_catalog(
+            request,
+            false,
+            self.codex_mode,
+            self.catalog.as_deref(),
+        )
+        .await;
+        let request_body = filter_input_tokens_request_body(&request_body);
+        let url = format!("{}/responses/input_tokens", self.http.base_url);
+
+        let mut req = self.build_request(&url).json(&request_body);
+        if let Some(t) = self.http.request_timeout {
+            req = req.timeout(t);
+        }
+        let (body, _headers) = send_and_read_response(req, "openai", "type").await?;
+        let response: InputTokensResponse =
+            serde_json::from_str(&body).map_err(|e| Error::Configuration {
+                message: format!("failed to parse OpenAI input token response: {e}"),
+                source:  None,
+            })?;
+
+        if response.object != "response.input_tokens" {
+            return Err(Error::Configuration {
+                message: format!(
+                    "failed to parse OpenAI input token response: unexpected object '{}'",
+                    response.object
+                ),
+                source:  None,
+            });
+        }
+
+        Ok(Some(InputTokenCount {
+            input_tokens: response.input_tokens,
+            method:       InputTokenCountMethod::ProviderApi,
+            provider:     self.provider_name.clone(),
+            model:        request.model.clone(),
+            warnings:     vec![],
+        }))
+    }
+
     async fn complete(&self, request: &Request) -> Result<Response, Error> {
         self.validate_request(request)?;
 
@@ -1337,7 +1417,7 @@ mod tests {
     use super::*;
     use crate::error::ProviderErrorKind;
     use crate::providers::common::LineReader;
-    use crate::types::{AudioData, DocumentData, ToolResult};
+    use crate::types::{AudioData, DocumentData, ReasoningEffort, ToolResult};
 
     fn minimal_request() -> Request {
         Request {
@@ -1431,6 +1511,111 @@ mod tests {
         assert_eq!(body["model"], "gpt-4o");
         // stream field is omitted when false (skip_serializing_if)
         assert!(body.get("stream").is_none());
+    }
+
+    #[tokio::test]
+    async fn filter_input_tokens_request_body_keeps_only_count_fields() {
+        let mut metadata = HashMap::new();
+        metadata.insert("trace".to_string(), "abc".to_string());
+
+        let mut request = minimal_request();
+        request.tools = Some(vec![ToolDefinition::function(
+            "search",
+            "Search files",
+            serde_json::json!({"type": "object"}),
+        )]);
+        request.reasoning_effort = Some(ReasoningEffort::Low);
+        request.response_format = Some(ResponseFormat {
+            kind:        ResponseFormatType::JsonSchema,
+            json_schema: Some(serde_json::json!({"type": "object"})),
+            strict:      true,
+        });
+        request.temperature = Some(0.2);
+        request.top_p = Some(0.9);
+        request.max_tokens = Some(32);
+        request.stop_sequences = Some(vec!["END".to_string()]);
+        request.metadata = Some(metadata);
+
+        let body = build_request_body(&request, true, false).await;
+        let filtered = filter_input_tokens_request_body(&body);
+
+        assert_eq!(
+            filtered,
+            serde_json::json!({
+                "input": [{"type": "message", "content": [{"text": "Hello", "type": "input_text"}], "role": "user"}],
+                "model": "gpt-4o",
+                "reasoning": {"effort": "low"},
+                "text": {"format": {"name": "response", "schema": {"type": "object"}, "strict": true, "type": "json_schema"}},
+                "tools": [{"description": "Search files", "name": "search", "parameters": {"type": "object"}, "type": "function"}]
+            })
+        );
+        assert!(filtered.get("store").is_none());
+        assert!(filtered.get("include").is_none());
+        assert!(filtered.get("stream").is_none());
+        assert!(filtered.get("max_output_tokens").is_none());
+        assert!(filtered.get("metadata").is_none());
+        assert!(filtered.get("temperature").is_none());
+        assert!(filtered.get("top_p").is_none());
+        assert!(filtered.get("stop").is_none());
+    }
+
+    #[tokio::test]
+    async fn filter_input_tokens_request_body_preserves_codex_serialization() {
+        let body = build_request_body(&minimal_request(), false, true).await;
+        let filtered = filter_input_tokens_request_body(&body);
+
+        assert_eq!(filtered["instructions"], "");
+        assert!(filtered.get("input").is_some());
+        assert!(filtered.get("model").is_some());
+        assert!(filtered.get("max_output_tokens").is_none());
+        assert!(filtered.get("include").is_none());
+    }
+
+    #[tokio::test]
+    async fn count_input_tokens_posts_count_request_and_parses_response() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST).path("/responses/input_tokens");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "object": "response.input_tokens",
+                    "input_tokens": 789
+                }));
+        });
+        let adapter = Adapter::new("sk-test").with_base_url(server.base_url());
+
+        let count = adapter
+            .count_input_tokens(&minimal_request())
+            .await
+            .unwrap()
+            .expect("openai should count tokens");
+
+        mock.assert();
+        assert_eq!(count.input_tokens, 789);
+        assert_eq!(count.method, InputTokenCountMethod::ProviderApi);
+    }
+
+    #[tokio::test]
+    async fn count_input_tokens_rejects_wrong_response_object() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST).path("/responses/input_tokens");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "object": "other",
+                    "input_tokens": 789
+                }));
+        });
+        let adapter = Adapter::new("sk-test").with_base_url(server.base_url());
+
+        let err = adapter
+            .count_input_tokens(&minimal_request())
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, Error::Configuration { .. }));
     }
 
     #[tokio::test]

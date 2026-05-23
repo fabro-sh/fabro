@@ -16,6 +16,7 @@ use crate::providers::common::{
     self as common, extract_system_prompt, parse_error_body, parse_rate_limit_headers,
     parse_retry_after,
 };
+use crate::token_count::{InputTokenCount, InputTokenCountMethod};
 use crate::types::{
     AdapterTimeout, ContentPart, FinishReason, Message, RateLimitInfo, Request, Response,
     ResponseFormat, ResponseFormatType, Role, StreamEvent, ThinkingData, TokenCounts, ToolCall,
@@ -172,6 +173,12 @@ struct UsageMetadata {
     thoughts_token_count:        Option<i64>,
     cached_content_token_count:  Option<i64>,
     tool_use_prompt_token_count: Option<i64>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CountTokensResponse {
+    total_tokens: i64,
 }
 
 /// Map Gemini's finish reason, inferring `ToolCalls` from content when needed.
@@ -934,6 +941,42 @@ impl ProviderAdapter for Adapter {
         Ok(())
     }
 
+    async fn count_input_tokens(
+        &self,
+        request: &Request,
+    ) -> Result<Option<InputTokenCount>, Error> {
+        self.validate_request(request)?;
+        let api_body = build_api_request(request).await;
+        let api_model = common::api_model_id(self.catalog.as_deref(), &request.model);
+        let url = format!("{}/models/{}:countTokens", self.http.base_url, api_model);
+
+        let mut req = self.http.client.post(&url);
+        if let Some(api_key) = &self.http.api_key {
+            req = req.header("x-goog-api-key", api_key);
+        }
+        for (key, value) in &self.http.default_headers {
+            req = req.header(key, value);
+        }
+        let mut req = req.json(&serde_json::json!({ "generateContentRequest": api_body }));
+        if let Some(t) = self.http.request_timeout {
+            req = req.timeout(t);
+        }
+        let (body, _headers) = send_gemini_response(req).await?;
+        let response: CountTokensResponse =
+            serde_json::from_str(&body).map_err(|e| Error::Configuration {
+                message: format!("failed to parse Gemini token count: {e}"),
+                source:  None,
+            })?;
+
+        Ok(Some(InputTokenCount {
+            input_tokens: response.total_tokens,
+            method:       InputTokenCountMethod::ProviderApi,
+            provider:     self.provider_name.clone(),
+            model:        request.model.clone(),
+            warnings:     vec![],
+        }))
+    }
+
     async fn complete(&self, request: &Request) -> Result<Response, Error> {
         self.validate_request(request)?;
         let api_body = build_api_request(request).await;
@@ -1033,6 +1076,8 @@ impl ProviderAdapter for Adapter {
 
 #[cfg(test)]
 mod tests {
+    use httpmock::prelude::*;
+
     use super::*;
     use crate::types::{AudioData, DocumentData};
 
@@ -1081,6 +1126,51 @@ mod tests {
         let body = build_api_request(&request).await;
         assert!(body.get("safetySettings").is_none());
         assert!(body.get("cachedContent").is_none());
+    }
+
+    #[tokio::test]
+    async fn count_input_tokens_posts_generate_content_request_and_parses_response() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/models/gemini-2.0-flash:countTokens")
+                .header("x-goog-api-key", "test-key");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({"totalTokens": 456}));
+        });
+        let adapter = Adapter::new("test-key").with_base_url(server.base_url());
+
+        let count = adapter
+            .count_input_tokens(&minimal_request())
+            .await
+            .unwrap()
+            .expect("gemini should count tokens");
+
+        mock.assert();
+        assert_eq!(count.input_tokens, 456);
+        assert_eq!(count.method, InputTokenCountMethod::ProviderApi);
+    }
+
+    #[tokio::test]
+    async fn count_tokens_body_uses_only_generate_content_request_top_level() {
+        let mut request = minimal_request();
+        request.tools = Some(vec![ToolDefinition::function(
+            "search",
+            "Search files",
+            serde_json::json!({"type": "object"}),
+        )]);
+        let api_body = build_api_request(&request).await;
+        let count_body = serde_json::json!({ "generateContentRequest": api_body });
+
+        assert!(count_body.get("generateContentRequest").is_some());
+        assert!(count_body.get("contents").is_none());
+        assert!(
+            count_body["generateContentRequest"]
+                .get("contents")
+                .is_some()
+        );
+        assert!(count_body["generateContentRequest"].get("tools").is_some());
     }
 
     #[tokio::test]

@@ -4,6 +4,7 @@ pub use fabro_model::{ModelHandle, ProviderId};
 use futures::Stream;
 
 use crate::error::Error;
+use crate::token_count::InputTokenCount;
 use crate::types::{Request, Response, Speed, StreamEvent, ToolChoice};
 
 // ---------------------------------------------------------------------------
@@ -24,6 +25,15 @@ pub trait ProviderAdapter: Send + Sync {
 
     /// Send a request and return an async stream of events (Section 4.2).
     async fn stream(&self, request: &Request) -> Result<StreamEventStream, Error>;
+
+    /// Count model-visible input/context tokens without creating a completion,
+    /// when the provider exposes a count endpoint.
+    async fn count_input_tokens(
+        &self,
+        _request: &Request,
+    ) -> Result<Option<InputTokenCount>, Error> {
+        Ok(None)
+    }
 
     /// Release resources. Called by `Client::close()`.
     async fn close(&self) -> Result<(), Error> {

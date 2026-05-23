@@ -6,10 +6,13 @@ use fabro_model::{Catalog, ProviderId};
 use tracing::debug;
 
 use crate::adapter_registry::{AdapterConfig, factory_for};
-use crate::error::Error;
+use crate::error::{Error, ProviderErrorKind};
 use crate::middleware::{Middleware, NextFn, NextStreamFn};
 use crate::provider::{ProviderAdapter, StreamEventStream};
-use crate::types::{Request, Response, Speed};
+use crate::token_count::{
+    InputTokenCount, InputTokenCountMethod, InputTokenCountPreference, estimate_input_tokens,
+};
+use crate::types::{Request, Response, Speed, Warning};
 
 /// The core client that routes requests to provider adapters (Section 2.2, 3).
 #[derive(Clone)]
@@ -389,6 +392,59 @@ impl Client {
         chain(request.clone()).await
     }
 
+    /// Count the model-visible input/context tokens for a request without
+    /// creating a completion.
+    ///
+    /// # Errors
+    ///
+    /// Returns request validation/provider resolution errors, and returns
+    /// provider count errors when the selected preference requires provider
+    /// semantics or when the error is not fallback-eligible.
+    pub async fn count_input_tokens(
+        &self,
+        request: &Request,
+        preference: InputTokenCountPreference,
+    ) -> Result<InputTokenCount, Error> {
+        self.validate_request_controls(request)?;
+        let provider = self.resolve_provider(request)?;
+        provider.validate_request(request)?;
+
+        if preference == InputTokenCountPreference::EstimateOnly {
+            return Ok(estimate_input_tokens(request, provider.name()));
+        }
+
+        match provider.count_input_tokens(request).await {
+            Ok(Some(count)) => Ok(count),
+            Ok(None) if preference == InputTokenCountPreference::PreferProvider => {
+                Ok(fallback_estimate(
+                    request,
+                    provider.name(),
+                    "provider_token_count_unsupported",
+                    "provider does not support input token counting; returned local estimate",
+                ))
+            }
+            Ok(None) => Err(Error::Configuration {
+                message: format!(
+                    "provider '{}' does not support input token counting",
+                    provider.name()
+                ),
+                source:  None,
+            }),
+            Err(error)
+                if preference == InputTokenCountPreference::PreferProvider
+                    && token_count_fallback_eligible(&error) =>
+            {
+                Ok(fallback_estimate(
+                    request,
+                    provider.name(),
+                    "provider_token_count_failed",
+                    "provider input token counting failed; returned local estimate",
+                ))
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     /// Close all provider adapters.
     ///
     /// # Errors
@@ -428,6 +484,39 @@ impl Client {
     }
 }
 
+fn token_count_fallback_eligible(error: &Error) -> bool {
+    matches!(
+        error,
+        Error::Network { .. }
+            | Error::RequestTimeout { .. }
+            | Error::Provider {
+                kind: ProviderErrorKind::RateLimit | ProviderErrorKind::Server,
+                ..
+            }
+    )
+}
+
+fn fallback_estimate(
+    request: &Request,
+    provider: &str,
+    code: &'static str,
+    message: &'static str,
+) -> InputTokenCount {
+    let mut count = estimate_input_tokens(request, provider);
+    if count.method == InputTokenCountMethod::LocalEstimate
+        && !count
+            .warnings
+            .iter()
+            .any(|warning| warning.code.as_deref() == Some(code))
+    {
+        count.warnings.push(Warning {
+            message: message.to_string(),
+            code:    Some(code.to_string()),
+        });
+    }
+    count
+}
+
 fn format_control_values<T: ToString>(values: &[T]) -> String {
     if values.is_empty() {
         "none".to_string()
@@ -450,6 +539,8 @@ fn format_additional_speeds(values: &[Speed]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use async_trait::async_trait;
     use fabro_auth::{ApiKeyHeader, CredentialSource, ResolvedCredentials};
     use fabro_model::ProviderId;
@@ -457,6 +548,7 @@ mod tests {
     use futures::stream;
 
     use super::*;
+    use crate::error::ProviderErrorDetail;
     use crate::types::*;
 
     /// A mock provider for testing.
@@ -542,6 +634,99 @@ mod tests {
         }
     }
 
+    struct CountingProvider {
+        provider_name: String,
+        count_result:  std::sync::Mutex<Result<Option<InputTokenCount>, Error>>,
+        count_calls:   Arc<AtomicUsize>,
+        reject_named:  bool,
+    }
+
+    impl CountingProvider {
+        fn new(result: Result<Option<InputTokenCount>, Error>) -> Self {
+            Self {
+                provider_name: "counter".to_string(),
+                count_result:  std::sync::Mutex::new(result),
+                count_calls:   Arc::new(AtomicUsize::new(0)),
+                reject_named:  false,
+            }
+        }
+
+        fn with_name(mut self, name: &str) -> Self {
+            self.provider_name = name.to_string();
+            self
+        }
+
+        fn count_calls(&self) -> Arc<AtomicUsize> {
+            Arc::clone(&self.count_calls)
+        }
+
+        fn rejecting_named(mut self) -> Self {
+            self.reject_named = true;
+            self
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ProviderAdapter for CountingProvider {
+        fn name(&self) -> &str {
+            &self.provider_name
+        }
+
+        async fn complete(&self, _request: &Request) -> Result<Response, Error> {
+            unimplemented!()
+        }
+
+        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, Error> {
+            unimplemented!()
+        }
+
+        fn supports_tool_choice(&self, mode: &str) -> bool {
+            !(self.reject_named && mode == "named")
+        }
+
+        async fn count_input_tokens(
+            &self,
+            _request: &Request,
+        ) -> Result<Option<InputTokenCount>, Error> {
+            self.count_calls.fetch_add(1, Ordering::SeqCst);
+            self.count_result.lock().unwrap().clone()
+        }
+    }
+
+    fn provider_count(tokens: i64) -> InputTokenCount {
+        InputTokenCount {
+            input_tokens: tokens,
+            method:       InputTokenCountMethod::ProviderApi,
+            provider:     "counter".to_string(),
+            model:        "mock-model".to_string(),
+            warnings:     vec![],
+        }
+    }
+
+    fn warning_codes(count: &InputTokenCount) -> Vec<&str> {
+        count
+            .warnings
+            .iter()
+            .filter_map(|warning| warning.code.as_deref())
+            .collect()
+    }
+
+    fn provider_error(kind: ProviderErrorKind) -> Error {
+        Error::Provider {
+            kind,
+            detail: Box::new(ProviderErrorDetail::new("provider failed", "counter")),
+        }
+    }
+
+    async fn client_with_counting_provider(
+        provider: CountingProvider,
+    ) -> (Client, Arc<AtomicUsize>) {
+        let calls = provider.count_calls();
+        let mut client = Client::new(HashMap::new(), None, vec![]);
+        client.register_provider(Arc::new(provider)).await.unwrap();
+        (client, calls)
+    }
+
     struct StubSource {
         credentials: Vec<ApiCredential>,
     }
@@ -581,6 +766,167 @@ mod tests {
         let response = client.complete(&test_request()).await.unwrap();
         assert_eq!(response.text(), "Hello!");
         assert_eq!(response.provider, "test");
+    }
+
+    #[tokio::test]
+    async fn count_input_tokens_returns_provider_result() {
+        let (client, calls) =
+            client_with_counting_provider(CountingProvider::new(Ok(Some(provider_count(42)))))
+                .await;
+
+        let count = client
+            .count_input_tokens(&test_request(), InputTokenCountPreference::PreferProvider)
+            .await
+            .unwrap();
+
+        assert_eq!(count.input_tokens, 42);
+        assert_eq!(count.method, InputTokenCountMethod::ProviderApi);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn count_input_tokens_prefer_provider_falls_back_for_unsupported_adapter() {
+        let mut client = Client::new(HashMap::new(), None, vec![]);
+        client
+            .register_provider(Arc::new(MockProvider::new("test", "")))
+            .await
+            .unwrap();
+
+        let count = client
+            .count_input_tokens(&test_request(), InputTokenCountPreference::PreferProvider)
+            .await
+            .unwrap();
+
+        assert_eq!(count.method, InputTokenCountMethod::LocalEstimate);
+        assert!(warning_codes(&count).contains(&"provider_token_count_unsupported"));
+    }
+
+    #[tokio::test]
+    async fn count_input_tokens_require_provider_errors_for_unsupported_adapter() {
+        let mut client = Client::new(HashMap::new(), None, vec![]);
+        client
+            .register_provider(Arc::new(MockProvider::new("test", "")))
+            .await
+            .unwrap();
+
+        let error = client
+            .count_input_tokens(&test_request(), InputTokenCountPreference::RequireProvider)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, Error::Configuration { .. }));
+    }
+
+    #[tokio::test]
+    async fn count_input_tokens_prefer_provider_falls_back_for_eligible_errors() {
+        let errors = vec![
+            Error::Network {
+                message: "network down".to_string(),
+                source:  None,
+            },
+            Error::RequestTimeout {
+                message: "timed out".to_string(),
+                source:  None,
+            },
+            provider_error(ProviderErrorKind::RateLimit),
+            provider_error(ProviderErrorKind::Server),
+        ];
+
+        for error in errors {
+            let (client, _) =
+                client_with_counting_provider(CountingProvider::new(Err(error))).await;
+            let count = client
+                .count_input_tokens(&test_request(), InputTokenCountPreference::PreferProvider)
+                .await
+                .unwrap();
+
+            assert_eq!(count.method, InputTokenCountMethod::LocalEstimate);
+            assert!(warning_codes(&count).contains(&"provider_token_count_failed"));
+        }
+    }
+
+    #[tokio::test]
+    async fn count_input_tokens_prefer_provider_returns_non_fallback_errors() {
+        let errors = vec![
+            provider_error(ProviderErrorKind::InvalidRequest),
+            provider_error(ProviderErrorKind::Authentication),
+            provider_error(ProviderErrorKind::AccessDenied),
+            provider_error(ProviderErrorKind::NotFound),
+            provider_error(ProviderErrorKind::ContextLength),
+            provider_error(ProviderErrorKind::ContentFilter),
+            provider_error(ProviderErrorKind::QuotaExceeded),
+            Error::Configuration {
+                message: "bad config".to_string(),
+                source:  None,
+            },
+            Error::UnsupportedToolChoice {
+                message: "bad tool choice".to_string(),
+            },
+        ];
+
+        for error in errors {
+            let (client, _) =
+                client_with_counting_provider(CountingProvider::new(Err(error))).await;
+            let err = client
+                .count_input_tokens(&test_request(), InputTokenCountPreference::PreferProvider)
+                .await
+                .unwrap_err();
+
+            assert!(!token_count_fallback_eligible(&err));
+        }
+    }
+
+    #[tokio::test]
+    async fn count_input_tokens_require_provider_returns_fallback_eligible_errors() {
+        let (client, _) = client_with_counting_provider(CountingProvider::new(Err(
+            provider_error(ProviderErrorKind::RateLimit),
+        )))
+        .await;
+
+        let err = client
+            .count_input_tokens(&test_request(), InputTokenCountPreference::RequireProvider)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, Error::Provider {
+            kind: ProviderErrorKind::RateLimit,
+            ..
+        }));
+    }
+
+    #[tokio::test]
+    async fn count_input_tokens_estimate_only_does_not_call_adapter() {
+        let provider = CountingProvider::new(Ok(Some(provider_count(99))));
+        let calls = provider.count_calls();
+        let (client, _) = client_with_counting_provider(provider).await;
+
+        let count = client
+            .count_input_tokens(&test_request(), InputTokenCountPreference::EstimateOnly)
+            .await
+            .unwrap();
+
+        assert_eq!(count.method, InputTokenCountMethod::LocalEstimate);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn count_input_tokens_validation_errors_still_return_err() {
+        let (client, calls) = client_with_counting_provider(
+            CountingProvider::new(Ok(Some(provider_count(1))))
+                .with_name("restricted")
+                .rejecting_named(),
+        )
+        .await;
+        let mut request = test_request();
+        request.tool_choice = Some(ToolChoice::named("search"));
+
+        let err = client
+            .count_input_tokens(&request, InputTokenCountPreference::PreferProvider)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, Error::UnsupportedToolChoice { .. }));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
