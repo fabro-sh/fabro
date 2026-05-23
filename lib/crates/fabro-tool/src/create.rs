@@ -166,12 +166,12 @@ impl JsonSchema for CreateRunSpecInput {
                             ],
                             "description": "Provider override for the run."
                         },
-                        "sandbox": {
+                        "environment": {
                             "anyOf": [
                                 { "type": "string" },
                                 { "type": "null" }
                             ],
-                            "description": "Sandbox provider override for the run."
+                            "description": "Named environment slug override for the run."
                         },
                         "preserve_sandbox": {
                             "anyOf": [
@@ -210,7 +210,7 @@ pub struct CreateRunSpec {
     pub auto_approve:     Option<bool>,
     pub model:            Option<String>,
     pub provider:         Option<String>,
-    pub sandbox:          Option<String>,
+    pub environment:      Option<String>,
     pub preserve_sandbox: Option<bool>,
     pub start:            Option<bool>,
 }
@@ -272,7 +272,7 @@ pub struct ValidatedCreateRunSpec {
     pub auto_approve:     Option<bool>,
     pub model:            Option<String>,
     pub provider:         Option<String>,
-    pub sandbox:          Option<String>,
+    pub environment:      Option<String>,
     pub preserve_sandbox: Option<bool>,
     pub start:            Option<bool>,
 }
@@ -314,7 +314,7 @@ impl TryFrom<CreateRunSpecInput> for ValidatedCreateRunSpec {
                     auto_approve:     None,
                     model:            None,
                     provider:         None,
-                    sandbox:          None,
+                    environment:      None,
                     preserve_sandbox: None,
                     start:            None,
                 })
@@ -378,7 +378,7 @@ impl TryFrom<CreateRunSpec> for ValidatedCreateRunSpec {
             auto_approve: spec.auto_approve,
             model: spec.model,
             provider: spec.provider,
-            sandbox: spec.sandbox,
+            environment: spec.environment,
             preserve_sandbox: spec.preserve_sandbox,
             start: spec.start,
         })
@@ -547,7 +547,7 @@ mod tests {
             auto_approve:     None,
             model:            None,
             provider:         None,
-            sandbox:          None,
+            environment:      None,
             preserve_sandbox: None,
             start:            None,
         })
@@ -692,7 +692,7 @@ mod tests {
                     auto_approve:     Some(true),
                     model:            None,
                     provider:         None,
-                    sandbox:          None,
+                    environment:      None,
                     preserve_sandbox: None,
                     start:            Some(false),
                 }
@@ -742,7 +742,7 @@ mod tests {
                     auto_approve:     Some(true),
                     model:            None,
                     provider:         None,
-                    sandbox:          None,
+                    environment:      None,
                     preserve_sandbox: None,
                     start:            Some(false),
                 })
@@ -791,7 +791,7 @@ mod tests {
                     auto_approve:     Some(true),
                     model:            None,
                     provider:         None,
-                    sandbox:          None,
+                    environment:      None,
                     preserve_sandbox: None,
                     start:            Some(false),
                 }

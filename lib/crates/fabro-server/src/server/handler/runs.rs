@@ -11,14 +11,17 @@ use axum::{Json, Router};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use bytes::Bytes;
+use chrono::Utc;
 use fabro_api::types::{
     BoardColumn, BoardColumnDefinition, RunManifest, SubmitAnswerRequest, UpdateRunParentRequest,
     UpdateRunRequest,
 };
 use fabro_config::Storage;
 use fabro_interview::AnswerSubmission;
+use fabro_llm::client::Client as LlmClient;
 use fabro_types::{
-    Principal, RunClientProvenance, RunId, RunProvenance, RunServerProvenance, parse_blob_ref,
+    Principal, RunClientProvenance, RunId, RunProvenance, RunServerProvenance, SystemActorKind,
+    parse_blob_ref,
 };
 use fabro_util::version::FABRO_VERSION;
 use fabro_workflow::command_log::{command_log_path, read_json_string_blob, read_log_slice};
@@ -41,6 +44,8 @@ use crate::principal_middleware::{
 use crate::run_files::{list_run_commits, list_run_files};
 use crate::run_manifest;
 use crate::run_selector::{ResolveRunError, resolve_run_by_selector};
+use crate::run_title_generation::{self, GenerateTitleInput, TitlePromptInput, WorkflowSummary};
+use crate::server_secrets::LlmClientResult;
 
 pub(super) fn manifest_routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -154,10 +159,13 @@ async fn list_board_runs(
 ) -> Response {
     let entries = match state
         .store
-        .list_cached_runs(&fabro_store::ListRunsQuery {
-            parent_id: params.parent_id,
-            ..fabro_store::ListRunsQuery::default()
-        })
+        .list_cached_runs(
+            &fabro_store::ListRunsQuery {
+                parent_id: params.parent_id,
+                ..fabro_store::ListRunsQuery::default()
+            },
+            Utc::now(),
+        )
         .await
     {
         Ok(runs) => runs,
@@ -213,7 +221,7 @@ async fn link_run_parent(
         }
     };
     let _parent_link_guard = state.parent_link_lock.lock().await;
-    let child = match state.store.get_cached_summary(&child_id).await {
+    let child = match state.store.get_cached_summary(&child_id, Utc::now()).await {
         Ok(Some(summary)) => summary,
         Ok(None) => return ApiError::not_found("Run not found.").into_response(),
         Err(err) => {
@@ -259,7 +267,7 @@ async fn unlink_run_parent(
     State(state): State<Arc<AppState>>,
 ) -> Response {
     let _parent_link_guard = state.parent_link_lock.lock().await;
-    let child = match state.store.get_cached_summary(&child_id).await {
+    let child = match state.store.get_cached_summary(&child_id, Utc::now()).await {
         Ok(Some(summary)) => summary,
         Ok(None) => return ApiError::not_found("Run not found.").into_response(),
         Err(err) => {
@@ -309,7 +317,7 @@ async fn validate_parent_link(
         }
         let summary = state
             .store
-            .get_cached_summary(&current_id)
+            .get_cached_summary(&current_id, Utc::now())
             .await
             .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
         let Some(summary) = summary else {
@@ -324,7 +332,7 @@ async fn validate_parent_link(
 }
 
 async fn updated_run_response(state: &AppState, run_id: &RunId) -> Response {
-    match state.store.get_cached_summary(run_id).await {
+    match state.store.get_cached_summary(run_id, Utc::now()).await {
         Ok(Some(summary)) => (
             StatusCode::OK,
             Json(state.decorate_run_summary(summary).await),
@@ -344,10 +352,13 @@ async fn list_runs(
 ) -> Response {
     match state
         .store
-        .list_cached_runs(&fabro_store::ListRunsQuery {
-            parent_id: params.parent_id,
-            ..fabro_store::ListRunsQuery::default()
-        })
+        .list_cached_runs(
+            &fabro_store::ListRunsQuery {
+                parent_id: params.parent_id,
+                ..fabro_store::ListRunsQuery::default()
+            },
+            Utc::now(),
+        )
         .await
     {
         Ok(entries) => {
@@ -415,7 +426,7 @@ async fn resolve_run(
 ) -> Response {
     let runs = match state
         .store
-        .list_runs(&fabro_store::ListRunsQuery::default())
+        .list_runs(&fabro_store::ListRunsQuery::default(), Utc::now())
         .await
     {
         Ok(runs) => runs,
@@ -490,7 +501,7 @@ async fn update_run(
         Ok(title) => title,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
-    let current = match state.store.get_cached_summary(&id).await {
+    let current = match state.store.get_cached_summary(&id, Utc::now()).await {
         Ok(Some(summary)) => summary,
         Ok(None) => return ApiError::not_found("Run not found.").into_response(),
         Err(err) => {
@@ -523,7 +534,7 @@ async fn update_run(
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
 
-    match state.store.get_cached_summary(&id).await {
+    match state.store.get_cached_summary(&id, Utc::now()).await {
         Ok(Some(summary)) => (
             StatusCode::OK,
             Json(state.decorate_run_summary(summary).await),
@@ -546,8 +557,14 @@ async fn create_run(
         Ok(req) => req,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
+    let explicit_title_supplied = req.title.is_some();
     let manifest_run_defaults = state.manifest_run_defaults();
-    let prepared = match run_manifest::prepare_manifest(manifest_run_defaults.as_ref(), &req) {
+    let manifest_environment_defaults = state.manifest_environment_defaults();
+    let prepared = match run_manifest::prepare_manifest_with_environment_defaults(
+        manifest_run_defaults.as_ref(),
+        manifest_environment_defaults.as_ref(),
+        &req,
+    ) {
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
@@ -564,9 +581,26 @@ async fn create_run(
 
     let web_url = state.run_web_url(&run_id);
     let catalog = state.catalog();
-    let configured_providers = state.ready_llm_provider_ids().await;
-    let mut create_input =
-        run_manifest::create_run_input(prepared.clone(), configured_providers, web_url.clone());
+    // Resolve once: we need both the provider IDs (for the run create input
+    // and ask-fabro-readiness) and the LLM client itself (for the spawned
+    // title-generation task). `ready_llm_provider_ids` would otherwise call
+    // `resolve_llm_client` a second time and discard the client.
+    let llm_client_for_title = match state.resolve_llm_client().await {
+        Ok(result) => Some(result),
+        Err(err) => {
+            tracing::warn!(error = ?err, "Failed to resolve LLM client while creating run");
+            None
+        }
+    };
+    let ready_provider_ids = llm_client_for_title
+        .as_ref()
+        .map(LlmClientResult::provider_ids)
+        .unwrap_or_default();
+    let mut create_input = run_manifest::create_run_input(
+        prepared.clone(),
+        ready_provider_ids.clone(),
+        web_url.clone(),
+    );
     create_input.run_id = Some(run_id);
     create_input.provenance = Some(run_provenance(&headers, &actor));
     create_input.submitted_manifest_bytes = Some(body.to_vec());
@@ -602,7 +636,11 @@ async fn create_run(
         }
     };
     let created_at = created.run_id.created_at();
-    let summary = match state.store.get_cached_summary(&created.run_id).await {
+    let summary = match state
+        .store
+        .get_cached_summary(&created.run_id, Utc::now())
+        .await
+    {
         Ok(Some(summary)) => summary,
         Ok(None) => return ApiError::not_found("Run not found.").into_response(),
         Err(err) => {
@@ -610,6 +648,7 @@ async fn create_run(
                 .into_response();
         }
     };
+    let deterministic_title = summary.title.clone();
 
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
@@ -625,11 +664,106 @@ async fn create_run(
         );
     }
 
+    if !explicit_title_supplied && !ready_provider_ids.is_empty() {
+        if let Some(llm_result) = llm_client_for_title {
+            let run_spec = created.persisted.run_spec();
+            let workflow = run_title_generation::workflow_summary(&run_spec.graph);
+            let run_inputs = run_spec.settings.run.inputs.clone();
+            let workflow_target = prepared.target_path.to_string();
+            let title_catalog = state.catalog();
+            let title_model = title_catalog.small_default_for_configured_ids(&ready_provider_ids);
+            let title_model_id = title_model.id.clone();
+            let title_provider_id = title_model.provider.clone();
+            spawn_generated_title_task(GeneratedTitleTask {
+                state: Arc::clone(&state),
+                run_id: created.run_id,
+                deterministic_title,
+                workflow_target,
+                workflow,
+                run_inputs,
+                client: llm_result.client,
+                model_id: title_model_id,
+                provider_id: title_provider_id,
+            });
+        }
+    }
+
     (
         StatusCode::CREATED,
         Json(state.decorate_run_summary(summary).await),
     )
         .into_response()
+}
+
+struct GeneratedTitleTask {
+    state:               Arc<AppState>,
+    run_id:              RunId,
+    deterministic_title: String,
+    workflow_target:     String,
+    workflow:            WorkflowSummary,
+    run_inputs:          std::collections::HashMap<String, toml::Value>,
+    client:              LlmClient,
+    model_id:            String,
+    provider_id:         fabro_model::ProviderId,
+}
+
+fn spawn_generated_title_task(task: GeneratedTitleTask) {
+    tokio::spawn(async move {
+        let generated_title = run_title_generation::generate_title_or_current(GenerateTitleInput {
+            client:      Arc::new(task.client),
+            model_id:    task.model_id,
+            provider_id: task.provider_id,
+            prompt:      TitlePromptInput {
+                run_id:          &task.run_id,
+                current_title:   &task.deterministic_title,
+                workflow_target: Some(task.workflow_target.as_str()),
+                run_inputs:      &task.run_inputs,
+                workflow:        &task.workflow,
+            },
+        })
+        .await;
+        if generated_title == task.deterministic_title {
+            return;
+        }
+
+        let current = match task
+            .state
+            .store
+            .get_cached_summary(&task.run_id, Utc::now())
+            .await
+        {
+            Ok(Some(summary)) => summary,
+            Ok(None) => return,
+            Err(err) => {
+                tracing::debug!(run_id = %task.run_id, error = %err, "Failed to re-read run summary for title update");
+                return;
+            }
+        };
+        if current.title != task.deterministic_title {
+            return;
+        }
+        let run_store = match task.state.store.open_run(&task.run_id).await {
+            Ok(store) => store,
+            Err(err) => {
+                tracing::debug!(run_id = %task.run_id, error = %err, "Failed to open run store for title update");
+                return;
+            }
+        };
+        if let Err(err) = workflow_event::append_event(
+            &run_store,
+            &task.run_id,
+            &workflow_event::Event::RunTitleUpdated {
+                title: generated_title,
+                actor: Some(Principal::System {
+                    system_kind: SystemActorKind::Engine,
+                }),
+            },
+        )
+        .await
+        {
+            tracing::debug!(run_id = %task.run_id, error = %err, "Failed to append generated run title event");
+        }
+    });
 }
 
 pub(super) fn run_provenance(headers: &HeaderMap, subject: &Principal) -> RunProvenance {
@@ -676,7 +810,12 @@ async fn run_preflight(
     Json(req): Json<RunManifest>,
 ) -> Response {
     let manifest_run_defaults = state.manifest_run_defaults();
-    let prepared = match run_manifest::prepare_manifest(manifest_run_defaults.as_ref(), &req) {
+    let manifest_environment_defaults = state.manifest_environment_defaults();
+    let prepared = match run_manifest::prepare_manifest_with_environment_defaults(
+        manifest_run_defaults.as_ref(),
+        manifest_environment_defaults.as_ref(),
+        &req,
+    ) {
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
@@ -704,7 +843,12 @@ async fn validate_run_manifest(
     Json(req): Json<RunManifest>,
 ) -> Response {
     let manifest_run_defaults = state.manifest_run_defaults();
-    let prepared = match run_manifest::prepare_manifest(manifest_run_defaults.as_ref(), &req) {
+    let manifest_environment_defaults = state.manifest_environment_defaults();
+    let prepared = match run_manifest::prepare_manifest_with_environment_defaults(
+        manifest_run_defaults.as_ref(),
+        manifest_environment_defaults.as_ref(),
+        &req,
+    ) {
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
@@ -726,7 +870,7 @@ async fn get_run_status(
     RequireRunScopedOrRunTools(id, _actor): RequireRunScopedOrRunTools,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state.store.get_cached_summary(&id).await {
+    match state.store.get_cached_summary(&id, Utc::now()).await {
         Ok(Some(run)) => {
             (StatusCode::OK, Json(state.decorate_run_summary(run).await)).into_response()
         }

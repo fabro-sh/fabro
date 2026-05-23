@@ -74,6 +74,7 @@ export function mapRunStagesToSidebarStages(
         ? formatDurationMs(stage.wall_time_ms)
         : "--",
       startedAt: stage.started_at ?? null,
+      providerUsed: stage.provider_used ?? null,
     }));
 }
 

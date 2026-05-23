@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use fabro_types::{Run, RunId, RunProjection};
 use tokio::sync::Mutex;
 
@@ -92,6 +93,17 @@ impl RunProjectionCacheState {
     }
 }
 
+/// Apply read-time overlays to a cached entry. Pure: does not touch the cache
+/// state, so it can run outside the cache mutex.
+fn apply_read_overlays(entry: &mut CachedRunProjection, now: DateTime<Utc>) {
+    // `Conclusion::timing` is the authoritative terminal snapshot and is
+    // already present in cached terminal summaries. Only fill missing timing
+    // with the best-effort live projection.
+    if entry.summary.timing.is_none() {
+        entry.summary.timing = entry.projection.live_run_timing(now);
+    }
+}
+
 impl RunProjectionCache {
     pub(crate) async fn replace_all(&self, entries: Vec<CachedRunProjection>) {
         self.state.lock().await.replace_all(entries);
@@ -101,7 +113,11 @@ impl RunProjectionCache {
         self.state.lock().await.insert(entry);
     }
 
-    pub(crate) async fn list(&self, query: &ListRunsQuery) -> Vec<CachedRunProjection> {
+    pub(crate) async fn list(
+        &self,
+        query: &ListRunsQuery,
+        now: DateTime<Utc>,
+    ) -> Vec<CachedRunProjection> {
         let entries = {
             let state = self.state.lock().await;
             let raw = match query.parent_id {
@@ -131,6 +147,11 @@ impl RunProjectionCache {
                 true
             })
             .collect::<Vec<_>>();
+        // Apply per-entry live overlays outside the cache mutex, after any
+        // date filtering so skipped entries do not sum stage timings.
+        for entry in &mut entries {
+            apply_read_overlays(entry, now);
+        }
         entries.sort_by(|left, right| {
             right
                 .run_id
@@ -150,13 +171,17 @@ impl RunProjectionCache {
             .map(|entry| state.with_children_count(entry))
     }
 
-    pub(crate) async fn get_summary(&self, run_id: &RunId) -> Option<Run> {
-        let state = self.state.lock().await;
-        state.entries.get(run_id).map(|entry| {
-            let mut summary = entry.summary.clone();
-            summary.children_count = state.count_children(run_id);
-            summary
-        })
+    pub(crate) async fn get_summary(&self, run_id: &RunId, now: DateTime<Utc>) -> Option<Run> {
+        let mut entry = {
+            let state = self.state.lock().await;
+            state
+                .entries
+                .get(run_id)
+                .cloned()
+                .map(|entry| state.with_children_count(entry))?
+        };
+        apply_read_overlays(&mut entry, now);
+        Some(entry.summary)
     }
 
     pub(crate) async fn apply_event(&self, run_id: &RunId, event: &EventEnvelope) -> Result<()> {

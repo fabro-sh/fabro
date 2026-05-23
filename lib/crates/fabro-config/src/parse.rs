@@ -5,7 +5,14 @@ use crate::SettingsLayer;
 const CURRENT_VERSION: u32 = 1;
 
 const ALLOWED_TOP_LEVEL_KEYS: &[&str] = &[
-    "_version", "project", "workflow", "run", "cli", "server", "llm",
+    "_version",
+    "project",
+    "workflow",
+    "environments",
+    "run",
+    "cli",
+    "server",
+    "llm",
 ];
 
 /// Legacy `[llm]` keys that pre-date the settings-driven catalog plan and
@@ -38,7 +45,7 @@ impl fmt::Display for ParseError {
                 } else {
                     write!(
                         f,
-                        "unknown top-level settings key `{key}`: expected one of `_version`, `project`, `workflow`, `run`, `cli`, `server`, `llm`"
+                        "unknown top-level settings key `{key}`: expected one of `_version`, `project`, `workflow`, `environments`, `run`, `cli`, `server`, `llm`"
                     )
                 }
             }
@@ -128,7 +135,7 @@ fn rename_hint(key: &str) -> Option<String> {
         "llm" => "rename to `[run.model]`",
         "vars" => "rename to `[run.inputs]`",
         "setup" => "rename to `[run.prepare]`",
-        "sandbox" => "move under `[run.sandbox]`",
+        "sandbox" => "rename to `[run.environment]` and `[environments.<slug>]`",
         "checkpoint" => "move under `[run.checkpoint]`",
         "pull_request" => "move under `[run.pull_request]`",
         "artifacts" => "move under `[run.artifacts]`",

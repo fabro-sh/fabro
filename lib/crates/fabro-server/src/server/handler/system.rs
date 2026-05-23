@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use chrono::Utc;
+
 use super::super::{
     AggregateBilling, AggregateBillingTotals, ApiError, AppState, BilledTokenCounts,
     BillingByModel, DfParams, FABRO_VERSION, GithubIntegrationStrategy, IntoResponse, Json, Path,
@@ -97,7 +99,7 @@ async fn get_system_df(
     let storage_dir = state.server_storage_dir();
     let summaries = match state
         .store
-        .list_runs(&fabro_store::ListRunsQuery::default())
+        .list_runs(&fabro_store::ListRunsQuery::default(), Utc::now())
         .await
     {
         Ok(summaries) => summaries,
@@ -162,7 +164,7 @@ async fn prune_runs(
     let storage_dir = state.server_storage_dir();
     let summaries = match state
         .store
-        .list_runs(&fabro_store::ListRunsQuery::default())
+        .list_runs(&fabro_store::ListRunsQuery::default(), Utc::now())
         .await
     {
         Ok(summaries) => summaries,

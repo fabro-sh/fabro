@@ -218,33 +218,6 @@ pub(crate) struct InputOverrideArgs {
     pub(crate) values: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
-pub(crate) enum CliSandboxProvider {
-    Local,
-    Docker,
-    Daytona,
-}
-
-impl From<CliSandboxProvider> for fabro_sandbox::SandboxProvider {
-    fn from(value: CliSandboxProvider) -> Self {
-        match value {
-            CliSandboxProvider::Local => Self::Local,
-            CliSandboxProvider::Docker => Self::Docker,
-            CliSandboxProvider::Daytona => Self::Daytona,
-        }
-    }
-}
-
-impl From<fabro_sandbox::SandboxProvider> for CliSandboxProvider {
-    fn from(value: fabro_sandbox::SandboxProvider) -> Self {
-        match value {
-            fabro_sandbox::SandboxProvider::Local => Self::Local,
-            fabro_sandbox::SandboxProvider::Docker => Self::Docker,
-            fabro_sandbox::SandboxProvider::Daytona => Self::Daytona,
-        }
-    }
-}
-
 #[derive(Args)]
 pub(crate) struct RunArgs {
     #[command(flatten)]
@@ -285,9 +258,9 @@ pub(crate) struct RunArgs {
     #[arg(short, long)]
     pub(crate) verbose: bool,
 
-    /// Sandbox for agent tools
-    #[arg(long, value_enum)]
-    pub(crate) sandbox: Option<CliSandboxProvider>,
+    /// Named environment for agent tools
+    #[arg(long)]
+    pub(crate) environment: Option<String>,
 
     /// Attach a label to this run (repeatable, format: KEY=VALUE)
     #[arg(long = "label", value_name = "KEY=VALUE")]
@@ -341,9 +314,9 @@ pub(crate) struct PreflightArgs {
     #[arg(short, long)]
     pub(crate) verbose: bool,
 
-    /// Sandbox for agent tools
-    #[arg(long, value_enum)]
-    pub(crate) sandbox: Option<CliSandboxProvider>,
+    /// Named environment for agent tools
+    #[arg(long)]
+    pub(crate) environment: Option<String>,
 }
 
 #[derive(Args)]

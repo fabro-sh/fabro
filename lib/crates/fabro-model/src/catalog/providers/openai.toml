@@ -238,6 +238,7 @@ knowledge_cutoff = "April 2025"
 estimated_output_tps = 140
 aliases = ["gpt54-mini", "gpt-54-mini"]
 probe = true
+small_default = true
 
 [models."gpt-5.4-mini".limits]
 context_window = 400000

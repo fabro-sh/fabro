@@ -43,9 +43,6 @@ import type { StageProjection } from './stage-projection';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { StartRecord } from './start-record';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { TodoListProjection } from './todo-list-projection';
 
 /**
  * Raw internal run projection derived from the event log.
@@ -83,10 +80,6 @@ export interface RunProjection {
      */
     'retried_from'?: string | null;
     'pending_interviews': { [key: string]: PendingInterviewRecord; };
-    /**
-     * Projected todo / task lists, keyed by `list_id` (`openai_plan:<session_id>` or `anthropic_tasks:<root_session_id>`). Built by replaying `todo.created`, `todo.updated`, and `todo.deleted` events.
-     */
-    'todos_by_list'?: { [key: string]: TodoListProjection; };
     /**
      * Map from StageId (`node_id@visit`) to stage projection data.
      */

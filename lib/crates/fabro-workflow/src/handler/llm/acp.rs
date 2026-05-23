@@ -269,14 +269,16 @@ impl AgentAcpBackend {
         };
         ActivationLease::activate(
             ActivationLeaseOptions {
-                stage_id:     StageId::new(node.id.clone(), stage_scope.visit),
-                session_id:   session_id.to_string(),
-                thread_id:    None,
-                provider:     Some(AgentBackend::Acp.to_string()),
-                model:        config_name.map(str::to_string),
-                capabilities: vec![SessionCapability::Steer],
-                hub:          Arc::clone(steering_hub),
-                emitter:      Arc::clone(emitter),
+                stage_id:         StageId::new(node.id.clone(), stage_scope.visit),
+                session_id:       session_id.to_string(),
+                thread_id:        None,
+                provider:         Some(AgentBackend::Acp.to_string()),
+                model:            config_name.map(str::to_string),
+                reasoning_effort: None,
+                speed:            None,
+                capabilities:     vec![SessionCapability::Steer],
+                hub:              Arc::clone(steering_hub),
+                emitter:          Arc::clone(emitter),
             },
             &(Arc::new(handle.clone()) as Arc<dyn ActiveControlHandle>),
         )

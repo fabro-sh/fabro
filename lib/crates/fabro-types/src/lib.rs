@@ -61,6 +61,7 @@ pub use conclusion::{Conclusion, StageSummary};
 pub use dense::{ServerSettings, UserSettings, WorkflowSettings};
 pub use diff::{DiffStats, DiffSummary, RunDiff};
 pub use event_envelope::EventEnvelope;
+pub use fabro_model::ReasoningEffort;
 pub use failure_signature::FailureSignature;
 pub use graph::{
     AttrValue, Edge, Graph, KNOWN_HANDLER_TYPES, Node, is_known_handler_type, is_llm_handler_type,
@@ -102,14 +103,18 @@ pub use run_event::{
 pub use run_failure::RunFailure;
 pub use run_id::{RunId, fixtures};
 pub use run_projection::{
-    CheckpointRecord, PendingInterviewRecord, RunProjection, StageProjection, first_event_seq,
+    ActivatedSkill, CheckpointRecord, McpServerProjection, McpServerStatus, PendingInterviewRecord,
+    RunProjection, SkillsProjection, StageModelUsage, StageProjection, SubAgentProjection,
+    SubAgentStatus, first_event_seq,
 };
 pub use run_sandbox::{RunSandbox, RunSandboxRuntime};
 pub use run_summary::{
     AskFabro, AskFabroUnavailableReason, AutomationRef, Run, RunBillingSummary, RunError,
     RunLifecycle, RunLinks, RunModel, RunOrigin, RunOriginKind, RunTimestamps, WorkflowRef,
 };
-pub use run_title::{RunTitleError, infer_run_title, normalize_explicit_run_title};
+pub use run_title::{
+    MAX_RUN_TITLE_CHARS, RunTitleError, infer_run_title, normalize_explicit_run_title,
+};
 pub use sandbox_details::{
     SandboxDetails, SandboxNetwork, SandboxNetworkPolicy, SandboxNetworkPolicyMode,
     SandboxResources, SandboxState, SandboxTimestamps,

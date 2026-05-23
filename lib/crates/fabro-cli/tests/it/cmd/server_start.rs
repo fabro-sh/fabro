@@ -208,8 +208,8 @@ fn help() {
               Override default LLM model
           --provider <PROVIDER>
               Override default LLM provider
-          --sandbox <SANDBOX>
-              Sandbox for agent tools
+          --environment <ENVIRONMENT>
+              Named environment for agent tools
           --max-concurrent-runs <MAX_CONCURRENT_RUNS>
               Maximum number of concurrent run executions
           --config <CONFIG>

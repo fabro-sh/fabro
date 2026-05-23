@@ -326,6 +326,7 @@ fabro create [OPTIONS] <WORKFLOW>
 | `--auto-approve` | Auto-approve all human gates |
 | `-d, --detach` | Run the workflow in the background and print the run ID |
 | `--dry-run` | Execute with simulated LLM backend |
+| `--environment <environment>` | Named environment for agent tools |
 | `--goal <goal>` | Override the workflow goal (available as {{ goal }} in prompts) |
 | `--goal-file <goal_file>` | Read the workflow goal from a file |
 | `--label <key=value>` | Attach a label to this run (repeatable, format: KEY=VALUE) |
@@ -333,7 +334,6 @@ fabro create [OPTIONS] <WORKFLOW>
 | `--parent <run>` | Link this run to an existing orchestration parent run |
 | `--preserve-sandbox` | Keep the sandbox alive after the run finishes (for debugging) |
 | `--provider <provider>` | Override default LLM provider |
-| `--sandbox <sandbox>` | Sandbox for agent tools<br />Values: `local`, `docker`, `daytona` |
 | `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
 | `-I, --input <key=value>` | Override a workflow input value (repeatable, format: KEY=VALUE) |
 | `-v, --verbose` | Enable verbose output |
@@ -869,11 +869,11 @@ fabro preflight [OPTIONS] <WORKFLOW>
 
 | Option | Description |
 | --- | --- |
+| `--environment <environment>` | Named environment for agent tools |
 | `--goal <goal>` | Override the workflow goal (available as {{ goal }} in prompts) |
 | `--goal-file <goal_file>` | Read the workflow goal from a file |
 | `--model <model>` | Override default LLM model |
 | `--provider <provider>` | Override default LLM provider |
-| `--sandbox <sandbox>` | Sandbox for agent tools<br />Values: `local`, `docker`, `daytona` |
 | `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
 | `-I, --input <key=value>` | Override a workflow input value (repeatable, format: KEY=VALUE) |
 | `-v, --verbose` | Enable verbose output |
@@ -1030,6 +1030,7 @@ fabro run [OPTIONS] <WORKFLOW>
 | `--auto-approve` | Auto-approve all human gates |
 | `-d, --detach` | Run the workflow in the background and print the run ID |
 | `--dry-run` | Execute with simulated LLM backend |
+| `--environment <environment>` | Named environment for agent tools |
 | `--goal <goal>` | Override the workflow goal (available as {{ goal }} in prompts) |
 | `--goal-file <goal_file>` | Read the workflow goal from a file |
 | `--label <key=value>` | Attach a label to this run (repeatable, format: KEY=VALUE) |
@@ -1037,7 +1038,6 @@ fabro run [OPTIONS] <WORKFLOW>
 | `--parent <run>` | Link this run to an existing orchestration parent run |
 | `--preserve-sandbox` | Keep the sandbox alive after the run finishes (for debugging) |
 | `--provider <provider>` | Override default LLM provider |
-| `--sandbox <sandbox>` | Sandbox for agent tools<br />Values: `local`, `docker`, `daytona` |
 | `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
 | `-I, --input <key=value>` | Override a workflow input value (repeatable, format: KEY=VALUE) |
 | `-v, --verbose` | Enable verbose output |
@@ -1224,12 +1224,12 @@ fabro server restart [OPTIONS]
 | --- | --- |
 | `--bind <bind>` | Address to bind to (IP or IP:port for TCP, or path containing / for Unix socket) |
 | `--config <config>` | Path to server config file (default: ~/.fabro/settings.toml) |
+| `--environment <environment>` | Named environment for agent tools |
 | `--foreground` | Run in the foreground instead of daemonizing |
 | `--max-concurrent-runs <max_concurrent_runs>` | Maximum number of concurrent run executions |
 | `--model <model>` | Override default LLM model |
 | `--no-web` | Disable the embedded web UI, browser auth routes, and web-only helper endpoints |
 | `--provider <provider>` | Override default LLM provider |
-| `--sandbox <sandbox>` | Sandbox for agent tools |
 | `--storage-dir <storage_dir>` | Local storage directory (default: ~/.fabro/storage) |
 | `--timeout <timeout>` | Seconds to wait for graceful shutdown before SIGKILL<br />Default: `10` |
 | `--watch-web` | Run `bun run dev` in apps/fabro-web to watch/recompile web assets (debug only) |
@@ -1249,12 +1249,12 @@ fabro server start [OPTIONS]
 | --- | --- |
 | `--bind <bind>` | Address to bind to (IP or IP:port for TCP, or path containing / for Unix socket) |
 | `--config <config>` | Path to server config file (default: ~/.fabro/settings.toml) |
+| `--environment <environment>` | Named environment for agent tools |
 | `--foreground` | Run in the foreground instead of daemonizing |
 | `--max-concurrent-runs <max_concurrent_runs>` | Maximum number of concurrent run executions |
 | `--model <model>` | Override default LLM model |
 | `--no-web` | Disable the embedded web UI, browser auth routes, and web-only helper endpoints |
 | `--provider <provider>` | Override default LLM provider |
-| `--sandbox <sandbox>` | Sandbox for agent tools |
 | `--storage-dir <storage_dir>` | Local storage directory (default: ~/.fabro/storage) |
 | `--watch-web` | Run `bun run dev` in apps/fabro-web to watch/recompile web assets (debug only) |
 | `--web` | Enable the embedded web UI and browser auth routes |

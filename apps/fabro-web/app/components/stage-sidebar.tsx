@@ -1,6 +1,6 @@
 import { type ComponentType, type ReactNode, useCallback, useState } from "react";
 import { Link } from "react-router";
-import type { StageHandler, StageState } from "@qltysh/fabro-api-client";
+import type { StageHandler, StageModelUsage, StageState } from "@qltysh/fabro-api-client";
 import {
   ArrowPathIcon,
   CheckCircleIcon,
@@ -31,6 +31,7 @@ export interface Stage {
   nodeId: string;
   visit: number;
   startedAt: string | null;
+  providerUsed: StageModelUsage | null;
 }
 
 export const statusConfig: Record<StageState, { icon: ComponentType<{ className?: string }>; color: string }> = {
