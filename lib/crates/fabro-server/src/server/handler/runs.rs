@@ -726,7 +726,12 @@ fn spawn_generated_title_task(task: GeneratedTitleTask) {
             return;
         }
 
-        let current = match task.state.store.get_cached_summary(&task.run_id).await {
+        let current = match task
+            .state
+            .store
+            .get_cached_summary(&task.run_id, Utc::now())
+            .await
+        {
             Ok(Some(summary)) => summary,
             Ok(None) => return,
             Err(err) => {
