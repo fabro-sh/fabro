@@ -5,7 +5,7 @@ use serde_json::Value;
 use super::BilledTokenCounts;
 use crate::transcript::{ToolCall, ToolResult, TranscriptMessage};
 use crate::{
-    MessageId, ModelRef, PairId, PairMessageId, PairSystemMessageKind,
+    MessageId, ModelRef, PairId, PairMessageId, PairSystemMessageKind, PermissionLevel,
     StageContextWindowProjection, StageId, TurnId,
 };
 
@@ -42,6 +42,8 @@ pub struct AgentSessionActivatedProps {
     pub reasoning_effort: Option<ReasoningEffort>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed:            Option<Speed>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_level: Option<PermissionLevel>,
     pub capabilities:     Vec<SessionCapability>,
     pub visit:            u32,
 }

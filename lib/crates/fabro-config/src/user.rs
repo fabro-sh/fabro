@@ -72,6 +72,9 @@ fn load_v2_layer_from_path(path: &Path) -> Result<SettingsLayer> {
 
 #[cfg(test)]
 mod tests {
+    use fabro_static::EnvVars;
+    use temp_env::with_var;
+
     use super::{
         SETTINGS_CONFIG_FILENAME, active_settings_path_with_lookup, default_settings_path,
         default_socket_path, default_storage_dir,
@@ -79,14 +82,16 @@ mod tests {
 
     #[test]
     fn settings_paths_use_expected_filenames() {
-        let home = dirs::home_dir().unwrap();
+        with_var(EnvVars::FABRO_HOME, None::<&str>, || {
+            let home = dirs::home_dir().unwrap();
 
-        assert_eq!(
-            default_settings_path(),
-            home.join(".fabro").join(SETTINGS_CONFIG_FILENAME)
-        );
-        assert_eq!(default_storage_dir(), home.join(".fabro/storage"));
-        assert_eq!(default_socket_path(), home.join(".fabro/fabro.sock"));
+            assert_eq!(
+                default_settings_path(),
+                home.join(".fabro").join(SETTINGS_CONFIG_FILENAME)
+            );
+            assert_eq!(default_storage_dir(), home.join(".fabro/storage"));
+            assert_eq!(default_socket_path(), home.join(".fabro/fabro.sock"));
+        });
     }
 
     #[test]

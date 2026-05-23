@@ -290,7 +290,7 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             };
         },
         /**
-         * Returns the latest best-effort model-visible context-window usage snapshot for an agent stage.
+         * Returns the latest best-effort model-visible context-window usage snapshot for an agent stage. Known stages without applicable or observed data return `available: false`; missing runs or stages return 404.
          * @summary Get Stage Context Window
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
@@ -981,7 +981,7 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Returns the latest best-effort model-visible context-window usage snapshot for an agent stage.
+         * Returns the latest best-effort model-visible context-window usage snapshot for an agent stage. Known stages without applicable or observed data return `available: false`; missing runs or stages return 404.
          * @summary Get Stage Context Window
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
@@ -1234,7 +1234,7 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
             return localVarFp.getRunStageCommandLog(id, stageId, offset, limit, options).then((request) => request(axios, basePath));
         },
         /**
-         * Returns the latest best-effort model-visible context-window usage snapshot for an agent stage.
+         * Returns the latest best-effort model-visible context-window usage snapshot for an agent stage. Known stages without applicable or observed data return `available: false`; missing runs or stages return 404.
          * @summary Get Stage Context Window
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
@@ -1451,7 +1451,7 @@ export class RunInternalsApi extends BaseAPI {
     }
 
     /**
-     * Returns the latest best-effort model-visible context-window usage snapshot for an agent stage.
+     * Returns the latest best-effort model-visible context-window usage snapshot for an agent stage. Known stages without applicable or observed data return `available: false`; missing runs or stages return 404.
      * @summary Get Stage Context Window
      * @param {string} id Unique run identifier (ULID).
      * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.

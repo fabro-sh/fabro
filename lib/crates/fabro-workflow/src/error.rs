@@ -304,6 +304,9 @@ pub enum Error {
     #[error("Unsupported operation: {0}")]
     Unsupported(String),
 
+    #[error("{0}")]
+    OutputSchemaValidation(String),
+
     #[error("Pipeline cancelled")]
     Cancelled,
 }
@@ -428,8 +431,8 @@ impl Error {
     /// Retryable: Handler (transient handler failures), Engine (could be
     /// transient),            Io (network/disk issues are often transient),
     /// Llm (delegates to SdkError). Terminal:  Parse, Validation,
-    /// Stylesheet (configuration errors),            Checkpoint (storage
-    /// integrity), Cancelled (explicit cancellation).
+    /// OutputSchemaValidation, Stylesheet (configuration errors), Checkpoint
+    /// (storage integrity), Cancelled (explicit cancellation).
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         match self {
@@ -444,6 +447,7 @@ impl Error {
             | Self::Precondition(_)
             | Self::RunNotFound(_)
             | Self::Unsupported(_)
+            | Self::OutputSchemaValidation(_)
             | Self::Cancelled => false,
         }
     }
@@ -461,7 +465,8 @@ impl Error {
             | Self::Template { .. }
             | Self::Stylesheet(_)
             | Self::Checkpoint(_)
-            | Self::Unsupported(_) => FailureCategory::Deterministic,
+            | Self::Unsupported(_)
+            | Self::OutputSchemaValidation(_) => FailureCategory::Deterministic,
             Self::Precondition(_) | Self::RunNotFound(_) => FailureCategory::Structural,
             Self::Handler { failure_class, .. } | Self::Engine { failure_class, .. } => {
                 *failure_class

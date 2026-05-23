@@ -27,6 +27,9 @@ import type { CommandTermination } from './command-termination';
 import type { McpServerProjection } from './mcp-server-projection';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { PermissionLevel } from './permission-level';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { SkillsProjection } from './skills-projection';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -92,13 +95,11 @@ export interface StageProjection {
      * Agent skills discovered and activated during this stage.
      */
     'skills'?: SkillsProjection;
+    'permission_level'?: PermissionLevel | null;
     /**
      * MCP servers observed by this stage.
      */
     'mcp_servers'?: Array<McpServerProjection>;
-    /**
-     * Latest content-free context-window snapshot for this agent stage.
-     */
     'context_window'?: StageContextWindowProjection | null;
     /**
      * Lifecycle state of the stage projection.

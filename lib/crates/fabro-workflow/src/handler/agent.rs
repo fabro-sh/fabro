@@ -5,17 +5,19 @@ use async_trait::async_trait;
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::{Graph, Node};
 use fabro_types::{RunId, StageModelUsage};
+pub(crate) use structured_output::extract_status_fields;
 use tokio_util::sync::CancellationToken;
 
 use super::llm::api::EffectiveRequestControls;
+use super::structured_output::{
+    self, OutputSchemaKind, StructuredOutputError, ValidatedStructuredOutput,
+};
 use super::{EngineServices, Handler, NodeTimeoutPolicy};
 use crate::context::{Context, WorkflowContext, keys};
 use crate::error::Error;
 use crate::event::{Emitter, Event, StageScope};
 use crate::interview_runtime::WorkflowAgentQuestionRuntime;
-use crate::outcome::{
-    BilledModelUsage, FailureCategory, FailureDetail, Outcome, OutcomeExt, StageOutcome,
-};
+use crate::outcome::{BilledModelUsage, Outcome, OutcomeExt};
 
 /// Result from a `CodergenBackend` invocation.
 pub enum CodergenResult {
@@ -132,110 +134,44 @@ impl AgentHandler {
     }
 }
 
-/// Status fields that indicate a JSON object contains routing directives.
-const STATUS_FIELDS: &[&str] = &[
-    "preferred_next_label",
-    "outcome",
-    "failure_reason",
-    "suggested_next_ids",
-    "context_updates",
-];
-
-/// Find all balanced `{...}` JSON object substrings in the text.
-fn find_json_objects(text: &str) -> Vec<&str> {
-    let mut results = Vec::new();
-    let bytes = text.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'{' {
-            let start = i;
-            let mut depth = 0;
-            let mut in_string = false;
-            let mut escape = false;
-            let mut j = i;
-            while j < bytes.len() {
-                let c = bytes[j];
-                if escape {
-                    escape = false;
-                } else if c == b'\\' && in_string {
-                    escape = true;
-                } else if c == b'"' {
-                    in_string = !in_string;
-                } else if !in_string {
-                    if c == b'{' {
-                        depth += 1;
-                    } else if c == b'}' {
-                        depth -= 1;
-                        if depth == 0 {
-                            results.push(&text[start..=j]);
-                            break;
-                        }
-                    }
-                }
-                j += 1;
-            }
-        }
-        i += 1;
+pub(crate) async fn validate_agent_output_sources(
+    schema: &OutputSchemaKind,
+    response_text: &str,
+    sandbox: &Arc<dyn Sandbox>,
+    last_file_touched: Option<&str>,
+) -> Result<ValidatedStructuredOutput, StructuredOutputError> {
+    if !matches!(schema, OutputSchemaKind::Routing) {
+        return structured_output::validate_response_text(schema, response_text);
     }
-    results
-}
 
-/// Extract routing directives from LLM response text.
-///
-/// Searches for the last JSON object in the response that contains at least
-/// one status field (`preferred_next_label`, `outcome`, `suggested_next_ids`,
-/// `context_updates`). Merges extracted fields into the outcome.
-pub(crate) fn extract_status_fields(text: &str, outcome: &mut Outcome) -> bool {
-    let candidates = find_json_objects(text);
-
-    let parsed = candidates.iter().rev().find_map(|candidate| {
-        let value: serde_json::Value = serde_json::from_str(candidate).ok()?;
-        if let Some(obj) = value.as_object() {
-            if STATUS_FIELDS.iter().any(|f| obj.contains_key(*f)) {
-                return Some(value);
-            }
-        }
-        None
-    });
-
-    let Some(value) = parsed else { return false };
-    let Some(obj) = value.as_object() else {
-        return false;
+    let initial_error = match structured_output::validate_response_text(schema, response_text) {
+        Ok(validated) => return Ok(validated),
+        Err(error) if error.allows_routing_fallback() => error,
+        Err(error) => return Err(error),
     };
 
-    if let Some(label) = obj.get("preferred_next_label").and_then(|v| v.as_str()) {
-        outcome.preferred_label = Some(label.to_string());
-    }
-
-    if let Some(ids) = obj.get("suggested_next_ids").and_then(|v| v.as_array()) {
-        let string_ids: Vec<String> = ids
-            .iter()
-            .filter_map(|v| v.as_str().map(String::from))
-            .collect();
-        if !string_ids.is_empty() {
-            outcome.suggested_next_ids = string_ids;
-        }
-    }
-
-    if let Some(status_str) = obj.get("outcome").and_then(|v| v.as_str()) {
-        if let Ok(status) = status_str.parse::<StageOutcome>() {
-            outcome.status = status;
-            if outcome.status.is_failure() {
-                if let Some(reason) = obj.get("failure_reason").and_then(|v| v.as_str()) {
-                    outcome.failure =
-                        Some(FailureDetail::new(reason, FailureCategory::Deterministic));
-                }
+    let mut fallback_error = initial_error;
+    if let Some(status_json) = read_sandbox_file(sandbox, "status.json").await {
+        match structured_output::validate_response_text(schema, &status_json) {
+            Ok(validated) => return Ok(validated),
+            Err(error) if error.allows_routing_fallback() => {
+                fallback_error = error;
             }
+            Err(error) => return Err(error),
         }
     }
 
-    if let Some(updates) = obj.get("context_updates").and_then(|v| v.as_object()) {
-        for (key, val) in updates {
-            outcome.context_updates.insert(key.clone(), val.clone());
+    if let Some(path) = last_file_touched {
+        if let Some(contents) = read_sandbox_file(sandbox, path).await {
+            return structured_output::validate_response_text(schema, &contents);
         }
     }
 
-    true
+    Err(fallback_error)
+}
+
+async fn read_sandbox_file(sandbox: &Arc<dyn Sandbox>, path: &str) -> Option<String> {
+    sandbox.read_file_text(path).await.ok()
 }
 
 /// Truncate a string to at most `max_chars` characters (char-boundary safe).
@@ -416,34 +352,46 @@ impl Handler for AgentHandler {
             serde_json::json!(&response_text),
         );
 
-        // 7b. Parse routing directives from response text, falling back to
-        //     status.json written by the agent into the sandbox CWD, then to
-        //     the last file the agent wrote.
-        let found_in_response = extract_status_fields(&response_text, &mut outcome);
-        if !found_in_response {
-            let mut found_in_status_json = false;
-            if let Ok(result) = services
-                .run
-                .sandbox
-                .exec_command("cat status.json", 5_000, None, None, None)
-                .await
+        if let Some(schema) = structured_output::parse_node_output_schema(node)? {
+            match validate_agent_output_sources(
+                &schema,
+                &response_text,
+                &services.run.sandbox,
+                last_file_touched.as_deref(),
+            )
+            .await
             {
-                if result.is_success() {
-                    found_in_status_json = extract_status_fields(&result.stdout, &mut outcome);
+                Ok(validated) => {
+                    structured_output::apply_validated_output(
+                        node,
+                        &schema,
+                        &validated,
+                        &mut outcome,
+                    );
+                }
+                Err(_) => {
+                    return Ok(structured_output::exhausted_failure_outcome(
+                        node.output_retries(),
+                    ));
                 }
             }
-            if !found_in_status_json {
-                if let Some(ref path) = last_file_touched {
-                    let quoted = shlex::try_quote(path).unwrap_or_else(|_| path.into());
-                    let cmd = format!("cat {quoted}");
-                    if let Ok(result) = services
-                        .run
-                        .sandbox
-                        .exec_command(&cmd, 5_000, None, None, None)
-                        .await
-                    {
-                        if result.is_success() {
-                            extract_status_fields(&result.stdout, &mut outcome);
+        } else {
+            // 7b. Parse routing directives from response text, falling back to
+            //     status.json written by the agent into the sandbox CWD, then to
+            //     the last file the agent wrote.
+            let found_in_response = extract_status_fields(&response_text, &mut outcome);
+            if !found_in_response {
+                let mut found_in_status_json = false;
+                if let Some(status_json) =
+                    read_sandbox_file(&services.run.sandbox, "status.json").await
+                {
+                    found_in_status_json = extract_status_fields(&status_json, &mut outcome);
+                }
+                if !found_in_status_json {
+                    if let Some(ref path) = last_file_touched {
+                        if let Some(contents) = read_sandbox_file(&services.run.sandbox, path).await
+                        {
+                            extract_status_fields(&contents, &mut outcome);
                         }
                     }
                 }
@@ -796,6 +744,142 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn codergen_handler_output_schema_routing_uses_status_json_fallback_when_response_has_no_json()
+     {
+        let sandbox_dir = TempDir::new().unwrap();
+        std::fs::write(
+            sandbox_dir.path().join("status.json"),
+            r#"{"preferred_next_label": "review"}"#,
+        )
+        .unwrap();
+
+        let handler = AgentHandler::new(None);
+        let mut node = Node::new("step");
+        node.attrs.insert(
+            "output_schema".to_string(),
+            AttrValue::String("routing".to_string()),
+        );
+        let context = test_context();
+        let graph = Graph::new("test");
+        let tmp = TempDir::new().unwrap();
+
+        let mut services = EngineServices::test_default();
+        services.run =
+            services
+                .run
+                .with_sandbox(std::sync::Arc::new(fabro_agent::LocalSandbox::new(
+                    sandbox_dir.path().to_path_buf(),
+                )));
+
+        let outcome = handler
+            .execute(&node, &context, &graph, tmp.path(), &services)
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Succeeded);
+        assert_eq!(outcome.preferred_label.as_deref(), Some("review"));
+    }
+
+    #[tokio::test]
+    async fn codergen_handler_output_schema_routing_rejects_malformed_response_before_status_json_fallback()
+     {
+        struct BadRoutingBackend;
+
+        #[async_trait]
+        impl CodergenBackend for BadRoutingBackend {
+            async fn run(&self, _request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
+                Ok(CodergenResult::Text {
+                    text:              r#"{"suggested_next_ids": [1]}"#.to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
+                    last_file_touched: None,
+                })
+            }
+        }
+
+        let sandbox_dir = TempDir::new().unwrap();
+        std::fs::write(
+            sandbox_dir.path().join("status.json"),
+            r#"{"preferred_next_label": "should_not_use"}"#,
+        )
+        .unwrap();
+
+        let handler = AgentHandler::new(Some(Box::new(BadRoutingBackend)));
+        let mut node = Node::new("step");
+        node.attrs.insert(
+            "output_schema".to_string(),
+            AttrValue::String("routing".to_string()),
+        );
+        node.attrs
+            .insert("output_retries".to_string(), AttrValue::Integer(0));
+        let context = test_context();
+        let graph = Graph::new("test");
+        let tmp = TempDir::new().unwrap();
+
+        let mut services = EngineServices::test_default();
+        services.run =
+            services
+                .run
+                .with_sandbox(std::sync::Arc::new(fabro_agent::LocalSandbox::new(
+                    sandbox_dir.path().to_path_buf(),
+                )));
+
+        let outcome = handler
+            .execute(&node, &context, &graph, tmp.path(), &services)
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.status, crate::outcome::StageOutcome::Failed {
+            retry_requested: false,
+        });
+        assert_eq!(
+            outcome.failure_reason(),
+            Some("output schema validation failed after 0 repair attempt(s)")
+        );
+        assert!(outcome.preferred_label.is_none());
+    }
+
+    #[tokio::test]
+    async fn codergen_handler_custom_output_schema_updates_output_context_key() {
+        struct CustomOutputBackend;
+
+        #[async_trait]
+        impl CodergenBackend for CustomOutputBackend {
+            async fn run(&self, _request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
+                Ok(CodergenResult::Text {
+                    text:              r#"{"passed": true}"#.to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
+                    last_file_touched: None,
+                })
+            }
+        }
+
+        let handler = AgentHandler::new(Some(Box::new(CustomOutputBackend)));
+        let mut node = Node::new("audit");
+        node.attrs.insert(
+            "output_schema".to_string(),
+            AttrValue::String(
+                r#"{"type":"object","required":["passed"],"properties":{"passed":{"type":"boolean"}}}"#
+                    .to_string(),
+            ),
+        );
+        let context = test_context();
+        let graph = Graph::new("test");
+        let tmp = TempDir::new().unwrap();
+
+        let outcome = handler
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            outcome.context_updates.get("output.audit"),
+            Some(&serde_json::json!({"passed": true})),
+        );
+    }
+
+    #[tokio::test]
     async fn codergen_handler_projects_provider_used_from_agent_session_events() {
         struct ProviderEventBackend;
 
@@ -813,6 +897,7 @@ mod tests {
                         model:            Some("gpt-5.4".to_string()),
                         reasoning_effort: Some(ReasoningEffort::High),
                         speed:            Some(Speed::Fast),
+                        permission_level: None,
                         capabilities:     vec![fabro_types::SessionCapability::Steer],
                     },
                     &scope,

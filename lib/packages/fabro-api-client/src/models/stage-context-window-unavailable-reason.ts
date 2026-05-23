@@ -12,9 +12,12 @@
  * Do not edit the class manually.
  */
 
+
+
 /**
  * Why context-window data is unavailable for a known run stage.
  */
+
 export const StageContextWindowUnavailableReason = {
     NOT_AGENT_STAGE: 'not_agent_stage',
     NOT_OBSERVED: 'not_observed',

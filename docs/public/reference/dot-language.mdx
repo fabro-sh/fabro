@@ -206,9 +206,36 @@ Start nodes can also be identified by ID (`start` or `Start`). Exit nodes can be
 | `model` | String | Explicit model ID (overrides stylesheet) |
 | `provider` | String | Explicit provider name (overrides stylesheet). Auto-inferred from the model catalog when omitted. |
 | `project_memory` | Boolean | When `true` (default), prompt nodes discover and include project docs (`AGENTS.md`, `CLAUDE.md`, etc.) as a system prompt. Set to `false` to disable. |
+| `output_schema` | String | Optional structured output validation. Use `routing` for Fabro's built-in routing directive schema, or `@path/to/schema.json` for a JSON Schema file. Supported on agent and prompt nodes. |
+| `output_retries` | Integer | Corrective structured-output turns inside the same prompt conversation or agent session. Default `2`; `0` validates once and fails without repair. Separate from `max_retries`. |
 | `backend` | String | Agent execution backend: `api` (default) or `acp`. `api` runs Fabro's tool loop through provider APIs; `acp` runs an Agent Client Protocol stdio agent inside the active sandbox. Prompt nodes are API-only. See [Agents — Backends](/core-concepts/agents#backends). |
 | `acp.command` | String | Shell command for nodes with `backend="acp"`. Mutually exclusive with `acp.config`. The value is always parsed as a command string, not JSON. |
 | `acp.config` | String | JSON stdio ACP config for nodes with `backend="acp"`. Mutually exclusive with `acp.command`. |
+
+#### Structured output validation
+
+`output_schema` opts an agent or prompt node into strict JSON validation:
+
+```dot
+review [
+  shape=tab,
+  output_schema="routing",
+  output_retries=2
+]
+
+audit [
+  shape=tab,
+  output_schema="@schemas/audit-result.schema.json",
+  output_retries=2
+]
+```
+
+- `output_schema="routing"` requires a JSON object with at least one recognized routing field: `preferred_next_label`, `outcome`, `failure_reason`, `suggested_next_ids`, or `context_updates`.
+- `output_schema="@schemas/audit-result.schema.json"` loads a JSON Schema file using workflow file-reference rules and validates the final JSON object in the response text.
+- On validation failure, Fabro sends validation feedback to the same active context before failing: prompt nodes keep the prior assistant response in the message list, and API-backed agent nodes repair in the same live session.
+- `output_retries` defaults to `2` and controls only these corrective structured-output turns. It is not the same as `max_retries` and does not consume workflow retry attempts.
+- Custom schema output is stored in context at `output.{node_id}`. Routing schema output updates routing fields and any `context_updates`.
+- `backend="acp"` with `output_schema` is unsupported in this release.
 
 ### Command nodes
 
@@ -331,15 +358,16 @@ gate -> v2 [condition="context.version matches ^v2\\."]
 gate -> slow_path
 ```
 
-## Prompt file references
+## Prompt and schema file references
 
-Instead of inlining long prompts, reference an external file:
+Instead of inlining long prompts or JSON Schemas, reference an external file:
 
 ```dot
 simplify [label="Simplify", prompt="@prompts/simplify.md"]
+audit [shape=tab, output_schema="@schemas/audit-result.schema.json"]
 ```
 
-The `@` prefix tells Fabro to load the prompt from a file path relative to the workflow file. Paths support `~` (home directory) and `..` (parent directory):
+The `@` prefix tells Fabro to load the referenced file relative to the workflow file. Paths support `~` (home directory) and `..` (parent directory):
 
 ```dot
 shared [prompt="@~/shared-prompts/review.md"]

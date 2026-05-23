@@ -12,9 +12,12 @@
  * Do not edit the class manually.
  */
 
+
+
 /**
  * Method used to produce the context-window token total and breakdown.
  */
+
 export const StageContextWindowCountMethod = {
     PROVIDER_API_SCALED_BREAKDOWN: 'provider_api_scaled_breakdown',
     RESPONSE_USAGE_SCALED_BREAKDOWN: 'response_usage_scaled_breakdown',

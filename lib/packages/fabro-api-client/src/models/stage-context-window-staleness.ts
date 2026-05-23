@@ -12,9 +12,12 @@
  * Do not edit the class manually.
  */
 
+
+
 /**
  * Freshness of the returned context-window data.
  */
+
 export const StageContextWindowStaleness = {
     LIVE: 'live',
     STORED: 'stored',

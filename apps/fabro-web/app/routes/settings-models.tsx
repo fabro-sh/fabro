@@ -87,13 +87,50 @@ function ProvidersPanel({ providers }: { providers: Provider[] }) {
 }
 
 function ProviderRow({ provider }: { provider: Provider }) {
+  const name = provider.display_name || provider.id;
+  const modelCount = `${provider.model_count} ${plural(provider.model_count, "model", "models")}`;
   return (
     <Row
-      title={provider.display_name || provider.id}
-      help={`${provider.model_count} ${plural(provider.model_count, "model", "models")}`}
+      title={
+        <span className="flex items-center gap-4">
+          <ProviderLogo provider={provider} />
+          <span className="flex min-w-0 flex-col">
+            <span className="text-sm text-fg-2">{name}</span>
+            <span className="text-xs/5 text-fg-3">{modelCount}</span>
+          </span>
+        </span>
+      }
     >
       <ProviderStatus provider={provider} />
     </Row>
+  );
+}
+
+function ProviderLogo({ provider }: { provider: Provider }) {
+  const [failed, setFailed] = useState(false);
+  const name = provider.display_name || provider.id;
+  const chip =
+    "grid size-10 shrink-0 place-items-center rounded-md bg-ice-50 ring-1 ring-line-strong";
+  const dim = provider.configured ? "" : "opacity-60";
+
+  if (failed) {
+    const initial = name.charAt(0).toUpperCase() || "?";
+    return (
+      <span className={`${chip} text-base font-medium text-page ${dim}`}>
+        {initial}
+      </span>
+    );
+  }
+
+  return (
+    <span className={`${chip} ${dim}`}>
+      <img
+        alt=""
+        src={`/images/providers/${provider.id}.svg`}
+        onError={() => setFailed(true)}
+        className="size-7"
+      />
+    </span>
   );
 }
 

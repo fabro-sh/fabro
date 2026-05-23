@@ -4,8 +4,8 @@ use fabro_api::types::{
     ActivatedSkill as ApiActivatedSkill, AgentMcpToolSummary as ApiAgentMcpToolSummary,
     AgentSkillActivationSource as ApiAgentSkillActivationSource,
     AgentSkillSummary as ApiAgentSkillSummary, McpServerProjection as ApiMcpServerProjection,
-    McpServerStatus as ApiMcpServerStatus, SkillsProjection as ApiSkillsProjection,
-    StageContextWindow as ApiStageContextWindow,
+    McpServerStatus as ApiMcpServerStatus, PermissionLevel as ApiPermissionLevel,
+    SkillsProjection as ApiSkillsProjection, StageContextWindow as ApiStageContextWindow,
     StageContextWindowBreakdownItem as ApiStageContextWindowBreakdownItem,
     StageContextWindowCategory as ApiStageContextWindowCategory,
     StageContextWindowCountMethod as ApiStageContextWindowCountMethod,
@@ -18,7 +18,7 @@ use fabro_api::types::{
 };
 use fabro_types::{
     ActivatedSkill, AgentMcpToolSummary, AgentSkillActivationSource, AgentSkillSummary,
-    McpServerProjection, McpServerStatus, SkillsProjection, StageContextWindow,
+    McpServerProjection, McpServerStatus, PermissionLevel, SkillsProjection, StageContextWindow,
     StageContextWindowBreakdownItem, StageContextWindowCategory, StageContextWindowCountMethod,
     StageContextWindowProjection, StageContextWindowStaleness, StageContextWindowUnavailableReason,
     StageContextWindowWarning, StageProjection, SubAgentProjection, SubAgentStatus, TodoListKind,
@@ -43,6 +43,7 @@ fn stage_projection_reuses_nested_agent_state_types() {
     assert_same_type::<ApiMcpServerProjection, McpServerProjection>();
     assert_same_type::<ApiMcpServerStatus, McpServerStatus>();
     assert_same_type::<ApiAgentMcpToolSummary, AgentMcpToolSummary>();
+    assert_same_type::<ApiPermissionLevel, PermissionLevel>();
     assert_same_type::<ApiStageContextWindow, StageContextWindow>();
     assert_same_type::<ApiStageContextWindowProjection, StageContextWindowProjection>();
     assert_same_type::<ApiStageContextWindowBreakdownItem, StageContextWindowBreakdownItem>();
@@ -133,6 +134,7 @@ fn stage_projection_round_trips_representative_json() {
                 }
             ]
         },
+        "permission_level": "read-only",
         "mcp_servers": [
             {
                 "server_name": "filesystem",
@@ -208,6 +210,14 @@ fn stage_context_window_response_round_trips_representative_json() {
     let api_response: ApiStageContextWindow = serde_json::from_value(value.clone()).unwrap();
     assert_eq!(api_response, response);
     assert_eq!(serde_json::to_value(response).unwrap(), value);
+}
+
+#[test]
+fn permission_level_matches_openapi_json_shape() {
+    let permission_json = serde_json::to_value(PermissionLevel::ReadOnly).unwrap();
+    assert_eq!(permission_json, json!("read-only"));
+    let api_permission: ApiPermissionLevel = serde_json::from_value(permission_json).unwrap();
+    assert_eq!(api_permission, PermissionLevel::ReadOnly);
 }
 
 #[test]

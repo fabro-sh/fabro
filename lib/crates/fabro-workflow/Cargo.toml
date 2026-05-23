@@ -46,6 +46,7 @@ fabro-http.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+jsonschema.workspace = true
 tokio.workspace = true
 bytes.workspace = true
 object_store.workspace = true

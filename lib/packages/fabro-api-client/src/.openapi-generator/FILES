@@ -24,6 +24,7 @@ index.ts
 models/activated-skill.ts
 models/agent-mcp-tool-summary.ts
 models/agent-permissions.ts
+models/agent-session-activated-props.ts
 models/agent-skill-activation-source.ts
 models/agent-skill-summary.ts
 models/aggregate-billing-totals.ts
@@ -219,6 +220,7 @@ models/pair-transcript-user-message.ts
 models/pair-transcript-warning.ts
 models/pending-interview-record.ts
 models/pending-reason.ts
+models/permission-level.ts
 models/pre-run-push-outcome-failed.ts
 models/pre-run-push-outcome-not-attempted.ts
 models/pre-run-push-outcome-skipped-no-remote.ts
@@ -395,6 +397,14 @@ models/slack-integration-settings.ts
 models/ssh-access-request.ts
 models/ssh-access-response.ts
 models/stage-completion.ts
+models/stage-context-window-breakdown-item.ts
+models/stage-context-window-category.ts
+models/stage-context-window-count-method.ts
+models/stage-context-window-projection.ts
+models/stage-context-window-staleness.ts
+models/stage-context-window-unavailable-reason.ts
+models/stage-context-window-warning.ts
+models/stage-context-window.ts
 models/stage-handler.ts
 models/stage-model-usage.ts
 models/stage-outcome.ts

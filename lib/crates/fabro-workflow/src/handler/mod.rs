@@ -9,6 +9,7 @@ pub mod manager_loop;
 pub mod parallel;
 pub mod prompt;
 pub mod start;
+pub mod structured_output;
 pub mod wait;
 
 use std::any::Any;

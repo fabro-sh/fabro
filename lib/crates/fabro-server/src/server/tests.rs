@@ -9835,6 +9835,7 @@ fn active_steerable_stage_projection_ignores_stale_deactivation() {
             model:            Some("gpt-5.4".to_string()),
             reasoning_effort: None,
             speed:            None,
+            permission_level: None,
             capabilities:     vec![SessionCapability::Steer],
         });
     update_live_run_from_event(&state, run_id, &activated_a);
@@ -9857,6 +9858,7 @@ fn active_steerable_stage_projection_ignores_stale_deactivation() {
             model:            Some("gpt-5.4".to_string()),
             reasoning_effort: None,
             speed:            None,
+            permission_level: None,
             capabilities:     vec![SessionCapability::Steer],
         });
     update_live_run_from_event(&state, run_id, &activated_b);
@@ -9915,6 +9917,7 @@ async fn steer_with_active_acp_session_forwards_to_worker() {
             model:            None,
             reasoning_effort: None,
             speed:            None,
+            permission_level: None,
             capabilities:     vec![SessionCapability::Steer],
         });
     update_live_run_from_event(&state, run_id, &activated);
@@ -10018,6 +10021,7 @@ async fn active_acp_steerable_marker_clears_on_terminal_paths() {
                 model:            None,
                 reasoning_effort: None,
                 speed:            None,
+                permission_level: None,
                 capabilities:     vec![SessionCapability::Steer],
             });
         update_live_run_from_event(&state, run_id, &activated);

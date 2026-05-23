@@ -1,6 +1,7 @@
 mod auth_sessions;
 mod cli_auth_token;
 mod docs;
+mod events;
 mod install;
 mod install_openai_compatible;
 mod routing;

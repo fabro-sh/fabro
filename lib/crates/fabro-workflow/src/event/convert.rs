@@ -1160,6 +1160,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             model,
             reasoning_effort,
             speed,
+            permission_level,
             capabilities,
             visit,
             ..
@@ -1169,6 +1170,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             model:            model.clone(),
             reasoning_effort: *reasoning_effort,
             speed:            *speed,
+            permission_level: *permission_level,
             capabilities:     capabilities.clone(),
             visit:            *visit,
         }),

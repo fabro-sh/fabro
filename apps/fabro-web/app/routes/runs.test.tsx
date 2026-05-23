@@ -3,7 +3,10 @@ import type { BoardColumn, Run } from "@qltysh/fabro-api-client";
 
 import {
   buildBoardColumns,
+  loadStoredRunsWorkspaceSearchParams,
   placeArchivedColumnLast,
+  persistRunsWorkspaceSearchParams,
+  RUNS_PREFERENCES_STORAGE_KEY,
   runsQuickStartCommands,
   shouldRefreshBoardForEvent,
 } from "./runs";
@@ -169,5 +172,91 @@ describe("runs route board mapping", () => {
       "fabro repo init",
       "fabro run hello",
     ]);
+  });
+});
+
+describe("runs route workspace preferences", () => {
+  class MemoryStorage {
+    values = new Map<string, string>();
+
+    getItem(key: string) {
+      return this.values.get(key) ?? null;
+    }
+
+    setItem(key: string, value: string) {
+      this.values.set(key, value);
+    }
+  }
+
+  test("missing storage returns default search params", () => {
+    expect(loadStoredRunsWorkspaceSearchParams(null).toString()).toBe("");
+  });
+
+  test("invalid stored values are ignored", () => {
+    const storage = new MemoryStorage();
+    storage.setItem(
+      RUNS_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version:   1,
+        view:      "table",
+        created:   "tomorrow",
+        archived:  "yes",
+        sort:      "branch",
+        direction: "sideways",
+        size:      999,
+        hide:      "repo,unknown,elapsed",
+        page:      12,
+      }),
+    );
+
+    expect(loadStoredRunsWorkspaceSearchParams(storage).toString()).toBe("hide=elapsed%2Crepo");
+  });
+
+  test("valid stored preferences produce canonical URL params", () => {
+    const storage = new MemoryStorage();
+    storage.setItem(
+      RUNS_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version:   1,
+        view:      "list",
+        search:    "retry failures",
+        repo:      "qlty/fabro",
+        workflow:  "release",
+        created:   "7d",
+        archived:  true,
+        sort:      "updated_at",
+        direction: "asc",
+        size:      50,
+        hide:      "repo,changes",
+        page:      4,
+      }),
+    );
+
+    expect(loadStoredRunsWorkspaceSearchParams(storage).toString()).toBe(
+      "view=list&search=retry+failures&repo=qlty%2Ffabro&workflow=release&created=7d&archived=1&sort=updated_at&direction=asc&size=50&hide=repo%2Cchanges",
+    );
+  });
+
+  test("persisting preferences omits page and stores canonical values", () => {
+    const storage = new MemoryStorage();
+    const params = new URLSearchParams(
+      "view=columns&search=abc&created=1d&sort=made-up&direction=asc&size=100&page=9&hide=unknown,workflow,repo",
+    );
+
+    persistRunsWorkspaceSearchParams(params, storage);
+
+    expect(JSON.parse(storage.getItem(RUNS_PREFERENCES_STORAGE_KEY) ?? "{}")).toEqual({
+      version:   1,
+      view:      "columns",
+      search:    "abc",
+      repo:      "all",
+      workflow:  "all",
+      created:   "1d",
+      archived:  false,
+      sort:      "created_at",
+      direction: "asc",
+      size:      100,
+      hide:      "repo,workflow",
+    });
   });
 });

@@ -12,9 +12,12 @@
  * Do not edit the class manually.
  */
 
+
+
 /**
  * Category of model-visible input/context tokens.
  */
+
 export const StageContextWindowCategory = {
     SYSTEM_PROMPT: 'system_prompt',
     TOOLS: 'tools',
