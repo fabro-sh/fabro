@@ -1670,31 +1670,34 @@ impl Session {
     }
 
     async fn compact_if_needed(&mut self) {
-        let over_threshold = check_context_usage(
+        let Some(estimate) = check_context_usage(
             &self.system_prompt,
             &self.history,
             self.provider_profile.as_ref(),
             self.config.compaction_threshold_percent,
             &self.event_emitter,
             &self.id,
-        );
-        if over_threshold && self.config.enable_context_compaction {
-            if let Err(e) = compact_context(
-                &mut self.history,
-                &self.llm_client,
-                self.provider_profile.as_ref(),
-                &self.system_prompt,
-                &self.file_tracker,
-                self.config.compaction_preserve_turns,
-                &self.event_emitter,
-                &self.id,
-            )
-            .await
-            {
-                self.event_emitter.emit(self.id.clone(), AgentEvent::Error {
-                    error: Error::InvalidState(format!("Context compaction failed: {e}")),
-                });
-            }
+        ) else {
+            return;
+        };
+        if !self.config.enable_context_compaction {
+            return;
+        }
+        if let Err(e) = compact_context(
+            &mut self.history,
+            &self.llm_client,
+            self.provider_profile.as_ref(),
+            &self.file_tracker,
+            self.config.compaction_preserve_turns,
+            estimate,
+            &self.event_emitter,
+            &self.id,
+        )
+        .await
+        {
+            self.event_emitter.emit(self.id.clone(), AgentEvent::Error {
+                error: Error::InvalidState(format!("Context compaction failed: {e}")),
+            });
         }
     }
 
@@ -1853,7 +1856,7 @@ mod tests {
     use fabro_llm::error::{ProviderErrorDetail, ProviderErrorKind};
     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
     use fabro_llm::types::{
-        ContentPart, ReasoningEffort, Request, Response, Role, StreamEvent, ToolCall,
+        ContentPart, ReasoningEffort, Request, Response, Role, StreamEvent, TokenCounts, ToolCall,
         ToolDefinition,
     };
     use futures::stream;
@@ -3653,13 +3656,25 @@ mod tests {
         assert!(found_auth_error_event, "expected auth error event");
     }
 
+    fn response_with_usage(mut response: Response, usage: TokenCounts) -> Response {
+        response.usage = usage;
+        response
+    }
+
+    fn response_with_input_tokens(response: Response, input_tokens: i64) -> Response {
+        response_with_usage(response, TokenCounts {
+            input_tokens,
+            ..TokenCounts::default()
+        })
+    }
+
     #[tokio::test]
     async fn compaction_triggered_when_over_threshold() {
         // Tiny context window to trigger compaction
         // Responses: [0] conversation response (stream), [1] summarization (complete),
         // [2] unused fallback
         let responses = vec![
-            text_response("OK"),
+            response_with_usage(text_response("OK"), TokenCounts::default()),
             text_response("Here is the summary of the conversation so far."),
             text_response("fallback"),
         ];
@@ -3705,6 +3720,90 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn compaction_uses_assistant_usage_baseline_for_short_response() {
+        let responses = vec![
+            response_with_input_tokens(text_response("OK"), 90),
+            text_response("Here is the summary of the conversation so far."),
+            text_response("fallback"),
+        ];
+
+        let provider = Arc::new(MockLlmProvider::new(responses));
+        let client = make_client(provider).await;
+        let registry = ToolRegistry::new();
+        let profile = Arc::new(TestProfile::with_context_window(registry, 100));
+        let env = Arc::new(MockSandbox::default());
+        let config = SessionOptions {
+            enable_context_compaction: true,
+            compaction_preserve_turns: 1,
+            ..Default::default()
+        };
+        let mut session = Session::new(client, profile, env, config, None);
+        let mut rx = session.subscribe();
+
+        session.process_input("hi").await.unwrap();
+
+        let mut started = None;
+        let mut found_completed = false;
+        while let Ok(event) = rx.try_recv() {
+            match event.event {
+                AgentEvent::CompactionStarted {
+                    estimated_tokens,
+                    context_window_size,
+                } => started = Some((estimated_tokens, context_window_size)),
+                AgentEvent::CompactionCompleted { .. } => found_completed = true,
+                _ => {}
+            }
+        }
+
+        assert_eq!(started, Some((90, 100)));
+        assert!(
+            found_completed,
+            "CompactionCompleted event should be emitted"
+        );
+    }
+
+    #[tokio::test]
+    async fn compaction_noop_does_not_emit_started() {
+        let large_input = "x".repeat(400);
+        let responses = vec![text_response("OK")];
+
+        let provider = Arc::new(MockLlmProvider::new(responses));
+        let client = make_client(provider).await;
+        let registry = ToolRegistry::new();
+        let profile = Arc::new(TestProfile::with_context_window(registry, 100));
+        let env = Arc::new(MockSandbox::default());
+        let config = SessionOptions {
+            enable_context_compaction: true,
+            compaction_preserve_turns: 10,
+            ..Default::default()
+        };
+        let mut session = Session::new(client, profile, env, config, None);
+        let mut rx = session.subscribe();
+
+        session.process_input(&large_input).await.unwrap();
+
+        let mut found_warning = false;
+        let mut found_compaction = false;
+        while let Ok(event) = rx.try_recv() {
+            match event.event {
+                AgentEvent::Warning { kind, .. } if kind == "context_window" => {
+                    found_warning = true;
+                }
+                AgentEvent::CompactionStarted { .. } | AgentEvent::CompactionCompleted { .. } => {
+                    found_compaction = true;
+                }
+                _ => {}
+            }
+        }
+
+        assert!(found_warning, "threshold should have been exceeded");
+        assert!(
+            !found_compaction,
+            "no-op compaction should not emit started or completed events"
+        );
+    }
+
+    #[tokio::test]
     async fn compaction_not_triggered_when_disabled() {
         let large_input = "x".repeat(400);
         let responses = vec![text_response("OK")];
@@ -3733,6 +3832,49 @@ mod tests {
             }
         }
         assert!(!found_compaction, "No compaction events when disabled");
+    }
+
+    #[tokio::test]
+    async fn compaction_disabled_blocks_api_usage_baseline_compaction() {
+        let responses = vec![response_with_input_tokens(text_response("OK"), 90)];
+
+        let provider = Arc::new(MockLlmProvider::new(responses));
+        let client = make_client(provider).await;
+        let registry = ToolRegistry::new();
+        let profile = Arc::new(TestProfile::with_context_window(registry, 100));
+        let env = Arc::new(MockSandbox::default());
+        let config = SessionOptions {
+            enable_context_compaction: false,
+            compaction_preserve_turns: 1,
+            ..Default::default()
+        };
+        let mut session = Session::new(client, profile, env, config, None);
+        let mut rx = session.subscribe();
+
+        session.process_input("hi").await.unwrap();
+
+        let mut found_api_usage_warning = false;
+        let mut found_compaction = false;
+        while let Ok(event) = rx.try_recv() {
+            match event.event {
+                AgentEvent::Warning { details, .. }
+                    if details["estimated_tokens"] == 90
+                        && details["estimate_method"] == "api_usage_plus_local_delta" =>
+                {
+                    found_api_usage_warning = true;
+                }
+                AgentEvent::CompactionStarted { .. } | AgentEvent::CompactionCompleted { .. } => {
+                    found_compaction = true;
+                }
+                _ => {}
+            }
+        }
+
+        assert!(
+            found_api_usage_warning,
+            "API usage baseline should still drive context warning"
+        );
+        assert!(!found_compaction, "compaction must remain disabled");
     }
 
     #[tokio::test]
@@ -3789,7 +3931,10 @@ mod tests {
         }
 
         let large_input = "x".repeat(400);
-        let responses = vec![text_response("OK")];
+        let responses = vec![response_with_usage(
+            text_response("OK"),
+            TokenCounts::default(),
+        )];
 
         let provider = Arc::new(StreamOnlyProvider {
             responses,

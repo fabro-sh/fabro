@@ -85,7 +85,7 @@ async fn spawn_served_listener(
                 no_web: true,
                 model: None,
                 provider: None,
-                sandbox: None,
+                environment: None,
                 max_concurrent_runs: None,
                 config: Some(config_path),
                 #[cfg(debug_assertions)]

@@ -855,8 +855,8 @@ methods = ["dev-token"]
 [server.web]
 url = "http://new.example.com"
 
-[run.sandbox]
-provider = "invalid-provider"
+[run.environment]
+id = "missing"
 "#;
 
     state
@@ -875,8 +875,8 @@ fn system_sandbox_provider_uses_manifest_defaults() {
     let source = r#"
 _version = 1
 
-[run.sandbox]
-provider = "daytona"
+[run.environment]
+id = "daytona"
 "#;
     let manifest_run_settings = resolve_manifest_run_settings(
         &run_manifest::manifest_run_defaults(Some(&manifest_run_defaults_from_toml(source))),
@@ -890,8 +890,8 @@ fn system_sandbox_provider_defaults_when_manifest_run_settings_do_not_resolve() 
     let source = r#"
 _version = 1
 
-[run.sandbox]
-provider = "invalid-provider"
+[run.environment]
+id = "missing"
 "#;
     let manifest_run_settings = resolve_manifest_run_settings(
         &run_manifest::manifest_run_defaults(Some(&manifest_run_defaults_from_toml(source))),
@@ -905,9 +905,10 @@ provider = "invalid-provider"
 
 #[test]
 fn clone_sandbox_credentials_are_available_for_clone_based_providers() {
-    assert!(clone_sandbox_can_use_github_credentials("docker"));
-    assert!(clone_sandbox_can_use_github_credentials("daytona"));
-    assert!(!clone_sandbox_can_use_github_credentials("local"));
+    use fabro_types::settings::run::EnvironmentProvider;
+    assert!(EnvironmentProvider::Docker.is_clone_based());
+    assert!(EnvironmentProvider::Daytona.is_clone_based());
+    assert!(!EnvironmentProvider::Local.is_clone_based());
 }
 
 #[tokio::test]
@@ -9570,7 +9571,7 @@ async fn delete_run_with_preserved_sandbox_returns_handoff() {
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = RunId::new();
     let mut settings = fabro_types::WorkflowSettings::default();
-    settings.run.sandbox.preserve = true;
+    settings.run.environment.lifecycle.preserve = true;
     let graph = Graph::new("test");
 
     create_durable_run_with_events(&state, run_id, &[
@@ -10036,8 +10037,8 @@ mode = "dry_run"
 provider = "anthropic"
 name = "claude-sonnet-4-5"
 
-[run.sandbox]
-provider = "local"
+[run.environment]
+id = "local"
 
 [[run.hooks]]
 name = "snapshot-hook"
@@ -10643,8 +10644,8 @@ script = "sleep 5"
 [run.prepare]
 timeout = "30s"
 
-[run.sandbox]
-provider = "local"
+[run.environment]
+id = "local"
 "#;
     let state = test_app_state_with_settings_and_registry_factory(
         server_settings_from_toml(source),

@@ -13,7 +13,7 @@ fn scenario_agent_linear(sandbox: &str) {
         .run_cmd()
         .args([
             "--auto-approve",
-            "--sandbox",
+            "--environment",
             sandbox,
             "--model",
             "claude-haiku-4-5",

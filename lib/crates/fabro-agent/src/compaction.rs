@@ -11,37 +11,53 @@ use crate::file_tracker::FileTracker;
 use crate::history::History;
 use crate::types::{AgentEvent, Message};
 
+const APPROX_CHARS_PER_TOKEN: usize = 4;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+pub(crate) enum ContextEstimateMethod {
+    ApiUsagePlusLocalDelta,
+    LocalEstimate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ContextEstimate {
+    pub tokens: usize,
+    pub method: ContextEstimateMethod,
+}
+
 /// Check whether the context window usage exceeds the configured threshold.
 /// Emits a `Warning` event with kind `"context_window"` when over the
-/// threshold. Returns `true` if the threshold is exceeded.
-pub fn check_context_usage(
+/// threshold. Returns `Some(estimate)` if the threshold is exceeded so the
+/// caller can pass it to `compact_context` without recomputing.
+pub(crate) fn check_context_usage(
     system_prompt: &str,
     history: &History,
     provider_profile: &dyn AgentProfile,
     threshold_percent: usize,
     emitter: &Emitter,
     session_id: &str,
-) -> bool {
-    let estimated_tokens = estimate_token_count(system_prompt, history);
+) -> Option<ContextEstimate> {
+    let estimate = estimate_active_context_usage(system_prompt, history);
     let context_window = provider_profile.context_window_size();
     let threshold = context_window * threshold_percent / 100;
 
-    if estimated_tokens > threshold {
+    if estimate.tokens > threshold {
+        let usage_percent = estimate.tokens.saturating_mul(100) / context_window;
+        let method: &'static str = estimate.method.into();
         emitter.emit(session_id.to_owned(), AgentEvent::Warning {
             kind:    "context_window".into(),
-            message: format!(
-                "Context window usage: {}%",
-                estimated_tokens * 100 / context_window
-            ),
+            message: format!("Context window usage: {usage_percent}%"),
             details: serde_json::json!({
-                "estimated_tokens": estimated_tokens,
+                "estimated_tokens": estimate.tokens,
                 "context_window_size": context_window,
-                "usage_percent": estimated_tokens * 100 / context_window,
+                "usage_percent": usage_percent,
+                "estimate_method": method,
             }),
         });
-        true
+        Some(estimate)
     } else {
-        false
+        None
     }
 }
 
@@ -51,29 +67,29 @@ pub fn check_context_usage(
     clippy::too_many_arguments,
     reason = "Context compaction needs explicit history, model, tracking, and emission inputs."
 )]
-pub async fn compact_context(
+pub(crate) async fn compact_context(
     history: &mut History,
     llm_client: &Client,
     provider_profile: &dyn AgentProfile,
-    system_prompt: &str,
     file_tracker: &FileTracker,
     preserve_count: usize,
+    estimate: ContextEstimate,
     emitter: &Emitter,
     session_id: &str,
 ) -> Result<(), Error> {
-    let estimated_tokens = estimate_token_count(system_prompt, history);
-    let context_window = provider_profile.context_window_size();
     let original_turn_count = history.turns().len();
 
-    emitter.emit(session_id.to_owned(), AgentEvent::CompactionStarted {
-        estimated_tokens,
-        context_window_size: context_window,
-    });
-
-    // Determine turns to summarize
+    // Determine turns to summarize. If there are not enough turns to compact,
+    // do not emit a started event without a matching completion.
     if original_turn_count <= preserve_count {
         return Ok(());
     }
+
+    emitter.emit(session_id.to_owned(), AgentEvent::CompactionStarted {
+        estimated_tokens:    estimate.tokens,
+        context_window_size: provider_profile.context_window_size(),
+    });
+
     let turns_to_summarize = &history.turns()[..original_turn_count - preserve_count];
     let rendered = render_turns_for_summary(turns_to_summarize);
 
@@ -139,7 +155,7 @@ function names, error messages, and exact values. Omit pleasantries and conversa
         "A different assistant began this task and produced the following summary. \
 Build on their progress — do not repeat completed steps.\n\n{summary_text}"
     );
-    let summary_token_estimate = summary_content.len() / 4;
+    let summary_token_estimate = estimate_chars_local_tokens(summary_content.len());
 
     history.compact(preserve_count, summary_content);
 
@@ -153,40 +169,76 @@ Build on their progress — do not repeat completed steps.\n\n{summary_text}"
     Ok(())
 }
 
-/// Estimate the total token count of the system prompt and conversation
-/// history. Uses a rough heuristic of ~4 characters per token.
-pub fn estimate_token_count(system_prompt: &str, history: &History) -> usize {
-    let mut total_chars = system_prompt.len();
-
-    for turn in history.turns() {
-        match turn {
-            Message::User { content, .. } => total_chars += content.len(),
-            Message::Assistant {
-                content,
-                tool_calls,
-                ..
-            } => {
-                total_chars += content.len();
-                if let Some(r) = turn.reasoning_text() {
-                    total_chars += r.len();
-                }
-                for tc in tool_calls {
-                    total_chars += tc.name.len();
-                    total_chars += tc.arguments.to_string().len();
-                }
-            }
-            Message::ToolResults { results, .. } => {
-                for r in results {
-                    total_chars += r.content.to_string().len();
-                }
-            }
-            Message::System { content, .. } | Message::Steering { content, .. } => {
-                total_chars += content.len();
-            }
-        }
+pub(crate) fn estimate_active_context_usage(
+    system_prompt: &str,
+    history: &History,
+) -> ContextEstimate {
+    let turns = history.turns();
+    if let Some((baseline_index, baseline_tokens)) = latest_assistant_usage_baseline(turns) {
+        let local_delta = estimate_turns_local_tokens(&turns[baseline_index + 1..]);
+        return ContextEstimate {
+            tokens: baseline_tokens.saturating_add(local_delta),
+            method: ContextEstimateMethod::ApiUsagePlusLocalDelta,
+        };
     }
 
-    total_chars / 4 // rough estimate: ~4 chars per token
+    ContextEstimate {
+        tokens: estimate_chars_local_tokens(
+            system_prompt
+                .len()
+                .saturating_add(estimate_turns_local_chars(turns)),
+        ),
+        method: ContextEstimateMethod::LocalEstimate,
+    }
+}
+
+fn latest_assistant_usage_baseline(turns: &[Message]) -> Option<(usize, usize)> {
+    turns.iter().enumerate().rev().find_map(|(index, turn)| {
+        if let Message::Assistant { usage, .. } = turn {
+            let total_tokens = usage.total_tokens();
+            if total_tokens > 0 {
+                return Some((index, usize::try_from(total_tokens).unwrap_or(usize::MAX)));
+            }
+        }
+        None
+    })
+}
+
+fn estimate_turns_local_tokens(turns: &[Message]) -> usize {
+    estimate_chars_local_tokens(estimate_turns_local_chars(turns))
+}
+
+fn estimate_turns_local_chars(turns: &[Message]) -> usize {
+    turns.iter().fold(0usize, |total, turn| {
+        total.saturating_add(estimate_turn_chars(turn))
+    })
+}
+
+fn estimate_chars_local_tokens(chars: usize) -> usize {
+    chars / APPROX_CHARS_PER_TOKEN
+}
+
+fn estimate_turn_chars(turn: &Message) -> usize {
+    match turn {
+        Message::User { content, .. }
+        | Message::System { content, .. }
+        | Message::Steering { content, .. } => content.len(),
+        Message::Assistant {
+            content,
+            tool_calls,
+            ..
+        } => {
+            let reasoning_chars = turn.reasoning_text().map_or(0, str::len);
+            let tool_call_chars: usize = tool_calls
+                .iter()
+                .map(|tc| tc.name.len() + tc.arguments.to_string().len())
+                .sum();
+            content.len() + reasoning_chars + tool_call_chars
+        }
+        Message::ToolResults { results, .. } => {
+            results.iter().map(|r| r.content.to_string().len()).sum()
+        }
+    }
 }
 
 /// Render conversation turns into a human-readable summary format for the
@@ -313,14 +365,176 @@ mod tests {
     }
 
     #[test]
-    fn estimate_token_count_basic() {
+    fn estimate_local_token_count_basic() {
         let mut history = History::default();
         history.push(Message::User {
             content:   "Hello world".into(), // 11 chars
             timestamp: SystemTime::now(),
         });
-        // system_prompt = "test" (4 chars) + 11 chars = 15 chars / 4 = 3 tokens
-        assert_eq!(estimate_token_count("test", &history), 3);
+        // system_prompt = "test" (4/4 = 1 token) + 11 chars / 4 = 2 tokens = 3 tokens
+        let estimate = estimate_active_context_usage("test", &history);
+        assert_eq!(estimate.tokens, 3);
+        assert_eq!(estimate.method, ContextEstimateMethod::LocalEstimate);
+    }
+
+    #[test]
+    fn active_context_estimate_without_assistant_usage_uses_local_estimate() {
+        let mut history = History::default();
+        history.push(Message::User {
+            content:   "Hello world".into(), // 11 chars => 2 tokens
+            timestamp: SystemTime::now(),
+        });
+        history.push(Message::Assistant {
+            // 18 chars content + tool call name (9) + args (16) = 43 chars => 10 tokens
+            content:        "No usage available".into(),
+            tool_calls:     vec![ToolCall::new(
+                "call_1",
+                "read_file",
+                serde_json::json!({"path": "foo.rs"}),
+            )],
+            provider_parts: vec![],
+            usage:          Box::new(TokenCounts::default()),
+            response_id:    "resp_1".into(),
+            timestamp:      SystemTime::now(),
+        });
+        history.push(Message::ToolResults {
+            // 4 chars => 1 token
+            results:   vec![ToolResult::success("call_1", serde_json::json!(1234))],
+            timestamp: SystemTime::now(),
+        });
+
+        let estimate = estimate_active_context_usage("test", &history);
+
+        assert_eq!(estimate.method, ContextEstimateMethod::LocalEstimate);
+        // (system prompt 4 + turn chars 11 + 18 + 9 + 16 + 4) / 4 = 62/4 = 15
+        assert_eq!(estimate.tokens, 15);
+    }
+
+    #[test]
+    fn active_context_local_estimate_matches_whole_history_rounding() {
+        let mut history = History::default();
+        history.push(Message::User {
+            content:   "abc".into(),
+            timestamp: SystemTime::now(),
+        });
+
+        let estimate = estimate_active_context_usage("x", &history);
+
+        assert_eq!(estimate.method, ContextEstimateMethod::LocalEstimate);
+        assert_eq!(estimate.tokens, 1);
+    }
+
+    #[test]
+    fn active_context_estimate_uses_latest_assistant_usage_plus_later_turns() {
+        let mut history = History::default();
+        history.push(Message::User {
+            content:   "ignored before baseline".repeat(100),
+            timestamp: SystemTime::now(),
+        });
+        history.push(Message::Assistant {
+            content:        "baseline response".into(),
+            tool_calls:     vec![],
+            provider_parts: vec![],
+            usage:          Box::new(TokenCounts {
+                input_tokens: 50,
+                ..TokenCounts::default()
+            }),
+            response_id:    "resp_1".into(),
+            timestamp:      SystemTime::now(),
+        });
+        history.push(Message::ToolResults {
+            // JSON number renders as 4 chars => 1 local token.
+            results:   vec![ToolResult::success("call_1", serde_json::json!(1234))],
+            timestamp: SystemTime::now(),
+        });
+        history.push(Message::User {
+            // 16 chars => 4 local tokens.
+            content:   "u".repeat(16),
+            timestamp: SystemTime::now(),
+        });
+        history.push(Message::Steering {
+            // 8 chars => 2 local tokens.
+            content:   "s".repeat(8),
+            timestamp: SystemTime::now(),
+        });
+
+        let estimate = estimate_active_context_usage("ignored system prompt", &history);
+
+        assert_eq!(estimate.tokens, 57);
+        assert_eq!(
+            estimate.method,
+            ContextEstimateMethod::ApiUsagePlusLocalDelta
+        );
+    }
+
+    #[test]
+    fn active_context_estimate_uses_total_tokens_including_cache_and_reasoning() {
+        let mut history = History::default();
+        history.push(Message::Assistant {
+            content:        "short".into(),
+            tool_calls:     vec![],
+            provider_parts: vec![],
+            usage:          Box::new(TokenCounts {
+                input_tokens:       10,
+                output_tokens:      20,
+                reasoning_tokens:   30,
+                cache_read_tokens:  40,
+                cache_write_tokens: 50,
+            }),
+            response_id:    "resp_1".into(),
+            timestamp:      SystemTime::now(),
+        });
+
+        let estimate = estimate_active_context_usage("", &history);
+
+        assert_eq!(estimate.tokens, 150);
+        assert_eq!(
+            estimate.method,
+            ContextEstimateMethod::ApiUsagePlusLocalDelta
+        );
+    }
+
+    #[test]
+    fn active_context_estimate_ignores_earlier_usage_when_later_usage_exists() {
+        let mut history = History::default();
+        history.push(Message::Assistant {
+            content:        "older response".into(),
+            tool_calls:     vec![],
+            provider_parts: vec![],
+            usage:          Box::new(TokenCounts {
+                input_tokens: 1_000,
+                ..TokenCounts::default()
+            }),
+            response_id:    "resp_old".into(),
+            timestamp:      SystemTime::now(),
+        });
+        history.push(Message::User {
+            content:   "ignored before latest baseline".repeat(100),
+            timestamp: SystemTime::now(),
+        });
+        history.push(Message::Assistant {
+            content:        "latest response".into(),
+            tool_calls:     vec![],
+            provider_parts: vec![],
+            usage:          Box::new(TokenCounts {
+                input_tokens: 20,
+                ..TokenCounts::default()
+            }),
+            response_id:    "resp_new".into(),
+            timestamp:      SystemTime::now(),
+        });
+        history.push(Message::User {
+            content:   "u".repeat(8),
+            timestamp: SystemTime::now(),
+        });
+
+        let estimate = estimate_active_context_usage("", &history);
+
+        assert_eq!(estimate.tokens, 22);
+        assert_eq!(
+            estimate.method,
+            ContextEstimateMethod::ApiUsagePlusLocalDelta
+        );
     }
 
     #[test]
@@ -329,8 +543,8 @@ mod tests {
         let emitter = Emitter::new();
         let profile = TestProfile::new();
         // Empty history, huge context window => well below threshold
-        let over = check_context_usage("short", &history, &profile, 80, &emitter, "sess");
-        assert!(!over);
+        let result = check_context_usage("short", &history, &profile, 80, &emitter, "sess");
+        assert!(result.is_none());
     }
 
     #[test]
@@ -345,11 +559,12 @@ mod tests {
         let mut rx = emitter.subscribe();
         // TestProfile has context_window=200_000 by default; use a small one
         let profile = TestProfile::with_context_window(ToolRegistry::new(), 100);
-        let over = check_context_usage("prompt", &history, &profile, 80, &emitter, "sess");
-        assert!(over);
+        let result = check_context_usage("prompt", &history, &profile, 80, &emitter, "sess");
+        assert!(result.is_some());
 
         // Should have emitted a Warning
         let event = rx.try_recv().unwrap();
-        assert!(matches!(event.event, AgentEvent::Warning { .. }));
+        assert!(matches!(event.event, AgentEvent::Warning { details, .. }
+                if details["estimate_method"] == "local_estimate"));
     }
 }

@@ -11,7 +11,7 @@ fn scenario_human_gate(sandbox: &str) {
         .run_cmd()
         .args([
             "--auto-approve",
-            "--sandbox",
+            "--environment",
             sandbox,
             "--model",
             "claude-haiku-4-5",

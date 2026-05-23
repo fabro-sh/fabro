@@ -40,7 +40,7 @@ fn acp_backend_workflow() {
 
     context
         .run_cmd()
-        .args(["--auto-approve", "--sandbox", "local"])
+        .args(["--auto-approve", "--environment", "local"])
         .arg(&workflow)
         .assert()
         .success();
@@ -119,7 +119,7 @@ fn acp_backend_does_not_inject_registered_provider_credentials() {
         .env_remove("ANTHROPIC_API_KEY")
         .env_remove("OPENAI_API_KEY")
         .env_remove("GEMINI_API_KEY")
-        .args(["--auto-approve", "--sandbox", "local"])
+        .args(["--auto-approve", "--environment", "local"])
         .arg(&workflow)
         .assert()
         .success();
@@ -193,7 +193,7 @@ include = ["verification-artifacts/**"]
 
     context
         .run_cmd()
-        .args(["--auto-approve", "--sandbox", "local"])
+        .args(["--auto-approve", "--environment", "local"])
         .arg(context.temp_dir.join("run.toml"))
         .assert()
         .success();

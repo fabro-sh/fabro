@@ -143,7 +143,7 @@ fn start_rejects_already_active_or_completed_run() {
         "create",
         "--provider",
         "openai",
-        "--sandbox",
+        "--environment",
         "local",
         "slow.fabro",
     ]);
@@ -204,7 +204,7 @@ fn start_runs_under_server_ownership_without_launcher_record() {
             "create",
             "--provider",
             "openai",
-            "--sandbox",
+            "--environment",
             "local",
             "owned-by-server.fabro",
         ])

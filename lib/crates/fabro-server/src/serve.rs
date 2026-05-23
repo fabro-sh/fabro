@@ -9,11 +9,10 @@ use clap::Args;
 use fabro_config::bind::{self, Bind, BindRequest};
 use fabro_config::user::active_settings_path;
 use fabro_config::{
-    RunLayer, RunModelLayer, RunSandboxLayer, ServerLayer, ServerWebLayer, Storage,
+    RunEnvironmentLayer, RunLayer, RunModelLayer, ServerLayer, ServerWebLayer, Storage,
     load_config_file, load_server_runtime_settings,
 };
 use fabro_install::{OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV};
-use fabro_sandbox::SandboxProvider;
 use fabro_static::EnvVars;
 use fabro_types::ServerSettings;
 use fabro_types::settings::server::{GithubIntegrationStrategy, LogDestination, WebhookStrategy};
@@ -205,9 +204,9 @@ pub struct ServeArgs {
     #[arg(long)]
     pub provider: Option<String>,
 
-    /// Sandbox for agent tools
-    #[arg(long, value_enum)]
-    pub sandbox: Option<SandboxProvider>,
+    /// Named environment for agent tools
+    #[arg(long)]
+    pub environment: Option<String>,
 
     /// Maximum number of concurrent run executions
     #[arg(long)]
@@ -240,9 +239,11 @@ fn serve_overrides(args: &ServeArgs) -> (Option<RunLayer>, Option<ServerLayer>) 
         let model_layer = run.model.get_or_insert_with(RunModelLayer::default);
         model_layer.provider = Some(InterpString::parse(provider));
     }
-    if let Some(sandbox) = args.sandbox {
-        let sandbox_layer = run.sandbox.get_or_insert_with(RunSandboxLayer::default);
-        sandbox_layer.provider = Some(sandbox.to_string());
+    if let Some(environment) = args.environment.as_ref() {
+        let environment_layer = run
+            .environment
+            .get_or_insert_with(RunEnvironmentLayer::default);
+        environment_layer.id = Some(environment.clone());
     }
     (
         (run != RunLayer::default()).then_some(run),
@@ -722,10 +723,11 @@ where
         effective_log_destination,
     );
     let resolved_app_settings = ResolvedAppStateSettings {
-        server_settings:       runtime_settings.server_settings,
-        manifest_run_defaults: runtime_settings.manifest_run_defaults,
-        manifest_run_settings: runtime_settings.manifest_run_settings,
-        llm_catalog_settings:  runtime_settings.llm_catalog_settings,
+        server_settings:               runtime_settings.server_settings,
+        manifest_run_defaults:         runtime_settings.manifest_run_defaults,
+        manifest_environment_defaults: runtime_settings.manifest_environment_defaults,
+        manifest_run_settings:         runtime_settings.manifest_run_settings,
+        llm_catalog_settings:          runtime_settings.llm_catalog_settings,
     };
     let resolved_server_settings = resolved_app_settings.server_settings.server.clone();
     let (auth_mode, server_secrets) = resolve_startup(
@@ -893,10 +895,12 @@ where
                                 .server_settings
                                 .with_storage_override(&data_dir_for_poll);
                             ResolvedAppStateSettings {
-                                server_settings:       resolved.server_settings,
-                                manifest_run_defaults: resolved.manifest_run_defaults,
-                                manifest_run_settings: resolved.manifest_run_settings,
-                                llm_catalog_settings:  resolved.llm_catalog_settings,
+                                server_settings:               resolved.server_settings,
+                                manifest_run_defaults:         resolved.manifest_run_defaults,
+                                manifest_environment_defaults: resolved
+                                    .manifest_environment_defaults,
+                                manifest_run_settings:         resolved.manifest_run_settings,
+                                llm_catalog_settings:          resolved.llm_catalog_settings,
                             }
                         });
                         match resolved {
@@ -1276,6 +1280,7 @@ mod tests {
             manifest_run_settings: RunSettingsBuilder::from_run_layer(&manifest_run_defaults)
                 .map_err(|err| fabro_util::error::SharedError::new(anyhow::Error::new(err))),
             manifest_run_defaults,
+            manifest_environment_defaults: fabro_config::MergeMap::default(),
             server_settings: server_settings(source),
             llm_catalog_settings: fabro_model::catalog::LlmCatalogSettings::default(),
         }
@@ -1468,7 +1473,7 @@ destination = "file"
             bind: None,
             model: None,
             provider: None,
-            sandbox: None,
+            environment: None,
             web: true,
             no_web: false,
             max_concurrent_runs: None,
@@ -1494,7 +1499,7 @@ destination = "file"
             bind: None,
             model: None,
             provider: None,
-            sandbox: None,
+            environment: None,
             web: false,
             no_web: true,
             max_concurrent_runs: None,

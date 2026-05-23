@@ -34,12 +34,14 @@ pub use public_url::{
     is_wildcard_host, replace_wildcard_host, validate_public_url, validate_public_url_with_label,
 };
 pub use run::{
-    ArtifactsSettings, DaytonaSettings, DaytonaSnapshotSettings, DockerSettings, DockerfileSource,
+    ArtifactsSettings, DockerfileSource, EnvironmentImageSettings, EnvironmentLifecycleSettings,
+    EnvironmentNetworkMode, EnvironmentNetworkSettings, EnvironmentProvider,
+    EnvironmentResourcesSettings, EnvironmentSettings, EnvironmentVolumeSettings,
     GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings, McpServerSettings,
     McpTransport, NotificationProviderSettings, NotificationRouteSettings, PullRequestSettings,
-    RunAgentSettings, RunCheckpointSettings, RunExecutionSettings, RunGitSettings, RunGoal,
-    RunIntegrationsGithubSettings, RunIntegrationsSettings, RunInterviewsSettings,
-    RunModelControls, RunModelSettings, RunNamespace, RunPrepareSettings, RunSandboxSettings,
+    RunAgentSettings, RunCheckpointSettings, RunEnvironmentSettings, RunExecutionSettings,
+    RunGitSettings, RunGoal, RunIntegrationsGithubSettings, RunIntegrationsSettings,
+    RunInterviewsSettings, RunModelControls, RunModelSettings, RunNamespace, RunPrepareSettings,
     RunScmSettings, ScmGitHubSettings, TlsMode,
 };
 pub use server::{

@@ -7,7 +7,7 @@ use fabro_types::run_event::{
     RunFailedProps, StageCompletedProps, StagePromptProps, TodoCreatedProps, TodoDeletedProps,
     TodoUpdatedProps,
 };
-use fabro_types::settings::run::RunSandboxSettings;
+use fabro_types::settings::run::{EnvironmentProvider, RunEnvironmentSettings};
 use fabro_types::{
     AgentBackend, AskFabro, BilledModelUsage, Checkpoint, CheckpointRecord, CommandTermination,
     Conclusion, EventBody, FailureSignature, InterviewQuestionRecord, Outcome,
@@ -535,27 +535,21 @@ fn projection_from_created(event: &EventEnvelope) -> Result<RunProjection> {
     let mut projection = RunProjection::new(title, spec, stored.ts);
     projection.parent_id = props.parent_id;
     projection.web_url.clone_from(&props.web_url);
-    projection.sandbox = Some(planned_sandbox(&projection.spec.settings.run.sandbox));
+    projection.sandbox = Some(planned_sandbox(&projection.spec.settings.run.environment));
     Ok(projection)
 }
 
-fn planned_sandbox(settings: &RunSandboxSettings) -> RunSandbox {
-    let provider = settings
-        .provider
-        .parse::<SandboxProvider>()
-        .unwrap_or(SandboxProvider::Local);
+fn planned_sandbox(settings: &RunEnvironmentSettings) -> RunSandbox {
+    let provider = SandboxProvider::from(settings.provider);
     RunSandbox {
         provider,
-        image: settings
-            .docker
-            .as_ref()
-            .map(|docker| docker.image.clone())
+        image: (settings.provider == EnvironmentProvider::Docker)
+            .then(|| settings.image.reference.clone())
+            .flatten()
             .filter(|image| !image.is_empty()),
-        snapshot: settings
-            .daytona
-            .as_ref()
-            .and_then(|daytona| daytona.snapshot.as_ref())
-            .map(|snapshot| snapshot.name.clone()),
+        snapshot: (settings.provider == EnvironmentProvider::Daytona)
+            .then(|| settings.image.reference.clone())
+            .flatten(),
         runtime: None,
     }
 }
