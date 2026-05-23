@@ -24,6 +24,9 @@ pub const ANTHROPIC_ASK_USER_QUESTION_TOOL: &str = "AskUserQuestion";
 pub const OPTION_DESCRIPTION_MAX_CHARS: usize = 2_000;
 pub const OPTION_PREVIEW_MAX_CHARS: usize = 4_000;
 
+const ROOT_SESSION_REQUIRED_ERROR: &str =
+    "human-question tools are available only during a root workflow agent session";
+
 #[derive(Clone, Default)]
 pub struct AgentToolRuntime {
     question_runtime: Option<Arc<dyn AgentQuestionRuntime>>,
@@ -265,12 +268,14 @@ async fn execute_question_tool(
     ctx: ToolContext,
     questions: Vec<AgentQuestion>,
 ) -> Result<Vec<AgentQuestionAnswer>, String> {
-    let session_id = ctx.session_id.as_deref().ok_or_else(|| {
-        "human-question tools are available only during a root workflow agent session".to_string()
-    })?;
-    let root_session_id = ctx.root_session_id.as_deref().ok_or_else(|| {
-        "human-question tools are available only during a root workflow agent session".to_string()
-    })?;
+    let session_id = ctx
+        .session_id
+        .as_deref()
+        .ok_or_else(|| ROOT_SESSION_REQUIRED_ERROR.to_string())?;
+    let root_session_id = ctx
+        .root_session_id
+        .as_deref()
+        .ok_or_else(|| ROOT_SESSION_REQUIRED_ERROR.to_string())?;
     if session_id != root_session_id {
         return Err(
             "human-question tools are only available to the root agent; subagents must report back to their parent".to_string(),
@@ -394,10 +399,10 @@ fn display_text(header: Option<&str>, question: &str) -> String {
 
 #[must_use]
 pub fn bounded_display_field(value: &str, max_chars: usize) -> String {
-    if value.chars().count() <= max_chars {
-        return value.to_string();
+    match value.char_indices().nth(max_chars) {
+        Some((byte_idx, _)) => value[..byte_idx].to_string(),
+        None => value.to_string(),
     }
-    value.chars().take(max_chars).collect()
 }
 
 fn ensure_all_answered(answers: &[AgentQuestionAnswer]) -> Result<(), String> {
@@ -444,10 +449,8 @@ fn format_anthropic_answers(answers: &[AgentQuestionAnswer]) -> Result<String, S
     let pairs = answers
         .iter()
         .map(|answer| {
-            let question = serde_json::to_string(&answer.original_question)
-                .unwrap_or_else(|_| "\"question\"".to_string());
-            let answer_text = serde_json::to_string(&answer.answers.join(", "))
-                .unwrap_or_else(|_| "\"\"".to_string());
+            let question = json!(answer.original_question);
+            let answer_text = json!(answer.answers.join(", "));
             format!("{question}={answer_text}")
         })
         .collect::<Vec<_>>()

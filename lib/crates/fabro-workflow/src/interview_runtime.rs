@@ -10,7 +10,6 @@ use fabro_interview::{Answer, AnswerSubmission, AnswerValue, Interviewer, Questi
 use fabro_types::{BlockedReason, InterviewOption, Principal, SystemActorKind};
 use futures::future;
 use tokio_util::sync::CancellationToken;
-use ulid::Ulid;
 
 use crate::event::{Emitter, Event, StageScope};
 use crate::millis_u64;
@@ -67,12 +66,6 @@ impl RunInterviewBlocker {
     }
 }
 
-impl Default for RunInterviewBlocker {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 pub(crate) struct RunInterviewGuard {
     blocker:  Arc<RunInterviewBlocker>,
     emitter:  Arc<Emitter>,
@@ -81,6 +74,10 @@ pub(crate) struct RunInterviewGuard {
 
 impl RunInterviewGuard {
     pub(crate) fn resolve(mut self) {
+        self.resolve_in_place();
+    }
+
+    fn resolve_in_place(&mut self) {
         if !self.resolved {
             self.blocker.resolved(self.emitter.as_ref());
             self.resolved = true;
@@ -90,10 +87,7 @@ impl RunInterviewGuard {
 
 impl Drop for RunInterviewGuard {
     fn drop(&mut self) {
-        if !self.resolved {
-            self.blocker.resolved(self.emitter.as_ref());
-            self.resolved = true;
-        }
+        self.resolve_in_place();
     }
 }
 
@@ -426,13 +420,13 @@ fn answer_from_submission(
 
 fn answer_labels(options: &[InterviewOption], answer: &Answer) -> Vec<String> {
     match &answer.value {
-        AnswerValue::Selected(key) => {
-            vec![option_label(options, key, answer.selected_option.as_ref())]
+        AnswerValue::Selected(key) => vec![answer.selected_option.as_ref().map_or_else(
+            || label_for_key(options, key),
+            |option| option.label.clone(),
+        )],
+        AnswerValue::MultiSelected(keys) => {
+            keys.iter().map(|key| label_for_key(options, key)).collect()
         }
-        AnswerValue::MultiSelected(keys) => keys
-            .iter()
-            .map(|key| option_label(options, key, None))
-            .collect(),
         AnswerValue::Text(text) => vec![text.clone()],
         AnswerValue::Yes => vec!["yes".to_string()],
         AnswerValue::No => vec!["no".to_string()],
@@ -443,25 +437,20 @@ fn answer_labels(options: &[InterviewOption], answer: &Answer) -> Vec<String> {
     }
 }
 
-fn option_label(
-    options: &[InterviewOption],
-    key: &str,
-    selected_option: Option<&InterviewOption>,
-) -> String {
-    selected_option
-        .filter(|option| option.key == key)
-        .or_else(|| options.iter().find(|option| option.key == key))
+fn label_for_key(options: &[InterviewOption], key: &str) -> String {
+    options
+        .iter()
+        .find(|option| option.key == key)
         .map_or_else(|| key.to_string(), |option| option.label.clone())
 }
 
 fn internal_question_id(scope: &StageScope, tool_call_id: &str, index: usize) -> String {
     format!(
-        "agentq-{}-v{}-{}-{}-{}",
+        "agentq-{}-v{}-{}-{}",
         slug(&scope.node_id),
         scope.visit,
         slug(tool_call_id),
         index + 1,
-        Ulid::new()
     )
 }
 
@@ -522,7 +511,7 @@ mod tests {
 
         let id = internal_question_id(&scope, "call_123", 1);
 
-        assert!(id.starts_with("agentq-reviewchanges-v3-call_123-2-"));
+        assert_eq!(id, "agentq-reviewchanges-v3-call_123-2");
     }
 
     #[tokio::test]

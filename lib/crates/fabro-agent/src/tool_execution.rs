@@ -264,12 +264,21 @@ fn error_tool_result_with_events(
     config: &SessionOptions,
     message: &str,
 ) -> ToolResult {
+    emit_tool_call_started(emitter, session_id, tc);
+    let result = ToolResult::error(&tc.id, message);
+    emit_tool_call_result(emitter, session_id, tc, &result);
+    truncate_tool_result(&result, &tc.name, config)
+}
+
+fn emit_tool_call_started(emitter: &Emitter, session_id: &str, tc: &ToolCall) {
     emitter.emit(session_id.to_owned(), AgentEvent::ToolCallStarted {
         tool_name:    tc.name.clone(),
         tool_call_id: tc.id.clone(),
         arguments:    tc.arguments.clone(),
     });
-    let result = ToolResult::error(&tc.id, message);
+}
+
+fn emit_tool_call_result(emitter: &Emitter, session_id: &str, tc: &ToolCall, result: &ToolResult) {
     emitter.emit(session_id.to_owned(), AgentEvent::ToolCallOutputDelta {
         delta: result.content.to_string(),
     });
@@ -277,9 +286,8 @@ fn error_tool_result_with_events(
         tool_name:    tc.name.clone(),
         tool_call_id: tc.id.clone(),
         output:       result.content.clone(),
-        is_error:     true,
+        is_error:     result.is_error,
     });
-    truncate_tool_result(&result, &tc.name, config)
 }
 
 /// Execute a single tool call with event emission and output truncation.
@@ -375,25 +383,11 @@ async fn execute_and_emit_one_tool_with_lookup(
     tool_env_provider: Option<&Arc<dyn ToolEnvProvider>>,
     agent_tool_runtime: &AgentToolRuntime,
 ) -> ToolResult {
-    emitter.emit(session_id.to_owned(), AgentEvent::ToolCallStarted {
-        tool_name:    tc.name.clone(),
-        tool_call_id: tc.id.clone(),
-        arguments:    tc.arguments.clone(),
-    });
+    emit_tool_call_started(emitter, session_id, tc);
 
     if let Some(reason) = access_denial {
         let result = ToolResult::error(&tc.id, &reason);
-
-        emitter.emit(session_id.to_owned(), AgentEvent::ToolCallOutputDelta {
-            delta: result.content.to_string(),
-        });
-        emitter.emit(session_id.to_owned(), AgentEvent::ToolCallCompleted {
-            tool_name:    tc.name.clone(),
-            tool_call_id: tc.id.clone(),
-            output:       result.content.clone(),
-            is_error:     true,
-        });
-
+        emit_tool_call_result(emitter, session_id, tc, &result);
         return truncate_tool_result(&result, &tc.name, config);
     }
 
@@ -407,17 +401,7 @@ async fn execute_and_emit_one_tool_with_lookup(
 
         if let ToolHookDecision::Block { reason } = decision {
             let result = ToolResult::error(&tc.id, &reason);
-
-            emitter.emit(session_id.to_owned(), AgentEvent::ToolCallOutputDelta {
-                delta: result.content.to_string(),
-            });
-            emitter.emit(session_id.to_owned(), AgentEvent::ToolCallCompleted {
-                tool_name:    tc.name.clone(),
-                tool_call_id: tc.id.clone(),
-                output:       result.content.clone(),
-                is_error:     true,
-            });
-
+            emit_tool_call_result(emitter, session_id, tc, &result);
             return truncate_tool_result(&result, &tc.name, config);
         }
     }
@@ -435,16 +419,7 @@ async fn execute_and_emit_one_tool_with_lookup(
     )
     .await;
 
-    emitter.emit(session_id.to_owned(), AgentEvent::ToolCallOutputDelta {
-        delta: result.content.to_string(),
-    });
-
-    emitter.emit(session_id.to_owned(), AgentEvent::ToolCallCompleted {
-        tool_name:    tc.name.clone(),
-        tool_call_id: tc.id.clone(),
-        output:       result.content.clone(),
-        is_error:     result.is_error,
-    });
+    emit_tool_call_result(emitter, session_id, tc, &result);
 
     // Post-tool-use hooks
     if let Some(hooks) = tool_hooks {
