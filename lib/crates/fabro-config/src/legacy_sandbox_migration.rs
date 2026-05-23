@@ -5,7 +5,9 @@
 
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
+use fabro_types::settings::run::EnvironmentProvider;
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, Value};
 
 use crate::{Error, Result, SettingsLayer};
@@ -13,11 +15,12 @@ use crate::{Error, Result, SettingsLayer};
 pub(crate) const REMOVAL_NOTE: &str =
     "This temporary compatibility migration will be removed before v1.0.";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) struct LegacySandboxMigrationReport {
-    pub(crate) contents:    String,
-    pub(crate) backup_path: PathBuf,
-    pub(crate) warning:     String,
+    pub(crate) layer:   SettingsLayer,
+    pub(crate) warning: String,
+    #[cfg(test)]
+    backup_path:        PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,7 +50,7 @@ pub(crate) fn migrate_settings_path(
         return Ok(None);
     };
 
-    next_contents
+    let layer = next_contents
         .parse::<SettingsLayer>()
         .map_err(|err| Error::parse_file("Migrated settings file is invalid", path, err))?;
 
@@ -72,9 +75,10 @@ pub(crate) fn migrate_settings_path(
     );
 
     Ok(Some(LegacySandboxMigrationReport {
-        contents: next_contents,
-        backup_path,
+        layer,
         warning,
+        #[cfg(test)]
+        backup_path,
     }))
 }
 
@@ -146,63 +150,63 @@ fn migrate_document(doc: &mut DocumentMut) -> std::result::Result<(), MigrationF
         }
     }
 
-    let provider = sandbox.get("provider").and_then(Item::as_str);
-    let provider_key = provider.unwrap_or_default().to_ascii_lowercase();
-    if provider.is_none() {
+    let provider_str = sandbox.get("provider").and_then(Item::as_str);
+    let active_provider = provider_str.and_then(|s| EnvironmentProvider::from_str(s).ok());
+    if provider_str.is_none() {
         unsupported.push("run.sandbox.provider".to_string());
     }
 
-    match provider_key.as_str() {
-        "daytona" => {
-            migrate_skip_clone(doc, &sandbox, "daytona");
-            reject_provider_table(&sandbox, "docker", &mut unsupported);
-        }
-        "docker" => {
-            migrate_skip_clone(doc, &sandbox, "docker");
-            reject_provider_table(&sandbox, "daytona", &mut unsupported);
-        }
-        _ => {
-            reject_provider_table(&sandbox, "daytona", &mut unsupported);
-            reject_provider_table(&sandbox, "docker", &mut unsupported);
+    // Inspect each provider's table once: if it's the active provider, capture
+    // skip_clone; otherwise, report it as unsupported.
+    let mut disable_clone = false;
+    for provider in [EnvironmentProvider::Daytona, EnvironmentProvider::Docker] {
+        let key: &'static str = provider.into();
+        let Some(item) = sandbox.get(key) else {
+            continue;
+        };
+        if Some(provider) == active_provider {
+            if item
+                .as_table()
+                .and_then(|table| table.get("skip_clone"))
+                .and_then(Item::as_bool)
+                .unwrap_or(false)
+            {
+                disable_clone = true;
+            }
+        } else {
+            item_path_keys(&format!("run.sandbox.{key}"), item, &mut unsupported);
         }
     }
 
-    set_value(
-        path_table(doc, &["run", "environment"]),
-        "id",
-        Value::from("default"),
-    );
-    if let Some(provider) = provider {
-        set_value(
-            path_table(doc, &["environments", "default"]),
-            "provider",
-            Value::from(provider),
-        );
+    if disable_clone {
+        ensure_table(doc.as_table_mut(), &["run", "clone"])["enabled"] =
+            Item::Value(Value::from(false));
     }
+    ensure_table(doc.as_table_mut(), &["run", "environment"])["id"] =
+        Item::Value(Value::from("default"));
 
-    let env = path_table(doc, &["environments", "default"]);
+    let env = ensure_table(doc.as_table_mut(), &["environments", "default"]);
+    if let Some(p) = provider_str {
+        env["provider"] = Item::Value(Value::from(p));
+    }
     if let Some(preserve) = sandbox.get("preserve") {
         if preserve.as_bool().is_some() {
-            set_item(
-                path_table_in_table(env, &["lifecycle"]),
-                "preserve",
-                preserve.clone(),
-            );
+            ensure_table(env, &["lifecycle"])["preserve"] = preserve.clone();
         } else {
             unsupported.push("run.sandbox.preserve".to_string());
         }
     }
     if let Some(env_item) = sandbox.get("env") {
-        if is_table_like(env_item) {
-            copy_table(env_item, path_table_in_table(env, &["env"]));
+        if env_item.is_table_like() {
+            copy_table(env_item, ensure_table(env, &["env"]));
         } else {
             unsupported.push("run.sandbox.env".to_string());
         }
     }
 
-    match provider_key.as_str() {
-        "daytona" => migrate_daytona(&sandbox, env, &mut unsupported),
-        "docker" => migrate_docker(&sandbox, env, &mut unsupported),
+    match active_provider {
+        Some(EnvironmentProvider::Daytona) => migrate_daytona(&sandbox, env, &mut unsupported),
+        Some(EnvironmentProvider::Docker) => migrate_docker(&sandbox, env, &mut unsupported),
         _ => {}
     }
 
@@ -214,29 +218,6 @@ fn migrate_document(doc: &mut DocumentMut) -> std::result::Result<(), MigrationF
 
     remove_run_sandbox(doc);
     Ok(())
-}
-
-fn migrate_skip_clone(doc: &mut DocumentMut, sandbox: &Table, provider: &str) {
-    let Some(provider_table) = sandbox.get(provider).and_then(Item::as_table) else {
-        return;
-    };
-    if provider_table
-        .get("skip_clone")
-        .and_then(Item::as_bool)
-        .unwrap_or(false)
-    {
-        set_value(
-            path_table(doc, &["run", "clone"]),
-            "enabled",
-            Value::from(false),
-        );
-    }
-}
-
-fn reject_provider_table(sandbox: &Table, provider: &str, unsupported: &mut Vec<String>) {
-    if let Some(item) = sandbox.get(provider) {
-        item_path_keys(&format!("run.sandbox.{provider}"), item, unsupported);
-    }
 }
 
 fn migrate_daytona(sandbox: &Table, env: &mut Table, unsupported: &mut Vec<String>) {
@@ -251,24 +232,21 @@ fn migrate_daytona(sandbox: &Table, env: &mut Table, unsupported: &mut Vec<Strin
     for (key, item) in daytona {
         match key {
             "skip_clone" => {
-                if item.as_bool() != Some(true) {
+                if item.as_bool().is_none() {
                     unsupported.push("run.sandbox.daytona.skip_clone".to_string());
                 }
             }
             "auto_stop_interval" => {
                 if let Some(minutes) = item.as_integer().filter(|minutes| *minutes >= 0) {
-                    set_value(
-                        path_table_in_table(env, &["lifecycle"]),
-                        "auto_stop",
-                        Value::from(format!("{minutes}m")),
-                    );
+                    ensure_table(env, &["lifecycle"])["auto_stop"] =
+                        Item::Value(Value::from(format!("{minutes}m")));
                 } else {
                     unsupported.push("run.sandbox.daytona.auto_stop_interval".to_string());
                 }
             }
             "labels" => {
-                if is_table_like(item) {
-                    copy_table(item, path_table_in_table(env, &["labels"]));
+                if item.is_table_like() {
+                    copy_table(item, ensure_table(env, &["labels"]));
                 } else {
                     unsupported.push("run.sandbox.daytona.labels".to_string());
                 }
@@ -288,27 +266,11 @@ fn migrate_daytona_snapshot(snapshot_item: &Item, env: &mut Table, unsupported: 
 
     for (key, item) in snapshot {
         match key {
-            "name" => set_item(path_table_in_table(env, &["image"]), "ref", item.clone()),
-            "cpu" => set_item(
-                path_table_in_table(env, &["resources"]),
-                "cpu",
-                item.clone(),
-            ),
-            "memory" => set_item(
-                path_table_in_table(env, &["resources"]),
-                "memory",
-                item.clone(),
-            ),
-            "disk" => set_item(
-                path_table_in_table(env, &["resources"]),
-                "disk",
-                item.clone(),
-            ),
-            "dockerfile" => set_item(
-                path_table_in_table(env, &["image"]),
-                "dockerfile",
-                item.clone(),
-            ),
+            "name" => ensure_table(env, &["image"])["ref"] = item.clone(),
+            "cpu" => ensure_table(env, &["resources"])["cpu"] = item.clone(),
+            "memory" => ensure_table(env, &["resources"])["memory"] = item.clone(),
+            "disk" => ensure_table(env, &["resources"])["disk"] = item.clone(),
+            "dockerfile" => ensure_table(env, &["image"])["dockerfile"] = item.clone(),
             _ => item_path_keys(
                 &format!("run.sandbox.daytona.snapshot.{key}"),
                 item,
@@ -330,26 +292,19 @@ fn migrate_docker(sandbox: &Table, env: &mut Table, unsupported: &mut Vec<String
     for (key, item) in docker {
         match key {
             "skip_clone" => {
-                if item.as_bool() != Some(true) {
+                if item.as_bool().is_none() {
                     unsupported.push("run.sandbox.docker.skip_clone".to_string());
                 }
             }
-            "image" => set_item(path_table_in_table(env, &["image"]), "ref", item.clone()),
-            "memory_limit" => set_item(
-                path_table_in_table(env, &["resources"]),
-                "memory",
-                item.clone(),
-            ),
+            "image" => ensure_table(env, &["image"])["ref"] = item.clone(),
+            "memory_limit" => ensure_table(env, &["resources"])["memory"] = item.clone(),
             "cpu_quota" => {
                 if let Some(cpu_quota) = item.as_integer() {
                     let cpu_count = cpu_quota / 100_000;
                     if cpu_quota > 0 && cpu_quota % 100_000 == 0 && i32::try_from(cpu_count).is_ok()
                     {
-                        set_value(
-                            path_table_in_table(env, &["resources"]),
-                            "cpu",
-                            Value::from(cpu_count),
-                        );
+                        ensure_table(env, &["resources"])["cpu"] =
+                            Item::Value(Value::from(cpu_count));
                     } else {
                         unsupported.push("run.sandbox.docker.cpu_quota".to_string());
                     }
@@ -362,18 +317,7 @@ fn migrate_docker(sandbox: &Table, env: &mut Table, unsupported: &mut Vec<String
     }
 }
 
-fn path_table<'a>(doc: &'a mut DocumentMut, path: &[&str]) -> &'a mut Table {
-    let mut item = doc.as_item_mut();
-    for segment in path {
-        item = &mut item[segment];
-        if !item.is_table() {
-            *item = Item::Table(Table::new());
-        }
-    }
-    item.as_table_mut().expect("path item should be a table")
-}
-
-fn path_table_in_table<'a>(table: &'a mut Table, path: &[&str]) -> &'a mut Table {
+fn ensure_table<'a>(table: &'a mut Table, path: &[&str]) -> &'a mut Table {
     let mut table = table;
     for segment in path {
         let item = &mut table[segment];
@@ -385,30 +329,12 @@ fn path_table_in_table<'a>(table: &'a mut Table, path: &[&str]) -> &'a mut Table
     table
 }
 
-fn set_value(table: &mut Table, key: &str, value: Value) {
-    table[key] = Item::Value(value);
-}
-
-fn set_item(table: &mut Table, key: &str, item: Item) {
-    table[key] = item;
-}
-
-fn is_table_like(item: &Item) -> bool {
-    item.is_table() || item.as_value().and_then(Value::as_inline_table).is_some()
-}
-
 fn copy_table(source: &Item, target: &mut Table) {
-    if let Some(table) = source.as_table() {
-        for (key, item) in table {
-            target[key] = item.clone();
-        }
+    let Some(src) = source.as_table_like() else {
         return;
-    }
-
-    if let Some(inline_table) = source.as_value().and_then(Value::as_inline_table) {
-        for (key, value) in inline_table {
-            target[key] = Item::Value(value.clone());
-        }
+    };
+    for (key, item) in src.iter() {
+        target[key] = item.clone();
     }
 }
 
@@ -431,13 +357,13 @@ fn copy_array_of_tables_with_volume_id(
             match key {
                 "volume_id" => {
                     has_id = true;
-                    set_item(&mut migrated_volume, "id", item.clone());
+                    migrated_volume["id"] = item.clone();
                 }
                 "mount_path" => {
                     has_mount_path = true;
-                    set_item(&mut migrated_volume, "mount_path", item.clone());
+                    migrated_volume["mount_path"] = item.clone();
                 }
-                "subpath" => set_item(&mut migrated_volume, "subpath", item.clone()),
+                "subpath" => migrated_volume["subpath"] = item.clone(),
                 _ => item_path_keys(
                     &format!("run.sandbox.daytona.volumes.{key}"),
                     item,
@@ -470,6 +396,7 @@ fn item_path_keys(prefix: &str, item: &Item, out: &mut Vec<String>) {
     if let Some(array) = item.as_array_of_tables() {
         if array.is_empty() {
             out.push(prefix.to_string());
+            return;
         }
         for table in array {
             if table.is_empty() {
@@ -492,23 +419,18 @@ fn remove_run_sandbox(doc: &mut DocumentMut) {
 }
 
 fn next_backup_path(path: &Path) -> PathBuf {
-    let base = path.with_file_name(format!(
-        "{}.legacy-sandbox-migration.bak",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("settings.toml")
-    ));
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("settings path always has a UTF-8 file name");
+    let base = path.with_file_name(format!("{file_name}.legacy-sandbox-migration.bak"));
     if !base.exists() {
         return base;
     }
 
-    for index in 1.. {
-        let candidate = path.with_file_name(format!(
-            "{}.legacy-sandbox-migration.{index}.bak",
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("settings.toml")
-        ));
+    for index in 1u32.. {
+        let candidate =
+            path.with_file_name(format!("{file_name}.legacy-sandbox-migration.{index}.bak"));
         if !candidate.exists() {
             return candidate;
         }
@@ -519,7 +441,6 @@ fn next_backup_path(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use fabro_types::settings::InterpString;
-    use fabro_types::settings::run::EnvironmentProvider;
 
     use super::*;
 
@@ -795,5 +716,29 @@ cpu_quota = 250000
         .expect_err("non-divisible cpu quota should fail migration");
 
         assert!(err.to_string().contains("run.sandbox.docker.cpu_quota"));
+    }
+
+    #[test]
+    fn explicit_skip_clone_false_is_accepted_as_default() {
+        let migrated = migrate(
+            r#"
+_version = 1
+
+[run.sandbox]
+provider = "docker"
+
+[run.sandbox.docker]
+skip_clone = false
+"#,
+        );
+
+        let settings = migrated
+            .parse::<SettingsLayer>()
+            .expect("migrated TOML should parse");
+        let resolved = crate::WorkflowSettingsBuilder::from_layer(&settings)
+            .expect("migrated settings should resolve")
+            .run;
+
+        assert!(resolved.clone.enabled);
     }
 }

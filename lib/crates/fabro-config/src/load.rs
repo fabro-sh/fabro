@@ -21,9 +21,7 @@ pub(crate) fn load_settings_path(path: &Path) -> Result<SettingsLayer> {
             Some(report) => {
                 tracing::warn!("{}", report.warning);
                 eprintln!("{}", report.warning);
-                report.contents.parse::<SettingsLayer>().map_err(|err| {
-                    Error::parse_file("Migrated settings file is invalid", path, err)
-                })?
+                report.layer
             }
             None => {
                 return Err(Error::parse_file(
