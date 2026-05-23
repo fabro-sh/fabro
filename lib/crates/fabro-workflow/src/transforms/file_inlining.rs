@@ -192,33 +192,46 @@ impl FileInliningTransform {
             .with_inputs(self.inputs.clone());
 
         for (node_id, node) in &mut graph.nodes {
-            let Some(AttrValue::String(prompt)) = node.attrs.get("prompt") else {
-                continue;
-            };
-            let target = TemplateRenderTarget::node_attr(
-                self.source_name.clone(),
-                node_id.clone(),
-                "prompt",
-            )
-            .with_source_origin(self.source_text.as_deref(), prompt)
-            .with_template_store(template_render_store(
-                &self.current_dir,
-                Arc::clone(&self.resolver),
-                self.source_name.as_deref(),
-                prompt,
-            )?);
-            let rendered = render_template_for_target(
-                prompt,
-                &ctx,
-                self.render_mode,
-                &target,
-                &mut diagnostics,
-            )?;
-            let value = self
-                .render_resolved_file_ref(&rendered, &ctx, target, &mut diagnostics)?
-                .unwrap_or(rendered);
-            node.attrs
-                .insert("prompt".to_string(), AttrValue::String(value));
+            for attr_name in ["prompt", "output_schema"] {
+                let Some(AttrValue::String(attr_value)) = node.attrs.get(attr_name) else {
+                    continue;
+                };
+                let target = TemplateRenderTarget::node_attr(
+                    self.source_name.clone(),
+                    node_id.clone(),
+                    attr_name,
+                )
+                .with_source_origin(self.source_text.as_deref(), attr_value)
+                .with_template_store(template_render_store(
+                    &self.current_dir,
+                    Arc::clone(&self.resolver),
+                    self.source_name.as_deref(),
+                    attr_value,
+                )?);
+                let rendered = render_template_for_target(
+                    attr_value,
+                    &ctx,
+                    self.render_mode,
+                    &target,
+                    &mut diagnostics,
+                )?;
+                let value = match self.render_resolved_file_ref(
+                    &rendered,
+                    &ctx,
+                    target,
+                    &mut diagnostics,
+                )? {
+                    Some(value) => value,
+                    None if attr_name == "output_schema" && rendered.starts_with('@') => {
+                        return Err(Error::Validation(format!(
+                            "node '{node_id}' output_schema has unresolved file reference: {rendered}"
+                        )));
+                    }
+                    None => rendered,
+                };
+                node.attrs
+                    .insert(attr_name.to_string(), AttrValue::String(value));
+            }
         }
 
         Ok((graph, diagnostics))
@@ -462,6 +475,90 @@ mod tests {
         assert_eq!(
             graph.attrs.get("goal").and_then(AttrValue::as_str),
             Some("Ship feature")
+        );
+    }
+
+    #[test]
+    fn file_inlining_transform_inlines_output_schema_reference() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("schemas")).unwrap();
+        std::fs::write(
+            dir.path().join("schemas/audit-result.schema.json"),
+            r#"{"type":"object","required":["passed"]}"#,
+        )
+        .unwrap();
+
+        let mut graph = Graph::new("test");
+        let mut node = Node::new("audit");
+        node.attrs.insert(
+            "output_schema".to_string(),
+            AttrValue::String("@schemas/audit-result.schema.json".to_string()),
+        );
+        graph.nodes.insert("audit".to_string(), node);
+
+        let transform = FileInliningTransform::new(
+            dir.path().to_path_buf(),
+            Arc::new(FilesystemFileResolver::new(None)),
+        );
+        let graph = transform.apply(graph).unwrap();
+
+        assert_eq!(
+            graph.nodes["audit"]
+                .attrs
+                .get("output_schema")
+                .and_then(AttrValue::as_str),
+            Some(r#"{"type":"object","required":["passed"]}"#)
+        );
+    }
+
+    #[test]
+    fn file_inlining_transform_leaves_routing_output_schema_keyword_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut graph = Graph::new("test");
+        let mut node = Node::new("route");
+        node.attrs.insert(
+            "output_schema".to_string(),
+            AttrValue::String("routing".to_string()),
+        );
+        graph.nodes.insert("route".to_string(), node);
+
+        let transform = FileInliningTransform::new(
+            dir.path().to_path_buf(),
+            Arc::new(FilesystemFileResolver::new(None)),
+        );
+        let graph = transform.apply(graph).unwrap();
+
+        assert_eq!(
+            graph.nodes["route"]
+                .attrs
+                .get("output_schema")
+                .and_then(AttrValue::as_str),
+            Some("routing")
+        );
+    }
+
+    #[test]
+    fn file_inlining_transform_reports_unresolved_output_schema_reference() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut graph = Graph::new("test");
+        let mut node = Node::new("audit");
+        node.attrs.insert(
+            "output_schema".to_string(),
+            AttrValue::String("@schemas/missing.schema.json".to_string()),
+        );
+        graph.nodes.insert("audit".to_string(), node);
+
+        let transform = FileInliningTransform::new(
+            dir.path().to_path_buf(),
+            Arc::new(FilesystemFileResolver::new(None)),
+        );
+        let error = transform.apply(graph).unwrap_err();
+
+        assert!(
+            error.to_string().contains(
+                "node 'audit' output_schema has unresolved file reference: @schemas/missing.schema.json"
+            ),
+            "unexpected error: {error}",
         );
     }
 

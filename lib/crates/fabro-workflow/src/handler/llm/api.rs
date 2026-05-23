@@ -13,7 +13,8 @@ use fabro_auth::{CredentialSource, EnvCredentialSource};
 use fabro_graphviz::graph::{AttrValue, Node};
 use fabro_llm::client::Client;
 use fabro_llm::types::{
-    Message, ReasoningEffort, Request, Speed, TokenCounts, ToolDefinition as LlmToolDefinition,
+    Message, ReasoningEffort, Request, Response, Speed, TokenCounts,
+    ToolDefinition as LlmToolDefinition,
 };
 use fabro_mcp::config::McpServerSettings;
 #[cfg(test)]
@@ -26,7 +27,11 @@ use tokio::sync::Mutex as TokioMutex;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::super::agent::{CodergenBackend, CodergenResult, CodergenRunRequest, OneShotRequest};
+use super::super::agent::{
+    CodergenBackend, CodergenResult, CodergenRunRequest, OneShotRequest,
+    validate_agent_output_sources,
+};
+use super::super::structured_output;
 use super::activation_lease::{ActivationLease, ActivationLeaseOptions};
 use super::routing;
 use super::routing::ProviderContext;
@@ -460,6 +465,32 @@ fn track_file_event(event: &AgentEvent, state: &mut FileTracking) {
     }
 }
 
+fn file_tracking_snapshot(
+    file_tracking: &Arc<Mutex<FileTracking>>,
+) -> (Vec<String>, Option<String>) {
+    let state = file_tracking.lock().unwrap();
+    let mut files: Vec<String> = state.touched.iter().cloned().collect();
+    files.sort();
+    (files, state.last.clone())
+}
+
+fn last_assistant_response(session: &Session) -> String {
+    session
+        .history()
+        .turns()
+        .iter()
+        .rev()
+        .find_map(|turn| {
+            if let AgentMessage::Assistant { content, .. } = turn {
+                if !content.is_empty() {
+                    return Some(content.clone());
+                }
+            }
+            None
+        })
+        .unwrap_or_default()
+}
+
 /// Spawn a task that subscribes to session events and:
 /// 1. Tracks file changes (write_file/edit_file tool calls) into shared state.
 /// 2. Forwards non-streaming agent events to the pipeline emitter.
@@ -519,6 +550,13 @@ pub struct AgentApiBackend {
     steering_hub:       Arc<SteeringHub>,
     catalog:            Arc<Catalog>,
     fabro_run_tools:    Option<FabroRunToolServices>,
+}
+
+struct OneShotCompletion {
+    response:        Response,
+    actual_model:    String,
+    actual_provider: String,
+    actual_speed:    Option<Speed>,
 }
 
 impl AgentApiBackend {
@@ -812,71 +850,18 @@ impl AgentApiBackend {
             }
         }
     }
-}
 
-#[async_trait]
-impl CodergenBackend for AgentApiBackend {
-    async fn shutdown(&self, emitter: &Arc<Emitter>) {
-        self.shutdown_cached_sessions(emitter);
-    }
-
-    fn effective_request_controls(&self, node: &Node) -> Result<EffectiveRequestControls, Error> {
-        self.resolve_effective_request_controls(node)
-    }
-
-    async fn one_shot(&self, request: OneShotRequest<'_>) -> Result<CodergenResult, Error> {
-        let node = request.node;
-        let prompt = request.prompt;
-        let system_prompt = request.system_prompt;
-        let emitter = request.emitter;
-        let stage_scope = request.stage_scope;
-
-        let client = Client::from_source(self.source.as_ref(), Arc::clone(&self.catalog))
-            .await
-            .map_err(|e| Error::handler_with_source("Failed to create LLM client", e))?;
-
-        let model = node.model().unwrap_or(&self.model);
-        let provider = self.resolve_provider_context(model, node.provider())?;
-        let provider_id = provider.provider_id.to_string();
-        let controls = self.resolve_effective_request_controls(node)?;
-
-        let max_tokens = node
-            .max_tokens()
-            .or_else(|| self.catalog.get(model).and_then(|m| m.limits.max_output));
-
-        let mut messages = Vec::new();
-        if let Some(sys) = system_prompt {
-            messages.push(Message::system(sys));
-        }
-        messages.push(Message::user(prompt));
-
-        let request = Request {
-            model: model.to_string(),
-            messages,
-            provider: Some(provider_id),
-            reasoning_effort: controls.reasoning_effort,
-            speed: controls.speed,
-            tools: None,
-            tool_choice: None,
-            response_format: None,
-            temperature: None,
-            top_p: None,
-            max_tokens,
-            stop_sequences: None,
-            metadata: None,
-            provider_options: None,
-        };
-
-        // Build per-request fallback chain: if the node overrides the provider,
-        // no failover is available; otherwise use the backend's.
-        let fallback_chain: &[FallbackTarget] = if node.provider().is_some() {
-            &[]
-        } else {
-            &self.fallback_chain
-        };
-
-        let result = client.complete(&request).await;
-
+    async fn complete_one_shot_request(
+        &self,
+        client: &Client,
+        node: &Node,
+        emitter: &Arc<Emitter>,
+        stage_scope: &StageScope,
+        request: &Request,
+        controls: EffectiveRequestControls,
+        fallback_chain: &[FallbackTarget],
+    ) -> Result<OneShotCompletion, Error> {
+        let result = client.complete(request).await;
         let default_provider = self.provider_id.to_string();
 
         let (response, actual_model, actual_provider, actual_speed) = match result {
@@ -916,7 +901,7 @@ impl CodergenBackend for AgentApiBackend {
                     let max_tokens = node.max_tokens().or_else(|| {
                         self.catalog
                             .get(&target.model)
-                            .and_then(|m| m.limits.max_output)
+                            .and_then(|model| model.limits.max_output)
                     });
 
                     let fallback_request = Request {
@@ -930,12 +915,12 @@ impl CodergenBackend for AgentApiBackend {
 
                     match client.complete(&fallback_request).await {
                         Ok(resp) => {
-                            found = Some((
-                                resp,
-                                target.model.clone(),
-                                target.provider.clone(),
-                                controls.speed,
-                            ));
+                            found = Some(OneShotCompletion {
+                                response:        resp,
+                                actual_model:    target.model.clone(),
+                                actual_provider: target.provider.clone(),
+                                actual_speed:    controls.speed,
+                            });
                             break;
                         }
                         Err(err) if err.failover_eligible() => {
@@ -946,29 +931,143 @@ impl CodergenBackend for AgentApiBackend {
                 }
 
                 match found {
-                    Some(triple) => triple,
+                    Some(completion) => return Ok(completion),
                     None => return Err(Error::Llm(last_err)),
                 }
             }
             Err(sdk_err) => return Err(Error::Llm(sdk_err)),
         };
 
-        let stage_usage = billed_model_usage_from_llm(
-            self.catalog.as_ref(),
-            &ModelRef {
-                provider: ProviderId::from(actual_provider),
-                model_id: actual_model,
-                speed:    actual_speed,
-            },
-            &response.usage,
-        )?;
-
-        Ok(CodergenResult::Text {
-            text:              response.text(),
-            usage:             Some(stage_usage),
-            files_touched:     Vec::new(),
-            last_file_touched: None,
+        Ok(OneShotCompletion {
+            response,
+            actual_model,
+            actual_provider,
+            actual_speed,
         })
+    }
+}
+
+#[async_trait]
+impl CodergenBackend for AgentApiBackend {
+    async fn shutdown(&self, emitter: &Arc<Emitter>) {
+        self.shutdown_cached_sessions(emitter);
+    }
+
+    fn effective_request_controls(&self, node: &Node) -> Result<EffectiveRequestControls, Error> {
+        self.resolve_effective_request_controls(node)
+    }
+
+    async fn one_shot(&self, request: OneShotRequest<'_>) -> Result<CodergenResult, Error> {
+        let node = request.node;
+        let prompt = request.prompt;
+        let system_prompt = request.system_prompt;
+        let emitter = request.emitter;
+        let stage_scope = request.stage_scope;
+
+        let client = Client::from_source(self.source.as_ref(), Arc::clone(&self.catalog))
+            .await
+            .map_err(|e| Error::handler_with_source("Failed to create LLM client", e))?;
+
+        let model = node.model().unwrap_or(&self.model);
+        let provider = self.resolve_provider_context(model, node.provider())?;
+        let provider_id = provider.provider_id.to_string();
+        let controls = self.resolve_effective_request_controls(node)?;
+
+        let max_tokens = node
+            .max_tokens()
+            .or_else(|| self.catalog.get(model).and_then(|m| m.limits.max_output));
+
+        let mut messages = Vec::new();
+        if let Some(sys) = system_prompt {
+            messages.push(Message::system(sys));
+        }
+        messages.push(Message::user(prompt));
+
+        // Build per-request fallback chain: if the node overrides the provider,
+        // no failover is available; otherwise use the backend's.
+        let fallback_chain: &[FallbackTarget] = if node.provider().is_some() {
+            &[]
+        } else {
+            &self.fallback_chain
+        };
+
+        let output_schema = structured_output::parse_node_output_schema(node)?;
+        let response_format = output_schema
+            .as_ref()
+            .map(structured_output::prompt_response_format);
+        let mut repair_attempts = 0_i64;
+        let mut total_usage = TokenCounts::default();
+
+        loop {
+            let request = Request {
+                model: model.to_string(),
+                messages: messages.clone(),
+                provider: Some(provider_id.clone()),
+                reasoning_effort: controls.reasoning_effort,
+                speed: controls.speed,
+                tools: None,
+                tool_choice: None,
+                response_format: response_format.clone(),
+                temperature: None,
+                top_p: None,
+                max_tokens,
+                stop_sequences: None,
+                metadata: None,
+                provider_options: None,
+            };
+
+            let completion = self
+                .complete_one_shot_request(
+                    &client,
+                    node,
+                    emitter,
+                    stage_scope,
+                    &request,
+                    controls,
+                    fallback_chain,
+                )
+                .await?;
+            total_usage += completion.response.usage.clone();
+            let response_text = completion.response.text();
+
+            let validation_error = if let Some(schema) = &output_schema {
+                match structured_output::validate_response_text(schema, &response_text) {
+                    Ok(_) => None,
+                    Err(error) => Some((schema, error)),
+                }
+            } else {
+                None
+            };
+
+            if let Some((schema, error)) = validation_error {
+                if repair_attempts >= node.output_retries() {
+                    return Err(Error::OutputSchemaValidation(
+                        structured_output::exhausted_failure_reason(node.output_retries()),
+                    ));
+                }
+                messages.push(Message::assistant(response_text));
+                messages.push(Message::user(error.repair_message(schema)));
+                repair_attempts += 1;
+                continue;
+            }
+
+            let stage_usage = billed_model_usage_from_llm(
+                self.catalog.as_ref(),
+                &ModelRef {
+                    provider: ProviderId::from(completion.actual_provider),
+                    model_id: completion.actual_model,
+                    speed:    completion.actual_speed,
+                },
+                &total_usage,
+            )?;
+
+            return Ok(CodergenResult::Text {
+                text:              response_text,
+                usage:             Some(stage_usage),
+                files_touched:     Vec::new(),
+                last_file_touched: None,
+            });
+        }
     }
 
     async fn run(&self, request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
@@ -981,6 +1080,7 @@ impl CodergenBackend for AgentApiBackend {
         let tool_hooks = request.tool_hooks;
         let cancel_token = request.cancel_token;
         let agent_tool_runtime = request.agent_tool_runtime;
+        let output_schema = structured_output::parse_node_output_schema(node)?;
 
         let fidelity = context.fidelity();
         let reuse_key = if fidelity == Fidelity::Full {
@@ -1258,8 +1358,59 @@ impl CodergenBackend for AgentApiBackend {
             return Err(err);
         }
 
+        let mut response = last_assistant_response(&session);
+        if let Some(schema) = &output_schema {
+            let mut repair_attempts = 0_i64;
+            loop {
+                let (_, last_file_touched) = file_tracking_snapshot(&file_tracking);
+                match validate_agent_output_sources(
+                    schema,
+                    &response,
+                    sandbox,
+                    last_file_touched.as_deref(),
+                )
+                .await
+                {
+                    Ok(_) => break,
+                    Err(error) => {
+                        if repair_attempts >= node.output_retries() {
+                            bridge.abort();
+                            discard_session(&mut session, &mut lease, emitter);
+                            return Err(Error::OutputSchemaValidation(
+                                structured_output::exhausted_failure_reason(node.output_retries()),
+                            ));
+                        }
+                        let repair_message = error.repair_message(schema);
+                        match session.process_input(&repair_message).await {
+                            Ok(()) => {
+                                repair_attempts += 1;
+                                response = last_assistant_response(&session);
+                            }
+                            Err(err) => match classify_agent_error(err, false) {
+                                AgentApiErrorDisposition::Cancelled => {
+                                    bridge.abort();
+                                    discard_session(&mut session, &mut lease, emitter);
+                                    return Err(Error::Cancelled);
+                                }
+                                AgentApiErrorDisposition::Terminal(err) => {
+                                    bridge.abort();
+                                    discard_session(&mut session, &mut lease, emitter);
+                                    return Err(err);
+                                }
+                                AgentApiErrorDisposition::FailoverEligible(sdk_err) => {
+                                    bridge.abort();
+                                    discard_session(&mut session, &mut lease, emitter);
+                                    return Err(Error::Llm(sdk_err));
+                                }
+                            },
+                        }
+                    }
+                }
+            }
+        }
+
         // Aggregate token usage only from new turns (prevents double-counting on
-        // reuse).
+        // reuse), including any output-schema repair turns.
         let mut total_usage = TokenCounts::default();
         for turn in &session.history().turns()[turns_before..] {
             if let AgentMessage::Assistant { usage, .. } = turn {
@@ -1278,29 +1429,8 @@ impl CodergenBackend for AgentApiBackend {
             &total_usage,
         )?;
 
-        // Extract last assistant response from the session history.
-        let response = session
-            .history()
-            .turns()
-            .iter()
-            .rev()
-            .find_map(|turn| {
-                if let AgentMessage::Assistant { content, .. } = turn {
-                    if !content.is_empty() {
-                        return Some(content.clone());
-                    }
-                }
-                None
-            })
-            .unwrap_or_default();
-
         // Collect files_touched from the shared tracking state.
-        let (files_touched, last_file_touched) = {
-            let s = file_tracking.lock().unwrap();
-            let mut v: Vec<String> = s.touched.iter().cloned().collect();
-            v.sort();
-            (v, s.last.clone())
-        };
+        let (files_touched, last_file_touched) = file_tracking_snapshot(&file_tracking);
 
         if let Some(lease) = lease.take() {
             lease.release();
@@ -1376,10 +1506,13 @@ mod tests {
     };
     use fabro_vault::{SecretType, Vault};
     use futures::stream;
+    use httpmock::Method::POST;
+    use httpmock::MockServer;
     use tokio::sync::RwLock as AsyncRwLock;
     use tokio_util::sync::CancellationToken;
 
     use super::*;
+    use crate::context::Context;
     use crate::services::FabroRunToolServices;
 
     struct ShutdownTestProfile {
@@ -1445,6 +1578,109 @@ mod tests {
         async fn stream(&self, _request: &Request) -> Result<StreamEventStream, LlmError> {
             Ok(Box::pin(stream::empty()))
         }
+    }
+
+    fn mock_llm_catalog(server: &MockServer) -> Arc<Catalog> {
+        let settings: LlmCatalogSettings = toml::from_str(&format!(
+            r#"
+[providers.mock]
+adapter = "openai_compatible"
+agent_profile = "openai"
+base_url = "{}"
+
+[providers.mock.auth]
+credentials = ["env:MOCK_API_KEY"]
+
+[models.mock-model]
+provider = "mock"
+display_name = "Mock Model"
+family = "mock"
+default = true
+
+[models.mock-model.limits]
+context_window = 8192
+max_output = 1024
+
+[models.mock-model.features]
+tools = true
+vision = false
+reasoning = false
+"#,
+            server.base_url()
+        ))
+        .unwrap();
+        Arc::new(Catalog::from_builtin_with_overrides(&settings).unwrap())
+    }
+
+    fn mock_api_backend(server: &MockServer) -> AgentApiBackend {
+        let source = EnvCredentialSource::with_env_lookup(Arc::new(|name| {
+            if name == "MOCK_API_KEY" {
+                Some("sk-test".to_string())
+            } else {
+                None
+            }
+        }));
+        AgentApiBackend::new_with_catalog(
+            "mock-model".to_string(),
+            ProviderId::from("mock"),
+            Vec::new(),
+            Arc::new(source),
+            SteeringHub::for_tests(),
+            mock_llm_catalog(server),
+        )
+    }
+
+    fn chat_completion_response(
+        text: &str,
+        input_tokens: i64,
+        output_tokens: i64,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "id": uuid::Uuid::new_v4().to_string(),
+            "model": "mock-model",
+            "choices": [{
+                "message": {
+                    "content": text
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": input_tokens,
+                "completion_tokens": output_tokens,
+                "total_tokens": input_tokens + output_tokens
+            }
+        })
+    }
+
+    fn chat_completion_stream(text: &str, input_tokens: i64, output_tokens: i64) -> String {
+        let text_chunk = serde_json::json!({
+            "id": uuid::Uuid::new_v4().to_string(),
+            "model": "mock-model",
+            "choices": [{
+                "delta": {
+                    "content": text
+                },
+                "finish_reason": null
+            }]
+        });
+        let usage_chunk = serde_json::json!({
+            "id": uuid::Uuid::new_v4().to_string(),
+            "model": "mock-model",
+            "choices": [],
+            "usage": {
+                "prompt_tokens": input_tokens,
+                "completion_tokens": output_tokens,
+                "total_tokens": input_tokens + output_tokens
+            }
+        });
+        format!("data: {text_chunk}\n\ndata: {usage_chunk}\n\ndata: [DONE]\n\n")
+    }
+
+    fn custom_output_schema_attr() -> AttrValue {
+        AttrValue::String(
+            r#"{"type":"object","required":["passed"],"properties":{"passed":{"type":"boolean"}}}"#
+                .to_string(),
+        )
     }
 
     #[test]
@@ -2210,6 +2446,127 @@ reasoning = false
             .unwrap();
 
         assert_eq!(client.provider_names(), vec!["anthropic"]);
+    }
+
+    #[tokio::test]
+    async fn one_shot_repairs_custom_output_schema_with_previous_assistant_message() {
+        let server = MockServer::start();
+        let first = server.mock(|when, then| {
+            when.method(POST)
+                .path("/chat/completions")
+                .body_includes(r#""type":"json_schema""#)
+                .body_excludes(r#""role":"assistant""#);
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(chat_completion_response("not json", 10, 1));
+        });
+        let repair = server.mock(|when, then| {
+            when.method(POST)
+                .path("/chat/completions")
+                .body_includes(r#""type":"json_schema""#)
+                .body_includes(r#""role":"assistant""#)
+                .body_includes("not json")
+                .body_includes("output_schema");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(chat_completion_response(r#"{"passed":true}"#, 11, 2));
+        });
+        let backend = mock_api_backend(&server);
+        let mut node = Node::new("audit");
+        node.attrs
+            .insert("output_schema".to_string(), custom_output_schema_attr());
+        node.attrs
+            .insert("output_retries".to_string(), AttrValue::Integer(1));
+        let context = Context::new();
+        let stage_scope = StageScope::for_handler(&context, &node.id);
+        let emitter = Arc::new(Emitter::new(fabro_types::RunId::new()));
+        let workspace = tempfile::tempdir().unwrap();
+        let sandbox: Arc<dyn fabro_agent::Sandbox> =
+            Arc::new(LocalSandbox::new(workspace.path().to_path_buf()));
+
+        let result = backend
+            .one_shot(OneShotRequest {
+                node:          &node,
+                prompt:        "Audit the result",
+                system_prompt: None,
+                emitter:       &emitter,
+                stage_scope:   &stage_scope,
+                sandbox:       &sandbox,
+                cancel_token:  CancellationToken::new(),
+            })
+            .await
+            .unwrap();
+
+        first.assert_calls(1);
+        repair.assert_calls(1);
+        let CodergenResult::Text { text, usage, .. } = result else {
+            panic!("one_shot should return text");
+        };
+        assert_eq!(text, r#"{"passed":true}"#);
+        let usage = usage.expect("usage should be aggregated");
+        assert_eq!(usage.tokens().input_tokens, 21);
+        assert_eq!(usage.tokens().output_tokens, 3);
+    }
+
+    #[tokio::test]
+    async fn agent_run_repairs_custom_output_schema_in_same_session() {
+        let server = MockServer::start();
+        let first = server.mock(|when, then| {
+            when.method(POST)
+                .path("/chat/completions")
+                .body_includes(r#""stream":true"#)
+                .body_excludes(r#""role":"assistant""#);
+            then.status(200)
+                .header("content-type", "text/event-stream")
+                .body(chat_completion_stream("not json", 20, 3));
+        });
+        let repair = server.mock(|when, then| {
+            when.method(POST)
+                .path("/chat/completions")
+                .body_includes(r#""stream":true"#)
+                .body_includes(r#""role":"assistant""#)
+                .body_includes("not json")
+                .body_includes("output_schema");
+            then.status(200)
+                .header("content-type", "text/event-stream")
+                .body(chat_completion_stream(r#"{"passed":true}"#, 21, 4));
+        });
+        let backend = mock_api_backend(&server);
+        let mut node = Node::new("audit");
+        node.attrs
+            .insert("output_schema".to_string(), custom_output_schema_attr());
+        node.attrs
+            .insert("output_retries".to_string(), AttrValue::Integer(1));
+        let context = Context::new();
+        let emitter = Arc::new(Emitter::new(fabro_types::RunId::new()));
+        let workspace = tempfile::tempdir().unwrap();
+        let sandbox: Arc<dyn fabro_agent::Sandbox> =
+            Arc::new(LocalSandbox::new(workspace.path().to_path_buf()));
+
+        let result = backend
+            .run(CodergenRunRequest {
+                node:               &node,
+                prompt:             "Audit the result",
+                context:            &context,
+                thread_id:          None,
+                emitter:            &emitter,
+                sandbox:            &sandbox,
+                tool_hooks:         None,
+                cancel_token:       CancellationToken::new(),
+                agent_tool_runtime: fabro_agent::AgentToolRuntime::default(),
+            })
+            .await
+            .unwrap();
+
+        first.assert_calls(1);
+        repair.assert_calls(1);
+        let CodergenResult::Text { text, usage, .. } = result else {
+            panic!("run should return text");
+        };
+        assert_eq!(text, r#"{"passed":true}"#);
+        let usage = usage.expect("usage should be aggregated");
+        assert_eq!(usage.tokens().input_tokens, 41);
+        assert_eq!(usage.tokens().output_tokens, 7);
     }
 
     #[tokio::test]

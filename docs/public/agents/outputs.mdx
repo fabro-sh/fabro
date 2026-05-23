@@ -64,6 +64,23 @@ The test coverage is below the threshold.
 
 JSON objects without recognized fields are ignored.
 
+### Validated routing output
+
+Set `output_schema="routing"` on an agent or prompt node to require Fabro's built-in routing directive schema:
+
+```dot
+review [
+  shape=tab,
+  prompt="Review the implementation and return routing JSON.",
+  output_schema="routing",
+  output_retries=2
+]
+```
+
+With `output_schema="routing"`, the routing JSON must be an object with at least one recognized routing field (`preferred_next_label`, `outcome`, `failure_reason`, `suggested_next_ids`, or `context_updates`) and those fields must have the expected types. Malformed routing JSON fails validation instead of being silently ignored.
+
+Fabro repairs invalid structured output inside the same LLM context before failing the node. For prompt nodes, Fabro appends the invalid assistant response and a corrective user message to the same message list. For agent nodes using the API backend, Fabro sends the corrective message to the same live agent session. `output_retries` controls these repair turns and defaults to `2`; `output_retries=0` validates once and fails without a repair turn. These repair turns are separate from workflow `max_retries` and do not consume node retry attempts.
+
 ### Fallback: status.json file
 
 If no routing directives are found in the response text, Fabro checks whether the agent wrote a `status.json` file into the sandbox working directory. If the file exists, Fabro extracts routing directives from it using the same logic. This is useful for agents that write structured output to files rather than including JSON in their response text.
@@ -89,6 +106,35 @@ review [
 review -> fix     [label="Fix"]
 review -> approve [label="Approve"]
 ```
+
+## Custom structured outputs
+
+Agent and prompt nodes can also validate their final JSON object against a JSON Schema file:
+
+```dot
+audit [
+  shape=tab,
+  prompt="Audit the change and return JSON that matches the schema.",
+  output_schema="@schemas/audit-result.schema.json",
+  output_retries=2
+]
+```
+
+`output_schema="@path/to/schema.json"` uses the same workflow file-reference rules as prompt files: the schema is loaded relative to the workflow file and inlined before execution. The final JSON object in the LLM response is validated with `jsonschema`.
+
+When custom schema validation succeeds, Fabro stores the parsed JSON value in context at:
+
+| Key | Value |
+|---|---|
+| `output.{node_id}` | The parsed JSON object that matched the custom schema |
+
+For example, node `audit` writes its parsed custom output to `output.audit`. Fabro still stores the raw response text at `response.audit`.
+
+If custom schema validation fails, Fabro sends concise validation feedback to the same prompt conversation or agent session and asks for corrected JSON. After `output_retries` repair turns are exhausted, the node fails terminally with `output schema validation failed after N repair attempt(s)`.
+
+<Note>
+Structured output validation currently applies to agent and prompt nodes. `backend="acp"` does not support `output_schema` in this release. Custom schemas update `output.{node_id}`; routing schemas update routing fields and `context_updates` instead.
+</Note>
 
 ## Output logging
 

@@ -169,6 +169,16 @@ impl Node {
     }
 
     #[must_use]
+    pub fn output_schema(&self) -> Option<&str> {
+        self.str_attr("output_schema")
+    }
+
+    #[must_use]
+    pub fn output_retries(&self) -> i64 {
+        self.int_attr("output_retries").unwrap_or(2).max(0)
+    }
+
+    #[must_use]
     pub fn max_retries(&self) -> Option<i64> {
         self.int_attr("max_retries")
     }
@@ -576,6 +586,8 @@ mod tests {
         assert_eq!(node.shape(), "box");
         assert_eq!(node.node_type(), None);
         assert_eq!(node.prompt(), None);
+        assert_eq!(node.output_schema(), None);
+        assert_eq!(node.output_retries(), 2);
         assert_eq!(node.max_retries(), None);
         assert!(!node.goal_gate());
         assert_eq!(node.retry_target(), None);
@@ -600,6 +612,31 @@ mod tests {
         node.attrs
             .insert("project_memory".to_string(), AttrValue::Boolean(false));
         assert!(!node.project_memory());
+    }
+
+    #[test]
+    fn node_output_retries_defaults_and_clamps_to_zero() {
+        let mut node = Node::new("x");
+        assert_eq!(node.output_retries(), 2);
+
+        node.attrs
+            .insert("output_retries".to_string(), AttrValue::Integer(0));
+        assert_eq!(node.output_retries(), 0);
+
+        node.attrs
+            .insert("output_retries".to_string(), AttrValue::Integer(-3));
+        assert_eq!(node.output_retries(), 0);
+    }
+
+    #[test]
+    fn node_output_schema_returns_string_attr() {
+        let mut node = Node::new("x");
+        node.attrs.insert(
+            "output_schema".to_string(),
+            AttrValue::String("routing".to_string()),
+        );
+
+        assert_eq!(node.output_schema(), Some("routing"));
     }
 
     #[test]

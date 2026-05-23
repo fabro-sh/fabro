@@ -87,9 +87,57 @@ pub fn reference_kind_for_attribute(
         "goal" if matches!(scope, AttributeScope::Graph) && value.starts_with('@') => {
             Some(ReferenceKind::GraphGoalFile)
         }
-        "prompt" if matches!(scope, AttributeScope::Node) && value.starts_with('@') => {
+        "prompt" | "output_schema"
+            if matches!(scope, AttributeScope::Node) && value.starts_with('@') =>
+        {
             Some(ReferenceKind::FileInline)
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn output_schema_at_value_is_file_inline_reference() {
+        assert_eq!(
+            reference_kind_for_attribute(
+                AttributeScope::Node,
+                "output_schema",
+                "@schemas/result.schema.json",
+            ),
+            Some(ReferenceKind::FileInline),
+        );
+    }
+
+    #[test]
+    fn output_schema_builtin_keyword_is_not_file_inline_reference() {
+        assert_eq!(
+            reference_kind_for_attribute(AttributeScope::Node, "output_schema", "routing"),
+            None,
+        );
+    }
+
+    #[test]
+    fn output_schema_reference_rejects_template_syntax() {
+        let error = reference_kind_for_attribute(
+            AttributeScope::Node,
+            "output_schema",
+            "@schemas/{{ inputs.schema }}.json",
+        )
+        .expect("output_schema @ references should be static references")
+        .validate("@schemas/{{ inputs.schema }}.json")
+        .unwrap_err();
+
+        assert_eq!(error.kind(), ReferenceKind::FileInline);
+        assert_eq!(error.value(), "@schemas/{{ inputs.schema }}.json");
+        assert!(
+            error
+                .to_string()
+                .contains("templates are not supported in file inline references"),
+            "unexpected error: {error}",
+        );
     }
 }
