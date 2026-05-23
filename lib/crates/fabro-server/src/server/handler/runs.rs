@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,7 +18,8 @@ use fabro_api::types::{
 use fabro_config::Storage;
 use fabro_interview::AnswerSubmission;
 use fabro_types::{
-    Principal, RunClientProvenance, RunId, RunProvenance, RunServerProvenance, parse_blob_ref,
+    Graph, Principal, RunClientProvenance, RunId, RunProvenance, RunServerProvenance,
+    SystemActorKind, parse_blob_ref,
 };
 use fabro_util::version::FABRO_VERSION;
 use fabro_workflow::command_log::{command_log_path, read_json_string_blob, read_log_slice};
@@ -41,6 +42,7 @@ use crate::principal_middleware::{
 use crate::run_files::{list_run_commits, list_run_files};
 use crate::run_manifest;
 use crate::run_selector::{ResolveRunError, resolve_run_by_selector};
+use crate::run_title_generation::{self, GenerateTitleInput, TitlePromptInput};
 
 pub(super) fn manifest_routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -546,6 +548,7 @@ async fn create_run(
         Ok(req) => req,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
+    let explicit_title_supplied = req.title.is_some();
     let manifest_run_defaults = state.manifest_run_defaults();
     let prepared = match run_manifest::prepare_manifest(manifest_run_defaults.as_ref(), &req) {
         Ok(prepared) => prepared,
@@ -564,9 +567,12 @@ async fn create_run(
 
     let web_url = state.run_web_url(&run_id);
     let catalog = state.catalog();
-    let configured_providers = state.ready_llm_provider_ids().await;
-    let mut create_input =
-        run_manifest::create_run_input(prepared.clone(), configured_providers, web_url.clone());
+    let ready_provider_ids = state.ready_llm_provider_ids().await;
+    let mut create_input = run_manifest::create_run_input(
+        prepared.clone(),
+        ready_provider_ids.clone(),
+        web_url.clone(),
+    );
     create_input.run_id = Some(run_id);
     create_input.provenance = Some(run_provenance(&headers, &actor));
     create_input.submitted_manifest_bytes = Some(body.to_vec());
@@ -610,6 +616,7 @@ async fn create_run(
                 .into_response();
         }
     };
+    let deterministic_title = summary.title.clone();
 
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
@@ -625,11 +632,96 @@ async fn create_run(
         );
     }
 
+    if !explicit_title_supplied && !ready_provider_ids.is_empty() {
+        let graph = created.persisted.run_spec().graph.clone();
+        let workflow_goal = graph.goal().to_string();
+        let workflow_name = (!graph.name.is_empty()).then(|| graph.name.clone());
+        let run_inputs = created.persisted.run_spec().settings.run.inputs.clone();
+        let workflow_target = prepared.target_path.to_string();
+        let (title_model_id, title_provider_id) = {
+            let catalog = state.catalog();
+            let model = catalog.small_default_for_configured_ids(&ready_provider_ids);
+            (model.id.clone(), model.provider.clone())
+        };
+        spawn_generated_title_task(GeneratedTitleTask {
+            state: Arc::clone(&state),
+            run_id: created.run_id,
+            deterministic_title,
+            workflow_target,
+            workflow_name,
+            workflow_goal,
+            run_inputs,
+            graph,
+            model_id: title_model_id,
+            provider_id: title_provider_id,
+        });
+    }
+
     (
         StatusCode::CREATED,
         Json(state.decorate_run_summary(summary).await),
     )
         .into_response()
+}
+
+struct GeneratedTitleTask {
+    state:               Arc<AppState>,
+    run_id:              RunId,
+    deterministic_title: String,
+    workflow_target:     String,
+    workflow_name:       Option<String>,
+    workflow_goal:       String,
+    run_inputs:          HashMap<String, toml::Value>,
+    graph:               Graph,
+    model_id:            String,
+    provider_id:         fabro_model::ProviderId,
+}
+
+fn spawn_generated_title_task(task: GeneratedTitleTask) {
+    tokio::spawn(async move {
+        let Ok(llm_result) = task.state.resolve_llm_client().await else {
+            return;
+        };
+        let generated_title = run_title_generation::generate_title_or_current(GenerateTitleInput {
+            client:      Arc::new(llm_result.client),
+            model_id:    task.model_id,
+            provider_id: task.provider_id,
+            prompt:      TitlePromptInput {
+                run_id:          &task.run_id,
+                current_title:   &task.deterministic_title,
+                workflow_target: Some(task.workflow_target.as_str()),
+                workflow_name:   task.workflow_name.as_deref(),
+                workflow_goal:   &task.workflow_goal,
+                run_inputs:      &task.run_inputs,
+                graph:           &task.graph,
+            },
+        })
+        .await;
+        if generated_title == task.deterministic_title {
+            return;
+        }
+
+        let Ok(Some(current)) = task.state.store.get_cached_summary(&task.run_id).await else {
+            return;
+        };
+        if current.title != task.deterministic_title {
+            return;
+        }
+        let Ok(run_store) = task.state.store.open_run(&task.run_id).await else {
+            return;
+        };
+        let _ = workflow_event::append_event(
+            &run_store,
+            &task.run_id,
+            &workflow_event::Event::RunTitleUpdated {
+                title: generated_title,
+                actor: Some(Principal::System {
+                    system_kind: SystemActorKind::Engine,
+                }),
+            },
+        )
+        .await;
+    });
 }
 
 fn run_provenance(headers: &HeaderMap, subject: &Principal) -> RunProvenance {
