@@ -155,7 +155,7 @@ function names, error messages, and exact values. Omit pleasantries and conversa
         "A different assistant began this task and produced the following summary. \
 Build on their progress — do not repeat completed steps.\n\n{summary_text}"
     );
-    let summary_token_estimate = summary_content.len() / APPROX_CHARS_PER_TOKEN;
+    let summary_token_estimate = estimate_chars_local_tokens(summary_content.len());
 
     history.compact(preserve_count, summary_content);
 
@@ -183,8 +183,11 @@ pub(crate) fn estimate_active_context_usage(
     }
 
     ContextEstimate {
-        tokens: estimate_system_prompt_local_tokens(system_prompt)
-            + estimate_turns_local_tokens(turns),
+        tokens: estimate_chars_local_tokens(
+            system_prompt
+                .len()
+                .saturating_add(estimate_turns_local_chars(turns)),
+        ),
         method: ContextEstimateMethod::LocalEstimate,
     }
 }
@@ -202,11 +205,17 @@ fn latest_assistant_usage_baseline(turns: &[Message]) -> Option<(usize, usize)> 
 }
 
 fn estimate_turns_local_tokens(turns: &[Message]) -> usize {
-    turns.iter().map(estimate_turn_chars).sum::<usize>() / APPROX_CHARS_PER_TOKEN
+    estimate_chars_local_tokens(estimate_turns_local_chars(turns))
 }
 
-fn estimate_system_prompt_local_tokens(system_prompt: &str) -> usize {
-    system_prompt.len() / APPROX_CHARS_PER_TOKEN
+fn estimate_turns_local_chars(turns: &[Message]) -> usize {
+    turns.iter().fold(0usize, |total, turn| {
+        total.saturating_add(estimate_turn_chars(turn))
+    })
+}
+
+fn estimate_chars_local_tokens(chars: usize) -> usize {
+    chars / APPROX_CHARS_PER_TOKEN
 }
 
 fn estimate_turn_chars(turn: &Message) -> usize {
@@ -397,8 +406,22 @@ mod tests {
         let estimate = estimate_active_context_usage("test", &history);
 
         assert_eq!(estimate.method, ContextEstimateMethod::LocalEstimate);
-        // sysprompt 4/4 = 1, turns sum = (11 + 18 + 9 + 16 + 4) / 4 = 58/4 = 14
+        // (system prompt 4 + turn chars 11 + 18 + 9 + 16 + 4) / 4 = 62/4 = 15
         assert_eq!(estimate.tokens, 15);
+    }
+
+    #[test]
+    fn active_context_local_estimate_matches_whole_history_rounding() {
+        let mut history = History::default();
+        history.push(Message::User {
+            content:   "abc".into(),
+            timestamp: SystemTime::now(),
+        });
+
+        let estimate = estimate_active_context_usage("x", &history);
+
+        assert_eq!(estimate.method, ContextEstimateMethod::LocalEstimate);
+        assert_eq!(estimate.tokens, 1);
     }
 
     #[test]
