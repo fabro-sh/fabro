@@ -9769,6 +9769,43 @@ async fn interrupt_terminal_run_returns_run_not_interruptible() {
 }
 
 #[test]
+fn injected_runnable_event_does_not_make_submitted_run_schedulable() {
+    let state = test_app_state();
+    let run_id = fixtures::RUN_1;
+    let temp_dir = tempfile::tempdir().unwrap();
+    {
+        let mut runs = state.runs.lock().expect("runs lock poisoned");
+        runs.insert(
+            run_id,
+            managed_run(
+                String::new(),
+                RunStatus::Submitted,
+                chrono::Utc::now(),
+                temp_dir.path().join(run_id.to_string()),
+                RunExecutionMode::Start,
+            ),
+        );
+    }
+
+    let runnable = workflow_event::to_run_event(&run_id, &workflow_event::Event::RunRunnable {
+        source: fabro_types::RunRunnableSource::StartRequested,
+        actor:  None,
+    });
+    update_live_run_from_event(&state, run_id, &runnable);
+
+    {
+        let runs = state.runs.lock().expect("runs lock poisoned");
+        assert_eq!(runs.get(&run_id).unwrap().status, RunStatus::Submitted);
+    }
+
+    let starting = workflow_event::to_run_event(&run_id, &workflow_event::Event::RunStarting);
+    update_live_run_from_event(&state, run_id, &starting);
+
+    let runs = state.runs.lock().expect("runs lock poisoned");
+    assert_eq!(runs.get(&run_id).unwrap().status, RunStatus::Starting);
+}
+
+#[test]
 fn active_steerable_stage_projection_ignores_stale_deactivation() {
     let state = test_app_state();
     let run_id = fixtures::RUN_1;

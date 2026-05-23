@@ -2939,6 +2939,14 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
         return;
     };
 
+    if matches!(&event.body, EventBody::RunRunnable(_)) {
+        // Scheduling is owned by the start/approve lifecycle handlers, which
+        // set the live status and notify the scheduler explicitly. Direct
+        // event ingestion still records durable history, but must not make
+        // externally injected events schedulable.
+        return;
+    }
+
     match &event.body {
         EventBody::RunSubmitted(_) => managed_run.status = RunStatus::Submitted,
         EventBody::RunPending(props) => {
@@ -2946,7 +2954,6 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
                 reason: props.reason,
             };
         }
-        EventBody::RunRunnable(_) => managed_run.status = RunStatus::Runnable,
         EventBody::RunStarting(_) => managed_run.status = RunStatus::Starting,
         EventBody::RunRunning(_) => managed_run.status = RunStatus::Running,
         EventBody::RunBlocked(props) => {
