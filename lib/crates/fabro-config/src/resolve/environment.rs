@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use fabro_types::settings::run::{
     DockerfileSource, EnvironmentImageSettings, EnvironmentLifecycleSettings,
     EnvironmentNetworkMode, EnvironmentNetworkSettings, EnvironmentProvider,
@@ -9,30 +7,14 @@ use fabro_types::settings::run::{
 
 use super::ResolveError;
 use crate::{
-    EnvironmentDockerfileLayer, EnvironmentImageLayer, EnvironmentLayer, EnvironmentLifecycleLayer,
-    EnvironmentNetworkLayer, EnvironmentResourcesLayer, EnvironmentVolumeLayer, MergeMap,
-    RunEnvironmentLayer,
+    Combine, EnvironmentDockerfileLayer, EnvironmentImageLayer, EnvironmentLayer,
+    EnvironmentLifecycleLayer, EnvironmentNetworkLayer, EnvironmentResourcesLayer,
+    EnvironmentVolumeLayer, MergeMap, RunEnvironmentLayer,
 };
-
-pub(crate) fn resolve_environments(
-    layers: &MergeMap<EnvironmentLayer>,
-    errors: &mut Vec<ResolveError>,
-) -> HashMap<String, EnvironmentSettings> {
-    layers
-        .iter()
-        .map(|(slug, layer)| {
-            let path = format!("environments.{slug}");
-            (
-                slug.clone(),
-                resolve_environment_layer(layer, &path, errors),
-            )
-        })
-        .collect()
-}
 
 pub(crate) fn resolve_run_environment(
     layer: Option<&RunEnvironmentLayer>,
-    environments: &HashMap<String, EnvironmentSettings>,
+    catalog: &MergeMap<EnvironmentLayer>,
     errors: &mut Vec<ResolveError>,
 ) -> RunEnvironmentSettings {
     let layer = layer.expect("defaults.toml should provide run.environment defaults");
@@ -43,7 +25,7 @@ pub(crate) fn resolve_run_environment(
         "default".to_string()
     });
 
-    let Some(base) = environments.get(&id) else {
+    let Some(base) = catalog.get(&id) else {
         errors.push(ResolveError::Invalid {
             path:   "run.environment.id".to_string(),
             reason: format!("unknown environment: {id}"),
@@ -51,8 +33,8 @@ pub(crate) fn resolve_run_environment(
         return RunEnvironmentSettings::from_environment(id, EnvironmentSettings::default());
     };
 
-    let mut environment = base.clone();
-    apply_run_environment_overrides(&mut environment, layer, errors);
+    let merged = layer.clone().into_environment_override().combine(base.clone());
+    let environment = resolve_environment_layer(&merged, "run.environment", errors);
     validate_provider_capabilities(&environment, "run.environment", errors);
     RunEnvironmentSettings::from_environment(id, environment)
 }
@@ -187,100 +169,10 @@ fn resolve_volumes(layers: Option<&[EnvironmentVolumeLayer]>) -> Vec<Environment
         .collect()
 }
 
-fn apply_run_environment_overrides(
-    environment: &mut EnvironmentSettings,
-    layer: &RunEnvironmentLayer,
-    errors: &mut Vec<ResolveError>,
-) {
-    if let Some(image) = layer.image.as_ref() {
-        apply_image_override(&mut environment.image, image);
-    }
-    if let Some(resources) = layer.resources.as_ref() {
-        apply_resources_override(&mut environment.resources, resources);
-    }
-    if let Some(network) = layer.network.as_ref() {
-        apply_network_override(
-            &mut environment.network,
-            network,
-            "run.environment.network",
-            errors,
-        );
-    }
-    if let Some(lifecycle) = layer.lifecycle.as_ref() {
-        apply_lifecycle_override(&mut environment.lifecycle, lifecycle);
-    }
-    environment.labels.extend(layer.labels.clone().into_inner());
-    if let Some(volumes) = layer.volumes.as_deref() {
-        environment.volumes = resolve_volumes(Some(volumes));
-    }
-    environment.env.extend(layer.env.clone().into_inner());
-}
-
-fn apply_image_override(target: &mut EnvironmentImageSettings, layer: &EnvironmentImageLayer) {
-    if let Some(reference) = layer.reference.as_ref() {
-        target.reference = Some(reference.clone());
-    }
-    if let Some(dockerfile) = layer.dockerfile.as_ref() {
-        target.dockerfile = Some(dockerfile_source(dockerfile));
-    }
-}
-
-fn apply_resources_override(
-    target: &mut EnvironmentResourcesSettings,
-    layer: &EnvironmentResourcesLayer,
-) {
-    if layer.cpu.is_some() {
-        target.cpu = layer.cpu;
-    }
-    if layer.memory.is_some() {
-        target.memory = layer.memory;
-    }
-    if layer.disk.is_some() {
-        target.disk = layer.disk;
-    }
-}
-
-fn apply_network_override(
-    target: &mut EnvironmentNetworkSettings,
-    layer: &EnvironmentNetworkLayer,
-    path: &str,
-    errors: &mut Vec<ResolveError>,
-) {
-    for (index, cidr) in layer.allow.iter().enumerate() {
-        if cidr.parse::<ipnet::IpNet>().is_err() {
-            errors.push(ResolveError::Invalid {
-                path:   format!("{path}.allow[{index}]"),
-                reason: format!("invalid CIDR: {cidr}"),
-            });
-        }
-    }
-    if let Some(raw) = layer.mode.as_deref() {
-        target.mode = parse_network_mode(raw, &format!("{path}.mode"), errors);
-    }
-    if !layer.allow.is_empty() {
-        target.allow.clone_from(&layer.allow);
-    }
-}
-
 fn dockerfile_source(dockerfile: &EnvironmentDockerfileLayer) -> DockerfileSource {
     match dockerfile {
         EnvironmentDockerfileLayer::Inline(text) => DockerfileSource::Inline(text.clone()),
         EnvironmentDockerfileLayer::Path { path } => DockerfileSource::Path { path: path.clone() },
-    }
-}
-
-fn apply_lifecycle_override(
-    target: &mut EnvironmentLifecycleSettings,
-    layer: &EnvironmentLifecycleLayer,
-) {
-    if let Some(preserve) = layer.preserve {
-        target.preserve = preserve;
-    }
-    if let Some(stop_on_terminal) = layer.stop_on_terminal {
-        target.stop_on_terminal = stop_on_terminal;
-    }
-    if layer.auto_stop.is_some() {
-        target.auto_stop = layer.auto_stop;
     }
 }
 
@@ -306,7 +198,6 @@ fn validate_provider_capabilities(
     path: &str,
     errors: &mut Vec<ResolveError>,
 ) {
-    validate_daytona_snapshot_name(environment, path, errors);
     match environment.provider {
         EnvironmentProvider::Local => {
             if matches!(

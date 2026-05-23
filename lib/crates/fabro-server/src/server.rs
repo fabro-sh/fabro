@@ -1684,10 +1684,6 @@ fn system_sandbox_provider(
     )
 }
 
-fn clone_sandbox_can_use_github_credentials(provider: &str) -> bool {
-    matches!(provider, "docker" | "daytona")
-}
-
 fn parse_system_duration(raw: &str) -> anyhow::Result<chrono::Duration> {
     let raw = raw.trim();
     anyhow::ensure!(!raw.is_empty(), "empty duration string");
@@ -3247,7 +3243,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         let run_spec = persisted.run_spec();
         let settings = &run_spec.settings.run;
         let clone_can_use_github_credentials = settings.execution.mode != RunMode::DryRun
-            && clone_sandbox_can_use_github_credentials(&settings.environment.provider.to_string())
+            && settings.environment.provider.is_clone_based()
             && run_spec
                 .repo_origin_url()
                 .is_some_and(|origin| !origin.trim().is_empty());

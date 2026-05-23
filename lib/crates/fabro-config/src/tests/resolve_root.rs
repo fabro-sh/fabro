@@ -67,7 +67,7 @@ provider = "not-a-provider"
 
     assert!(rendered.contains("server.listen.address"));
     assert!(rendered.contains("server.auth.github.allowed_usernames"));
-    assert!(rendered.contains("environments.bad.provider"));
+    assert!(rendered.contains("run.environment.provider"));
 }
 
 #[test]
@@ -189,7 +189,7 @@ provider = "not-a-provider"
     assert!(errors.iter().any(|error| {
         matches!(
             error,
-            fabro_config::ResolveError::Invalid { path, .. } if path == "environments.bad.provider"
+            fabro_config::ResolveError::Invalid { path, .. } if path == "run.environment.provider"
         )
     }));
 }
@@ -214,6 +214,6 @@ command = ["echo", "hi"]
     .expect_err("invalid workflow settings should fail")
     .to_string();
 
-    assert!(rendered.contains("environments.bad.provider"));
+    assert!(rendered.contains("run.environment.provider"));
     assert!(rendered.contains("run.prepare.steps[0]"));
 }

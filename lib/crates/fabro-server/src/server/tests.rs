@@ -905,9 +905,10 @@ id = "missing"
 
 #[test]
 fn clone_sandbox_credentials_are_available_for_clone_based_providers() {
-    assert!(clone_sandbox_can_use_github_credentials("docker"));
-    assert!(clone_sandbox_can_use_github_credentials("daytona"));
-    assert!(!clone_sandbox_can_use_github_credentials("local"));
+    use fabro_types::settings::run::EnvironmentProvider;
+    assert!(EnvironmentProvider::Docker.is_clone_based());
+    assert!(EnvironmentProvider::Daytona.is_clone_based());
+    assert!(!EnvironmentProvider::Local.is_clone_based());
 }
 
 #[tokio::test]

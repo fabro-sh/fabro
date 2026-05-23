@@ -707,12 +707,7 @@ fn requires_github_credentials(run: &RunNamespace) -> bool {
     if run.integrations.github.is_token_requested() {
         return true;
     }
-    run.execution.mode != RunMode::DryRun
-        && clone_sandbox_requires_github_credentials(&run.environment.provider.to_string())
-}
-
-fn clone_sandbox_requires_github_credentials(provider: &str) -> bool {
-    matches!(provider, "docker" | "daytona")
+    run.execution.mode != RunMode::DryRun && run.environment.provider.is_clone_based()
 }
 
 fn install_signal_handlers(
@@ -793,9 +788,10 @@ mod tests {
 
     #[test]
     fn clone_sandbox_credentials_are_required_for_clone_based_providers() {
-        assert!(super::clone_sandbox_requires_github_credentials("docker"));
-        assert!(super::clone_sandbox_requires_github_credentials("daytona"));
-        assert!(!super::clone_sandbox_requires_github_credentials("local"));
+        use fabro_types::settings::run::EnvironmentProvider;
+        assert!(EnvironmentProvider::Docker.is_clone_based());
+        assert!(EnvironmentProvider::Daytona.is_clone_based());
+        assert!(!EnvironmentProvider::Local.is_clone_based());
     }
 
     #[test]

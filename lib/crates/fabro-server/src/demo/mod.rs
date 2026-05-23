@@ -1714,34 +1714,34 @@ mod runs {
     }
 
     pub(super) fn settings() -> serde_json::Value {
+        let environment = EnvironmentSettings {
+            provider: EnvironmentProvider::Daytona,
+            image: EnvironmentImageSettings {
+                reference:  Some("api-server-dev".into()),
+                dockerfile: None,
+            },
+            resources: EnvironmentResourcesSettings {
+                cpu:    Some(4),
+                memory: Some(fabro_types::settings::Size::from_gigabytes(8)),
+                disk:   Some(fabro_types::settings::Size::from_gigabytes(10)),
+            },
+            lifecycle: EnvironmentLifecycleSettings {
+                preserve:         false,
+                stop_on_terminal: true,
+                auto_stop:        Some(
+                    "60m".parse().expect("hardcoded demo duration should parse"),
+                ),
+            },
+            labels: HashMap::from([("project".to_string(), "api-server".to_string())]),
+            ..EnvironmentSettings::default()
+        };
         let settings = WorkflowSettings {
-            project:      ProjectNamespace::default(),
-            workflow:     WorkflowNamespace {
+            project:  ProjectNamespace::default(),
+            workflow: WorkflowNamespace {
                 graph: "workflow.fabro".into(),
                 ..WorkflowNamespace::default()
             },
-            environments: HashMap::from([("api-server".to_string(), EnvironmentSettings {
-                provider: EnvironmentProvider::Daytona,
-                image: EnvironmentImageSettings {
-                    reference:  Some("api-server-dev".into()),
-                    dockerfile: None,
-                },
-                resources: EnvironmentResourcesSettings {
-                    cpu:    Some(4),
-                    memory: Some(fabro_types::settings::Size::from_gigabytes(8)),
-                    disk:   Some(fabro_types::settings::Size::from_gigabytes(10)),
-                },
-                lifecycle: EnvironmentLifecycleSettings {
-                    preserve:         false,
-                    stop_on_terminal: true,
-                    auto_stop:        Some(
-                        "60m".parse().expect("hardcoded demo duration should parse"),
-                    ),
-                },
-                labels: HashMap::from([("project".to_string(), "api-server".to_string())]),
-                ..EnvironmentSettings::default()
-            })]),
-            run:          RunNamespace {
+            run:      RunNamespace {
                 goal: Some(RunGoal::Inline(InterpString::parse(
                     "Add rate limiting to auth endpoints",
                 ))),
@@ -1757,27 +1757,7 @@ mod runs {
                 },
                 environment: RunEnvironmentSettings::from_environment(
                     "api-server".to_string(),
-                    EnvironmentSettings {
-                        provider: EnvironmentProvider::Daytona,
-                        image: EnvironmentImageSettings {
-                            reference:  Some("api-server-dev".into()),
-                            dockerfile: None,
-                        },
-                        resources: EnvironmentResourcesSettings {
-                            cpu:    Some(4),
-                            memory: Some(fabro_types::settings::Size::from_gigabytes(8)),
-                            disk:   Some(fabro_types::settings::Size::from_gigabytes(10)),
-                        },
-                        lifecycle: EnvironmentLifecycleSettings {
-                            preserve:         false,
-                            stop_on_terminal: true,
-                            auto_stop:        Some(
-                                "60m".parse().expect("hardcoded demo duration should parse"),
-                            ),
-                        },
-                        labels: HashMap::from([("project".to_string(), "api-server".to_string())]),
-                        ..EnvironmentSettings::default()
-                    },
+                    environment,
                 ),
                 ..RunNamespace::default()
             },

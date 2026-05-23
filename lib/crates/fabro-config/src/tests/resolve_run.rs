@@ -119,7 +119,6 @@ NODE_ENV = "development"
     )
     .expect("daytona environment should resolve");
 
-    assert!(settings.environments.contains_key("fabro-dev"));
     let environment = settings.run.environment;
 
     assert_eq!(environment.id, "fabro-dev");

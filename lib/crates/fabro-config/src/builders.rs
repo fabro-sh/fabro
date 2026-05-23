@@ -10,7 +10,7 @@ use fabro_util::error::SharedError;
 use crate::defaults::DEFAULTS_LAYER;
 use crate::load::load_settings_path;
 use crate::resolve::{
-    ResolveError, resolve_cli, resolve_environments, resolve_project, resolve_run, resolve_server,
+    ResolveError, resolve_cli, resolve_project, resolve_run, resolve_server,
     resolve_workflow,
 };
 use crate::user::load_settings_config;
@@ -191,10 +191,9 @@ impl RunSettingsBuilder {
     pub(crate) fn from_layer(layer: &SettingsLayer) -> Result<RunNamespace> {
         let layer = layer.clone().combine(DEFAULTS_LAYER.clone());
         let mut errors = Vec::new();
-        let environments = resolve_environments(&layer.environments, &mut errors);
         let run = resolve_run(
             &layer.run.clone().unwrap_or_default(),
-            &environments,
+            &layer.environments,
             &mut errors,
         );
         finish_result(run, "failed to resolve run settings", errors)
@@ -590,17 +589,15 @@ impl WorkflowSettingsBuilder {
         let mut errors = Vec::new();
         let project = resolve_project(&layer.project.clone().unwrap_or_default(), &mut errors);
         let workflow = resolve_workflow(&layer.workflow.clone().unwrap_or_default(), &mut errors);
-        let environments = resolve_environments(&layer.environments, &mut errors);
         let run = resolve_run(
             &layer.run.clone().unwrap_or_default(),
-            &environments,
+            &layer.environments,
             &mut errors,
         );
         finish_dense_result(
             WorkflowSettings {
                 project,
                 workflow,
-                environments,
                 run,
             },
             errors,

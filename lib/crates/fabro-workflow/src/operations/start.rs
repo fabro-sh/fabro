@@ -8,18 +8,16 @@ use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_llm::client::Client as LlmClient;
 use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_model::{Catalog, FallbackTarget, ProviderId};
-use fabro_sandbox::config::{
-    DaytonaNetwork, DaytonaSnapshotSettings, DaytonaVolumeMount,
-    DockerfileSource as SandboxDockerfileSource,
-};
 use fabro_sandbox::daytona::DaytonaConfig;
+use fabro_sandbox::from_environment::{
+    daytona_config_from_environment, docker_config_from_environment,
+};
 use fabro_sandbox::{DockerSandboxOptions, SandboxProvider, SandboxSpec};
 use fabro_static::EnvVars;
 use fabro_types::settings::run::{
-    ApprovalMode, DockerfileSource as ResolvedDockerfileSource, EnvironmentNetworkMode,
-    HookDefinition as ResolvedHookDefinition, HookEvent as ResolvedHookEvent,
+    ApprovalMode, HookDefinition as ResolvedHookDefinition, HookEvent as ResolvedHookEvent,
     HookType as ResolvedHookType, McpServerSettings as ResolvedMcpServerSettings,
-    McpTransport as ResolvedMcpTransport, PullRequestSettings, RunEnvironmentSettings, RunMode,
+    McpTransport as ResolvedMcpTransport, PullRequestSettings, RunMode,
     RunModelSettings as ResolvedRunModelSettings, RunNamespace as ResolvedRunSettings,
     TlsMode as ResolvedTlsMode,
 };
@@ -517,15 +515,11 @@ fn resolve_sandbox_provider(settings: &ResolvedRunSettings) -> SandboxProvider {
 }
 
 fn resolve_daytona_config(settings: &ResolvedRunSettings) -> DaytonaConfig {
-    let mut config = runtime_daytona_config(&settings.environment, !settings.clone.enabled);
-    config.skip_clone = !settings.clone.enabled;
-    config
+    daytona_config_from_environment(&settings.environment, !settings.clone.enabled)
 }
 
 fn resolve_docker_config(settings: &ResolvedRunSettings) -> DockerSandboxOptions {
-    let mut config = runtime_docker_config(&settings.environment, !settings.clone.enabled);
-    config.skip_clone = !settings.clone.enabled;
-    config
+    docker_config_from_environment(&settings.environment, !settings.clone.enabled)
 }
 
 fn resolve_start_llm(
@@ -656,109 +650,6 @@ fn runtime_mcp_server(settings: &ResolvedMcpServerSettings) -> McpServerSettings
         startup_timeout_secs: settings.startup_timeout_secs,
         tool_timeout_secs:    settings.tool_timeout_secs,
     }
-}
-
-fn runtime_daytona_config(settings: &RunEnvironmentSettings, skip_clone: bool) -> DaytonaConfig {
-    DaytonaConfig {
-        auto_stop_interval: settings
-            .lifecycle
-            .auto_stop
-            .map(|duration| duration_to_minutes_i32(duration.as_std())),
-        labels: (!settings.labels.is_empty()).then_some(settings.labels.clone()),
-        volumes: settings
-            .volumes
-            .iter()
-            .map(|volume| DaytonaVolumeMount {
-                volume_id:  volume.id.clone(),
-                mount_path: volume.mount_path.clone(),
-                subpath:    volume.subpath.clone(),
-            })
-            .collect(),
-        snapshot: settings
-            .image
-            .reference
-            .as_ref()
-            .map(|name| DaytonaSnapshotSettings {
-                name:       name.clone(),
-                cpu:        settings.resources.cpu,
-                memory:     settings
-                    .resources
-                    .memory
-                    .map(|size| size_to_gb_i32(size.as_bytes())),
-                disk:       settings
-                    .resources
-                    .disk
-                    .map(|size| size_to_gb_i32(size.as_bytes())),
-                dockerfile: settings
-                    .image
-                    .dockerfile
-                    .as_ref()
-                    .map(|dockerfile| match dockerfile {
-                        ResolvedDockerfileSource::Inline(text) => {
-                            SandboxDockerfileSource::Inline(text.clone())
-                        }
-                        ResolvedDockerfileSource::Path { path } => {
-                            SandboxDockerfileSource::Path { path: path.clone() }
-                        }
-                    }),
-            }),
-        network: Some(match settings.network.mode {
-            EnvironmentNetworkMode::Block => DaytonaNetwork::Block,
-            EnvironmentNetworkMode::AllowAll => DaytonaNetwork::AllowAll,
-            EnvironmentNetworkMode::CidrAllowList => {
-                DaytonaNetwork::AllowList(settings.network.allow.clone())
-            }
-        }),
-        skip_clone,
-    }
-}
-
-fn runtime_docker_config(
-    settings: &RunEnvironmentSettings,
-    skip_clone: bool,
-) -> DockerSandboxOptions {
-    let mut env_vars = settings
-        .env
-        .iter()
-        .map(|(key, value)| format!("{key}={}", resolve_interp(value)))
-        .collect::<Vec<_>>();
-    env_vars.sort();
-    let default_options = DockerSandboxOptions::default();
-
-    DockerSandboxOptions {
-        image: settings
-            .image
-            .reference
-            .clone()
-            .unwrap_or(default_options.image),
-        network_mode: match settings.network.mode {
-            EnvironmentNetworkMode::Block => Some("none".to_string()),
-            EnvironmentNetworkMode::AllowAll | EnvironmentNetworkMode::CidrAllowList => {
-                default_options.network_mode
-            }
-        },
-        memory_limit: settings
-            .resources
-            .memory
-            .and_then(|size| i64::try_from(size.as_bytes()).ok()),
-        cpu_quota: settings
-            .resources
-            .cpu
-            .map(|cpu| i64::from(cpu).saturating_mul(100_000)),
-        env_vars,
-        skip_clone,
-        ..DockerSandboxOptions::default()
-    }
-}
-
-fn duration_to_minutes_i32(duration: Duration) -> i32 {
-    let minutes = duration.as_secs() / 60;
-    i32::try_from(minutes).unwrap_or(i32::MAX)
-}
-
-fn size_to_gb_i32(bytes: u64) -> i32 {
-    let gb = bytes / 1_000_000_000;
-    i32::try_from(gb).unwrap_or(i32::MAX)
 }
 
 fn runtime_hook_definition(definition: &ResolvedHookDefinition) -> fabro_hooks::HookDefinition {

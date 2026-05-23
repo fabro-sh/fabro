@@ -1,26 +1,27 @@
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
-    ArtifactsSettings, EnvironmentSettings, GitAuthorSettings, HookDefinition, HookType,
-    InterviewProviderSettings, McpServerSettings, McpTransport, MergeStrategy,
-    NotificationProviderSettings, NotificationRouteSettings, PullRequestSettings, RunAgentSettings,
-    RunBranchSettings, RunCheckpointSettings, RunCloneSettings, RunExecutionSettings,
-    RunGitSettings, RunGoal, RunIntegrationsGithubSettings, RunIntegrationsSettings,
-    RunInterviewsSettings, RunMetaBranchSettings, RunModelControls, RunModelSettings, RunNamespace,
-    RunPrepareSettings, RunScmSettings, ScmGitHubSettings, TlsMode,
+    ArtifactsSettings, GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings,
+    McpServerSettings, McpTransport, MergeStrategy, NotificationProviderSettings,
+    NotificationRouteSettings, PullRequestSettings, RunAgentSettings, RunBranchSettings,
+    RunCheckpointSettings, RunCloneSettings, RunExecutionSettings, RunGitSettings, RunGoal,
+    RunIntegrationsGithubSettings, RunIntegrationsSettings, RunInterviewsSettings,
+    RunMetaBranchSettings, RunModelControls, RunModelSettings, RunNamespace, RunPrepareSettings,
+    RunScmSettings, ScmGitHubSettings, TlsMode,
 };
 
 use super::{ResolveError, resolve_run_environment};
 use crate::{
-    HookAgentMarker, HookEntry, HookTlsMode, InterviewProviderLayer, InterviewsLayer,
-    McpEntryLayer, ModelRefOrSplice, NotificationProviderLayer, NotificationRouteLayer,
-    RunAgentLayer, RunArtifactsLayer, RunCheckpointLayer, RunCloneLayer, RunExecutionLayer,
-    RunGitLayer, RunGoalLayer, RunIntegrationsLayer, RunLayer, RunMetaBranchLayer, RunModelLayer,
-    RunPrepareLayer, RunPullRequestLayer, RunRunBranchLayer, RunScmLayer, StringOrSplice,
+    EnvironmentLayer, HookAgentMarker, HookEntry, HookTlsMode, InterviewProviderLayer,
+    InterviewsLayer, McpEntryLayer, MergeMap, ModelRefOrSplice, NotificationProviderLayer,
+    NotificationRouteLayer, RunAgentLayer, RunArtifactsLayer, RunCheckpointLayer, RunCloneLayer,
+    RunExecutionLayer, RunGitLayer, RunGoalLayer, RunIntegrationsLayer, RunLayer,
+    RunMetaBranchLayer, RunModelLayer, RunPrepareLayer, RunPullRequestLayer, RunRunBranchLayer,
+    RunScmLayer, StringOrSplice,
 };
 
 pub fn resolve_run(
     layer: &RunLayer,
-    environments: &std::collections::HashMap<String, EnvironmentSettings>,
+    environments: &MergeMap<EnvironmentLayer>,
     errors: &mut Vec<ResolveError>,
 ) -> RunNamespace {
     let clone = resolve_clone(layer.clone.as_ref());
