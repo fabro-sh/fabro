@@ -4045,28 +4045,48 @@ mod tests {
 
         #[test]
         fn agent_session_activation_updates_stage_permission_level_projection() {
+            fn activated_props(
+                permission_level: Option<PermissionLevel>,
+            ) -> AgentSessionActivatedProps {
+                AgentSessionActivatedProps {
+                    thread_id: None,
+                    provider: Some("openai".to_string()),
+                    model: Some("gpt-5.4".to_string()),
+                    reasoning_effort: None,
+                    speed: None,
+                    permission_level,
+                    capabilities: vec![],
+                    visit: 1,
+                }
+            }
+
             let mut state = initialized_projection();
             let stage_id = stage_id();
 
             state
                 .apply_event(&test_stage_event(
                     1,
-                    EventBody::AgentSessionActivated(AgentSessionActivatedProps {
-                        thread_id:        None,
-                        provider:         Some("openai".to_string()),
-                        model:            Some("gpt-5.4".to_string()),
-                        reasoning_effort: None,
-                        speed:            None,
-                        permission_level: Some(PermissionLevel::ReadOnly),
-                        capabilities:     vec![],
-                        visit:            1,
-                    }),
+                    EventBody::AgentSessionActivated(activated_props(Some(
+                        PermissionLevel::ReadOnly,
+                    ))),
                     stage_id.clone(),
                 ))
                 .unwrap();
 
             let stage = state.stage(&stage_id).unwrap();
             assert_eq!(stage.permission_level, Some(PermissionLevel::ReadOnly));
+
+            let mut legacy_state = initialized_projection();
+            legacy_state
+                .apply_event(&test_stage_event(
+                    1,
+                    EventBody::AgentSessionActivated(activated_props(None)),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+
+            let legacy_stage = legacy_state.stage(&stage_id).unwrap();
+            assert_eq!(legacy_stage.permission_level, None);
         }
 
         #[test]
