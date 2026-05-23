@@ -10,6 +10,7 @@ use fabro_interview::{Answer, AnswerSubmission, AnswerValue, Interviewer, Questi
 use fabro_types::{BlockedReason, InterviewOption, Principal, SystemActorKind};
 use futures::future;
 use tokio_util::sync::CancellationToken;
+use ulid::Ulid;
 
 use crate::event::{Emitter, Event, StageScope};
 use crate::millis_u64;
@@ -420,10 +421,7 @@ fn answer_from_submission(
 
 fn answer_labels(options: &[InterviewOption], answer: &Answer) -> Vec<String> {
     match &answer.value {
-        AnswerValue::Selected(key) => vec![answer.selected_option.as_ref().map_or_else(
-            || label_for_key(options, key),
-            |option| option.label.clone(),
-        )],
+        AnswerValue::Selected(key) => vec![label_for_key(options, key)],
         AnswerValue::MultiSelected(keys) => {
             keys.iter().map(|key| label_for_key(options, key)).collect()
         }
@@ -446,11 +444,12 @@ fn label_for_key(options: &[InterviewOption], key: &str) -> String {
 
 fn internal_question_id(scope: &StageScope, tool_call_id: &str, index: usize) -> String {
     format!(
-        "agentq-{}-v{}-{}-{}",
+        "agentq-{}-v{}-{}-{}-{}",
         slug(&scope.node_id),
         scope.visit,
         slug(tool_call_id),
         index + 1,
+        Ulid::new(),
     )
 }
 
@@ -511,7 +510,12 @@ mod tests {
 
         let id = internal_question_id(&scope, "call_123", 1);
 
-        assert_eq!(id, "agentq-reviewchanges-v3-call_123-2");
+        assert!(id.starts_with("agentq-reviewchanges-v3-call_123-2-"));
+        let ulid = id
+            .rsplit('-')
+            .next()
+            .expect("question id should include a ULID suffix");
+        assert_eq!(ulid.len(), 26);
     }
 
     #[tokio::test]

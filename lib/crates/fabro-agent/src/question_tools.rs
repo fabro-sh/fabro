@@ -397,8 +397,7 @@ fn display_text(header: Option<&str>, question: &str) -> String {
     }
 }
 
-#[must_use]
-pub fn bounded_display_field(value: &str, max_chars: usize) -> String {
+fn bounded_display_field(value: &str, max_chars: usize) -> String {
     match value.char_indices().nth(max_chars) {
         Some((byte_idx, _)) => value[..byte_idx].to_string(),
         None => value.to_string(),
