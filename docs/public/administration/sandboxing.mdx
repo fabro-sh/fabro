@@ -9,7 +9,7 @@ Fabro supports three sandbox providers: `local` (no isolation), `docker` (contai
 
 ## Network access control
 
-For cloud sandboxes (Daytona), you can control outbound network access with the `network` field in `[run.sandbox.daytona]`. Three modes are available: `"allow_all"` (default), `"block"`, and `{ allow_list = ["..."] }` for CIDR-based egress filtering.
+For cloud sandboxes (Daytona), you can control outbound network access with `[environments.<slug>.network]`. Three modes are available: `"allow_all"` (default), `"block"`, and `"cidr_allow_list"` with an `allow = ["..."]` CIDR list.
 
 Server defaults in `settings.toml` apply when a run config doesn't specify `network`. Individual run configs can override the server default.
 

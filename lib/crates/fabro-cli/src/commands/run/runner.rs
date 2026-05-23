@@ -707,12 +707,7 @@ fn requires_github_credentials(run: &RunNamespace) -> bool {
     if run.integrations.github.is_token_requested() {
         return true;
     }
-    run.execution.mode != RunMode::DryRun
-        && clone_sandbox_requires_github_credentials(&run.sandbox.provider)
-}
-
-fn clone_sandbox_requires_github_credentials(provider: &str) -> bool {
-    matches!(provider, "docker" | "daytona")
+    run.execution.mode != RunMode::DryRun && run.environment.provider.is_clone_based()
 }
 
 fn install_signal_handlers(
@@ -793,9 +788,10 @@ mod tests {
 
     #[test]
     fn clone_sandbox_credentials_are_required_for_clone_based_providers() {
-        assert!(super::clone_sandbox_requires_github_credentials("docker"));
-        assert!(super::clone_sandbox_requires_github_credentials("daytona"));
-        assert!(!super::clone_sandbox_requires_github_credentials("local"));
+        use fabro_types::settings::run::EnvironmentProvider;
+        assert!(EnvironmentProvider::Docker.is_clone_based());
+        assert!(EnvironmentProvider::Daytona.is_clone_based());
+        assert!(!EnvironmentProvider::Local.is_clone_based());
     }
 
     #[test]
@@ -1147,8 +1143,8 @@ mod tests {
 
         use fabro_types::settings::InterpString;
         use fabro_types::settings::run::{
-            RunIntegrationsGithubSettings, RunIntegrationsSettings, RunMode, RunNamespace,
-            RunSandboxSettings,
+            EnvironmentProvider, RunIntegrationsGithubSettings, RunIntegrationsSettings, RunMode,
+            RunNamespace,
         };
 
         use super::super::requires_github_credentials;
@@ -1160,10 +1156,9 @@ mod tests {
         ) -> RunNamespace {
             let mut run = RunNamespace::default();
             run.execution.mode = mode;
-            run.sandbox = RunSandboxSettings {
-                provider: provider.to_string(),
-                ..RunSandboxSettings::default()
-            };
+            run.environment.provider = provider
+                .parse::<EnvironmentProvider>()
+                .expect("test provider should parse");
             run.integrations = RunIntegrationsSettings {
                 github: RunIntegrationsGithubSettings { permissions },
             };

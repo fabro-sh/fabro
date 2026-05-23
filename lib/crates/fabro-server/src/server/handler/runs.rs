@@ -11,6 +11,7 @@ use axum::{Json, Router};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use bytes::Bytes;
+use chrono::Utc;
 use fabro_api::types::{
     BoardColumn, BoardColumnDefinition, RunManifest, SubmitAnswerRequest, UpdateRunParentRequest,
     UpdateRunRequest,
@@ -158,10 +159,13 @@ async fn list_board_runs(
 ) -> Response {
     let entries = match state
         .store
-        .list_cached_runs(&fabro_store::ListRunsQuery {
-            parent_id: params.parent_id,
-            ..fabro_store::ListRunsQuery::default()
-        })
+        .list_cached_runs(
+            &fabro_store::ListRunsQuery {
+                parent_id: params.parent_id,
+                ..fabro_store::ListRunsQuery::default()
+            },
+            Utc::now(),
+        )
         .await
     {
         Ok(runs) => runs,
@@ -217,7 +221,7 @@ async fn link_run_parent(
         }
     };
     let _parent_link_guard = state.parent_link_lock.lock().await;
-    let child = match state.store.get_cached_summary(&child_id).await {
+    let child = match state.store.get_cached_summary(&child_id, Utc::now()).await {
         Ok(Some(summary)) => summary,
         Ok(None) => return ApiError::not_found("Run not found.").into_response(),
         Err(err) => {
@@ -263,7 +267,7 @@ async fn unlink_run_parent(
     State(state): State<Arc<AppState>>,
 ) -> Response {
     let _parent_link_guard = state.parent_link_lock.lock().await;
-    let child = match state.store.get_cached_summary(&child_id).await {
+    let child = match state.store.get_cached_summary(&child_id, Utc::now()).await {
         Ok(Some(summary)) => summary,
         Ok(None) => return ApiError::not_found("Run not found.").into_response(),
         Err(err) => {
@@ -313,7 +317,7 @@ async fn validate_parent_link(
         }
         let summary = state
             .store
-            .get_cached_summary(&current_id)
+            .get_cached_summary(&current_id, Utc::now())
             .await
             .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
         let Some(summary) = summary else {
@@ -328,7 +332,7 @@ async fn validate_parent_link(
 }
 
 async fn updated_run_response(state: &AppState, run_id: &RunId) -> Response {
-    match state.store.get_cached_summary(run_id).await {
+    match state.store.get_cached_summary(run_id, Utc::now()).await {
         Ok(Some(summary)) => (
             StatusCode::OK,
             Json(state.decorate_run_summary(summary).await),
@@ -348,10 +352,13 @@ async fn list_runs(
 ) -> Response {
     match state
         .store
-        .list_cached_runs(&fabro_store::ListRunsQuery {
-            parent_id: params.parent_id,
-            ..fabro_store::ListRunsQuery::default()
-        })
+        .list_cached_runs(
+            &fabro_store::ListRunsQuery {
+                parent_id: params.parent_id,
+                ..fabro_store::ListRunsQuery::default()
+            },
+            Utc::now(),
+        )
         .await
     {
         Ok(entries) => {
@@ -419,7 +426,7 @@ async fn resolve_run(
 ) -> Response {
     let runs = match state
         .store
-        .list_runs(&fabro_store::ListRunsQuery::default())
+        .list_runs(&fabro_store::ListRunsQuery::default(), Utc::now())
         .await
     {
         Ok(runs) => runs,
@@ -494,7 +501,7 @@ async fn update_run(
         Ok(title) => title,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
-    let current = match state.store.get_cached_summary(&id).await {
+    let current = match state.store.get_cached_summary(&id, Utc::now()).await {
         Ok(Some(summary)) => summary,
         Ok(None) => return ApiError::not_found("Run not found.").into_response(),
         Err(err) => {
@@ -527,7 +534,7 @@ async fn update_run(
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
 
-    match state.store.get_cached_summary(&id).await {
+    match state.store.get_cached_summary(&id, Utc::now()).await {
         Ok(Some(summary)) => (
             StatusCode::OK,
             Json(state.decorate_run_summary(summary).await),
@@ -552,7 +559,12 @@ async fn create_run(
     };
     let explicit_title_supplied = req.title.is_some();
     let manifest_run_defaults = state.manifest_run_defaults();
-    let prepared = match run_manifest::prepare_manifest(manifest_run_defaults.as_ref(), &req) {
+    let manifest_environment_defaults = state.manifest_environment_defaults();
+    let prepared = match run_manifest::prepare_manifest_with_environment_defaults(
+        manifest_run_defaults.as_ref(),
+        manifest_environment_defaults.as_ref(),
+        &req,
+    ) {
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
@@ -624,7 +636,11 @@ async fn create_run(
         }
     };
     let created_at = created.run_id.created_at();
-    let summary = match state.store.get_cached_summary(&created.run_id).await {
+    let summary = match state
+        .store
+        .get_cached_summary(&created.run_id, Utc::now())
+        .await
+    {
         Ok(Some(summary)) => summary,
         Ok(None) => return ApiError::not_found("Run not found.").into_response(),
         Err(err) => {
@@ -789,7 +805,12 @@ async fn run_preflight(
     Json(req): Json<RunManifest>,
 ) -> Response {
     let manifest_run_defaults = state.manifest_run_defaults();
-    let prepared = match run_manifest::prepare_manifest(manifest_run_defaults.as_ref(), &req) {
+    let manifest_environment_defaults = state.manifest_environment_defaults();
+    let prepared = match run_manifest::prepare_manifest_with_environment_defaults(
+        manifest_run_defaults.as_ref(),
+        manifest_environment_defaults.as_ref(),
+        &req,
+    ) {
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
@@ -817,7 +838,12 @@ async fn validate_run_manifest(
     Json(req): Json<RunManifest>,
 ) -> Response {
     let manifest_run_defaults = state.manifest_run_defaults();
-    let prepared = match run_manifest::prepare_manifest(manifest_run_defaults.as_ref(), &req) {
+    let manifest_environment_defaults = state.manifest_environment_defaults();
+    let prepared = match run_manifest::prepare_manifest_with_environment_defaults(
+        manifest_run_defaults.as_ref(),
+        manifest_environment_defaults.as_ref(),
+        &req,
+    ) {
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
@@ -839,7 +865,7 @@ async fn get_run_status(
     RequireRunScopedOrRunTools(id, _actor): RequireRunScopedOrRunTools,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state.store.get_cached_summary(&id).await {
+    match state.store.get_cached_summary(&id, Utc::now()).await {
         Ok(Some(run)) => {
             (StatusCode::OK, Json(state.decorate_run_summary(run).await)).into_response()
         }

@@ -24,13 +24,28 @@ import type { BillingModelRef } from './billing-model-ref';
 import type { CommandTermination } from './command-termination';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { McpServerProjection } from './mcp-server-projection';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { SkillsProjection } from './skills-projection';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { StageCompletion } from './stage-completion';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { StageModelUsage } from './stage-model-usage';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { StageState } from './stage-state';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { StageTiming } from './stage-timing';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { SubAgentProjection } from './sub-agent-projection';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { TodoListProjection } from './todo-list-projection';
 
 /**
  * Observable projection data for one workflow stage execution.
@@ -40,10 +55,7 @@ export interface StageProjection {
     'prompt'?: string | null;
     'response'?: string | null;
     'completion'?: StageCompletion | null;
-    /**
-     * Provider and model metadata recorded for the stage attempt.
-     */
-    'provider_used'?: object | null;
+    'provider_used'?: StageModelUsage | null;
     'diff'?: string | null;
     /**
      * Command and environment recorded when the stage script ran.
@@ -68,6 +80,19 @@ export interface StageProjection {
     'timing'?: StageTiming | null;
     'usage': BilledTokenCounts;
     'model'?: BillingModelRef | null;
+    'todos'?: TodoListProjection | null;
+    /**
+     * Subagents spawned by this stage, in replay/insertion order.
+     */
+    'subagents'?: Array<SubAgentProjection>;
+    /**
+     * Agent skills discovered and activated during this stage.
+     */
+    'skills'?: SkillsProjection;
+    /**
+     * MCP servers observed by this stage.
+     */
+    'mcp_servers'?: Array<McpServerProjection>;
     /**
      * Lifecycle state of the stage projection.
      */

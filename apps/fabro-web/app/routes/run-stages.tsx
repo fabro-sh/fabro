@@ -61,7 +61,7 @@ import {
 import { STAGE_ACTIVITY_EVENT_TYPES, type StageActivityEventType } from "../lib/run-events";
 import { mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
 import { getNumber, getString, type UnknownRecord } from "../lib/unknown";
-import type { EventEnvelope, StageHandler } from "@qltysh/fabro-api-client";
+import type { EventEnvelope, StageHandler, StageModelUsage } from "@qltysh/fabro-api-client";
 
 export const handle = { wide: true, fullHeight: true };
 
@@ -539,23 +539,27 @@ export function buildThreadDnaItems(
   return out;
 }
 
-const STAGE_MODEL_EVENT_NAMES = new Set([
-  "stage.prompt",
-  "agent.session.activated",
-]);
-
-export function extractStageModel(
-  events: EventEnvelope[],
-  stageId: string,
+export function formatStageModelUsageLabel(
+  providerUsed: StageModelUsage | null | undefined,
 ): string | null {
-  let model: string | null = null;
-  for (const e of events) {
-    if (activityEventStageId(e) !== stageId) continue;
-    if (!e.event || !STAGE_MODEL_EVENT_NAMES.has(e.event)) continue;
-    const candidate = getString(e.properties ?? {}, "model");
-    if (candidate) model = candidate;
+  const model = providerUsed?.model;
+  if (!model) return null;
+  const effort = providerUsed.reasoning_effort;
+  return effort ? `${model} · ${effort}` : model;
+}
+
+export function stageModelUsageTitle(
+  providerUsed: StageModelUsage | null | undefined,
+): string {
+  if (!providerUsed) return "LLM model used for this stage";
+  const parts: string[] = [];
+  if (providerUsed.provider) parts.push(`Provider: ${providerUsed.provider}`);
+  if (providerUsed.model) parts.push(`Model: ${providerUsed.model}`);
+  if (providerUsed.reasoning_effort) {
+    parts.push(`Reasoning effort: ${providerUsed.reasoning_effort}`);
   }
-  return model;
+  if (providerUsed.speed) parts.push(`Speed: ${providerUsed.speed}`);
+  return parts.length ? parts.join("\n") : "LLM model used for this stage";
 }
 
 function turnLabel(turn: TurnType): string {
@@ -1226,7 +1230,7 @@ function EventsToolbar({
   onSearchChange,
   filteredCount,
   totalCount,
-  model,
+  providerUsed,
 }: {
   tab: EventsTab;
   renderer: StageRenderer;
@@ -1242,7 +1246,7 @@ function EventsToolbar({
   onSearchChange: (value: string) => void;
   filteredCount: number;
   totalCount: number;
-  model: string | null;
+  providerUsed: StageModelUsage | null;
 }) {
   // Filters apply to: the agent transcript (filter event kinds) and the Debug
   // tab (filter event categories). Specialized renderers (human, parallel,
@@ -1263,6 +1267,11 @@ function EventsToolbar({
     else onDebugCategoriesChange([]);
     onSearchChange("");
   }
+
+  const modelUsage = useMemo(() => {
+    const label = formatStageModelUsageLabel(providerUsed);
+    return label ? { label, title: stageModelUsageTitle(providerUsed) } : null;
+  }, [providerUsed]);
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-3">
@@ -1309,15 +1318,15 @@ function EventsToolbar({
             : `${totalCount.toLocaleString()} events`}
         </span>
       )}
-      {model && (
+      {modelUsage && (
         <span
           className={`inline-flex items-center gap-1.5 text-xs text-fg-muted ${
             showFilters ? "" : "ml-auto"
           }`}
-          title="LLM model used for this stage"
+          title={modelUsage.title}
         >
           <CpuChipIcon className="size-3.5" aria-hidden="true" />
-          <span className="font-mono">{model}</span>
+          <span className="font-mono">{modelUsage.label}</span>
         </span>
       )}
       {tab === "primary" && renderer === "command" && commandTurn && (
@@ -1433,14 +1442,6 @@ export default function RunStages() {
     }
     return Array.from(set).sort();
   }, [debugEvents]);
-  const stageModel = useMemo(
-    () =>
-      selectedStageId
-        ? extractStageModel(stageEventsQuery.data ?? [], selectedStageId)
-        : null,
-    [stageEventsQuery.data, selectedStageId],
-  );
-
   const filteredDebugEvents = useMemo<EventEnvelope[]>(() => {
     const useCategoryFilter = selectedDebugCategories.length > 0;
     const cats = new Set(selectedDebugCategories);
@@ -1510,7 +1511,7 @@ export default function RunStages() {
               onSearchChange={setSearch}
               filteredCount={effectiveTab === "primary" ? filteredTurns.length : filteredDebugEvents.length}
               totalCount={effectiveTab === "primary" ? turns.length : debugEvents.length}
-              model={stageModel}
+              providerUsed={selectedStage.providerUsed}
             />
             {effectiveTab === "debug" && (
               <div className="pb-3">

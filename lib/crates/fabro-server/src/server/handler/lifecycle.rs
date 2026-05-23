@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use chrono::Utc;
+
 use super::super::{
     ApiError, AppState, FailureReason, ForkRequest, ForkResponse, IntoResponse, Json, Path,
     Principal, RequireRunScopedOrRunTools, RequiredUser, Response, RewindRequest, RewindResponse,
@@ -24,7 +26,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
 }
 
 async fn run_response(state: &AppState, id: RunId, status: StatusCode) -> Response {
-    match state.store.get_cached_summary(&id).await {
+    match state.store.get_cached_summary(&id, Utc::now()).await {
         Ok(Some(summary)) => {
             (status, Json(state.decorate_run_summary(summary).await)).into_response()
         }

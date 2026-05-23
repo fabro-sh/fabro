@@ -7,7 +7,8 @@ use fabro_types::run::RunSpec;
 use fabro_types::{
     BilledModelUsage, BilledTokenCounts, Checkpoint, CheckpointRecord, InterviewQuestionRecord,
     QuestionType, RunDiff, RunSandbox, RunSandboxRuntime, RunStatus, SandboxProvider,
-    StageCompletion, StageOutcome, StartRecord, WorkflowSettings, first_event_seq, fixtures,
+    StageCompletion, StageModelUsage, StageOutcome, StartRecord, WorkflowSettings, first_event_seq,
+    fixtures,
 };
 use serde_json::json;
 
@@ -126,7 +127,13 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
             .single()
             .expect("timestamp should be representable"),
     });
-    stage.provider_used = Some(json!({ "provider": "openai", "model": "gpt-5.4" }));
+    stage.provider_used = Some(StageModelUsage {
+        mode:             StageModelUsage::MODE_PROMPT.to_string(),
+        provider:         Some("openai".to_string()),
+        model:            Some("gpt-5.4".to_string()),
+        reasoning_effort: None,
+        speed:            None,
+    });
     stage.diff = Some("diff --git a/a b/a".to_string());
     stage.script_invocation = Some(json!({ "command": "cargo test" }));
     stage.script_timing = Some(json!({ "duration_ms": 10 }));
@@ -174,8 +181,16 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
         Some(StageOutcome::Succeeded)
     );
     assert_eq!(
-        node.provider_used,
-        Some(json!({ "provider": "openai", "model": "gpt-5.4" }))
+        node.provider_used
+            .as_ref()
+            .and_then(|usage| usage.provider.as_deref()),
+        Some("openai")
+    );
+    assert_eq!(
+        node.provider_used
+            .as_ref()
+            .and_then(|usage| usage.model.as_deref()),
+        Some("gpt-5.4")
     );
     assert_eq!(
         node.script_invocation,

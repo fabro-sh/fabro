@@ -108,10 +108,10 @@ enum AgentApiErrorDisposition {
     Terminal(Error),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct EffectiveRequestControls {
-    pub(super) reasoning_effort: Option<ReasoningEffort>,
-    pub(super) speed:            Option<Speed>,
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EffectiveRequestControls {
+    pub(crate) reasoning_effort: Option<ReasoningEffort>,
+    pub(crate) speed:            Option<Speed>,
 }
 
 fn classify_agent_error(err: fabro_agent::Error, allow_failover: bool) -> AgentApiErrorDisposition {
@@ -361,7 +361,7 @@ where
     Ok(format!("{summary}\n{json}"))
 }
 
-pub(super) fn effective_request_controls(
+pub(crate) fn effective_request_controls(
     run_model_controls: &RunModelControls,
     node: &Node,
 ) -> Result<EffectiveRequestControls, Error> {
@@ -611,7 +611,10 @@ impl AgentApiBackend {
         self
     }
 
-    fn effective_request_controls(&self, node: &Node) -> Result<EffectiveRequestControls, Error> {
+    fn resolve_effective_request_controls(
+        &self,
+        node: &Node,
+    ) -> Result<EffectiveRequestControls, Error> {
         effective_request_controls(&self.run_model_controls, node)
     }
 
@@ -770,14 +773,16 @@ impl AgentApiBackend {
         let handle = Arc::new(session.control_handle()) as Arc<dyn ActiveControlHandle>;
         let lease = ActivationLease::activate(
             ActivationLeaseOptions {
-                stage_id:     stage_id.clone(),
-                session_id:   session.id().to_string(),
-                thread_id:    thread_id.map(str::to_string),
-                provider:     Some(session.provider_id().to_string()),
-                model:        Some(session.model().to_string()),
-                capabilities: vec![SessionCapability::Steer],
-                hub:          Arc::clone(&self.steering_hub),
-                emitter:      Arc::clone(emitter),
+                stage_id:         stage_id.clone(),
+                session_id:       session.id().to_string(),
+                thread_id:        thread_id.map(str::to_string),
+                provider:         Some(session.provider_id().to_string()),
+                model:            Some(session.model().to_string()),
+                reasoning_effort: session.reasoning_effort(),
+                speed:            session.speed(),
+                capabilities:     vec![SessionCapability::Steer],
+                hub:              Arc::clone(&self.steering_hub),
+                emitter:          Arc::clone(emitter),
             },
             &handle,
         )?;
@@ -814,6 +819,10 @@ impl CodergenBackend for AgentApiBackend {
         self.shutdown_cached_sessions(emitter);
     }
 
+    fn effective_request_controls(&self, node: &Node) -> Result<EffectiveRequestControls, Error> {
+        self.resolve_effective_request_controls(node)
+    }
+
     async fn one_shot(&self, request: OneShotRequest<'_>) -> Result<CodergenResult, Error> {
         let node = request.node;
         let prompt = request.prompt;
@@ -828,7 +837,7 @@ impl CodergenBackend for AgentApiBackend {
         let model = node.model().unwrap_or(&self.model);
         let provider = self.resolve_provider_context(model, node.provider())?;
         let provider_id = provider.provider_id.to_string();
-        let controls = self.effective_request_controls(node)?;
+        let controls = self.resolve_effective_request_controls(node)?;
 
         let max_tokens = node
             .max_tokens()
@@ -908,14 +917,13 @@ impl CodergenBackend for AgentApiBackend {
                             .get(&target.model)
                             .and_then(|m| m.limits.max_output)
                     });
-                    let fallback_controls = self.effective_request_controls(node)?;
 
                     let fallback_request = Request {
                         model: target.model.clone(),
                         provider: Some(target.provider.clone()),
                         max_tokens,
-                        reasoning_effort: fallback_controls.reasoning_effort,
-                        speed: fallback_controls.speed,
+                        reasoning_effort: controls.reasoning_effort,
+                        speed: controls.speed,
                         ..request.clone()
                     };
 
@@ -925,7 +933,7 @@ impl CodergenBackend for AgentApiBackend {
                                 resp,
                                 target.model.clone(),
                                 target.provider.clone(),
-                                fallback_controls.speed,
+                                controls.speed,
                             ));
                             break;
                         }
@@ -1252,7 +1260,7 @@ impl CodergenBackend for AgentApiBackend {
             }
         }
 
-        let billing_controls = self.effective_request_controls(node)?;
+        let billing_controls = self.resolve_effective_request_controls(node)?;
         let stage_usage = billed_model_usage_from_llm(
             self.catalog.as_ref(),
             &ModelRef {
@@ -2068,7 +2076,7 @@ reasoning = false
         });
         let node = Node::new("work");
 
-        let controls = backend.effective_request_controls(&node).unwrap();
+        let controls = backend.resolve_effective_request_controls(&node).unwrap();
 
         assert_eq!(controls.reasoning_effort, Some(ReasoningEffort::Low));
         assert_eq!(controls.speed, Some(Speed::Fast));
@@ -2096,7 +2104,7 @@ reasoning = false
             fabro_graphviz::graph::AttrValue::String("standard".to_string()),
         );
 
-        let controls = backend.effective_request_controls(&node).unwrap();
+        let controls = backend.resolve_effective_request_controls(&node).unwrap();
 
         assert_eq!(controls.reasoning_effort, Some(ReasoningEffort::High));
         assert_eq!(controls.speed, Some(Speed::Standard));
@@ -2112,7 +2120,7 @@ reasoning = false
         );
         let node = Node::new("work");
 
-        let controls = backend.effective_request_controls(&node).unwrap();
+        let controls = backend.resolve_effective_request_controls(&node).unwrap();
 
         assert_eq!(controls.reasoning_effort, None);
     }

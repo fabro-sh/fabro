@@ -58,8 +58,15 @@ fn apply_builtin_defaults_materializes_expected_layer() {
         layer
             .run
             .as_ref()
-            .and_then(|run| run.sandbox.as_ref())
-            .and_then(|sandbox| sandbox.provider.as_deref()),
+            .and_then(|run| run.environment.as_ref())
+            .and_then(|environment| environment.id.as_deref()),
+        Some("default")
+    );
+    assert_eq!(
+        layer
+            .environments
+            .get("default")
+            .and_then(|environment| environment.provider.as_deref()),
         Some("docker")
     );
     assert_eq!(

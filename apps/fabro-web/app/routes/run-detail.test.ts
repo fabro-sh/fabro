@@ -382,7 +382,7 @@ describe("RunDetail full-height child routes", () => {
     const outletWrappers = renderer.root.findAll(
       (node) =>
         node.type === "div" &&
-        hasClasses(node.props.className, ["pt-3.5", "min-h-0", "flex-1"]),
+        hasClasses(node.props.className, ["pt-3", "min-h-0", "flex-1", "flex-col"]),
     );
     expect(outletWrappers).toHaveLength(1);
   });
@@ -541,7 +541,7 @@ describe("RunDetail full-height child routes", () => {
       (node) =>
         node.type === "div" &&
         hasClasses(node.props.className, [
-          "pt-3.5",
+          "pt-3",
           "pb-[var(--fabro-interview-dock-clearance)]",
         ]),
     );

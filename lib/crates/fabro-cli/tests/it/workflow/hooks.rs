@@ -120,7 +120,7 @@ fn configure_hook_env(cmd: &mut assert_cmd::Command, hook_model: &str) {
     if TestMode::from_env().is_twin() {
         cmd.env_remove("ANTHROPIC_API_KEY");
     }
-    cmd.arg("--sandbox").arg("local");
+    cmd.arg("--environment").arg("local");
     cmd.arg("--auto-approve");
     cmd.arg("--provider").arg(stage_provider());
     cmd.arg("--model").arg(hook_model);

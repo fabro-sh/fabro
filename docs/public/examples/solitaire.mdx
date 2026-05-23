@@ -271,15 +271,20 @@ fallbacks = ["openai", "gemini"]
 [[run.prepare.steps]]
 script = "python3 -m venv .venv && . .venv/bin/activate && pip install pytest curses"
 
-[run.sandbox]
+[run.environment]
+id = "python-dev"
+
+[environments.python-dev]
 provider = "daytona"
 
-[run.sandbox.daytona.snapshot]
-name = "python-dev"
+[environments.python-dev.image]
+ref = "python-dev"
+dockerfile = "FROM python:3.12-slim\nRUN apt-get update && apt-get install -y git libncurses-dev"
+
+[environments.python-dev.resources]
 cpu = 4
 memory = "8GB"
 disk = "20GB"
-dockerfile = "FROM python:3.12-slim\nRUN apt-get update && apt-get install -y git libncurses-dev"
 ```
 
 ```bash

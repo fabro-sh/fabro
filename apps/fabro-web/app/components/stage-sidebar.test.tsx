@@ -14,6 +14,7 @@ function makeStage(overrides: Partial<Stage> = {}): Stage {
     status:    "running",
     duration:  "--",
     startedAt: null,
+    providerUsed: null,
     ...overrides,
   };
 }

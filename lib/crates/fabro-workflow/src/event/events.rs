@@ -8,6 +8,7 @@ use ::fabro_types::{
     StageTiming, SuccessReason, run_event as fabro_types,
 };
 use fabro_agent::{AgentEvent, SandboxEvent};
+use fabro_model::{ReasoningEffort, Speed};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, run_failure_from_error};
@@ -427,15 +428,19 @@ pub enum Event {
         to_node:   String,
     },
     Prompt {
-        stage:    String,
-        visit:    u32,
-        text:     String,
+        stage:            String,
+        visit:            u32,
+        text:             String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        mode:     Option<String>,
+        mode:             Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        provider: Option<String>,
+        provider:         Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        model:    Option<String>,
+        model:            Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reasoning_effort: Option<ReasoningEffort>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        speed:            Option<Speed>,
     },
     PromptCompleted {
         node_id:  String,
@@ -570,16 +575,20 @@ pub enum Event {
     },
     /// A stage has a currently steerable live session binding.
     AgentSessionActivated {
-        node_id:      String,
-        visit:        u32,
-        session_id:   String,
+        node_id:          String,
+        visit:            u32,
+        session_id:       String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        thread_id:    Option<String>,
+        thread_id:        Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        provider:     Option<String>,
+        provider:         Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        model:        Option<String>,
-        capabilities: Vec<fabro_types::SessionCapability>,
+        model:            Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reasoning_effort: Option<ReasoningEffort>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        speed:            Option<Speed>,
+        capabilities:     Vec<fabro_types::SessionCapability>,
     },
     /// A stage's steerable live session binding ended.
     AgentSessionDeactivated {
