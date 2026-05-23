@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::{Graph, Node};
-use fabro_types::StageModelMode;
+use fabro_types::StageModelUsage;
 use tokio_util::sync::CancellationToken;
 
 use super::agent::{CodergenBackend, CodergenResult, CodergenRunRequest};
@@ -249,7 +249,7 @@ async fn llm_evaluate(
             stage:            node_id.to_string(),
             visit:            stage_scope.visit,
             text:             full_prompt.clone(),
-            mode:             Some(StageModelMode::FanIn),
+            mode:             Some(StageModelUsage::MODE_FAN_IN.to_string()),
             provider:         None,
             model:            None,
             reasoning_effort: None,

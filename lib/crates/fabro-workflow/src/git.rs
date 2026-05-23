@@ -343,7 +343,7 @@ mod tests {
 
     use fabro_dump::RunDump;
     use fabro_store::Database;
-    use fabro_types::{CommandTermination, StageModelMode, fixtures};
+    use fabro_types::{CommandTermination, StageModelUsage, fixtures};
     use object_store::memory::InMemory;
 
     use super::*;
@@ -481,7 +481,7 @@ mod tests {
             stage:            "work".into(),
             visit:            2,
             text:             "hello".into(),
-            mode:             Some(StageModelMode::Prompt),
+            mode:             Some(StageModelUsage::MODE_PROMPT.to_string()),
             provider:         Some("openai".into()),
             model:            Some("gpt-5.4".into()),
             reasoning_effort: None,

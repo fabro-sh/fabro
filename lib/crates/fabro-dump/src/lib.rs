@@ -474,7 +474,7 @@ mod tests {
     use fabro_types::run::RunSpec;
     use fabro_types::{
         Checkpoint, CheckpointRecord, Conclusion, RunDiff, RunSandbox, RunStatus, SandboxProvider,
-        StageCompletion, StageModelMode, StageModelUsage, StageOutcome, StartRecord, SuccessReason,
+        StageCompletion, StageModelUsage, StageOutcome, StartRecord, SuccessReason,
         WorkflowSettings, first_event_seq, fixtures,
     };
     use futures::executor;
@@ -587,7 +587,7 @@ mod tests {
                 .unwrap(),
         });
         stage.provider_used = Some(StageModelUsage {
-            mode:             StageModelMode::Prompt,
+            mode:             StageModelUsage::MODE_PROMPT.to_string(),
             provider:         Some("openai".to_string()),
             model:            None,
             reasoning_effort: None,
@@ -645,8 +645,8 @@ mod tests {
         assert_eq!(node.diff, None);
         assert_eq!(node.output, None);
         assert_eq!(
-            node.provider_used.as_ref().map(|usage| usage.mode),
-            Some(StageModelMode::Prompt)
+            node.provider_used.as_ref().map(|usage| usage.mode.as_str()),
+            Some(StageModelUsage::MODE_PROMPT)
         );
         assert_eq!(
             node.provider_used

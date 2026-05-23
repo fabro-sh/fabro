@@ -7,8 +7,8 @@ use fabro_types::run::RunSpec;
 use fabro_types::{
     BilledModelUsage, BilledTokenCounts, Checkpoint, CheckpointRecord, InterviewQuestionRecord,
     QuestionType, RunDiff, RunSandbox, RunSandboxRuntime, RunStatus, SandboxProvider,
-    StageCompletion, StageModelMode, StageModelUsage, StageOutcome, StartRecord, WorkflowSettings,
-    first_event_seq, fixtures,
+    StageCompletion, StageModelUsage, StageOutcome, StartRecord, WorkflowSettings, first_event_seq,
+    fixtures,
 };
 use serde_json::json;
 
@@ -128,7 +128,7 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
             .expect("timestamp should be representable"),
     });
     stage.provider_used = Some(StageModelUsage {
-        mode:             StageModelMode::Prompt,
+        mode:             StageModelUsage::MODE_PROMPT.to_string(),
         provider:         Some("openai".to_string()),
         model:            Some("gpt-5.4".to_string()),
         reasoning_effort: None,

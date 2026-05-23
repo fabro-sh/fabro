@@ -9,8 +9,8 @@ use crate::run_event::{AgentSessionActivatedProps, StagePromptProps};
 use crate::{
     AgentBackend, BilledTokenCounts, Checkpoint, Conclusion, InterviewQuestionRecord,
     InvalidTransition, ModelRef, PullRequestLink, RunControlAction, RunDiff, RunId, RunSandbox,
-    RunSpec, RunStatus, StageCompletion, StageHandler, StageId, StageModelMode, StageState,
-    StageTiming, StartRecord, TodoListProjection,
+    RunSpec, RunStatus, StageCompletion, StageHandler, StageId, StageState, StageTiming,
+    StartRecord, TodoListProjection,
 };
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -59,7 +59,7 @@ pub struct CheckpointRecord {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StageModelUsage {
-    pub mode:             StageModelMode,
+    pub mode:             String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider:         Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -71,17 +71,24 @@ pub struct StageModelUsage {
 }
 
 impl StageModelUsage {
+    pub const MODE_PROMPT: &'static str = "prompt";
+    pub const MODE_AGENT: &'static str = "agent";
+    pub const MODE_ACP: &'static str = "acp";
+    pub const MODE_FAN_IN: &'static str = "fan_in";
+
     /// Build the usage record from a `stage.prompt` event, returning `None`
     /// when the event carried no model metadata.
     #[must_use]
     pub fn from_prompt_props(props: &StagePromptProps) -> Option<Self> {
-        let has_metadata = props.mode.is_some()
-            || props.provider.is_some()
+        let has_metadata = props.provider.is_some()
             || props.model.is_some()
             || props.reasoning_effort.is_some()
             || props.speed.is_some();
         has_metadata.then(|| Self {
-            mode:             props.mode.unwrap_or(StageModelMode::Prompt),
+            mode:             props
+                .mode
+                .clone()
+                .unwrap_or_else(|| Self::MODE_PROMPT.to_string()),
             provider:         props.provider.clone(),
             model:            props.model.clone(),
             reasoning_effort: props.reasoning_effort,
@@ -96,16 +103,16 @@ impl StageModelUsage {
     pub fn from_agent_session_activated(props: &AgentSessionActivatedProps) -> Self {
         let acp: &'static str = AgentBackend::Acp.into();
         let mode = if props.provider.as_deref() == Some(acp) {
-            StageModelMode::Acp
+            Self::MODE_ACP
         } else {
-            StageModelMode::Agent
+            Self::MODE_AGENT
         };
         Self {
-            mode,
-            provider: props.provider.clone(),
-            model: props.model.clone(),
+            mode:             mode.to_string(),
+            provider:         props.provider.clone(),
+            model:            props.model.clone(),
             reasoning_effort: props.reasoning_effort,
-            speed: props.speed,
+            speed:            props.speed,
         }
     }
 }

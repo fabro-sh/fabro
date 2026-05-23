@@ -39,7 +39,6 @@ pub mod settings;
 pub mod stage_completion;
 pub mod stage_handler;
 pub mod stage_id;
-pub mod stage_model_mode;
 pub mod start;
 pub mod status;
 pub mod steering;
@@ -130,7 +129,6 @@ pub use session::{
 pub use stage_completion::StageCompletion;
 pub use stage_handler::StageHandler;
 pub use stage_id::{InvalidStageVisit, ParallelBranchId, StageId};
-pub use stage_model_mode::StageModelMode;
 pub use start::StartRecord;
 pub use status::{
     BlockedReason, FailureReason, InvalidTransition, ParseFailureReasonError,

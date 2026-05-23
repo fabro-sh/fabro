@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
-use fabro_types::StageModelMode;
+use fabro_types::StageModelUsage;
 
 use super::agent::{
     CodergenBackend, CodergenResult, OneShotRequest, emit_stage_prompt, extract_status_fields,
@@ -112,7 +112,7 @@ impl Handler for PromptHandler {
             context,
             node,
             &prompt,
-            StageModelMode::Prompt,
+            StageModelUsage::MODE_PROMPT,
             self.backend.as_deref(),
         )?;
 
@@ -420,7 +420,7 @@ mod tests {
         let state = run_store.state().await.unwrap();
         let node_state = state.stage(&StageId::new("classify", 1)).unwrap();
         let provider_used = node_state.provider_used.as_ref().unwrap();
-        assert_eq!(provider_used.mode, StageModelMode::Prompt);
+        assert_eq!(provider_used.mode, StageModelUsage::MODE_PROMPT);
         assert_eq!(provider_used.reasoning_effort, Some(ReasoningEffort::High));
         assert_eq!(provider_used.speed, Some(Speed::Fast));
     }

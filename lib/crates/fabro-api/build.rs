@@ -342,7 +342,6 @@ fn main() {
         ("StageHandler", "fabro_types::StageHandler", &[]),
         ("StageState", "fabro_types::StageState", &[]),
         ("CommandTermination", "fabro_types::CommandTermination", &[]),
-        ("StageModelMode", "fabro_types::StageModelMode", &[]),
         ("StageModelUsage", "fabro_types::StageModelUsage", &[]),
         ("StageProjection", "fabro_types::StageProjection", &[]),
         ("SecretMetadata", "fabro_types::SecretMetadata", &[]),

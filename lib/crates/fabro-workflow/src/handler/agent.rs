@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::{Graph, Node};
-use fabro_types::{RunId, StageModelMode};
+use fabro_types::{RunId, StageModelUsage};
 use tokio_util::sync::CancellationToken;
 
 use super::llm::api::EffectiveRequestControls;
@@ -52,8 +52,8 @@ pub struct OneShotRequest<'a> {
 /// resolved [`StageScope`] so the caller can keep building events scoped to
 /// the same stage.
 ///
-/// Both `AgentHandler` and `PromptHandler` build the same payload (the only
-/// difference is `mode`), so the per-emit fallback rules — node-provided
+/// Both `AgentHandler` and `PromptHandler` build the same payload, so the
+/// per-emit fallback rules — node-provided
 /// `provider`/`model` overrides over run-level defaults, and the backend's
 /// `EffectiveRequestControls` (or `Default::default()` when no backend is
 /// attached) — live in one place.
@@ -62,7 +62,7 @@ pub(crate) fn emit_stage_prompt(
     context: &Context,
     node: &Node,
     prompt: &str,
-    mode: StageModelMode,
+    mode: &str,
     backend: Option<&dyn CodergenBackend>,
 ) -> Result<StageScope, Error> {
     let prompt_provider = node
@@ -83,7 +83,7 @@ pub(crate) fn emit_stage_prompt(
             stage:            node.id.clone(),
             visit:            stage_scope.visit,
             text:             prompt.to_string(),
-            mode:             Some(mode),
+            mode:             Some(mode.to_string()),
             provider:         prompt_provider,
             model:            prompt_model,
             reasoning_effort: request_controls.reasoning_effort,
@@ -308,7 +308,7 @@ impl Handler for AgentHandler {
             context,
             node,
             &prompt,
-            StageModelMode::Agent,
+            StageModelUsage::MODE_AGENT,
             self.backend.as_deref(),
         )?;
 

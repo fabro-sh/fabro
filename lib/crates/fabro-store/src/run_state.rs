@@ -908,7 +908,7 @@ mod tests {
         AgentBackend, BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint,
         CheckpointRecord, CommandTermination, EventBody, FailureCategory, FailureDetail,
         FailureReason, Graph, Outcome, PullRequestLink, QuestionType, ReasoningEffort, RunBlobId,
-        RunControlAction, RunDiff, RunEvent, RunSpec, RunStatus, Speed, StageModelMode,
+        RunControlAction, RunDiff, RunEvent, RunSpec, RunStatus, Speed, StageModelUsage,
         StageOutcome, StageState, SuccessReason, WorkflowSettings, first_event_seq, fixtures,
     };
     use serde_json::json;
@@ -1273,7 +1273,7 @@ mod tests {
 
         let stage = state.stage(&stage_id).unwrap();
         let provider_used = stage.provider_used.as_ref().unwrap();
-        assert_eq!(provider_used.mode, StageModelMode::Agent);
+        assert_eq!(provider_used.mode, StageModelUsage::MODE_AGENT);
         assert_eq!(provider_used.provider.as_deref(), Some("openai"));
         assert_eq!(provider_used.model.as_deref(), Some("gpt-5.4"));
         assert_eq!(provider_used.reasoning_effort, Some(ReasoningEffort::High));
@@ -1369,7 +1369,7 @@ mod tests {
 
         let stage = state.stage(&stage_id).unwrap();
         let provider_used = stage.provider_used.as_ref().unwrap();
-        assert_eq!(provider_used.mode, StageModelMode::Acp);
+        assert_eq!(provider_used.mode, StageModelUsage::MODE_ACP);
         assert_eq!(provider_used.provider.as_deref(), Some("acp"));
         assert_eq!(provider_used.model.as_deref(), Some("fake"));
     }
