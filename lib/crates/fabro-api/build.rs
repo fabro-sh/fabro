@@ -349,6 +349,12 @@ fn main() {
         ("CommandTermination", "fabro_types::CommandTermination", &[]),
         ("StageModelUsage", "fabro_types::StageModelUsage", &[]),
         ("StageProjection", "fabro_types::StageProjection", &[]),
+        ("PermissionLevel", "fabro_types::PermissionLevel", &[]),
+        (
+            "AgentSessionActivatedProps",
+            "fabro_types::run_event::AgentSessionActivatedProps",
+            &[],
+        ),
         ("TodoListProjection", "fabro_types::TodoListProjection", &[]),
         ("SubAgentProjection", "fabro_types::SubAgentProjection", &[]),
         ("SubAgentStatus", "fabro_types::SubAgentStatus", &[]),

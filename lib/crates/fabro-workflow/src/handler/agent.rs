@@ -813,6 +813,7 @@ mod tests {
                         model:            Some("gpt-5.4".to_string()),
                         reasoning_effort: Some(ReasoningEffort::High),
                         speed:            Some(Speed::Fast),
+                        permission_level: None,
                         capabilities:     vec![fabro_types::SessionCapability::Steer],
                     },
                     &scope,

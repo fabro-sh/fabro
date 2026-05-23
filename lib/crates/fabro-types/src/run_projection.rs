@@ -9,9 +9,9 @@ use crate::run_event::{AgentSessionActivatedProps, StagePromptProps};
 use crate::{
     AgentBackend, AgentMcpToolSummary, AgentSkillActivationSource, AgentSkillSummary,
     BilledTokenCounts, Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition,
-    ModelRef, PullRequestLink, RunApproval, RunControlAction, RunDiff, RunId, RunSandbox, RunSpec,
-    RunStatus, RunTiming, StageCompletion, StageHandler, StageId, StageState, StageTiming,
-    StartRecord, TodoListProjection,
+    ModelRef, PermissionLevel, PullRequestLink, RunApproval, RunControlAction, RunDiff, RunId,
+    RunSandbox, RunSpec, RunStatus, RunTiming, StageCompletion, StageHandler, StageId, StageState,
+    StageTiming, StartRecord, TodoListProjection,
 };
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -156,6 +156,8 @@ pub struct StageProjection {
     pub subagents:         Vec<SubAgentProjection>,
     #[serde(default, skip_serializing_if = "SkillsProjection::is_empty")]
     pub skills:            SkillsProjection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_level:  Option<PermissionLevel>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_servers:       Vec<McpServerProjection>,
     pub state:             StageState,
@@ -232,6 +234,7 @@ impl StageProjection {
             todos: None,
             subagents: Vec::new(),
             skills: SkillsProjection::default(),
+            permission_level: None,
             mcp_servers: Vec::new(),
             provider_used: None,
             diff: None,

@@ -1,6 +1,7 @@
 export * from './activated-skill';
 export * from './agent-mcp-tool-summary';
 export * from './agent-permissions';
+export * from './agent-session-activated-props';
 export * from './agent-skill-activation-source';
 export * from './agent-skill-summary';
 export * from './aggregate-billing';
@@ -195,6 +196,7 @@ export * from './pair-transcript-user-message';
 export * from './pair-transcript-warning';
 export * from './pending-interview-record';
 export * from './pending-reason';
+export * from './permission-level';
 export * from './pre-run-push-outcome';
 export * from './pre-run-push-outcome-failed';
 export * from './pre-run-push-outcome-not-attempted';

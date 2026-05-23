@@ -18,6 +18,7 @@ pub mod types {
         Model, ModelCosts, ModelFeatures, ModelLimits, ModelRef as BillingModelRef, ModelTestMode,
         Provider, ReasoningEffort, ReasoningEffortFeature, Speed as BillingSpeed,
     };
+    pub use fabro_types::run_event::AgentSessionActivatedProps;
     pub use fabro_types::settings::ServerNamespace;
     pub use fabro_types::settings::server::{
         GithubIntegrationSettings, GithubIntegrationStrategy, IntegrationWebhooksSettings,
@@ -38,8 +39,8 @@ pub mod types {
         FailureSignature, GitContext, IdpIdentity, InterviewOption, InterviewQuestionRecord,
         McpServerProjection, McpServerStatus, PairId, PairMessageId, PairMessageRecord,
         PairMessageRequest, PairRecord, PairStartRequest, PairStatus, PairTarget,
-        PairTranscriptEntry, PairTranscriptResponse, PendingInterviewRecord, PreRunPushOutcome,
-        Principal, PullRequest, PullRequestDetails, PullRequestDetailsStatus,
+        PairTranscriptEntry, PairTranscriptResponse, PendingInterviewRecord, PermissionLevel,
+        PreRunPushOutcome, Principal, PullRequest, PullRequestDetails, PullRequestDetailsStatus,
         PullRequestDetailsUnavailableReason, PullRequestLink, PullRequestMeta, PullRequestResponse,
         QuestionType, RepositoryRef, Run, RunApproval, RunApprovalState, RunClientProvenance,
         RunEvent, RunEventDetailContentKind, RunEventDetailResponse, RunFailure,

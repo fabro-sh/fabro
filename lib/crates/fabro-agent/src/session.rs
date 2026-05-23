@@ -15,7 +15,7 @@ use fabro_llm::{Error as LlmError, retry};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_mcp::connection_manager::McpConnectionManager;
 use fabro_model::{AgentProfileKind, Catalog, ModelRef, Speed};
-use fabro_types::{Principal, SessionMessage, SessionRecord, SteeringMessage};
+use fabro_types::{PermissionLevel, Principal, SessionMessage, SessionRecord, SteeringMessage};
 use futures::StreamExt;
 use tokio::sync::{Mutex as AsyncMutex, Notify, broadcast};
 use tokio::time;
@@ -467,6 +467,11 @@ impl Session {
     #[must_use]
     pub fn speed(&self) -> Option<Speed> {
         self.config.speed
+    }
+
+    #[must_use]
+    pub fn permission_level(&self) -> Option<PermissionLevel> {
+        self.config.permission_level
     }
 
     /// Initialize session by discovering project docs and capturing environment

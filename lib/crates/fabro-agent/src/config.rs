@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use fabro_llm::types::{ReasoningEffort, Speed};
 use fabro_mcp::config::McpServerSettings;
+use fabro_types::PermissionLevel;
 
 /// Callback invoked before each tool execution. Return `Ok(())` to allow,
 /// `Err(message)` to deny with the given message.
@@ -121,6 +122,8 @@ pub struct SessionOptions {
     /// Static policy used to filter advertised tools and block hidden calls.
     /// `None` preserves legacy behavior: all registered tools are exposed.
     pub tool_access_policy: Option<Arc<dyn ToolAccessPolicy>>,
+    /// Agent tool permission level applied when the session started.
+    pub permission_level: Option<PermissionLevel>,
     /// Tool schema exposure mode used when `tool_access_policy` is set.
     pub tool_exposure_mode: ToolExposureMode,
     pub enable_context_compaction: bool,
@@ -164,6 +167,7 @@ impl std::fmt::Debug for SessionOptions {
                 "tool_access_policy",
                 &self.tool_access_policy.as_ref().map(|_| "<policy>"),
             )
+            .field("permission_level", &self.permission_level)
             .field("tool_exposure_mode", &self.tool_exposure_mode)
             .field("enable_context_compaction", &self.enable_context_compaction)
             .field(
@@ -197,6 +201,7 @@ impl Default for SessionOptions {
             user_instructions: None,
             tool_hooks: None,
             tool_access_policy: None,
+            permission_level: None,
             tool_exposure_mode: ToolExposureMode::AutoApprovedOnly,
             enable_context_compaction: true,
             compaction_threshold_percent: 80,
@@ -275,6 +280,7 @@ mod tests {
         assert_eq!(config.max_subagent_depth, 1);
         assert!(config.user_instructions.is_none());
         assert!(config.tool_access_policy.is_none());
+        assert!(config.permission_level.is_none());
         assert_eq!(
             config.tool_exposure_mode,
             ToolExposureMode::AutoApprovedOnly

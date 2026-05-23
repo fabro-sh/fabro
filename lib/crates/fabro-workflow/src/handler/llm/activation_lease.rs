@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use fabro_model::{ReasoningEffort, Speed};
-use fabro_types::{SessionCapability, StageId};
+use fabro_types::{PermissionLevel, SessionCapability, StageId};
 
 use crate::error::Error;
 use crate::event::{Emitter, Event};
@@ -24,6 +24,7 @@ pub struct ActivationLeaseOptions {
     pub model:            Option<String>,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub speed:            Option<Speed>,
+    pub permission_level: Option<PermissionLevel>,
     pub capabilities:     Vec<SessionCapability>,
     pub hub:              Arc<SteeringHub>,
     pub emitter:          Arc<Emitter>,
@@ -59,6 +60,7 @@ impl ActivationLease {
             model:            options.model,
             reasoning_effort: options.reasoning_effort,
             speed:            options.speed,
+            permission_level: options.permission_level,
             capabilities:     options.capabilities,
         });
         options
@@ -160,6 +162,7 @@ mod tests {
             model: Some("gpt-5.4".to_string()),
             reasoning_effort: None,
             speed: None,
+            permission_level: None,
             capabilities: vec![SessionCapability::Steer],
             hub,
             emitter,

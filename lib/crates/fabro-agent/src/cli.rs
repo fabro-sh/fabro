@@ -574,6 +574,7 @@ pub async fn run_with_args_and_client_and_catalog(
 
     let config = SessionOptions {
         tool_hooks: Some(tool_hooks.clone()),
+        permission_level: Some(permissions),
         skill_dirs: args.skills_dir.map(|d| vec![d]),
         mcp_servers,
         ..SessionOptions::default()
@@ -591,6 +592,7 @@ pub async fn run_with_args_and_client_and_catalog(
     let factory_profile_kind = profile_kind;
     let factory_env = Arc::clone(&env);
     let factory_hooks = config.tool_hooks.clone();
+    let factory_permission_level = config.permission_level;
     let factory: SessionFactory = Arc::new(move || {
         let child_summarizer = Some(build_summarizer(
             &factory_provider_id,
@@ -611,6 +613,7 @@ pub async fn run_with_args_and_client_and_catalog(
             Arc::clone(&factory_env),
             SessionOptions {
                 tool_hooks: factory_hooks.clone(),
+                permission_level: factory_permission_level,
                 ..SessionOptions::default()
             },
             None,

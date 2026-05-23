@@ -5569,6 +5569,11 @@ components:
       type: string
       enum: [idle, running, failed]
 
+    PermissionLevel:
+      description: Agent tool permission level applied to a session.
+      type: string
+      enum: [read-only, read-write, full]
+
     SessionTurn:
       description: Currently active durable session turn.
       type: object
@@ -7561,6 +7566,40 @@ components:
           additionalProperties: true
       additionalProperties: true
 
+    AgentSessionActivatedProps:
+      description: Properties for the `agent.session.activated` event.
+      type: object
+      required:
+        - capabilities
+        - visit
+      properties:
+        thread_id:
+          type: ["string", "null"]
+        provider:
+          type: ["string", "null"]
+        model:
+          type: ["string", "null"]
+        reasoning_effort:
+          oneOf:
+            - $ref: "#/components/schemas/ReasoningEffort"
+            - type: "null"
+        speed:
+          oneOf:
+            - $ref: "#/components/schemas/BillingSpeed"
+            - type: "null"
+        permission_level:
+          oneOf:
+            - $ref: "#/components/schemas/PermissionLevel"
+            - type: "null"
+        capabilities:
+          type: array
+          items:
+            type: string
+            enum: [steer]
+        visit:
+          type: integer
+          minimum: 1
+
     RunSupersededByProps:
       description: Properties for the `run.superseded_by` audit event emitted on a rewound source run after archive succeeds.
       type: object
@@ -7929,6 +7968,11 @@ components:
         skills:
           $ref: "#/components/schemas/SkillsProjection"
           description: Agent skills discovered and activated during this stage.
+        permission_level:
+          oneOf:
+            - $ref: "#/components/schemas/PermissionLevel"
+            - type: "null"
+          description: Agent tool permission level applied to this stage session.
         mcp_servers:
           type: array
           description: MCP servers observed by this stage.
