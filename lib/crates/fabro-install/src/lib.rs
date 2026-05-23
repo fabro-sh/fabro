@@ -453,10 +453,7 @@ pub fn write_sandbox_settings(
     let root = root_table_mut(doc)?;
     let run = ensure_table(root, "run")?;
     let environment = ensure_table(run, "environment")?;
-    environment.insert(
-        "id".to_string(),
-        toml::Value::String("default".to_string()),
-    );
+    environment.insert("id".to_string(), toml::Value::String("default".to_string()));
 
     let environments = ensure_table(root, "environments")?;
     let default = ensure_table(environments, "default")?;
