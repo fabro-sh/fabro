@@ -33,30 +33,38 @@ a = "higher"
 }
 
 #[test]
-fn run_sandbox_env_merges_sticky() {
+fn run_environment_env_merges_sticky() {
     let lower = parse(
         r#"
-[run.sandbox.env]
+[run.environment.env]
 A = "lower-a"
 B = "lower-b"
 "#,
     );
     let higher = parse(
         r#"
-[run.sandbox.env]
+[run.environment.env]
 A = "higher-a"
 C = "higher-c"
 "#,
     );
     let merged = higher.combine(lower);
-    let sandbox = merged.run.unwrap().sandbox.unwrap();
-    assert_eq!(sandbox.env.len(), 3);
+    let environment = merged.run.unwrap().environment.unwrap();
+    assert_eq!(environment.env.len(), 3);
     assert_eq!(
-        sandbox.env.get("A").map(InterpString::as_source).as_deref(),
+        environment
+            .env
+            .get("A")
+            .map(InterpString::as_source)
+            .as_deref(),
         Some("higher-a")
     );
     assert_eq!(
-        sandbox.env.get("B").map(InterpString::as_source).as_deref(),
+        environment
+            .env
+            .get("B")
+            .map(InterpString::as_source)
+            .as_deref(),
         Some("lower-b")
     );
 }

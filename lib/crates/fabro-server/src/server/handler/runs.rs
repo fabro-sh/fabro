@@ -547,7 +547,12 @@ async fn create_run(
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
     let manifest_run_defaults = state.manifest_run_defaults();
-    let prepared = match run_manifest::prepare_manifest(manifest_run_defaults.as_ref(), &req) {
+    let manifest_environment_defaults = state.manifest_environment_defaults();
+    let prepared = match run_manifest::prepare_manifest_with_environment_defaults(
+        manifest_run_defaults.as_ref(),
+        manifest_environment_defaults.as_ref(),
+        &req,
+    ) {
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
@@ -676,7 +681,12 @@ async fn run_preflight(
     Json(req): Json<RunManifest>,
 ) -> Response {
     let manifest_run_defaults = state.manifest_run_defaults();
-    let prepared = match run_manifest::prepare_manifest(manifest_run_defaults.as_ref(), &req) {
+    let manifest_environment_defaults = state.manifest_environment_defaults();
+    let prepared = match run_manifest::prepare_manifest_with_environment_defaults(
+        manifest_run_defaults.as_ref(),
+        manifest_environment_defaults.as_ref(),
+        &req,
+    ) {
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
@@ -704,7 +714,12 @@ async fn validate_run_manifest(
     Json(req): Json<RunManifest>,
 ) -> Response {
     let manifest_run_defaults = state.manifest_run_defaults();
-    let prepared = match run_manifest::prepare_manifest(manifest_run_defaults.as_ref(), &req) {
+    let manifest_environment_defaults = state.manifest_environment_defaults();
+    let prepared = match run_manifest::prepare_manifest_with_environment_defaults(
+        manifest_run_defaults.as_ref(),
+        manifest_environment_defaults.as_ref(),
+        &req,
+    ) {
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };

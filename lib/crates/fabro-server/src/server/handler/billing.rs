@@ -57,6 +57,7 @@ async fn list_run_stages(
                 stage.live_wall_time_ms(now),
                 stage.started_at,
                 handler,
+                stage.provider_used.clone(),
             )
         })
         .collect::<Vec<_>>();

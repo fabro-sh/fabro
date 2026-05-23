@@ -1,13 +1,9 @@
 ---
 title: "Slack"
-description: "Answer human-in-the-loop questions directly from Slack"
+description: "Answer human-in-the-loop questions and receive run lifecycle notifications in Slack"
 ---
 
-<Warning>
-The Slack integration is **in progress** and not yet available for use. This page describes the planned integration. We'll update it when Slack support ships.
-</Warning>
-
-Fabro's Slack integration lets your team answer [human-in-the-loop](/workflows/human-in-the-loop) questions without leaving Slack. When a workflow reaches a human gate, Fabro posts an interactive message to a Slack channel with buttons for each option. Team members click a button (or reply in a thread for freeform input), and the workflow continues.
+Fabro's Slack integration lets your team answer [human-in-the-loop](/workflows/human-in-the-loop) questions without leaving Slack and receive opt-in run lifecycle notifications. When a workflow reaches a human gate, Fabro posts an interactive message to a Slack channel with buttons for each option. Team members click a button (or reply in a thread for freeform input), and the workflow continues.
 
 The integration uses Slack's [Socket Mode](https://api.slack.com/apis/socket-mode), so no public URL or webhook endpoint is required — Fabro connects outbound over a WebSocket.
 
@@ -91,12 +87,14 @@ FABRO_SLACK_BOT_TOKEN=xoxb-your-bot-token
 FABRO_SLACK_APP_TOKEN=xapp-your-app-token
 ```
 
-Optionally, set a default channel in your [server configuration](/administration/server-configuration):
+Optionally, set a default interview channel in your [server configuration](/administration/server-configuration):
 
 ```toml title="settings.toml"
-[slack]
+[server.integrations.slack]
 default_channel = "#fabro-reviews"
 ```
+
+`default_channel` is used only for human-in-the-loop interview prompts. Run lifecycle notifications use per-run or per-workflow `[run.notifications]` routes instead.
 
 ### 7. Invite the bot
 
@@ -123,6 +121,26 @@ When a user interacts:
 
 The connection is maintained with automatic reconnection and exponential backoff (1s initial, 30s max). If the WebSocket disconnects, Fabro reconnects transparently — no manual intervention needed.
 
+## Run lifecycle notifications
+
+Slack run lifecycle notifications are opt-in per run or workflow through the `[run.notifications]` namespace. Notification settings do not live in server config.
+
+```toml title="workflow.toml"
+[run.notifications.deploys]
+enabled = true
+provider = "slack"
+events = ["run.started", "run.completed", "run.failed"]
+
+[run.notifications.deploys.slack]
+channel = "#deploys"
+```
+
+Each enabled route posts one message when a matching event is emitted. Lifecycle messages include the run ID, a link back to Fabro when the server has a web URL, the workflow label, result and duration for terminal events, and pull request details when the run has already created or linked a PR.
+
+The route-level Slack channel is required for lifecycle notifications. The channel may be a literal (`"#deploys"`) or an environment interpolation (`"{{ env.DEPLOYS_SLACK_CHANNEL }}"`). If the channel is missing, empty, or cannot be resolved, Fabro logs a warning and skips that route without affecting the run or other notification routes.
+
+Lifecycle notifications are one-way and fire-and-forget. They never accept answers, register reply threads, update prior messages, or interact with interview state.
+
 ## Environment variables
 
 | Variable | Required | Description |
@@ -130,10 +148,11 @@ The connection is maintained with automatic reconnection and exponential backoff
 | `FABRO_SLACK_BOT_TOKEN` | Yes | Bot User OAuth Token (`xoxb-...`). Used to post and update messages. |
 | `FABRO_SLACK_APP_TOKEN` | Yes | App-Level Token (`xapp-...`). Used to connect via Socket Mode. |
 
-Both must be set for the Slack integration to activate. If either is missing or empty, Slack is disabled silently.
+Both must be set for the Slack integration to activate. If either is missing or empty, Slack is disabled silently. A server-level `default_channel` is not required for lifecycle notifications; it is only needed when you want interview prompts to use a default Slack channel.
 
 ## Limitations
 
-- **Interviews only** — The Slack integration handles human gate questions. It does not post run status notifications or support [steering](/human-tools/steering) running agents.
 - **Single workspace** — Fabro connects to one Slack workspace at a time.
 - **One answer per question** — The first person to click a button or reply in a thread provides the answer. Subsequent interactions on the same question are ignored.
+- **No Slack steering** — Slack does not support [steering](/human-tools/steering) running agents.
+- **Lifecycle notifications are one-way** — `run.started`, `run.completed`, and `run.failed` messages are posted once per matching route and are not updated later.

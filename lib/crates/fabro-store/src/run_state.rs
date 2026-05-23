@@ -3,11 +3,10 @@ use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
 use fabro_types::run_event::{
-    AgentAcpStartedProps, AgentSessionActivatedProps, CheckpointCompletedProps, RunCompletedProps,
-    RunFailedProps, StageCompletedProps, StagePromptProps, TodoCreatedProps, TodoDeletedProps,
-    TodoUpdatedProps,
+    CheckpointCompletedProps, RunCompletedProps, RunFailedProps, StageCompletedProps,
+    TodoCreatedProps, TodoDeletedProps, TodoUpdatedProps,
 };
-use fabro_types::settings::run::RunSandboxSettings;
+use fabro_types::settings::run::{EnvironmentProvider, RunEnvironmentSettings};
 use fabro_types::{
     ActivatedSkill, AgentBackend, AskFabro, BilledModelUsage, Checkpoint, CheckpointRecord,
     CommandTermination, Conclusion, EventBody, FailureSignature, InterviewQuestionRecord,
@@ -15,11 +14,10 @@ use fabro_types::{
     RepositoryRef, Run, RunBillingSummary, RunControlAction, RunDiff, RunEvent, RunId,
     RunLifecycle, RunLinks, RunModel, RunOrigin, RunProjection, RunSandbox, RunSandboxRuntime,
     RunSpec, RunStatus, RunTimestamps, SandboxProvider, StageCompletion, StageHandler, StageId,
-    StageOutcome, StageProjection, StageState, StartRecord, SubAgentProjection, SubAgentStatus,
-    TodoListProjection, TodoProjection, WorkflowRef, first_event_seq,
+    StageModelUsage, StageOutcome, StageProjection, StageState, StartRecord, SubAgentProjection,
+    SubAgentStatus, TodoListProjection, TodoProjection, WorkflowRef, first_event_seq,
 };
 use fabro_util::error::render_compact_with_causes;
-use serde_json::Value;
 
 use crate::{Error, EventEnvelope, Result};
 
@@ -312,7 +310,7 @@ impl RunProjectionReducer for RunProjection {
                     return Ok(());
                 };
                 stage.prompt = Some(props.text.clone());
-                stage.provider_used = provider_used_from_prompt(props);
+                stage.provider_used = StageModelUsage::from_prompt_props(props);
             }
             EventBody::PromptCompleted(props) => {
                 let Some(stage) = stage_at_stored_or_current_visit(self, stored, event.seq) else {
@@ -376,17 +374,14 @@ impl RunProjectionReducer for RunProjection {
                 else {
                     return Ok(());
                 };
-                if !is_acp_session_activation(props) {
-                    stage.provider_used = Some(provider_used_from_agent_session_activated(props));
-                }
+                stage.provider_used = Some(StageModelUsage::from_agent_session_activated(props));
             }
-            EventBody::AgentAcpStarted(props) => {
-                let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
-                else {
-                    return Ok(());
-                };
-                stage.provider_used = Some(provider_used_from_agent_acp_started(props));
-            }
+            // `AgentAcpStarted` is the start-of-process signal for an external
+            // ACP agent. `provider_used` is intentionally sourced from the
+            // subsequent `AgentSessionActivated` event, which carries the
+            // canonical provider/model. ACP runs without a steering hub never
+            // emit activation and so legitimately leave `provider_used`
+            // unset — matching legacy ACP behavior.
             EventBody::CommandStarted(props) => {
                 let script_invocation = serde_json::to_value(props).map_err(|err| {
                     Error::InvalidEvent(format!("invalid command.started payload: {err}"))
@@ -670,27 +665,21 @@ fn projection_from_created(event: &EventEnvelope) -> Result<RunProjection> {
     let mut projection = RunProjection::new(title, spec, stored.ts);
     projection.parent_id = props.parent_id;
     projection.web_url.clone_from(&props.web_url);
-    projection.sandbox = Some(planned_sandbox(&projection.spec.settings.run.sandbox));
+    projection.sandbox = Some(planned_sandbox(&projection.spec.settings.run.environment));
     Ok(projection)
 }
 
-fn planned_sandbox(settings: &RunSandboxSettings) -> RunSandbox {
-    let provider = settings
-        .provider
-        .parse::<SandboxProvider>()
-        .unwrap_or(SandboxProvider::Local);
+fn planned_sandbox(settings: &RunEnvironmentSettings) -> RunSandbox {
+    let provider = SandboxProvider::from(settings.provider);
     RunSandbox {
         provider,
-        image: settings
-            .docker
-            .as_ref()
-            .map(|docker| docker.image.clone())
+        image: (settings.provider == EnvironmentProvider::Docker)
+            .then(|| settings.image.reference.clone())
+            .flatten()
             .filter(|image| !image.is_empty()),
-        snapshot: settings
-            .daytona
-            .as_ref()
-            .and_then(|daytona| daytona.snapshot.as_ref())
-            .map(|snapshot| snapshot.name.clone()),
+        snapshot: (settings.provider == EnvironmentProvider::Daytona)
+            .then(|| settings.image.reference.clone())
+            .flatten(),
         runtime: None,
     }
 }
@@ -1005,50 +994,6 @@ fn stage_completion_from_outcome(
     }
 }
 
-fn provider_used_from_prompt(props: &StagePromptProps) -> Option<Value> {
-    let mut provider_used = serde_json::Map::new();
-    if let Some(mode) = props.mode.clone() {
-        provider_used.insert("mode".to_string(), Value::String(mode));
-    }
-    if let Some(provider) = props.provider.clone() {
-        provider_used.insert("provider".to_string(), Value::String(provider));
-    }
-    if let Some(model) = props.model.clone() {
-        provider_used.insert("model".to_string(), Value::String(model));
-    }
-    (!provider_used.is_empty()).then_some(Value::Object(provider_used))
-}
-
-fn provider_used_from_agent_session_activated(props: &AgentSessionActivatedProps) -> Value {
-    let mut provider_used = serde_json::Map::new();
-    provider_used.insert("mode".to_string(), Value::String("agent".to_string()));
-    if let Some(provider) = props.provider.clone() {
-        provider_used.insert("provider".to_string(), Value::String(provider));
-    }
-    if let Some(model) = props.model.clone() {
-        provider_used.insert("model".to_string(), Value::String(model));
-    }
-    Value::Object(provider_used)
-}
-
-fn is_acp_session_activation(props: &AgentSessionActivatedProps) -> bool {
-    let acp: &'static str = AgentBackend::Acp.into();
-    props.provider.as_deref() == Some(acp)
-}
-
-fn provider_used_from_agent_acp_started(props: &AgentAcpStartedProps) -> Value {
-    let mut provider_used = serde_json::Map::new();
-    provider_used.insert(
-        "mode".to_string(),
-        Value::String(AgentBackend::Acp.to_string()),
-    );
-    provider_used.insert("command".to_string(), Value::String(props.command.clone()));
-    if let Some(config_name) = props.config_name.clone() {
-        provider_used.insert("config_name".to_string(), Value::String(config_name));
-    }
-    Value::Object(provider_used)
-}
-
 fn apply_agent_terminal(
     event_prefix: &str,
     stage: &mut StageProjection,
@@ -1094,9 +1039,10 @@ mod tests {
     use fabro_types::{
         AgentBackend, BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint,
         CheckpointRecord, CommandTermination, EventBody, FailureCategory, FailureDetail,
-        FailureReason, Graph, McpServerStatus, Outcome, PullRequestLink, QuestionType, RunBlobId,
-        RunControlAction, RunDiff, RunEvent, RunSpec, RunStatus, StageOutcome, StageState,
-        SubAgentStatus, SuccessReason, WorkflowSettings, first_event_seq, fixtures,
+        FailureReason, Graph, McpServerStatus, Outcome, PullRequestLink, QuestionType,
+        ReasoningEffort, RunBlobId, RunControlAction, RunDiff, RunEvent, RunSpec, RunStatus, Speed,
+        StageModelUsage, StageOutcome, StageState, SubAgentStatus, SuccessReason, WorkflowSettings,
+        first_event_seq, fixtures,
     };
     use serde_json::json;
 
@@ -1404,11 +1350,13 @@ mod tests {
             .apply_event(&test_event(
                 4,
                 EventBody::StagePrompt(StagePromptProps {
-                    visit:    1,
-                    text:     "prompt".to_string(),
-                    mode:     None,
-                    provider: None,
-                    model:    None,
+                    visit:            1,
+                    text:             "prompt".to_string(),
+                    mode:             None,
+                    provider:         None,
+                    model:            None,
+                    reasoning_effort: None,
+                    speed:            None,
                 }),
                 Some("build"),
             ))
@@ -1444,25 +1392,25 @@ mod tests {
             .apply_event(&test_stage_event(
                 4,
                 EventBody::AgentSessionActivated(AgentSessionActivatedProps {
-                    thread_id:    Some("thread-1".to_string()),
-                    provider:     Some("openai".to_string()),
-                    model:        Some("gpt-5.4".to_string()),
-                    capabilities: vec![fabro_types::SessionCapability::Steer],
-                    visit:        1,
+                    thread_id:        Some("thread-1".to_string()),
+                    provider:         Some("openai".to_string()),
+                    model:            Some("gpt-5.4".to_string()),
+                    reasoning_effort: Some(ReasoningEffort::High),
+                    speed:            Some(Speed::Fast),
+                    capabilities:     vec![fabro_types::SessionCapability::Steer],
+                    visit:            1,
                 }),
                 stage_id.clone(),
             ))
             .unwrap();
 
         let stage = state.stage(&stage_id).unwrap();
-        assert_eq!(
-            stage.provider_used.as_ref().unwrap(),
-            &json!({
-                "mode": "agent",
-                "provider": "openai",
-                "model": "gpt-5.4"
-            })
-        );
+        let provider_used = stage.provider_used.as_ref().unwrap();
+        assert_eq!(provider_used.mode, StageModelUsage::MODE_AGENT);
+        assert_eq!(provider_used.provider.as_deref(), Some("openai"));
+        assert_eq!(provider_used.model.as_deref(), Some("gpt-5.4"));
+        assert_eq!(provider_used.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(provider_used.speed, Some(Speed::Fast));
     }
 
     #[test]
@@ -1494,7 +1442,11 @@ mod tests {
     }
 
     #[test]
-    fn agent_acp_started_updates_stage_provider_used() {
+    fn agent_acp_started_alone_leaves_stage_provider_used_unset() {
+        // `agent.acp.started` no longer writes `provider_used`; the canonical
+        // source is the subsequent `agent.session.activated` event. ACP runs
+        // without a steering hub never activate and so legitimately leave
+        // `provider_used` unset.
         let mut state = initialized_projection();
         let stage_id = StageId::new("code", 1);
         start_stage(&mut state, &stage_id);
@@ -1512,18 +1464,11 @@ mod tests {
             .unwrap();
 
         let stage = state.stage(&stage_id).unwrap();
-        assert_eq!(
-            stage.provider_used.as_ref().unwrap(),
-            &json!({
-                "mode": "acp",
-                "command": "python fake_agent.py",
-                "config_name": "fake"
-            })
-        );
+        assert!(stage.provider_used.is_none());
     }
 
     #[test]
-    fn acp_session_activation_preserves_agent_acp_started_provider_used() {
+    fn acp_session_activation_records_provider_used_with_acp_mode() {
         let mut state = initialized_projection();
         let stage_id = StageId::new("code", 1);
         start_stage(&mut state, &stage_id);
@@ -1543,25 +1488,23 @@ mod tests {
             .apply_event(&test_stage_event(
                 5,
                 EventBody::AgentSessionActivated(AgentSessionActivatedProps {
-                    thread_id:    None,
-                    provider:     Some(AgentBackend::Acp.to_string()),
-                    model:        Some("fake".to_string()),
-                    capabilities: vec![fabro_types::SessionCapability::Steer],
-                    visit:        1,
+                    thread_id:        None,
+                    provider:         Some(AgentBackend::Acp.to_string()),
+                    model:            Some("fake".to_string()),
+                    reasoning_effort: None,
+                    speed:            None,
+                    capabilities:     vec![fabro_types::SessionCapability::Steer],
+                    visit:            1,
                 }),
                 stage_id.clone(),
             ))
             .unwrap();
 
         let stage = state.stage(&stage_id).unwrap();
-        assert_eq!(
-            stage.provider_used.as_ref().unwrap(),
-            &json!({
-                "mode": "acp",
-                "command": "python fake_agent.py",
-                "config_name": "fake"
-            })
-        );
+        let provider_used = stage.provider_used.as_ref().unwrap();
+        assert_eq!(provider_used.mode, StageModelUsage::MODE_ACP);
+        assert_eq!(provider_used.provider.as_deref(), Some("acp"));
+        assert_eq!(provider_used.model.as_deref(), Some("fake"));
     }
 
     #[test]

@@ -173,11 +173,11 @@ describe("parseFanInOutcome", () => {
     const events: EventEnvelope[] = [
       envelope(1, {
         event: "stage.prompt",
-        properties: { mode: "fan_in", text: "rank these" },
+        properties: { mode: "fan_in", text: "rank these", model: "claude-sonnet-4-6" },
       }),
       envelope(2, {
         event: "prompt.completed",
-        properties: { response: "branch-a wins", model: "claude-sonnet-4-6" },
+        properties: { response: "branch-a wins", model: "ignored-downstream-model" },
       }),
     ];
     const outcome = parseFanInOutcome(events, "Selected best candidate: branch-a");

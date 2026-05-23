@@ -245,14 +245,14 @@ fn run_completed_dry_run(context: &TestContext, workflow: &Path) -> RunSetup {
         run_id.as_str(),
         "--dry-run",
         "--auto-approve",
-        "--sandbox",
+        "--environment",
         "local",
     ]);
     cmd.arg(workflow);
     let output = cmd.output().expect("command should execute");
     if !output.status.success() {
         panic!(
-            "command failed: fabro run --dry-run --auto-approve --sandbox local {}\nstdout:\n{}\nstderr:\n{}",
+            "command failed: fabro run --dry-run --auto-approve --environment local {}\nstdout:\n{}\nstderr:\n{}",
             workflow.display(),
             stdout(&output),
             stderr(&output)
@@ -308,14 +308,14 @@ pub(crate) fn setup_detached_dry_run(context: &TestContext) -> RunSetup {
         "--detach",
         "--dry-run",
         "--auto-approve",
-        "--sandbox",
+        "--environment",
         "local",
     ]);
     cmd.arg(workflow);
     let output = cmd.output().expect("command should execute");
     if !output.status.success() {
         panic!(
-            "command failed: fabro run --detach --dry-run --auto-approve --sandbox local {}\nstdout:\n{}\nstderr:\n{}",
+            "command failed: fabro run --detach --dry-run --auto-approve --environment local {}\nstdout:\n{}\nstderr:\n{}",
             fixture("simple.fabro").display(),
             stdout(&output),
             stderr(&output)
@@ -390,8 +390,13 @@ graph = "sandbox_run.fabro"
 [run]
 goal = "Exercise sandbox commands"
 
-[run.sandbox]
+[run.environment]
+id = "local"
+
+[environments.local]
 provider = "local"
+
+[environments.local.lifecycle]
 preserve = true
 
 "#,
@@ -413,7 +418,7 @@ fn run_local_workflow(context: &TestContext, workspace_dir: &Path, workflow: &st
         "--run-id",
         run_id.as_str(),
         "--auto-approve",
-        "--sandbox",
+        "--environment",
         "local",
         "--provider",
         "openai",
@@ -422,7 +427,7 @@ fn run_local_workflow(context: &TestContext, workspace_dir: &Path, workflow: &st
     let output = cmd.output().expect("command should execute");
     if !output.status.success() {
         panic!(
-            "command failed: fabro run --auto-approve --sandbox local --provider openai {workflow}\nstdout:\n{}\nstderr:\n{}",
+            "command failed: fabro run --auto-approve --environment local --provider openai {workflow}\nstdout:\n{}\nstderr:\n{}",
             stdout(&output),
             stderr(&output)
         );

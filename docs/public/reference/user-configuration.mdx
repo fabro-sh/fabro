@@ -34,7 +34,7 @@ Files that omit `_version` are treated as version `1`. The legacy top-level `ver
 | Scope | Examples |
 |---|---|
 | CLI-only | `[cli.target]`, `[cli.auth]`, `[cli.exec]`, `[cli.output]`, `[cli.updates]`, `[cli.logging]` |
-| Shared run defaults | `[run.model]`, `[run.sandbox]`, `[run.checkpoint]`, `[run.inputs]`, `[run.prepare]`, `[run.pull_request]`, `[run.integrations.github.permissions]`, `[run.hooks]`, `[run.agent.mcps]` |
+| Shared run defaults | `[run.model]`, `[run.environment]`, `[environments.<slug>]`, `[run.checkpoint]`, `[run.inputs]`, `[run.prepare]`, `[run.pull_request]`, `[run.integrations.github.permissions]`, `[run.hooks]`, `[run.agent.mcps]` |
 | Shared LLM catalog | `[llm.providers.<id>]`, `[llm.models.<id>]`, model limits, features, controls, and costs |
 | Server-only | `[server.listen]`, `[server.api]`, `[server.web]`, `[server.auth]`, `[server.storage]`, `[server.artifacts]`, `[server.slatedb]`, `[server.scheduler]`, `[server.logging]`, `[server.integrations]` |
 

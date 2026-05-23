@@ -161,7 +161,7 @@ fn start_detached_human_run(
         .args([
             "run",
             "--detach",
-            "--sandbox",
+            "--environment",
             "local",
             "--provider",
             "openai",
@@ -391,7 +391,7 @@ fn attach_advances_when_pending_question_is_answered_elsewhere() {
         .args([
             "run",
             "--detach",
-            "--sandbox",
+            "--environment",
             "local",
             "--provider",
             "openai",
@@ -516,7 +516,7 @@ fn attach_before_completion_streams_to_finished_state() {
         "--detach",
         "--provider",
         "openai",
-        "--sandbox",
+        "--environment",
         "local",
         "slow.fabro",
     ]);
@@ -637,7 +637,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
         .args([
             "run",
             "--detach",
-            "--sandbox",
+            "--environment",
             "local",
             "--provider",
             "openai",
@@ -931,6 +931,31 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "clone": {
                 "enabled": true
               },
+              "environment": {
+                "env": {},
+                "id": "local",
+                "image": {
+                  "dockerfile": null,
+                  "ref": null
+                },
+                "labels": {},
+                "lifecycle": {
+                  "auto_stop": null,
+                  "preserve": false,
+                  "stop_on_terminal": true
+                },
+                "network": {
+                  "allow": [],
+                  "mode": "allow_all"
+                },
+                "provider": "local",
+                "resources": {
+                  "cpu": null,
+                  "disk": null,
+                  "memory": null
+                },
+                "volumes": []
+              },
               "execution": {
                 "approval": "prompt",
                 "mode": "normal"
@@ -976,21 +1001,6 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "run_branch": {
                 "enabled": true,
                 "push": true
-              },
-              "sandbox": {
-                "daytona": null,
-                "devcontainer": false,
-                "docker": {
-                  "cpu_quota": 200000,
-                  "env_vars": {},
-                  "image": "buildpack-deps:noble",
-                  "memory_limit": 4000000000,
-                  "network_mode": null
-                },
-                "env": {},
-                "preserve": false,
-                "provider": "local",
-                "stop_on_terminal": true
               },
               "scm": {
                 "github": null,

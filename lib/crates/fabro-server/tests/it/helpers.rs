@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
-use fabro_config::{RunLayer, RunSandboxLayer, ServerSettingsBuilder};
+use fabro_config::{RunEnvironmentLayer, RunLayer, ServerSettingsBuilder};
 use fabro_server::server::{AppState, spawn_scheduler};
 use fabro_server::test_support::{
     TestAppStateBuilder, build_test_router, llm_catalog_settings_with_provider_base_url,
@@ -94,9 +94,9 @@ pub(crate) fn test_app_state_with_options(
 pub(crate) fn test_settings() -> TestAppSettings {
     TestAppSettings {
         manifest_run_defaults: RunLayer {
-            sandbox: Some(RunSandboxLayer {
-                provider: Some("local".to_string()),
-                ..RunSandboxLayer::default()
+            environment: Some(RunEnvironmentLayer {
+                id: Some("local".to_string()),
+                ..RunEnvironmentLayer::default()
             }),
             ..RunLayer::default()
         },

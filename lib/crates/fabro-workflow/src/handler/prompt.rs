@@ -3,15 +3,17 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
+use fabro_types::StageModelUsage;
 
 use super::agent::{
-    CodergenBackend, CodergenResult, OneShotRequest, extract_status_fields, truncate,
+    CodergenBackend, CodergenResult, OneShotRequest, emit_stage_prompt, extract_status_fields,
+    truncate,
 };
 use super::llm::routing;
 use super::{EngineServices, Handler};
 use crate::context::{Context, WorkflowContext, keys};
 use crate::error::Error;
-use crate::event::{Emitter, Event, StageScope};
+use crate::event::{Emitter, Event};
 use crate::outcome::Outcome;
 
 /// Handler for single-shot LLM calls (no tools, no agent loop).
@@ -105,23 +107,14 @@ impl Handler for PromptHandler {
             None
         };
 
-        let prompt_provider = node
-            .provider()
-            .map(String::from)
-            .or_else(|| Some(services.run.provider_id.to_string()));
-        let prompt_model = node.model().map(String::from);
-        let stage_scope = StageScope::for_handler(context, &node.id);
-        services.run.emitter.emit_scoped(
-            &Event::Prompt {
-                stage:    node.id.clone(),
-                visit:    stage_scope.visit,
-                text:     prompt.clone(),
-                mode:     Some("prompt".to_string()),
-                provider: prompt_provider.clone(),
-                model:    prompt_model.clone(),
-            },
-            &stage_scope,
-        );
+        let stage_scope = emit_stage_prompt(
+            services,
+            context,
+            node,
+            &prompt,
+            StageModelUsage::MODE_PROMPT,
+            self.backend.as_deref(),
+        )?;
 
         // 3. Call LLM backend (one_shot)
         let (response_text, stage_usage, backend_files_touched) =
@@ -212,6 +205,7 @@ mod tests {
     use std::time::Duration;
 
     use fabro_graphviz::graph::AttrValue;
+    use fabro_model::{ReasoningEffort, Speed};
     use fabro_store::{Database, RunDatabase, StageId};
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
@@ -337,6 +331,16 @@ mod tests {
                     last_file_touched: None,
                 })
             }
+
+            fn effective_request_controls(
+                &self,
+                _node: &Node,
+            ) -> Result<crate::handler::llm::api::EffectiveRequestControls, Error> {
+                Ok(crate::handler::llm::api::EffectiveRequestControls {
+                    reasoning_effort: Some(ReasoningEffort::High),
+                    speed:            Some(Speed::Fast),
+                })
+            }
         }
 
         let handler = PromptHandler::new(Some(Box::new(OneShotBackend)));
@@ -384,6 +388,16 @@ mod tests {
                     last_file_touched: None,
                 })
             }
+
+            fn effective_request_controls(
+                &self,
+                _node: &Node,
+            ) -> Result<crate::handler::llm::api::EffectiveRequestControls, Error> {
+                Ok(crate::handler::llm::api::EffectiveRequestControls {
+                    reasoning_effort: Some(ReasoningEffort::High),
+                    speed:            Some(Speed::Fast),
+                })
+            }
         }
 
         let handler = PromptHandler::new(Some(Box::new(ProviderOneShotBackend)));
@@ -405,7 +419,10 @@ mod tests {
 
         let state = run_store.state().await.unwrap();
         let node_state = state.stage(&StageId::new("classify", 1)).unwrap();
-        assert_eq!(node_state.provider_used.as_ref().unwrap()["mode"], "prompt");
+        let provider_used = node_state.provider_used.as_ref().unwrap();
+        assert_eq!(provider_used.mode, StageModelUsage::MODE_PROMPT);
+        assert_eq!(provider_used.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(provider_used.speed, Some(Speed::Fast));
     }
 
     struct OneShotCapturingBackend {
