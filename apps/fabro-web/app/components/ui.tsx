@@ -226,9 +226,11 @@ function hoverCardStyle(rect: DOMRect): CSSProperties {
 export function HoverCard({
   content,
   children,
+  className = "inline-flex",
 }: {
   content: ReactNode;
   children: ReactNode;
+  className?: string;
 }) {
   const { open, rect, triggerProps } = useHoverAnchor();
   const id = useId();
@@ -236,7 +238,7 @@ export function HoverCard({
 
   return (
     <>
-      <span {...triggerProps} aria-describedby={open ? id : undefined} className="inline-flex">
+      <span {...triggerProps} aria-describedby={open ? id : undefined} className={className}>
         {children}
       </span>
       {rect && portalTarget
@@ -252,6 +254,27 @@ export function HoverCard({
             portalTarget,
           )
         : null}
+    </>
+  );
+}
+
+export function PopoverHeader({ children }: { children: ReactNode }) {
+  return (
+    <div className="mb-1.5 border-b border-line pb-1 font-medium text-fg-2">
+      {children}
+    </div>
+  );
+}
+
+export function PopoverRows({ children }: { children: ReactNode }) {
+  return <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">{children}</dl>;
+}
+
+export function PopoverRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <>
+      <dt className="text-fg-3">{label}</dt>
+      <dd className="min-w-0 text-fg">{children}</dd>
     </>
   );
 }

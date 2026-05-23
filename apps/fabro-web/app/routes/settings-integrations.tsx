@@ -49,6 +49,9 @@ function ProjectManagementPanel() {
       <Row title="Linear" help="Sync runs with Linear issues and projects.">
         <span className="text-sm text-fg-muted">Coming Soon</span>
       </Row>
+      <Row title="Jira" help="Sync runs with Jira issues and projects.">
+        <span className="text-sm text-fg-muted">Coming Soon</span>
+      </Row>
     </Panel>
   );
 }
@@ -89,6 +92,18 @@ function SlackPanel({ settings }: { settings: ServerSettings }) {
               : undefined
           }
         />
+      </Row>
+      <Row
+        title="Microsoft Teams"
+        help="Channel app for run notifications and approvals."
+      >
+        <span className="text-sm text-fg-muted">Coming Soon</span>
+      </Row>
+      <Row
+        title="Discord"
+        help="Server app for run notifications and approvals."
+      >
+        <span className="text-sm text-fg-muted">Coming Soon</span>
       </Row>
     </Panel>
   );

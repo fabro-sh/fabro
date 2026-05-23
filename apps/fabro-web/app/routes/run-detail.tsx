@@ -38,7 +38,15 @@ import { InterviewDock } from "../components/interview-dock";
 import { SteerBar, type SteerBarHandle } from "../components/steer-bar";
 import { ErrorState } from "../components/state";
 import { useToast } from "../components/toast";
-import { ConfirmDialog, HoverCard, SECONDARY_BUTTON_CLASS, Tooltip } from "../components/ui";
+import {
+  ConfirmDialog,
+  HoverCard,
+  PopoverHeader,
+  PopoverRow,
+  PopoverRows,
+  SECONDARY_BUTTON_CLASS,
+  Tooltip,
+} from "../components/ui";
 import {
   isRunStatus,
   mapRunToRunItem,
@@ -49,6 +57,7 @@ import type {
   PullRequestDetails,
   RepositoryRef,
   RunLifecycle,
+  RunTiming,
   WorkflowRef,
 } from "@qltysh/fabro-api-client";
 import { useAskFabroLayout } from "../lib/ask-fabro-layout";
@@ -63,7 +72,7 @@ import {
   type LifecycleMutationResult,
   type PreviewMutationResult,
 } from "../lib/mutations";
-import { formatAbsoluteTs, formatRelativeTime } from "../lib/format";
+import { formatAbsoluteTs, formatDurationMs, formatRelativeTime } from "../lib/format";
 import { queryKeys } from "../lib/query-keys";
 import { useRunEvents } from "../lib/run-events";
 import { useRunToasts } from "../hooks/use-run-toasts";
@@ -192,27 +201,6 @@ export function meta({ data }: any) {
 
 // ---- Header hover-card popovers ----
 
-function PopoverHeader({ children }: { children: ReactNode }) {
-  return (
-    <div className="mb-1.5 border-b border-line pb-1 font-medium text-fg-2">
-      {children}
-    </div>
-  );
-}
-
-function PopoverRows({ children }: { children: ReactNode }) {
-  return <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">{children}</dl>;
-}
-
-function PopoverRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <>
-      <dt className="text-fg-3">{label}</dt>
-      <dd className="min-w-0 text-fg">{children}</dd>
-    </>
-  );
-}
-
 function humanizeFailureReason(reason: string): string {
   const spaced = reason.replace(/_/g, " ");
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
@@ -299,6 +287,36 @@ function WorkflowPopover({
           </dl>
         </div>
       )}
+    </>
+  );
+}
+
+function DurationPopover({
+  timing,
+  createdAt,
+  completedAt,
+  now,
+}: {
+  timing: RunTiming;
+  createdAt: string;
+  completedAt: string | null;
+  now: number;
+}) {
+  const endMs = completedAt != null ? Date.parse(completedAt) : now;
+  const sinceCreatedMs = Math.max(0, endMs - Date.parse(createdAt));
+  return (
+    <>
+      <PopoverHeader>Duration</PopoverHeader>
+      <dl className="space-y-2">
+        <div>
+          <dt className="text-fg-3">Wall-clock since created</dt>
+          <dd className="mt-0.5 font-mono text-fg">{formatDurationMs(sinceCreatedMs)}</dd>
+        </div>
+        <div>
+          <dt className="text-fg-3">Active (inference + tools)</dt>
+          <dd className="mt-0.5 font-mono text-fg">{formatDurationMs(timing.active_time_ms)}</dd>
+        </div>
+      </dl>
     </>
   );
 }
@@ -580,11 +598,22 @@ export default function RunDetail({ params }: { params: { id: string } }) {
             ) : (
               workflowChip
             )}
-            {run.elapsed && (
-              <span className="flex items-center gap-1.5 font-mono text-xs text-fg-muted">
-                <ClockIcon className="size-3.5" aria-hidden="true" />
-                {run.elapsed}
-              </span>
+            {run.elapsed && summary.timing && (
+              <HoverCard
+                content={
+                  <DurationPopover
+                    timing={summary.timing}
+                    createdAt={summary.timestamps.created_at}
+                    completedAt={summary.timestamps.completed_at}
+                    now={now}
+                  />
+                }
+              >
+                <span className="flex items-center gap-1.5 font-mono text-xs text-fg-muted">
+                  <ClockIcon className="size-3.5" aria-hidden="true" />
+                  {run.elapsed}
+                </span>
+              </HoverCard>
             )}
             {run.lastEventAt && (
               <Tooltip label={`Last event ${formatAbsoluteTs(run.lastEventAt)}`}>
