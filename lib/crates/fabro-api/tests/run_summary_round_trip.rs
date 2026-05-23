@@ -2,12 +2,15 @@ use std::any::{TypeId, type_name};
 use std::collections::HashMap;
 
 use chrono::{TimeZone, Utc};
-use fabro_api::types::{RepositoryRef as ApiRepositoryRef, Run as ApiRun};
+use fabro_api::types::{
+    RepositoryRef as ApiRepositoryRef, Run as ApiRun, RunApproval as ApiRunApproval,
+    RunApprovalState as ApiRunApprovalState, RunRunnableSource as ApiRunRunnableSource,
+};
 use fabro_types::status::{RunStatus, SuccessReason};
 use fabro_types::{
     AskFabro, AskFabroUnavailableReason, DiffSummary, PullRequestLink, RepositoryProvider,
-    RepositoryRef, Run, RunBillingSummary, RunId, RunLifecycle, RunLinks, RunOrigin, RunTimestamps,
-    RunTiming, WorkflowRef,
+    RepositoryRef, Run, RunApproval, RunApprovalState, RunBillingSummary, RunId, RunLifecycle,
+    RunLinks, RunOrigin, RunRunnableSource, RunTimestamps, RunTiming, WorkflowRef,
 };
 use serde_json::json;
 
@@ -15,6 +18,40 @@ use serde_json::json;
 fn run_summary_reuses_domain_types() {
     assert_same_type::<ApiRun, Run>();
     assert_same_type::<ApiRepositoryRef, RepositoryRef>();
+    assert_same_type::<ApiRunApproval, RunApproval>();
+    assert_same_type::<ApiRunApprovalState, RunApprovalState>();
+    assert_same_type::<ApiRunRunnableSource, RunRunnableSource>();
+}
+
+#[test]
+fn approval_json_matches_openapi_shape() {
+    let requested_at = Utc.with_ymd_and_hms(2026, 5, 23, 12, 0, 0).unwrap();
+    let decided_at = Utc.with_ymd_and_hms(2026, 5, 23, 12, 1, 0).unwrap();
+
+    assert_eq!(
+        serde_json::to_value(RunApproval {
+            state: RunApprovalState::Denied,
+            requested_at,
+            decided_at: Some(decided_at),
+            denial_reason: Some("Not approved for execution".to_string()),
+        })
+        .unwrap(),
+        json!({
+            "state": "denied",
+            "requested_at": "2026-05-23T12:00:00Z",
+            "decided_at": "2026-05-23T12:01:00Z",
+            "denial_reason": "Not approved for execution"
+        })
+    );
+
+    assert_eq!(
+        serde_json::to_value(RunApprovalState::Pending).unwrap(),
+        json!("pending")
+    );
+    assert_eq!(
+        serde_json::to_value(RunRunnableSource::Approved).unwrap(),
+        json!("approved")
+    );
 }
 
 #[test]

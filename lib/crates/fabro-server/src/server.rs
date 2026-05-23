@@ -211,7 +211,6 @@ struct ManagedRun {
     status: RunStatus,
     error: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,
-    enqueued_at: Instant,
     // Populated when running:
     answer_transport: Option<RunAnswerTransport>,
     accepted_questions: HashSet<String>,
@@ -2533,7 +2532,6 @@ fn managed_run(
         status,
         error: None,
         created_at,
-        enqueued_at: Instant::now(),
         answer_transport: None,
         accepted_questions: HashSet::new(),
         active_api_targets: HashMap::new(),
@@ -3106,7 +3104,7 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
 
 async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
     // Transition to Starting and set up cancel infrastructure
-    let (cancel_rx, run_dir, event_tx, cancel_token, execution_mode, queued_for) = {
+    let (cancel_rx, run_dir, event_tx, cancel_token, execution_mode) = {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         let managed_run = match runs.get_mut(&run_id) {
             Some(r) if r.status == RunStatus::Runnable => r,
@@ -3131,10 +3129,8 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
             managed_run.event_tx.clone(),
             cancel_token,
             managed_run.execution_mode,
-            managed_run.enqueued_at.elapsed(),
         )
     };
-    let _ = queued_for;
 
     // Create interviewer and event plumbing (this is the "provisioning" phase)
     let interviewer = Arc::new(ControlInterviewer::new());
@@ -3675,43 +3671,45 @@ pub fn spawn_scheduler(state: Arc<AppState>) {
             if state.is_shutting_down() {
                 break;
             }
-            // Promote as many runnable runs as capacity allows.
-            loop {
+            let runs_to_start = {
+                let runs = state.runs.lock().expect("runs lock poisoned");
+                let active = runs
+                    .values()
+                    .filter(|r| {
+                        matches!(
+                            r.status,
+                            RunStatus::Starting
+                                | RunStatus::Running
+                                | RunStatus::Blocked { .. }
+                                | RunStatus::Paused { .. }
+                        )
+                    })
+                    .count();
+                let available = state.max_concurrent_runs.saturating_sub(active);
+                if available == 0 {
+                    Vec::new()
+                } else {
+                    let mut runnable: Vec<_> = runs
+                        .iter()
+                        .filter(|(_, r)| r.status == RunStatus::Runnable)
+                        .map(|(id, r)| (*id, r.created_at))
+                        .collect();
+                    runnable.sort_by_key(|(_, created_at)| *created_at);
+                    runnable
+                        .into_iter()
+                        .take(available)
+                        .map(|(id, _)| id)
+                        .collect::<Vec<_>>()
+                }
+            };
+            for id in runs_to_start {
                 if state.is_shutting_down() {
                     break;
                 }
-                let run_to_start = {
-                    let runs = state.runs.lock().expect("runs lock poisoned");
-                    let active = runs
-                        .values()
-                        .filter(|r| {
-                            matches!(
-                                r.status,
-                                RunStatus::Starting
-                                    | RunStatus::Running
-                                    | RunStatus::Blocked { .. }
-                                    | RunStatus::Paused { .. }
-                            )
-                        })
-                        .count();
-                    if active >= state.max_concurrent_runs {
-                        break;
-                    }
-                    runs.iter()
-                        .filter(|(_, r)| r.status == RunStatus::Runnable)
-                        .min_by_key(|(_, r)| r.created_at)
-                        .map(|(id, _)| *id)
-                };
-                match run_to_start {
-                    Some(id) => {
-                        let state_clone = Arc::clone(&state);
-                        tokio::spawn(
-                            execute_run(state_clone, id)
-                                .instrument(tracing::info_span!("run", id = %id)),
-                        );
-                    }
-                    None => break,
-                }
+                let state_clone = Arc::clone(&state);
+                tokio::spawn(
+                    execute_run(state_clone, id).instrument(tracing::info_span!("run", id = %id)),
+                );
             }
         }
     });
