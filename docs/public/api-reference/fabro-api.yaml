@@ -8134,6 +8134,7 @@ components:
         - timestamps
         - timing
         - billing
+        - size
         - ask_fabro
         - diff
         - pull_request
@@ -8201,6 +8202,8 @@ components:
           oneOf:
             - $ref: "#/components/schemas/RunBillingSummary"
             - type: "null"
+        size:
+          $ref: "#/components/schemas/RunSize"
         ask_fabro:
           $ref: "#/components/schemas/AskFabro"
         diff:
@@ -8331,6 +8334,11 @@ components:
         total_usd_micros:
           type: ["integer", "null"]
           format: int64
+
+    RunSize:
+      type: string
+      enum: [XS, S, M, L, XL]
+      description: Run size bucket derived from current best-effort billed usage.
 
     RunLinks:
       type: object

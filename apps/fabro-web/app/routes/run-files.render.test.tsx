@@ -71,6 +71,7 @@ mock.module("../lib/queries", () => ({
         completed_at:  null,
       },
       billing:          null,
+      size:             "XS",
       diff:             null,
       pull_request:     null,
       current_question: null,

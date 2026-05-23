@@ -6,8 +6,8 @@ use fabro_api::types::{RepositoryRef as ApiRepositoryRef, Run as ApiRun};
 use fabro_types::status::{RunStatus, SuccessReason};
 use fabro_types::{
     AskFabro, AskFabroUnavailableReason, DiffSummary, PullRequestLink, RepositoryProvider,
-    RepositoryRef, Run, RunBillingSummary, RunId, RunLifecycle, RunLinks, RunOrigin, RunTimestamps,
-    RunTiming, WorkflowRef,
+    RepositoryRef, Run, RunBillingSummary, RunId, RunLifecycle, RunLinks, RunOrigin, RunSize,
+    RunTimestamps, RunTiming, WorkflowRef,
 };
 use serde_json::json;
 
@@ -68,6 +68,7 @@ fn run_summary_json_matches_openapi_shape() {
         billing:          Some(RunBillingSummary {
             total_usd_micros: Some(123),
         }),
+        size:             RunSize::Xs,
         ask_fabro:        AskFabro {
             available:          false,
             unavailable_reason: Some(AskFabroUnavailableReason::SandboxNotReady),
@@ -144,6 +145,7 @@ fn run_summary_json_matches_openapi_shape() {
             "billing": {
                 "total_usd_micros": 123
             },
+            "size": "XS",
             "ask_fabro": {
                 "available": false,
                 "unavailable_reason": "sandbox_not_ready",

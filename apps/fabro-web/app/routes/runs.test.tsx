@@ -49,6 +49,7 @@ function boardRun(id: string, column: BoardColumn, questionText?: string): Run {
       completed_at:   null,
     },
     billing:          null,
+    size:             "XS",
     diff:             null,
     pull_request:     null,
     current_question: questionText ? { text: questionText } : null,

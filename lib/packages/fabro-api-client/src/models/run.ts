@@ -54,6 +54,9 @@ import type { RunQuestion } from './run-question';
 import type { RunSandbox } from './run-sandbox';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { RunSize } from './run-size';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { RunTimestamps } from './run-timestamps';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -90,6 +93,7 @@ export interface Run {
     'timestamps': RunTimestamps;
     'timing': RunTiming | null;
     'billing': RunBillingSummary | null;
+    'size': RunSize;
     'ask_fabro': AskFabro;
     'diff': DiffSummary | null;
     'pull_request': PullRequestLink | null;

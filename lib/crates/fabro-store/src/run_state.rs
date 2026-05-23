@@ -13,7 +13,7 @@ use fabro_types::{
     Conclusion, EventBody, FailureSignature, InterviewQuestionRecord, Outcome,
     PendingInterviewRecord, PullRequestLink, RepositoryRef, Run, RunBillingSummary,
     RunControlAction, RunDiff, RunEvent, RunId, RunLifecycle, RunLinks, RunModel, RunOrigin,
-    RunProjection, RunSandbox, RunSandboxRuntime, RunSpec, RunStatus, RunTimestamps,
+    RunProjection, RunSandbox, RunSandboxRuntime, RunSize, RunSpec, RunStatus, RunTimestamps,
     SandboxProvider, StageCompletion, StageHandler, StageId, StageOutcome, StageProjection,
     StageState, StartRecord, TodoListProjection, TodoProjection, WorkflowRef, first_event_seq,
 };
@@ -668,11 +668,8 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> Run {
         .conclusion
         .as_ref()
         .map(|conclusion| conclusion.timing);
-    let total_usd_micros = state
-        .conclusion
-        .as_ref()
-        .and_then(|conclusion| conclusion.billing.as_ref())
-        .and_then(|billing| billing.total_usd_micros);
+    let terminal_total = terminal_total_usd_micros(state);
+    let current_total = terminal_total.or_else(|| projected_total_usd_micros(state));
 
     Run {
         id: *run_id,
@@ -715,9 +712,10 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> Run {
             completed_at,
         },
         timing: run_timing,
-        billing: total_usd_micros.map(|total_usd_micros| RunBillingSummary {
+        billing: terminal_total.map(|total_usd_micros| RunBillingSummary {
             total_usd_micros: Some(total_usd_micros),
         }),
+        size: RunSize::from_total_usd_micros(current_total),
         ask_fabro: AskFabro::default(),
         diff: diff_summary,
         pull_request: state.pull_request.clone(),
@@ -727,6 +725,40 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> Run {
             web: state.web_url.clone(),
         },
     }
+}
+
+fn terminal_total_usd_micros(state: &RunProjection) -> Option<i64> {
+    state
+        .conclusion
+        .as_ref()
+        .and_then(|conclusion| conclusion.billing.as_ref())
+        .and_then(|billing| billing.total_usd_micros)
+}
+
+fn projected_total_usd_micros(state: &RunProjection) -> Option<i64> {
+    let mut total_usd_micros = 0_i64;
+    let mut has_total = false;
+
+    for (stage_id, stage) in state.iter_stages() {
+        if is_boundary_stage(state, stage_id.node_id()) {
+            continue;
+        }
+        if let Some(value) = stage.usage.total_usd_micros {
+            total_usd_micros = total_usd_micros.saturating_add(value);
+            has_total = true;
+        }
+    }
+
+    has_total.then_some(total_usd_micros)
+}
+
+fn is_boundary_stage(projection: &RunProjection, node_id: &str) -> bool {
+    projection
+        .spec()
+        .graph()
+        .nodes
+        .get(node_id)
+        .is_some_and(|node| matches!(node.handler_type(), Some("start" | "exit")))
 }
 
 fn run_models(state: &RunProjection) -> Vec<RunModel> {
@@ -957,7 +989,7 @@ mod tests {
         AgentBackend, BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint,
         CheckpointRecord, CommandTermination, EventBody, FailureCategory, FailureDetail,
         FailureReason, Graph, Outcome, PullRequestLink, QuestionType, RunBlobId, RunControlAction,
-        RunDiff, RunEvent, RunSpec, RunStatus, StageOutcome, StageState, SuccessReason,
+        RunDiff, RunEvent, RunSize, RunSpec, RunStatus, StageOutcome, StageState, SuccessReason,
         WorkflowSettings, first_event_seq, fixtures,
     };
     use serde_json::json;
@@ -2962,6 +2994,34 @@ mod tests {
         let stage = state.stage(&stage_id).unwrap();
         assert_eq!(stage.usage, live_counts(10, 5));
         assert_eq!(stage.model, Some(model));
+    }
+
+    #[test]
+    fn summary_size_tracks_current_projected_usage_before_terminal_conclusion() {
+        let mut state = initialized_projection();
+        let stage_id = StageId::new("build", 1);
+        let usage = test_usage("gpt-5.2", 10_000_001, 10_000_000);
+
+        state
+            .apply_event(&test_stage_event(
+                1,
+                EventBody::StageStarted(started_props()),
+                stage_id.clone(),
+            ))
+            .unwrap();
+        let mut props = completed_props(42, StageOutcome::Succeeded);
+        props.billing = Some(usage);
+        state
+            .apply_event(&test_stage_event(
+                2,
+                EventBody::StageCompleted(props),
+                stage_id,
+            ))
+            .unwrap();
+
+        let summary = build_summary(&state, &fixtures::RUN_1);
+        assert_eq!(summary.size, RunSize::S);
+        assert_eq!(summary.billing, None);
     }
 
     #[test]

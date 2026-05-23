@@ -44,6 +44,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
       active_time_ms:    0,
     },
     billing:          { total_usd_micros: 500000 },
+    size:             "XS",
     diff:             null,
     pull_request:     null,
     current_question: null,

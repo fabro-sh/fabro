@@ -70,6 +70,8 @@ pub struct Run {
     #[serde(default)]
     pub billing:          Option<RunBillingSummary>,
     #[serde(default)]
+    pub size:             RunSize,
+    #[serde(default)]
     pub ask_fabro:        AskFabro,
     #[serde(default)]
     pub diff:             Option<DiffSummary>,
@@ -165,6 +167,83 @@ pub struct RunTimestamps {
 pub struct RunBillingSummary {
     #[serde(default)]
     pub total_usd_micros: Option<i64>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr,
+)]
+#[serde(rename_all = "UPPERCASE")]
+#[strum(serialize_all = "UPPERCASE")]
+pub enum RunSize {
+    #[default]
+    Xs,
+    S,
+    M,
+    L,
+    Xl,
+}
+
+impl RunSize {
+    #[must_use]
+    pub fn from_total_usd_micros(total_usd_micros: Option<i64>) -> Self {
+        match total_usd_micros.unwrap_or(0) {
+            ..=20_000_000 => Self::Xs,
+            ..=50_000_000 => Self::S,
+            ..=100_000_000 => Self::M,
+            ..=200_000_000 => Self::L,
+            _ => Self::Xl,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RunSize;
+
+    #[test]
+    fn run_size_uses_billed_usage_thresholds() {
+        assert_eq!(RunSize::from_total_usd_micros(None), RunSize::Xs);
+        assert_eq!(
+            RunSize::from_total_usd_micros(Some(20_000_000)),
+            RunSize::Xs
+        );
+        assert_eq!(RunSize::from_total_usd_micros(Some(20_000_001)), RunSize::S);
+        assert_eq!(RunSize::from_total_usd_micros(Some(50_000_000)), RunSize::S);
+        assert_eq!(RunSize::from_total_usd_micros(Some(50_000_001)), RunSize::M);
+        assert_eq!(
+            RunSize::from_total_usd_micros(Some(100_000_000)),
+            RunSize::M
+        );
+        assert_eq!(
+            RunSize::from_total_usd_micros(Some(100_000_001)),
+            RunSize::L
+        );
+        assert_eq!(
+            RunSize::from_total_usd_micros(Some(200_000_000)),
+            RunSize::L
+        );
+        assert_eq!(
+            RunSize::from_total_usd_micros(Some(200_000_001)),
+            RunSize::Xl
+        );
+    }
+
+    #[test]
+    fn run_size_serializes_as_uppercase_string() {
+        assert_eq!(serde_json::to_value(RunSize::Xs).unwrap(), "XS");
+        assert_eq!(serde_json::to_value(RunSize::Xl).unwrap(), "XL");
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

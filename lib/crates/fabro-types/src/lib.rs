@@ -107,7 +107,8 @@ pub use run_projection::{
 pub use run_sandbox::{RunSandbox, RunSandboxRuntime};
 pub use run_summary::{
     AskFabro, AskFabroUnavailableReason, AutomationRef, Run, RunBillingSummary, RunError,
-    RunLifecycle, RunLinks, RunModel, RunOrigin, RunOriginKind, RunTimestamps, WorkflowRef,
+    RunLifecycle, RunLinks, RunModel, RunOrigin, RunOriginKind, RunSize, RunTimestamps,
+    WorkflowRef,
 };
 pub use run_title::{RunTitleError, infer_run_title, normalize_explicit_run_title};
 pub use sandbox_details::{

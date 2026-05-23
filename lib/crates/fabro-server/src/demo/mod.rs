@@ -1046,8 +1046,8 @@ mod runs {
     };
     use fabro_types::settings::{InterpString, ProjectNamespace, WorkflowNamespace};
     use fabro_types::{
-        RepositoryRef, RunBillingSummary, RunId, RunLifecycle, RunLinks, RunOrigin, RunTimestamps,
-        StageId, WorkflowRef, WorkflowSettings,
+        RepositoryRef, RunBillingSummary, RunId, RunLifecycle, RunLinks, RunOrigin, RunSize,
+        RunTimestamps, StageId, WorkflowRef, WorkflowSettings,
     };
 
     use super::ts;
@@ -1150,6 +1150,7 @@ mod runs {
             billing: total_usd_micros.map(|total_usd_micros| RunBillingSummary {
                 total_usd_micros: Some(total_usd_micros),
             }),
+            size: RunSize::from_total_usd_micros(total_usd_micros),
             ask_fabro: Default::default(),
             diff: None,
             pull_request: None,

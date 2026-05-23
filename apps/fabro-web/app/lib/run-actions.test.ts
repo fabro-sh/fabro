@@ -51,6 +51,7 @@ function makeRun(status: RunStatus, archived = false): Run {
       completed_at:   null,
     },
     billing:          null,
+    size:             "XS",
     diff:             null,
     pull_request:     null,
     current_question: null,
